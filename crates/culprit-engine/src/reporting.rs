@@ -111,8 +111,9 @@ impl Reports<'_> {
         if let Some(path) = since
             && let Some(previous) = read_digest(path)?
         {
-            current.snapshot.escalations_before =
-                culprit_core::EscalationBaseline::from_digest(&previous, &current.snapshot);
+            // A digest keeps only the database's redacted location, which never equals the report's real one.
+            let redacted = culprit_core::redact::redact_snapshot(&current.snapshot);
+            current.snapshot.escalations_before = culprit_core::EscalationBaseline::from_digest(&previous, &redacted);
             let current = recheck(current);
             return Ok(with_details(&current, culprit_checks::digest_since(&current, &previous, top, top_queries)));
         }
@@ -129,24 +130,21 @@ impl Reports<'_> {
             }
             _ => None,
         };
-        if (unbased || since.is_some())
-            && let Some(previous) = &previous
-        {
-            current.snapshot.escalations_before = previous
-                .snapshot
-                .report_comparison(&current.snapshot)
-                .allows_comparison()
-                .then(|| culprit_core::EscalationBaseline::from_scan(&previous.snapshot, &current.snapshot))
-                .flatten();
-        }
-        if current.snapshot.evictions_before.is_none()
-            && let Some(previous) = &previous
-        {
-            current.snapshot.evictions_before = culprit_core::CountBaseline::from_setting(
-                &previous.snapshot,
-                &current.snapshot,
-                trends::EVICTIONS_SETTING,
-            );
+        if let Some(previous) = &previous {
+            // `previous` has been through the redaction: its location only equals this scan's redacted one.
+            let redacted = culprit_core::redact::redact_snapshot(&current.snapshot);
+            if unbased || since.is_some() {
+                current.snapshot.escalations_before = previous
+                    .snapshot
+                    .report_comparison(&redacted)
+                    .allows_comparison()
+                    .then(|| culprit_core::EscalationBaseline::from_scan(&previous.snapshot, &redacted))
+                    .flatten();
+            }
+            if current.snapshot.evictions_before.is_none() {
+                current.snapshot.evictions_before =
+                    culprit_core::CountBaseline::from_setting(&previous.snapshot, &redacted, trends::EVICTIONS_SETTING);
+            }
         }
         let current = recheck(current);
         Ok(with_details(&current, culprit_checks::digest(&current, previous.as_ref(), top, top_queries)))

@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use async_trait::async_trait;
 use culprit_core::{
-    AuthKind, Digest, Engine, Error, ExplainMode, IndexContention, LiveState, Plan, Provider, Report, Result,
-    ResultSet, ServerInfo, Severity, Snapshot, SnapshotOptions,
+    AuthKind, DatabaseIdentity, DatabaseLocation, Digest, Engine, Error, ExplainMode, IndexContention, LiveState, Plan,
+    Provider, Report, Result, ResultSet, ServerInfo, Severity, Snapshot, SnapshotOptions,
 };
 use culprit_engine::{NewConnection, Workspace};
 
@@ -332,5 +332,116 @@ fn daily_ci_digest_compares_across_growing_query_store_cron_jitter_and_legacy_di
     assert!(from_legacy.since.is_some(), "legacy digest without identity/measurement must still compare");
     assert!(from_legacy.top.iter().any(|f| f.id == ID && f.title.contains("4 times since Oct 22, 06:00 UTC")));
 
+    let _ = std::fs::remove_dir_all(home);
+}
+
+/// A scheduled job's two-day scan of a real server: the report names the host, and a digest keeps only its hash.
+fn server_scan(taken_at: &str, escalations: u32) -> Snapshot {
+    let end = chrono::DateTime::parse_from_rfc3339(taken_at).expect("a time");
+    let start = end - chrono::Duration::hours(48);
+    let mut s = demo(escalations);
+    s.taken_at = taken_at.into();
+    s.server.started_at = Some("2026-10-19T12:41:00Z".into());
+    s.options = Some(SnapshotOptions::default().with_window_minutes(2 * 24 * 60));
+    let workload = s.workload.as_mut().expect("a workload");
+    workload.window_hours = 48.0;
+    workload.window_start = Some(start.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+    workload.window_end = Some(taken_at.into());
+    s.bind_identity(DatabaseIdentity {
+        engine: Engine::Mssql,
+        database: s.database_identity().database,
+        location: DatabaseLocation::Server { host: "sql.example.invalid".into(), port: 1433, instance: None },
+        incarnation: None,
+    });
+    s
+}
+
+#[test]
+fn a_digest_of_a_real_server_compares_escalations_with_the_redacted_digest_before_it() {
+    let home = temp_home("real-server");
+    std::fs::create_dir_all(&home).unwrap();
+    let ws = Workspace::open_in(&home);
+    let write = |name: &str, json: Vec<u8>| {
+        let path = home.join(name);
+        std::fs::write(&path, json).unwrap();
+        path
+    };
+    let scan = |name: &str, taken_at: &str, escalations: u32| {
+        write(name, serde_json::to_vec(&server_scan(taken_at, escalations)).unwrap())
+    };
+    let finding = |d: &Digest| d.findings.iter().find(|f| f.id == ID).cloned().expect("the escalation in the digest");
+
+    let first = ws.digest(None, Some(&scan("a.json", "2026-10-21T06:00:00Z", 2)), None, 10, 5).unwrap();
+    let kept = first.identity.as_ref().expect("the digest's identity");
+    assert!(matches!(&kept.location, DatabaseLocation::Server { host, .. } if host.starts_with("redacted-")));
+    let first_path = write("first.json", serde_json::to_vec(&first).unwrap());
+
+    // None since: history, out of the digest's list of problems, and still counted for the next comparison.
+    let same = ws.digest(None, Some(&scan("b.json", "2026-10-22T06:00:00Z", 2)), Some(&first_path), 10, 5).unwrap();
+    assert_eq!(finding(&same).severity, Severity::Low);
+    assert_eq!(finding(&same).actionability, culprit_core::Actionability::History);
+    assert!(finding(&same).title.ends_with(", none since Oct 21, 06:00 UTC"), "{}", finding(&same).title);
+    assert!(same.since.as_ref().unwrap().again.is_empty());
+    assert!(same.top.iter().all(|f| f.id != ID));
+    assert_eq!(finding(&same).count, Some(2.0));
+    let same_path = write("same.json", serde_json::to_vec(&same).unwrap());
+
+    // Three more than the digest before, not five: a day of history doesn't lose the count.
+    let grew = ws.digest(None, Some(&scan("c.json", "2026-10-23T06:00:00Z", 5)), Some(&same_path), 10, 5).unwrap();
+    assert_eq!(finding(&grew).severity, Severity::High);
+    assert_eq!(finding(&grew).actionability, culprit_core::Actionability::NeedsAttention);
+    assert!(finding(&grew).title.contains("3 times since Oct 22, 06:00 UTC"), "{}", finding(&grew).title);
+    assert_eq!(grew.since.as_ref().unwrap().again.iter().map(|f| f.count_since).collect::<Vec<_>>(), [Some(3.0)]);
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn a_digest_after_a_weekend_reports_the_escalations_over_it() {
+    let home = temp_home("weekend");
+    std::fs::create_dir_all(&home).unwrap();
+    let ws = Workspace::open_in(&home);
+    let write = |name: &str, json: Vec<u8>| {
+        let path = home.join(name);
+        std::fs::write(&path, json).unwrap();
+        path
+    };
+    let scan = |name: &str, taken_at: &str, escalations: u32| {
+        write(name, serde_json::to_vec(&server_scan(taken_at, escalations)).unwrap())
+    };
+    let finding = |d: &Digest| d.findings.iter().find(|f| f.id == ID).cloned().expect("the escalation in the digest");
+
+    let friday = ws.digest(None, Some(&scan("fri.json", "2026-10-23T06:00:00Z", 2)), None, 10, 5).unwrap();
+    let friday_path = write("friday.json", serde_json::to_vec(&friday).unwrap());
+
+    // 72 hours later, past the two-day window: the counts still cover exactly the time since Friday's digest.
+    let grew = ws.digest(None, Some(&scan("mon.json", "2026-10-26T06:00:00Z", 5)), Some(&friday_path), 10, 5).unwrap();
+    assert_eq!(finding(&grew).severity, Severity::High);
+    assert_eq!(finding(&grew).actionability, culprit_core::Actionability::NeedsAttention);
+    assert!(finding(&grew).title.contains("3 times since Oct 23, 06:00 UTC"), "{}", finding(&grew).title);
+    assert_eq!(grew.since.as_ref().unwrap().again.iter().map(|f| f.count_since).collect::<Vec<_>>(), [Some(3.0)]);
+    assert!(grew.top.iter().any(|f| f.id == ID));
+
+    let same = ws.digest(None, Some(&scan("mon2.json", "2026-10-26T06:00:00Z", 2)), Some(&friday_path), 10, 5).unwrap();
+    assert_eq!(finding(&same).severity, Severity::Low);
+    assert_eq!(finding(&same).actionability, culprit_core::Actionability::History);
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn a_digest_since_a_report_of_a_real_server_compares_escalations_with_it() {
+    let home = temp_home("real-server-report");
+    std::fs::create_dir_all(&home).unwrap();
+    let ws = Workspace::open_in(&home);
+    let scan = |name: &str, taken_at: &str, escalations: u32| {
+        let path = home.join(name);
+        std::fs::write(&path, serde_json::to_vec(&server_scan(taken_at, escalations)).unwrap()).unwrap();
+        path
+    };
+    let before = scan("a.json", "2026-10-21T06:00:00Z", 2);
+    let now = scan("b.json", "2026-10-22T06:00:00Z", 5);
+    let digest = ws.digest(None, Some(&now), Some(&before), 10, 5).unwrap();
+    let finding = digest.findings.iter().find(|f| f.id == ID).expect("the escalation in the digest");
+    assert_eq!(finding.severity, Severity::High);
+    assert!(finding.title.contains("3 times since Oct 21, 06:00 UTC"), "{}", finding.title);
     let _ = std::fs::remove_dir_all(home);
 }

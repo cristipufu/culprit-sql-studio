@@ -329,14 +329,16 @@ pub fn lock_escalations(snapshot: &Snapshot) -> Vec<Finding> {
                 Some(_) => Severity::High,
                 None => since_start_severity(first_scan_rate, ESCALATIONS_HIGH_PER_DAY, ESCALATIONS_MEDIUM_PER_DAY),
             };
+            // A digest's counts cover exactly the time since that digest, however long ago: Friday's, on a Monday.
             let out_of_window = new.is_some_and(|(b, _)| {
-                !days_between(&b.taken_at, &snapshot.taken_at).is_some_and(|d| {
-                    d >= 0.0
-                        && snapshot
-                            .options
-                            .as_ref()
-                            .is_none_or(|o| d * 1440.0 <= f64::from(o.window_in_minutes()) * 1.25)
-                })
+                !b.is_from_digest()
+                    && !days_between(&b.taken_at, &snapshot.taken_at).is_some_and(|d| {
+                        d >= 0.0
+                            && snapshot
+                                .options
+                                .as_ref()
+                                .is_none_or(|o| d * 1440.0 <= f64::from(o.window_in_minutes()) * 1.25)
+                    })
             });
             if !historical && (out_of_window || (new.is_none() && f.severity == Severity::Low)) {
                 f.informational();

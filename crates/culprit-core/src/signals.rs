@@ -615,6 +615,11 @@ impl EscalationBaseline {
         })
     }
 
+    /// Whether a previous digest supplied this baseline, not a saved scan: a digest has no scan id to point at.
+    pub fn is_from_digest(&self) -> bool {
+        self.reference.as_ref().is_some_and(|r| r.id.is_none())
+    }
+
     /// Escalations on `table` (`schema.table`) since the earlier scan, out of `now` counted since the server started.
     /// `None` for a count lower than then without a restart: the table's indexes were reloaded into memory, or one of
     /// them (or a partition) was rebuilt or dropped and took its own count with it. The rest may all be old, so it
