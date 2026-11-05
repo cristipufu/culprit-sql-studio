@@ -2,6 +2,14 @@
 
 Each release's notes are its section below: the release workflow publishes them on GitHub, and the desktop app shows them when it offers the update. A release without a section here isn't drafted.
 
+## 0.5.3
+
+### Fixes
+
+- **Scheduled digests know which lock escalations are new.** On a real server, `culprit digest --since` couldn't match a scan to the previous digest when grading lock escalations, so each table stayed high or medium severity for as long as its average since SQL Server started stayed high, even after the escalations stopped. A table with no new escalations now reads "none since" and leaves the digest's problems on the next run, and a table with new ones says how many happened since the previous digest.
+- **Escalations over a weekend stay visible.** With the comparison working, a digest taken long after the previous one would have marked its new escalations as informational: Monday's after Friday's, on a two-day window. They now count as new however long the gap, because a digest's counts cover exactly the time since the previous one.
+- **Digests compared with an earlier report.** `culprit digest --report … --since <report>` had the same mismatch on real servers, which dropped its lock-escalation comparison and its `pg_stat_statements` eviction comparison. Both now work.
+
 ## 0.5.2
 
 ### Added
