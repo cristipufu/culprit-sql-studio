@@ -693,3 +693,115 @@ fn ysql_uses_postgres_quoting_and_rejects_native_administration_in_reads() {
     assert!(!reads_only("SELECT set_config('x', 'y', false)", engine));
     assert!(!reads_only("SELECT 1; UPDATE t SET n = 1", engine));
 }
+
+#[test]
+fn fuzz_sql_lexer_and_classifiers_never_panic_or_accept_injected_writes() {
+    const FRAGMENTS: &[&str] = &[
+        "SELECT",
+        "FROM",
+        "WHERE",
+        "orders",
+        " ",
+        "\t",
+        "\n",
+        "\r",
+        "\r\n",
+        ";",
+        "'",
+        "''",
+        r"\'",
+        "\"",
+        "\"\"",
+        r#"\"#,
+        "`",
+        "``",
+        "[",
+        "]",
+        "]]",
+        "$$",
+        "$tag$",
+        "$1",
+        "@p0",
+        ":id",
+        "--",
+        "#",
+        "/*",
+        "*/",
+        "/*!80000",
+        "/*M!100000",
+        "/*+",
+        "café",
+        "日本語",
+        "🚀",
+        "\u{00A0}",
+        "\u{200B}",
+        "\u{FEFF}",
+        "\u{0000}",
+        "E'\\''",
+        "N'x'",
+        "0x1F",
+        "1--1",
+        "(",
+        ")",
+        ",",
+        ".",
+    ];
+    let mut state = 0x853c_49e6_748f_ea9b_u64;
+    let mut next_u64 = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+
+    for _ in 0..500 {
+        let len = (next_u64() as usize % 18) + 1;
+        let mut sql = String::new();
+        for _ in 0..len {
+            let idx = next_u64() as usize % FRAGMENTS.len();
+            sql.push_str(FRAGMENTS[idx]);
+        }
+        let _ = clean_identifier(&sql);
+        let _ = extract_call_site(&sql);
+        for engine in ALL {
+            let verdict = check(&sql, engine);
+            let ro = reads_only(&sql, engine);
+            let single = single_statement(&sql, engine);
+            let _ = tables_in(&sql, engine);
+            let _ = creates_index(&sql, engine);
+            let _ = unquote_identifier(&sql);
+
+            assert_eq!(ro, verdict.reads_only, "reads_only and check().reads_only must agree on {engine:?}: {sql:?}");
+            if ro {
+                assert!(single.is_ok(), "reads_only implies single_statement on {engine:?}: {sql:?}");
+                assert!(verdict.problem.is_none(), "reads_only implies no problem on {engine:?}: {sql:?}");
+            }
+        }
+    }
+
+    const MUTATING_TAILS: &[&str] = &[
+        "; DELETE FROM orders",
+        "; UPDATE orders SET status = 1",
+        "; INSERT INTO orders VALUES (1)",
+        "; DROP TABLE orders",
+        "; ALTER TABLE orders DROP COLUMN status",
+        "; TRUNCATE TABLE orders",
+        "; EXEC sp_who",
+        "; CREATE INDEX ix ON orders (id)",
+        "; GRANT SELECT ON orders TO public",
+        "-- comment\rDELETE FROM orders",
+        "-- comment\nUPDATE orders SET status = 1",
+    ];
+    for engine in ALL {
+        for tail in MUTATING_TAILS {
+            let injected = format!("SELECT id, 'safe '' literal' FROM orders WHERE id = 1{tail}");
+            assert!(!reads_only(&injected, engine), "injected write accepted as reads_only on {engine:?}: {injected}");
+            if tail.starts_with(';') || engine == Engine::Mssql {
+                assert!(
+                    single_statement(&injected, engine).is_err(),
+                    "injected write accepted as single_statement on {engine:?}: {injected}"
+                );
+            }
+        }
+    }
+}

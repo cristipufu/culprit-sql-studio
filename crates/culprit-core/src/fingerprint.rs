@@ -88,17 +88,29 @@ pub fn fingerprint(sql: &str, engine: Engine) -> Fingerprint {
         if (r.hash_comments && c == '#')
             || (c == '-' && next == Some('-') && chars.get(i + 2).is_none_or(|c| c.is_whitespace() || !r.hash_comments))
         {
-            while i < chars.len() && chars[i] != '\n' {
+            while i < chars.len() && !matches!(chars[i], '\n' | '\r') {
                 i += 1;
             }
             continue;
         }
         if c == '/' && next == Some('*') {
+            let nests = engine != SqlSyntax::Mysql;
+            let mut depth = 1usize;
             i += 2;
-            while i + 1 < chars.len() && !(chars[i] == '*' && chars[i + 1] == '/') {
-                i += 1;
+            while i + 1 < chars.len() && depth > 0 {
+                if nests && chars[i] == '/' && chars[i + 1] == '*' {
+                    depth += 1;
+                    i += 2;
+                } else if chars[i] == '*' && chars[i + 1] == '/' {
+                    depth -= 1;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
             }
-            i += 2;
+            if depth > 0 {
+                i = chars.len();
+            }
             continue;
         }
         if c.is_whitespace() {
@@ -143,7 +155,14 @@ pub fn fingerprint(sql: &str, engine: Engine) -> Fingerprint {
         if let Some(close) = close {
             let start = i + 1;
             i += 1;
-            while i < chars.len() && chars[i] != close {
+            while i < chars.len() {
+                if chars[i] == close {
+                    if chars.get(i + 1) == Some(&close) {
+                        i += 2;
+                        continue;
+                    }
+                    break;
+                }
                 i += 1;
             }
             let name: String = chars[start..i.min(chars.len())].iter().collect();
@@ -152,6 +171,20 @@ pub fn fingerprint(sql: &str, engine: Engine) -> Fingerprint {
             display.push(c);
             display.push_str(&name);
             display.push(close);
+            continue;
+        }
+        // Postgres dollar-quoted string literals (`$$…$$` or `$tag$…$tag$`).
+        if c == '$'
+            && engine == SqlSyntax::Postgres
+            && let Some(tag_end) = dollar_tag(&chars, i)
+        {
+            let tag = &chars[i..=tag_end];
+            let body_start = tag_end + 1;
+            i = chars
+                .get(body_start..)
+                .and_then(|rest| rest.windows(tag.len()).position(|w| w == tag).map(|p| body_start + p + tag.len()))
+                .unwrap_or(chars.len());
+            value(&mut tokens, &mut display);
             continue;
         }
         // Placeholders: `?` and `?1`, `$1`, and named ones where the engine has them.
@@ -250,6 +283,21 @@ fn word_before(chars: &[char], i: usize) -> bool {
     i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_')
 }
 
+fn dollar_tag(chars: &[char], start: usize) -> Option<usize> {
+    let mut i = start + 1;
+    if chars.get(i).is_some_and(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    while i < chars.len() {
+        match chars[i] {
+            '$' => return Some(i),
+            c if c.is_alphanumeric() || c == '_' => i += 1,
+            _ => return None,
+        }
+    }
+    None
+}
+
 /// Lists of values become `...` whatever their length (`IN (1, 2, 3)`, `IN (...)`, `?, ...`), and the MySQL digest's
 /// `(unknown)` placeholder is a value.
 fn collapse(tokens: Vec<String>) -> Vec<String> {
@@ -344,5 +392,94 @@ mod tests {
     fn lists_of_any_length_are_one_shape() {
         let key = |s: &str| fingerprint(s, Engine::Sqlite).key;
         assert_eq!(key("SELECT * FROM t WHERE id IN (1, 2, 3)"), key("SELECT * FROM t WHERE id IN (?, ?)"));
+    }
+
+    #[test]
+    fn dollar_quoted_strings_nested_comments_and_escaped_identifiers_are_normalized() {
+        for engine in [Engine::Postgres, Engine::Yugabyte] {
+            let a = fingerprint("SELECT $$secret_alpha$$, $tag$secret beta$tag$ FROM \"my\"\"table\"", engine);
+            let b = fingerprint("SELECT 'other', $tag$different$tag$ FROM \"my\"\"table\"", engine);
+            assert_eq!(a.key, b.key);
+            assert!(!a.key.contains("secret"));
+            assert!(!a.display.contains("secret"));
+            assert!(a.display.contains("\"my\"\"table\""));
+
+            let nested = fingerprint("SELECT /* outer /* inner */ still_comment_canary */ a FROM t", engine);
+            assert!(!nested.key.contains("still_comment_canary"));
+            assert!(!nested.display.contains("still_comment_canary"));
+        }
+        let cr = fingerprint("SELECT a FROM t -- comment\rWHERE id = 42", Engine::Postgres);
+        assert_eq!(cr.key, "select a from t where id = ?");
+    }
+
+    #[test]
+    fn fuzz_fingerprint_never_panics_or_leaks_planted_literals() {
+        const TOKENS: &[&str] = &[
+            "SELECT",
+            "FROM",
+            "WHERE",
+            "orders",
+            "AND",
+            "IN",
+            "(",
+            ")",
+            ",",
+            " ",
+            "\n",
+            "\r",
+            "'PLANTED_STR_CANARY'",
+            "N'PLANTED_NSTR_CANARY'",
+            "'escaped '' PLANTED_ESC_CANARY'",
+            "-- PLANTED_COMMENT_CANARY\n",
+            "-- PLANTED_CR_COMMENT_CANARY\r",
+            "/* PLANTED_BLOCK_CANARY */",
+            "987654321",
+            "0xdeadbeef",
+            "\"quoted\"\"ident\"",
+            "[bracket]]ident]",
+            "`backtick``ident`",
+            "café",
+            "日本語",
+        ];
+        let mut state = 0x243f_6a88_85a3_08d3_u64;
+        let mut next_u64 = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+
+        for _ in 0..300 {
+            let len = (next_u64() as usize % 14) + 2;
+            let mut sql = String::new();
+            for _ in 0..len {
+                let idx = next_u64() as usize % TOKENS.len();
+                sql.push_str(TOKENS[idx]);
+                sql.push(' ');
+            }
+            for engine in Engine::ALL {
+                let fp = fingerprint(&sql, engine);
+                for canary in [
+                    "PLANTED_STR_CANARY",
+                    "PLANTED_NSTR_CANARY",
+                    "PLANTED_ESC_CANARY",
+                    "PLANTED_COMMENT_CANARY",
+                    "PLANTED_CR_COMMENT_CANARY",
+                    "PLANTED_BLOCK_CANARY",
+                    "987654321",
+                    "deadbeef",
+                ] {
+                    assert!(!fp.key.contains(&canary.to_lowercase()), "{engine:?} leaked {canary} in key: {sql:?}");
+                    assert!(!fp.display.contains(canary), "{engine:?} leaked {canary} in display: {sql:?}");
+                }
+            }
+            for pg_engine in [Engine::Postgres, Engine::Yugabyte] {
+                let pg_sql =
+                    format!("{sql} WHERE payload = $tag$PLANTED_DOLLAR_CANARY$tag$ AND body = $$PLANTED_DOLLAR2$$");
+                let fp = fingerprint(&pg_sql, pg_engine);
+                assert!(!fp.key.contains("planted_dollar"));
+                assert!(!fp.display.contains("PLANTED_DOLLAR"));
+            }
+        }
     }
 }

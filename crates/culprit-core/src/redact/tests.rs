@@ -465,3 +465,79 @@ fn native_xml_redaction_handles_xml_syntax_and_fails_closed() {
         assert!(!redact_native(xml, Engine::Mssql).contains("PLANTED"), "{xml}");
     }
 }
+
+#[test]
+fn fuzz_redact_sql_and_prose_are_idempotent_and_never_leak_planted_literals() {
+    for engine in [Engine::Postgres, Engine::Yugabyte, Engine::Mssql] {
+        let nested = redact_sql("SELECT /* outer /* inner */ PLANTED_NESTED_CANARY */ 1 FROM orders", engine);
+        assert!(!nested.contains("PLANTED_NESTED_CANARY"), "{engine:?}: {nested}");
+    }
+    for engine in Engine::ALL {
+        let cr =
+            redact_sql("SELECT a FROM orders -- PLANTED_COMMENT_CANARY\rWHERE secret = 'PLANTED_AFTER_CR'", engine);
+        assert!(!cr.contains("PLANTED_COMMENT_CANARY"), "{engine:?}: {cr}");
+        assert!(!cr.contains("PLANTED_AFTER_CR"), "{engine:?}: {cr}");
+    }
+    for engine in [Engine::Postgres, Engine::Yugabyte] {
+        let prose = redact_prose("Predicate used $$PLANTED_PROSE_DOLLAR$$ and $tag$PLANTED_PROSE_TAG$tag$.", engine);
+        assert!(!prose.contains("PLANTED_PROSE_DOLLAR"));
+        assert!(!prose.contains("PLANTED_PROSE_TAG"));
+    }
+
+    const PIECES: &[&str] = &[
+        "SELECT * FROM orders WHERE",
+        "tenant = 'PLANTED_STR_CANARY'",
+        "AND note = N'PLANTED_NSTR_CANARY'",
+        "AND count = 987654321",
+        "AND id = '550e8400-e29b-41d4-a716-446655440000'",
+        "-- PLANTED_LINE_CANARY\n",
+        "-- PLANTED_CR_CANARY\r",
+        "/* PLANTED_COMMENT_CANARY */",
+        "AND col = \"quoted\"\"col\"",
+        "AND [db].[dbo].[orders].[col] = 'PLANTED_FOUR_PART'",
+        "AND label = 'café 日本語 PLANTED_UTF8_CANARY 🚀'",
+    ];
+    let mut state = 0x1319_8a2e_0370_7344_u64;
+    let mut next_u64 = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+
+    for _ in 0..300 {
+        let len = (next_u64() as usize % 8) + 2;
+        let mut sql = String::new();
+        for _ in 0..len {
+            let idx = next_u64() as usize % PIECES.len();
+            sql.push_str(PIECES[idx]);
+            sql.push(' ');
+        }
+        let _ = strip_database(&sql);
+        for engine in Engine::ALL {
+            let once = redact_sql(&sql, engine);
+            let twice = redact_sql(&once, engine);
+            assert_eq!(once, twice, "redact_sql must be idempotent on {engine:?}: {sql:?}");
+
+            let prose_once = redact_prose(&format!("Query `{sql}` with 'PLANTED_OUTSIDE_SPAN'"), engine);
+            let prose_twice = redact_prose(&prose_once, engine);
+            assert_eq!(prose_once, prose_twice, "redact_prose must be idempotent on {engine:?}");
+            assert!(!prose_once.contains("PLANTED_OUTSIDE_SPAN"));
+
+            for canary in [
+                "PLANTED_STR_CANARY",
+                "PLANTED_NSTR_CANARY",
+                "987654321",
+                "550e8400-e29b-41d4-a716-446655440000",
+                "PLANTED_LINE_CANARY",
+                "PLANTED_CR_CANARY",
+                "PLANTED_COMMENT_CANARY",
+                "PLANTED_FOUR_PART",
+                "PLANTED_UTF8_CANARY",
+            ] {
+                assert!(!once.contains(canary), "{engine:?} redact_sql leaked {canary}: {once}");
+                assert!(!prose_once.contains(canary), "{engine:?} redact_prose leaked {canary}: {prose_once}");
+            }
+        }
+    }
+}

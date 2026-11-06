@@ -79,6 +79,18 @@ fn mask_prose_values(text: &str, engine: Engine) -> String {
                 continue;
             }
         }
+        if chars[i] == '$'
+            && engine.sql_syntax() == crate::SqlSyntax::Postgres
+            && let Some(tag_end) = dollar_tag(&chars, i)
+        {
+            let tag: Vec<char> = chars[i..=tag_end].to_vec();
+            out.push_str("'?'");
+            match find(&chars, tag_end + 1, &tag) {
+                Some(p) => i = p + tag.len(),
+                None => return out,
+            }
+            continue;
+        }
         if !word(prev) && is_guid(&chars[i..]) {
             out.push('?');
             i += 36;
@@ -130,20 +142,24 @@ fn redact(text: &str, engine: Engine, numbers: bool) -> String {
         let next = at(i + 1);
         match c {
             '-' if next == Some('-') && (engine != Engine::Mysql || at(i + 2).is_none_or(|n| n.is_whitespace())) => {
-                let end = chars[i..].iter().position(|&x| x == '\n').map_or(chars.len(), |p| i + p);
+                let end = chars[i..].iter().position(|&x| matches!(x, '\n' | '\r')).map_or(chars.len(), |p| i + p);
                 out.push_str(if end > i + 2 { "-- …" } else { "--" });
                 i = end;
             }
             '#' if engine == Engine::Mysql => {
-                let end = chars[i..].iter().position(|&x| x == '\n').map_or(chars.len(), |p| i + p);
+                let end = chars[i..].iter().position(|&x| matches!(x, '\n' | '\r')).map_or(chars.len(), |p| i + p);
                 out.push_str("# …");
                 i = end;
             }
             '/' if next == Some('*') => {
-                let end = find(&chars, i + 2, &['*', '/']).map_or(chars.len(), |p| p + 2);
+                let nests = engine.sql_syntax() != crate::SqlSyntax::Mysql;
+                let end = skip_block_comment(&chars, i, nests);
                 let body: String = chars[i + 2..end.saturating_sub(2).max(i + 2)].iter().collect();
                 // Optimizer hints and Culprit's own tag carry no data; any other comment might.
-                if body.trim_start().starts_with('+') || body.trim() == "culprit" {
+                if !nests && body.trim_start().starts_with('+')
+                    || (nests && !body.contains("/*") && body.trim_start().starts_with('+'))
+                    || body.trim() == "culprit"
+                {
                     out.extend(&chars[i..end]);
                 } else {
                     out.push_str("/* … */");
@@ -297,6 +313,23 @@ fn find(chars: &[char], from: usize, needle: &[char]) -> Option<usize> {
         return None;
     }
     chars[from..].windows(needle.len()).position(|w| w == needle).map(|p| from + p)
+}
+
+fn skip_block_comment(chars: &[char], start: usize, nests: bool) -> usize {
+    let mut depth = 1usize;
+    let mut i = start + 2;
+    while i + 1 < chars.len() && depth > 0 {
+        if nests && chars[i] == '/' && chars[i + 1] == '*' {
+            depth += 1;
+            i += 2;
+        } else if chars[i] == '*' && chars[i + 1] == '/' {
+            depth -= 1;
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    if depth > 0 { chars.len() } else { i }
 }
 
 /// The index after a quoted run opened at `start`; a doubled closing quote is an escaped one.
