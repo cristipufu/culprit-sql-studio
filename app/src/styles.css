@@ -12547,7 +12547,7 @@ button.as-callout:hover {
   min-width: 0;
   margin-left: auto;
 }
-.conn-tools .conn-key, .conn-tools .conn-log, .conn-tools .conn-rename {
+.conn-tools .conn-key, .conn-tools .conn-log, .conn-tools .conn-rename, .conn-tools .conn-remove {
   width: 24px;
   height: 24px;
   padding: 0;
@@ -12555,6 +12555,9 @@ button.as-callout:hover {
 }
 .conn-tools .conn-key:hover, .conn-tools .conn-log:hover, .conn-tools .conn-rename:hover {
   color: var(--text);
+}
+.conn-tools .conn-remove:hover {
+  color: var(--high-text);
 }
 .conn-settings-editor {
   display: inline-flex;

@@ -1,4 +1,4 @@
-import { ArrowRight, Bot, Check, ChevronDown, Clock3, FileText, KeyRound, Pencil } from "lucide-react";
+import { ArrowRight, Bot, Check, ChevronDown, Clock3, FileText, KeyRound, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { SshSetting } from "./SshSetting";
 import { EngineBadge } from "../../components/EngineBadge";
@@ -8,7 +8,7 @@ import type { ConnectionInfo } from "../../gen/ConnectionInfo";
 import { api, errorMessage, isDesktop } from "../../lib/api";
 import { connectFacts, serverName } from "../../lib/engines";
 import { ago } from "../../lib/format";
-import { loadConnections, openConnection, renameConnection } from "../../lib/store";
+import { loadConnections, openConnection, removeConnection, renameConnection } from "../../lib/store";
 
 const AUTH_LABEL: Partial<Record<AuthKind, string>> = { entra: "Entra ID", "aws-iam": "AWS IAM" };
 
@@ -101,9 +101,47 @@ export function ConnectionCard({ connection: c }: { connection: ConnectionInfo }
             onClick={() => { submitted.current = false; setAlias(c.name); setError(null); setEditing(true); }}>
             <Pencil size={12} />
           </button>
+          <RemoveConnection name={c.name} />
         </span>
       </div>
     </article>
+  );
+}
+
+/** Forget the connection after an inline confirmation: its metadata and keychain password go; saved reports stay. */
+function RemoveConnection({ name }: { name: string }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await removeConnection(name);
+    } catch (e) {
+      setError(errorMessage(e).message);
+      setBusy(false);
+    }
+  };
+  if (!open) {
+    return (
+      <button type="button" className="btn ghost conn-remove" title={`Remove ${name}`} aria-label={`Remove ${name}`}
+        onClick={() => { setError(null); setOpen(true); }}>
+        <Trash2 size={12} />
+      </button>
+    );
+  }
+  return (
+    <span className="conn-settings-editor" role="group" aria-label={`Remove ${name}`}
+      onKeyDown={(e) => { if (e.key === "Escape" && !busy) { e.stopPropagation(); setOpen(false); } }}>
+      <span className="muted">Remove {name}?</span>
+      <button type="button" className="btn small danger" autoFocus disabled={busy} aria-busy={busy} onClick={remove}>
+        {busy ? "Removing…" : "Remove"}
+      </button>
+      <button type="button" className="btn small ghost" disabled={busy} onClick={() => setOpen(false)}>
+        Cancel
+      </button>
+      {error && <span className="error" role="alert">{error}</span>}
+    </span>
   );
 }
 

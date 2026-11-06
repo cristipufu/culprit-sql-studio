@@ -51,6 +51,7 @@ Connections (start)
 - Cloud discovery returns and shows at most 20 matching databases. The backend reads bounded cloud pages and stops once it knows there are more matches. The UI says more may be available rather than inventing a remaining count; incomplete searches show the reason. Refining the search reads later cloud pages, and hidden rows cannot be preselected or added. Editing terms clears the old results, and newer searches own their results. CLI `conn discover --save` requires a complete search; refine `--match` or `--region` if it is incomplete.
 - **Find Azure SQL databases**: lists databases the Azure CLI login can see (Resource Graph, metadata only), with suggested aliases and environments inferred from names (`prd` → production, `alp`/`stg` → staging). Saved with Entra ID, so nothing secret is stored. Production entries are unticked by default.
 - Saved connections also live in the sidebar, grouped by environment, so switching is one click from anywhere.
+- Any saved connection, imported, discovered or added by hand, can be removed from its card's footer after an inline confirmation (Escape cancels). Removing forgets its metadata and keychain password and leaves the workspace if it was open; saved reports stay on disk, like `culprit conn rm`.
 - Secrets live in the OS keychain. Connection metadata lives in `~/.config/culprit/connections.toml`, shared with the CLI.
 
 ### Connected header
