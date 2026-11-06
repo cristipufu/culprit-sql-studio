@@ -187,10 +187,12 @@ pub(super) fn find_table<'a>(snapshot: &'a Snapshot, raw: &str) -> Option<&'a Ta
 }
 
 pub(super) fn table_matches(table: &TableStat, raw: &str) -> bool {
-    if let Some(parts) = culprit_core::sql::identifier_parts(raw)
-        && let [.., schema, name] = parts.as_slice()
-    {
-        return table.schema.eq_ignore_ascii_case(schema) && table.name.eq_ignore_ascii_case(name);
+    if let Some(parts) = culprit_core::sql::identifier_parts(raw) {
+        return match parts.as_slice() {
+            [.., schema, name] => table.schema.eq_ignore_ascii_case(schema) && table.name.eq_ignore_ascii_case(name),
+            [name] => table.name.eq_ignore_ascii_case(name),
+            [] => false,
+        };
     }
     let cleaned = unquote_ident(raw);
     if let Some((schema, name)) = cleaned.rsplit_once('.') {

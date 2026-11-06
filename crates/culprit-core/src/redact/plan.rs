@@ -220,7 +220,7 @@ pub fn redact_native(raw: &str, engine: Engine) -> String {
         return redact_showplan(raw);
     }
     if (trimmed.starts_with('{') || trimmed.starts_with('['))
-        && let Ok(mut value) = serde_json::from_str::<serde_json::Value>(raw)
+        && let Ok(mut value) = serde_json::from_str::<serde_json::Value>(trimmed)
     {
         redact_json(&mut value, engine);
         return serde_json::to_string_pretty(&value).unwrap_or_default();

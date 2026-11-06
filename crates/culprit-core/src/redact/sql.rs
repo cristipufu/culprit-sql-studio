@@ -72,6 +72,18 @@ fn mask_prose_values(text: &str, engine: Engine) -> String {
             i = end;
             continue;
         }
+        if in_code_span && engine != Engine::Mysql && chars[i] == '"' {
+            let end = skip_quoted(&chars, i, '"', false);
+            out.extend(&chars[i..end]);
+            i = end;
+            continue;
+        }
+        if in_code_span && matches!(engine, Engine::Mssql | Engine::Sqlite) && chars[i] == '[' {
+            let end = skip_quoted(&chars, i, ']', false);
+            out.extend(&chars[i..end]);
+            i = end;
+            continue;
+        }
         if chars[i] == '\'' {
             let prefix = prev.is_some_and(|p| matches!(p.to_ascii_uppercase(), 'N' | 'E' | 'X' | 'B'))
                 && !word(i.checked_sub(2).and_then(|k| chars.get(k)));
@@ -207,13 +219,13 @@ fn redact(text: &str, engine: Engine, numbers: bool) -> String {
                 last_word = chars[i + 1..end.saturating_sub(1).max(i + 1)].iter().collect();
                 i = end;
             }
-            '[' if engine == Engine::Mssql => {
+            '[' if matches!(engine, Engine::Mssql | Engine::Sqlite) => {
                 let end = skip_quoted(&chars, i, ']', false);
                 out.extend(&chars[i..end]);
                 last_word = chars[i + 1..end.saturating_sub(1).max(i + 1)].iter().collect();
                 i = end;
             }
-            '`' if engine == Engine::Mysql => {
+            '`' if matches!(engine, Engine::Mysql | Engine::Sqlite) => {
                 let end = skip_quoted(&chars, i, '`', false);
                 out.extend(&chars[i..end]);
                 last_word.clear();

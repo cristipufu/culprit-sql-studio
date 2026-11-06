@@ -496,6 +496,16 @@ fn fuzz_redact_sql_and_prose_are_idempotent_and_never_leak_planted_literals() {
     }
     let mysql_dq_backtick = redact_prose("Query `SELECT \"a`b\", \"PLANTED_MYSQL_DQ\"` done", Engine::Mysql);
     assert!(!mysql_dq_backtick.contains("PLANTED_MYSQL_DQ"), "{mysql_dq_backtick}");
+    let sqlite_ident_quote =
+        redact_sql("SELECT [user's id], `item's id` FROM t WHERE s = 'PLANTED_SQLITE_IDENT'", Engine::Sqlite);
+    assert!(!sqlite_ident_quote.contains("PLANTED_SQLITE_IDENT"), "{sqlite_ident_quote}");
+    let mssql_prose_bracket = redact_prose("Query `SELECT [user's `id`], 'PLANTED_MSSQL_BRACKET'` done", Engine::Mssql);
+    assert!(!mssql_prose_bracket.contains("PLANTED_MSSQL_BRACKET"), "{mssql_prose_bracket}");
+    let bom_json = redact_native(
+        "\u{feff}{\"query_block\":{\"table\":{\"attached_condition\":\"(id = 987654321 AND s = 'PLANTED_BOM_JSON')\"}}}",
+        Engine::Mysql,
+    );
+    assert!(!bom_json.contains("987654321") && !bom_json.contains("PLANTED_BOM_JSON"), "{bom_json}");
     for engine in [Engine::Postgres, Engine::Yugabyte] {
         let prose = redact_prose("Predicate used $$PLANTED_PROSE_DOLLAR$$ and $tag$PLANTED_PROSE_TAG$tag$.", engine);
         assert!(!prose.contains("PLANTED_PROSE_DOLLAR"));

@@ -337,4 +337,18 @@ fn flags_vacuum_full_cluster_blocking_reindex_and_suppresses_concurrent_quick_fi
         ),
         "/* header */ ALTER TABLE orders ADD note VARCHAR(20) DEFAULT 'a--b', ALGORITHM=INPLACE, LOCK=NONE;"
     );
+
+    // Column named `modify` or `alter`, or nullable column with `CHECK (c IS NOT NULL) NOT VALID`, does not false-flag.
+    let col_edge_sql = format!(
+        "ALTER TABLE {table} ADD COLUMN modify varchar(50);\n\
+         ALTER TABLE {table} ADD COLUMN c text CHECK (c IS NOT NULL) NOT VALID;"
+    );
+    assert!(lint_sql(&s, &col_edge_sql).is_empty(), "{:?}", lint_sql(&s, &col_edge_sql));
+
+    // Quoted table name containing a literal dot (`"audit.events"`) matches its single-part table name and script index.
+    let mut dotted_snap = s.clone();
+    dotted_snap.tables[0].name = "audit.events".into();
+    let dotted_sql = "CREATE INDEX CONCURRENTLY idx_audit_parent ON \"audit.events\" (parent_id);\n\
+                      ALTER TABLE \"audit.events\" ADD CONSTRAINT fk_audit FOREIGN KEY (parent_id) REFERENCES \"audit.events\" (id) NOT VALID;";
+    assert!(lint_sql(&dotted_snap, dotted_sql).is_empty(), "{:?}", lint_sql(&dotted_snap, dotted_sql));
 }

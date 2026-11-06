@@ -6,7 +6,10 @@ use culprit_core::{
 
 use crate::support::{base_score, finding, subject, supports_online_index};
 
-use super::lex::{compact_sql, contains_identifier, find_keyword_outside_comments, parse_paren_list, tokenize};
+use super::lex::{
+    append_sql_clause, compact_sql, contains_identifier, ends_with_line_comment, find_keyword_outside_comments,
+    parse_paren_list, tokenize,
+};
 use super::{
     GB, HIGH_TABLE_ROWS, find_table, is_large_table, postgres_qualified_index, push_table_metrics,
     supports_concurrent_index, table_bytes, table_rows, table_size_label, unquote_ident,
@@ -694,7 +697,7 @@ pub(super) fn collect_script_indexes(statements: &[String]) -> Vec<(String, Vec<
             col_start += 2;
         }
         if let Some((cols, _)) = parse_paren_list(&tokens, col_start) {
-            out.push((unquote_ident(table), cols));
+            out.push((table.clone(), cols));
         }
     }
     out
@@ -713,8 +716,7 @@ fn suggest_mysql_online_index(stmt: &str, upper: &[String]) -> Option<String> {
     if upper.iter().any(|t| matches!(t.as_str(), "ALGORITHM" | "LOCK")) {
         return None;
     }
-    let trimmed = stmt.trim().trim_end_matches(';').trim_end();
-    Some(format!("{trimmed} ALGORITHM=INPLACE LOCK=NONE;"))
+    Some(append_sql_clause(stmt, " ALGORITHM=INPLACE LOCK=NONE;"))
 }
 
 fn suggest_concurrent_index(stmt: &str) -> Option<String> {
@@ -730,13 +732,13 @@ fn suggest_concurrent_index(stmt: &str) -> Option<String> {
         return None;
     }
     let head = if is_unique { "CREATE UNIQUE INDEX CONCURRENTLY " } else { "CREATE INDEX CONCURRENTLY " };
-    Some(format!("{head}{rest};"))
+    let sep = if ends_with_line_comment(rest) { "\n;" } else { ";" };
+    Some(format!("{head}{rest}{sep}"))
 }
 
 fn suggest_mssql_online_index(stmt: &str, upper: &[String]) -> Option<String> {
     if upper.iter().any(|t| t == "WITH") {
         return None;
     }
-    let trimmed = stmt.trim().trim_end_matches(';').trim_end();
-    Some(format!("{trimmed} WITH (ONLINE = ON);"))
+    Some(append_sql_clause(stmt, " WITH (ONLINE = ON);"))
 }

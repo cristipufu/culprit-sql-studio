@@ -364,10 +364,22 @@ fn scan_outside_quotes_and_comments(
             }
         }
         if bytes[i] == b'\'' && !in_double && !in_backtick && !in_bracket {
+            if in_single && bytes.get(i + 1) == Some(&b'\'') {
+                i += 2;
+                continue;
+            }
             in_single = !in_single;
         } else if bytes[i] == b'"' && !in_single && !in_backtick && !in_bracket {
+            if in_double && bytes.get(i + 1) == Some(&b'"') {
+                i += 2;
+                continue;
+            }
             in_double = !in_double;
         } else if bytes[i] == b'`' && !in_single && !in_double && !in_bracket {
+            if in_backtick && bytes.get(i + 1) == Some(&b'`') {
+                i += 2;
+                continue;
+            }
             in_backtick = !in_backtick;
         } else if bytes[i] == b'[' && !in_single && !in_double && !in_backtick && !in_bracket {
             in_bracket = true;
@@ -401,8 +413,13 @@ pub(super) fn find_keyword_outside_comments(sql: &str, keyword: &str) -> Option<
     )
 }
 
-fn ends_with_line_comment(sql: &str) -> bool {
+pub(super) fn ends_with_line_comment(sql: &str) -> bool {
     scan_outside_quotes_and_comments(sql, |_, _| false, |bytes, _, end| end == bytes.len()).is_some()
+}
+
+pub(super) fn append_sql_clause(stmt: &str, clause: &str) -> String {
+    let body = stmt.trim().strip_suffix(';').unwrap_or(stmt).trim_end();
+    if ends_with_line_comment(body) { format!("{body}\n{}", clause.trim_start()) } else { format!("{body}{clause}") }
 }
 
 pub(super) fn rewrite_preserving_comments(orig_span: &str, rep_sql: &str) -> String {
@@ -421,18 +438,17 @@ pub(super) fn rewrite_preserving_comments(orig_span: &str, rep_sql: &str) -> Str
         rewritten.push_str(" CONCURRENTLY");
         rewritten.push_str(&orig_span[after_idx..]);
         if !rewritten.trim_end().ends_with(';') && rep_sql.ends_with(';') {
+            if ends_with_line_comment(rewritten.trim_end()) {
+                rewritten.push('\n');
+            }
             rewritten.push(';');
         }
         return rewritten;
     }
     // 2. Suffix additions (WITH (ONLINE = ON); or ALGORITHM=INPLACE[ ,] LOCK=NONE;)
     for suffix in [" WITH (ONLINE = ON);", " ALGORITHM=INPLACE LOCK=NONE;", ", ALGORITHM=INPLACE, LOCK=NONE;"] {
-        if rep_sql.ends_with(suffix) {
-            let body = orig_span.trim_end().strip_suffix(';').unwrap_or(orig_span).trim_end();
-            if ends_with_line_comment(body) {
-                return format!("{body}\n{}", suffix.trim_start());
-            }
-            return format!("{body}{suffix}");
+        if rep_sql.ends_with(suffix.trim_start()) {
+            return append_sql_clause(orig_span.trim_end(), suffix);
         }
     }
     // 3. Preserve leading comments before a rewritten statement (DROP INDEX CONCURRENTLY, REINDEX CONCURRENTLY, VACUUM)

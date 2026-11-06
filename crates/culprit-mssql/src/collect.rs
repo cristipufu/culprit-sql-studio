@@ -280,17 +280,11 @@ pub(crate) async fn snapshot(
     let probe = provider.pool.with(|c| Box::pin(probe::run(c))).await?;
     let probe_ref = &probe;
 
-    let (workload_part, (schema_part, schema_error), (misc_part, misc_error)) = tokio::join!(
-        async {
-            match provider.pool.get().await {
-                Ok(mut client) => {
-                    let part = collect_workload(&mut client, &probe, options).await;
-                    provider.pool.put(client);
-                    Ok(part)
-                }
-                Err(err) => Err(err),
-            }
-        },
+    let ((workload_part, workload_error), (schema_part, schema_error), (misc_part, misc_error)) = tokio::join!(
+        provider.on_session(move |mut c| async move {
+            let part = collect_workload(&mut c, probe_ref, options).await;
+            (part, c)
+        }),
         provider.on_session(move |mut c| async move {
             let part = collect_schema(&mut c, probe_ref).await;
             (part, c)
@@ -300,11 +294,6 @@ pub(crate) async fn snapshot(
             (part, c)
         }),
     );
-    let workload_part = workload_part.unwrap_or_else(|error| {
-        let mut part = WorkloadPart::default();
-        part.outcome.sources_failed(sources::WORKLOAD, &error);
-        part
-    });
 
     let mut outcome = Outcome::default();
     let (expected_have, expected_missing) = probe::expected_capabilities(&probe);
@@ -319,6 +308,9 @@ pub(crate) async fn snapshot(
         }
     }
     outcome.merge(workload_part.outcome);
+    if let Some(error) = workload_error {
+        outcome.sources_failed(sources::WORKLOAD, &error);
+    }
     outcome.merge(schema_part.outcome);
     outcome.merge(misc_part.outcome);
     if let Some(error) = schema_error {

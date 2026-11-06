@@ -158,14 +158,6 @@ impl Execution<'_> {
                 "At least one `CREATE INDEX` statement is required to verify a hypothetical index",
             ));
         }
-        let info = self.connections.connection(name)?;
-        culprit_core::sql::single_statement(sql, info.engine)?;
-        for idx in indexes {
-            culprit_core::sql::single_statement(idx, info.engine)?;
-            if !culprit_core::sql::creates_index(idx, info.engine) {
-                return Err(Error::invalid("`--with-index` expects a `CREATE INDEX` statement"));
-            }
-        }
         let hypothetical = self.explain_hypothetical(name, sql, indexes).await?;
         let baseline = self.explain(name, sql, ExplainMode::Estimated, false).await?;
         Ok(culprit_core::verify_hypothetical_index(baseline, hypothetical))

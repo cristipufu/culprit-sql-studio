@@ -7,7 +7,7 @@ use culprit_core::{
 use crate::support::{base_score, finding, subject};
 
 use super::index_ddl::{check_workload_references, has_mysql_online_ddl};
-use super::lex::{compact_sql, parse_paren_list, split_top_level_commas, tokenize};
+use super::lex::{append_sql_clause, compact_sql, parse_paren_list, split_top_level_commas, tokenize};
 use super::{
     GB, HIGH_TABLE_ROWS, ScriptContext, find_table, is_large_table, push_table_metrics, table_bytes, table_matches,
     table_rows, table_size_label, unquote_ident,
@@ -48,7 +48,7 @@ pub(super) fn collect_validated_constraint_tables(statements: &[String]) -> Vec<
                 pos += 1;
             }
             if let Some(raw_table) = tokens.get(pos) {
-                tables.push(unquote_ident(raw_table));
+                tables.push(raw_table.clone());
             }
         }
     }
@@ -129,10 +129,7 @@ pub(super) fn check_alter_table(
         let can_append = !upper.iter().any(|t| matches!(t.as_str(), "ALGORITHM" | "LOCK"));
         f.fix = Some(Fix {
             summary: "Append `ALGORITHM=INPLACE, LOCK=NONE` (or `ALGORITHM=INSTANT` for compatible column additions on MySQL 8.0+) so the database rejects any blocking table copy immediately.".into(),
-            sql: can_append.then(|| {
-                let trimmed = stmt.trim().trim_end_matches(';').trim_end();
-                format!("{trimmed}, ALGORITHM=INPLACE, LOCK=NONE;")
-            }),
+            sql: can_append.then(|| append_sql_clause(stmt, ", ALGORITHM=INPLACE, LOCK=NONE;")),
             cost: None,
         });
         push_table_metrics(&mut f, rows, bytes);
@@ -260,7 +257,7 @@ fn check_add_not_null_without_default(
         return;
     };
     let rest = &upper[col_idx + 1..];
-    let has_not_null = rest.windows(2).any(|w| w == ["NOT", "NULL"]);
+    let has_not_null = has_top_level_not_null(rest);
     let has_default = rest.iter().any(|t| {
         matches!(
             t.as_str(),
@@ -503,15 +500,35 @@ fn check_add_volatile_default(
     }
 }
 
+fn has_top_level_not_null(upper: &[String]) -> bool {
+    let mut depth = 0usize;
+    for (i, tok) in upper.iter().enumerate() {
+        match tok.as_str() {
+            "(" => depth += 1,
+            ")" => depth = depth.saturating_sub(1),
+            "NOT"
+                if depth == 0
+                    && upper.get(i + 1).map(String::as_str) == Some("NULL")
+                    && (i == 0 || upper[i - 1] != "IS") =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 fn check_column_type_or_set_not_null(
     scope: &AlterTableScope<'_>,
     tokens: &[String],
     upper: &[String],
     findings: &mut Vec<Finding>,
 ) {
-    let Some(idx) = upper.iter().position(|t| t == "ALTER" || t == "MODIFY") else {
+    if !matches!(upper.first().map(String::as_str), Some("ALTER" | "MODIFY")) {
         return;
-    };
+    }
+    let idx = 0;
     let table = scope.table;
     let rows = table_rows(table);
     let bytes = table_bytes(table);
