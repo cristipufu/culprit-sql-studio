@@ -141,6 +141,7 @@ impl Connections<'_> {
         })?;
         let password_env = new.password_env.clone().filter(|v| !v.is_empty());
         let password = spec.password.as_deref().filter(|p| !p.is_empty() && password_env.is_none());
+        self.retire_reports(&new.name)?;
         if let Some(password) = password {
             self.secrets.set(&new.name, password)?;
         }
@@ -183,13 +184,50 @@ impl Connections<'_> {
         self.connection(name)
     }
 
+    /// Forget a connection. Its password goes first: when the keychain refuses, the connection stays as it was and can
+    /// be removed again, instead of disappearing with its password left behind. Saved reports stay on disk
+    /// ([`Connections::retire_reports`] sets them aside if the name is given to another connection).
     pub(crate) fn remove_connection(&self, name: &str) -> Result<()> {
         let stored = self.store.get(name)?;
-        self.store.remove(name)?;
         if stored.auth == AuthKind::Password && stored.password_env.is_none() {
-            self.secrets.delete(name)?;
+            let deleted = self.secrets.delete(name);
+            // Culprit saved no password for it, so there is nothing to wait for, and no connection without a saved
+            // password reads one from the keychain (`resolve_secrets`).
+            if stored.password_saved != Some(false) {
+                deleted?;
+            }
         }
-        Ok(())
+        self.store.remove(name)
+    }
+
+    /// Reports filed under a name no saved connection uses were left by a removed one. Before the name is given to a
+    /// connection, move them to `reports/.removed/` (connection names never start with a dot), so its card and first
+    /// open never show another database's scan as its own. Nothing is deleted. A folder a saved connection already
+    /// reads, as one whose name differs only in case does on a case-insensitive disk, stays where it is.
+    fn retire_reports(&self, name: &str) -> Result<()> {
+        let dir = self.paths.reports_dir(name);
+        if !dir.exists() {
+            return Ok(());
+        }
+        let folder = store::safe_file_name(name);
+        if self.store.list()?.iter().any(|(saved, _)| store::safe_file_name(saved).eq_ignore_ascii_case(&folder)) {
+            return Ok(());
+        }
+        let removed = self.paths.removed_reports_dir();
+        crate::private_fs::create_dir(&removed).map_err(|e| Error::internal(format!("{}: {e}", removed.display())))?;
+        let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+        let mut to = removed.join(format!("{folder}-{stamp}"));
+        for n in 2.. {
+            if !to.exists() {
+                break;
+            }
+            to = removed.join(format!("{folder}-{stamp}-{n}"));
+        }
+        std::fs::rename(&dir, &to).map_err(|e| {
+            Error::internal(format!("{}: {e}", dir.display())).with_hint(
+                "A removed connection left reports under this name; move or delete that folder, then try again",
+            )
+        })
     }
 
     /// Mark a connection production, staging, development or local. Production refuses session kills and asks before
@@ -213,6 +251,8 @@ impl Connections<'_> {
     /// Rename (re-alias) a connection, carrying its keychain secret and report history along.
     pub(crate) fn rename_connection(&self, old: &str, new: &str) -> Result<ConnectionInfo> {
         let stored = self.store.get(old)?;
+        store::validate_name(new)?;
+        self.retire_reports(new)?;
         self.store.rename(old, new)?;
         if stored.auth == AuthKind::Password && stored.password_env.is_none() && stored.password_saved != Some(false) {
             if let Some(secret) = self.secrets.get(old)? {
@@ -306,6 +346,7 @@ impl Connections<'_> {
             query_log: None,
             no_query_log: false,
         };
+        self.retire_reports(&d.alias)?;
         self.store.put(&d.alias, stored)?;
         self.connection(&d.alias)
     }
@@ -353,6 +394,7 @@ impl Connections<'_> {
             query_log: None,
             no_query_log: false,
         };
+        self.retire_reports(&d.alias)?;
         self.store.put(&d.alias, stored)?;
         self.connection(&d.alias)
     }
@@ -393,6 +435,7 @@ impl Connections<'_> {
             stored.push((c.alias.clone(), import::to_stored(c)?));
         }
         for (name, connection) in stored {
+            self.retire_reports(&name)?;
             self.store.put(&name, connection)?;
         }
         items.iter().map(|c| self.connection(&c.alias)).collect()
@@ -434,7 +477,7 @@ impl Connections<'_> {
         let mut spec = stored.spec();
         spec.ssh = ssh;
         self.ssh.attach(&mut spec)?;
-        self.resolve_secrets(name, stored.password_env.as_deref(), &mut spec).await?;
+        self.resolve_secrets(name, stored, &mut spec).await?;
         self.materialize_certificates(&mut spec)?;
         self.open_provider(&spec)
     }
@@ -524,8 +567,8 @@ impl Connections<'_> {
         Ok(())
     }
 
-    async fn resolve_secrets(&self, name: &str, password_env: Option<&str>, spec: &mut ConnectionSpec) -> Result<()> {
-        match (spec.auth, password_env) {
+    async fn resolve_secrets(&self, name: &str, stored: &StoredConnection, spec: &mut ConnectionSpec) -> Result<()> {
+        match (spec.auth, stored.password_env.as_deref()) {
             (AuthKind::Entra | AuthKind::AwsIam, _) => self.resolve_token(spec).await?,
             (AuthKind::Password, Some(var)) => {
                 let value = std::env::var(var).map_err(|_| {
@@ -534,6 +577,9 @@ impl Connections<'_> {
                 })?;
                 spec.password = Some(value);
             }
+            // Saved without a password (imported, discovered, or added before one was set): a keychain entry under its
+            // name would be another connection's, left by one removed before, and must never reach this server.
+            (AuthKind::Password, None) if stored.password_saved == Some(false) => {}
             (AuthKind::Password, None) => spec.password = self.secrets.get(name)?,
             (AuthKind::None, _) => {}
         }

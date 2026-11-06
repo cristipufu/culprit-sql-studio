@@ -4,7 +4,7 @@ import type { ConnectionInfo } from "../gen/ConnectionInfo";
 import type { Report } from "../gen/Report";
 import type { SavedQuery } from "../gen/SavedQuery";
 import { api } from "./api";
-import { renameEditorTabs } from "./editor-tabs";
+import { removeEditorTabs, renameEditorTabs } from "./editor-tabs";
 import { ReportRequests, type ReportState, withConnectionName } from "./report-requests";
 import { LatestRequest } from "./requests";
 export type { ReportState } from "./report-requests";
@@ -196,10 +196,20 @@ export async function renameConnection(old: string, next: string): Promise<Conne
   return saved;
 }
 
-/** Forget a saved connection and its keychain secret; leave the workspace if it was open. Saved reports stay on disk. */
+/** Forget a saved connection, its keychain secret and this device's scratch tabs; leave the workspace if it was open.
+ * Saved reports stay on disk. */
 export async function removeConnection(name: string): Promise<void> {
-  await (await api()).removeConnection(name);
+  const removed = getState().connections.find((c) => c.name === name);
+  try {
+    await (await api()).removeConnection(name);
+  } catch (error) {
+    // Show what is saved now: a connection the CLI or another window already removed is gone, not an error.
+    const saved = await loadConnections().catch(() => null);
+    if (!saved || saved.some((c) => c.name === name)) throw error;
+  }
   connectionRequests.invalidate();
+  const tabError = removed ? removeEditorTabs(removed) : null;
+  if (tabError) toast(tabError);
   try {
     localStorage.removeItem(windowKey(name));
     if (lastConnection() === name) localStorage.removeItem(LAST_KEY);

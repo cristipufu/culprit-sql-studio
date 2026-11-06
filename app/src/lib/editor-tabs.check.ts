@@ -1,4 +1,4 @@
-import { EditorTabStorage, MAX_EDITOR_TABS, editorScope, newEditorTab, renameEditorTabs, type EditorTabs } from "./editor-tabs";
+import { EditorTabStorage, MAX_EDITOR_TABS, editorScope, newEditorTab, removeEditorTabs, renameEditorTabs, type EditorTabs } from "./editor-tabs";
 
 function check(ok: unknown, message: string): asserts ok { if (!ok) throw new Error(message); }
 class MemoryStorage {
@@ -87,4 +87,15 @@ check(new EditorTabStorage(b, "", legacy).initial.tabs[0]!.sql === "", "Legacy t
 check(new EditorTabStorage(a, "", null).write(tabs), "Unavailable storage must return a visible error");
 legacy.fail = editorScope(b);
 check(renameEditorTabs(a, b, legacy) && legacy.getItem(editorScope(a)) !== null, "Failed rename must retain the original workspace");
-console.log("Editor tabs: scoped restore, exact SQL, incremental writes, rename, bounded storage, corruption, quotas and legacy migration passed");
+const leaving = new MemoryStorage();
+const stays = { ...a, name: "stays" };
+check(new EditorTabStorage(a, "", leaving).write(tabs) === null && new EditorTabStorage(stays, "", leaving).write({ tabs: [extra], active: extra.id }) === null, "Two workspaces should save");
+check(removeEditorTabs(a, leaving) === null && leaving.getItem(editorScope(a)) === null && tabs.tabs.every((t) => leaving.getItem("culprit.editor.sql:" + t.id) === null), "Removing a connection must clear its index and every SQL body");
+check(new EditorTabStorage(a, "", leaving).initial.tabs[0]!.sql === "", "A connection added again at the same endpoint must start with a fresh tab");
+check(new EditorTabStorage(stays, "", leaving).initial.tabs[0]!.sql === extra.sql, "Removing one connection must keep other connections' tabs");
+const unreadable = new MemoryStorage(); unreadable.setItem(editorScope(a), "{");
+check(removeEditorTabs(a, unreadable) === null && unreadable.getItem(editorScope(a)) === null, "An unreadable index must still be removed");
+check(removeEditorTabs(b, new MemoryStorage()) === null && removeEditorTabs(a, null) === null, "Nothing to remove is not an error");
+const denied = { getItem(): string | null { throw new Error("denied"); }, setItem() {}, removeItem() {} };
+check(removeEditorTabs(a, denied), "A storage failure while removing must be reported");
+console.log("Editor tabs: scoped restore, exact SQL, incremental writes, rename, removal, bounded storage, corruption, quotas and legacy migration passed");

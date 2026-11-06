@@ -234,7 +234,8 @@ enum ConnCommand {
     List,
     /// Connect and identify the server.
     Test { name: String },
-    /// Forget a connection and delete its keychain secret.
+    /// Forget a connection and delete its keychain secret. Its saved reports stay on disk; a connection added later
+    /// under the same name starts without them (they move to `reports/.removed/`).
     Rm { name: String },
     /// Rename a connection (its alias). Keychain secret and report history move with it.
     Rename { old: String, new: String },

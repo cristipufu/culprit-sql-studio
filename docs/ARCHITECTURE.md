@@ -81,7 +81,7 @@ returned data and query lifetime; a server-side sort or selective-looking predic
 
 The editor keeps scratch SQL in device storage, scoped by the saved alias and logical database endpoint.
 A bounded metadata index records tabs and selection; each tab has its own SQL body so a keystroke does not
-serialize other queries. Renaming moves only the index. Results and execution confirmations are never restored,
+serialize other queries. Renaming moves only the index; removing the connection deletes the index and its bodies. Results and execution confirmations are never restored,
 and failed writes keep the prior index and surface an error in the editor.
 
 Cloud discovery uses `discover/paging.rs` and returns `DiscoveryResult` to the CLI and desktop: up to 20 matches,

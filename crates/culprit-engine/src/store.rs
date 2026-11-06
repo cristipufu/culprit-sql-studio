@@ -93,6 +93,12 @@ impl Paths {
     pub fn reports_dir(&self, connection: &str) -> PathBuf {
         self.data.join("reports").join(safe_file_name(connection))
     }
+
+    /// Where reports of removed connections go when their name is given to another connection. No connection's folder
+    /// starts with a dot, so this is never one.
+    pub fn removed_reports_dir(&self) -> PathBuf {
+        self.data.join("reports").join(".removed")
+    }
 }
 
 fn xdg(var: &str, unix_default: &str, fallback: fn() -> Option<PathBuf>) -> Result<PathBuf> {

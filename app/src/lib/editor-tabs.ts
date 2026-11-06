@@ -152,3 +152,21 @@ export function renameEditorTabs(from: Connection, to: Connection, storage = dev
     return null;
   } catch { return "The connection was renamed, but its scratch tabs couldn’t be moved. Their stored copy has been kept."; }
 }
+
+/** A removed connection's scratch tabs go with it, so they neither hold device storage other connections' tabs need
+ * nor reappear for a connection added later at the same endpoint. An unreadable index still goes. */
+export function removeEditorTabs(connection: Connection, storage = deviceStorage()): string | null {
+  if (!storage) return null;
+  try {
+    const raw = storage.getItem(editorScope(connection));
+    if (raw === null) return null;
+    let ids: string[] = [];
+    try {
+      const tabs: unknown = JSON.parse(raw)?.tabs;
+      if (Array.isArray(tabs)) ids = tabs.map((t) => t?.id).filter((id): id is string => typeof id === "string" && /^[\w-]{1,64}$/.test(id));
+    } catch { /* No bodies can be found from an unreadable index. */ }
+    for (const id of ids) storage.removeItem(BODY_PREFIX + id);
+    storage.removeItem(editorScope(connection));
+    return null;
+  } catch { return "The connection was removed, but its scratch tabs couldn’t be cleared from this device."; }
+}
