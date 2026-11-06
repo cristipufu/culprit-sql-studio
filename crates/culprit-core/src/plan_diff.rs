@@ -135,7 +135,8 @@ pub struct HypotheticalIndexVerification {
 pub fn verify_hypothetical_index(baseline: Plan, hypothetical: Plan) -> HypotheticalIndexVerification {
     let mut virtual_indexes = hypothetical.facts().virtual_indexes.clone();
     if virtual_indexes.is_empty()
-        && let Some(raw) = hypothetical.props.get("virtual_indexes")
+        && let Some(raw) =
+            hypothetical.props.get("VirtualIndexes").or_else(|| hypothetical.props.get("virtual_indexes"))
     {
         virtual_indexes = raw.split(", ").map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect();
     }
@@ -144,9 +145,9 @@ pub fn verify_hypothetical_index(baseline: Plan, hypothetical: Plan) -> Hypothet
     let mut used_virtual_indexes = Vec::new();
     if !virtual_indexes.is_empty() {
         for vi in &virtual_indexes {
-            let chosen = hyp_indexes
-                .iter()
-                .any(|idx| idx.eq_ignore_ascii_case(vi) || idx.contains(vi.as_str()) || vi.contains(*idx));
+            let chosen = hyp_indexes.iter().any(|idx| {
+                idx.eq_ignore_ascii_case(vi) || idx.rsplit('.').next().is_some_and(|leaf| leaf.eq_ignore_ascii_case(vi))
+            });
             if chosen && !used_virtual_indexes.iter().any(|u: &String| u.eq_ignore_ascii_case(vi)) {
                 used_virtual_indexes.push(vi.clone());
             }
@@ -1099,5 +1100,17 @@ mod tests {
         assert_eq!(verified.used_virtual_indexes, vec!["<13542>btree_orders_customer_id"]);
         assert!(!verified.diff.same_shape);
         assert!(verified.diff.cost_ratio.is_some_and(|r| r < 0.05));
+
+        // If the planner keeps scanning an existing index whose name is a substring of the virtual index name,
+        // `uses_virtual_index` must remain false.
+        let base_idx = plan(
+            Engine::Postgres,
+            node("Index Scan", NodeKind::Seek, Some("public.orders"), Some("orders"), 120.0, vec![]),
+        );
+        let mut hyp_unchanged = base_idx.clone();
+        hyp_unchanged.facts_mut().virtual_indexes = vec!["<13542>btree_orders_customer_id".into()];
+        let ignored = verify_hypothetical_index(base_idx, hyp_unchanged);
+        assert!(!ignored.uses_virtual_index);
+        assert!(ignored.used_virtual_indexes.is_empty());
     }
 }

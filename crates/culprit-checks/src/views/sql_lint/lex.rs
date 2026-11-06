@@ -1,7 +1,7 @@
 //! Statement splitting, tokenization, and comment-preserving rewrites for DDL linting,
 //! built on [`culprit_core::sql`] lexical primitives.
 
-use culprit_core::sql::{dollar_quoted_end, dollar_tag, line_end};
+use culprit_core::sql::{block_comment_end, dollar_quoted_end, dollar_tag, line_end};
 
 use super::unquote_ident;
 
@@ -86,8 +86,8 @@ pub(super) fn split_statement_spans(sql: &str) -> Vec<(usize, usize, String)> {
             }
             if c == '-' && chars.peek().map(|(_, ch)| *ch) == Some('-') {
                 for (_, ch) in chars.by_ref() {
-                    if ch == '\n' {
-                        current.push('\n');
+                    if matches!(ch, '\n' | '\r') {
+                        current.push(ch);
                         break;
                     }
                 }
@@ -95,10 +95,17 @@ pub(super) fn split_statement_spans(sql: &str) -> Vec<(usize, usize, String)> {
             }
             if c == '/' && chars.peek().map(|(_, ch)| *ch) == Some('*') {
                 chars.next();
+                let mut depth = 1usize;
                 while let Some((_, ch)) = chars.next() {
-                    if ch == '*' && chars.peek().map(|(_, next_ch)| *next_ch) == Some('/') {
+                    if ch == '/' && chars.peek().map(|(_, next_ch)| *next_ch) == Some('*') {
                         chars.next();
-                        break;
+                        depth += 1;
+                    } else if ch == '*' && chars.peek().map(|(_, next_ch)| *next_ch) == Some('/') {
+                        chars.next();
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
                     }
                 }
                 current.push(' ');
@@ -125,6 +132,14 @@ pub(super) fn split_statement_spans(sql: &str) -> Vec<(usize, usize, String)> {
         } else if c == '[' && !in_single && !in_double && !in_backtick && !in_bracket {
             in_bracket = true;
         } else if c == ']' && in_bracket {
+            if chars.peek().map(|(_, next_c)| *next_c) == Some(']') {
+                current.push(c);
+                if let Some((end_i, next_c)) = chars.next() {
+                    current.push(next_c);
+                    stmt_end = end_i + next_c.len_utf8();
+                }
+                continue;
+            }
             in_bracket = false;
         }
         if !c.is_whitespace() {
@@ -202,6 +217,37 @@ pub(super) fn tokenize(stmt: &str) -> Vec<String> {
         if c == '[' {
             close_delim = Some(']');
             current.push(c);
+            continue;
+        }
+        if c == '-' && chars.peek().map(|(_, ch)| *ch) == Some('-') {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            for (_, ch) in chars.by_ref() {
+                if matches!(ch, '\n' | '\r') {
+                    break;
+                }
+            }
+            continue;
+        }
+        if c == '/' && chars.peek().map(|(_, ch)| *ch) == Some('*') {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            chars.next();
+            let mut depth = 1usize;
+            while let Some((_, ch)) = chars.next() {
+                if ch == '/' && chars.peek().map(|(_, next_ch)| *next_ch) == Some('*') {
+                    chars.next();
+                    depth += 1;
+                } else if ch == '*' && chars.peek().map(|(_, next_ch)| *next_ch) == Some('/') {
+                    chars.next();
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+            }
             continue;
         }
         if c.is_whitespace() {
@@ -290,6 +336,9 @@ pub(super) fn split_top_level_commas<'a>(
 pub(super) fn find_keyword_outside_comments(sql: &str, keyword: &str) -> Option<usize> {
     let bytes = sql.as_bytes();
     let kw = keyword.as_bytes();
+    if kw.is_empty() {
+        return None;
+    }
     let mut i = 0;
     let mut in_single = false;
     let mut in_double = false;
@@ -312,11 +361,7 @@ pub(super) fn find_keyword_outside_comments(sql: &str, keyword: &str) -> Option<
                 continue;
             }
             if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
-                i += 2;
-                while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
-                    i += 1;
-                }
-                i = (i + 2).min(bytes.len());
+                i = block_comment_end(bytes, i, true).unwrap_or(bytes.len());
                 continue;
             }
             if i + kw.len() <= bytes.len() && bytes[i..i + kw.len()].eq_ignore_ascii_case(kw) {
@@ -337,6 +382,10 @@ pub(super) fn find_keyword_outside_comments(sql: &str, keyword: &str) -> Option<
         } else if bytes[i] == b'[' && !in_single && !in_double && !in_backtick && !in_bracket {
             in_bracket = true;
         } else if bytes[i] == b']' && in_bracket {
+            if bytes.get(i + 1) == Some(&b']') {
+                i += 2;
+                continue;
+            }
             in_bracket = false;
         }
         i += 1;

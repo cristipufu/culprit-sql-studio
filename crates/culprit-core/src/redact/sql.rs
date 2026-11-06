@@ -154,12 +154,14 @@ fn redact(text: &str, engine: Engine, numbers: bool) -> String {
             '/' if next == Some('*') => {
                 let nests = engine.sql_syntax() != crate::SqlSyntax::Mysql;
                 let end = skip_block_comment(&chars, i, nests);
+                let closed = end >= i + 4 && chars[end - 2] == '*' && chars[end - 1] == '/';
                 let body: String = chars[i + 2..end.saturating_sub(2).max(i + 2)].iter().collect();
+                let safe_hint = closed
+                    && body.trim_start().starts_with('+')
+                    && !body.contains(['\'', '"', '$'])
+                    && (!nests || !body.contains("/*"));
                 // Optimizer hints and Culprit's own tag carry no data; any other comment might.
-                if !nests && body.trim_start().starts_with('+')
-                    || (nests && !body.contains("/*") && body.trim_start().starts_with('+'))
-                    || body.trim() == "culprit"
-                {
+                if safe_hint || (closed && body.trim() == "culprit") {
                     out.extend(&chars[i..end]);
                 } else {
                     out.push_str("/* … */");

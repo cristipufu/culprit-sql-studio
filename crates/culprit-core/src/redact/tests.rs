@@ -477,6 +477,10 @@ fn fuzz_redact_sql_and_prose_are_idempotent_and_never_leak_planted_literals() {
             redact_sql("SELECT a FROM orders -- PLANTED_COMMENT_CANARY\rWHERE secret = 'PLANTED_AFTER_CR'", engine);
         assert!(!cr.contains("PLANTED_COMMENT_CANARY"), "{engine:?}: {cr}");
         assert!(!cr.contains("PLANTED_AFTER_CR"), "{engine:?}: {cr}");
+        let unclosed_hint = redact_sql("SELECT /*+ IndexScan(orders) 'PLANTED_HINT_SECRET'", engine);
+        assert!(!unclosed_hint.contains("PLANTED_HINT_SECRET"), "{engine:?}: {unclosed_hint}");
+        let quoted_hint = redact_sql("SELECT /*+ IndexScan(orders) 'PLANTED_QUOTED_HINT' */ 1", engine);
+        assert!(!quoted_hint.contains("PLANTED_QUOTED_HINT"), "{engine:?}: {quoted_hint}");
     }
     for engine in [Engine::Postgres, Engine::Yugabyte] {
         let prose = redact_prose("Predicate used $$PLANTED_PROSE_DOLLAR$$ and $tag$PLANTED_PROSE_TAG$tag$.", engine);

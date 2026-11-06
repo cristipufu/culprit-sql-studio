@@ -312,4 +312,13 @@ fn flags_vacuum_full_cluster_blocking_reindex_and_suppresses_concurrent_quick_fi
     // MySQL unsigned vs signed integer types on FK columns are caught as a type mismatch.
     assert_eq!(normalized_base_type("bigint(20) unsigned"), "bigint unsigned");
     assert_eq!(normalized_base_type("bigint(20)"), "bigint");
+
+    // Nested block comments, carriage-return line comments, and escaped brackets with semicolons are lexed cleanly.
+    let nested_and_cr = format!(
+        "-- header comment\rCREATE /* outer /* INDEX */ inner */ INDEX [idx]]semi;colon] ON {table} (created_at);"
+    );
+    let (rewritten_nested, nested_count) = apply_sql_fixes(&s, &nested_and_cr);
+    assert_eq!(nested_count, 1);
+    assert!(rewritten_nested.contains("CREATE /* outer /* INDEX */ inner */ INDEX CONCURRENTLY [idx]]semi;colon]"));
+    assert!(lint_sql(&s, &rewritten_nested).is_empty());
 }
