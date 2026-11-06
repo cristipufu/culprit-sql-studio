@@ -161,6 +161,7 @@ impl PostgresProvider {
                 tables::fill(&client, &mut plan).await;
             }
             if !virtual_names.is_empty() {
+                plan.facts_mut().virtual_indexes = virtual_names.clone();
                 plan.props.insert("VirtualIndexes".into(), virtual_names.join(", "));
             }
             Ok(plan)

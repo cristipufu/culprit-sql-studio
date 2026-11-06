@@ -368,6 +368,7 @@ fn table_node(
         node.detail = Some(detail.join(", "));
     }
     let key_parts = strings(table, "used_key_parts");
+    node.facts_mut().used_key_parts = key_parts.clone();
     let refs = strings(table, "ref");
     node.seek_predicate = match (key_parts.is_empty(), refs.is_empty(), kind) {
         (false, false, _) => Some(format!("{} = {}", key_parts.join(", "), refs.join(", "))),

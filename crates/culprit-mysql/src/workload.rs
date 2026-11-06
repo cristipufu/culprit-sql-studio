@@ -537,6 +537,7 @@ fn sample_plan(json: &str, sample: &str, database: &str, digest_text: &str) -> R
         && culprit_core::sql::limit_count(digest_text, Engine::Mysql).is_none()
         && let Some(rows) = culprit_core::sql::limit_count(sample, Engine::Mysql)
     {
+        clean.facts_mut().sample_limit_rows = culprit_core::plan_facts::nonnegative(rows);
         clean.props.insert(culprit_core::insights::LIMIT_ROWS.into(), rows.to_string());
     }
     Ok(clean)

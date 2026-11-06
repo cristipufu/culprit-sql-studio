@@ -82,7 +82,9 @@ pub(crate) async fn last_actual_plan(pool: &Pool, query_id: &str, plan_id: Optio
     }
     plan.raw = None;
     if let Some(at) = row.str("last_run") {
-        plan.props.insert("LastRunAt".into(), format!("{at}Z"));
+        let formatted = format!("{at}Z");
+        plan.facts_mut().last_run_at = Some(formatted.clone());
+        plan.props.insert("LastRunAt".into(), formatted);
     }
     clear_unrecorded_times(&mut plan);
     if let Some(n) = row.f64("execution_count") {

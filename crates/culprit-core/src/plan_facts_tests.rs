@@ -472,3 +472,32 @@ fn execution_mode_facts_control_own_time_without_reading_display_labels() {
     p.root.props.insert("ActualExecutionMode".into(), "Batch".into());
     assert_eq!(crate::actual::self_times(&p).unwrap()[&1], 4.0);
 }
+
+#[test]
+fn virtual_indexes_sample_limits_last_run_and_used_key_parts_follow_typed_facts() {
+    let mut p = plan();
+    p.props.insert("LastRunAt".into(), "2026-01-01T00:00:00Z".into());
+    p.props.insert(crate::insights::LIMIT_ROWS.into(), "50".into());
+    p.props.insert("VirtualIndexes".into(), "hypo_orders_a, hypo_orders_b".into());
+    p.root.props.insert("used_key_parts".into(), "customer_id, created_at".into());
+    assert_eq!(p.facts().last_run_at.as_deref(), Some("2026-01-01T00:00:00Z"));
+    assert_eq!(p.facts().sample_limit_rows, Some(50.0));
+    assert_eq!(p.facts().virtual_indexes, vec!["hypo_orders_a", "hypo_orders_b"]);
+    assert_eq!(p.root.facts().used_key_parts, vec!["customer_id", "created_at"]);
+    assert_eq!(crate::actual_summary(&p).unwrap().last_run_at.as_deref(), Some("2026-01-01T00:00:00Z"));
+
+    // Authoritative facts override and do not revive legacy properties.
+    p.facts = Some(PlanFacts {
+        last_run_at: Some("2026-02-01T12:00:00Z".into()),
+        sample_limit_rows: Some(25.0),
+        virtual_indexes: vec!["hypo_only".into()],
+        ..Default::default()
+    });
+    p.root.facts = Some(PlanNodeFacts { used_key_parts: vec!["status".into()], ..Default::default() });
+    p.props.clear();
+    p.root.props.clear();
+    assert_eq!(crate::actual_summary(&p).unwrap().last_run_at.as_deref(), Some("2026-02-01T12:00:00Z"));
+    assert_eq!(p.facts().sample_limit_rows, Some(25.0));
+    assert_eq!(p.facts().virtual_indexes, vec!["hypo_only"]);
+    assert_eq!(p.root.facts().used_key_parts, vec!["status"]);
+}

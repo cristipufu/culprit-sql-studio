@@ -87,6 +87,7 @@ pub fn reparse(saved: &Plan, schema: Option<&str>) -> Option<Plan> {
     }
     clean.facts_mut().server_version = saved.facts().server_version.clone();
     clean.facts_mut().flavor = saved.facts().flavor.clone().or(clean.facts().flavor.clone());
+    clean.facts_mut().sample_limit_rows = saved.facts().sample_limit_rows;
     Some(clean)
 }
 
@@ -309,6 +310,7 @@ fn table_node(table: &Map<String, Value>, cx: &Context, id: &mut u32) -> PlanNod
         });
     }
     let key_parts = strings(table, "used_key_parts");
+    node.facts_mut().used_key_parts = key_parts.clone();
     let refs = strings(table, "ref");
     node.seek_predicate = match (key_parts.is_empty(), refs.is_empty(), kind) {
         (false, false, _) => Some(format!("{} = {}", key_parts.join(", "), refs.join(", "))),

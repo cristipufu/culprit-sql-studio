@@ -92,6 +92,10 @@ pub fn from_value(value: &Value, kind: PlanKind, statement: Option<&str>) -> Res
 pub(crate) fn native(mut plan: Plan) -> Result<Plan> {
     let raw = plan.raw.as_deref().ok_or_else(|| Error::invalid("YSQL returned no native plan text"))?;
     let mut native = parse(raw, plan.kind, plan.statement.as_deref())?;
+    let virtual_indexes = plan.facts().virtual_indexes.clone();
+    if !virtual_indexes.is_empty() {
+        native.facts_mut().virtual_indexes = virtual_indexes;
+    }
     if let Some(indexes) = plan.props.remove("VirtualIndexes") {
         native.props.insert("VirtualIndexes".into(), indexes);
     }
@@ -116,6 +120,10 @@ pub(crate) fn redacted_constants(plan: &mut Plan) {
 
 pub fn reparse(saved: &Plan) -> Option<Plan> {
     let mut plan = parse(saved.raw.as_deref()?, saved.kind, saved.statement.as_deref()).ok()?;
+    let virtual_indexes = saved.facts().virtual_indexes.clone();
+    if !virtual_indexes.is_empty() {
+        plan.facts_mut().virtual_indexes = virtual_indexes;
+    }
     if let Some(indexes) = saved.props.get("VirtualIndexes") {
         plan.props.insert("VirtualIndexes".into(), indexes.clone());
     }

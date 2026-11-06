@@ -43,8 +43,9 @@ impl Out {
             }
             (Some(_), None) => {
                 let when = plan
-                    .props
-                    .get("LastRunAt")
+                    .facts()
+                    .last_run_at
+                    .as_deref()
                     .map(|at| format!(" · last ran {}", at.replace('T', " ")))
                     .unwrap_or_default();
                 println!(
@@ -60,8 +61,12 @@ impl Out {
                 self.paint(DIM, &format!("{:?} plan · the access path only: no row or cost estimates", plan.kind))
             ),
             _ => {
-                let virt =
-                    plan.props.get("VirtualIndexes").map(|v| format!(" · virtual indexes: {v}")).unwrap_or_default();
+                let facts = plan.facts();
+                let virt = if facts.virtual_indexes.is_empty() {
+                    String::new()
+                } else {
+                    format!(" · virtual indexes: {}", facts.virtual_indexes.join(", "))
+                };
                 println!(
                     "{}",
                     self.paint(DIM, &format!("{:?} plan · total cost {:.2}{virt}", plan.kind, plan.total_cost))

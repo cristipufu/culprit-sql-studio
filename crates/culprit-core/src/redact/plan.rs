@@ -94,6 +94,7 @@ pub fn redact_plan(plan: &Plan) -> Plan {
             f.aggregate_strategy = f.aggregate_strategy.as_deref().map(|v| redact_strings(v, engine));
             f.conditions = f.conditions.iter().map(|v| text(v, engine)).collect();
             f.columns_without_statistics = f.columns_without_statistics.iter().map(|v| text(v, engine)).collect();
+            f.used_key_parts = f.used_key_parts.iter().map(|v| text(v, engine)).collect();
             f.output_columns = f.output_columns.as_ref().map(|values| values.iter().map(|v| text(v, engine)).collect());
             f.user_functions = f
                 .user_functions
@@ -158,6 +159,8 @@ pub fn redact_plan(plan: &Plan) -> Plan {
         f.parallelism_blocker = f.parallelism_blocker.as_deref().map(|v| redact_strings(v, plan.engine));
         f.optimization_early_abort = f.optimization_early_abort.as_deref().map(|v| redact_strings(v, plan.engine));
         f.statistics_maintenance = f.statistics_maintenance.as_deref().map(|v| text(v, plan.engine));
+        f.last_run_at = f.last_run_at.as_deref().map(|v| redact_strings(v, plan.engine));
+        f.virtual_indexes = f.virtual_indexes.iter().map(|v| redact_strings(v, plan.engine)).collect();
     }
     // Insights quote the predicates they were found in: worked out again from the redacted plan.
     if plan.insights.is_some() {

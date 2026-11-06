@@ -79,11 +79,8 @@ pub fn missing_histogram(snapshot: &Snapshot) -> Vec<Finding> {
             let columns = predicate_columns(&predicate);
             // The key parts of the index the step reads are counted from the index itself (MySQL dives into it for a
             // range), not guessed.
-            let key_parts: Vec<String> = node
-                .props
-                .get("used_key_parts")
-                .map(|k| k.split(',').map(|c| c.trim().to_string()).collect())
-                .unwrap_or_default();
+            let facts = node.facts();
+            let key_parts = &facts.used_key_parts;
             let guessed: Vec<String> = columns
                 .equality
                 .iter()

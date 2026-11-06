@@ -420,7 +420,7 @@ pub fn plan(plan: &Plan) -> Value {
             "worst_estimate_operator": summary.worst_estimate_node,
             "worst_estimate_factor": summary.worst_estimate.map(|v| round(v, 1)),
             "shares": if culprit_core::self_times(plan).is_some() { "share of the time" } else { "share of the estimated cost" },
-            "last_ran": plan.props.get("LastRunAt"),
+            "last_ran": plan.facts().last_run_at,
         });
     }
     value
@@ -469,7 +469,7 @@ fn plan_value(plan: &Plan) -> Value {
         "kind": plan.kind,
         "total_cost": round(plan.total_cost, 4),
         "operators": plan.nodes().len(),
-        "virtual_indexes": plan.props.get("VirtualIndexes"),
+        "virtual_indexes": (!plan.facts().virtual_indexes.is_empty()).then(|| plan.facts().virtual_indexes.join(", ")),
         "warnings": warnings(plan),
         "index_hints": plan.index_hints.iter().map(|h| json!({
             "table": h.table,

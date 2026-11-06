@@ -336,7 +336,7 @@ pub fn actual_summary(plan: &Plan) -> Option<ActualSummary> {
         operator_time_ms: own.as_ref().map(|times| nodes.iter().filter_map(|n| times.get(&n.id)).sum()),
         spill_pages: sum(&|n| n.runtime.as_ref().and_then(|r| r.spill_pages)),
         skew: worker_skew(plan),
-        last_run_at: plan.props.get("LastRunAt").cloned(),
+        last_run_at: facts.last_run_at.clone(),
         workers: facts.used_threads.map(f64::from),
     })
 }

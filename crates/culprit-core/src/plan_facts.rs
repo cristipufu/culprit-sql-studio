@@ -105,6 +105,15 @@ pub struct PlanFacts {
     pub query_identifier: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    pub last_run_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "nonnegative_number")]
+    #[ts(as = "Option<f64>", optional)]
+    pub sample_limit_rows: Option<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<String>>", optional)]
+    pub virtual_indexes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub docdb: Option<crate::signals::DocdbMetrics>,
 }
 
@@ -222,6 +231,9 @@ pub struct PlanNodeFacts {
     pub conversions: Vec<PlanConversion>,
     pub user_functions: Vec<String>,
     pub columns_without_statistics: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<String>>", optional)]
+    pub used_key_parts: Vec<String>,
     pub possible_index_names: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub possible_index_columns: Option<Vec<PlanIndexColumns>>,
@@ -318,6 +330,12 @@ impl PlanFacts {
             docdb: None,
             query_hash: props.get("QueryHash").cloned(),
             query_identifier: props.get("Query Identifier").cloned(),
+            last_run_at: props.get("LastRunAt").cloned(),
+            sample_limit_rows: number(crate::insights::LIMIT_ROWS),
+            virtual_indexes: props
+                .get("VirtualIndexes")
+                .map(|v| v.split(", ").filter(|s| !s.is_empty()).map(str::to_string).collect())
+                .unwrap_or_default(),
             parallelism_blocker: props.get("NonParallelPlanReason").cloned(),
             optimization_early_abort: props.get("StatementOptmEarlyAbortReason").cloned(),
             server_version: props.get("server_version").cloned(),
@@ -434,6 +452,10 @@ impl PlanNodeFacts {
             columns_without_statistics: props
                 .get("ColumnsWithNoStatistics")
                 .map(|v| v.split(", ").map(str::to_string).collect())
+                .unwrap_or_default(),
+            used_key_parts: props
+                .get("used_key_parts")
+                .map(|v| v.split(',').map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect())
                 .unwrap_or_default(),
             possible_index_names: props
                 .get("possible_keys")
