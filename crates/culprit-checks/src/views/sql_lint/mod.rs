@@ -183,20 +183,7 @@ pub(super) fn supports_concurrent_index(snapshot: &Snapshot, table: Option<&Tabl
 }
 
 pub(super) fn find_table<'a>(snapshot: &'a Snapshot, raw: &str) -> Option<&'a TableStat> {
-    if let Some(parts) = culprit_core::sql::identifier_parts(raw)
-        && let [.., schema, name] = parts.as_slice()
-    {
-        return snapshot
-            .tables
-            .iter()
-            .find(|t| t.schema.eq_ignore_ascii_case(schema) && t.name.eq_ignore_ascii_case(name));
-    }
-    let cleaned = unquote_ident(raw);
-    if let Some((schema, name)) = cleaned.rsplit_once('.') {
-        snapshot.tables.iter().find(|t| t.schema.eq_ignore_ascii_case(schema) && t.name.eq_ignore_ascii_case(name))
-    } else {
-        snapshot.tables.iter().find(|t| t.name.eq_ignore_ascii_case(&cleaned))
-    }
+    snapshot.tables.iter().find(|t| table_matches(t, raw))
 }
 
 pub(super) fn table_matches(table: &TableStat, raw: &str) -> bool {

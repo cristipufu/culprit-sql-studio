@@ -13,7 +13,7 @@ mod sql;
 mod tests;
 
 pub use plan::{redact_native, redact_plan};
-pub(crate) use sql::skip_quoted_smart;
+pub(crate) use sql::{dollar_tag, skip_quoted_smart};
 pub use sql::{redact_prose, redact_sql, redact_strings, strip_database};
 
 fn opaque(value: &str) -> String {

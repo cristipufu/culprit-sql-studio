@@ -32,6 +32,23 @@ fn parse_dollar_tag_str(sql: &str) -> Option<&str> {
     std::str::from_utf8(tag).ok()
 }
 
+fn skip_nested_block_comment(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) {
+    chars.next();
+    let mut depth = 1usize;
+    while let Some((_, ch)) = chars.next() {
+        if ch == '/' && chars.peek().map(|(_, next_ch)| *next_ch) == Some('*') {
+            chars.next();
+            depth += 1;
+        } else if ch == '*' && chars.peek().map(|(_, next_ch)| *next_ch) == Some('/') {
+            chars.next();
+            depth -= 1;
+            if depth == 0 {
+                break;
+            }
+        }
+    }
+}
+
 pub(super) fn split_statement_spans(sql: &str) -> Vec<(usize, usize, String)> {
     let mut out = Vec::new();
     let mut current = String::new();
@@ -94,20 +111,7 @@ pub(super) fn split_statement_spans(sql: &str) -> Vec<(usize, usize, String)> {
                 continue;
             }
             if c == '/' && chars.peek().map(|(_, ch)| *ch) == Some('*') {
-                chars.next();
-                let mut depth = 1usize;
-                while let Some((_, ch)) = chars.next() {
-                    if ch == '/' && chars.peek().map(|(_, next_ch)| *next_ch) == Some('*') {
-                        chars.next();
-                        depth += 1;
-                    } else if ch == '*' && chars.peek().map(|(_, next_ch)| *next_ch) == Some('/') {
-                        chars.next();
-                        depth -= 1;
-                        if depth == 0 {
-                            break;
-                        }
-                    }
-                }
+                skip_nested_block_comment(&mut chars);
                 current.push(' ');
                 continue;
             }
@@ -234,20 +238,7 @@ pub(super) fn tokenize(stmt: &str) -> Vec<String> {
             if !current.is_empty() {
                 tokens.push(std::mem::take(&mut current));
             }
-            chars.next();
-            let mut depth = 1usize;
-            while let Some((_, ch)) = chars.next() {
-                if ch == '/' && chars.peek().map(|(_, next_ch)| *next_ch) == Some('*') {
-                    chars.next();
-                    depth += 1;
-                } else if ch == '*' && chars.peek().map(|(_, next_ch)| *next_ch) == Some('/') {
-                    chars.next();
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                }
-            }
+            skip_nested_block_comment(&mut chars);
             continue;
         }
         if c.is_whitespace() {
@@ -333,12 +324,12 @@ pub(super) fn split_top_level_commas<'a>(
     out
 }
 
-pub(super) fn find_keyword_outside_comments(sql: &str, keyword: &str) -> Option<usize> {
+fn scan_outside_quotes_and_comments(
+    sql: &str,
+    mut on_unquoted_byte: impl FnMut(&[u8], usize) -> bool,
+    mut on_line_comment: impl FnMut(&[u8], usize, usize) -> bool,
+) -> Option<usize> {
     let bytes = sql.as_bytes();
-    let kw = keyword.as_bytes();
-    if kw.is_empty() {
-        return None;
-    }
     let mut i = 0;
     let mut in_single = false;
     let mut in_double = false;
@@ -357,20 +348,19 @@ pub(super) fn find_keyword_outside_comments(sql: &str, keyword: &str) -> Option<
                 continue;
             }
             if bytes[i] == b'-' && bytes.get(i + 1) == Some(&b'-') {
-                i = line_end(bytes, i);
+                let end = line_end(bytes, i);
+                if on_line_comment(bytes, i, end) {
+                    return Some(i);
+                }
+                i = end;
                 continue;
             }
             if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
                 i = block_comment_end(bytes, i, true).unwrap_or(bytes.len());
                 continue;
             }
-            if i + kw.len() <= bytes.len() && bytes[i..i + kw.len()].eq_ignore_ascii_case(kw) {
-                let before_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_';
-                let after_ok = i + kw.len() == bytes.len()
-                    || !bytes[i + kw.len()].is_ascii_alphanumeric() && bytes[i + kw.len()] != b'_';
-                if before_ok && after_ok {
-                    return Some(i);
-                }
+            if on_unquoted_byte(bytes, i) {
+                return Some(i);
             }
         }
         if bytes[i] == b'\'' && !in_double && !in_backtick && !in_bracket {
@@ -393,56 +383,26 @@ pub(super) fn find_keyword_outside_comments(sql: &str, keyword: &str) -> Option<
     None
 }
 
-fn ends_with_line_comment(sql: &str) -> bool {
-    let bytes = sql.as_bytes();
-    let mut i = 0;
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut in_backtick = false;
-    let mut in_bracket = false;
-    while i < bytes.len() {
-        if in_single && bytes[i] == b'\\' {
-            i = (i + 2).min(bytes.len());
-            continue;
-        }
-        if !in_single && !in_double && !in_backtick && !in_bracket {
-            if bytes[i] == b'$'
-                && let Some(tag) = dollar_tag(bytes, i)
-            {
-                i = dollar_quoted_end(bytes, i, tag).unwrap_or(bytes.len());
-                continue;
-            }
-            if bytes[i] == b'-' && bytes.get(i + 1) == Some(&b'-') {
-                let end = line_end(bytes, i);
-                if end == bytes.len() {
-                    return true;
-                }
-                i = end;
-                continue;
-            }
-            if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
-                i = block_comment_end(bytes, i, true).unwrap_or(bytes.len());
-                continue;
-            }
-        }
-        if bytes[i] == b'\'' && !in_double && !in_backtick && !in_bracket {
-            in_single = !in_single;
-        } else if bytes[i] == b'"' && !in_single && !in_backtick && !in_bracket {
-            in_double = !in_double;
-        } else if bytes[i] == b'`' && !in_single && !in_double && !in_bracket {
-            in_backtick = !in_backtick;
-        } else if bytes[i] == b'[' && !in_single && !in_double && !in_backtick && !in_bracket {
-            in_bracket = true;
-        } else if bytes[i] == b']' && in_bracket {
-            if bytes.get(i + 1) == Some(&b']') {
-                i += 2;
-                continue;
-            }
-            in_bracket = false;
-        }
-        i += 1;
+pub(super) fn find_keyword_outside_comments(sql: &str, keyword: &str) -> Option<usize> {
+    let kw = keyword.as_bytes();
+    if kw.is_empty() {
+        return None;
     }
-    false
+    let is_word_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    scan_outside_quotes_and_comments(
+        sql,
+        |bytes, i| {
+            i + kw.len() <= bytes.len()
+                && bytes[i..i + kw.len()].eq_ignore_ascii_case(kw)
+                && (i == 0 || !is_word_byte(bytes[i - 1]))
+                && (i + kw.len() == bytes.len() || !is_word_byte(bytes[i + kw.len()]))
+        },
+        |_, _, _| false,
+    )
+}
+
+fn ends_with_line_comment(sql: &str) -> bool {
+    scan_outside_quotes_and_comments(sql, |_, _| false, |bytes, _, end| end == bytes.len()).is_some()
 }
 
 pub(super) fn rewrite_preserving_comments(orig_span: &str, rep_sql: &str) -> String {

@@ -273,20 +273,7 @@ fn word_before(chars: &[char], i: usize) -> bool {
     i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_')
 }
 
-fn dollar_tag(chars: &[char], start: usize) -> Option<usize> {
-    let mut i = start + 1;
-    if chars.get(i).is_some_and(|c| c.is_ascii_digit()) {
-        return None;
-    }
-    while i < chars.len() {
-        match chars[i] {
-            '$' => return Some(i),
-            c if c.is_alphanumeric() || c == '_' => i += 1,
-            _ => return None,
-        }
-    }
-    None
-}
+use crate::redact::dollar_tag;
 
 /// Lists of values become `...` whatever their length (`IN (1, 2, 3)`, `IN (...)`, `?, ...`), and the MySQL digest's
 /// `(unknown)` placeholder is a value.

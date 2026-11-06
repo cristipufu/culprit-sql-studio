@@ -464,7 +464,7 @@ fn number_end(chars: &[char], from: usize) -> usize {
 }
 
 /// A Postgres dollar-quote opener at `start` (`$$` or `$tag$`): the index of its closing `$`. `$1` is not one.
-fn dollar_tag(chars: &[char], start: usize) -> Option<usize> {
+pub(crate) fn dollar_tag(chars: &[char], start: usize) -> Option<usize> {
     let mut i = start + 1;
     if chars.get(i).is_some_and(|c| c.is_ascii_digit()) {
         return None;
