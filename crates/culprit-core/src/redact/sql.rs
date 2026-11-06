@@ -53,29 +53,37 @@ fn mask_prose_values(text: &str, engine: Engine) -> String {
     let chars: Vec<char> = text.chars().collect();
     let word = |c: Option<&char>| c.is_some_and(|c| c.is_alphanumeric() || *c == '_');
     let mut out = String::with_capacity(text.len());
+    let mut in_code_span = false;
     let mut i = 0;
     while i < chars.len() {
         let prev = i.checked_sub(1).and_then(|k| chars.get(k));
+        if chars[i] == '`' {
+            in_code_span = !in_code_span;
+            out.push('`');
+            i += 1;
+            continue;
+        }
+        if in_code_span && engine == Engine::Mysql && chars[i] == '"' {
+            let (end, closed) = skip_quoted_smart(&chars, i, '"', true, false, true);
+            out.push_str("\"?\"");
+            if !closed {
+                return out;
+            }
+            i = end;
+            continue;
+        }
         if chars[i] == '\'' {
             let prefix = prev.is_some_and(|p| matches!(p.to_ascii_uppercase(), 'N' | 'E' | 'X' | 'B'))
                 && !word(i.checked_sub(2).and_then(|k| chars.get(k)));
             if !word(prev) || prefix {
-                let backslashes = engine == Engine::Mysql || prev.is_some_and(|p| p.eq_ignore_ascii_case(&'E'));
-                let mut j = i + 1;
-                let close = loop {
-                    match chars.get(j) {
-                        None => break None,
-                        Some('\\') if backslashes => j += 2,
-                        Some('\'') if chars.get(j + 1) == Some(&'\'') => j += 2,
-                        Some('\'') => break Some(j),
-                        Some(_) => j += 1,
-                    }
-                };
+                let is_e_quote = prev.is_some_and(|p| p.eq_ignore_ascii_case(&'E')) && prefix;
+                let backslashes = engine == Engine::Mysql || is_e_quote;
+                let (end, closed) = skip_quoted_smart(&chars, i, '\'', backslashes, is_e_quote, true);
                 out.push_str("'?'");
-                match close {
-                    Some(end) => i = end + 1,
-                    None => return out,
+                if !closed {
+                    return out;
                 }
+                i = end;
                 continue;
             }
         }
@@ -169,8 +177,9 @@ fn redact(text: &str, engine: Engine, numbers: bool) -> String {
                 i = end;
             }
             '\'' => {
-                let escapes = engine == Engine::Mysql || last_word.eq_ignore_ascii_case("e");
-                let (end, closed) = skip_quoted_closed(&chars, i, '\'', escapes);
+                let is_e_quote = i > 0 && matches!(chars[i - 1], 'e' | 'E') && last_word.eq_ignore_ascii_case("e");
+                let escapes = engine == Engine::Mysql || is_e_quote;
+                let (end, closed) = skip_quoted_smart(&chars, i, '\'', escapes, is_e_quote, false);
                 // A pattern keeps where its wildcards are (`'%?%'`): that's its shape, not data, and a leading % is
                 // what stops an index from being used.
                 let body_end = if closed { end.saturating_sub(1) } else { end };
@@ -188,7 +197,7 @@ fn redact(text: &str, engine: Engine, numbers: bool) -> String {
                 last_word.clear();
             }
             '"' if engine == Engine::Mysql => {
-                i = skip_quoted(&chars, i, '"', true);
+                i = skip_quoted_smart(&chars, i, '"', true, false, false).0;
                 out.push_str("\"?\"");
                 last_word.clear();
             }
@@ -218,7 +227,10 @@ fn redact(text: &str, engine: Engine, numbers: bool) -> String {
                     i = close;
                 } else {
                     // `$1`: a parameter marker, kept.
-                    let end = word_end(&chars, i + 1);
+                    let mut end = i + 1;
+                    while end < chars.len() && chars[end].is_ascii_digit() {
+                        end += 1;
+                    }
                     out.extend(&chars[i..end]);
                     i = end;
                 }
@@ -231,7 +243,11 @@ fn redact(text: &str, engine: Engine, numbers: bool) -> String {
                     i += 2;
                     continue;
                 }
-                let end = word_end(&chars, i + 1 + usize::from(next == Some('@')));
+                let end = word_end(
+                    &chars,
+                    i + 1 + usize::from(next == Some('@')),
+                    engine.sql_syntax() == crate::SqlSyntax::Postgres,
+                );
                 out.extend(&chars[i..end]);
                 last_word.clear();
                 i = end;
@@ -258,7 +274,7 @@ fn redact(text: &str, engine: Engine, numbers: bool) -> String {
                 i = end;
             }
             _ if c.is_alphabetic() || c == '_' => {
-                let end = word_end(&chars, i);
+                let end = word_end(&chars, i, engine.sql_syntax() == crate::SqlSyntax::Postgres);
                 last_word = chars[i..end].iter().collect();
                 out.push_str(&last_word);
                 i = end;
@@ -358,9 +374,68 @@ fn skip_quoted_closed(chars: &[char], start: usize, close: char, backslash: bool
     (chars.len(), false)
 }
 
-fn word_end(chars: &[char], from: usize) -> usize {
+pub(crate) fn skip_quoted_smart(
+    chars: &[char],
+    start: usize,
+    close: char,
+    default_backslash: bool,
+    force_backslash: bool,
+    stop_at_backtick: bool,
+) -> (usize, bool) {
+    let (end, closed) = skip_quoted_closed(chars, start, close, default_backslash || force_backslash);
+    if force_backslash {
+        return (end, closed);
+    }
+    let (alt_end, alt_closed) = skip_quoted_closed(chars, start, close, !default_backslash);
+    if alt_end == end && alt_closed == closed {
+        return (end, closed);
+    }
+    let followed_by_word = |pos: usize| chars.get(pos).is_some_and(|c| c.is_alphanumeric() || *c == '_');
+    let (primary_clean, _) = quotes_clean_from(chars, end, close, default_backslash, stop_at_backtick);
+    let primary_ok = closed && !followed_by_word(end) && primary_clean;
+    if !primary_ok {
+        let (alt_clean, alt_quotes) = quotes_clean_from(chars, alt_end, close, !default_backslash, stop_at_backtick);
+        let switch_to_literal = default_backslash && alt_end < end;
+        if alt_closed && !followed_by_word(alt_end) && alt_clean && (!switch_to_literal || alt_quotes > 0) {
+            return (alt_end, alt_closed);
+        }
+    }
+    (end, closed)
+}
+
+fn quotes_clean_from(
+    chars: &[char],
+    mut i: usize,
+    close: char,
+    backslash: bool,
+    stop_at_backtick: bool,
+) -> (bool, usize) {
+    let mut count = 0usize;
+    while i < chars.len() && !(stop_at_backtick && chars[i] == '`') {
+        if chars[i] == '-' && chars.get(i + 1) == Some(&'-') {
+            i += chars[i..].iter().position(|&x| matches!(x, '\n' | '\r')).unwrap_or(chars.len() - i);
+        } else if chars[i] == '/' && chars.get(i + 1) == Some(&'*') {
+            i = skip_block_comment(chars, i, true);
+        } else if chars[i] == close {
+            count += 1;
+            let (end, closed) = skip_quoted_closed(chars, i, close, backslash);
+            if !closed || chars.get(end).is_some_and(|c| c.is_alphanumeric() || *c == '_') {
+                return (false, count);
+            }
+            i = end;
+        } else {
+            i += 1;
+        }
+    }
+    (true, count)
+}
+
+fn word_end(chars: &[char], from: usize, postgres_dollar: bool) -> usize {
     let mut i = from;
-    while i < chars.len() && (chars[i].is_alphanumeric() || matches!(chars[i], '_' | '$' | '#' | '@')) {
+    while i < chars.len()
+        && (chars[i].is_alphanumeric() || matches!(chars[i], '_' | '$' | '#' | '@'))
+        && !(postgres_dollar && chars[i] == '$' && dollar_tag(chars, i).is_some())
+    {
         i += 1;
     }
     i

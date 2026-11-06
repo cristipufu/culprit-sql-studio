@@ -125,23 +125,10 @@ pub fn fingerprint(sql: &str, engine: Engine) -> Fingerprint {
             && !word_before(&chars, i);
         if c == '\'' || (c == '"' && r.double_quote_is_string) || prefixed {
             let quote = if prefixed { '\'' } else { c };
-            let escapes = r.backslash_escapes || (prefixed && matches!(c, 'e' | 'E'));
-            i += if prefixed { 2 } else { 1 };
-            while i < chars.len() {
-                if escapes && chars[i] == '\\' {
-                    i += 2;
-                    continue;
-                }
-                if chars[i] == quote {
-                    if chars.get(i + 1) == Some(&quote) {
-                        i += 2;
-                        continue;
-                    }
-                    break;
-                }
-                i += 1;
-            }
-            i += 1;
+            let force_escapes = prefixed && matches!(c, 'e' | 'E');
+            let quote_start = if prefixed { i + 1 } else { i };
+            i = crate::redact::skip_quoted_smart(&chars, quote_start, quote, r.backslash_escapes, force_escapes, false)
+                .0;
             value(&mut tokens, &mut display);
             continue;
         }
@@ -232,7 +219,10 @@ pub fn fingerprint(sql: &str, engine: Engine) -> Fingerprint {
             |ch: char| ch.is_alphanumeric() || ch == '_' || ch == '$' || ch == '@' || (ch == '#' && !r.hash_comments);
         if word_char(c) {
             let start = i;
-            while i < chars.len() && word_char(chars[i]) {
+            while i < chars.len()
+                && word_char(chars[i])
+                && !(engine == SqlSyntax::Postgres && chars[i] == '$' && dollar_tag(&chars, i).is_some())
+            {
                 i += 1;
             }
             let word: String = chars[start..i].iter().collect();
@@ -474,12 +464,16 @@ mod tests {
                 }
             }
             for pg_engine in [Engine::Postgres, Engine::Yugabyte] {
-                let pg_sql =
-                    format!("{sql} WHERE payload = $tag$PLANTED_DOLLAR_CANARY$tag$ AND body = $$PLANTED_DOLLAR2$$");
+                let pg_sql = format!(
+                    "{sql} WHERE payload = $tag$PLANTED_DOLLAR_CANARY$tag$ AND body =$$PLANTED_DOLLAR2$$ AND x = 'it\\'s' AND y = 'PLANTED_DOLLAR3'"
+                );
                 let fp = fingerprint(&pg_sql, pg_engine);
                 assert!(!fp.key.contains("planted_dollar"));
                 assert!(!fp.display.contains("PLANTED_DOLLAR"));
             }
+            let my_fp = fingerprint("SELECT 'C:\\path\\', ' PLANTED_MYSQL_NO_BS'", Engine::Mysql);
+            assert!(!my_fp.key.contains("planted_mysql_no_bs"));
+            assert!(!my_fp.display.contains("PLANTED_MYSQL_NO_BS"));
         }
     }
 }

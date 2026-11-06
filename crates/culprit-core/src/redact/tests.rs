@@ -484,11 +484,25 @@ fn fuzz_redact_sql_and_prose_are_idempotent_and_never_leak_planted_literals() {
         assert_eq!(redact_sql("SELECT 'secret%a", engine), "SELECT '?'");
         assert_eq!(redact_sql("SELECT 'secret%", engine), "SELECT '?%'");
         assert_eq!(redact_sql("SELECT '%secret%a", engine), "SELECT '%?'");
+        let e_col = redact_sql("SELECT e, 'abc\\' FROM t WHERE secret = 'PLANTED_E_COL'", engine);
+        assert!(!e_col.contains("PLANTED_E_COL"), "{engine:?}: {e_col}");
+        let legacy_esc = redact_sql("SELECT 'it\\'s', 'PLANTED_LEGACY_ESC'", engine);
+        assert!(!legacy_esc.contains("PLANTED_LEGACY_ESC"), "{engine:?}: {legacy_esc}");
+        let no_bs_esc = redact_sql("SELECT 'C:\\path\\', ' PLANTED_NO_BS_ESC'", engine);
+        assert!(!no_bs_esc.contains("PLANTED_NO_BS_ESC"), "{engine:?}: {no_bs_esc}");
+        let prose_no_bs =
+            redact_prose("Plan 7 isn't slow: `SELECT 'C:\\path\\', ' PLANTED_PROSE_NO_BS'` isn't fast", engine);
+        assert!(!prose_no_bs.contains("PLANTED_PROSE_NO_BS"), "{engine:?}: {prose_no_bs}");
     }
+    let mysql_dq_backtick = redact_prose("Query `SELECT \"a`b\", \"PLANTED_MYSQL_DQ\"` done", Engine::Mysql);
+    assert!(!mysql_dq_backtick.contains("PLANTED_MYSQL_DQ"), "{mysql_dq_backtick}");
     for engine in [Engine::Postgres, Engine::Yugabyte] {
         let prose = redact_prose("Predicate used $$PLANTED_PROSE_DOLLAR$$ and $tag$PLANTED_PROSE_TAG$tag$.", engine);
         assert!(!prose.contains("PLANTED_PROSE_DOLLAR"));
         assert!(!prose.contains("PLANTED_PROSE_TAG"));
+        let adjacent_dollar = redact_sql("SELECT$$PLANTED_ADJ_DOLLAR$$, $1$$PLANTED_PARAM_DOLLAR$$", engine);
+        assert!(!adjacent_dollar.contains("PLANTED_ADJ_DOLLAR"), "{engine:?}: {adjacent_dollar}");
+        assert!(!adjacent_dollar.contains("PLANTED_PARAM_DOLLAR"), "{engine:?}: {adjacent_dollar}");
     }
 
     const PIECES: &[&str] = &[
