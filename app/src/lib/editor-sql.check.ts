@@ -1,4 +1,13 @@
-import { canOpenFixInEditor, canOpenQueryInEditor, countPlaceholders, prepareQueryForEditor, splitSqlStatements } from "./editor-sql";
+import {
+  canOpenFixInEditor,
+  canOpenQueryInEditor,
+  countPlaceholders,
+  locateFindingSpan,
+  prepareQueryForEditor,
+  splitSqlStatements,
+  statementEndOffset,
+} from "./editor-sql";
+import type { Finding } from "../gen/Finding";
 import type { QueryStat } from "../gen/QueryStat";
 
 function assert(cond: unknown, msg: string): void {
@@ -122,5 +131,68 @@ assert(canOpenFixInEditor("CREATE INDEX ix_orders_status ON orders (status);", "
 // 5. T-SQL GO batch separator support
 const goBatch = `SELECT 1 AS a\nGO\nSELECT 2 AS b\nGO`;
 assert(splitSqlStatements(goBatch).length === 2, "GO lines should split statements");
+
+// 6. Lint finding statement-span matching and semicolon end-offset scanning
+function makeFinding(summary: string, subjectName = "public.orders"): Pick<Finding, "summary" | "subject"> {
+  return {
+    summary,
+    subject: { kind: "table", name: subjectName },
+  };
+}
+
+const migrationScript = `-- Migration header with a; semicolon in comment
+CREATE FUNCTION noop() RETURNS void AS $body$
+BEGIN
+  PERFORM 1;
+END;
+$body$ LANGUAGE plpgsql;
+
+/* Block comment before the locking statement; */
+CREATE INDEX idx_orders_customer
+  ON public.orders (customer_id);
+`;
+
+const indexFinding = makeFinding(
+  "The statement `CREATE INDEX idx_orders_customer ON public.orders (customer_id)` builds an index without `CONCURRENTLY`.",
+  "public.orders",
+);
+const span = locateFindingSpan(migrationScript, indexFinding);
+assert(span !== null, "expected locateFindingSpan to find CREATE INDEX statement");
+assert(
+  migrationScript.slice(span![0], span![1]) === "CREATE INDEX idx_orders_customer",
+  `expected first line of CREATE INDEX, got ${JSON.stringify(migrationScript.slice(span![0], span![1]))}`,
+);
+
+const stmtEnd = statementEndOffset(migrationScript, span![0], span![1]);
+assert(
+  migrationScript.slice(span![0], stmtEnd) === "CREATE INDEX idx_orders_customer\n  ON public.orders (customer_id);",
+  `expected full CREATE INDEX statement up to semicolon, got ${JSON.stringify(migrationScript.slice(span![0], stmtEnd))}`,
+);
+
+// Fallback to subject leaf name when summary has no backtick-quoted statement
+const subjectFallbackFinding = makeFinding("Table has an unindexed foreign key.", "public.orders");
+const fallbackSpan = locateFindingSpan("SELECT 1;\nALTER TABLE public.orders\n  ADD CONSTRAINT fk_cust FOREIGN KEY (customer_id) REFERENCES customers(id);", subjectFallbackFinding);
+assert(fallbackSpan !== null, "expected subject fallback to locate ALTER TABLE statement");
+assert(
+  "SELECT 1;\nALTER TABLE public.orders\n  ADD CONSTRAINT fk_cust FOREIGN KEY (customer_id) REFERENCES customers(id);".slice(
+    fallbackSpan![0],
+    fallbackSpan![1],
+  ) === "ALTER TABLE public.orders",
+  "expected subject fallback to highlight first line of containing statement",
+);
+
+// T-SQL GO batch boundaries in locateFindingSpan and statementEndOffset
+const tsqlGoScript = `CREATE TABLE dbo.audit_log (id int)\nGO\nALTER TABLE dbo.orders\n  ADD status nvarchar(32)\nGO\nSELECT 1`;
+const tsqlSpan = locateFindingSpan(tsqlGoScript, subjectFallbackFinding);
+assert(tsqlSpan !== null, "expected locateFindingSpan to find statement after GO");
+assert(
+  tsqlGoScript.slice(tsqlSpan![0], tsqlSpan![1]) === "ALTER TABLE dbo.orders",
+  `expected ALTER TABLE dbo.orders after GO, got ${JSON.stringify(tsqlGoScript.slice(tsqlSpan![0], tsqlSpan![1]))}`,
+);
+const tsqlEnd = statementEndOffset(tsqlGoScript, tsqlSpan![0], tsqlSpan![1]);
+assert(
+  tsqlGoScript.slice(tsqlSpan![0], tsqlEnd) === "ALTER TABLE dbo.orders\n  ADD status nvarchar(32)",
+  `expected statementEndOffset to stop before GO, got ${JSON.stringify(tsqlGoScript.slice(tsqlSpan![0], tsqlEnd))}`,
+);
 
 console.log("editor-sql.ts passed all checks");

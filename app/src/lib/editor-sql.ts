@@ -1,4 +1,5 @@
 import type { Engine } from "../gen/Engine";
+import type { Finding } from "../gen/Finding";
 import type { QueryStat } from "../gen/QueryStat";
 
 const DOLLAR_TAG_RE = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/;
@@ -324,4 +325,304 @@ export function prepareQueryForEditor(query: QueryStat, engine: Engine): string 
     return `-- Replace the parameter placeholders (?, $1, @p1) with literal values before running\n${body}`;
   }
   return body;
+}
+
+function extractSummaryStatement(summary: string): string | null {
+  const prefix = summary.startsWith("The statement `")
+    ? "The statement `"
+    : summary.startsWith("The migration statement `")
+      ? "The migration statement `"
+      : null;
+  if (prefix !== null) {
+    const rest = summary.slice(prefix.length);
+    const closers = [
+      "` uses `CONCURRENTLY`",
+      "` drops `",
+      "` truncates ",
+      "` runs `",
+      "` rebuilds ",
+      "` builds an index ",
+      "` alters ",
+      "` adds ",
+      "` references ",
+    ];
+    let best = -1;
+    for (const c of closers) {
+      const idx = rest.indexOf(c);
+      if (idx !== -1 && (best === -1 || idx < best)) best = idx;
+    }
+    if (best !== -1) return rest.slice(0, best);
+    return rest.split("`")[0] ?? null;
+  }
+  return summary.split("`")[1] ?? null;
+}
+
+function normalizeSqlWithOffsets(docText: string): { norm: string; offsets: number[] } {
+  let norm = "";
+  const offsets: number[] = [];
+  let inSingle = false;
+  let inDouble = false;
+  let inBacktick = false;
+  let inBracket = false;
+  let dollarTag: string | null = null;
+  let lastSpace = true;
+
+  for (let i = 0; i < docText.length; i++) {
+    const ch = docText[i]!;
+    const next = docText[i + 1];
+    if (dollarTag !== null) {
+      if (/\s/.test(ch)) {
+        if (!lastSpace) {
+          norm += " ";
+          offsets.push(i);
+          lastSpace = true;
+        }
+      } else {
+        norm += ch.toLowerCase();
+        offsets.push(i);
+        lastSpace = false;
+      }
+      if (ch === "$" && docText.startsWith(dollarTag, i)) {
+        for (let k = 1; k < dollarTag.length; k++) {
+          norm += docText[i + k]!.toLowerCase();
+          offsets.push(i + k);
+        }
+        i += dollarTag.length - 1;
+        dollarTag = null;
+      }
+      continue;
+    }
+    if (inSingle && ch === "\\" && i + 1 < docText.length) {
+      norm += ch.toLowerCase() + next!.toLowerCase();
+      offsets.push(i, i + 1);
+      lastSpace = false;
+      i += 1;
+      continue;
+    }
+    if (!inSingle && !inDouble && !inBacktick && !inBracket) {
+      if (ch === "$") {
+        const m = DOLLAR_TAG_RE.exec(docText.slice(i));
+        if (m) {
+          dollarTag = m[0];
+          for (let k = 0; k < dollarTag.length; k++) {
+            norm += docText[i + k]!.toLowerCase();
+            offsets.push(i + k);
+          }
+          lastSpace = false;
+          i += dollarTag.length - 1;
+          continue;
+        }
+      }
+      if (ch === "-" && next === "-") {
+        const nl = docText.indexOf("\n", i + 2);
+        if (nl === -1) break;
+        i = nl;
+        if (!lastSpace) {
+          norm += " ";
+          offsets.push(i);
+          lastSpace = true;
+        }
+        continue;
+      }
+      if (ch === "/" && next === "*") {
+        const end = docText.indexOf("*/", i + 2);
+        if (end === -1) break;
+        i = end + 1;
+        if (!lastSpace) {
+          norm += " ";
+          offsets.push(i);
+          lastSpace = true;
+        }
+        continue;
+      }
+    }
+    if (ch === "'" && !inDouble && !inBacktick && !inBracket) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle && !inBacktick && !inBracket) inDouble = !inDouble;
+    else if (ch === "`" && !inSingle && !inDouble && !inBracket) inBacktick = !inBacktick;
+    else if (ch === "[" && !inSingle && !inDouble && !inBacktick && !inBracket) inBracket = true;
+    else if (ch === "]" && inBracket) inBracket = false;
+
+    if (/\s/.test(ch)) {
+      if (!lastSpace) {
+        norm += " ";
+        offsets.push(i);
+        lastSpace = true;
+      }
+    } else {
+      norm += ch.toLowerCase();
+      offsets.push(i);
+      lastSpace = false;
+    }
+  }
+  return { norm, offsets };
+}
+
+function statementStartOffset(docText: string, targetOffset: number): number {
+  let inSingle = false;
+  let inDouble = false;
+  let inBacktick = false;
+  let inBracket = false;
+  let dollarTag: string | null = null;
+  let stmtStart: number | null = null;
+  for (let i = 0; i < docText.length && i <= targetOffset; i++) {
+    const ch = docText[i]!;
+    const next = docText[i + 1];
+    if (dollarTag !== null) {
+      if (ch === "$" && docText.startsWith(dollarTag, i)) {
+        i += dollarTag.length - 1;
+        dollarTag = null;
+      }
+      continue;
+    }
+    if (inSingle && ch === "\\" && i + 1 < docText.length) {
+      i += 1;
+      continue;
+    }
+    if (!inSingle && !inDouble && !inBacktick && !inBracket) {
+      if (i === 0 || docText[i - 1] === "\n") {
+        const goMatch = GO_LINE_RE.exec(docText.slice(i));
+        if (goMatch && i + goMatch[0].length <= targetOffset) {
+          stmtStart = null;
+          i += goMatch[0].length - 1;
+          continue;
+        }
+      }
+      if (ch === "$") {
+        const m = DOLLAR_TAG_RE.exec(docText.slice(i));
+        if (m) {
+          if (stmtStart === null) stmtStart = i;
+          dollarTag = m[0];
+          i += dollarTag.length - 1;
+          continue;
+        }
+      }
+      if (ch === "-" && next === "-") {
+        const nl = docText.indexOf("\n", i + 2);
+        if (nl === -1) break;
+        i = nl;
+        continue;
+      }
+      if (ch === "/" && next === "*") {
+        const end = docText.indexOf("*/", i + 2);
+        if (end === -1) break;
+        i = end + 1;
+        continue;
+      }
+      if (ch === ";") {
+        stmtStart = null;
+        continue;
+      }
+    }
+    if (ch === "'" && !inDouble && !inBacktick && !inBracket) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle && !inBacktick && !inBracket) inDouble = !inDouble;
+    else if (ch === "`" && !inSingle && !inDouble && !inBracket) inBacktick = !inBacktick;
+    else if (ch === "[" && !inSingle && !inDouble && !inBacktick && !inBracket) inBracket = true;
+    else if (ch === "]" && inBracket) inBracket = false;
+    if (!/\s/.test(ch) && stmtStart === null) {
+      stmtStart = i;
+    }
+  }
+  return stmtStart ?? targetOffset;
+}
+
+function lineSpanFromOffset(docText: string, startOffset: number): [number, number] | null {
+  const lineEndRaw = docText.indexOf("\n", startOffset);
+  const lineEnd = lineEndRaw === -1 ? docText.length : lineEndRaw;
+  const lineSlice = docText.slice(startOffset, lineEnd);
+  const trimmedEnd = startOffset + lineSlice.trimEnd().length;
+  return trimmedEnd > startOffset ? [startOffset, trimmedEnd] : null;
+}
+
+/** Locate the character span `[from, to]` of the first line of the SQL statement referenced by a lint finding. */
+export function locateFindingSpan(docText: string, f: Pick<Finding, "summary" | "subject">): [number, number] | null {
+  const { norm, offsets } = normalizeSqlWithOffsets(docText);
+  const quoted = extractSummaryStatement(f.summary);
+  const quotedFull = quoted
+    ? quoted
+        .trim()
+        .replace(/;+$/, "")
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLowerCase()
+    : "";
+  if (quotedFull.length > 0) {
+    const pos = norm.indexOf(quotedFull);
+    if (pos !== -1 && offsets[pos] !== undefined) {
+      const span = lineSpanFromOffset(docText, offsets[pos]!);
+      if (span) return span;
+    }
+  }
+  const prefix = quoted ? quoted.trim().split(/\s+/).slice(0, 4).join(" ").toLowerCase() : "";
+  if (prefix.length > 0) {
+    const pos = norm.indexOf(prefix);
+    if (pos !== -1 && offsets[pos] !== undefined) {
+      const span = lineSpanFromOffset(docText, statementStartOffset(docText, offsets[pos]!));
+      if (span) return span;
+    }
+  }
+  const leaf = (f.subject.name.split(".").pop() ?? f.subject.name).toLowerCase();
+  if (leaf.length > 0) {
+    const pos = norm.indexOf(leaf);
+    if (pos !== -1 && offsets[pos] !== undefined) {
+      const span = lineSpanFromOffset(docText, statementStartOffset(docText, offsets[pos]!));
+      if (span) return span;
+    }
+  }
+  return null;
+}
+
+/** Find the end offset (including the terminating `;`) of the statement starting at `from`. */
+export function statementEndOffset(docText: string, from: number, fallbackTo: number): number {
+  let inSingle = false;
+  let inDouble = false;
+  let inBacktick = false;
+  let inBracket = false;
+  let dollarTag: string | null = null;
+  for (let i = from; i < docText.length; i++) {
+    const ch = docText[i]!;
+    const next = docText[i + 1];
+    if (dollarTag !== null) {
+      if (ch === "$" && docText.startsWith(dollarTag, i)) {
+        i += dollarTag.length - 1;
+        dollarTag = null;
+      }
+      continue;
+    }
+    if (inSingle && ch === "\\" && i + 1 < docText.length) {
+      i += 1;
+      continue;
+    }
+    if (!inSingle && !inDouble && !inBacktick && !inBracket) {
+      if (i > from && docText[i - 1] === "\n" && GO_LINE_RE.test(docText.slice(i))) {
+        return i >= 2 && docText[i - 2] === "\r" ? i - 2 : i - 1;
+      }
+      if (ch === "$") {
+        const m = DOLLAR_TAG_RE.exec(docText.slice(i));
+        if (m) {
+          dollarTag = m[0];
+          i += dollarTag.length - 1;
+          continue;
+        }
+      }
+      if (ch === "-" && next === "-") {
+        const nl = docText.indexOf("\n", i + 2);
+        if (nl === -1) break;
+        i = nl;
+        continue;
+      }
+      if (ch === "/" && next === "*") {
+        const end = docText.indexOf("*/", i + 2);
+        if (end === -1) break;
+        i = end + 1;
+        continue;
+      }
+      if (ch === ";") return i + 1;
+    }
+    if (ch === "'" && !inDouble && !inBacktick && !inBracket) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle && !inBacktick && !inBracket) inDouble = !inDouble;
+    else if (ch === "`" && !inSingle && !inDouble && !inBracket) inBacktick = !inBacktick;
+    else if (ch === "[" && !inSingle && !inDouble && !inBacktick && !inBracket) inBracket = true;
+    else if (ch === "]" && inBracket) inBracket = false;
+  }
+  return fallbackTo;
 }
