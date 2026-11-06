@@ -339,7 +339,10 @@ export async function demoApi(): Promise<Api> {
     parseConnection: unsupported,
     testConnection: unsupported,
     addConnection: unsupported,
-    removeConnection: unsupported,
+    removeConnection: async (name) => {
+      if (!connections.some((c) => c.name === name)) return Promise.reject({ code: "not_found", message: `No connection named '${name}'`, hint: null });
+      connections = connections.filter((c) => c.name !== name);
+    },
     renameConnection: async (old, next) => {
       if (!/^[A-Za-z0-9._-]{1,64}$/.test(next)) return Promise.reject({ code: "invalid_input", message: `'${next}' is not a valid connection name`, hint: null });
       if (connections.some((c) => c.name === next)) return Promise.reject({ code: "invalid_input", message: `A connection named '${next}' already exists`, hint: null });

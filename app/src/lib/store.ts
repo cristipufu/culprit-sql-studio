@@ -196,6 +196,23 @@ export async function renameConnection(old: string, next: string): Promise<Conne
   return saved;
 }
 
+/** Forget a saved connection and its keychain secret; leave the workspace if it was open. Saved reports stay on disk. */
+export async function removeConnection(name: string): Promise<void> {
+  await (await api()).removeConnection(name);
+  connectionRequests.invalidate();
+  try {
+    localStorage.removeItem(windowKey(name));
+    if (lastConnection() === name) localStorage.removeItem(LAST_KEY);
+  } catch {}
+  setState((s) => ({
+    connections: s.connections.filter((c) => c.name !== name),
+    ...(s.active === name
+      ? { active: null, view: "connections", report: { status: "none" }, finding: null, query: null, changes: null, editorSql: null, editorSaved: null }
+      : {}),
+  }));
+  void loadConnections().catch(() => {});
+}
+
 /** Open a connection: show its last report for the remembered window instantly, then refresh it in place. */
 export async function openConnection(name: string, options: { rescan?: boolean } = {}): Promise<void> {
   const rescan = options.rescan ?? true;
