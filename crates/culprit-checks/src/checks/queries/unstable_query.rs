@@ -154,7 +154,9 @@ pub fn unstable_query(snapshot: &Snapshot) -> Vec<Finding> {
             // The same ladders as `parameter-sensitive`: the cause is usually the same, only the evidence is coarser.
             let fewest = (excess / (max - q.mean_time_ms).max(1.0)).ceil();
             f.fix = Some(match (&waited, snapshot.server.engine) {
-                (Some(w), _) => w.fix(snapshot),
+                (Some(w), Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite) => {
+                    w.fix(snapshot)
+                }
                 // Lock waits the engine recorded explain the slow runs: what holds the locks is the fix, not a plan.
                 (None, Engine::Mssql) if recorded.locks_explain => {
                     let LockHolder { lead, sql } = find_lock_holder(snapshot, q, Some(fewest));
@@ -391,7 +393,9 @@ impl<'a> WriteWaits<'a> {
     fn storage(&self, engine: Engine) -> &'static str {
         match engine {
             Engine::Postgres => "on storage (writing WAL or data pages while a checkpoint runs)",
-            _ => "on storage (the log flush at commit, when it commits on its own, or a checkpoint)",
+            Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite => {
+                "on storage (the log flush at commit, when it commits on its own, or a checkpoint)"
+            }
         }
     }
 
@@ -401,7 +405,7 @@ impl<'a> WriteWaits<'a> {
     fn referenced(&self, engine: Engine) -> String {
         let holders = match engine {
             Engine::Postgres | Engine::Yugabyte => "locks (SELECT … FOR UPDATE), deletes or changes the key of",
-            _ => "locks, updates or deletes",
+            Engine::Mssql | Engine::Mysql | Engine::Sqlite => "locks, updates or deletes",
         };
         format!("{holders} the referenced row of {}", self.parents())
     }
@@ -430,7 +434,7 @@ impl<'a> WriteWaits<'a> {
                 None,
             )),
             Engine::Sqlite => None,
-            _ => {
+            Engine::Postgres | Engine::Yugabyte | Engine::Mysql => {
                 let LockHolder { lead, sql } = log_next_waits(snapshot, Some(bar));
                 Some((lead, sql))
             }
@@ -486,9 +490,11 @@ impl<'a> WriteWaits<'a> {
             (false, true) => format!("A transaction that locks the table (a migration's, say) {holds}"),
         };
         let storage = match (self.io_ms.is_some(), engine) {
-            (true, _) => "",
+            (true, Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite) => "",
             (false, Engine::Postgres) => " Compare storage timing during a slow run with its other work.",
-            (false, _) => " Compare log and storage timing during a slow run with its other work.",
+            (false, Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite) => {
+                " Compare log and storage timing during a slow run with its other work."
+            }
         };
         Fix {
             summary: format!(

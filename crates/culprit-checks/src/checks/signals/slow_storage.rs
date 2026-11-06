@@ -102,7 +102,7 @@ pub(super) fn file_label(snapshot: &Snapshot, g: &FileGroup) -> String {
         (Engine::Postgres, FileKind::Log, _) => "WAL".into(),
         (Engine::Postgres, FileKind::Temp, _) => "temporary tables".into(),
         (Engine::Postgres, _, _) => "table and index files".into(),
-        (_, kind, _) => one.unwrap_or_else(|| {
+        (Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite, kind, _) => one.unwrap_or_else(|| {
             match kind {
                 FileKind::Temp => "temporary files",
                 FileKind::Log => "the log files",

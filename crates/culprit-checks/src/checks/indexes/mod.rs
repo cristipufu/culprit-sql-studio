@@ -89,7 +89,9 @@ pub(crate) fn widen_index(snapshot: &Snapshot, existing: &IndexStat, include: &[
                 "PostgreSQL can't add included columns to {} in place; a new index has to be built.",
                 existing.name
             ),
-            _ => format!("{} has no included columns: an index there holds only its keys.", snapshot.server.name()),
+            Engine::Mssql | Engine::Mysql | Engine::Sqlite => {
+                format!("{} has no included columns: an index there holds only its keys.", snapshot.server.name())
+            }
         });
     }
     let keys: Vec<String> = existing

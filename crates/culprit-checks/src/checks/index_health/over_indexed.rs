@@ -45,7 +45,7 @@ pub(crate) fn index_writes(snapshot: &Snapshot, t: &culprit_core::TableStat) -> 
     let (total, days) = measured_writes(snapshot, &t.schema, &t.name)?;
     let hot = match snapshot.server.engine {
         Engine::Postgres => t.storage.as_ref().and_then(|s| s.hot_updates).unwrap_or(0.0).min(t.updates.unwrap_or(0.0)),
-        _ => 0.0,
+        Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite => 0.0,
     };
     Some(IndexWrites { total: (total - hot).max(0.0), days, statements: snapshot.server.engine == Engine::Mssql })
 }

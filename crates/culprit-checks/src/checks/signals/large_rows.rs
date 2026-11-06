@@ -146,7 +146,7 @@ pub(super) fn compress_advice(engine: Engine) -> &'static str {
         Engine::Yugabyte => {
             "review supported DocDB compression and the application's representation of large values, or keep them in object storage and store a reference; PostgreSQL TOAST compression settings do not describe DocDB"
         }
-        _ => {
+        Engine::Mssql | Engine::Mysql | Engine::Sqlite => {
             "COMPRESS() them as they're written (GZip; DECOMPRESS() reads them back), or keep them in object storage and store a reference"
         }
     }

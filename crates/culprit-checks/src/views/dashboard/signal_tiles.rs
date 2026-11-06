@@ -24,7 +24,7 @@ pub(super) fn file_name(s: &Snapshot, f: &FileIo) -> String {
         (Engine::Postgres, FileKind::Log, _) => "WAL".into(),
         (Engine::Postgres, FileKind::Temp, _) => "temporary files".into(),
         (Engine::Postgres, _, _) => "tables and indexes".into(),
-        _ => f.name.clone(),
+        (Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite, _, _) => f.name.clone(),
     }
 }
 
@@ -61,7 +61,9 @@ pub(super) fn storage(report: &Report) -> Tile {
             Engine::Mysql if !s.server.has(Capability::PerformanceSchema) => {
                 format!("{family} times no file I/O while performance_schema is off.")
             }
-            _ => "This scan has no storage timings.".to_string(),
+            Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite => {
+                "This scan has no storage timings.".to_string()
+            }
         };
         let mut t = Tile::new(TileKey::Storage, TileStatus::Unavailable, why);
         t.detail = collector_note(s, &[culprit_core::source_id::FILE_LATENCY, "storage", "files", "signals"]);
@@ -184,8 +186,14 @@ pub(super) fn connections(report: &Report) -> Tile {
             Engine::Postgres if !culprit_core::version_at_least(&s.server.version, [14, 0, 0]) => {
                 "PostgreSQL counts sessions from version 14; this server doesn't.".to_string()
             }
-            engine if !engine.has_server() => format!("{engine} has no server, so no connections to count."),
-            _ => "This scan has no connection counters.".to_string(),
+            engine @ (Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite)
+                if !engine.has_server() =>
+            {
+                format!("{engine} has no server, so no connections to count.")
+            }
+            Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite => {
+                "This scan has no connection counters.".to_string()
+            }
         };
         let mut t = Tile::new(TileKey::Connections, TileStatus::Unavailable, why);
         t.detail = collector_note(
@@ -407,14 +415,20 @@ pub(super) fn failures(report: &Report) -> Tile {
                 "PostgreSQL doesn't count failed runs per statement; its log does (log_min_error_statement)."
                     .to_string()
             }
-            _ if w.kind() == Some(culprit_core::WorkloadKind::SlowLog) => format!(
-                "The slow query log keeps runs that finished; {family} counts errors per statement only in performance_schema."
-            ),
-            _ if w.log.is_some() => format!(
+            Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite
+                if w.kind() == Some(culprit_core::WorkloadKind::SlowLog) =>
+            {
+                format!(
+                    "The slow query log keeps runs that finished; {family} counts errors per statement only in performance_schema."
+                )
+            }
+            Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite if w.log.is_some() => format!(
                 "The {} log records how long statements took, not whether they failed.",
                 w.log.as_deref().unwrap_or_default()
             ),
-            _ => format!("{family} reported no failed or cancelled runs per statement in this scan."),
+            Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite => {
+                format!("{family} reported no failed or cancelled runs per statement in this scan.")
+            }
         };
         return Tile::new(TileKey::Failures, TileStatus::Unavailable, why);
     }

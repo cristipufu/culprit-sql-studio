@@ -148,7 +148,7 @@ fn storage_scope(s: &mut Snapshot) {
             Engine::Postgres if f.kind == culprit_core::FileKind::Data && major.is_none() => None,
             Engine::Postgres | Engine::Mysql => Some(culprit_core::FileScope::Server),
             Engine::Mssql if f.database.is_some() => Some(culprit_core::FileScope::Database),
-            _ => None,
+            Engine::Mssql | Engine::Yugabyte | Engine::Sqlite => None,
         };
         if f.scope.is_none() {
             f.scope = scope;

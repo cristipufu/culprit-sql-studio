@@ -188,7 +188,7 @@ pub(super) fn failing_fix(
                 cost: None,
             }
         }
-        _ => {
+        Engine::Mysql | Engine::Postgres | Engine::Yugabyte | Engine::Sqlite => {
             // The holder is found the way every check that names a lock wait finds it: Live only for timeouts that come
             // often enough to catch one.
             let holder = (code == "1205").then(|| find_lock_holder(snapshot, q, costs.failed.filter(|n| *n > 0.0)));

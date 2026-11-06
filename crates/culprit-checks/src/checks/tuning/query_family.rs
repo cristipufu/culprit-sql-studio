@@ -36,7 +36,10 @@ pub fn query_family(snapshot: &Snapshot) -> Vec<Finding> {
         );
         let handle = statement_handle(without_declaration(&family.sample));
         let (title, why) = match (&split, engine) {
-            (FamilySplit::Declarations(examples), _) => (
+            (
+                FamilySplit::Declarations(examples),
+                Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite,
+            ) => (
                 format!(
                     "The app sends {} versions of {} that differ only in how their parameters are declared",
                     format::count(family.variants),
@@ -52,7 +55,7 @@ pub fn query_family(snapshot: &Snapshot) -> Vec<Finding> {
                     }
                 ),
             ),
-            (_, Engine::Mssql) => (
+            (FamilySplit::Values | FamilySplit::Unknown, Engine::Mssql) => (
                 format!(
                     "The app sends {} versions of {} that differ only in literal values",
                     format::count(family.variants),
@@ -60,7 +63,10 @@ pub fn query_family(snapshot: &Snapshot) -> Vec<Finding> {
                 ),
                 "so SQL Server compiles each one separately and keeps a plan for each".to_string(),
             ),
-            _ => (
+            (
+                FamilySplit::Values | FamilySplit::Unknown,
+                Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite,
+            ) => (
                 format!("{} is tracked as {} separate statements", capitalize(&handle), format::count(family.variants)),
                 "because its value lists (IN lists, multi-row VALUES) have different lengths; each length is planned \
                  and counted on its own"
@@ -113,7 +119,10 @@ pub fn query_family(snapshot: &Snapshot) -> Vec<Finding> {
             }
         };
         f.fix = Some(match (&split, engine) {
-            (FamilySplit::Declarations(_), _) => Fix {
+            (
+                FamilySplit::Declarations(_),
+                Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite,
+            ) => Fix {
                 summary: in_the_code(
                     "declare each string parameter with a fixed size, the column's length, instead of letting the \
                     driver size it from the value (in ADO.NET, set SqlParameter.Size or use Add with a SqlDbType and \
@@ -123,7 +132,7 @@ pub fn query_family(snapshot: &Snapshot) -> Vec<Finding> {
                 sql: None,
                 cost: None,
             },
-            (_, Engine::Mssql) => Fix {
+            (FamilySplit::Values | FamilySplit::Unknown, Engine::Mssql) => Fix {
                 summary: in_the_code(
                     "send values as parameters (sp_executesql, or your driver's parameterized queries) so one plan \
                     serves every value. If you can't change the app, forced parameterization does it for the whole \
@@ -135,7 +144,10 @@ pub fn query_family(snapshot: &Snapshot) -> Vec<Finding> {
                 )),
                 cost: Some("Forced parameterization can make some queries pick a plan that suits one value badly (parameter sensitivity); watch the regression findings after switching.".into()),
             },
-            _ => Fix {
+            (
+                FamilySplit::Values | FamilySplit::Unknown,
+                Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite,
+            ) => Fix {
                 summary: in_the_code(
                     "pass value lists as one array parameter (`= ANY($1)` in Postgres) instead of a growing IN list, \
                     and batch multi-row inserts with UNNEST or COPY.",
@@ -273,7 +285,9 @@ pub(super) fn family_split(snapshot: &Snapshot, family: &culprit_core::QueryFami
             _ => Some(FamilySplit::Unknown),
         },
         // Entries are grouped with their value lists collapsed: without a list, the copies are the same text.
-        _ => has_value_list(&family.sample).then_some(FamilySplit::Values),
+        Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite => {
+            has_value_list(&family.sample).then_some(FamilySplit::Values)
+        }
     }
 }
 

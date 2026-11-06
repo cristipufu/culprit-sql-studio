@@ -230,12 +230,12 @@ fn regression_finding(snapshot: &Snapshot, timeline: &Timeline, q: &QueryStat, s
             sql: Some(format!("EXEC sp_query_store_force_plan @query_id = {}, @plan_id = {};", q.id, change.old.id)),
             cost: None,
         },
-        (Some(_), _) => Fix {
+        (Some(_), Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite) => Fix {
             summary: "The plan changed when it got slower. Compare the two plans (Queries → Plans), refresh statistics on the tables it reads, and check the parameter values the slow runs use.".into(),
             sql: None,
             cost: None,
         },
-        (None, _) => Fix {
+        (None, Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite) => Fix {
             summary: format!(
                 "Find what changed {when}: a deploy touching this statement, its parameters or its indexes; data growth in the tables it reads; a statistics update; or blocking (Live shows current waits). Open the query to compare its plan with what you expect."
             ),

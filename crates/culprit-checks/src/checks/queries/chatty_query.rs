@@ -310,7 +310,7 @@ fn lock_waits(snapshot: &Snapshot, q: &QueryStat) -> Option<String> {
             let lock = q.spread.as_ref().and_then(|s| s.lock_ms).or_else(locks)?;
             Some(format!("{} counted {}", snapshot.server.name(), of_its(lock)))
         }
-        _ => None,
+        Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Sqlite => None,
     }
 }
 

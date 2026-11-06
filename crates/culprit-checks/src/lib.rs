@@ -108,3 +108,30 @@ pub fn analyze(snapshot: Snapshot) -> Report {
 pub fn analyze_with(snapshot: Snapshot, extra: &[Arc<dyn Check>]) -> Report {
     with_extra(extra).run(snapshot)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use culprit_core::Engine;
+
+    #[test]
+    fn pipeline_and_views_execute_across_all_engines() {
+        let base: Snapshot =
+            serde_json::from_str(include_str!("../../../fixtures/postgres-demo.json")).expect("fixture is a snapshot");
+        for engine in Engine::ALL {
+            let mut snapshot = base.clone();
+            snapshot.server.engine = engine;
+            snapshot.server.product = engine.label().into();
+            let report = analyze(snapshot);
+            assert_eq!(report.snapshot.server.engine, engine);
+            let _ = dashboard(&report);
+            let _ = index_advice(&report);
+            let _ = waits::explain(&report.snapshot);
+            let _ = digest(&report, None, 5, 5);
+            if let Some(finding) = report.findings.first() {
+                let _ = agent_brief(&report, finding);
+            }
+            let _ = lint_sql(&report.snapshot, "CREATE INDEX idx_orders_customer ON orders (customer_id);");
+        }
+    }
+}

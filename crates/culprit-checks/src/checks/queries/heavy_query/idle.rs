@@ -346,7 +346,9 @@ fn idle_time_of(snapshot: &Snapshot, q: &QueryStat) -> Option<Idle> {
         }
         let source = match engine {
             Engine::Postgres => "pg_stat_statements doesn't record what a statement waited for",
-            _ => "the statistics don't record what it waited for",
+            Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite => {
+                "the statistics don't record what it waited for"
+            }
         };
         // A locking read asks for the lock on every row it finds: that's the one it most likely waited for.
         let lock = match locking_clause(&text) {

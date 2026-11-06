@@ -97,7 +97,9 @@ pub(super) fn many_keys(engine: Engine, verb: &str) -> String {
         Engine::Postgres | Engine::Yugabyte => {
             format!("an {verb} over an array of keys (`= ANY($1)`), or joined to a VALUES list")
         }
-        _ => format!("an {verb} over a list of keys (`IN (…)`), or joined to a temporary table of the changes"),
+        Engine::Mysql | Engine::Sqlite => {
+            format!("an {verb} over a list of keys (`IN (…)`), or joined to a temporary table of the changes")
+        }
     }
 }
 
