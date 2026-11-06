@@ -170,6 +170,18 @@ impl Provider for Explains {
             .ok_or_else(|| Error::invalid("no plan recorded"))
     }
 
+    async fn explain_hypothetical(&self, sql: &str, _indexes: &[String]) -> Result<Plan> {
+        let mut plan = self.explain(sql, ExplainMode::Estimated).await?;
+        plan.root.op = "Index Scan".into();
+        plan.root.kind = culprit_core::NodeKind::Seek;
+        plan.root.index = Some("<13542>btree_hypothetical_ix".into());
+        plan.root.self_cost = (plan.root.self_cost * 0.05).max(1.0);
+        plan.root.subtree_cost = plan.root.self_cost;
+        plan.total_cost = plan.root.self_cost;
+        plan.facts_mut().virtual_indexes = vec!["<13542>btree_hypothetical_ix".into()];
+        Ok(plan)
+    }
+
     async fn live(&self) -> Result<LiveState> {
         Replay.live().await
     }
@@ -368,5 +380,33 @@ async fn reads_run_freely_and_production_writes_need_confirmation() {
     assert_eq!(saved.code, ErrorCode::ConfirmationRequired, "saved queries follow the same rule");
     assert_eq!(path(ws.run_saved("Purge one", Some("dev"), 10, false).await.unwrap()), "wrote");
     assert!(ws.saved_query("Purge one").unwrap().last_run_at.is_some());
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[tokio::test]
+async fn verify_index_compares_baseline_and_hypothetical_plans_and_validates_ddl() {
+    let home = temp_home("verify-index");
+    let ws = Workspace::open_in(&home)
+        .with_provider(Engine::Postgres, Arc::new(|_| Ok(Box::new(Explains) as Box<dyn Provider>)));
+    ws.add_connection(NewConnection {
+        name: "replayed".into(),
+        input: "postgres://reader@replay.invalid:5432/demo".into(),
+        auth: Some(AuthKind::None),
+        ..Default::default()
+    })
+    .unwrap();
+
+    let q = recorded().workload.unwrap().queries.into_iter().find(|q| q.plan.is_some()).unwrap();
+    assert!(ws.verify_index("replayed", &q.text, &[]).await.is_err());
+    assert!(ws.verify_index("replayed", &q.text, &["DROP TABLE orders".into()]).await.is_err());
+
+    let verified = ws
+        .verify_index("replayed", &q.text, &["CREATE INDEX CONCURRENTLY ix_test ON public.orders (customer_id)".into()])
+        .await
+        .expect("verify_index succeeds");
+    assert!(verified.uses_virtual_index);
+    assert_eq!(verified.virtual_indexes, vec!["<13542>btree_hypothetical_ix"]);
+    assert_eq!(verified.used_virtual_indexes, vec!["<13542>btree_hypothetical_ix"]);
+    assert!(verified.diff.cost_ratio.is_some_and(|r| r < 1.0));
     let _ = std::fs::remove_dir_all(home);
 }

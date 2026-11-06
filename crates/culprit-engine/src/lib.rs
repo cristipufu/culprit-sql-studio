@@ -548,6 +548,18 @@ impl Workspace {
         self.execution_service().explain_hypothetical(name, sql, indexes).await
     }
 
+    /// Compare a statement's current estimated plan against its estimated plan with one or more virtual indexes
+    /// (`CREATE INDEX ...`) in planner memory (`hypopg`), returning both plans, their structural diff, and whether
+    /// the virtual index was chosen.
+    pub async fn verify_index(
+        &self,
+        name: &str,
+        sql: &str,
+        indexes: &[String],
+    ) -> Result<culprit_core::HypotheticalIndexVerification> {
+        self.execution_service().verify_index(name, sql, indexes).await
+    }
+
     /// The actual plan of a query's last run as the engine kept it (SQL Server 2019+ with LAST_QUERY_PLAN_STATS).
     /// Never runs the query; other engines say why they can't and how to measure it instead.
     pub async fn last_actual_plan(&self, name: &str, query_id: &str, plan_id: Option<&str>) -> Result<Plan> {

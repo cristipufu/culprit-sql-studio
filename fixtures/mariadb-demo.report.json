@@ -648,7 +648,7 @@
     "analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.0"
+      "version": "0.5.4"
     },
     "baselines": [],
     "collection": null,
@@ -661,7 +661,7 @@
         "parser": {
           "component": "culprit-mysql",
           "revision": null,
-          "version": "0.5.0"
+          "version": "0.5.4"
         },
         "query": "375c64398248650e"
       },
@@ -671,7 +671,7 @@
         "parser": {
           "component": "culprit-mysql",
           "revision": null,
-          "version": "0.5.0"
+          "version": "0.5.4"
         },
         "query": "decf59629e790076"
       },
@@ -681,7 +681,7 @@
         "parser": {
           "component": "culprit-mysql",
           "revision": null,
-          "version": "0.5.0"
+          "version": "0.5.4"
         },
         "query": "258e3c9b580f1ecc"
       },
@@ -691,7 +691,7 @@
         "parser": {
           "component": "culprit-mysql",
           "revision": null,
-          "version": "0.5.0"
+          "version": "0.5.4"
         },
         "query": "46db559fdff712fd"
       },
@@ -701,7 +701,7 @@
         "parser": {
           "component": "culprit-mysql",
           "revision": null,
-          "version": "0.5.0"
+          "version": "0.5.4"
         },
         "query": "d1f45c9664edccf9"
       }
@@ -818,7 +818,7 @@
     "previous_analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.4.4"
+      "version": "0.5.0"
     }
   },
   "refinement": [
@@ -2934,6 +2934,10 @@
                       "ix_orders_status_created"
                     ],
                     "table_alias": "orders",
+                    "used_key_parts": [
+                      "status",
+                      "created_at"
+                    ],
                     "user_functions": []
                   },
                   "id": 1,
@@ -3533,6 +3537,9 @@
                           "fk_orders_customer"
                         ],
                         "table_alias": "orders",
+                        "used_key_parts": [
+                          "customer_id"
+                        ],
                         "user_functions": []
                       },
                       "id": 2,
@@ -3834,6 +3841,9 @@
                           "fk_items_product"
                         ],
                         "table_alias": "oi",
+                        "used_key_parts": [
+                          "order_id"
+                        ],
                         "user_functions": []
                       },
                       "id": 1,
@@ -3889,6 +3899,9 @@
                           "PRIMARY"
                         ],
                         "table_alias": "p",
+                        "used_key_parts": [
+                          "id"
+                        ],
                         "user_functions": []
                       },
                       "id": 2,

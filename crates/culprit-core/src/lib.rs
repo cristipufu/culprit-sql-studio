@@ -78,7 +78,8 @@ pub use operations::{
 pub use plan::*;
 pub use plan_compare::{CompareContext, Scenario, ScenarioKind};
 pub use plan_diff::{
-    ChangeKind, NodeMatch, PlanChange, PlanDiff, PlanRegion, plan_cost_basis, plan_diff, plan_diff_in, plan_diff_named,
+    ChangeKind, HypotheticalIndexVerification, NodeMatch, PlanChange, PlanDiff, PlanRegion, plan_cost_basis, plan_diff,
+    plan_diff_in, plan_diff_named, verify_hypothetical_index,
 };
 pub use plan_facts::{
     PlanAutomaticIndex, PlanChangedColumn, PlanConversion, PlanConversionIssue, PlanExecutionMode, PlanFacts,

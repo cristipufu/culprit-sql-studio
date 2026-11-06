@@ -110,6 +110,67 @@ pub struct PlanDiff {
     pub scenarios: Vec<Scenario>,
 }
 
+/// Result of comparing a statement's current estimated plan against a hypothetical plan with one or more virtual
+/// indexes (`CREATE INDEX ...`) in planner memory (`hypopg`).
+#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[ts(export)]
+pub struct HypotheticalIndexVerification {
+    pub baseline: Plan,
+    pub hypothetical: Plan,
+    pub diff: PlanDiff,
+    /// Virtual index names created for the hypothetical plan.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<String>>", optional)]
+    pub virtual_indexes: Vec<String>,
+    /// Virtual index names actually chosen by at least one operator in the hypothetical plan.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<String>>", optional)]
+    pub used_virtual_indexes: Vec<String>,
+    /// True when the planner chose at least one of the virtual indexes in the hypothetical plan.
+    pub uses_virtual_index: bool,
+}
+
+/// Compare a baseline estimated plan against a hypothetical estimated plan with virtual indexes, identifying which
+/// virtual indexes were chosen and computing the structural [`PlanDiff`].
+pub fn verify_hypothetical_index(baseline: Plan, hypothetical: Plan) -> HypotheticalIndexVerification {
+    let mut virtual_indexes = hypothetical.facts().virtual_indexes.clone();
+    if virtual_indexes.is_empty()
+        && let Some(raw) = hypothetical.props.get("virtual_indexes")
+    {
+        virtual_indexes = raw.split(", ").map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect();
+    }
+    let hyp_indexes: Vec<&str> = hypothetical.nodes().into_iter().filter_map(|n| n.index.as_deref()).collect();
+    let base_indexes: Vec<&str> = baseline.nodes().into_iter().filter_map(|n| n.index.as_deref()).collect();
+    let mut used_virtual_indexes = Vec::new();
+    if !virtual_indexes.is_empty() {
+        for vi in &virtual_indexes {
+            let chosen = hyp_indexes
+                .iter()
+                .any(|idx| idx.eq_ignore_ascii_case(vi) || idx.contains(vi.as_str()) || vi.contains(*idx));
+            if chosen && !used_virtual_indexes.iter().any(|u: &String| u.eq_ignore_ascii_case(vi)) {
+                used_virtual_indexes.push(vi.clone());
+            }
+        }
+    } else {
+        for idx in hyp_indexes {
+            let in_base = base_indexes.iter().any(|b| b.eq_ignore_ascii_case(idx));
+            if !in_base && !used_virtual_indexes.iter().any(|u: &String| u.eq_ignore_ascii_case(idx)) {
+                used_virtual_indexes.push(idx.to_string());
+            }
+        }
+    }
+    let uses_virtual_index = !used_virtual_indexes.is_empty();
+    let diff = plan_diff_named(&baseline, "Current plan", &hypothetical, "With virtual index");
+    HypotheticalIndexVerification {
+        baseline,
+        hypothetical,
+        diff,
+        virtual_indexes,
+        used_virtual_indexes,
+        uses_virtual_index,
+    }
+}
+
 /// Compare plan `b` against plan `a` (the baseline), naming them "plan A" and "plan B" in the headlines.
 pub fn plan_diff(a: &Plan, b: &Plan) -> PlanDiff {
     plan_diff_named(a, "plan A", b, "plan B")
@@ -1014,5 +1075,29 @@ mod tests {
         limited.total_cost = 5.0;
         limited.compute_self_costs();
         assert_eq!(plan_cost_basis(&limited), 1000.0);
+    }
+
+    #[test]
+    fn verify_hypothetical_index_detects_virtual_index_adoption_and_cost_reduction() {
+        let baseline =
+            plan(Engine::Postgres, node("Seq Scan", NodeKind::Scan, Some("public.orders"), None, 500.0, vec![]));
+        let mut hypothetical = plan(
+            Engine::Postgres,
+            node(
+                "Index Scan",
+                NodeKind::Seek,
+                Some("public.orders"),
+                Some("<13542>btree_orders_customer_id"),
+                8.5,
+                vec![],
+            ),
+        );
+        hypothetical.facts_mut().virtual_indexes = vec!["<13542>btree_orders_customer_id".into()];
+        let verified = verify_hypothetical_index(baseline, hypothetical);
+        assert!(verified.uses_virtual_index);
+        assert_eq!(verified.virtual_indexes, vec!["<13542>btree_orders_customer_id"]);
+        assert_eq!(verified.used_virtual_indexes, vec!["<13542>btree_orders_customer_id"]);
+        assert!(!verified.diff.same_shape);
+        assert!(verified.diff.cost_ratio.is_some_and(|r| r < 0.05));
     }
 }

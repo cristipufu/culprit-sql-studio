@@ -717,7 +717,7 @@
     "analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.0"
+      "version": "0.5.4"
     },
     "baselines": [],
     "collection": null,
@@ -836,7 +836,7 @@
     "previous_analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.4.4"
+      "version": "0.5.0"
     }
   },
   "snapshot": {
