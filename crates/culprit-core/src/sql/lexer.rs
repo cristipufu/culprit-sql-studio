@@ -225,12 +225,12 @@ pub(crate) fn is_word_part(c: u8) -> bool {
 
 /// Where a `--` or `#` comment ends. Servers end it at a carriage return as well as a line feed (Postgres does, and
 /// so may others): ending it at either one never hides text the server runs, so `-- note\rEXEC …` shows its EXEC.
-pub(crate) fn line_end(bytes: &[u8], from: usize) -> usize {
+pub fn line_end(bytes: &[u8], from: usize) -> usize {
     bytes[from..].iter().position(|b| matches!(b, b'\n' | b'\r')).map_or(bytes.len(), |p| from + p + 1)
 }
 
 /// The index after a `/* … */` comment starting at `from`. Postgres and SQL Server nest these; MySQL doesn't.
-pub(crate) fn block_comment_end(bytes: &[u8], from: usize, nests: bool) -> std::result::Result<usize, &'static str> {
+pub fn block_comment_end(bytes: &[u8], from: usize, nests: bool) -> std::result::Result<usize, &'static str> {
     let mut depth = 0usize;
     let mut i = from;
     while i + 1 < bytes.len() {
@@ -253,7 +253,7 @@ pub(crate) fn block_comment_end(bytes: &[u8], from: usize, nests: bool) -> std::
 }
 
 /// The index after a quoted run opened at `from` with `close` (doubled `close` is an escaped one).
-pub(crate) fn quoted_end(
+pub fn quoted_end(
     bytes: &[u8],
     from: usize,
     close: u8,
@@ -278,12 +278,12 @@ pub(crate) fn quoted_end(
 }
 
 /// Best-effort index after a quoted run opened at `from` with `close`, advancing to the end of `bytes` when unclosed.
-pub(crate) fn skip_quoted_bytes(bytes: &[u8], from: usize, close: u8, backslash_escapes: bool) -> usize {
+pub fn skip_quoted_bytes(bytes: &[u8], from: usize, close: u8, backslash_escapes: bool) -> usize {
     quoted_end(bytes, from, close, backslash_escapes).unwrap_or(bytes.len())
 }
 
 /// A Postgres dollar-quote opener at `from` (`$$` or `$tag$`); `$1` is a parameter, not a quote.
-pub(crate) fn dollar_tag(bytes: &[u8], from: usize) -> Option<&[u8]> {
+pub fn dollar_tag(bytes: &[u8], from: usize) -> Option<&[u8]> {
     let rest = &bytes[from + 1..];
     let len = rest.iter().position(|b| *b == b'$')?;
     let tag = &rest[..len];
@@ -292,7 +292,7 @@ pub(crate) fn dollar_tag(bytes: &[u8], from: usize) -> Option<&[u8]> {
     valid.then_some(&bytes[from..from + len + 2])
 }
 
-pub(crate) fn dollar_quoted_end(bytes: &[u8], from: usize, tag: &[u8]) -> std::result::Result<usize, &'static str> {
+pub fn dollar_quoted_end(bytes: &[u8], from: usize, tag: &[u8]) -> std::result::Result<usize, &'static str> {
     let body = from + tag.len();
     bytes[body..]
         .windows(tag.len())
@@ -303,7 +303,7 @@ pub(crate) fn dollar_quoted_end(bytes: &[u8], from: usize, tag: &[u8]) -> std::r
 
 /// One name part as written in a plan or filter, without its delimiters:
 /// `[a]]b]` → `a]b`, `` `a``b` `` → ``a`b``, `"a""b"` → `a"b`.
-pub(crate) fn clean_identifier(raw: &str) -> String {
+pub fn clean_identifier(raw: &str) -> String {
     let raw = raw.trim();
     let inner = |open: char, close: char| {
         raw.strip_prefix(open)
@@ -316,8 +316,16 @@ pub(crate) fn clean_identifier(raw: &str) -> String {
         .unwrap_or_else(|| raw.trim_matches(|c| c == '[' || c == ']' || c == '`' || c == '"').to_string())
 }
 
+/// Unquote a single or dotted SQL identifier (`[dbo].[orders]`, `"public"."user""s"`, `` `shop`.`items` ``),
+/// preserving escaped quotes and dots inside quotes.
+pub fn unquote_identifier(raw: &str) -> String {
+    identifier_parts(raw)
+        .map(|parts| parts.join("."))
+        .unwrap_or_else(|| raw.split('.').map(clean_identifier).collect::<Vec<_>>().join("."))
+}
+
 /// Split a dotted identifier (`[db].[s].[t]`, `"s"."t"`, `s.t`) into unescaped parts while respecting quoted dots.
-pub(crate) fn identifier_parts(value: &str) -> Option<Vec<String>> {
+pub fn identifier_parts(value: &str) -> Option<Vec<String>> {
     let mut parts = Vec::new();
     let mut part = String::new();
     let mut quoted = None;
