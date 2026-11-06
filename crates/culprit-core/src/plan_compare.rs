@@ -155,7 +155,7 @@ pub(crate) fn scenarios(
         });
     }
 
-    estimate_scenarios(&mut out, &pairs, a, b, name_a, name_b, parameters_differ, ctx);
+    estimate_scenarios(&mut out, &pairs, (a, name_a), (b, name_b), parameters_differ, ctx);
 
     // Per table, the indexes each plan reads it through (a seek plus a lookup uses two; a scan of the table uses one).
     let mut lines: Vec<(String, String)> = Vec::new();
@@ -279,14 +279,11 @@ pub(crate) fn scenarios(
     out
 }
 
-#[allow(clippy::too_many_arguments)]
 fn estimate_scenarios(
     out: &mut Vec<Scenario>,
     pairs: &[(&PlanNode, &PlanNode)],
-    a: &Plan,
-    b: &Plan,
-    name_a: &str,
-    name_b: &str,
+    (a, name_a): (&Plan, &str),
+    (b, name_b): (&Plan, &str),
     parameters_differ: bool,
     ctx: &CompareContext,
 ) {

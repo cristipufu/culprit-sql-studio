@@ -537,7 +537,6 @@ fn culprit_json(text: &str) -> Result<Plan> {
     Ok(plan)
 }
 
-#[allow(dead_code)]
 fn contains_key(value: &Value, key: &str) -> bool {
     match value {
         Value::Object(o) => o.contains_key(key) || o.values().any(|v| contains_key(v, key)),

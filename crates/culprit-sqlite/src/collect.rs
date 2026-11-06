@@ -162,9 +162,9 @@ pub fn snapshot(
         object_sizes(conn, &without_rowid, budget)
             .map_err(|e| format!("reading every page stopped ({})", map_error(&e).message.to_lowercase()))
     }) {
-        Ok((sizes, counted)) => {
-            coverage.completed(&crate::sources::SIZES, sizes.len());
-            (sizes, counted, Ok(()))
+        Ok(ObjectSizes { bytes, rows }) => {
+            coverage.completed(&crate::sources::SIZES, bytes.len());
+            (bytes, rows, Ok(()))
         }
         Err(why) => {
             let error = culprit_core::Error::internal(format!("Table and index sizes are unknown: {why}."));
@@ -474,15 +474,15 @@ fn table_rows(conn: &Connection) -> HashMap<String, f64> {
     out
 }
 
+struct ObjectSizes {
+    bytes: HashMap<String, f64>,
+    rows: HashMap<String, f64>,
+}
+
 /// Bytes per table and index, and each table's rows, from one pass over `dbstat` stopped after `budget`. A rowid
 /// table's rows are the cells of its leaf pages (interior cells point to pages); a WITHOUT ROWID table is a b-tree of
 /// entries, every one a row, interior pages included.
-#[allow(clippy::type_complexity)]
-fn object_sizes(
-    conn: &Connection,
-    without_rowid: &HashSet<&str>,
-    budget: Duration,
-) -> rusqlite::Result<(HashMap<String, f64>, HashMap<String, f64>)> {
+fn object_sizes(conn: &Connection, without_rowid: &HashSet<&str>, budget: Duration) -> rusqlite::Result<ObjectSizes> {
     let started = Instant::now();
     conn.progress_handler(1_000, Some(move || started.elapsed() > budget))?;
     let read = (|| {
@@ -504,7 +504,7 @@ fn object_sizes(
         counted.insert(name.clone(), if without_rowid.contains(name.as_str()) { cells } else { leaf_cells });
         sizes.insert(name, bytes);
     }
-    Ok((sizes, counted))
+    Ok(ObjectSizes { bytes: sizes, rows: counted })
 }
 
 fn table(t: &SchemaTable, rows: Option<f64>, data: Option<f64>, index_bytes: f64, has_pk: bool) -> TableStat {

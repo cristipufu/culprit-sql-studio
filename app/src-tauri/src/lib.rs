@@ -317,10 +317,9 @@ async fn export_plan(plan: Plan, title: String, format: ExportFormat, options: E
     culprit_engine::run_blocking(move || culprit_engine::export_plan(&plan, &title, format, &options)).await
 }
 
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-async fn export_diff(
-    ws: Ws<'_>,
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportDiffRequest {
     a: Plan,
     b: Plan,
     name_a: String,
@@ -328,7 +327,11 @@ async fn export_diff(
     format: ExportFormat,
     options: ExportOptions,
     connection: Option<String>,
-) -> Result<ExportFile> {
+}
+
+#[tauri::command]
+async fn export_diff(ws: Ws<'_>, request: ExportDiffRequest) -> Result<ExportFile> {
+    let ExportDiffRequest { a, b, name_a, name_b, format, options, connection } = request;
     blocking_workspace(ws.inner().clone(), move |ws| {
         let diff = ws.diff_plans(&a, &name_a, &b, &name_b, connection.as_deref());
         culprit_engine::export_diff(&a, &b, &diff, &name_a, &name_b, format, &options)

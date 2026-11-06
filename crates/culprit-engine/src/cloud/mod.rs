@@ -251,20 +251,23 @@ async fn timed<T>(work: impl std::future::Future<Output = Result<T>>) -> Result<
     })?
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn finish(
-    provider: CloudProvider,
-    resource: &Resource,
-    tier: Vec<String>,
-    series: Vec<CloudSeries>,
-    mut found: Vec<ThrottleEpisode>,
-    mut notes: Vec<String>,
-    start: f64,
-    end: f64,
-    period: u32,
-    source: &str,
-) -> CloudSignals {
-    found.sort_by(|a, b| a.start.cmp(&b.start));
+pub(super) struct CloudAssessment<'a> {
+    pub(super) provider: CloudProvider,
+    pub(super) resource: &'a Resource,
+    pub(super) tier: Vec<String>,
+    pub(super) series: Vec<CloudSeries>,
+    pub(super) episodes: Vec<ThrottleEpisode>,
+    pub(super) notes: Vec<String>,
+    pub(super) start: f64,
+    pub(super) end: f64,
+    pub(super) period: u32,
+    pub(super) source: &'a str,
+}
+
+pub(super) fn finish(assessment: CloudAssessment<'_>) -> CloudSignals {
+    let CloudAssessment { provider, resource, tier, series, mut episodes, mut notes, start, end, period, source } =
+        assessment;
+    episodes.sort_by(|a, b| a.start.cmp(&b.start));
     let span = span_words(start, end);
     let no_data = series.iter().all(|s| s.points.is_empty());
     if no_data {
@@ -283,10 +286,10 @@ pub(super) fn finish(
         summary: if no_data {
             format!("No cloud measurements were available for the {span}.")
         } else {
-            summarize(&found, &span)
+            summarize(&episodes, &span)
         },
         series,
-        episodes: found,
+        episodes,
         notes,
         fetched_at: iso(now()),
     }

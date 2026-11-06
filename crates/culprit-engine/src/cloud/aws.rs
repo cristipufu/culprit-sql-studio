@@ -5,7 +5,7 @@ use culprit_core::cloud::{
 use culprit_core::{Error, ErrorCode, Result, format};
 use serde_json::Value;
 
-use super::{Resource, finish, iso, normalize_time, period_for};
+use super::{CloudAssessment, Resource, finish, iso, normalize_time, period_for};
 use crate::aws;
 
 pub(super) async fn resolve_rds(region: &str, id: &str, cluster: bool, reader: bool) -> Result<Resource> {
@@ -400,7 +400,18 @@ pub(super) fn rds_judge(
             "Performance Insights is off, so DB load isn't measured; turning it on adds the DBLoad metric.".to_string(),
         );
     }
-    finish(CloudProvider::Aws, resource, tier, series, found, notes, start, end, period, "CloudWatch")
+    finish(CloudAssessment {
+        provider: CloudProvider::Aws,
+        resource,
+        tier,
+        series,
+        episodes: found,
+        notes,
+        start,
+        end,
+        period,
+        source: "CloudWatch",
+    })
 }
 
 fn rule<'a>(

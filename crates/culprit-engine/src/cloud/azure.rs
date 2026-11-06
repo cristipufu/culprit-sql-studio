@@ -5,7 +5,7 @@ use culprit_core::{Engine, Error, ErrorCode, Result, format};
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::{Resource, Target, finish, iso, normalize_time, period_for};
+use super::{CloudAssessment, Resource, Target, finish, iso, normalize_time, period_for};
 use crate::discover;
 
 pub(super) async fn resolve_azure_sql(server: &str, database: &str) -> Result<Resource> {
@@ -319,5 +319,16 @@ pub(super) fn azure_judge(
         vec![tier]
     };
     let tier: Vec<String> = tier.into_iter().filter(|t| !t.is_empty()).collect();
-    finish(CloudProvider::Azure, resource, tier, series, found, notes, start, end, period, "Azure Monitor")
+    finish(CloudAssessment {
+        provider: CloudProvider::Azure,
+        resource,
+        tier,
+        series,
+        episodes: found,
+        notes,
+        start,
+        end,
+        period,
+        source: "Azure Monitor",
+    })
 }

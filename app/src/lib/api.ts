@@ -212,7 +212,7 @@ async function desktopApi(): Promise<Api> {
       invoke("diff_plans", { a: { ...a, raw: null }, b: { ...b, raw: null }, nameA, nameB, connection: connection ?? null }),
     exportPlan: (plan, title, format, options) => invoke("export_plan", { plan: format === "native" ? plan : { ...plan, raw: null }, title, format, options }),
     exportDiff: (a, b, nameA, nameB, format, options, connection) =>
-      invoke("export_diff", { a: { ...a, raw: null }, b: { ...b, raw: null }, nameA, nameB, format, options, connection: connection ?? null }),
+      invoke("export_diff", { request: { a: { ...a, raw: null }, b: { ...b, raw: null }, nameA, nameB, format, options, connection: connection ?? null } }),
     exportQueryPlan: (name, queryId, planId, format, options) => invoke("export_query_plan", { name, queryId, planId, format, options }),
     exportFinding: (name, findingId, format, options) => invoke("export_finding", { name, findingId, format, options }),
     verifyFindings: (name, ids) => invoke("verify_findings", { name, ids }),
