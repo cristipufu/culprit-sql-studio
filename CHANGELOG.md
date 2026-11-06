@@ -2,6 +2,17 @@
 
 Each release's notes are its section below: the release workflow publishes them on GitHub, and the desktop app shows them when it offers the update. A release without a section here isn't drafted.
 
+## 0.5.4
+
+### Added
+
+- **Remove connections from the app.** Each connection card has a Remove button with an inline confirmation, so connections imported from Azure Data Studio, VS Code, DBeaver or DataGrip, discovered in the cloud or added by hand no longer need `culprit conn rm`. Removing forgets the connection, its keychain password and this device's scratch editor tabs, and leaves the connection if it was open. Its saved reports stay on disk.
+
+### Fixes
+
+- **A removal finishes or leaves the connection as it was.** When the keychain refused to delete a connection's password, as it does when you deny its prompt, the connection was already gone, the error said otherwise, and the password stayed behind. The password now goes first: a refusal keeps the connection, and removing it again works.
+- **A reused name starts with its own history.** A connection added, imported, discovered or renamed under the name of a removed one showed the removed connection's last scan on its card and when opened, until its own first scan. Those reports now move to `reports/.removed/`. A connection saved without a password also never reads one left in the keychain under its name, so another server's password can't be sent to it.
+
 ## 0.5.3
 
 ### Fixes
