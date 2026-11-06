@@ -321,4 +321,20 @@ fn flags_vacuum_full_cluster_blocking_reindex_and_suppresses_concurrent_quick_fi
     assert_eq!(nested_count, 1);
     assert!(rewritten_nested.contains("CREATE /* outer /* INDEX */ inner */ INDEX CONCURRENTLY [idx]]semi;colon]"));
     assert!(lint_sql(&s, &rewritten_nested).is_empty());
+
+    // Suffix rewrites handle trailing line comments before `;` and do not confuse `'a--b'` string literals with comments.
+    assert_eq!(
+        super::lex::rewrite_preserving_comments(
+            "CREATE INDEX idx ON orders (customer_id) -- inline comment\n   ;",
+            "CREATE INDEX idx ON orders (customer_id) WITH (ONLINE = ON);",
+        ),
+        "CREATE INDEX idx ON orders (customer_id) -- inline comment\nWITH (ONLINE = ON);"
+    );
+    assert_eq!(
+        super::lex::rewrite_preserving_comments(
+            "/* header */ ALTER TABLE orders ADD note VARCHAR(20) DEFAULT 'a--b';",
+            "ALTER TABLE orders ADD note VARCHAR(20) DEFAULT 'a--b', ALGORITHM=INPLACE, LOCK=NONE;",
+        ),
+        "/* header */ ALTER TABLE orders ADD note VARCHAR(20) DEFAULT 'a--b', ALGORITHM=INPLACE, LOCK=NONE;"
+    );
 }

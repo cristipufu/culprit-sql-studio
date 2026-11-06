@@ -84,7 +84,14 @@ pub(crate) fn is_empty(xml: &str) -> bool {
 /// one taken today would: the same statement of the document (by the `QueryHash` the saved plan carries). `None` when
 /// the plan kept no XML, or this parser can't read it.
 pub fn reparse(saved: &Plan) -> Option<Plan> {
-    parse_statement(saved.raw.as_deref()?, saved.facts().query_hash.as_deref()).ok()
+    let mut plan = parse_statement(saved.raw.as_deref()?, saved.facts().query_hash.as_deref()).ok()?;
+    if let Some(last_run_at) = saved.facts().last_run_at.clone() {
+        plan.facts_mut().last_run_at = Some(last_run_at);
+    }
+    if let Some(last_run_at) = saved.props.get("LastRunAt") {
+        plan.props.insert("LastRunAt".into(), last_run_at.clone());
+    }
+    Some(plan)
 }
 
 /// Parse the statement whose `QueryHash` matches (a batch or procedure plan holds every statement), or the most

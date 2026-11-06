@@ -170,10 +170,11 @@ fn redact(text: &str, engine: Engine, numbers: bool) -> String {
             }
             '\'' => {
                 let escapes = engine == Engine::Mysql || last_word.eq_ignore_ascii_case("e");
-                let end = skip_quoted(&chars, i, '\'', escapes);
+                let (end, closed) = skip_quoted_closed(&chars, i, '\'', escapes);
                 // A pattern keeps where its wildcards are (`'%?%'`): that's its shape, not data, and a leading % is
                 // what stops an index from being used.
-                let body = &chars[(i + 1).min(end)..end.saturating_sub(1).max(i + 1).min(chars.len())];
+                let body_end = if closed { end.saturating_sub(1) } else { end };
+                let body = &chars[(i + 1).min(body_end)..body_end.max(i + 1).min(chars.len())];
                 out.push('\'');
                 if body.first() == Some(&'%') {
                     out.push('%');
@@ -336,6 +337,10 @@ fn skip_block_comment(chars: &[char], start: usize, nests: bool) -> usize {
 
 /// The index after a quoted run opened at `start`; a doubled closing quote is an escaped one.
 fn skip_quoted(chars: &[char], start: usize, close: char, backslash: bool) -> usize {
+    skip_quoted_closed(chars, start, close, backslash).0
+}
+
+fn skip_quoted_closed(chars: &[char], start: usize, close: char, backslash: bool) -> (usize, bool) {
     let mut i = start + 1;
     while i < chars.len() {
         if backslash && chars[i] == '\\' {
@@ -344,13 +349,13 @@ fn skip_quoted(chars: &[char], start: usize, close: char, backslash: bool) -> us
             if chars.get(i + 1) == Some(&close) {
                 i += 2;
             } else {
-                return i + 1;
+                return (i + 1, true);
             }
         } else {
             i += 1;
         }
     }
-    chars.len()
+    (chars.len(), false)
 }
 
 fn word_end(chars: &[char], from: usize) -> usize {

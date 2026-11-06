@@ -393,6 +393,58 @@ pub(super) fn find_keyword_outside_comments(sql: &str, keyword: &str) -> Option<
     None
 }
 
+fn ends_with_line_comment(sql: &str) -> bool {
+    let bytes = sql.as_bytes();
+    let mut i = 0;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut in_backtick = false;
+    let mut in_bracket = false;
+    while i < bytes.len() {
+        if in_single && bytes[i] == b'\\' {
+            i = (i + 2).min(bytes.len());
+            continue;
+        }
+        if !in_single && !in_double && !in_backtick && !in_bracket {
+            if bytes[i] == b'$'
+                && let Some(tag) = dollar_tag(bytes, i)
+            {
+                i = dollar_quoted_end(bytes, i, tag).unwrap_or(bytes.len());
+                continue;
+            }
+            if bytes[i] == b'-' && bytes.get(i + 1) == Some(&b'-') {
+                let end = line_end(bytes, i);
+                if end == bytes.len() {
+                    return true;
+                }
+                i = end;
+                continue;
+            }
+            if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+                i = block_comment_end(bytes, i, true).unwrap_or(bytes.len());
+                continue;
+            }
+        }
+        if bytes[i] == b'\'' && !in_double && !in_backtick && !in_bracket {
+            in_single = !in_single;
+        } else if bytes[i] == b'"' && !in_single && !in_backtick && !in_bracket {
+            in_double = !in_double;
+        } else if bytes[i] == b'`' && !in_single && !in_double && !in_bracket {
+            in_backtick = !in_backtick;
+        } else if bytes[i] == b'[' && !in_single && !in_double && !in_backtick && !in_bracket {
+            in_bracket = true;
+        } else if bytes[i] == b']' && in_bracket {
+            if bytes.get(i + 1) == Some(&b']') {
+                i += 2;
+                continue;
+            }
+            in_bracket = false;
+        }
+        i += 1;
+    }
+    false
+}
+
 pub(super) fn rewrite_preserving_comments(orig_span: &str, rep_sql: &str) -> String {
     if !orig_span.contains("--") && !orig_span.contains("/*") {
         return rep_sql.to_string();
@@ -416,9 +468,8 @@ pub(super) fn rewrite_preserving_comments(orig_span: &str, rep_sql: &str) -> Str
     // 2. Suffix additions (WITH (ONLINE = ON); or ALGORITHM=INPLACE[ ,] LOCK=NONE;)
     for suffix in [" WITH (ONLINE = ON);", " ALGORITHM=INPLACE LOCK=NONE;", ", ALGORITHM=INPLACE, LOCK=NONE;"] {
         if rep_sql.ends_with(suffix) {
-            let body = orig_span.trim_end().strip_suffix(';').unwrap_or(orig_span.trim_end());
-            let last_line = body.rsplit('\n').next().unwrap_or(body);
-            if last_line.contains("--") {
+            let body = orig_span.trim_end().strip_suffix(';').unwrap_or(orig_span).trim_end();
+            if ends_with_line_comment(body) {
                 return format!("{body}\n{}", suffix.trim_start());
             }
             return format!("{body}{suffix}");

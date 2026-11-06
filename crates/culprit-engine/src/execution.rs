@@ -166,8 +166,8 @@ impl Execution<'_> {
                 return Err(Error::invalid("`--with-index` expects a `CREATE INDEX` statement"));
             }
         }
-        let baseline = self.explain(name, sql, ExplainMode::Estimated, false).await?;
         let hypothetical = self.explain_hypothetical(name, sql, indexes).await?;
+        let baseline = self.explain(name, sql, ExplainMode::Estimated, false).await?;
         Ok(culprit_core::verify_hypothetical_index(baseline, hypothetical))
     }
 

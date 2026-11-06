@@ -43,6 +43,13 @@ pub fn reparse(
     let raw = saved.raw.as_deref()?;
     let mut plan = parse(raw, saved.kind, saved.statement.as_deref()).ok()?;
     crate::tables::refill(&mut plan, saved, tables, indexes);
+    let virtual_indexes = saved.facts().virtual_indexes.clone();
+    if !virtual_indexes.is_empty() {
+        plan.facts_mut().virtual_indexes = virtual_indexes;
+    }
+    if let Some(indexes) = saved.props.get("VirtualIndexes") {
+        plan.props.insert("VirtualIndexes".into(), indexes.clone());
+    }
     if let Some(entry) = entry.filter(|_| saved.kind == PlanKind::Generic) {
         mark_generic(&mut plan);
         mark_planned_text(&mut plan, entry);
