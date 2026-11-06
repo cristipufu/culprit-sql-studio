@@ -78,6 +78,23 @@ fn same_table(a_schema: &str, a_table: &str, b_schema: &str, b_table: &str) -> b
     a_schema.eq_ignore_ascii_case(b_schema) && a_table.eq_ignore_ascii_case(b_table)
 }
 
+struct AdvisorScope<'a> {
+    report: &'a Report,
+    snapshot: &'a Snapshot,
+    ids: HashSet<&'a str>,
+}
+
+impl<'a> AdvisorScope<'a> {
+    fn new(report: &'a Report) -> Self {
+        let ids = report.findings.iter().map(|f| f.id.as_str()).collect();
+        Self { report, snapshot: &report.snapshot, ids }
+    }
+
+    fn link(&self, id: String) -> Option<String> {
+        self.ids.contains(id.as_str()).then_some(id)
+    }
+}
+
 pub fn index_advice(report: &Report) -> IndexAdvice {
     let s = &report.snapshot;
     if let Some(reason) = crate::evidence::index_catalog(s) {
@@ -94,13 +111,33 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
             )],
         };
     }
-    let engine = s.server.engine;
-    let ids: HashSet<&str> = report.findings.iter().map(|f| f.id.as_str()).collect();
-    let link = |id: String| ids.contains(id.as_str()).then_some(id);
-    let queries = s.queries();
-    let mut candidates: Vec<IndexCandidate> = Vec::new();
+    let scope = AdvisorScope::new(report);
+    let mut candidates = Vec::new();
+    collect_optimizer_candidates(&scope, &mut candidates);
+    collect_plan_scan_candidates(&scope, &mut candidates);
+    collect_engine_built_candidates(&scope, &mut candidates);
+    collect_foreign_key_candidates(&scope, &mut candidates);
+    let skipped = prune_and_rank_candidates(&scope, &mut candidates);
+    let cleanups = collect_cleanups(&scope, &candidates);
+    let tables = collect_table_advice(&scope);
+    let notes = collect_advisor_notes(&scope, skipped);
 
-    // 1. What SQL Server's optimizer asked for, merged.
+    IndexAdvice {
+        connection: s.connection.clone(),
+        engine: Some(s.server.engine),
+        taken_at: s.taken_at.clone(),
+        counters: if s.server.has(Capability::IndexUsage) { since_phrase(s) } else { String::new() },
+        candidates,
+        cleanups,
+        tables,
+        notes,
+    }
+}
+
+/// What SQL Server's optimizer asked for, merged.
+fn collect_optimizer_candidates(scope: &AdvisorScope<'_>, candidates: &mut Vec<IndexCandidate>) {
+    let s = scope.snapshot;
+    let queries = s.queries();
     for mut c in merge_candidates(s) {
         let keys = c.keys();
         let table_name = format!("{}.{}", c.schema, c.table);
@@ -260,18 +297,22 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
             writes_per_day: writes_per_day(s, &c.schema, &c.table),
             write_cost: cost,
             verify,
-            finding_id: link(format!("missing-index:{table_name}({})", keys.join(","))),
+            finding_id: scope.link(format!("missing-index:{table_name}({})", keys.join(","))),
         });
     }
+}
 
-    // 2. Plans that read a whole table to keep a few rows (every engine with captured plans), as the refined findings
-    // have them: a scan the refine stage folded into a missing-index request lends that candidate its queries, and one
-    // a rewrite fixes instead (a function or a leading wildcard on the column) gets no index of its own.
+/// Plans that read a whole table to keep a few rows (every engine with captured plans), as the refined findings
+/// have them: a scan the refine stage folded into a missing-index request lends that candidate its queries, and one
+/// a rewrite fixes instead (a function or a leading wildcard on the column) gets no index of its own.
+fn collect_plan_scan_candidates(scope: &AdvisorScope<'_>, candidates: &mut Vec<IndexCandidate>) {
+    let s = scope.snapshot;
+    let report = scope.report;
     for g in scan_groups(s) {
         let table_name = format!("{}.{}", g.schema, g.table);
         let group_queries: Vec<&QueryStat> = g.queries.iter().map(|(q, _)| *q).collect();
         let finding_id = format!("filtered-scan:{table_name}({})", g.keys.join(","));
-        if !ids.contains(finding_id.as_str()) {
+        if !scope.ids.contains(finding_id.as_str()) {
             let absorbed_by = report.findings.iter().find(|f| {
                 f.check == "missing-index"
                     && g.queries
@@ -329,13 +370,17 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
                 format!("Obtain a newly compiled plan and check whether {} uses the candidate index to read fewer rows; a scan can still be appropriate for some parameters.", g.table),
                 "Compare reads and time per run after equivalent workload, including storage and write cost. Old saved plans and a changing share of database time alone do not verify improvement.".into(),
             ],
-            finding_id: link(finding_id),
+            finding_id: scope.link(finding_id),
         });
     }
+}
 
-    // 3. Indexes the engine builds for itself on every run because none fits (SQLite's automatic index): its own verdict,
-    // like the optimizer's requests, weighed by the statements that make it build one. Never one an index already leads
-    // with (the engine had another reason), and merged into a candidate with the same keys.
+/// Indexes the engine builds for itself on every run because none fits (SQLite's automatic index): its own verdict,
+/// like the optimizer's requests, weighed by the statements that make it build one. Never one an index already leads
+/// with (the engine had another reason), and merged into a candidate with the same keys.
+fn collect_engine_built_candidates(scope: &AdvisorScope<'_>, candidates: &mut Vec<IndexCandidate>) {
+    let s = scope.snapshot;
+    let engine = s.server.engine;
     for g in engine_built(s) {
         let table_name = format!("{}.{}", g.schema, g.table);
         if g.keys.is_empty() || crate::indexes::leading_index(s, &g.schema, &g.table, &g.keys, &g.keys).is_some() {
@@ -393,11 +438,14 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
                 ),
                 "Re-scan after the workload has run: the queries' share of database time drops.".into(),
             ],
-            finding_id: link(format!("plan-insights:automatic-index:{}", g.plan_table.to_ascii_lowercase())),
+            finding_id: scope.link(format!("plan-insights:automatic-index:{}", g.plan_table.to_ascii_lowercase())),
         });
     }
+}
 
-    // 4. Foreign keys no index leads with, among those the database checks.
+/// Foreign keys no index leads with, among those the database checks.
+fn collect_foreign_key_candidates(scope: &AdvisorScope<'_>, candidates: &mut Vec<IndexCandidate>) {
+    let s = scope.snapshot;
     for fk in crate::indexes::enforced_foreign_keys(s) {
         let rows = s.table(&fk.schema, &fk.table).and_then(|t| t.rows).unwrap_or(0.0);
         if rows < crate::indexes::FK_OWN_FINDING_ROWS {
@@ -453,7 +501,8 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
             }
             // The refine stage folds an engine-built index's finding into the key's: link to the one that's left.
             if planned.finding_id.is_none() {
-                planned.finding_id = link(format!("unindexed-fk:{}.{}({})", fk.schema, fk.table, fk.columns.join(",")));
+                planned.finding_id =
+                    scope.link(format!("unindexed-fk:{}.{}({})", fk.schema, fk.table, fk.columns.join(",")));
             }
             continue;
         }
@@ -486,13 +535,15 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
             writes_per_day: writes_per_day(s, &fk.schema, &fk.table),
             write_cost: write_cost(s, &fk.schema, &fk.table),
             verify: vec![format!("Deletes from {} no longer scan {}.", fk.ref_table, fk.table)],
-            finding_id: link(format!("unindexed-fk:{child}({})", fk.columns.join(","))),
+            finding_id: scope.link(format!("unindexed-fk:{child}({})", fk.columns.join(","))),
         });
     }
+}
 
-    // A table the scan no longer lists was dropped or renamed, and an index for queries that all stopped running fixes
-    // nothing now: neither belongs on the list of indexes to add. Whether a query stopped is read from its own history,
-    // not from which findings went inactive: a schema finding (an unindexed foreign key) can list a stopped query too.
+/// Filter out candidates for dropped tables or stopped queries and sort by DB time share, lookups, and table rows.
+fn prune_and_rank_candidates(scope: &AdvisorScope<'_>, candidates: &mut Vec<IndexCandidate>) -> usize {
+    let s = scope.snapshot;
+    let report = scope.report;
     let inactive: HashSet<&str> = report.findings.iter().filter(|f| f.inactive).map(|f| f.id.as_str()).collect();
     let stopped =
         |id: &str| s.workload.as_ref().and_then(|w| w.query(id)).is_some_and(|q| crate::query_is_history(s, q));
@@ -531,7 +582,7 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
         table_known && !all_stopped
     });
     let skipped = before - candidates.len();
-    if engine == Engine::Mssql {
+    if s.server.engine == Engine::Mssql {
         for c in candidates.iter_mut() {
             c.reason = crate::without_database(&c.reason, &s.server.database);
         }
@@ -544,8 +595,13 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
             .then(b.lookups.unwrap_or(0.0).total_cmp(&a.lookups.unwrap_or(0.0)))
             .then(b.table_rows.unwrap_or(0.0).total_cmp(&a.table_rows.unwrap_or(0.0)))
     });
+    skipped
+}
 
-    // Cleanups: duplicates and prefixes, overlaps, then indexes nothing reads.
+/// Cleanups: duplicates and prefixes, overlaps, then indexes nothing reads.
+fn collect_cleanups(scope: &AdvisorScope<'_>, candidates: &[IndexCandidate]) -> Vec<IndexCleanup> {
+    let s = scope.snapshot;
+    let engine = s.server.engine;
     let mut cleanups: Vec<IndexCleanup> = Vec::new();
     for (a, b) in redundant_indexes(s) {
         let exact = same_keys(a, b);
@@ -571,7 +627,7 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
                 ),
                 sql: Some(hide_index_sql(s, a)),
                 caveats: Vec::new(),
-                finding_id: link(format!("duplicate-index:{table_name}.{}", a.name)),
+                finding_id: scope.link(format!("duplicate-index:{table_name}.{}", a.name)),
             });
             continue;
         }
@@ -597,7 +653,7 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
             } else {
                 vec![format!("{} is narrower; keep it if a hot query scans it rather than seeking.", a.name)]
             },
-            finding_id: link(format!("duplicate-index:{table_name}.{}", a.name)),
+            finding_id: scope.link(format!("duplicate-index:{table_name}.{}", a.name)),
         });
     }
     for (a, b) in overlapping_pairs(s) {
@@ -623,7 +679,7 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
             ),
             sql: Some(hide_index_sql(s, a)),
             caveats: vec![format!("Check the plans of the queries that read {} before hiding it.", a.name)],
-            finding_id: link(format!("overlapping-index:{table_name}.{}", a.name)),
+            finding_id: scope.link(format!("overlapping-index:{table_name}.{}", a.name)),
         });
     }
     // By table and name: MySQL and SQL Server index names are unique only within a table.
@@ -664,7 +720,7 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
                     vec![format!("It supports the foreign key {}; deletes on the parent scan without it.", fk.name)]
                 })
                 .unwrap_or_default(),
-            finding_id: link(format!("unused-index:{table_name}")),
+            finding_id: scope.link(format!("unused-index:{table_name}")),
         });
     }
     if engine == Engine::Postgres && crate::indexes::watched_long_enough(s) {
@@ -700,13 +756,18 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
                 ),
                 sql: Some(drop_index_for_snapshot(s, &i.schema, &i.table, &i.name)),
                 caveats: Vec::new(),
-                finding_id: link(format!("unused-index:invalid:{table_name}.{}", i.name)),
+                finding_id: scope.link(format!("unused-index:invalid:{table_name}.{}", i.name)),
             });
         }
     }
     cleanups.sort_by(|a, b| b.size_bytes.unwrap_or(0.0).total_cmp(&a.size_bytes.unwrap_or(0.0)));
+    cleanups
+}
 
-    // Tables whose shape costs reads or writes.
+/// Tables whose shape costs reads or writes.
+fn collect_table_advice(scope: &AdvisorScope<'_>) -> Vec<TableAdvice> {
+    let s = scope.snapshot;
+    let report = scope.report;
     let mut tables: Vec<TableAdvice> = Vec::new();
     // A partition carries its parent's indexes and is read with it: the findings judge the parent, and so does this.
     for t in s.tables.iter().filter(|t| t.partition_of.is_none()) {
@@ -769,7 +830,7 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
                 forwarded_per_day: per_day,
                 sql: None,
                 queries: Vec::new(),
-                finding_id: link(format!("heap-table:{table_name}")),
+                finding_id: scope.link(format!("heap-table:{table_name}")),
             });
         }
         let secondary = s
@@ -800,11 +861,17 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
                 forwarded_per_day: None,
                 sql: None,
                 queries: Vec::new(),
-                finding_id: link(format!("over-indexed:{table_name}")),
+                finding_id: scope.link(format!("over-indexed:{table_name}")),
             });
         }
     }
+    tables
+}
 
+fn collect_advisor_notes(scope: &AdvisorScope<'_>, skipped: usize) -> Vec<String> {
+    let s = scope.snapshot;
+    let report = scope.report;
+    let engine = s.server.engine;
     let mut notes = Vec::new();
     // Where candidates come from on this engine, as the engine says it (no missing-index requests, no history…).
     notes.extend(engine.spec().index_advice_sources(&s.server, s.workload.is_some()));
@@ -875,17 +942,7 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
             )
         });
     }
-
-    IndexAdvice {
-        connection: s.connection.clone(),
-        engine: Some(engine),
-        taken_at: s.taken_at.clone(),
-        counters: if s.server.has(Capability::IndexUsage) { since_phrase(s) } else { String::new() },
-        candidates,
-        cleanups,
-        tables,
-        notes,
-    }
+    notes
 }
 
 /// Whether a statement on the child table goes through the foreign key: it names a key column, deletes from or
