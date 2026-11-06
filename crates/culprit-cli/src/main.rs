@@ -1,5 +1,7 @@
 mod agents;
+mod conn_cmd;
 mod dashboard_cmd;
+mod lint_cmd;
 mod locks;
 mod output;
 mod plan_cmd;
@@ -9,16 +11,14 @@ mod timeline_cmd;
 mod update_cmd;
 mod waits_cmd;
 
-use std::io::{IsTerminal, Read};
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use culprit_core::{
-    AuthKind, Engine, Environment, Error, ExplainMode, Report, SessionAction, Severity, SnapshotOptions,
-};
+use culprit_core::{Error, ExplainMode, Report, SessionAction, Severity, SnapshotOptions};
+use culprit_engine::Workspace;
 use culprit_engine::entra::SignInEvent;
-use culprit_engine::{ImportSource, NewConnection, Workspace};
 use output::{Format, Out};
 
 #[derive(Parser)]
@@ -105,7 +105,7 @@ pub(crate) fn parse_hours(text: &str) -> Result<f64, String> {
 enum Command {
     /// Manage saved connections. Secrets go to the OS keychain; commands refer to connections by name.
     #[command(subcommand)]
-    Conn(ConnCommand),
+    Conn(conn_cmd::ConnCommand),
     /// Microsoft Entra ID sign-ins made with a device code (used when the Azure CLI is missing or signed out).
     #[command(subcommand)]
     Auth(AuthCommand),
@@ -193,25 +193,7 @@ enum Command {
     },
     /// Lint migration or DDL SQL offline against a connection's latest saved snapshot (or a saved report/snapshot file).
     #[command(visible_alias = "check-sql")]
-    LintSql {
-        /// A connection name or a saved report/snapshot .json file.
-        connection: String,
-        /// Inline SQL or migration script to check.
-        #[arg(long, conflicts_with = "files")]
-        sql: Option<String>,
-        /// Path to one or more .sql migration files or directories of .sql files to check.
-        #[arg(long = "file", value_name = "PATH")]
-        files: Vec<PathBuf>,
-        /// Rewrite fixable DDL statements in place on the specified --file path(s).
-        #[arg(long)]
-        write: bool,
-        /// Saved report or snapshot file to lint against (instead of the connection's latest scan).
-        #[arg(long)]
-        report: Option<PathBuf>,
-        /// Exit with code 3 if any finding is at least this severe (for CI).
-        #[arg(long, value_enum)]
-        fail_on: Option<SeverityArg>,
-    },
+    LintSql(lint_cmd::LintSqlArgs),
     /// Serve Culprit to coding agents over MCP (stdio). Findings, statistics, schema and estimated plans; statements
     /// only on connections with `--agent query` and after approval in the desktop app. Every call is audited.
     Mcp(agents::McpArgs),
@@ -227,118 +209,9 @@ enum Command {
 }
 
 #[derive(Subcommand)]
-enum ConnCommand {
-    /// Save a connection. Paste a URL, ADO, JDBC or libpq string, or a host.
-    Add(AddArgs),
-    /// List saved connections and their last scan.
-    List,
-    /// Connect and identify the server.
-    Test { name: String },
-    /// Forget a connection and delete its keychain secret. Its saved reports stay on disk; a connection added later
-    /// under the same name starts without them (they move to `reports/.removed/`).
-    Rm { name: String },
-    /// Rename a connection (its alias). Keychain secret and report history move with it.
-    Rename { old: String, new: String },
-    /// Find databases your cloud CLI can see (Azure SQL and PostgreSQL/MySQL flexible servers via `az login`, Amazon
-    /// RDS/Aurora via `aws login`) and optionally save them.
-    Discover(DiscoverArgs),
-    /// Store the password for a password-authenticated connection in the OS keychain. Reads it from stdin (hidden when typed).
-    SetPassword { name: String },
-    /// Change a connection's settings, e.g. what coding agents may do with it (`--agent off|stats|query`).
-    Set(agents::SetArgs),
-    /// Bring in connections saved in Azure Data Studio, VS Code (mssql), DBeaver or DataGrip. Reads names, hosts, databases
-    /// and user names only, never passwords; password connections ask once with `culprit conn set-password`.
-    Import(ImportArgs),
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-enum ImportFrom {
-    Auto,
-    Ads,
-    Vscode,
-    Dbeaver,
-    Datagrip,
-}
-
-#[derive(Args)]
-struct ImportArgs {
-    /// Which tool to read. `auto` reads every tool found on this machine.
-    #[arg(long, value_enum, default_value = "auto")]
-    from: ImportFrom,
-    /// Read this file instead of the tool's usual location (repeatable): settings.json, data-sources.json, dataSources.xml.
-    #[arg(long = "file", value_name = "PATH")]
-    files: Vec<PathBuf>,
-    /// Keep connections whose alias, host or database contains this word (repeatable; all must match).
-    #[arg(long = "match", value_name = "WORD")]
-    terms: Vec<String>,
-    /// List what would be imported without saving anything.
-    #[arg(long)]
-    dry_run: bool,
-}
-
-#[derive(Subcommand)]
 enum AuthCommand {
     /// Forget device-code sign-ins: stored refresh tokens and cached access tokens. `az logout` signs the Azure CLI out.
     Logout,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-enum CloudArg {
-    Azure,
-    Aws,
-}
-
-#[derive(Args)]
-struct DiscoverArgs {
-    /// Which cloud to search.
-    #[arg(long, value_enum, default_value = "azure")]
-    cloud: CloudArg,
-    /// AWS region to search (repeatable). Defaults to every enabled region.
-    #[arg(long = "region", value_name = "REGION")]
-    regions: Vec<String>,
-    /// Keep databases whose database or server name contains this word. Repeat to narrow down (all must match). Omit to show the first 20 matches.
-    #[arg(long = "match", value_name = "WORD")]
-    terms: Vec<String>,
-    /// Save unsaved matches under their suggested aliases; requires a complete, narrowed search.
-    #[arg(long)]
-    save: bool,
-    /// Also save production databases (they are listed either way).
-    #[arg(long)]
-    include_production: bool,
-}
-
-#[derive(Args)]
-struct AddArgs {
-    name: String,
-    #[command(flatten)]
-    ssh: ssh::SshArgs,
-    /// Connection string or host (postgres://…, mssql://…, Server=…;Database=…, jdbc:…, host=… dbname=…), or a SQLite
-    /// file's path.
-    #[arg(long)]
-    url: String,
-    #[arg(long, value_enum, default_value = "development")]
-    env: EnvArg,
-    #[arg(long, value_enum)]
-    engine: Option<EngineArg>,
-    #[arg(long, value_enum)]
-    auth: Option<AuthArg>,
-    #[arg(long)]
-    database: Option<String>,
-    #[arg(long)]
-    user: Option<String>,
-    /// Read the password from stdin instead of the connection string.
-    #[arg(long, conflicts_with = "password_env")]
-    password_stdin: bool,
-    /// Read the password from this environment variable every time instead of storing it (CI, agents).
-    #[arg(long)]
-    password_env: Option<String>,
-    /// Save without testing the connection first.
-    #[arg(long)]
-    no_test: bool,
-    /// For a database that keeps no statement history (SQLite): the log the application's framework writes, read on
-    /// every scan. Rails, Django, Entity Framework Core, Phoenix/Ecto, or JSON lines.
-    #[arg(long, value_name = "FILE")]
-    query_log: Option<std::path::PathBuf>,
 }
 
 #[derive(Args)]
@@ -482,33 +355,7 @@ struct RunArgs {
 }
 
 #[derive(Clone, Copy, ValueEnum)]
-enum EnvArg {
-    Production,
-    Staging,
-    Development,
-    Local,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-enum EngineArg {
-    Postgres,
-    #[value(alias = "yugabytedb", alias = "ysql")]
-    Yugabyte,
-    Mssql,
-    Mysql,
-    Sqlite,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-enum AuthArg {
-    Password,
-    Entra,
-    AwsIam,
-    None,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-enum SeverityArg {
+pub(crate) enum SeverityArg {
     Low,
     Medium,
     #[value(alias = "critical")]
@@ -546,18 +393,14 @@ fn writes_markdown(command: &Command) -> bool {
             | Command::Verify(_)
             | Command::Export(_)
             | Command::Plan(plan_cmd::PlanCommand::Export { .. })
-            | Command::LintSql { .. }
+            | Command::LintSql(_)
     )
 }
 
 fn writes_sarif(command: &Command) -> bool {
     matches!(
         command,
-        Command::Scan(_)
-            | Command::Findings(_)
-            | Command::Analyze { .. }
-            | Command::LintSql { .. }
-            | Command::Drift { .. }
+        Command::Scan(_) | Command::Findings(_) | Command::Analyze { .. } | Command::LintSql(_) | Command::Drift { .. }
     )
 }
 
@@ -620,7 +463,7 @@ async fn run(command: Command, out: &Out) -> culprit_core::Result<u8> {
         }));
     }
     match command {
-        Command::Conn(c) => conn(&ws, c, out).await,
+        Command::Conn(c) => conn_cmd::run(&ws, c, out).await,
         Command::Auth(AuthCommand::Logout) => {
             let removed = ws.sign_out()?;
             out.done(&match removed {
@@ -810,94 +653,7 @@ async fn run(command: Command, out: &Out) -> culprit_core::Result<u8> {
             out.analyzed(&report);
             Ok(0)
         }
-        Command::LintSql { connection, sql, files, write, report, fail_on } => {
-            if write && files.is_empty() {
-                return Err(Error::invalid("--write requires --file <PATH>"));
-            }
-            let report_path = report.or_else(|| report_file(&connection));
-            let mut base_report = load(&ws, &connection, report_path.as_ref())?;
-            let mut batches: Vec<(Option<String>, String, Vec<culprit_core::Finding>)> = Vec::new();
-            let mut all_findings = Vec::new();
-
-            if let Some(s) = sql {
-                let findings = culprit_engine::lint_sql(&base_report.snapshot, &s);
-                all_findings.extend(findings.clone());
-                batches.push((None, s, findings));
-            } else if !files.is_empty() {
-                let resolved = collect_sql_files(&files)?;
-                let multi = resolved.len() > 1;
-                for path in resolved {
-                    let uri = path.to_string_lossy().into_owned();
-                    let raw = std::fs::read_to_string(&path)
-                        .map_err(|e| Error::invalid(format!("{}: {e}", path.display())))?;
-                    let sql_text = if write {
-                        let (rewritten, applied) = culprit_engine::apply_sql_fixes(&base_report.snapshot, &raw);
-                        if applied > 0 && rewritten != raw {
-                            std::fs::write(&path, &rewritten)
-                                .map_err(|e| Error::invalid(format!("{}: {e}", path.display())))?;
-                        }
-                        rewritten
-                    } else {
-                        raw
-                    };
-                    let findings = culprit_engine::lint_sql(&base_report.snapshot, &sql_text);
-                    for mut f in findings.clone() {
-                        if multi {
-                            f.title = format!("[{uri}] {}", f.title);
-                        }
-                        all_findings.push(f);
-                    }
-                    batches.push((Some(uri), sql_text, findings));
-                }
-            } else {
-                return Err(Error::invalid("Pass --sql <SQL> or --file <PATH>"));
-            }
-
-            let opportunities = all_findings.iter().filter(|f| f.is_actionable()).count() as u32;
-            let mut by_category = Vec::new();
-            for cat in [
-                culprit_core::Category::Indexes,
-                culprit_core::Category::Queries,
-                culprit_core::Category::Maintenance,
-                culprit_core::Category::Configuration,
-            ] {
-                let count = all_findings.iter().filter(|f| f.is_actionable() && f.category == cat).count() as u32;
-                if count > 0 {
-                    by_category.push(culprit_core::CategoryCount { category: cat, count });
-                }
-            }
-            let mut by_severity = Vec::new();
-            for sev in [Severity::High, Severity::Medium, Severity::Low] {
-                let count = all_findings.iter().filter(|f| f.is_actionable() && f.severity == sev).count() as u32;
-                if count > 0 {
-                    by_severity.push(culprit_core::SeverityCount { severity: sev, count });
-                }
-            }
-            let headline = if all_findings.is_empty() {
-                "No migration or DDL issues found.".to_string()
-            } else {
-                format!(
-                    "{} migration DDL {} found.",
-                    all_findings.len(),
-                    if all_findings.len() == 1 { "issue" } else { "issues" }
-                )
-            };
-            base_report.summary = culprit_core::Summary {
-                opportunities,
-                by_category,
-                by_severity,
-                top_share: None,
-                headline,
-                no_workload: None,
-                runs_said: Vec::new(),
-                over_scans: Vec::new(),
-            };
-            base_report.findings = all_findings;
-            base_report.locked.clear();
-            base_report.assessments.clear();
-            out.lint_sql(&base_report, &batches);
-            Ok(fail_code(&base_report, fail_on))
-        }
+        Command::LintSql(args) => lint_cmd::run(&ws, args, out),
         Command::Mcp(args) => agents::mcp(ws, args).await,
         Command::Audit(args) => agents::audit(&ws, args, out),
         Command::Agent(command) => agents::agent(&ws, command, out),
@@ -905,12 +661,12 @@ async fn run(command: Command, out: &Out) -> culprit_core::Result<u8> {
     }
 }
 
-fn fail_code(report: &Report, fail_on: Option<SeverityArg>) -> u8 {
+pub(crate) fn fail_code(report: &Report, fail_on: Option<SeverityArg>) -> u8 {
     let Some(threshold) = fail_on.map(Severity::from) else { return 0 };
     if report.findings.iter().any(|f| f.severity >= threshold) { EXIT_FINDINGS } else { 0 }
 }
 
-fn load(ws: &Workspace, connection: &str, path: Option<&PathBuf>) -> culprit_core::Result<Report> {
+pub(crate) fn load(ws: &Workspace, connection: &str, path: Option<&PathBuf>) -> culprit_core::Result<Report> {
     if let Some(path) = path {
         return ws.analyze_file(path);
     }
@@ -924,58 +680,9 @@ fn load(ws: &Workspace, connection: &str, path: Option<&PathBuf>) -> culprit_cor
 }
 
 /// `arg` names a saved report file rather than a connection.
-fn report_file(arg: &str) -> Option<PathBuf> {
+pub(crate) fn report_file(arg: &str) -> Option<PathBuf> {
     let path = PathBuf::from(arg);
     (arg.ends_with(".json") && path.is_file()).then_some(path)
-}
-
-fn collect_sql_files(inputs: &[PathBuf]) -> culprit_core::Result<Vec<PathBuf>> {
-    let mut out = Vec::new();
-    for path in inputs {
-        if path.is_file() {
-            if !out.contains(path) {
-                out.push(path.clone());
-            }
-        } else if path.is_dir() {
-            collect_sql_dir(path, 0, &mut out)?;
-        } else {
-            return Err(Error::invalid(format!("{}: no such file or directory", path.display())));
-        }
-    }
-    if out.is_empty() {
-        return Err(Error::invalid("No .sql files found in the specified --file path(s)"));
-    }
-    Ok(out)
-}
-
-fn collect_sql_dir(dir: &std::path::Path, depth: usize, out: &mut Vec<PathBuf>) -> culprit_core::Result<()> {
-    if depth > 16 {
-        return Ok(());
-    }
-    let entries = std::fs::read_dir(dir).map_err(|e| Error::invalid(format!("{}: {e}", dir.display())))?;
-    let mut items: Vec<(PathBuf, std::fs::FileType)> = entries
-        .filter_map(|e| {
-            let e = e.ok()?;
-            let ft = e.file_type().ok()?;
-            Some((e.path(), ft))
-        })
-        .collect();
-    items.sort_by(|a, b| a.0.cmp(&b.0));
-    for (p, ft) in items {
-        if ft.is_symlink() {
-            continue;
-        }
-        if ft.is_dir() {
-            let is_hidden = p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.'));
-            if !is_hidden {
-                collect_sql_dir(&p, depth + 1, out)?;
-            }
-        } else if ft.is_file() && p.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("sql")) && !out.contains(&p)
-        {
-            out.push(p);
-        }
-    }
-    Ok(())
 }
 
 fn explain_sql(ws: &Workspace, args: &ExplainArgs) -> culprit_core::Result<String> {
@@ -997,199 +704,6 @@ fn explain_sql(ws: &Workspace, args: &ExplainArgs) -> culprit_core::Result<Strin
     }
     Err(Error::invalid("Pass --sql, --file or --query-id"))
 }
-
-async fn conn(ws: &Workspace, command: ConnCommand, out: &Out) -> culprit_core::Result<u8> {
-    match command {
-        ConnCommand::List => {
-            out.connections(&ws.connections()?);
-            Ok(0)
-        }
-        ConnCommand::Test { name } => {
-            let server = ws.probe(&name).await?;
-            out.server(&server);
-            Ok(0)
-        }
-        ConnCommand::Rename { old, new } => {
-            let info = ws.rename_connection(&old, &new)?;
-            out.connection_renamed(&old, &info);
-            Ok(0)
-        }
-        ConnCommand::Discover(args) => {
-            let found = match args.cloud {
-                CloudArg::Azure => {
-                    if !args.regions.is_empty() {
-                        return Err(Error::invalid("--region only applies to --cloud aws"));
-                    }
-                    out.progress("Searching Azure Resource Graph…");
-                    ws.discover_azure(&args.terms).await?
-                }
-                CloudArg::Aws => {
-                    let message = if args.regions.is_empty() {
-                        "Searching Amazon RDS in every enabled region…".to_string()
-                    } else {
-                        format!("Searching Amazon RDS in {}…", args.regions.join(", "))
-                    };
-                    out.progress(&message);
-                    ws.discover_aws(&args.regions, &args.terms).await?
-                }
-            };
-            let mut saved = Vec::new();
-            if args.save {
-                if found.has_more || !found.warnings.is_empty() {
-                    return Err(Error::invalid("Discovery is incomplete; no connections were saved")
-                        .with_hint("Refine --match or --region until the search is complete, then retry --save"));
-                }
-                for d in found.items.iter().filter(|d| d.saved_as.is_none()) {
-                    if d.environment.is_production() && !args.include_production {
-                        continue;
-                    }
-                    saved.push(ws.add_discovered(d)?);
-                }
-            }
-            out.discovered(&found, &saved);
-            Ok(0)
-        }
-        ConnCommand::Import(args) => {
-            let source = match args.from {
-                ImportFrom::Auto => None,
-                ImportFrom::Ads => Some(ImportSource::Ads),
-                ImportFrom::Vscode => Some(ImportSource::Vscode),
-                ImportFrom::Dbeaver => Some(ImportSource::Dbeaver),
-                ImportFrom::Datagrip => Some(ImportSource::Datagrip),
-            };
-            let mut found = if args.files.is_empty() {
-                ws.import_candidates(source)?
-            } else {
-                let mut all = Vec::new();
-                for file in &args.files {
-                    all.extend(ws.import_file(file, source)?);
-                }
-                all
-            };
-            let terms: Vec<String> = args.terms.iter().map(|t| t.to_ascii_lowercase()).collect();
-            found.retain(|c| {
-                let text =
-                    format!("{} {} {}", c.alias, c.host, c.database.as_deref().unwrap_or("")).to_ascii_lowercase();
-                terms.iter().all(|t| text.contains(t.as_str()))
-            });
-            let new: Vec<_> = found.iter().filter(|c| c.saved_as.is_none()).cloned().collect();
-            let saved = if args.dry_run || new.is_empty() { Vec::new() } else { ws.import_connections(&new)? };
-            out.imported(&found, &saved, args.dry_run);
-            Ok(0)
-        }
-        ConnCommand::SetPassword { name } => {
-            let password = read_password(&format!("Password for {name}: "))?;
-            let info = ws.set_password(&name, &password)?;
-            out.done(&format!("Stored the password for {} in the OS keychain", info.name));
-            Ok(0)
-        }
-        ConnCommand::Set(args) => agents::set(ws, args, out),
-        ConnCommand::Rm { name } => {
-            ws.remove_connection(&name)?;
-            out.done(&format!("Removed {name}"));
-            Ok(0)
-        }
-        ConnCommand::Add(args) => {
-            let password = if args.password_stdin {
-                let mut buf = String::new();
-                std::io::stdin().read_to_string(&mut buf).map_err(|e| Error::invalid(e.to_string()))?;
-                Some(buf.trim_end_matches(['\r', '\n']).to_string())
-            } else {
-                None
-            };
-            let new = NewConnection {
-                name: args.name.clone(),
-                input: args.url,
-                environment: match args.env {
-                    EnvArg::Production => Environment::Production,
-                    EnvArg::Staging => Environment::Staging,
-                    EnvArg::Development => Environment::Development,
-                    EnvArg::Local => Environment::Local,
-                },
-                engine: args.engine.map(|e| match e {
-                    EngineArg::Postgres => Engine::Postgres,
-                    EngineArg::Yugabyte => Engine::Yugabyte,
-                    EngineArg::Mssql => Engine::Mssql,
-                    EngineArg::Mysql => Engine::Mysql,
-                    EngineArg::Sqlite => Engine::Sqlite,
-                }),
-                ssh: args.ssh.config(),
-                database: args.database,
-                user: args.user,
-                password,
-                password_env: args.password_env,
-                auth: args.auth.map(|a| match a {
-                    AuthArg::Password => AuthKind::Password,
-                    AuthArg::Entra => AuthKind::Entra,
-                    AuthArg::AwsIam => AuthKind::AwsIam,
-                    AuthArg::None => AuthKind::None,
-                }),
-            };
-            let server = if args.no_test {
-                None
-            } else {
-                out.progress(&format!("Testing {}…", args.name));
-                Some(ws.test_connection(&new).await?)
-            };
-            let mut info = ws.add_connection(new)?;
-            if let Some(log) = args.query_log.as_deref() {
-                info = ws.set_query_log(&info.name, Some(log))?;
-            }
-            out.connection_added(&info, server.as_ref());
-            Ok(0)
-        }
-    }
-}
-
-/// One line from stdin. When stdin is a terminal the typed characters are hidden and a prompt goes to stderr.
-fn read_password(prompt: &str) -> culprit_core::Result<String> {
-    use std::io::{BufRead, Write};
-    let interactive = std::io::stdin().is_terminal();
-    let hide = |on: bool| {
-        if interactive {
-            echo_input(!on);
-        }
-    };
-    if interactive {
-        eprint!("{prompt}");
-        let _ = std::io::stderr().flush();
-    }
-    hide(true);
-    let mut line = String::new();
-    let read = std::io::stdin().lock().read_line(&mut line);
-    hide(false);
-    if interactive {
-        eprintln!();
-    }
-    read.map_err(|e| Error::invalid(e.to_string()))?;
-    Ok(line.trim_end_matches(['\r', '\n']).to_string())
-}
-
-/// Turn the terminal's echo of typed characters on or off.
-#[cfg(unix)]
-fn echo_input(on: bool) {
-    let _ = std::process::Command::new("stty").arg(if on { "echo" } else { "-echo" }).status();
-}
-
-/// Turn the console's echo of typed characters on or off.
-#[cfg(windows)]
-fn echo_input(on: bool) {
-    use windows_sys::Win32::System::Console::{
-        CONSOLE_MODE, ENABLE_ECHO_INPUT, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode,
-    };
-    // SAFETY: GetStdHandle returns this process's console input handle (or an invalid one, which GetConsoleMode then
-    // rejects), and the mode is only written back to the same handle.
-    unsafe {
-        let input = GetStdHandle(STD_INPUT_HANDLE);
-        let mut mode: CONSOLE_MODE = 0;
-        if GetConsoleMode(input, &mut mode) != 0 {
-            SetConsoleMode(input, if on { mode | ENABLE_ECHO_INPUT } else { mode & !ENABLE_ECHO_INPUT });
-        }
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-fn echo_input(_on: bool) {}
 
 #[cfg(test)]
 mod tests {
@@ -1214,7 +728,7 @@ mod tests {
             "key with spaces",
         ])
         .unwrap();
-        let Command::Conn(ConnCommand::Add(args)) = cli.command else { panic!("connection add") };
+        let Command::Conn(conn_cmd::ConnCommand::Add(args)) = cli.command else { panic!("connection add") };
         let ssh = args.ssh.config().unwrap();
         assert_eq!(ssh.destination, "reader@bastion");
         assert_eq!(ssh.port, Some(2222));
