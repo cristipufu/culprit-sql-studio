@@ -2,6 +2,18 @@
 
 Each release's notes are its section below: the release workflow publishes them on GitHub, and the desktop app shows them when it offers the update. A release without a section here isn't drafted.
 
+## 0.5.5
+
+### Improvements
+
+- **Compact scan-error badge in the top bar.** Failed scan notices now show a short "Last scan failed" badge instead of stretching the full error across the header. Hover or focus the badge to read and copy the complete error message and hint.
+- **Hypothetical index plan verification.** Index verification compares a query's baseline plan against its plan with virtual indexes, showing whether the planner adopts the proposed index and how the plan changes.
+
+### Fixes
+
+- **More accurate migration SQL linting.** `culprit lint-sql` and the editor linter handle multi-clause `ALTER TABLE` statements, `CREATE INDEX CONCURRENTLY IF NOT EXISTS`, MySQL `ADD INDEX` and `CHANGE COLUMN` clauses, shorthand column renames, quoted identifiers and inline comments when highlighting statements or applying quick fixes.
+- **Hardened SQL redaction, plan reparsing and CLI path handling.** Saved plans keep their structured facts when reparsed, SQL lexing and redaction handle edge-case quoting and comments across dialects, and `culprit lint-sql` skips duplicate symlinked paths.
+
 ## 0.5.4
 
 ### Added
