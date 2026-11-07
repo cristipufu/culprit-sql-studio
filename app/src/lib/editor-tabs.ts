@@ -9,7 +9,6 @@ type Index = { version: 1; tabs: Omit<EditorTab, "sql">[]; active: string };
 export const MAX_EDITOR_TABS = 200;
 const MAX_SQL_CHARS = 2 * 1024 * 1024;
 const MAX_INDEX_CHARS = 64 * 1024;
-const LEGACY_KEY = "culprit.editor.tabs";
 const BODY_PREFIX = "culprit.editor.sql:";
 const UNAVAILABLE = "Scratch tabs couldn’t be saved on this device. Save important work as named queries.";
 const INVALID = "Saved scratch tabs couldn’t be read. Their stored copy has been kept.";
@@ -45,15 +44,15 @@ function metadata(tabs: EditorTabs): string {
   return JSON.stringify({ version: 1, active: tabs.active, tabs: tabs.tabs.map(({ id, title, saved }) => ({ id, title, saved })) } satisfies Index);
 }
 
-function validate(value: unknown, legacy = false): EditorTabs {
+function validate(value: unknown): EditorTabs {
   if (!value || typeof value !== "object") throw new Error(INVALID);
-  const index = value as Partial<Index & EditorTabs>;
-  if ((!legacy && index.version !== 1) || !Array.isArray(index.tabs) || !index.tabs.length || index.tabs.length > MAX_EDITOR_TABS) throw new Error(INVALID);
+  const index = value as Partial<Index>;
+  if (index.version !== 1 || !Array.isArray(index.tabs) || !index.tabs.length || index.tabs.length > MAX_EDITOR_TABS) throw new Error(INVALID);
   const ids = new Set<string>();
   for (const tab of index.tabs) {
     if (!tab || typeof tab.id !== "string" || !/^[\w-]{1,64}$/.test(tab.id) || ids.has(tab.id)
       || typeof tab.title !== "string" || tab.title.length > 1024 || (tab.saved !== null && typeof tab.saved !== "string")
-      || (typeof tab.saved === "string" && tab.saved.length > 1024) || (legacy && typeof tab.sql !== "string")) throw new Error(INVALID);
+      || (typeof tab.saved === "string" && tab.saved.length > 1024)) throw new Error(INVALID);
     ids.add(tab.id);
   }
   return { tabs: index.tabs as EditorTab[], active: typeof index.active === "string" && ids.has(index.active) ? index.active : index.tabs[0]!.id };
@@ -79,7 +78,6 @@ export class EditorTabStorage {
   private readonly scope: string;
   private index: string | null = null;
   private bodies = new Map<string, string>();
-  private legacy = false;
   private blocked = false;
 
   constructor(connection: Connection, placeholder: string, private readonly storage = deviceStorage()) {
@@ -95,26 +93,11 @@ export class EditorTabStorage {
         this.initial = load(raw, storage);
         this.index = metadata(this.initial);
         this.bodies = new Map(this.initial.tabs.map((t) => [t.id, t.sql]));
-      } else {
-        const legacy = storage.getItem(LEGACY_KEY);
-        if (legacy !== null) {
-          if (legacy.length > MAX_SQL_CHARS + MAX_INDEX_CHARS) throw new Error(INVALID);
-          const old = validate(JSON.parse(legacy), true);
-          if (old.tabs.reduce((sum, t) => sum + t.sql.length, 0) > MAX_SQL_CHARS) throw new Error(INVALID);
-          const tabs = old.tabs.map((t) => newEditorTab(t.sql, t.title, t.saved));
-          this.initial = { tabs, active: tabs[old.tabs.findIndex((t) => t.id === old.active)]!.id };
-          this.legacy = true;
-        }
       }
     } catch {
       this.error = INVALID;
       this.blocked = protectScopedData;
     }
-  }
-
-  /** Claim old global tabs only after mounting and after a successful copy, never during React render. */
-  migrate(): string | null {
-    return this.legacy ? this.write(this.initial) : this.error;
   }
 
   write(tabs: EditorTabs): string | null {
@@ -142,7 +125,6 @@ export class EditorTabStorage {
       for (const id of this.bodies.keys()) {
         if (!kept.has(id)) { this.storage.removeItem(BODY_PREFIX + id); this.bodies.delete(id); }
       }
-      if (this.legacy) { this.storage.removeItem(LEGACY_KEY); this.legacy = false; }
       return this.settle(null);
     } catch {
       // A rejected index must not leave newly allocated SQL bodies consuming quota forever.

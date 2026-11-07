@@ -44,9 +44,8 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
-    setPersistenceError(tabStorage.migrate());
     return () => { mounted.current = false; };
-  }, [tabStorage]);
+  }, []);
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   const [outputs, setOutputs] = useState<Record<string, Output>>({});
