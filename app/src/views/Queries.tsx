@@ -21,6 +21,7 @@ import { figures, honest, workloadKind, windowPhrase, type Figures } from "../li
 import { setState, toast, useStore } from "../lib/store";
 import { compareSince } from "./Overview";
 import { remember, rememberedChoice } from "../lib/prefs";
+import { tabListKeys } from "../lib/keys";
 
 const PAGE_SIZE = 100;
 type QueryEntry = { query: QueryStat; figures: Figures; search: string };
@@ -283,9 +284,9 @@ function QueryDetail({ report, query }: { report: Report; query: QueryStat }) {
             );
           })()}
         </div>
-        <div className="qd-tabs" role="tablist" aria-label="Query detail">
+        <div className="qd-tabs" role="tablist" aria-label="Query detail" onKeyDown={tabListKeys}>
           {tabs.map((t) => (
-            <button type="button" key={t.tab} role="tab" aria-selected={tab === t.tab} className={`qd-tab ${tab === t.tab ? "on" : ""}`} onClick={() => choose(t.tab)}>
+            <button type="button" key={t.tab} role="tab" aria-selected={tab === t.tab} tabIndex={tab === t.tab ? 0 : -1} className={`qd-tab ${tab === t.tab ? "on" : ""}`} onClick={() => choose(t.tab)}>
               {t.label}
               {t.extra}
               {t.hint && <span className="kbd">{t.hint}</span>}

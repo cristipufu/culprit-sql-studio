@@ -10,6 +10,7 @@ import { count, duration, oneLine } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
 import { currentReport, setState, toast, useStore } from "../lib/store";
 import { remember, rememberedChoice } from "../lib/prefs";
+import { tabListKeys } from "../lib/keys";
 
 const Deadlocks = lazy(() => import("./Deadlocks"));
 
@@ -152,12 +153,12 @@ function LiveSessions({ connection }: { connection: string }) {
           <span className="live-dot" aria-hidden /> Live · <span className="live-age">{freshness}</span>
         </span>
         {tab === "sessions" && <Sparkline samples={history} />}
-        <span className="seg live-tabs" role="tablist" aria-label="Live">
-          <button type="button" role="tab" aria-selected={tab === "sessions"} className={tab === "sessions" ? "on" : ""} onClick={() => chooseTab("sessions")}>
+        <span className="seg live-tabs" role="tablist" aria-label="Live" onKeyDown={tabListKeys}>
+          <button type="button" role="tab" aria-selected={tab === "sessions"} tabIndex={tab === "sessions" ? 0 : -1} className={tab === "sessions" ? "on" : ""} onClick={() => chooseTab("sessions")}>
             Sessions
             {blocked.length > 0 && <span className="tab-count warn">{blocked.length} waiting</span>}
           </button>
-          <button type="button" role="tab" aria-selected={tab === "deadlocks"} className={tab === "deadlocks" ? "on" : ""} onClick={() => chooseTab("deadlocks")}>
+          <button type="button" role="tab" aria-selected={tab === "deadlocks"} tabIndex={tab === "deadlocks" ? 0 : -1} className={tab === "deadlocks" ? "on" : ""} onClick={() => chooseTab("deadlocks")}>
             Deadlocks
             {recentDeadlocks > 0 && <span className="tab-count">{recentDeadlocks}</span>}
           </button>

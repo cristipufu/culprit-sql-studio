@@ -12,6 +12,7 @@ import { PlanInsights } from "./PlanInsights";
 import { PlanOperations } from "./PlanOperations";
 import { PlanView } from "./PlanView";
 import { remember, rememberedChoice } from "../lib/prefs";
+import { tabListKeys } from "../lib/keys";
 
 export type PlanLook = "diagram" | "tree" | "operations";
 
@@ -34,11 +35,11 @@ const LOOKS: { look: PlanLook; label: string; icon: typeof Network; hint: string
 /** Diagram · Tree · Operations. */
 export function LookToggle({ look, onChange }: { look: PlanLook; onChange: (look: PlanLook) => void }) {
   return (
-    <span className="seg look-toggle" role="tablist" aria-label="Plan view">
+    <span className="seg look-toggle" role="tablist" aria-label="Plan view" onKeyDown={tabListKeys}>
       {LOOKS.map((l) => {
         const Icon = l.icon;
         return (
-          <button type="button" key={l.look} role="tab" aria-selected={look === l.look} className={look === l.look ? "on" : ""} title={l.hint} onClick={() => onChange(l.look)}>
+          <button type="button" key={l.look} role="tab" aria-selected={look === l.look} tabIndex={look === l.look ? 0 : -1} className={look === l.look ? "on" : ""} title={l.hint} onClick={() => onChange(l.look)}>
             <Icon size={12} />
             {l.label}
           </button>

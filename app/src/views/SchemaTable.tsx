@@ -12,6 +12,7 @@ import { Header } from "./schema-table/Header";
 import { Columns } from "./schema-table/Columns";
 import { Indexes } from "./schema-table/Indexes";
 import { Relations } from "./schema-table/Relations";
+import { tabListKeys } from "../lib/keys";
 
 type Tab = "columns" | "indexes" | "relations" | "data" | "ddl";
 
@@ -68,21 +69,12 @@ export function SchemaTable({ report, table, onOpenTable }: { report: Report; ta
         className="td-tabs"
         role="tablist"
         aria-label="Table details"
-        onKeyDown={(e) => {
-          if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-          e.preventDefault();
-          const at = tabs.findIndex((t) => t.key === tab);
-          const next = tabs[(at + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
-          if (!next) return;
-          choose(next.key);
-          (e.currentTarget.querySelector(`[data-tab="${next.key}"]`) as HTMLElement | null)?.focus();
-        }}
+        onKeyDown={tabListKeys}
       >
         {tabs.map((t) => (
           <button type="button"
             key={t.key}
             id={`${tabId}-${t.key}`}
-            data-tab={t.key}
             role="tab"
             aria-selected={tab === t.key}
             aria-controls={`${tabId}-panel`}

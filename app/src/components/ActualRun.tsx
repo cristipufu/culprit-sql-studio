@@ -9,6 +9,7 @@ import { serverName } from "../lib/engines";
 import { currentReport, setState, useStore } from "../lib/store";
 import { PlanSurface, type PlanLook } from "./PlanSurface";
 import { copyAndTell } from "../lib/clipboard";
+import { tabListKeys } from "../lib/keys";
 
 export type PlanSource = "plan" | "actual";
 
@@ -17,11 +18,11 @@ const TURN_ON = "ALTER DATABASE SCOPED CONFIGURATION SET LAST_QUERY_PLAN_STATS =
 /** "Estimated" (what the optimizer planned) or "Last run" (what actually happened). */
 export function PlanSourceToggle({ value, onChange }: { value: PlanSource; onChange: (v: PlanSource) => void }) {
   return (
-    <span className="seg" role="tablist" aria-label="Which plan">
-      <button type="button" role="tab" aria-selected={value === "plan"} className={value === "plan" ? "on" : ""} onClick={() => onChange("plan")} title="The plan the optimizer chose, with its estimates">
+    <span className="seg" role="tablist" aria-label="Which plan" onKeyDown={tabListKeys}>
+      <button type="button" role="tab" aria-selected={value === "plan"} tabIndex={value === "plan" ? 0 : -1} className={value === "plan" ? "on" : ""} onClick={() => onChange("plan")} title="The plan the optimizer chose, with its estimates">
         Estimated
       </button>
-      <button type="button" role="tab" aria-selected={value === "actual"} className={value === "actual" ? "on" : ""} onClick={() => onChange("actual")} title="Real row counts (and timings, when measured) from a run of this query">
+      <button type="button" role="tab" aria-selected={value === "actual"} tabIndex={value === "actual" ? 0 : -1} className={value === "actual" ? "on" : ""} onClick={() => onChange("actual")} title="Real row counts (and timings, when measured) from a run of this query">
         <History size={12} /> Last run
       </button>
     </span>

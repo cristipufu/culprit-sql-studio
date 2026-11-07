@@ -34,6 +34,7 @@ import { SAMPLES, setSide, swapSides, trySample, usePlans, type LoadedPlan } fro
 import { deliver, exportOptions } from "../lib/share";
 import { can, planEngineName } from "../lib/engines";
 import { remember, rememberedChoice } from "../lib/prefs";
+import { tabListKeys } from "../lib/keys";
 
 const KIND: Record<Plan["kind"], string> = { estimated: "estimated", generic: "generic", actual: "actual" };
 const LOOK_KEY = "culprit.plan.look";
@@ -335,7 +336,7 @@ export function PlanCompare() {
 
       {ready && (
         <section className="cmp-panel">
-          <div className="cmp-tabs" role="tablist" aria-label="Comparison details">
+          <div className="cmp-tabs" role="tablist" aria-label="Comparison details" onKeyDown={tabListKeys}>
             <TabButton id="changes" tab={tab} onPick={setTab} label="What changed" count={ready.changes.length} hotkey="C" />
             <TabButton id="why" tab={tab} onPick={setTab} label="Why" count={ready.scenarios.length} hotkey="W" />
             <TabButton id="props" tab={tab} onPick={setTab} label="Properties" hotkey="P" />
@@ -480,7 +481,7 @@ export function PlanCompare() {
 
 function TabButton({ id, tab, onPick, label, count: n, hotkey }: { id: Tab; tab: Tab; onPick: (t: Tab) => void; label: string; count?: number; hotkey: string }) {
   return (
-    <button type="button" role="tab" aria-selected={tab === id} className={`cmp-tab ${tab === id ? "on" : ""}`} onClick={() => onPick(id)} title={`${label} (${hotkey})`}>
+    <button type="button" role="tab" aria-selected={tab === id} tabIndex={tab === id ? 0 : -1} className={`cmp-tab ${tab === id ? "on" : ""}`} onClick={() => onPick(id)} title={`${label} (${hotkey})`}>
       {label}
       {n != null && <span className="cmp-count">{n}</span>}
     </button>
