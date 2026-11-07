@@ -424,18 +424,27 @@ mod tests {
 
     #[test]
     fn deepest_accepted_plan_can_be_reopened_on_its_own_and_in_a_report() {
-        let rows: Vec<_> = (1..=MAX_DEPTH as i64).map(|id| (id, id - 1, "SCAN items".into())).collect();
-        let plan = plan_from_rows("SELECT * FROM items", &rows).unwrap();
-        let json = serde_json::to_vec(&plan).unwrap();
-        let reopened: Plan = serde_json::from_slice(&json).unwrap();
-        assert_eq!(reopened.nodes().len(), plan.nodes().len());
+        // Unoptimized serde frames for every nested step of a whole report need 1–2 MiB on macOS and more on Windows,
+        // past the 2 MiB a test thread gets there; the thread size is the test's, not the property under test.
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                let rows: Vec<_> = (1..=MAX_DEPTH as i64).map(|id| (id, id - 1, "SCAN items".into())).collect();
+                let plan = plan_from_rows("SELECT * FROM items", &rows).unwrap();
+                let json = serde_json::to_vec(&plan).unwrap();
+                let reopened: Plan = serde_json::from_slice(&json).unwrap();
+                assert_eq!(reopened.nodes().len(), plan.nodes().len());
 
-        let mut report: culprit_core::Report =
-            serde_json::from_str(include_str!("../../../fixtures/mssql-demo.report.json")).unwrap();
-        report.snapshot.workload.as_mut().unwrap().queries[0].plan = Some(plan);
-        let json = serde_json::to_vec(&report).unwrap();
-        let reopened: culprit_core::Report = serde_json::from_slice(&json).unwrap();
-        assert!(reopened.snapshot.workload.unwrap().queries[0].plan.is_some());
+                let mut report: culprit_core::Report =
+                    serde_json::from_str(include_str!("../../../fixtures/mssql-demo.report.json")).unwrap();
+                report.snapshot.workload.as_mut().unwrap().queries[0].plan = Some(plan);
+                let json = serde_json::to_vec(&report).unwrap();
+                let reopened: culprit_core::Report = serde_json::from_slice(&json).unwrap();
+                assert!(reopened.snapshot.workload.unwrap().queries[0].plan.is_some());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]
