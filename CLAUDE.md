@@ -40,6 +40,8 @@ Run commands from the repository root unless a working directory is shown. Use t
 | Desktop Rust (`app/src-tauri`) | `cargo test --locked -p culprit-app --lib`, with a test filter when useful | `cargo fmt --all --check`; unfiltered desktop library tests; `cargo clippy --locked -p culprit-app --all-targets -- -D warnings`; UI/backend gates only if those areas also changed |
 | Marketing website (`site/`, `dev/site*`) | `bash dev/site.sh`; inspect the generated site when its behavior/layout changes | Site checks only; no desktop or backend build |
 
+Coverage is measured, not gated: `python3 dev/coverage.py` (needs `rustup component add llvm-tools`; builds in `target/coverage`, leaving `target/debug` alone) prints line and function coverage per crate and UI area, counting UI files no test loads as uncovered; CI's Coverage job posts the same table on pushes to `main`. Run it when the question is what the tests reach, not as a gate.
+
 A crate's `tests/*.rs` files are modules of one binary: list a new file in `tests/all.rs`, and use `--test all module::` to select one module. Do not turn each file into a separately linked test binary. Library doc tests are disabled because there are no Rust documentation examples; do not force `cargo test --doc`. If executable Rust examples are added to documentation, enable and run doc tests for that crate.
 
 For an intentional change to what users read, accept the reviewed golden diff with `CULPRIT_UPDATE_GOLDEN=1 cargo test --locked -p culprit-engine --test all golden::`. The final backend suite includes the golden checks, so a separate unchanged golden run is unnecessary.

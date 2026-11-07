@@ -81,6 +81,41 @@ jobs:
           bun install --frozen-lockfile
           bun audit
 
+  coverage:
+    name: Coverage
+    # Measures, doesn't gate: the table goes to the run's summary, the LCOV reports to an artifact. On pushes to main,
+    # so pull requests don't wait for an instrumented build.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+          components: llvm-tools
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: coverage
+          workspaces: ". -> target/coverage"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: UI packages
+        working-directory: app
+        run: bun install --frozen-lockfile
+      - name: Measure
+        run: |
+          python3 dev/coverage.py
+          cat target/coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: coverage
+          path: |
+            target/coverage/rust.lcov
+            target/coverage/ui/lcov.info
+            target/coverage/summary.md
+          retention-days: 14
+
   app:
     name: Desktop app (${{ matrix.os }})
     needs: [fmt, check]
