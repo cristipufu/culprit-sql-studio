@@ -127,48 +127,6 @@ fn legacy_report_and_bare_snapshot_have_explicit_origins_without_invented_collec
     std::fs::remove_dir_all(home).unwrap();
 }
 
-#[cfg(feature = "mssql")]
-#[test]
-fn parsing_provenance_distinguishes_native_reparse_missing_text_and_retained_plan() {
-    use culprit_core::PlanParsingOutcome;
-
-    let home = home("parsing");
-    let ws = Workspace::open_in(&home);
-    std::fs::create_dir_all(&home).unwrap();
-    let mut snapshot = snapshot();
-    let mut query = snapshot.workload.as_ref().unwrap().queries[0].clone();
-    query.plan = Some(culprit_engine::parse_plan(include_str!("plans/mssql-seek.sqlplan")).unwrap());
-    let queries = ["native", "missing", "malformed"]
-        .into_iter()
-        .map(|id| {
-            let mut q = query.clone();
-            q.id = id.into();
-            match id {
-                "missing" => q.plan.as_mut().unwrap().raw = None,
-                "malformed" => q.plan.as_mut().unwrap().raw = Some("<broken>".into()),
-                _ => {}
-            }
-            q
-        })
-        .collect();
-    snapshot.workload.as_mut().unwrap().queries = queries;
-    let path = home.join("snapshot.json");
-    std::fs::write(&path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
-    let report = ws.analyze_file(&path).unwrap();
-    let trace = &report.provenance.as_ref().unwrap().parsing;
-    assert_eq!(trace.len(), 3);
-    for (id, expected) in [
-        ("native", PlanParsingOutcome::Reparsed),
-        ("missing", PlanParsingOutcome::NoNativeText),
-        ("malformed", PlanParsingOutcome::Retained),
-    ] {
-        let parsed = trace.iter().find(|p| p.query == id).unwrap();
-        assert_eq!(parsed.outcome, expected);
-        assert_eq!(parsed.parser, culprit_mssql::component_version());
-    }
-    std::fs::remove_dir_all(home).unwrap();
-}
-
 struct ReplicaReplay;
 #[async_trait]
 impl Provider for ReplicaReplay {
@@ -326,32 +284,6 @@ fn replay_builds_an_initial_scan_timeline_and_replaces_only_the_history_it_used(
     assert_eq!(current.sizes_before, retained);
     assert!(current.workload.as_ref().unwrap().timeline.is_some());
     assert_eq!(current.workload.as_ref().unwrap().history_inputs, refs);
-}
-
-#[cfg(feature = "postgres")]
-#[test]
-fn replay_refreshes_row_size_estimates_and_forgets_them_when_the_new_plan_has_no_width() {
-    let home = home("row-width");
-    std::fs::create_dir_all(&home).unwrap();
-    let ws = Workspace::open_in(&home);
-    let native = include_str!("plans/pg-index.json");
-    let plan = culprit_engine::parse_plan(native).unwrap();
-    let expected = culprit_core::signals::plan_row_bytes(&plan).expect("fixture width");
-    let mut s = point("first.invalid", "2026-10-11T00:00:00Z", "20261011T000000.000Z", 20.0);
-    let q = &mut s.workload.as_mut().unwrap().queries[0];
-    q.plan = Some(plan);
-    q.plan.as_mut().unwrap().root.facts_mut().estimated_row_bytes = Some(1.0);
-    q.costs.get_or_insert_default().row_bytes = Some(1.0);
-    let path = home.join("native.json");
-    std::fs::write(&path, serde_json::to_vec(&s).unwrap()).unwrap();
-    let replayed = ws.analyze_file(&path).unwrap();
-    assert_eq!(replayed.snapshot.queries()[0].costs.as_ref().unwrap().row_bytes, Some(expected));
-    let mut value: serde_json::Value = serde_json::from_str(native).unwrap();
-    value[0]["Plan"].as_object_mut().unwrap().remove("Plan Width");
-    s.workload.as_mut().unwrap().queries[0].plan.as_mut().unwrap().raw = Some(value.to_string().into());
-    std::fs::write(&path, serde_json::to_vec(&s).unwrap()).unwrap();
-    assert_eq!(ws.analyze_file(&path).unwrap().snapshot.queries()[0].costs.as_ref().unwrap().row_bytes, None);
-    std::fs::remove_dir_all(home).unwrap();
 }
 
 #[test]

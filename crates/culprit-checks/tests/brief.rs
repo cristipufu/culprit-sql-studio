@@ -447,19 +447,21 @@ fn a_sqlite_step_says_what_it_does() {
 fn a_share_resting_on_a_default_guess_is_left_out() {
     // The scan under the sort keeps a share the planner guessed for `created_at > now() - $1`: the sort's rows, and
     // its share of the cost, rest on that guess.
+    // The parser marks it, so the demo's brief gives no share.
     let mut postgres = report("postgres-demo.json");
     let spill = finding(&postgres, "temp-spill:9065391607317686058").clone();
-    let measured = plan_line(&agent_brief(&postgres, &spill));
-    assert!(measured.contains("the step this finding is about (23% of estimated cost) is `Sort`"), "{measured}");
-    let workload = postgres.snapshot.workload.as_mut().expect("workload");
-    let q = workload.queries.iter_mut().find(|q| q.id == "9065391607317686058").expect("the statement");
-    let scan = &mut q.plan.as_mut().expect("its plan").root.children[0].children[0];
-    scan.facts_mut().selectivity_guess = Some("0.333".into());
-    scan.props.insert(culprit_core::GUESSED_SELECTIVITY.into(), "0.333".into());
     let guessed = plan_line(&agent_brief(&postgres, &spill));
     assert!(guessed.contains("the step this finding is about is `Sort`"), "{guessed}");
     assert!(!guessed.contains("of estimated cost"), "{guessed}");
     assert!(guessed.contains("rest on the planner's default guess for a parameter"), "{guessed}");
+    // A scan that rests on no guess gives the sort's share of the cost.
+    let workload = postgres.snapshot.workload.as_mut().expect("workload");
+    let q = workload.queries.iter_mut().find(|q| q.id == "9065391607317686058").expect("the statement");
+    let scan = &mut q.plan.as_mut().expect("its plan").root.children[0].children[0];
+    scan.facts_mut().selectivity_guess = None;
+    scan.props.remove(culprit_core::GUESSED_SELECTIVITY);
+    let measured = plan_line(&agent_brief(&postgres, &spill));
+    assert!(measured.contains("the step this finding is about (23% of estimated cost) is `Sort`"), "{measured}");
 }
 
 #[test]

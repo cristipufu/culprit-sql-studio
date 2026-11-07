@@ -658,6 +658,8 @@ fn histograms_for_guessed_filter_columns() {
     plan.root.object = Some(format!("`{}`.`{}`", table.schema, table.name));
     plan.root.predicate = Some(format!("(`{}`.`{}`.`flavor` = 'x')", table.schema, table.name));
     plan.root.props.insert("filtered".into(), "10.00".into());
+    // As the parser records it: the plan's facts, not its display properties, are what the checks read.
+    plan.root.facts_mut().estimated_filtered_percent = Some(10.0);
     s.histograms = Some(vec![]);
     let all = missing_histogram(&s);
     let f: Vec<&Finding> = all.iter().filter(|f| f.subject.name.ends_with(&format!(".{}", table.name))).collect();
@@ -678,7 +680,9 @@ fn histograms_for_guessed_filter_columns() {
     s.server.product = "MariaDB 11.8.9".into();
     assert!(missing_histogram(&s).iter().all(|f| !f.title.contains("flavor")));
     let q = s.workload.as_mut().unwrap().queries.iter_mut().find(|q| q.plan.is_some()).unwrap();
-    q.plan.as_mut().unwrap().root.props.insert("filtered".into(), "100".into());
+    let root = &mut q.plan.as_mut().unwrap().root;
+    root.props.insert("filtered".into(), "100".into());
+    root.facts_mut().estimated_filtered_percent = Some(100.0);
     let maria = missing_histogram(&s);
     let f = maria.iter().find(|f| f.title.contains("flavor")).unwrap();
     assert!(f.title.starts_with("MariaDB guesses"));

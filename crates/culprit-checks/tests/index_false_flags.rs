@@ -785,6 +785,7 @@ fn sampled_limits_do_not_turn_returned_rows_into_filter_evidence() {
         let plan = q.plan.as_mut().unwrap();
         if let Some(limit) = sample_limit {
             plan.props.insert(culprit_core::insights::LIMIT_ROWS.into(), limit.into());
+            plan.facts_mut().sample_limit_rows = limit.parse().ok();
         }
         let node = &mut plan.root;
         let node = if node.object.is_some() { node } else { &mut node.children[0] };
@@ -795,6 +796,7 @@ fn sampled_limits_do_not_turn_returned_rows_into_filter_evidence() {
         node.rows_read = Some(498_573.0);
         // MySQL's fixed 10% for an equality it has no statistics for: a guess, not an estimate.
         node.props.insert("filtered".into(), "10.00".into());
+        node.facts_mut().estimated_filtered_percent = Some(10.0);
         node.est_rows = 49_857.0;
         analyze(s)
     };

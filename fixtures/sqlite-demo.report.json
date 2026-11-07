@@ -342,58 +342,6 @@
     "collection": null,
     "extensions": [],
     "origin": "prepared-report",
-    "parsing": [
-      {
-        "engine": "sqlite",
-        "outcome": "retained",
-        "parser": {
-          "component": "no native parser used",
-          "revision": null,
-          "version": null
-        },
-        "query": "c1b0de997fac4faa"
-      },
-      {
-        "engine": "sqlite",
-        "outcome": "retained",
-        "parser": {
-          "component": "no native parser used",
-          "revision": null,
-          "version": null
-        },
-        "query": "3c81e035bd6f73fa"
-      },
-      {
-        "engine": "sqlite",
-        "outcome": "retained",
-        "parser": {
-          "component": "no native parser used",
-          "revision": null,
-          "version": null
-        },
-        "query": "500217f7b40055be"
-      },
-      {
-        "engine": "sqlite",
-        "outcome": "retained",
-        "parser": {
-          "component": "no native parser used",
-          "revision": null,
-          "version": null
-        },
-        "query": "4971a2de8aecdcc6"
-      },
-      {
-        "engine": "sqlite",
-        "outcome": "retained",
-        "parser": {
-          "component": "no native parser used",
-          "revision": null,
-          "version": null
-        },
-        "query": "84456a5661cab4aa"
-      }
-    ],
     "pipeline": {
       "checks": [
         "missing-index",

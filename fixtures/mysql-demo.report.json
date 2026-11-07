@@ -839,88 +839,6 @@
     "collection": null,
     "extensions": [],
     "origin": "prepared-report",
-    "parsing": [
-      {
-        "engine": "mysql",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-mysql",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "04cd7be9c366fadc"
-      },
-      {
-        "engine": "mysql",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-mysql",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "19bd4ff468839ea3"
-      },
-      {
-        "engine": "mysql",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-mysql",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "c7b5ac9bb4bcecfe"
-      },
-      {
-        "engine": "mysql",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-mysql",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "9b30e6ad79d940fe"
-      },
-      {
-        "engine": "mysql",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-mysql",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "17f97e6ec7a22e0a"
-      },
-      {
-        "engine": "mysql",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-mysql",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "b4c0f3861e32013e"
-      },
-      {
-        "engine": "mysql",
-        "outcome": "no-native-text",
-        "parser": {
-          "component": "culprit-mysql",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "4167fe7f2c20deb7"
-      },
-      {
-        "engine": "mysql",
-        "outcome": "no-native-text",
-        "parser": {
-          "component": "culprit-mysql",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "7f47c8550af0c644"
-      }
-    ],
     "pipeline": {
       "checks": [
         "missing-index",
@@ -2756,8 +2674,8 @@
                           "rows_read": 498573.0,
                           "runtime": null,
                           "seek_predicate": null,
-                          "self_cost": 50940.200000000004,
-                          "subtree_cost": 50940.200000000004,
+                          "self_cost": 50940.2,
+                          "subtree_cost": 50940.2,
                           "table_rows": null,
                           "warnings": []
                         }
@@ -2787,7 +2705,7 @@
                       "runtime": null,
                       "seek_predicate": null,
                       "self_cost": 0.0,
-                      "subtree_cost": 50940.200000000004,
+                      "subtree_cost": 50940.2,
                       "table_rows": null,
                       "warnings": []
                     }
@@ -2816,7 +2734,7 @@
                   "runtime": null,
                   "seek_predicate": null,
                   "self_cost": 0.0,
-                  "subtree_cost": 50940.200000000004,
+                  "subtree_cost": 50940.2,
                   "table_rows": null,
                   "warnings": []
                 }
@@ -2845,15 +2763,15 @@
               "runtime": null,
               "seek_predicate": null,
               "self_cost": 0.0,
-              "subtree_cost": 50940.200000000004,
+              "subtree_cost": 50940.2,
               "table_rows": null,
               "warnings": []
             },
             "statement": "SELECT `customer_id` , CHANNEL , SUM ( `total` ) AS `spent` , COUNT ( * ) AS `orders` FROM `orders` GROUP BY `customer_id` , CHANNEL ORDER BY `spent` DESC LIMIT ?",
-            "total_cost": 50940.200000000004,
+            "total_cost": 50940.2,
             "view": {
               "actual": null,
-              "cost_basis": 50940.200000000004,
+              "cost_basis": 50940.2,
               "cost_note": "`Sort` (using filesort) and `Group` (using temporary table) have no cost of their own in the plan, so no share is given.",
               "focus_checks": [
                 "heavy-query",

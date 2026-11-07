@@ -36,7 +36,7 @@ Cluster-wide statistics require administrator-configured, enabled global views. 
 | Retained plan history | Native `yb_pg_stat_plans` cache counts, weighted average/max elapsed times and first/last use; selected cached bodies stay in saved scans for offline inspection |
 | Analyze | `EXPLAIN (ANALYZE, DIST, VERBOSE, FORMAT JSON)`; measured writes roll back |
 | Virtual indexes | Native HypoPG with `explain --with-index`; session-memory indexes, trusted read-only registration/planning, native estimates and offline labels; requires a direct YSQL backend |
-| Plan files | Native JSON with DIST/storage markers is detected as YugabyteDB; saved scans reparse with the native reader |
+| Plan files | Native JSON with DIST/storage markers is detected as YugabyteDB and read by the native reader |
 
 ### Retained plans
 

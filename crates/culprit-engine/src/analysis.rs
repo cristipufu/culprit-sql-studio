@@ -3,8 +3,7 @@
 use std::sync::Arc;
 
 use culprit_core::{
-    AnalysisOrigin, BaselineReference, ChangeEvent, Check, CollectionProvenance, ComponentVersion,
-    PlanParsingProvenance, Report, Snapshot,
+    AnalysisOrigin, BaselineReference, ChangeEvent, Check, CollectionProvenance, ComponentVersion, Report, Snapshot,
 };
 
 pub(crate) struct Input {
@@ -70,21 +69,19 @@ impl Input {
     }
 }
 
-pub(crate) fn reread(mut input: Input, extra: &[Arc<dyn Check>]) -> Report {
-    let parsing = crate::plans::reparse_saved_traced(&mut input.snapshot);
-    run(input, extra, parsing)
+pub(crate) fn reread(input: Input, extra: &[Arc<dyn Check>]) -> Report {
+    run(input, extra)
 }
 
 pub(crate) fn shared(mut input: Input, extra: &[Arc<dyn Check>]) -> Report {
-    // Parse before redaction drops native text. Retaining the unredacted collection would bypass that boundary.
-    let parsing = crate::plans::reparse_saved_traced(&mut input.snapshot);
+    // Retaining the unredacted collection would bypass the redaction boundary.
     input.snapshot = culprit_core::redact::redact_snapshot(&input.snapshot);
     input.collected = None;
     input.recorded_changes.clear();
     for reference in &mut input.baselines {
         culprit_core::redact::redact_baseline(reference);
     }
-    run(input, extra, parsing)
+    run(input, extra)
 }
 
 pub(crate) fn collected(
@@ -101,10 +98,10 @@ pub(crate) fn collected(
     input.recorded_changes = recorded_changes;
     input.origin = AnalysisOrigin::Collected;
     input.baselines = history_inputs;
-    run(input, extra, Vec::new())
+    run(input, extra)
 }
 
-fn run(input: Input, extra: &[Arc<dyn Check>], parsing: Vec<PlanParsingProvenance>) -> Report {
+fn run(input: Input, extra: &[Arc<dyn Check>]) -> Report {
     let mut report = culprit_checks::analyze_with(input.snapshot, extra);
     if let Some(p) = &mut report.provenance {
         p.origin = input.origin;
@@ -115,7 +112,6 @@ fn run(input: Input, extra: &[Arc<dyn Check>], parsing: Vec<PlanParsingProvenanc
         } else {
             input.last_analyzer
         };
-        p.parsing = parsing;
         // Numeric baselines and workload history are rebuilt from the actual input. Index-age evidence belongs to
         // the engine's historical events, retained separately because checks consume the dates they established.
         for reference in input.baselines.into_iter().filter(|r| r.purpose == culprit_core::BaselinePurpose::IndexAge) {

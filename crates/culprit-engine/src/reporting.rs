@@ -29,9 +29,8 @@ impl Reports<'_> {
         Ok(self.reread(input))
     }
 
-    /// A saved scan as this version of Culprit reads it: its plans parsed again from the text they were captured as
-    /// ([`crate::plans::reparse_saved`]) and its checks run again, so a fix to a parser or a check reaches the scans saved
-    /// before it, and what a person reads in an old scan is what a scan taken now would say about the same data.
+    /// A saved scan with its checks run again, so a fix to a check reaches the scans saved before it: what a person
+    /// reads is what a scan taken now would say about the same data.
     fn reread(&self, input: analysis::Input) -> Report {
         analysis::reread(input, self.checks)
     }
@@ -71,7 +70,6 @@ impl Reports<'_> {
         // A digest is posted where the database's data must not go: every report it reads is checked again from its
         // redacted snapshot, so titles, headlines and details can only quote SQL the lexer has already redacted.
         let recheck = |input: analysis::Input| analysis::shared(input, self.checks);
-        // Plans are read again from their text before the redaction drops it.
         let load = |name: &str, id: &str| {
             let dir = self.paths.reports_dir(name);
             reports::load_analysis_input(&dir.join(format!("{id}.json"))).map(|mut input| {

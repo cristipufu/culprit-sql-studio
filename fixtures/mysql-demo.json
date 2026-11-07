@@ -39,6 +39,8 @@
     "query_count": 6.0,
     "queries": [
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "04cd7be9c366fadc",
         "query_hash": "04cd7be9c366fadc06fc61535eebd2ef5487acf29e34c7828e7618f9245c2f61",
         "text": "SELECT `customer_id` , CHANNEL , SUM ( `total` ) AS `spent` , COUNT ( * ) AS `orders` FROM `orders` GROUP BY `customer_id` , CHANNEL ORDER BY `spent` DESC LIMIT ?",
@@ -80,9 +82,18 @@
             "subtree_cost": 50940.200000000004,
             "self_cost": 0.0,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "select_id": "1"
+            },
+            "facts": {
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": []
             },
             "children": [
               {
@@ -103,9 +114,18 @@
                 "subtree_cost": 50940.200000000004,
                 "self_cost": 0.0,
                 "act_time_ms": null,
+                "runtime": null,
                 "warnings": [],
                 "props": {
                   "using_filesort": "true"
+                },
+                "facts": {
+                  "expression_cache": false,
+                  "conditions": [],
+                  "conversions": [],
+                  "user_functions": [],
+                  "columns_without_statistics": [],
+                  "possible_index_names": []
                 },
                 "children": [
                   {
@@ -126,10 +146,19 @@
                     "subtree_cost": 50940.200000000004,
                     "self_cost": 0.0,
                     "act_time_ms": null,
+                    "runtime": null,
                     "warnings": [],
                     "props": {
                       "using_filesort": "false",
                       "using_temporary_table": "true"
+                    },
+                    "facts": {
+                      "expression_cache": false,
+                      "conditions": [],
+                      "conversions": [],
+                      "user_functions": [],
+                      "columns_without_statistics": [],
+                      "possible_index_names": []
                     },
                     "children": [
                       {
@@ -150,6 +179,7 @@
                         "subtree_cost": 50940.200000000004,
                         "self_cost": 50940.200000000004,
                         "act_time_ms": null,
+                        "runtime": null,
                         "warnings": [],
                         "props": {
                           "data_read_per_join": "106M",
@@ -160,6 +190,17 @@
                           "rows_examined_per_scan": "498573",
                           "rows_produced_per_join": "498573",
                           "used_columns": "id, customer_id, channel, total"
+                        },
+                        "facts": {
+                          "estimated_filtered_percent": 100.0,
+                          "table_alias": "orders",
+                          "expression_cache": false,
+                          "conditions": [],
+                          "conversions": [],
+                          "user_functions": [],
+                          "columns_without_statistics": [],
+                          "possible_index_names": [],
+                          "rows_produced_per_join": 498573.0
                         },
                         "children": []
                       }
@@ -174,11 +215,23 @@
           "props": {
             "query_cost": "50940.20"
           },
+          "facts": {
+            "trigger_timings": [],
+            "conversions": [],
+            "changed_columns": []
+          },
           "raw": "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost_info\": {\n      \"query_cost\": \"50940.20\"\n    },\n    \"ordering_operation\": {\n      \"using_filesort\": true,\n      \"grouping_operation\": {\n        \"using_temporary_table\": true,\n        \"using_filesort\": false,\n        \"table\": {\n          \"table_name\": \"orders\",\n          \"access_type\": \"ALL\",\n          \"rows_examined_per_scan\": 498573,\n          \"rows_produced_per_join\": 498573,\n          \"filtered\": \"100.00\",\n          \"cost_info\": {\n            \"read_cost\": \"1082.90\",\n            \"eval_cost\": \"49857.30\",\n            \"prefix_cost\": \"50940.20\",\n            \"data_read_per_join\": \"106M\"\n          },\n          \"used_columns\": [\n            \"id\",\n            \"customer_id\",\n            \"channel\",\n            \"total\"\n          ]\n        }\n      }\n    }\n  }\n}"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": null,
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "19bd4ff468839ea3",
         "query_hash": "19bd4ff468839ea318af4da05dd337f98ad2e56e3a9ae3b48e96eb75018cf387",
         "text": "SELECT `o` . `id` , `o` . `customer_id` , `o` . `total` FROM `orders` `o` WHERE `o` . `promo_code` = ? ORDER BY `o` . `total` DESC LIMIT ?",
@@ -220,9 +273,18 @@
             "subtree_cost": 50940.2,
             "self_cost": 0.0,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "select_id": "1"
+            },
+            "facts": {
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": []
             },
             "children": [
               {
@@ -243,9 +305,18 @@
                 "subtree_cost": 50940.2,
                 "self_cost": 0.0,
                 "act_time_ms": null,
+                "runtime": null,
                 "warnings": [],
                 "props": {
                   "using_filesort": "true"
+                },
+                "facts": {
+                  "expression_cache": false,
+                  "conditions": [],
+                  "conversions": [],
+                  "user_functions": [],
+                  "columns_without_statistics": [],
+                  "possible_index_names": []
                 },
                 "children": [
                   {
@@ -256,7 +327,7 @@
                     "object": "shop.orders",
                     "index": null,
                     "seek_predicate": null,
-                    "predicate": "(shop.o.promo_code = 'SPRING0')",
+                    "predicate": "(shop.o.promo_code = '?')",
                     "est_rows": 49857.0,
                     "est_executions": 1.0,
                     "act_rows": null,
@@ -266,6 +337,7 @@
                     "subtree_cost": 50940.2,
                     "self_cost": 50940.2,
                     "act_time_ms": null,
+                    "runtime": null,
                     "warnings": [],
                     "props": {
                       "data_read_per_join": "10M",
@@ -276,6 +348,17 @@
                       "rows_examined_per_scan": "498573",
                       "rows_produced_per_join": "49857",
                       "used_columns": "id, customer_id, promo_code, total"
+                    },
+                    "facts": {
+                      "estimated_filtered_percent": 10.0,
+                      "table_alias": "o",
+                      "expression_cache": false,
+                      "conditions": [],
+                      "conversions": [],
+                      "user_functions": [],
+                      "columns_without_statistics": [],
+                      "possible_index_names": [],
+                      "rows_produced_per_join": 49857.0
                     },
                     "children": []
                   }
@@ -288,11 +371,23 @@
           "props": {
             "query_cost": "50940.20"
           },
+          "facts": {
+            "trigger_timings": [],
+            "conversions": [],
+            "changed_columns": []
+          },
           "raw": "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost_info\": {\n      \"query_cost\": \"50940.20\"\n    },\n    \"ordering_operation\": {\n      \"using_filesort\": true,\n      \"table\": {\n        \"table_name\": \"o\",\n        \"access_type\": \"ALL\",\n        \"rows_examined_per_scan\": 498573,\n        \"rows_produced_per_join\": 49857,\n        \"filtered\": \"10.00\",\n        \"cost_info\": {\n          \"read_cost\": \"45954.47\",\n          \"eval_cost\": \"4985.73\",\n          \"prefix_cost\": \"50940.20\",\n          \"data_read_per_join\": \"10M\"\n        },\n        \"used_columns\": [\n          \"id\",\n          \"customer_id\",\n          \"promo_code\",\n          \"total\"\n        ],\n        \"attached_condition\": \"(`shop`.`o`.`promo_code` = 'SPRING0')\"\n      }\n    }\n  }\n}"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": null,
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "c7b5ac9bb4bcecfe",
         "query_hash": "c7b5ac9bb4bcecfe11994fc794d8dc62b9322110c4baa3c5ec103e07a4897b2f",
         "text": "SELECT COUNT ( * ) FROM `orders` WHERE STATUS = ? AND `created_at` >= ?",
@@ -334,9 +429,18 @@
             "subtree_cost": 6088.66,
             "self_cost": 0.0,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "select_id": "1"
+            },
+            "facts": {
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": []
             },
             "children": [
               {
@@ -347,7 +451,7 @@
                 "object": "shop.orders",
                 "index": "ix_orders_status_created",
                 "seek_predicate": "range on status, created_at",
-                "predicate": "((shop.orders.status = 'shipped') and (shop.orders.created_at >= TIMESTAMP'2026-09-05 00:00:00'))",
+                "predicate": "((shop.orders.status = '?') and (shop.orders.created_at >= TIMESTAMP'?'))",
                 "est_rows": 29126.0,
                 "est_executions": 1.0,
                 "act_rows": null,
@@ -357,6 +461,7 @@
                 "subtree_cost": 6088.66,
                 "self_cost": 6088.66,
                 "act_time_ms": null,
+                "runtime": null,
                 "warnings": [],
                 "props": {
                   "data_read_per_join": "6M",
@@ -372,6 +477,24 @@
                   "used_key_parts": "status, created_at",
                   "using_index": "true"
                 },
+                "facts": {
+                  "estimated_filtered_percent": 100.0,
+                  "table_alias": "orders",
+                  "expression_cache": false,
+                  "conditions": [],
+                  "conversions": [],
+                  "user_functions": [],
+                  "columns_without_statistics": [],
+                  "used_key_parts": [
+                    "status",
+                    "created_at"
+                  ],
+                  "possible_index_names": [
+                    "ix_orders_status",
+                    "ix_orders_status_created"
+                  ],
+                  "rows_produced_per_join": 29126.0
+                },
                 "children": []
               }
             ]
@@ -381,11 +504,23 @@
           "props": {
             "query_cost": "6088.66"
           },
+          "facts": {
+            "trigger_timings": [],
+            "conversions": [],
+            "changed_columns": []
+          },
           "raw": "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost_info\": {\n      \"query_cost\": \"6088.66\"\n    },\n    \"table\": {\n      \"table_name\": \"orders\",\n      \"access_type\": \"range\",\n      \"possible_keys\": [\n        \"ix_orders_status\",\n        \"ix_orders_status_created\"\n      ],\n      \"key\": \"ix_orders_status_created\",\n      \"used_key_parts\": [\n        \"status\",\n        \"created_at\"\n      ],\n      \"key_length\": \"71\",\n      \"rows_examined_per_scan\": 29126,\n      \"rows_produced_per_join\": 29126,\n      \"filtered\": \"100.00\",\n      \"using_index\": true,\n      \"cost_info\": {\n        \"read_cost\": \"3176.06\",\n        \"eval_cost\": \"2912.60\",\n        \"prefix_cost\": \"6088.66\",\n        \"data_read_per_join\": \"6M\"\n      },\n      \"used_columns\": [\n        \"status\",\n        \"created_at\"\n      ],\n      \"attached_condition\": \"((`shop`.`orders`.`status` = 'shipped') and (`shop`.`orders`.`created_at` >= TIMESTAMP'2026-09-05 00:00:00'))\"\n    }\n  }\n}"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": null,
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "9b30e6ad79d940fe",
         "query_hash": "9b30e6ad79d940fe51b541498b73f65bfd7efa2c0d3ba63e5117d170d92c1ff3",
         "text": "SELECT `id` , NAME , `price` FROM `products` WHERE `id` = ?",
@@ -427,9 +562,18 @@
             "subtree_cost": 1.0,
             "self_cost": 0.9,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "select_id": "1"
+            },
+            "facts": {
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": []
             },
             "children": [
               {
@@ -450,6 +594,7 @@
                 "subtree_cost": 0.1,
                 "self_cost": 0.1,
                 "act_time_ms": null,
+                "runtime": null,
                 "warnings": [],
                 "props": {
                   "data_read_per_join": "592",
@@ -465,6 +610,22 @@
                   "used_columns": "id, name, price",
                   "used_key_parts": "id"
                 },
+                "facts": {
+                  "estimated_filtered_percent": 100.0,
+                  "table_alias": "products",
+                  "expression_cache": false,
+                  "conditions": [],
+                  "conversions": [],
+                  "user_functions": [],
+                  "columns_without_statistics": [],
+                  "used_key_parts": [
+                    "id"
+                  ],
+                  "possible_index_names": [
+                    "PRIMARY"
+                  ],
+                  "rows_produced_per_join": 1.0
+                },
                 "children": []
               }
             ]
@@ -474,11 +635,23 @@
           "props": {
             "query_cost": "1.00"
           },
+          "facts": {
+            "trigger_timings": [],
+            "conversions": [],
+            "changed_columns": []
+          },
           "raw": "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost_info\": {\n      \"query_cost\": \"1.00\"\n    },\n    \"table\": {\n      \"table_name\": \"products\",\n      \"access_type\": \"const\",\n      \"possible_keys\": [\n        \"PRIMARY\"\n      ],\n      \"key\": \"PRIMARY\",\n      \"used_key_parts\": [\n        \"id\"\n      ],\n      \"key_length\": \"4\",\n      \"ref\": [\n        \"const\"\n      ],\n      \"rows_examined_per_scan\": 1,\n      \"rows_produced_per_join\": 1,\n      \"filtered\": \"100.00\",\n      \"cost_info\": {\n        \"read_cost\": \"0.00\",\n        \"eval_cost\": \"0.10\",\n        \"prefix_cost\": \"0.00\",\n        \"data_read_per_join\": \"592\"\n      },\n      \"used_columns\": [\n        \"id\",\n        \"name\",\n        \"price\"\n      ]\n    }\n  }\n}"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": null,
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "17f97e6ec7a22e0a",
         "query_hash": "17f97e6ec7a22e0ab529234ac4f8c9a2e19c92ae391b601764b707c7cf069ee2",
         "text": "SELECT `id` , STATUS , `total` , `created_at` FROM `orders` WHERE `customer_id` = ? ORDER BY `created_at` DESC LIMIT ?",
@@ -520,9 +693,18 @@
             "subtree_cost": 2.14,
             "self_cost": 0.0,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "select_id": "1"
+            },
+            "facts": {
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": []
             },
             "children": [
               {
@@ -543,9 +725,18 @@
                 "subtree_cost": 2.14,
                 "self_cost": 0.0,
                 "act_time_ms": null,
+                "runtime": null,
                 "warnings": [],
                 "props": {
                   "using_filesort": "true"
+                },
+                "facts": {
+                  "expression_cache": false,
+                  "conditions": [],
+                  "conversions": [],
+                  "user_functions": [],
+                  "columns_without_statistics": [],
+                  "possible_index_names": []
                 },
                 "children": [
                   {
@@ -566,6 +757,7 @@
                     "subtree_cost": 2.14,
                     "self_cost": 2.14,
                     "act_time_ms": null,
+                    "runtime": null,
                     "warnings": [],
                     "props": {
                       "data_read_per_join": "672",
@@ -581,6 +773,22 @@
                       "used_columns": "id, customer_id, status, total, created_at",
                       "used_key_parts": "customer_id"
                     },
+                    "facts": {
+                      "estimated_filtered_percent": 100.0,
+                      "table_alias": "orders",
+                      "expression_cache": false,
+                      "conditions": [],
+                      "conversions": [],
+                      "user_functions": [],
+                      "columns_without_statistics": [],
+                      "used_key_parts": [
+                        "customer_id"
+                      ],
+                      "possible_index_names": [
+                        "fk_orders_customer"
+                      ],
+                      "rows_produced_per_join": 3.0
+                    },
                     "children": []
                   }
                 ]
@@ -592,11 +800,23 @@
           "props": {
             "query_cost": "2.14"
           },
+          "facts": {
+            "trigger_timings": [],
+            "conversions": [],
+            "changed_columns": []
+          },
           "raw": "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost_info\": {\n      \"query_cost\": \"2.14\"\n    },\n    \"ordering_operation\": {\n      \"using_filesort\": true,\n      \"table\": {\n        \"table_name\": \"orders\",\n        \"access_type\": \"ref\",\n        \"possible_keys\": [\n          \"fk_orders_customer\"\n        ],\n        \"key\": \"fk_orders_customer\",\n        \"used_key_parts\": [\n          \"customer_id\"\n        ],\n        \"key_length\": \"4\",\n        \"ref\": [\n          \"const\"\n        ],\n        \"rows_examined_per_scan\": 3,\n        \"rows_produced_per_join\": 3,\n        \"filtered\": \"100.00\",\n        \"cost_info\": {\n          \"read_cost\": \"1.84\",\n          \"eval_cost\": \"0.30\",\n          \"prefix_cost\": \"2.14\",\n          \"data_read_per_join\": \"672\"\n        },\n        \"used_columns\": [\n          \"id\",\n          \"customer_id\",\n          \"status\",\n          \"total\",\n          \"created_at\"\n        ]\n      }\n    }\n  }\n}"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": null,
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "b4c0f3861e32013e",
         "query_hash": "b4c0f3861e32013e5cbd16b0418e10c45d5196b5f665f6010ac10fdfcfe6209c",
         "text": "SELECT `oi` . `quantity` , `oi` . `price` , `p` . `name` FROM `order_items` `oi` JOIN `products` `p` ON `p` . `id` = `oi` . `product_id` WHERE `oi` . `order_id` = ?",
@@ -638,9 +858,18 @@
             "subtree_cost": 4.36,
             "self_cost": 0.0,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "select_id": "1"
+            },
+            "facts": {
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": []
             },
             "children": [
               {
@@ -661,8 +890,17 @@
                 "subtree_cost": 4.36,
                 "self_cost": 0.0,
                 "act_time_ms": null,
+                "runtime": null,
                 "warnings": [],
                 "props": {},
+                "facts": {
+                  "expression_cache": false,
+                  "conditions": [],
+                  "conversions": [],
+                  "user_functions": [],
+                  "columns_without_statistics": [],
+                  "possible_index_names": []
+                },
                 "children": [
                   {
                     "id": 2,
@@ -682,6 +920,7 @@
                     "subtree_cost": 2.2,
                     "self_cost": 2.2,
                     "act_time_ms": null,
+                    "runtime": null,
                     "warnings": [],
                     "props": {
                       "data_read_per_join": "48",
@@ -697,6 +936,23 @@
                       "used_columns": "order_id, product_id, quantity, price",
                       "used_key_parts": "order_id"
                     },
+                    "facts": {
+                      "estimated_filtered_percent": 100.0,
+                      "table_alias": "oi",
+                      "expression_cache": false,
+                      "conditions": [],
+                      "conversions": [],
+                      "user_functions": [],
+                      "columns_without_statistics": [],
+                      "used_key_parts": [
+                        "order_id"
+                      ],
+                      "possible_index_names": [
+                        "fk_items_order",
+                        "fk_items_product"
+                      ],
+                      "rows_produced_per_join": 2.0
+                    },
                     "children": []
                   },
                   {
@@ -708,15 +964,16 @@
                     "index": "PRIMARY",
                     "seek_predicate": "id = shop.oi.product_id",
                     "predicate": null,
-                    "est_rows": 2.0,
-                    "est_executions": 1.0,
+                    "est_rows": 1.0,
+                    "est_executions": 2.0,
                     "act_rows": null,
                     "act_executions": null,
-                    "rows_read": 1.0,
+                    "rows_read": 2.0,
                     "table_rows": null,
                     "subtree_cost": 2.16,
                     "self_cost": 2.16,
                     "act_time_ms": null,
+                    "runtime": null,
                     "warnings": [],
                     "props": {
                       "data_read_per_join": "1K",
@@ -732,6 +989,22 @@
                       "used_columns": "id, name",
                       "used_key_parts": "id"
                     },
+                    "facts": {
+                      "estimated_filtered_percent": 100.0,
+                      "table_alias": "p",
+                      "expression_cache": false,
+                      "conditions": [],
+                      "conversions": [],
+                      "user_functions": [],
+                      "columns_without_statistics": [],
+                      "used_key_parts": [
+                        "id"
+                      ],
+                      "possible_index_names": [
+                        "PRIMARY"
+                      ],
+                      "rows_produced_per_join": 2.0
+                    },
                     "children": []
                   }
                 ]
@@ -743,9 +1016,19 @@
           "props": {
             "query_cost": "4.36"
           },
+          "facts": {
+            "trigger_timings": [],
+            "conversions": [],
+            "changed_columns": []
+          },
           "raw": "{\n  \"query_block\": {\n    \"select_id\": 1,\n    \"cost_info\": {\n      \"query_cost\": \"4.36\"\n    },\n    \"nested_loop\": [\n      {\n        \"table\": {\n          \"table_name\": \"oi\",\n          \"access_type\": \"ref\",\n          \"possible_keys\": [\n            \"fk_items_order\",\n            \"fk_items_product\"\n          ],\n          \"key\": \"fk_items_order\",\n          \"used_key_parts\": [\n            \"order_id\"\n          ],\n          \"key_length\": \"4\",\n          \"ref\": [\n            \"const\"\n          ],\n          \"rows_examined_per_scan\": 2,\n          \"rows_produced_per_join\": 2,\n          \"filtered\": \"100.00\",\n          \"cost_info\": {\n            \"read_cost\": \"2.00\",\n            \"eval_cost\": \"0.20\",\n            \"prefix_cost\": \"2.20\",\n            \"data_read_per_join\": \"48\"\n          },\n          \"used_columns\": [\n            \"order_id\",\n            \"product_id\",\n            \"quantity\",\n            \"price\"\n          ]\n        }\n      },\n      {\n        \"table\": {\n          \"table_name\": \"p\",\n          \"access_type\": \"eq_ref\",\n          \"possible_keys\": [\n            \"PRIMARY\"\n          ],\n          \"key\": \"PRIMARY\",\n          \"used_key_parts\": [\n            \"id\"\n          ],\n          \"key_length\": \"4\",\n          \"ref\": [\n            \"shop.oi.product_id\"\n          ],\n          \"rows_examined_per_scan\": 1,\n          \"rows_produced_per_join\": 2,\n          \"filtered\": \"100.00\",\n          \"cost_info\": {\n            \"read_cost\": \"1.96\",\n            \"eval_cost\": \"0.20\",\n            \"prefix_cost\": \"4.36\",\n            \"data_read_per_join\": \"1K\"\n          },\n          \"used_columns\": [\n            \"id\",\n            \"name\"\n          ]\n        }\n      }\n    ]\n  }\n}"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": null,
+        "rows_affected": null,
+        "plan_id": null
       }
     ]
   },

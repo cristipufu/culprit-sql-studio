@@ -82,20 +82,6 @@ fn empty_showplan(doc: &Document) -> bool {
             .all(|n| matches!(n.tag_name().name(), "ShowPlanXML" | "BatchSequence" | "Batch" | "Statements"))
 }
 
-/// A plan a scan saved, read again from its XML with this parser, so a scan saved by an older Culprit reads the way
-/// one taken today would: the same statement of the document (by the `QueryHash` the saved plan carries). `None` when
-/// the plan kept no XML, or this parser can't read it.
-pub fn reparse(saved: &Plan) -> Option<Plan> {
-    let mut plan = parse_statement(saved.raw.as_deref()?, saved.facts().query_hash.as_deref()).ok()?;
-    if let Some(last_run_at) = saved.facts().last_run_at.clone() {
-        plan.facts_mut().last_run_at = Some(last_run_at);
-    }
-    if let Some(last_run_at) = saved.props.get("LastRunAt") {
-        plan.props.insert("LastRunAt".into(), last_run_at.clone());
-    }
-    Some(plan)
-}
-
 /// Parse the statement whose `QueryHash` matches (a batch or procedure plan holds every statement), or the most
 /// expensive statement when none matches.
 pub fn parse_statement(xml: &str, query_hash: Option<&str>) -> Result<Plan> {
@@ -883,7 +869,6 @@ mod tests {
         assert_eq!(condition.total_cost, 1.0);
         assert_eq!(condition.props.get("CompileTime").map(String::as_str), Some("2"));
         assert!(condition.statement.as_deref().unwrap().starts_with("IF NOT EXISTS"));
-        assert_eq!(reparse(&condition).unwrap().root.op, "Index Seek");
         assert_eq!(parse(xml).unwrap().root.op, "Table Scan", "the default still picks the most costly statement");
         assert_eq!(parse_statement(xml, Some("0x02")).unwrap().kind, PlanKind::Actual);
     }

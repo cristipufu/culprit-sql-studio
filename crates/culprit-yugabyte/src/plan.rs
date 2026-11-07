@@ -118,27 +118,12 @@ pub(crate) fn redacted_constants(plan: &mut Plan) {
     mark(&mut plan.root);
 }
 
-pub fn reparse(saved: &Plan) -> Option<Plan> {
-    let mut plan = parse(saved.raw.as_deref()?, saved.kind, saved.statement.as_deref()).ok()?;
-    let virtual_indexes = saved.facts().virtual_indexes.clone();
-    if !virtual_indexes.is_empty() {
-        plan.facts_mut().virtual_indexes = virtual_indexes;
-    }
-    if let Some(indexes) = saved.props.get("VirtualIndexes") {
-        plan.props.insert("VirtualIndexes".into(), indexes.clone());
-    }
-    if saved.facts().constants_redacted {
-        redacted_constants(&mut plan);
-    }
-    Some(plan)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn retained_qpm_plans_keep_redaction_and_missing_estimates_when_reparsed() {
+    fn retained_qpm_plans_keep_redaction_and_missing_estimates() {
         let mut plan = parse(include_str!("../tests/data/qpm.json"), PlanKind::Estimated, None).unwrap();
         redacted_constants(&mut plan);
         assert!(plan.facts().constants_redacted && plan.facts().estimated_cost_unavailable);
@@ -146,14 +131,10 @@ mod tests {
         assert!(plan.root.facts().selectivity_guess.is_some());
         assert!(plan.root.kept_share().is_none());
         assert!(plan.root.act_rows.is_none() && plan.root.act_time_ms.is_none());
-        let replay = reparse(&plan).unwrap();
-        assert!(replay.facts().constants_redacted);
-        assert!(replay.root.facts().selectivity_guess.is_some());
-        assert_eq!(replay.kind, PlanKind::Estimated);
     }
 
     #[test]
-    fn native_storage_filters_and_counters_survive_replay_without_heap_measurements() {
+    fn native_storage_filters_and_counters_without_heap_measurements() {
         let raw = include_str!("../tests/data/scan.json");
         let plan =
             parse(raw, PlanKind::Actual, Some("SELECT * FROM public.orders WHERE customer_id = 42 LIMIT 10")).unwrap();
@@ -164,9 +145,6 @@ mod tests {
         assert!(scan.predicate.as_deref().unwrap().contains("customer_id = 42"));
         assert!(scan.facts().conditions.iter().any(|s| s.contains("customer_id = 42")));
         assert!(plan.nodes().iter().all(|n| n.table_rows.is_none() && n.facts().heap_fetches.is_none()));
-        let replay = reparse(&plan).unwrap();
-        assert_eq!(replay.facts().docdb, plan.facts().docdb);
-        assert_eq!(replay.root.children[0].rows_read_total(), Some(19_492.0));
     }
 
     #[test]
@@ -193,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn generic_ysql_ranges_and_arrays_keep_the_shared_parameter_evidence_on_replay() {
+    fn generic_ysql_ranges_and_arrays_keep_the_shared_parameter_evidence() {
         for predicate in ["created_at >= $1", "id = ANY($1)"] {
             let raw = serde_json::json!([{"Plan":{"Node Type":"Seq Scan","Schema":"public","Relation Name":"orders",
                 "Plan Rows":6667,"Total Cost":149,"Filter":predicate}}])
@@ -203,7 +181,6 @@ mod tests {
             assert!(plan.has_guess());
             assert_eq!(plan.root.kept_share(), None);
             assert_eq!(plan.guess(&plan.root), Some(culprit_core::Guess::Rows));
-            assert!(reparse(&plan).unwrap().has_guess());
             assert!(!plan.root.facts().selectivity_guess.as_deref().unwrap().contains("may well use an index"));
         }
     }

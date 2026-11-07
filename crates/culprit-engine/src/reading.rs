@@ -15,9 +15,9 @@ use culprit_core::{Finding, Plan, Report, Result, format};
 
 use crate::reports;
 
-/// A saved report or snapshot, read the way the app opens one: its plans parsed again from their text
-/// ([`crate::plans::reparse_saved`]), read against the scans saved beside it ([`reports::rebase_on_scans`]), its checks run
-/// again, and each plan marked against the catalog and given its insights.
+/// A saved report or snapshot, read the way the app opens one: against the scans saved beside it
+/// ([`reports::rebase_on_scans`]), its checks run again, and each plan marked against the catalog and given its
+/// insights.
 pub fn open(path: &Path) -> Result<Report> {
     let mut input = reports::load_analysis_input(path)?;
     if let Some(dir) = path.parent() {
@@ -26,8 +26,8 @@ pub fn open(path: &Path) -> Result<Report> {
     Ok(crate::analysis::reread(input, &[]))
 }
 
-/// Refresh presentation on a legacy or externally assembled report without replacing its findings. Reports returned
-/// by Workspace or `open` already have this presentation; clients render those directly.
+/// Give a report assembled outside the workspace (`culprit_checks::analyze`) the presentation the app adds, without
+/// replacing its findings. Reports returned by Workspace or `open` already have it; clients render those directly.
 pub fn for_reading(mut report: Report) -> Report {
     culprit_core::insights::mark_snapshot(&mut report.snapshot);
     culprit_core::insights::mark_snapshot_keys(&mut report.snapshot);

@@ -752,9 +752,6 @@ mod tests {
         let again = culprit_core::redact::redact_plan(&plan);
         assert_eq!(again.props.get(culprit_core::insights::LIMIT_ROWS).map(String::as_str), Some("50"));
         assert!(!serde_json::to_string(&again).unwrap().contains("SPRING"));
-        // A re-read of the saved plan keeps it too.
-        let reread = plan_json::reparse(&plan, Some("shop")).unwrap();
-        assert_eq!(reread.props.get(culprit_core::insights::LIMIT_ROWS).map(String::as_str), Some("50"));
         // A LIMIT written inside the sample's literal is the application's data, not the statement's shape: it never
         // reaches the plan, which redaction would otherwise leave alone.
         let note = "SELECT id FROM orders WHERE promo_code = 'LIMIT 4242' LIMIT ?";

@@ -5,6 +5,5 @@ import type { BaselineReference } from "./BaselineReference";
 import type { CollectionProvenance } from "./CollectionProvenance";
 import type { ComponentVersion } from "./ComponentVersion";
 import type { PipelineProvenance } from "./PipelineProvenance";
-import type { PlanParsingProvenance } from "./PlanParsingProvenance";
 
-export type AnalysisProvenance = { analyzer: ComponentVersion, pipeline: PipelineProvenance, extensions: Array<AnalysisExtension>, origin: AnalysisOrigin, collection: CollectionProvenance | null, previous_analyzer: ComponentVersion | null, parsing: Array<PlanParsingProvenance>, baselines: Array<BaselineReference>, };
+export type AnalysisProvenance = { analyzer: ComponentVersion, pipeline: PipelineProvenance, extensions: Array<AnalysisExtension>, origin: AnalysisOrigin, collection: CollectionProvenance | null, previous_analyzer: ComponentVersion | null, baselines: Array<BaselineReference>, };

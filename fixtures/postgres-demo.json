@@ -41,6 +41,8 @@
     "query_count": 16.0,
     "queries": [
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "9065391607317686058",
         "query_hash": null,
         "text": "SELECT id, note FROM orders WHERE created_at > now() - interval $1 ORDER BY note",
@@ -49,7 +51,7 @@
         "executions": 214.0,
         "total_time_ms": 71022.31686599995,
         "mean_time_ms": 331.8799853551402,
-        "max_time_ms": 405.97684499999997,
+        "max_time_ms": 405.976845,
         "stddev_time_ms": 21.93120453003782,
         "cpu_time_ms": null,
         "rows": 52768740.0,
@@ -82,6 +84,7 @@
             "subtree_cost": 163472.94,
             "self_cost": 77949.7,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "Async Capable": "false",
@@ -90,6 +93,16 @@
               "Plan Width": "74",
               "Startup Cost": "85828.82",
               "Workers Planned": "2"
+            },
+            "facts": {
+              "workers_planned": 2,
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": [],
+              "estimated_row_bytes": 74.0
             },
             "children": [
               {
@@ -101,7 +114,7 @@
                 "index": null,
                 "seek_predicate": null,
                 "predicate": null,
-                "est_rows": 277777.0,
+                "est_rows": 666664.7999999999,
                 "est_executions": 1.0,
                 "act_rows": null,
                 "act_executions": null,
@@ -110,15 +123,30 @@
                 "subtree_cost": 85523.24,
                 "self_cost": 38154.94,
                 "act_time_ms": null,
+                "runtime": null,
                 "warnings": [],
                 "props": {
                   "Async Capable": "false",
                   "Disabled": "false",
                   "Parallel Aware": "false",
                   "Parent Relationship": "Outer",
+                  "Plan Rows per process": "277777",
                   "Plan Width": "74",
                   "Sort Key": "orders.note",
                   "Startup Cost": "84828.79"
+                },
+                "facts": {
+                  "parent_relationship": {
+                    "kind": "outer"
+                  },
+                  "estimated_rows_per_process": 277777.0,
+                  "expression_cache": false,
+                  "conditions": [],
+                  "conversions": [],
+                  "user_functions": [],
+                  "columns_without_statistics": [],
+                  "possible_index_names": [],
+                  "estimated_row_bytes": 74.0
                 },
                 "children": [
                   {
@@ -130,15 +158,16 @@
                     "index": null,
                     "seek_predicate": null,
                     "predicate": "(orders.created_at > (now() - $1))",
-                    "est_rows": 277777.0,
+                    "est_rows": 666664.7999999999,
                     "est_executions": 1.0,
                     "act_rows": null,
                     "act_executions": null,
                     "rows_read": null,
-                    "table_rows": null,
+                    "table_rows": 1999995.0,
                     "subtree_cost": 47368.3,
                     "self_cost": 47368.3,
                     "act_time_ms": null,
+                    "runtime": null,
                     "warnings": [],
                     "props": {
                       "Alias": "orders",
@@ -147,8 +176,27 @@
                       "Filter": "(orders.created_at > (now() - $1))",
                       "Parallel Aware": "true",
                       "Parent Relationship": "Outer",
+                      "Plan Rows per process": "277777",
                       "Plan Width": "74",
+                      "Selectivity": "Planned with a default selectivity for its parameter (a fixed share of the rows for a range or a pattern, 10 values for ANY): with a real value the planner may well use an index instead.",
                       "Startup Cost": "0.0"
+                    },
+                    "facts": {
+                      "selectivity_guess": "Planned with a default selectivity for its parameter (a fixed share of the rows for a range or a pattern, 10 values for ANY): with a real value the planner may well use an index instead.",
+                      "parent_relationship": {
+                        "kind": "outer"
+                      },
+                      "estimated_rows_per_process": 277777.0,
+                      "table_alias": "orders",
+                      "expression_cache": false,
+                      "conditions": [
+                        "(orders.created_at > (now() - $1))"
+                      ],
+                      "conversions": [],
+                      "user_functions": [],
+                      "columns_without_statistics": [],
+                      "possible_index_names": [],
+                      "estimated_row_bytes": 74.0
                     },
                     "children": []
                   }
@@ -159,14 +207,43 @@
           "warnings": [],
           "index_hints": [],
           "props": {
+            "Generic Plan": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
             "JIT": "{\"Functions\":4,\"Options\":{\"Deforming\":true,\"Expressions\":true,\"Inlining\":false,\"Optimization\":false}}",
-            "Query Identifier": "-8094429823453666749"
+            "Planned Text": "Planned from the text pg_stat_statements keeps, in which the application's constants are $n placeholders like its parameters, each typed as PostgreSQL infers it: PostgreSQL identifies what it planned as query -8094429823453666749, not as this statement (9065391607317686058). Constants the application wrote into the statement are unknown values here, so its own runs, which have them, can be planned differently."
+          },
+          "facts": {
+            "trigger_timings": [],
+            "generic_plan_reason": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "conversions": [],
+            "changed_columns": []
           },
           "raw": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Gather Merge\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Startup Cost\": 85828.82,\n      \"Total Cost\": 163472.94,\n      \"Plan Rows\": 666665,\n      \"Plan Width\": 74,\n      \"Disabled\": false,\n      \"Output\": [\"id\", \"note\"],\n      \"Workers Planned\": 2,\n      \"Plans\": [\n        {\n          \"Node Type\": \"Sort\",\n          \"Parent Relationship\": \"Outer\",\n          \"Parallel Aware\": false,\n          \"Async Capable\": false,\n          \"Startup Cost\": 84828.79,\n          \"Total Cost\": 85523.24,\n          \"Plan Rows\": 277777,\n          \"Plan Width\": 74,\n          \"Disabled\": false,\n          \"Output\": [\"id\", \"note\"],\n          \"Sort Key\": [\"orders.note\"],\n          \"Plans\": [\n            {\n              \"Node Type\": \"Seq Scan\",\n              \"Parent Relationship\": \"Outer\",\n              \"Parallel Aware\": true,\n              \"Async Capable\": false,\n              \"Relation Name\": \"orders\",\n              \"Schema\": \"public\",\n              \"Alias\": \"orders\",\n              \"Startup Cost\": 0.00,\n              \"Total Cost\": 47368.30,\n              \"Plan Rows\": 277777,\n              \"Plan Width\": 74,\n              \"Disabled\": false,\n              \"Output\": [\"id\", \"note\"],\n              \"Filter\": \"(orders.created_at > (now() - $1))\"\n            }\n          ]\n        }\n      ]\n    },\n    \"Query Identifier\": -8094429823453666749,\n    \"JIT\": {\n      \"Functions\": 4,\n      \"Options\": {\n        \"Inlining\": false,\n        \"Optimization\": false,\n        \"Expressions\": true,\n        \"Deforming\": true\n      }\n    }\n  }\n]"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": {
+          "failed": null,
+          "aborted": null,
+          "aborted_mean_ms": null,
+          "warnings": null,
+          "top_error": null,
+          "plan_ms": null,
+          "plans": null,
+          "jit_ms": null,
+          "jit_functions": null,
+          "log_bytes": null,
+          "log_share": null,
+          "log_full_pages": null,
+          "row_bytes": 74.0,
+          "compile_history": null
+        },
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "5308963031944094559",
         "query_hash": null,
         "text": "SELECT id, status, total, created_at FROM orders WHERE customer_id = $1 ORDER BY created_at DESC LIMIT $2",
@@ -208,6 +285,7 @@
             "subtree_cost": 44202.93,
             "self_cost": 0.0,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "Async Capable": "false",
@@ -215,6 +293,15 @@
               "Parallel Aware": "false",
               "Plan Width": "29",
               "Startup Cost": "44202.93"
+            },
+            "facts": {
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": [],
+              "estimated_row_bytes": 29.0
             },
             "children": [
               {
@@ -235,6 +322,7 @@
                 "subtree_cost": 44202.96,
                 "self_cost": 0.22000000000116415,
                 "act_time_ms": null,
+                "runtime": null,
                 "warnings": [],
                 "props": {
                   "Async Capable": "false",
@@ -244,6 +332,18 @@
                   "Plan Width": "29",
                   "Sort Key": "orders.created_at DESC",
                   "Startup Cost": "44202.93"
+                },
+                "facts": {
+                  "parent_relationship": {
+                    "kind": "outer"
+                  },
+                  "expression_cache": false,
+                  "conditions": [],
+                  "conversions": [],
+                  "user_functions": [],
+                  "columns_without_statistics": [],
+                  "possible_index_names": [],
+                  "estimated_row_bytes": 29.0
                 },
                 "children": [
                   {
@@ -264,6 +364,7 @@
                     "subtree_cost": 44202.74,
                     "self_cost": 1001.0999999999985,
                     "act_time_ms": null,
+                    "runtime": null,
                     "warnings": [],
                     "props": {
                       "Async Capable": "false",
@@ -275,6 +376,19 @@
                       "Startup Cost": "1000.0",
                       "Workers Planned": "2"
                     },
+                    "facts": {
+                      "parent_relationship": {
+                        "kind": "outer"
+                      },
+                      "workers_planned": 2,
+                      "expression_cache": false,
+                      "conditions": [],
+                      "conversions": [],
+                      "user_functions": [],
+                      "columns_without_statistics": [],
+                      "possible_index_names": [],
+                      "estimated_row_bytes": 29.0
+                    },
                     "children": [
                       {
                         "id": 3,
@@ -285,15 +399,16 @@
                         "index": null,
                         "seek_predicate": null,
                         "predicate": "(orders.customer_id = $1)",
-                        "est_rows": 5.0,
+                        "est_rows": 12.0,
                         "est_executions": 1.0,
                         "act_rows": null,
                         "act_executions": null,
-                        "rows_read": null,
-                        "table_rows": null,
+                        "rows_read": 1999995.0,
+                        "table_rows": 1999995.0,
                         "subtree_cost": 43201.64,
                         "self_cost": 43201.64,
                         "act_time_ms": null,
+                        "runtime": null,
                         "warnings": [],
                         "props": {
                           "Alias": "orders",
@@ -302,8 +417,25 @@
                           "Filter": "(orders.customer_id = $1)",
                           "Parallel Aware": "true",
                           "Parent Relationship": "Outer",
+                          "Plan Rows per process": "5",
                           "Plan Width": "29",
                           "Startup Cost": "0.0"
+                        },
+                        "facts": {
+                          "parent_relationship": {
+                            "kind": "outer"
+                          },
+                          "estimated_rows_per_process": 5.0,
+                          "table_alias": "orders",
+                          "expression_cache": false,
+                          "conditions": [
+                            "(orders.customer_id = $1)"
+                          ],
+                          "conversions": [],
+                          "user_functions": [],
+                          "columns_without_statistics": [],
+                          "possible_index_names": [],
+                          "estimated_row_bytes": 29.0
                         },
                         "children": []
                       }
@@ -316,13 +448,42 @@
           "warnings": [],
           "index_hints": [],
           "props": {
-            "Query Identifier": "-3115203753024809050"
+            "Generic Plan": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "Planned Text": "Planned from the text pg_stat_statements keeps, in which the application's constants are $n placeholders like its parameters, each typed as PostgreSQL infers it: PostgreSQL identifies what it planned as query -3115203753024809050, not as this statement (5308963031944094559). Constants the application wrote into the statement are unknown values here, so its own runs, which have them, can be planned differently."
+          },
+          "facts": {
+            "trigger_timings": [],
+            "generic_plan_reason": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "conversions": [],
+            "changed_columns": []
           },
           "raw": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Limit\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Startup Cost\": 44202.93,\n      \"Total Cost\": 44202.93,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 29,\n      \"Disabled\": false,\n      \"Output\": [\"id\", \"status\", \"total\", \"created_at\"],\n      \"Plans\": [\n        {\n          \"Node Type\": \"Sort\",\n          \"Parent Relationship\": \"Outer\",\n          \"Parallel Aware\": false,\n          \"Async Capable\": false,\n          \"Startup Cost\": 44202.93,\n          \"Total Cost\": 44202.96,\n          \"Plan Rows\": 11,\n          \"Plan Width\": 29,\n          \"Disabled\": false,\n          \"Output\": [\"id\", \"status\", \"total\", \"created_at\"],\n          \"Sort Key\": [\"orders.created_at DESC\"],\n          \"Plans\": [\n            {\n              \"Node Type\": \"Gather\",\n              \"Parent Relationship\": \"Outer\",\n              \"Parallel Aware\": false,\n              \"Async Capable\": false,\n              \"Startup Cost\": 1000.00,\n              \"Total Cost\": 44202.74,\n              \"Plan Rows\": 11,\n              \"Plan Width\": 29,\n              \"Disabled\": false,\n              \"Output\": [\"id\", \"status\", \"total\", \"created_at\"],\n              \"Workers Planned\": 2,\n              \"Single Copy\": false,\n              \"Plans\": [\n                {\n                  \"Node Type\": \"Seq Scan\",\n                  \"Parent Relationship\": \"Outer\",\n                  \"Parallel Aware\": true,\n                  \"Async Capable\": false,\n                  \"Relation Name\": \"orders\",\n                  \"Schema\": \"public\",\n                  \"Alias\": \"orders\",\n                  \"Startup Cost\": 0.00,\n                  \"Total Cost\": 43201.64,\n                  \"Plan Rows\": 5,\n                  \"Plan Width\": 29,\n                  \"Disabled\": false,\n                  \"Output\": [\"id\", \"status\", \"total\", \"created_at\"],\n                  \"Filter\": \"(orders.customer_id = $1)\"\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    },\n    \"Query Identifier\": -3115203753024809050\n  }\n]"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": {
+          "failed": null,
+          "aborted": null,
+          "aborted_mean_ms": null,
+          "warnings": null,
+          "top_error": null,
+          "plan_ms": null,
+          "plans": null,
+          "jit_ms": null,
+          "jit_functions": null,
+          "log_bytes": null,
+          "log_share": null,
+          "log_full_pages": null,
+          "row_bytes": 29.0,
+          "compile_history": null
+        },
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "-8886085649470066503",
         "query_hash": null,
         "text": "SELECT pg_sleep($1)",
@@ -364,6 +525,7 @@
             "subtree_cost": 0.01,
             "self_cost": 0.01,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "Async Capable": "false",
@@ -372,18 +534,56 @@
               "Plan Width": "4",
               "Startup Cost": "0.0"
             },
+            "facts": {
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": [],
+              "estimated_row_bytes": 4.0
+            },
             "children": []
           },
           "warnings": [],
           "index_hints": [],
           "props": {
-            "Query Identifier": "3411573856342672671"
+            "Generic Plan": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "Planned Text": "Planned from the text pg_stat_statements keeps, in which the application's constants are $n placeholders like its parameters, each typed as PostgreSQL infers it: PostgreSQL identifies what it planned as query 3411573856342672671, not as this statement (-8886085649470066503). Constants the application wrote into the statement are unknown values here, so its own runs, which have them, can be planned differently."
+          },
+          "facts": {
+            "trigger_timings": [],
+            "generic_plan_reason": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "conversions": [],
+            "changed_columns": []
           },
           "raw": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Result\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Startup Cost\": 0.00,\n      \"Total Cost\": 0.01,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 4,\n      \"Disabled\": false,\n      \"Output\": [\"pg_sleep($1)\"]\n    },\n    \"Query Identifier\": 3411573856342672671\n  }\n]"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": {
+          "failed": null,
+          "aborted": null,
+          "aborted_mean_ms": null,
+          "warnings": null,
+          "top_error": null,
+          "plan_ms": null,
+          "plans": null,
+          "jit_ms": null,
+          "jit_functions": null,
+          "log_bytes": null,
+          "log_share": null,
+          "log_full_pages": null,
+          "row_bytes": 4.0,
+          "compile_history": null
+        },
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "4911431806993420100",
         "query_hash": null,
         "text": "UPDATE products SET name = name WHERE id = $1",
@@ -421,10 +621,11 @@
             "act_rows": null,
             "act_executions": null,
             "rows_read": null,
-            "table_rows": null,
+            "table_rows": 10000.0,
             "subtree_cost": 8.3,
             "self_cost": 0.0,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "Alias": "products",
@@ -434,6 +635,16 @@
               "Parallel Aware": "false",
               "Plan Width": "0",
               "Startup Cost": "0.29"
+            },
+            "facts": {
+              "table_alias": "products",
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": [],
+              "estimated_row_bytes": 0.0
             },
             "children": [
               {
@@ -450,10 +661,11 @@
                 "act_rows": null,
                 "act_executions": null,
                 "rows_read": null,
-                "table_rows": null,
+                "table_rows": 10000.0,
                 "subtree_cost": 8.3,
                 "self_cost": 8.3,
                 "act_time_ms": null,
+                "runtime": null,
                 "warnings": [],
                 "props": {
                   "Alias": "products",
@@ -466,6 +678,21 @@
                   "Scan Direction": "Forward",
                   "Startup Cost": "0.29"
                 },
+                "facts": {
+                  "parent_relationship": {
+                    "kind": "outer"
+                  },
+                  "table_alias": "products",
+                  "expression_cache": false,
+                  "conditions": [
+                    "(products.id = $1)"
+                  ],
+                  "conversions": [],
+                  "user_functions": [],
+                  "columns_without_statistics": [],
+                  "possible_index_names": [],
+                  "estimated_row_bytes": 18.0
+                },
                 "children": []
               }
             ]
@@ -473,13 +700,27 @@
           "warnings": [],
           "index_hints": [],
           "props": {
-            "Query Identifier": "-8336599228220240425"
+            "Generic Plan": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "Planned Text": "Planned from the text pg_stat_statements keeps, in which the application's constants are $n placeholders like its parameters, each typed as PostgreSQL infers it: PostgreSQL identifies what it planned as query -8336599228220240425, not as this statement (4911431806993420100). Constants the application wrote into the statement are unknown values here, so its own runs, which have them, can be planned differently."
+          },
+          "facts": {
+            "trigger_timings": [],
+            "generic_plan_reason": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "conversions": [],
+            "changed_columns": []
           },
           "raw": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"ModifyTable\",\n      \"Operation\": \"Update\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Relation Name\": \"products\",\n      \"Schema\": \"public\",\n      \"Alias\": \"products\",\n      \"Startup Cost\": 0.29,\n      \"Total Cost\": 8.30,\n      \"Plan Rows\": 0,\n      \"Plan Width\": 0,\n      \"Disabled\": false,\n      \"Plans\": [\n        {\n          \"Node Type\": \"Index Scan\",\n          \"Parent Relationship\": \"Outer\",\n          \"Parallel Aware\": false,\n          \"Async Capable\": false,\n          \"Scan Direction\": \"Forward\",\n          \"Index Name\": \"products_pkey\",\n          \"Relation Name\": \"products\",\n          \"Schema\": \"public\",\n          \"Alias\": \"products\",\n          \"Startup Cost\": 0.29,\n          \"Total Cost\": 8.30,\n          \"Plan Rows\": 1,\n          \"Plan Width\": 18,\n          \"Disabled\": false,\n          \"Output\": [\"name\", \"ctid\"],\n          \"Index Cond\": \"(products.id = $1)\"\n        }\n      ]\n    },\n    \"Query Identifier\": -8336599228220240425\n  }\n]"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": null,
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "-3722457391793582113",
         "query_hash": null,
         "text": "SELECT count(*), sum(quantity * price) FROM order_items WHERE product_id = $1",
@@ -488,7 +729,7 @@
         "executions": 397.0,
         "total_time_ms": 6787.841944999999,
         "mean_time_ms": 17.097838652392948,
-        "max_time_ms": 30.878363999999998,
+        "max_time_ms": 30.878364,
         "stddev_time_ms": 2.409066030206302,
         "cpu_time_ms": null,
         "rows": 397.0,
@@ -521,6 +762,7 @@
             "subtree_cost": 13561.99,
             "self_cost": 0.020000000000436557,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "Async Capable": "false",
@@ -530,6 +772,16 @@
               "Plan Width": "40",
               "Startup Cost": "13561.98",
               "Strategy": "Plain"
+            },
+            "facts": {
+              "aggregate_strategy": "Plain",
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": [],
+              "estimated_row_bytes": 40.0
             },
             "children": [
               {
@@ -550,6 +802,7 @@
                 "subtree_cost": 13561.97,
                 "self_cost": 1000.1999999999989,
                 "act_time_ms": null,
+                "runtime": null,
                 "warnings": [],
                 "props": {
                   "Async Capable": "false",
@@ -561,6 +814,19 @@
                   "Startup Cost": "13561.76",
                   "Workers Planned": "2"
                 },
+                "facts": {
+                  "parent_relationship": {
+                    "kind": "outer"
+                  },
+                  "workers_planned": 2,
+                  "expression_cache": false,
+                  "conditions": [],
+                  "conversions": [],
+                  "user_functions": [],
+                  "columns_without_statistics": [],
+                  "possible_index_names": [],
+                  "estimated_row_bytes": 40.0
+                },
                 "children": [
                   {
                     "id": 2,
@@ -571,7 +837,7 @@
                     "index": null,
                     "seek_predicate": null,
                     "predicate": null,
-                    "est_rows": 1.0,
+                    "est_rows": 2.4,
                     "est_executions": 1.0,
                     "act_rows": null,
                     "act_executions": null,
@@ -580,6 +846,7 @@
                     "subtree_cost": 12561.77,
                     "self_cost": 0.4400000000005093,
                     "act_time_ms": null,
+                    "runtime": null,
                     "warnings": [],
                     "props": {
                       "Async Capable": "false",
@@ -587,9 +854,24 @@
                       "Parallel Aware": "false",
                       "Parent Relationship": "Outer",
                       "Partial Mode": "Partial",
+                      "Plan Rows per process": "1",
                       "Plan Width": "40",
                       "Startup Cost": "12561.76",
                       "Strategy": "Plain"
+                    },
+                    "facts": {
+                      "parent_relationship": {
+                        "kind": "outer"
+                      },
+                      "estimated_rows_per_process": 1.0,
+                      "aggregate_strategy": "Plain",
+                      "expression_cache": false,
+                      "conditions": [],
+                      "conversions": [],
+                      "user_functions": [],
+                      "columns_without_statistics": [],
+                      "possible_index_names": [],
+                      "estimated_row_bytes": 40.0
                     },
                     "children": [
                       {
@@ -601,15 +883,16 @@
                         "index": null,
                         "seek_predicate": null,
                         "predicate": "(order_items.product_id = $1)",
-                        "est_rows": 42.0,
+                        "est_rows": 100.8,
                         "est_executions": 1.0,
                         "act_rows": null,
                         "act_executions": null,
-                        "rows_read": null,
-                        "table_rows": null,
+                        "rows_read": 1000000.0,
+                        "table_rows": 1000000.0,
                         "subtree_cost": 12561.33,
                         "self_cost": 12561.33,
                         "act_time_ms": null,
+                        "runtime": null,
                         "warnings": [],
                         "props": {
                           "Alias": "order_items",
@@ -618,8 +901,25 @@
                           "Filter": "(order_items.product_id = $1)",
                           "Parallel Aware": "true",
                           "Parent Relationship": "Outer",
+                          "Plan Rows per process": "42",
                           "Plan Width": "10",
                           "Startup Cost": "0.0"
+                        },
+                        "facts": {
+                          "parent_relationship": {
+                            "kind": "outer"
+                          },
+                          "estimated_rows_per_process": 42.0,
+                          "table_alias": "order_items",
+                          "expression_cache": false,
+                          "conditions": [
+                            "(order_items.product_id = $1)"
+                          ],
+                          "conversions": [],
+                          "user_functions": [],
+                          "columns_without_statistics": [],
+                          "possible_index_names": [],
+                          "estimated_row_bytes": 10.0
                         },
                         "children": []
                       }
@@ -632,13 +932,42 @@
           "warnings": [],
           "index_hints": [],
           "props": {
-            "Query Identifier": "-7653842676421569731"
+            "Generic Plan": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "Planned Text": "Planned from the text pg_stat_statements keeps, in which the application's constants are $n placeholders like its parameters, each typed as PostgreSQL infers it: PostgreSQL identifies what it planned as query -7653842676421569731, not as this statement (-3722457391793582113). Constants the application wrote into the statement are unknown values here, so its own runs, which have them, can be planned differently."
+          },
+          "facts": {
+            "trigger_timings": [],
+            "generic_plan_reason": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "conversions": [],
+            "changed_columns": []
           },
           "raw": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Aggregate\",\n      \"Strategy\": \"Plain\",\n      \"Partial Mode\": \"Finalize\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Startup Cost\": 13561.98,\n      \"Total Cost\": 13561.99,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 40,\n      \"Disabled\": false,\n      \"Output\": [\"count(*)\", \"sum(((quantity)::numeric * price))\"],\n      \"Plans\": [\n        {\n          \"Node Type\": \"Gather\",\n          \"Parent Relationship\": \"Outer\",\n          \"Parallel Aware\": false,\n          \"Async Capable\": false,\n          \"Startup Cost\": 13561.76,\n          \"Total Cost\": 13561.97,\n          \"Plan Rows\": 2,\n          \"Plan Width\": 40,\n          \"Disabled\": false,\n          \"Output\": [\"(PARTIAL count(*))\", \"(PARTIAL sum(((quantity)::numeric * price)))\"],\n          \"Workers Planned\": 2,\n          \"Single Copy\": false,\n          \"Plans\": [\n            {\n              \"Node Type\": \"Aggregate\",\n              \"Strategy\": \"Plain\",\n              \"Partial Mode\": \"Partial\",\n              \"Parent Relationship\": \"Outer\",\n              \"Parallel Aware\": false,\n              \"Async Capable\": false,\n              \"Startup Cost\": 12561.76,\n              \"Total Cost\": 12561.77,\n              \"Plan Rows\": 1,\n              \"Plan Width\": 40,\n              \"Disabled\": false,\n              \"Output\": [\"PARTIAL count(*)\", \"PARTIAL sum(((quantity)::numeric * price))\"],\n              \"Plans\": [\n                {\n                  \"Node Type\": \"Seq Scan\",\n                  \"Parent Relationship\": \"Outer\",\n                  \"Parallel Aware\": true,\n                  \"Async Capable\": false,\n                  \"Relation Name\": \"order_items\",\n                  \"Schema\": \"public\",\n                  \"Alias\": \"order_items\",\n                  \"Startup Cost\": 0.00,\n                  \"Total Cost\": 12561.33,\n                  \"Plan Rows\": 42,\n                  \"Plan Width\": 10,\n                  \"Disabled\": false,\n                  \"Output\": [\"id\", \"order_id\", \"product_id\", \"quantity\", \"price\"],\n                  \"Filter\": \"(order_items.product_id = $1)\"\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    },\n    \"Query Identifier\": -7653842676421569731\n  }\n]"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": {
+          "failed": null,
+          "aborted": null,
+          "aborted_mean_ms": null,
+          "warnings": null,
+          "top_error": null,
+          "plan_ms": null,
+          "plans": null,
+          "jit_ms": null,
+          "jit_functions": null,
+          "log_bytes": null,
+          "log_share": null,
+          "log_full_pages": null,
+          "row_bytes": 40.0,
+          "compile_history": null
+        },
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "2004611025554862962",
         "query_hash": null,
         "text": "SELECT status, count(*), sum(total) FROM orders WHERE created_at > now() - interval $1 GROUP BY status",
@@ -680,6 +1009,7 @@
             "subtree_cost": 50453.35,
             "self_cost": 0.18000000000029104,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "Async Capable": "false",
@@ -690,6 +1020,16 @@
               "Plan Width": "47",
               "Startup Cost": "50451.77",
               "Strategy": "Sorted"
+            },
+            "facts": {
+              "aggregate_strategy": "Sorted",
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": [],
+              "estimated_row_bytes": 47.0
             },
             "children": [
               {
@@ -710,6 +1050,7 @@
                 "subtree_cost": 50453.17,
                 "self_cost": 1001.4099999999962,
                 "act_time_ms": null,
+                "runtime": null,
                 "warnings": [],
                 "props": {
                   "Async Capable": "false",
@@ -719,6 +1060,19 @@
                   "Plan Width": "47",
                   "Startup Cost": "50451.77",
                   "Workers Planned": "2"
+                },
+                "facts": {
+                  "parent_relationship": {
+                    "kind": "outer"
+                  },
+                  "workers_planned": 2,
+                  "expression_cache": false,
+                  "conditions": [],
+                  "conversions": [],
+                  "user_functions": [],
+                  "columns_without_statistics": [],
+                  "possible_index_names": [],
+                  "estimated_row_bytes": 47.0
                 },
                 "children": [
                   {
@@ -730,7 +1084,7 @@
                     "index": null,
                     "seek_predicate": null,
                     "predicate": null,
-                    "est_rows": 5.0,
+                    "est_rows": 12.0,
                     "est_executions": 1.0,
                     "act_rows": null,
                     "act_executions": null,
@@ -739,15 +1093,30 @@
                     "subtree_cost": 49451.76,
                     "self_cost": 0.06999999999970896,
                     "act_time_ms": null,
+                    "runtime": null,
                     "warnings": [],
                     "props": {
                       "Async Capable": "false",
                       "Disabled": "false",
                       "Parallel Aware": "false",
                       "Parent Relationship": "Outer",
+                      "Plan Rows per process": "5",
                       "Plan Width": "47",
                       "Sort Key": "orders.status",
                       "Startup Cost": "49451.74"
+                    },
+                    "facts": {
+                      "parent_relationship": {
+                        "kind": "outer"
+                      },
+                      "estimated_rows_per_process": 5.0,
+                      "expression_cache": false,
+                      "conditions": [],
+                      "conversions": [],
+                      "user_functions": [],
+                      "columns_without_statistics": [],
+                      "possible_index_names": [],
+                      "estimated_row_bytes": 47.0
                     },
                     "children": [
                       {
@@ -759,7 +1128,7 @@
                         "index": null,
                         "seek_predicate": null,
                         "predicate": null,
-                        "est_rows": 5.0,
+                        "est_rows": 12.0,
                         "est_executions": 1.0,
                         "act_rows": null,
                         "act_executions": null,
@@ -768,6 +1137,7 @@
                         "subtree_cost": 49451.69,
                         "self_cost": 2083.3899999999994,
                         "act_time_ms": null,
+                        "runtime": null,
                         "warnings": [],
                         "props": {
                           "Async Capable": "false",
@@ -776,10 +1146,25 @@
                           "Parallel Aware": "false",
                           "Parent Relationship": "Outer",
                           "Partial Mode": "Partial",
+                          "Plan Rows per process": "5",
                           "Plan Width": "47",
                           "Planned Partitions": "0",
                           "Startup Cost": "49451.62",
                           "Strategy": "Hashed"
+                        },
+                        "facts": {
+                          "parent_relationship": {
+                            "kind": "outer"
+                          },
+                          "estimated_rows_per_process": 5.0,
+                          "aggregate_strategy": "Hashed",
+                          "expression_cache": false,
+                          "conditions": [],
+                          "conversions": [],
+                          "user_functions": [],
+                          "columns_without_statistics": [],
+                          "possible_index_names": [],
+                          "estimated_row_bytes": 47.0
                         },
                         "children": [
                           {
@@ -791,15 +1176,16 @@
                             "index": null,
                             "seek_predicate": null,
                             "predicate": "(orders.created_at > (now() - $1))",
-                            "est_rows": 277777.0,
+                            "est_rows": 666664.7999999999,
                             "est_executions": 1.0,
                             "act_rows": null,
                             "act_executions": null,
                             "rows_read": null,
-                            "table_rows": null,
+                            "table_rows": 1999995.0,
                             "subtree_cost": 47368.3,
                             "self_cost": 47368.3,
                             "act_time_ms": null,
+                            "runtime": null,
                             "warnings": [],
                             "props": {
                               "Alias": "orders",
@@ -808,8 +1194,27 @@
                               "Filter": "(orders.created_at > (now() - $1))",
                               "Parallel Aware": "true",
                               "Parent Relationship": "Outer",
+                              "Plan Rows per process": "277777",
                               "Plan Width": "13",
+                              "Selectivity": "Planned with a default selectivity for its parameter (a fixed share of the rows for a range or a pattern, 10 values for ANY): with a real value the planner may well use an index instead.",
                               "Startup Cost": "0.0"
+                            },
+                            "facts": {
+                              "selectivity_guess": "Planned with a default selectivity for its parameter (a fixed share of the rows for a range or a pattern, 10 values for ANY): with a real value the planner may well use an index instead.",
+                              "parent_relationship": {
+                                "kind": "outer"
+                              },
+                              "estimated_rows_per_process": 277777.0,
+                              "table_alias": "orders",
+                              "expression_cache": false,
+                              "conditions": [
+                                "(orders.created_at > (now() - $1))"
+                              ],
+                              "conversions": [],
+                              "user_functions": [],
+                              "columns_without_statistics": [],
+                              "possible_index_names": [],
+                              "estimated_row_bytes": 13.0
                             },
                             "children": []
                           }
@@ -824,13 +1229,42 @@
           "warnings": [],
           "index_hints": [],
           "props": {
-            "Query Identifier": "1758281497443122294"
+            "Generic Plan": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "Planned Text": "Planned from the text pg_stat_statements keeps, in which the application's constants are $n placeholders like its parameters, each typed as PostgreSQL infers it: PostgreSQL identifies what it planned as query 1758281497443122294, not as this statement (2004611025554862962). Constants the application wrote into the statement are unknown values here, so its own runs, which have them, can be planned differently."
+          },
+          "facts": {
+            "trigger_timings": [],
+            "generic_plan_reason": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "conversions": [],
+            "changed_columns": []
           },
           "raw": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Aggregate\",\n      \"Strategy\": \"Sorted\",\n      \"Partial Mode\": \"Finalize\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Startup Cost\": 50451.77,\n      \"Total Cost\": 50453.35,\n      \"Plan Rows\": 5,\n      \"Plan Width\": 47,\n      \"Disabled\": false,\n      \"Output\": [\"status\", \"count(*)\", \"sum(total)\"],\n      \"Group Key\": [\"orders.status\"],\n      \"Plans\": [\n        {\n          \"Node Type\": \"Gather Merge\",\n          \"Parent Relationship\": \"Outer\",\n          \"Parallel Aware\": false,\n          \"Async Capable\": false,\n          \"Startup Cost\": 50451.77,\n          \"Total Cost\": 50453.17,\n          \"Plan Rows\": 12,\n          \"Plan Width\": 47,\n          \"Disabled\": false,\n          \"Output\": [\"status\", \"(PARTIAL count(*))\", \"(PARTIAL sum(total))\"],\n          \"Workers Planned\": 2,\n          \"Plans\": [\n            {\n              \"Node Type\": \"Sort\",\n              \"Parent Relationship\": \"Outer\",\n              \"Parallel Aware\": false,\n              \"Async Capable\": false,\n              \"Startup Cost\": 49451.74,\n              \"Total Cost\": 49451.76,\n              \"Plan Rows\": 5,\n              \"Plan Width\": 47,\n              \"Disabled\": false,\n              \"Output\": [\"status\", \"(PARTIAL count(*))\", \"(PARTIAL sum(total))\"],\n              \"Sort Key\": [\"orders.status\"],\n              \"Plans\": [\n                {\n                  \"Node Type\": \"Aggregate\",\n                  \"Strategy\": \"Hashed\",\n                  \"Partial Mode\": \"Partial\",\n                  \"Parent Relationship\": \"Outer\",\n                  \"Parallel Aware\": false,\n                  \"Async Capable\": false,\n                  \"Startup Cost\": 49451.62,\n                  \"Total Cost\": 49451.69,\n                  \"Plan Rows\": 5,\n                  \"Plan Width\": 47,\n                  \"Disabled\": false,\n                  \"Output\": [\"status\", \"PARTIAL count(*)\", \"PARTIAL sum(total)\"],\n                  \"Group Key\": [\"orders.status\"],\n                  \"Planned Partitions\": 0,\n                  \"Plans\": [\n                    {\n                      \"Node Type\": \"Seq Scan\",\n                      \"Parent Relationship\": \"Outer\",\n                      \"Parallel Aware\": true,\n                      \"Async Capable\": false,\n                      \"Relation Name\": \"orders\",\n                      \"Schema\": \"public\",\n                      \"Alias\": \"orders\",\n                      \"Startup Cost\": 0.00,\n                      \"Total Cost\": 47368.30,\n                      \"Plan Rows\": 277777,\n                      \"Plan Width\": 13,\n                      \"Disabled\": false,\n                      \"Output\": [\"id\", \"customer_id\", \"status\", \"total\", \"note\", \"created_at\"],\n                      \"Filter\": \"(orders.created_at > (now() - $1))\"\n                    }\n                  ]\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    },\n    \"Query Identifier\": 1758281497443122294\n  }\n]"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": {
+          "failed": null,
+          "aborted": null,
+          "aborted_mean_ms": null,
+          "warnings": null,
+          "top_error": null,
+          "plan_ms": null,
+          "plans": null,
+          "jit_ms": null,
+          "jit_functions": null,
+          "log_bytes": null,
+          "log_share": null,
+          "log_full_pages": null,
+          "row_bytes": 47.0,
+          "compile_history": null
+        },
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "2885972271926804069",
         "query_hash": null,
         "text": "SELECT kind, count(*) FROM events WHERE customer_id = $1 GROUP BY kind",
@@ -872,6 +1306,7 @@
             "subtree_cost": 12.36,
             "self_cost": 0.02999999999999936,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "Async Capable": "false",
@@ -882,6 +1317,16 @@
               "Plan Width": "14",
               "Startup Cost": "12.33",
               "Strategy": "Sorted"
+            },
+            "facts": {
+              "aggregate_strategy": "Sorted",
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": [],
+              "estimated_row_bytes": 14.0
             },
             "children": [
               {
@@ -902,6 +1347,7 @@
                 "subtree_cost": 12.33,
                 "self_cost": 0.009999999999999787,
                 "act_time_ms": null,
+                "runtime": null,
                 "warnings": [],
                 "props": {
                   "Async Capable": "false",
@@ -911,6 +1357,18 @@
                   "Plan Width": "6",
                   "Sort Key": "events.kind",
                   "Startup Cost": "12.33"
+                },
+                "facts": {
+                  "parent_relationship": {
+                    "kind": "outer"
+                  },
+                  "expression_cache": false,
+                  "conditions": [],
+                  "conversions": [],
+                  "user_functions": [],
+                  "columns_without_statistics": [],
+                  "possible_index_names": [],
+                  "estimated_row_bytes": 6.0
                 },
                 "children": [
                   {
@@ -927,10 +1385,11 @@
                     "act_rows": null,
                     "act_executions": null,
                     "rows_read": null,
-                    "table_rows": null,
+                    "table_rows": 300000.0,
                     "subtree_cost": 12.32,
                     "self_cost": 12.32,
                     "act_time_ms": null,
+                    "runtime": null,
                     "warnings": [],
                     "props": {
                       "Alias": "events",
@@ -943,6 +1402,21 @@
                       "Scan Direction": "Forward",
                       "Startup Cost": "0.42"
                     },
+                    "facts": {
+                      "parent_relationship": {
+                        "kind": "outer"
+                      },
+                      "table_alias": "events",
+                      "expression_cache": false,
+                      "conditions": [
+                        "(events.customer_id = $1)"
+                      ],
+                      "conversions": [],
+                      "user_functions": [],
+                      "columns_without_statistics": [],
+                      "possible_index_names": [],
+                      "estimated_row_bytes": 6.0
+                    },
                     "children": []
                   }
                 ]
@@ -952,13 +1426,42 @@
           "warnings": [],
           "index_hints": [],
           "props": {
-            "Query Identifier": "-8565942875766726703"
+            "Generic Plan": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "Planned Text": "Planned from the text pg_stat_statements keeps, in which the application's constants are $n placeholders like its parameters, each typed as PostgreSQL infers it: PostgreSQL identifies what it planned as query -8565942875766726703, not as this statement (2885972271926804069). Constants the application wrote into the statement are unknown values here, so its own runs, which have them, can be planned differently."
+          },
+          "facts": {
+            "trigger_timings": [],
+            "generic_plan_reason": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "conversions": [],
+            "changed_columns": []
           },
           "raw": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Aggregate\",\n      \"Strategy\": \"Sorted\",\n      \"Partial Mode\": \"Simple\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Startup Cost\": 12.33,\n      \"Total Cost\": 12.36,\n      \"Plan Rows\": 2,\n      \"Plan Width\": 14,\n      \"Disabled\": false,\n      \"Output\": [\"kind\", \"count(*)\"],\n      \"Group Key\": [\"events.kind\"],\n      \"Plans\": [\n        {\n          \"Node Type\": \"Sort\",\n          \"Parent Relationship\": \"Outer\",\n          \"Parallel Aware\": false,\n          \"Async Capable\": false,\n          \"Startup Cost\": 12.33,\n          \"Total Cost\": 12.33,\n          \"Plan Rows\": 2,\n          \"Plan Width\": 6,\n          \"Disabled\": false,\n          \"Output\": [\"kind\"],\n          \"Sort Key\": [\"events.kind\"],\n          \"Plans\": [\n            {\n              \"Node Type\": \"Index Scan\",\n              \"Parent Relationship\": \"Outer\",\n              \"Parallel Aware\": false,\n              \"Async Capable\": false,\n              \"Scan Direction\": \"Forward\",\n              \"Index Name\": \"events_customer_idx\",\n              \"Relation Name\": \"events\",\n              \"Schema\": \"public\",\n              \"Alias\": \"events\",\n              \"Startup Cost\": 0.42,\n              \"Total Cost\": 12.32,\n              \"Plan Rows\": 2,\n              \"Plan Width\": 6,\n              \"Disabled\": false,\n              \"Output\": [\"kind\"],\n              \"Index Cond\": \"(events.customer_id = $1)\"\n            }\n          ]\n        }\n      ]\n    },\n    \"Query Identifier\": -8565942875766726703\n  }\n]"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": {
+          "failed": null,
+          "aborted": null,
+          "aborted_mean_ms": null,
+          "warnings": null,
+          "top_error": null,
+          "plan_ms": null,
+          "plans": null,
+          "jit_ms": null,
+          "jit_functions": null,
+          "log_bytes": null,
+          "log_share": null,
+          "log_full_pages": null,
+          "row_bytes": 14.0,
+          "compile_history": null
+        },
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "3432126458605143571",
         "query_hash": null,
         "text": "SELECT name, email FROM customers WHERE id = $1",
@@ -996,10 +1499,11 @@
             "act_rows": null,
             "act_executions": null,
             "rows_read": null,
-            "table_rows": null,
+            "table_rows": 200000.0,
             "subtree_cost": 8.44,
             "self_cost": 8.44,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "Alias": "customers",
@@ -1011,18 +1515,59 @@
               "Scan Direction": "Forward",
               "Startup Cost": "0.42"
             },
+            "facts": {
+              "table_alias": "customers",
+              "expression_cache": false,
+              "conditions": [
+                "(customers.id = $1)"
+              ],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": [],
+              "estimated_row_bytes": 37.0
+            },
             "children": []
           },
           "warnings": [],
           "index_hints": [],
           "props": {
-            "Query Identifier": "5459391128893703637"
+            "Generic Plan": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "Planned Text": "Planned from the text pg_stat_statements keeps, in which the application's constants are $n placeholders like its parameters, each typed as PostgreSQL infers it: PostgreSQL identifies what it planned as query 5459391128893703637, not as this statement (3432126458605143571). Constants the application wrote into the statement are unknown values here, so its own runs, which have them, can be planned differently."
+          },
+          "facts": {
+            "trigger_timings": [],
+            "generic_plan_reason": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "conversions": [],
+            "changed_columns": []
           },
           "raw": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Index Scan\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Scan Direction\": \"Forward\",\n      \"Index Name\": \"customers_pkey\",\n      \"Relation Name\": \"customers\",\n      \"Schema\": \"public\",\n      \"Alias\": \"customers\",\n      \"Startup Cost\": 0.42,\n      \"Total Cost\": 8.44,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 37,\n      \"Disabled\": false,\n      \"Output\": [\"name\", \"email\"],\n      \"Index Cond\": \"(customers.id = $1)\"\n    },\n    \"Query Identifier\": 5459391128893703637\n  }\n]"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": {
+          "failed": null,
+          "aborted": null,
+          "aborted_mean_ms": null,
+          "warnings": null,
+          "top_error": null,
+          "plan_ms": null,
+          "plans": null,
+          "jit_ms": null,
+          "jit_functions": null,
+          "log_bytes": null,
+          "log_share": null,
+          "log_full_pages": null,
+          "row_bytes": 37.0,
+          "compile_history": null
+        },
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "4237762245898133153",
         "query_hash": null,
         "text": "CREATE DATABASE bare",
@@ -1042,9 +1587,16 @@
         "last_seen": null,
         "plans": [],
         "plan": null,
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": null,
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "8465053948014496855",
         "query_hash": null,
         "text": "UPDATE products SET price = price WHERE id = $1",
@@ -1082,10 +1634,11 @@
             "act_rows": null,
             "act_executions": null,
             "rows_read": null,
-            "table_rows": null,
+            "table_rows": 10000.0,
             "subtree_cost": 8.3,
             "self_cost": 0.0,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "Alias": "products",
@@ -1095,6 +1648,16 @@
               "Parallel Aware": "false",
               "Plan Width": "0",
               "Startup Cost": "0.29"
+            },
+            "facts": {
+              "table_alias": "products",
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": [],
+              "estimated_row_bytes": 0.0
             },
             "children": [
               {
@@ -1111,10 +1674,11 @@
                 "act_rows": null,
                 "act_executions": null,
                 "rows_read": null,
-                "table_rows": null,
+                "table_rows": 10000.0,
                 "subtree_cost": 8.3,
                 "self_cost": 8.3,
                 "act_time_ms": null,
+                "runtime": null,
                 "warnings": [],
                 "props": {
                   "Alias": "products",
@@ -1127,6 +1691,21 @@
                   "Scan Direction": "Forward",
                   "Startup Cost": "0.29"
                 },
+                "facts": {
+                  "parent_relationship": {
+                    "kind": "outer"
+                  },
+                  "table_alias": "products",
+                  "expression_cache": false,
+                  "conditions": [
+                    "(products.id = $1)"
+                  ],
+                  "conversions": [],
+                  "user_functions": [],
+                  "columns_without_statistics": [],
+                  "possible_index_names": [],
+                  "estimated_row_bytes": 13.0
+                },
                 "children": []
               }
             ]
@@ -1134,13 +1713,27 @@
           "warnings": [],
           "index_hints": [],
           "props": {
-            "Query Identifier": "-796694400354061278"
+            "Generic Plan": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "Planned Text": "Planned from the text pg_stat_statements keeps, in which the application's constants are $n placeholders like its parameters, each typed as PostgreSQL infers it: PostgreSQL identifies what it planned as query -796694400354061278, not as this statement (8465053948014496855). Constants the application wrote into the statement are unknown values here, so its own runs, which have them, can be planned differently."
+          },
+          "facts": {
+            "trigger_timings": [],
+            "generic_plan_reason": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "conversions": [],
+            "changed_columns": []
           },
           "raw": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"ModifyTable\",\n      \"Operation\": \"Update\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Relation Name\": \"products\",\n      \"Schema\": \"public\",\n      \"Alias\": \"products\",\n      \"Startup Cost\": 0.29,\n      \"Total Cost\": 8.30,\n      \"Plan Rows\": 0,\n      \"Plan Width\": 0,\n      \"Disabled\": false,\n      \"Plans\": [\n        {\n          \"Node Type\": \"Index Scan\",\n          \"Parent Relationship\": \"Outer\",\n          \"Parallel Aware\": false,\n          \"Async Capable\": false,\n          \"Scan Direction\": \"Forward\",\n          \"Index Name\": \"products_pkey\",\n          \"Relation Name\": \"products\",\n          \"Schema\": \"public\",\n          \"Alias\": \"products\",\n          \"Startup Cost\": 0.29,\n          \"Total Cost\": 8.30,\n          \"Plan Rows\": 1,\n          \"Plan Width\": 13,\n          \"Disabled\": false,\n          \"Output\": [\"price\", \"ctid\"],\n          \"Index Cond\": \"(products.id = $1)\"\n        }\n      ]\n    },\n    \"Query Identifier\": -796694400354061278\n  }\n]"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": null,
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "-6576252161252119529",
         "query_hash": null,
         "text": "SELECT pg_stat_statements_reset()",
@@ -1182,6 +1775,7 @@
             "subtree_cost": 0.01,
             "self_cost": 0.01,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "Async Capable": "false",
@@ -1190,18 +1784,57 @@
               "Plan Width": "8",
               "Startup Cost": "0.0"
             },
+            "facts": {
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": [],
+              "estimated_row_bytes": 8.0
+            },
             "children": []
           },
           "warnings": [],
           "index_hints": [],
           "props": {
+            "Generic Plan": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
             "Query Identifier": "-6576252161252119529"
+          },
+          "facts": {
+            "trigger_timings": [],
+            "generic_plan_reason": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "conversions": [],
+            "changed_columns": [],
+            "query_identifier": "-6576252161252119529"
           },
           "raw": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Result\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Startup Cost\": 0.00,\n      \"Total Cost\": 0.01,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 8,\n      \"Disabled\": false,\n      \"Output\": [\"pg_stat_statements_reset('0'::oid, '0'::oid, '0'::bigint, false)\"]\n    },\n    \"Query Identifier\": -6576252161252119529\n  }\n]"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": {
+          "failed": null,
+          "aborted": null,
+          "aborted_mean_ms": null,
+          "warnings": null,
+          "top_error": null,
+          "plan_ms": null,
+          "plans": null,
+          "jit_ms": null,
+          "jit_functions": null,
+          "log_bytes": null,
+          "log_share": null,
+          "log_full_pages": null,
+          "row_bytes": 8.0,
+          "compile_history": null
+        },
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "5306524445554315840",
         "query_hash": null,
         "text": "select count(*), sum(calls) from pg_stat_statements where query like $1",
@@ -1243,6 +1876,7 @@
             "subtree_cost": 12.54,
             "self_cost": 0.03999999999999915,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "Async Capable": "false",
@@ -1252,6 +1886,16 @@
               "Plan Width": "40",
               "Startup Cost": "12.53",
               "Strategy": "Plain"
+            },
+            "facts": {
+              "aggregate_strategy": "Plain",
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": [],
+              "estimated_row_bytes": 40.0
             },
             "children": [
               {
@@ -1272,6 +1916,7 @@
                 "subtree_cost": 12.5,
                 "self_cost": 12.5,
                 "act_time_ms": null,
+                "runtime": null,
                 "warnings": [],
                 "props": {
                   "Alias": "pg_stat_statements",
@@ -1283,7 +1928,24 @@
                   "Parallel Aware": "false",
                   "Parent Relationship": "Outer",
                   "Plan Width": "8",
+                  "Selectivity": "Planned with a default selectivity for its parameter (a fixed share of the rows for a range or a pattern, 10 values for ANY): the rows it expects, and the cost of the steps above it, rest on that guess, not on the column's statistics.",
                   "Startup Cost": "0.0"
+                },
+                "facts": {
+                  "selectivity_guess": "Planned with a default selectivity for its parameter (a fixed share of the rows for a range or a pattern, 10 values for ANY): the rows it expects, and the cost of the steps above it, rest on that guess, not on the column's statistics.",
+                  "parent_relationship": {
+                    "kind": "outer"
+                  },
+                  "table_alias": "pg_stat_statements",
+                  "expression_cache": false,
+                  "conditions": [
+                    "(pg_stat_statements.query ~~ $1)"
+                  ],
+                  "conversions": [],
+                  "user_functions": [],
+                  "columns_without_statistics": [],
+                  "possible_index_names": [],
+                  "estimated_row_bytes": 8.0
                 },
                 "children": []
               }
@@ -1292,13 +1954,42 @@
           "warnings": [],
           "index_hints": [],
           "props": {
-            "Query Identifier": "-3224020964755723897"
+            "Generic Plan": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "Planned Text": "Planned from the text pg_stat_statements keeps, in which the application's constants are $n placeholders like its parameters, each typed as PostgreSQL infers it: PostgreSQL identifies what it planned as query -3224020964755723897, not as this statement (5306524445554315840). Constants the application wrote into the statement are unknown values here, so its own runs, which have them, can be planned differently."
+          },
+          "facts": {
+            "trigger_timings": [],
+            "generic_plan_reason": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "conversions": [],
+            "changed_columns": []
           },
           "raw": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Aggregate\",\n      \"Strategy\": \"Plain\",\n      \"Partial Mode\": \"Simple\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Startup Cost\": 12.53,\n      \"Total Cost\": 12.54,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 40,\n      \"Disabled\": false,\n      \"Output\": [\"count(*)\", \"sum(pg_stat_statements.calls)\"],\n      \"Plans\": [\n        {\n          \"Node Type\": \"Function Scan\",\n          \"Parent Relationship\": \"Outer\",\n          \"Parallel Aware\": false,\n          \"Async Capable\": false,\n          \"Function Name\": \"pg_stat_statements\",\n          \"Schema\": \"public\",\n          \"Alias\": \"pg_stat_statements\",\n          \"Startup Cost\": 0.00,\n          \"Total Cost\": 12.50,\n          \"Plan Rows\": 5,\n          \"Plan Width\": 8,\n          \"Disabled\": false,\n          \"Output\": [\"pg_stat_statements.userid\", \"pg_stat_statements.dbid\", \"pg_stat_statements.toplevel\", \"pg_stat_statements.queryid\", \"pg_stat_statements.query\", \"pg_stat_statements.plans\", \"pg_stat_statements.total_plan_time\", \"pg_stat_statements.min_plan_time\", \"pg_stat_statements.max_plan_time\", \"pg_stat_statements.mean_plan_time\", \"pg_stat_statements.stddev_plan_time\", \"pg_stat_statements.calls\", \"pg_stat_statements.total_exec_time\", \"pg_stat_statements.min_exec_time\", \"pg_stat_statements.max_exec_time\", \"pg_stat_statements.mean_exec_time\", \"pg_stat_statements.stddev_exec_time\", \"pg_stat_statements.rows\", \"pg_stat_statements.shared_blks_hit\", \"pg_stat_statements.shared_blks_read\", \"pg_stat_statements.shared_blks_dirtied\", \"pg_stat_statements.shared_blks_written\", \"pg_stat_statements.local_blks_hit\", \"pg_stat_statements.local_blks_read\", \"pg_stat_statements.local_blks_dirtied\", \"pg_stat_statements.local_blks_written\", \"pg_stat_statements.temp_blks_read\", \"pg_stat_statements.temp_blks_written\", \"pg_stat_statements.shared_blk_read_time\", \"pg_stat_statements.shared_blk_write_time\", \"pg_stat_statements.local_blk_read_time\", \"pg_stat_statements.local_blk_write_time\", \"pg_stat_statements.temp_blk_read_time\", \"pg_stat_statements.temp_blk_write_time\", \"pg_stat_statements.wal_records\", \"pg_stat_statements.wal_fpi\", \"pg_stat_statements.wal_bytes\", \"pg_stat_statements.wal_buffers_full\", \"pg_stat_statements.jit_functions\", \"pg_stat_statements.jit_generation_time\", \"pg_stat_statements.jit_inlining_count\", \"pg_stat_statements.jit_inlining_time\", \"pg_stat_statements.jit_optimization_count\", \"pg_stat_statements.jit_optimization_time\", \"pg_stat_statements.jit_emission_count\", \"pg_stat_statements.jit_emission_time\", \"pg_stat_statements.jit_deform_count\", \"pg_stat_statements.jit_deform_time\", \"pg_stat_statements.parallel_workers_to_launch\", \"pg_stat_statements.parallel_workers_launched\", \"pg_stat_statements.stats_since\", \"pg_stat_statements.minmax_stats_since\"],\n          \"Function Call\": \"pg_stat_statements(true)\",\n          \"Filter\": \"(pg_stat_statements.query ~~ $1)\"\n        }\n      ]\n    },\n    \"Query Identifier\": -3224020964755723897\n  }\n]"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": {
+          "failed": null,
+          "aborted": null,
+          "aborted_mean_ms": null,
+          "warnings": null,
+          "top_error": null,
+          "plan_ms": null,
+          "plans": null,
+          "jit_ms": null,
+          "jit_functions": null,
+          "log_bytes": null,
+          "log_share": null,
+          "log_full_pages": null,
+          "row_bytes": 40.0,
+          "compile_history": null
+        },
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "2169115237613314459",
         "query_hash": null,
         "text": "SELECT pg_stat_reset()",
@@ -1340,6 +2031,7 @@
             "subtree_cost": 0.01,
             "self_cost": 0.01,
             "act_time_ms": null,
+            "runtime": null,
             "warnings": [],
             "props": {
               "Async Capable": "false",
@@ -1348,18 +2040,57 @@
               "Plan Width": "4",
               "Startup Cost": "0.0"
             },
+            "facts": {
+              "expression_cache": false,
+              "conditions": [],
+              "conversions": [],
+              "user_functions": [],
+              "columns_without_statistics": [],
+              "possible_index_names": [],
+              "estimated_row_bytes": 4.0
+            },
             "children": []
           },
           "warnings": [],
           "index_hints": [],
           "props": {
+            "Generic Plan": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
             "Query Identifier": "2169115237613314459"
+          },
+          "facts": {
+            "trigger_timings": [],
+            "generic_plan_reason": "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.",
+            "conversions": [],
+            "changed_columns": [],
+            "query_identifier": "2169115237613314459"
           },
           "raw": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Result\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Startup Cost\": 0.00,\n      \"Total Cost\": 0.01,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 4,\n      \"Disabled\": false,\n      \"Output\": [\"pg_stat_reset()\"]\n    },\n    \"Query Identifier\": 2169115237613314459\n  }\n]"
         },
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": {
+          "failed": null,
+          "aborted": null,
+          "aborted_mean_ms": null,
+          "warnings": null,
+          "top_error": null,
+          "plan_ms": null,
+          "plans": null,
+          "jit_ms": null,
+          "jit_functions": null,
+          "log_bytes": null,
+          "log_share": null,
+          "log_full_pages": null,
+          "row_bytes": 4.0,
+          "compile_history": null
+        },
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "-8017746645856686016",
         "query_hash": null,
         "text": "DROP DATABASE IF EXISTS bare",
@@ -1379,9 +2110,16 @@
         "last_seen": null,
         "plans": [],
         "plan": null,
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": null,
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "6097083398544187049",
         "query_hash": null,
         "text": "COMMIT",
@@ -1401,9 +2139,16 @@
         "last_seen": null,
         "plans": [],
         "plan": null,
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": null,
+        "rows_affected": null,
+        "plan_id": null
       },
       {
+        "requests": null,
+        "resolved_write_target": null,
         "id": "4854991825702068830",
         "query_hash": null,
         "text": "BEGIN",
@@ -1423,7 +2168,12 @@
         "last_seen": null,
         "plans": [],
         "plan": null,
-        "waits": []
+        "waits": [],
+        "trend": null,
+        "spread": null,
+        "costs": null,
+        "rows_affected": null,
+        "plan_id": null
       }
     ]
   },

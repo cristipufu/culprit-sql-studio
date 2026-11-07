@@ -602,7 +602,6 @@ fn demo_reports_quiet_for(hours: f64) -> Vec<(String, Report)> {
         .into_iter()
         .map(|(name, path)| {
             let mut s = culprit_engine::reports::load_snapshot(&path).unwrap_or_else(|e| panic!("{name}: {e:?}"));
-            culprit_engine::plans::reparse_saved(&mut s);
             quiet_for(&mut s, hours);
             (name, culprit_engine::reading::for_reading(culprit_checks::analyze(s)))
         })
@@ -1094,7 +1093,6 @@ fn demo_reports_in_a_burst(hours: f64) -> Vec<(String, Report)> {
         .into_iter()
         .map(|(name, path)| {
             let mut s = culprit_engine::reports::load_snapshot(&path).unwrap_or_else(|e| panic!("{name}: {e:?}"));
-            culprit_engine::plans::reparse_saved(&mut s);
             in_a_burst(&mut s, hours);
             (name, culprit_engine::reading::for_reading(culprit_checks::analyze(s)))
         })

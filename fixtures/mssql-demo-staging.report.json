@@ -723,7 +723,6 @@
     "collection": null,
     "extensions": [],
     "origin": "prepared-report",
-    "parsing": [],
     "pipeline": {
       "checks": [
         "missing-index",

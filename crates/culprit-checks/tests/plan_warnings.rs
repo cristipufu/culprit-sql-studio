@@ -21,6 +21,8 @@ fn with_converts(converts: &str) -> Snapshot {
     let workload = s.workload.as_mut().expect("the demo has a workload");
     let plan = workload.queries.iter_mut().find(|q| q.id == "7").and_then(|q| q.plan.as_mut()).expect("query 7's plan");
     plan.props.insert("PlanAffectingConvert".into(), converts.into());
+    // The conversions as the parser records them: the plan's facts, not its display properties, are what checks read.
+    plan.facts_mut().conversions = culprit_core::PlanFacts::from_properties(&plan.props).conversions;
     s
 }
 
@@ -83,6 +85,7 @@ fn a_saved_statistics_warning_keeps_current_catalog_facts_separate() {
     let seek = seek_on_priority(&mut plan.root).expect("the seek on priority");
     seek.warnings.push(culprit_core::PlanWarning::MissingStatistics);
     seek.props.insert("ColumnsWithNoStatistics".into(), "priority".into());
+    seek.facts_mut().columns_without_statistics = vec!["priority".into()];
     let stats = s.statistics.iter_mut().find(|st| st.name == "ix_support_tickets_priority").expect("its statistics");
     stats.last_updated = Some("2026-08-28T08:58:07Z".into());
     stats.rows = Some(1.0);

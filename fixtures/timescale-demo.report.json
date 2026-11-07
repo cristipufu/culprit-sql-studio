@@ -393,38 +393,6 @@
     "collection": null,
     "extensions": [],
     "origin": "prepared-report",
-    "parsing": [
-      {
-        "engine": "postgres",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "-6927356924371546951"
-      },
-      {
-        "engine": "postgres",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "3152047327284928468"
-      },
-      {
-        "engine": "postgres",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "-2225272007542897168"
-      }
-    ],
     "pipeline": {
       "checks": [
         "missing-index",
@@ -1740,7 +1708,7 @@
                           "rows_read": null,
                           "runtime": null,
                           "seek_predicate": null,
-                          "self_cost": 28.509999999999998,
+                          "self_cost": 28.51,
                           "subtree_cost": 43.08,
                           "table_rows": null,
                           "warnings": []
@@ -1901,7 +1869,7 @@
                           "rows_read": null,
                           "runtime": null,
                           "seek_predicate": null,
-                          "self_cost": 28.509999999999998,
+                          "self_cost": 28.51,
                           "subtree_cost": 43.08,
                           "table_rows": null,
                           "warnings": []
@@ -2545,7 +2513,7 @@
                           "rows_read": null,
                           "runtime": null,
                           "seek_predicate": null,
-                          "self_cost": 28.509999999999998,
+                          "self_cost": 28.51,
                           "subtree_cost": 43.08,
                           "table_rows": null,
                           "warnings": []
@@ -2706,7 +2674,7 @@
                           "rows_read": null,
                           "runtime": null,
                           "seek_predicate": null,
-                          "self_cost": 28.509999999999998,
+                          "self_cost": 28.51,
                           "subtree_cost": 43.08,
                           "table_rows": null,
                           "warnings": []
@@ -3446,7 +3414,7 @@
                       "rows_read": null,
                       "runtime": null,
                       "seek_predicate": null,
-                      "self_cost": 13.799999999999997,
+                      "self_cost": 13.799999999999995,
                       "subtree_cost": 131.38,
                       "table_rows": null,
                       "warnings": []
@@ -3641,7 +3609,7 @@
                   "finding_no_share_reason": "The rows it works on rest on the planner's default guess for a parameter, not on the table's statistics, so no share is given.",
                   "guess": "rows",
                   "id": 3,
-                  "layout_own_share": 0.01981650100785431,
+                  "layout_own_share": 0.019816501007854315,
                   "layout_subtree_share": 0.02994369917286439,
                   "misestimate": null,
                   "no_share_reason": "The rows it works on rest on the planner's default guess for a parameter, not on the table's statistics, so no share is given.",
@@ -3701,7 +3669,7 @@
                   "finding_no_share_reason": "The rows it works on rest on the planner's default guess for a parameter, not on the table's statistics, so no share is given.",
                   "guess": "rows",
                   "id": 6,
-                  "layout_own_share": 0.01981650100785431,
+                  "layout_own_share": 0.019816501007854315,
                   "layout_subtree_share": 0.02994369917286439,
                   "misestimate": null,
                   "no_share_reason": "The rows it works on rest on the planner's default guess for a parameter, not on the table's statistics, so no share is given.",
@@ -3941,7 +3909,7 @@
                   "finding_no_share_reason": "The rows it works on rest on the planner's default guess for a parameter, not on the table's statistics, so no share is given.",
                   "guess": "rows",
                   "id": 18,
-                  "layout_own_share": 0.01981650100785431,
+                  "layout_own_share": 0.019816501007854315,
                   "layout_subtree_share": 0.02994369917286439,
                   "misestimate": null,
                   "no_share_reason": "The rows it works on rest on the planner's default guess for a parameter, not on the table's statistics, so no share is given.",
@@ -4001,7 +3969,7 @@
                   "finding_no_share_reason": "The rows it works on rest on the planner's default guess for a parameter, not on the table's statistics, so no share is given.",
                   "guess": "rows",
                   "id": 21,
-                  "layout_own_share": 0.01981650100785431,
+                  "layout_own_share": 0.019816501007854315,
                   "layout_subtree_share": 0.02994369917286439,
                   "misestimate": null,
                   "no_share_reason": "The rows it works on rest on the planner's default guess for a parameter, not on the table's statistics, so no share is given.",

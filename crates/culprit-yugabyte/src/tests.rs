@@ -101,7 +101,6 @@ async fn live_hypothetical_indexes_use_native_plans_without_persistent_indexes_o
     assert_eq!(parameterized.engine, Engine::Yugabyte);
     assert_eq!(parameterized.kind, culprit_core::PlanKind::Generic);
     assert!(plan.props.get("VirtualIndexes").is_some_and(|names| names.contains("hypo") || names.contains("lsm")));
-    assert_eq!(crate::plan::reparse(&plan).unwrap().props.get("VirtualIndexes"), plan.props.get("VirtualIndexes"));
     assert!(plan.nodes().iter().any(|n| n.index.as_deref().is_some_and(|i| i.contains("lsm"))));
     assert!(
         plan.nodes().iter().all(|n| n.table_rows.is_none() && n.facts().heap_fetches.is_none() && n.runtime.is_none())
@@ -510,7 +509,6 @@ async fn live_qpm_history_retains_independent_periods_and_redacted_plans() {
         assert_eq!(plan.kind, culprit_core::PlanKind::Estimated);
         assert!(plan.facts().constants_redacted);
         assert!(plan.nodes().iter().all(|n| n.act_rows.is_none() && n.act_time_ms.is_none()));
-        assert!(crate::plan::reparse(&plan).unwrap().facts().constants_redacted);
     }
     assert!(provider.stored_plan(&q.id, "-9223372036854775808").await.is_ok(), "signed ids reach the native lookup");
     admin.batch_execute(&tagged("SET default_transaction_read_only=off")).await.unwrap();

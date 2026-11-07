@@ -91,8 +91,8 @@ pub struct PlanNode {
     pub runtime: Option<crate::actual::NodeRuntime>,
     pub warnings: Vec<PlanWarning>,
     pub props: Properties,
-    // Captured and prepared calculation inputs. None identifies an older plan requiring the property adapter;
-    // Some with unknown fields never borrows a conflicting display property.
+    // Captured and prepared calculation inputs. None: read from `props` (`PlanNodeFacts::from_properties`); Some with
+    // unknown fields never borrows a conflicting display property.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub facts: Option<crate::PlanNodeFacts>,
@@ -144,12 +144,12 @@ impl PlanNode {
         self.facts
             .as_ref()
             .map(std::borrow::Cow::Borrowed)
-            .unwrap_or_else(|| std::borrow::Cow::Owned(crate::PlanNodeFacts::from_legacy_properties(&self.props)))
+            .unwrap_or_else(|| std::borrow::Cow::Owned(crate::PlanNodeFacts::from_properties(&self.props)))
     }
 
-    /// Materialize legacy evidence before a preparation step changes it, preserving the other captured facts.
+    /// Materialize the facts read from `props` before a preparation step changes them, preserving the others.
     pub fn facts_mut(&mut self) -> &mut crate::PlanNodeFacts {
-        self.facts.get_or_insert_with(|| crate::PlanNodeFacts::from_legacy_properties(&self.props))
+        self.facts.get_or_insert_with(|| crate::PlanNodeFacts::from_properties(&self.props))
     }
     pub fn walk<'a>(&'a self, out: &mut Vec<&'a PlanNode>) {
         out.push(self);
@@ -409,10 +409,10 @@ impl Plan {
         self.facts
             .as_ref()
             .map(std::borrow::Cow::Borrowed)
-            .unwrap_or_else(|| std::borrow::Cow::Owned(crate::PlanFacts::from_legacy_properties(&self.props)))
+            .unwrap_or_else(|| std::borrow::Cow::Owned(crate::PlanFacts::from_properties(&self.props)))
     }
     pub fn facts_mut(&mut self) -> &mut crate::PlanFacts {
-        self.facts.get_or_insert_with(|| crate::PlanFacts::from_legacy_properties(&self.props))
+        self.facts.get_or_insert_with(|| crate::PlanFacts::from_properties(&self.props))
     }
     pub fn nodes(&self) -> Vec<&PlanNode> {
         let mut out = Vec::new();

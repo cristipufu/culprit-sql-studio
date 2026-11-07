@@ -654,58 +654,6 @@
     "collection": null,
     "extensions": [],
     "origin": "prepared-report",
-    "parsing": [
-      {
-        "engine": "mysql",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-mysql",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "375c64398248650e"
-      },
-      {
-        "engine": "mysql",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-mysql",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "decf59629e790076"
-      },
-      {
-        "engine": "mysql",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-mysql",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "258e3c9b580f1ecc"
-      },
-      {
-        "engine": "mysql",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-mysql",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "46db559fdff712fd"
-      },
-      {
-        "engine": "mysql",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-mysql",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "d1f45c9664edccf9"
-      }
-    ],
     "pipeline": {
       "checks": [
         "missing-index",

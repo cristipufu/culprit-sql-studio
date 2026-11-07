@@ -59,38 +59,6 @@ pub fn parse(json: &str, kind: PlanKind, statement: Option<&str>, schema: Option
     Ok(plan)
 }
 
-/// Plan props a scan adds to the plan it reads: the server that made it, where its sample statement came from, and the
-/// row count of the sample's LIMIT.
-const SCAN_PROPS: &[&str] = &["server_version", "flavor", "Sample", culprit_core::insights::LIMIT_ROWS];
-
-/// A plan a scan saved, read again from its text with this parser (EXPLAIN JSON, or the tree of EXPLAIN ANALYZE), so a
-/// scan saved by an older Culprit reads the way one taken today would. The scan kept the plan's JSON with the sample's
-/// values replaced, and the plan read from it is redacted the same way; what the scan said of the plan stays. `None`
-/// when the plan kept no text, or this parser can't read it.
-pub fn reparse(saved: &Plan, schema: Option<&str>) -> Option<Plan> {
-    let raw = saved.raw.as_deref()?;
-    let text = raw.trim_start();
-    let plan = if text.starts_with('{') || text.starts_with('[') {
-        parse(raw, saved.kind, saved.statement.as_deref(), schema)
-    } else if text.starts_with("->") {
-        crate::plan_tree::parse(raw, saved.statement.as_deref(), schema)
-    } else {
-        return None;
-    }
-    .ok()?;
-    let mut clean = culprit_core::redact::redact_plan(&plan);
-    clean.raw = saved.raw.clone();
-    for key in SCAN_PROPS {
-        if let Some(value) = saved.props.get(*key) {
-            clean.props.insert(key.to_string(), value.clone());
-        }
-    }
-    clean.facts_mut().server_version = saved.facts().server_version.clone();
-    clean.facts_mut().flavor = saved.facts().flavor.clone().or(clean.facts().flavor.clone());
-    clean.facts_mut().sample_limit_rows = saved.facts().sample_limit_rows;
-    Some(clean)
-}
-
 pub(crate) struct Context {
     pub aliases: HashMap<String, (Option<String>, String)>,
     pub schema: Option<String>,

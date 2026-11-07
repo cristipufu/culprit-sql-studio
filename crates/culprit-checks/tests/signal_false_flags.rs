@@ -913,6 +913,7 @@ fn mariadb_without_column_statistics_assumes_no_filtering() {
     plan.root.object = Some(format!("`{}`.`{}`", table.schema, table.name));
     plan.root.predicate = Some(format!("(`{}`.`{}`.`flavor` = 'x')", table.schema, table.name));
     plan.root.props.insert("filtered".into(), "100".into());
+    plan.root.facts_mut().estimated_filtered_percent = Some(100.0);
     s.histograms = Some(vec![]);
     let r = analyze(s);
     let f = of(&r, "missing-histogram").into_iter().find(|f| f.title.contains("flavor")).expect("finding");

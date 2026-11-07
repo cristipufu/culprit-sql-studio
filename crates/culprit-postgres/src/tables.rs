@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use culprit_core::{IndexStat, NodeKind, Plan, PlanNode, TableStat};
+use culprit_core::{NodeKind, Plan, PlanNode};
 use tokio_postgres::Client;
 
 use crate::rows::tagged;
@@ -74,39 +74,6 @@ pub async fn fill(client: &Client, plan: &mut Plan) {
         }
     }
     let sizes = collected.into_iter().filter_map(|(key, size)| Some((key, size?))).collect();
-    apply(&mut plan.root, &sizes, false);
-}
-
-/// The sizes a plan carries from its scan (`table_rows`, and which scans were marked as partitions a run may prune),
-/// put back on the same plan read again by a newer parser ([`crate::plan_json::reparse`]): what [`fill`] looked up
-/// then, worked out again without a connection. A table the saved plan carries no size for (scans saved before the
-/// collector looked them up) takes it from the scan's own catalog, `tables`, and every table its indexes, `indexes`, so
-/// the plan reads as one a scan takes now.
-pub(crate) fn refill(plan: &mut Plan, saved: &Plan, tables: &[TableStat], indexes: &[IndexStat]) {
-    let mut sizes: HashMap<String, Size> = HashMap::new();
-    for n in saved.nodes() {
-        // A count of 0 where the planner expects rows is one the catalog never made (`counted_rows`): unknown, not 0.
-        let counted = n.table_rows.filter(|rows| *rows > 0.0 || n.est_rows <= 1.0);
-        if let (Some(object), Some(rows)) = (n.object.as_ref(), counted) {
-            let partition = n.facts().partition_pruning.is_some();
-            let size = sizes.entry(object.clone()).or_insert(Size { rows: Some(rows), partition, indexed: None });
-            size.partition |= partition;
-        }
-    }
-    for n in plan.nodes() {
-        let Some(object) = n.object.as_ref() else { continue };
-        let (schema, name) = object.rsplit_once('.').unwrap_or(("", object));
-        let mut matching = tables.iter().filter(|t| t.name == name && (schema.is_empty() || t.schema == schema));
-        let (Some(table), None) = (matching.next(), matching.next()) else { continue };
-        let indexed: Vec<String> = indexes
-            .iter()
-            .filter(|i| i.schema == table.schema && i.table == table.name)
-            .flat_map(|i| i.columns.iter().cloned())
-            .collect();
-        let size = sizes.entry(object.clone()).or_insert(Size { rows: table.rows, partition: false, indexed: None });
-        size.rows = size.rows.or(table.rows);
-        size.indexed = Some(indexed);
-    }
     apply(&mut plan.root, &sizes, false);
 }
 
@@ -319,16 +286,6 @@ mod tests {
         assert!(!plan.root.props.contains_key(culprit_core::GUESSED_SELECTIVITY));
     }
 
-    #[test]
-    fn an_unqualified_saved_plan_does_not_borrow_an_arbitrary_schemas_table_size() {
-        let json = r#"[{"Plan":{"Node Type":"Seq Scan","Relation Name":"orders","Plan Rows":10,"Total Cost":100}}]"#;
-        let mut plan = crate::plan_json::parse(json, PlanKind::Estimated, None).unwrap();
-        let saved = plan.clone();
-        refill(&mut plan, &saved, &[table("public", "orders", 100.0), table("archive", "orders", 1000000.0)], &[]);
-        assert_eq!(plan.root.table_rows, None);
-        assert_eq!(plan.root.rows_read_total(), None);
-    }
-
     fn sizes(entries: &[(&str, f64, bool)]) -> HashMap<String, Size> {
         entries
             .iter()
@@ -458,74 +415,34 @@ mod tests {
         assert!(plan.root.facts().selectivity_guess.is_none());
     }
 
-    // Saved scans re-read by a newer parser get the sizes the scan looked up back from the saved plan, with the marks
-    // that follow from them, and nothing is looked up.
-    #[test]
-    fn a_saved_plan_read_again_keeps_the_sizes_its_scan_looked_up() {
-        let json = r#"[{"Plan": {"Node Type": "Seq Scan", "Relation Name": "orders", "Schema": "public",
-            "Plan Rows": 5, "Total Cost": 4500.0, "Filter": "(customer_id = $1)"}}]"#;
-        let mut saved = crate::plan_json::parse(json, PlanKind::Generic, Some("SELECT 1")).unwrap();
-        apply(&mut saved.root, &sizes(&[("public.orders", 2_000_000.0, false)]), false);
-        let again = crate::plan_json::reparse(&saved, None, &[], &[]).unwrap();
-        assert_eq!(again.root.table_rows, Some(2_000_000.0));
-        assert_eq!(again.root.rows_read, Some(2_000_000.0));
-    }
-
-    fn table(schema: &str, name: &str, rows: f64) -> TableStat {
-        serde_json::from_value(
-            serde_json::json!({"schema": schema, "name": name, "rows": rows, "has_primary_key": true}),
-        )
-        .unwrap()
-    }
-
-    fn index(schema: &str, table: &str, name: &str, columns: &[&str]) -> IndexStat {
-        serde_json::from_value(serde_json::json!({
-            "schema": schema, "table": table, "name": name, "kind": "btree", "columns": columns, "include": [],
-            "is_unique": false, "is_primary_key": false, "is_clustered": false, "is_disabled": false
-        }))
-        .unwrap()
-    }
-
-    // The demo's saved scans kept plans without table sizes: read again, a plan takes them from the scan's own catalog,
-    // so a scan that reads 2M rows to keep 12 reads as one (and its plan's insight says so).
-    #[test]
-    fn a_saved_plan_without_sizes_takes_them_from_the_catalog() {
-        let json = r#"[{"Plan": {"Node Type": "Seq Scan", "Relation Name": "orders", "Schema": "public",
-            "Plan Rows": 12, "Total Cost": 45000.0, "Filter": "(customer_id = $1)"}}]"#;
-        let saved = crate::plan_json::parse(json, PlanKind::Generic, Some("SELECT 1")).unwrap();
-        assert_eq!(saved.root.table_rows, None);
-        let again = crate::plan_json::reparse(&saved, None, &[table("public", "orders", 2_000_000.0)], &[]).unwrap();
-        assert_eq!(again.root.table_rows, Some(2_000_000.0));
-        assert_eq!(again.root.rows_read, Some(2_000_000.0));
-        let rules: Vec<String> = culprit_core::insights::insights(&again).into_iter().map(|i| i.rule).collect();
-        assert!(rules.contains(&"scan-filter".to_string()), "{rules:?}");
-    }
-
     // A guessed scan's note promises an index only where one of the table's indexes has a column the filter names.
     #[test]
     fn a_guess_note_never_promises_an_index_the_table_lacks() {
         let json = r#"[{"Plan": {"Node Type": "Seq Scan", "Relation Name": "orders", "Schema": "public",
             "Plan Rows": 10000, "Total Cost": 45000.0, "Filter": "((o.note)::text ~~ $1)"}}]"#;
         let saved = crate::plan_json::parse(json, PlanKind::Generic, Some("SELECT 1")).unwrap();
-        let tables = [table("public", "orders", 2_000_000.0)];
-        let note = |indexes: &[IndexStat]| {
-            let plan = crate::plan_json::reparse(&saved, None, &tables, indexes).unwrap();
+        // The size and index columns a scan's lookup (`fill`) finds for the table.
+        let note = |plan: &Plan, indexed: &[&str]| {
+            let mut plan = plan.clone();
+            let size = Size {
+                rows: Some(2_000_000.0),
+                partition: false,
+                indexed: Some(indexed.iter().map(|c| c.to_string()).collect()),
+            };
+            apply(&mut plan.root, &HashMap::from([("public.orders".to_string(), size)]), false);
             plan.root.props[culprit_core::GUESSED_SELECTIVITY].clone()
         };
-        let none = note(&[index("public", "orders", "orders_status_created_idx", &["status", "created_at"])]);
+        let none = note(&saved, &["status", "created_at"]);
         assert!(!none.contains("use an index"), "{none}");
         assert!(none.contains("rest on that guess"), "{none}");
-        let some = note(&[index("public", "orders", "orders_note_idx", &["note"])]);
+        let some = note(&saved, &["note"]);
         assert!(some.contains("may well use an index"), "{some}");
         // Only the conditions planned on the guess count: the primary key on id serves none of these ranges.
         let json = r#"[{"Plan": {"Node Type": "Seq Scan", "Relation Name": "orders", "Schema": "public",
             "Plan Rows": 1111, "Total Cost": 45000.0,
             "Filter": "((o.total >= $3) AND (o.customer_id > $4) AND ((o.id % $1) = $2))"}}]"#;
         let saved = crate::plan_json::parse(json, PlanKind::Generic, Some("SELECT 1")).unwrap();
-        let plan =
-            crate::plan_json::reparse(&saved, None, &tables, &[index("public", "orders", "orders_pkey", &["id"])])
-                .unwrap();
-        let text = &plan.root.props[culprit_core::GUESSED_SELECTIVITY];
+        let text = note(&saved, &["id"]);
         assert!(!text.contains("use an index"), "{text}");
     }
 
@@ -537,13 +454,6 @@ mod tests {
         assert_eq!(counted_rows(-1.0, Some(10.0)), None);
         assert_eq!(counted_rows(0.0, Some(3.0)), Some(0.0));
         assert_eq!(counted_rows(4580.0, Some(60.0)), Some(4580.0));
-        let json = r#"[{"Plan": {"Node Type": "Seq Scan", "Relation Name": "pg_attrdef", "Schema": "pg_catalog",
-            "Plan Rows": 232, "Total Cost": 47.0}}]"#;
-        let mut saved = crate::plan_json::parse(json, PlanKind::Generic, Some("SELECT 1")).unwrap();
-        saved.root.table_rows = Some(0.0);
-        saved.root.rows_read = Some(0.0);
-        let again = crate::plan_json::reparse(&saved, None, &[], &[]).unwrap();
-        assert_eq!((again.root.table_rows, again.root.rows_read), (None, None));
     }
 
     // A sort above a scan planned on a guess sorts the guess's rows: the plan can't say how many it will sort, and

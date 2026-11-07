@@ -243,8 +243,8 @@ continuous counter history. Local index zeros cannot establish cluster-wide abse
 
 Native QPM history has a separate `QueryStat::plan_history` context. Cache entry counts and dates are independent of
 the statement-statistics period; `workload_plans()` exposes only variants that share that period to causal checks,
-charts and runtime weighting. A captured cache body stays separate from the current estimate, reparses without the
-current catalog and opens from the saved report before provider or credential resolution. Missing native estimates
+charts and runtime weighting. A captured cache body stays separate from the current estimate, and opens from the saved
+report before provider or credential resolution. Missing native estimates
 remain unknown in the shared plan projection, and redacted constants cannot establish filter selectivity.
 
 Native ASH lives in `OperationalStats::activity_history`, separate from measured `WaitStat` durations and statement
@@ -303,14 +303,10 @@ indexes, columns, foreign keys, statistics, waits, settings, pressure signals, a
 applies to every engine is written once. Types the UI shows derive `ts_rs::TS`; `cargo test -p culprit-core -p
 culprit-engine` regenerates `app/src/gen`.
 
-A saved scan is read as this version would read it. Whenever one is loaded (`culprit analyze`, the latest report the
-app, CLI, MCP and exports show, the index advisor, the digest), the saved-report service (`reporting.rs`) parses each plan again from the text
-it was captured as (`culprit_engine::plans::reparse_saved`, through each provider's `reparse`: `plan_json::reparse` on
-PostgreSQL and MySQL, `plan_xml::reparse` on SQL Server) and runs the pipeline again, so a parser or check fix reaches
-the scans saved before it. What the scan added that the text doesn't hold stays as saved (the statement it planned, the
-server's version, where a sample came from and its LIMIT, table sizes), and so do SQLite's plans, whose text keeps the
-steps but not their tree. A PostgreSQL plan saved without a table's size takes it from the scan's own catalog
-(`tables::refill`), and a timeline of Culprit's scans is built again from the counters files the scans before it kept
+A saved scan is read with this version's checks. Whenever one is loaded (`culprit analyze`, the latest report the app,
+CLI, MCP and exports show, the index advisor, the digest), the saved-report service (`reporting.rs`) runs the pipeline
+again, so a check fix reaches the scans saved before it. Its plans are as its parsers read them when it was taken, and a
+timeline of Culprit's scans is built again from the counters files the scans before it kept
 (`reports::rebuild_timeline`), so a step a saved scan misread reads as the counters say.
 
 ### Retained evidence and provenance
@@ -318,7 +314,7 @@ steps but not their tree. A PostgreSQL plan saved without a table's size takes i
 `Report.snapshot` is the prepared view. `Report.evidence.input` retains the snapshot before pure preparation;
 Workspace scans additionally retain the provider's original picture in `evidence.collected`, before history adds
 baselines, dates counters or sets aside replica usage. Database-recorded change events remain separate. Replaying a
-report starts from retained input, reparses its native plans and reruns today's preparation and checks. The original
+report starts from retained input and reruns today's preparation and checks. The original
 collection is preserved, and a reread never rewrites the saved file. Replays do not nest reports or grow a version chain.
 A report without retained evidence uses its prepared picture with the explicit `PreparedReport` origin: it cannot
 recover data an older preparation discarded, and it never claims to hold the original collection.
@@ -368,9 +364,8 @@ Editor linting checks the small latest pointer and releases its snapshot-cache
 mutex before analysis. Brief generation reads its global fallback only when the selected window has no saved report.
 
 The desktop, CLI JSON and generated browser demo omit `evidence` from their view projection while keeping provenance;
-MCP returns its focused views. Shared exports and digests reparse before
-redacting, analyze only redacted input and never copy unredacted collection or recorded events into their replay body.
-Saved artifacts and optional metadata remain readable when these additions are absent.
+MCP returns its focused views. Shared exports and digests analyze only redacted input and never copy unredacted
+collection or recorded events into their replay body.
 
 Sharing masks SQL literals, physical paths and endpoint details, including retained measurement and baseline
 identities. Database, schema and logical catalog labels remain available for diagnosis. Before masking index predicates,

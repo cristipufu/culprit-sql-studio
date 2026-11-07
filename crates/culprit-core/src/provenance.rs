@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{ChangeEvent, DatabaseIdentity, Engine, MeasurementContext, Snapshot};
+use crate::{ChangeEvent, DatabaseIdentity, MeasurementContext, Snapshot};
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
@@ -153,24 +153,6 @@ impl Snapshot {
     }
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-#[ts(export)]
-pub enum PlanParsingOutcome {
-    Reparsed,
-    NoNativeText,
-    Retained,
-}
-
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
-#[ts(export)]
-pub struct PlanParsingProvenance {
-    pub query: String,
-    pub engine: Engine,
-    pub parser: ComponentVersion,
-    pub outcome: PlanParsingOutcome,
-}
-
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct AnalysisProvenance {
@@ -180,7 +162,6 @@ pub struct AnalysisProvenance {
     pub origin: AnalysisOrigin,
     pub collection: Option<CollectionProvenance>,
     pub previous_analyzer: Option<ComponentVersion>,
-    pub parsing: Vec<PlanParsingProvenance>,
     pub baselines: Vec<BaselineReference>,
 }
 

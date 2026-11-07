@@ -1,5 +1,5 @@
-//! Captured facts used in plan calculations. Provider properties remain available for inspection; their labels are
-//! interpreted only by the compatibility adapter for plans saved before these fields existed.
+//! Captured facts used in plan calculations. A parser that sets them writes them; otherwise they are read from the
+//! engine's own plan properties (`from_properties`), which stay available for inspection.
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -319,7 +319,7 @@ pub fn count(value: f64) -> Option<u32> {
 }
 
 impl PlanFacts {
-    pub fn from_legacy_properties(props: &Properties) -> Self {
+    pub fn from_properties(props: &Properties) -> Self {
         let number =
             |key: &str| props.get(key).and_then(|value| value.trim().parse::<f64>().ok()).and_then(nonnegative);
         let jit = props.get("JIT").and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
@@ -408,9 +408,9 @@ impl PlanFacts {
 }
 
 impl PlanNodeFacts {
-    /// The sole adapter for older normalized plans and external providers that still supply properties only. A
-    /// present facts object is authoritative, including its unknown fields; it never inherits stale properties.
-    pub fn from_legacy_properties(props: &Properties) -> Self {
+    /// The facts a node's engine properties say, for a parser (or a plugged-in provider) that supplies properties
+    /// only. A present facts object is authoritative, including its unknown fields; it never inherits stale properties.
+    pub fn from_properties(props: &Properties) -> Self {
         let number = |key: &str| props.get(key).and_then(|value| value.trim().parse::<f64>().ok());
         Self {
             estimated_rows_unavailable: false,
@@ -431,11 +431,11 @@ impl PlanNodeFacts {
             subplan_name: props.get("Subplan Name").cloned(),
             aggregate_strategy: props.get("Strategy").cloned(),
             table_missing: props.get("Table not in the catalog").cloned(),
-            many_to_many: props.get("ManyToMany").and_then(|v| legacy_bool(v)),
-            anti_join: props.get("not_exists").and_then(|v| legacy_bool(v)),
-            dependent: props.get("dependent").and_then(|v| legacy_bool(v)),
-            cacheable: props.get("cacheable").and_then(|v| legacy_bool(v)),
-            functions_in_seek_only: props.get("UserDefinedFunctionsInSeekOnly").and_then(|v| legacy_bool(v)),
+            many_to_many: props.get("ManyToMany").and_then(|v| prop_bool(v)),
+            anti_join: props.get("not_exists").and_then(|v| prop_bool(v)),
+            dependent: props.get("dependent").and_then(|v| prop_bool(v)),
+            cacheable: props.get("cacheable").and_then(|v| prop_bool(v)),
+            functions_in_seek_only: props.get("UserDefinedFunctionsInSeekOnly").and_then(|v| prop_bool(v)),
             expression_cache: props.contains_key("cache_state"),
             conditions: ["Filter", "Join Filter", "Index Cond", "Recheck Cond", "Hash Cond", "Merge Cond"]
                 .iter()
@@ -461,8 +461,8 @@ impl PlanNodeFacts {
                 .get("possible_keys")
                 .map(|v| v.split(", ").filter(|v| !v.is_empty()).map(str::to_string).collect())
                 .unwrap_or_default(),
-            possible_index_columns: props.get("possible_keys_columns").map(|v| legacy_indexes(v)),
-            table_indexes: props.get(crate::insights::TABLE_INDEXES).map(|v| legacy_indexes(v)),
+            possible_index_columns: props.get("possible_keys_columns").map(|v| prop_indexes(v)),
+            table_indexes: props.get(crate::insights::TABLE_INDEXES).map(|v| prop_indexes(v)),
             automatic_index: props.get("Automatic Index").and_then(|v| PlanAutomaticIndex::from_description(v)),
             parallel_threads: number(crate::plan::PARALLEL_THREADS).and_then(thread_count),
             measured_kept_share: number(crate::plan::MEASURED_KEPT).and_then(fraction),
@@ -495,7 +495,7 @@ impl PlanNodeFacts {
                 "Memory" => Some(false),
                 _ => None,
             }),
-            exchange_spill: props.get(crate::insights::EXCHANGE_SPILL).and_then(|v| legacy_bool(v)),
+            exchange_spill: props.get(crate::insights::EXCHANGE_SPILL).and_then(|v| prop_bool(v)),
             estimated_rows_per_process: number("Plan Rows per process").and_then(nonnegative),
         }
     }
@@ -526,7 +526,7 @@ mod percentage_number {
     }
 }
 
-fn legacy_bool(value: &str) -> Option<bool> {
+fn prop_bool(value: &str) -> Option<bool> {
     match value.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" => Some(true),
         "0" | "false" | "no" => Some(false),
@@ -711,7 +711,7 @@ pub struct PlanChangedColumn {
     pub column: String,
     pub data_type: String,
 }
-fn legacy_indexes(value: &str) -> Vec<PlanIndexColumns> {
+fn prop_indexes(value: &str) -> Vec<PlanIndexColumns> {
     value
         .lines()
         .filter_map(|line| {

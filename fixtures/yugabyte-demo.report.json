@@ -499,108 +499,6 @@
     "collection": null,
     "extensions": [],
     "origin": "prepared-report",
-    "parsing": [
-      {
-        "engine": "yugabyte",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-yugabyte",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "8345917977273313509"
-      },
-      {
-        "engine": "yugabyte",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-yugabyte",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "8345917977273313509"
-      },
-      {
-        "engine": "yugabyte",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-yugabyte",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "466454478821061062"
-      },
-      {
-        "engine": "yugabyte",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-yugabyte",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "466454478821061062"
-      },
-      {
-        "engine": "yugabyte",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-yugabyte",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "4357247400045295631"
-      },
-      {
-        "engine": "yugabyte",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-yugabyte",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "4357247400045295631"
-      },
-      {
-        "engine": "yugabyte",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-yugabyte",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "-71879613880347319"
-      },
-      {
-        "engine": "yugabyte",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-yugabyte",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "-71879613880347319"
-      },
-      {
-        "engine": "yugabyte",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-yugabyte",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "-1395695495724611761"
-      },
-      {
-        "engine": "yugabyte",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-yugabyte",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "-1395695495724611761"
-      }
-    ],
     "pipeline": {
       "checks": [
         "missing-index",
@@ -7187,7 +7085,7 @@
               "rows_read": null,
               "runtime": null,
               "seek_predicate": null,
-              "self_cost": 116.67000000000007,
+              "self_cost": 116.67000000000009,
               "subtree_cost": 1805.08,
               "table_rows": null,
               "warnings": []

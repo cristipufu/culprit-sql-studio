@@ -277,7 +277,6 @@ impl Pipeline {
             origin: culprit_core::AnalysisOrigin::Snapshot,
             collection: None,
             previous_analyzer: None,
-            parsing: Vec::new(),
             baselines: snapshot.baseline_references(),
         });
         for step in &self.prepare {

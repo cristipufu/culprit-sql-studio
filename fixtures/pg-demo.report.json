@@ -1272,158 +1272,6 @@
     "collection": null,
     "extensions": [],
     "origin": "prepared-report",
-    "parsing": [
-      {
-        "engine": "postgres",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "9065391607317686058"
-      },
-      {
-        "engine": "postgres",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "5308963031944094559"
-      },
-      {
-        "engine": "postgres",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "-8886085649470066503"
-      },
-      {
-        "engine": "postgres",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "4911431806993420100"
-      },
-      {
-        "engine": "postgres",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "-3722457391793582113"
-      },
-      {
-        "engine": "postgres",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "2004611025554862962"
-      },
-      {
-        "engine": "postgres",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "2885972271926804069"
-      },
-      {
-        "engine": "postgres",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "3432126458605143571"
-      },
-      {
-        "engine": "postgres",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "8465053948014496855"
-      },
-      {
-        "engine": "postgres",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "-6576252161252119529"
-      },
-      {
-        "engine": "postgres",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "5306524445554315840"
-      },
-      {
-        "engine": "postgres",
-        "outcome": "reparsed",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "2169115237613314459"
-      },
-      {
-        "engine": "postgres",
-        "outcome": "no-native-text",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "-463560455567765064"
-      },
-      {
-        "engine": "postgres",
-        "outcome": "no-native-text",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "-967240904657798800"
-      },
-      {
-        "engine": "postgres",
-        "outcome": "no-native-text",
-        "parser": {
-          "component": "culprit-postgres",
-          "revision": null,
-          "version": "0.5.5"
-        },
-        "query": "6425265648074738764"
-      }
-    ],
     "pipeline": {
       "checks": [
         "missing-index",
@@ -3781,7 +3629,7 @@
                       "rows_read": null,
                       "runtime": null,
                       "seek_predicate": null,
-                      "self_cost": 1001.0999999999985,
+                      "self_cost": 1001.0999999999984,
                       "subtree_cost": 44202.74,
                       "table_rows": null,
                       "warnings": []
@@ -3933,13 +3781,13 @@
                   "uncosted": false
                 },
                 {
-                  "cost_share": 0.022647804581412617,
+                  "cost_share": 0.022647804581412613,
                   "estimated_rows": 11.0,
                   "estimated_rows_for_runs": 11.0,
                   "finding_no_share_reason": null,
                   "guess": null,
                   "id": 2,
-                  "layout_own_share": 0.022647804581412617,
+                  "layout_own_share": 0.022647804581412613,
                   "layout_subtree_share": 0.9999950229577386,
                   "misestimate": null,
                   "no_share_reason": null,
@@ -4683,7 +4531,7 @@
                   "rows_read": null,
                   "runtime": null,
                   "seek_predicate": null,
-                  "self_cost": 1000.1999999999989,
+                  "self_cost": 1000.1999999999988,
                   "subtree_cost": 13561.97,
                   "table_rows": null,
                   "warnings": []
@@ -5516,7 +5364,7 @@
                   "rows_read": null,
                   "runtime": null,
                   "seek_predicate": null,
-                  "self_cost": 0.009999999999999787,
+                  "self_cost": 0.009999999999999789,
                   "subtree_cost": 12.33,
                   "table_rows": null,
                   "warnings": []
@@ -5611,7 +5459,7 @@
                   "finding_no_share_reason": "The plan as a whole is cheap, so no share of its cost is put on one step.",
                   "guess": null,
                   "id": 1,
-                  "layout_own_share": 0.000809061488673122,
+                  "layout_own_share": 0.0008090614886731221,
                   "layout_subtree_share": 0.9975728155339806,
                   "misestimate": null,
                   "no_share_reason": "The plan as a whole is cheap, so no share of its cost is put on one step.",
