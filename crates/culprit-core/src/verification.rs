@@ -111,11 +111,6 @@ pub fn compare_reports(before: &Report, after: &Report, ids: &[String]) -> Verif
                 before: Some(was.impact.label.clone()), after: None,
                 note: Some("This observation uses cumulative counters. A reset, removed index or unavailable counter can make it disappear without verifying a fix. Compare new counts and waits under representative load.".into()),
             },
-            (Some(was), None) if before.assessments.is_empty() && was.id.contains(['/', '\\']) => VerifiedFinding {
-                id: id.clone(), title: was.title.clone(), status: VerifyStatus::Unknown,
-                before: Some(was.impact.label.clone()), after: None,
-                note: Some("This older report used a path in the finding identifier. A private replacement identifier does not verify a fix; compare a fresh baseline.".into()),
-            },
             (Some(was), None) => match after.finding_absence_problem_with_baseline(
                 &was.id, &was.check, &was.queries.iter().map(|q| q.id.as_str()).collect::<Vec<_>>(), was.facts.plan_baseline.as_ref()
             ) {

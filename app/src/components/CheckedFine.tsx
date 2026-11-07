@@ -6,11 +6,10 @@ import { engineLimitations } from "../lib/engines";
 /** The pipeline's evidence assessment. No finding alone never means fine. */
 export function CheckedFine({ report }: { report: Report }) {
   const [open, setOpen] = useState(report.findings.length <= 3);
-  const assessments = report.assessments ?? [];
+  const assessments = report.assessments;
   const assessed = assessments.filter((c) => c.status === "assessed");
   const limited = assessments.filter((c) => c.status === "insufficient-evidence" || c.status === "unavailable" || (c.status === "findings" && c.reason));
   const inapplicable = assessments.filter((c) => c.status === "not-applicable");
-  if (!assessments.length) return <p className="muted">This saved report has no check coverage assessment. Scan again to see which problems could be assessed.</p>;
   return (
     <div className="checked-fine">
       <button type="button" className="checked-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>

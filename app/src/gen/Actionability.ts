@@ -2,7 +2,6 @@
 
 /**
  * What a person can do with a finding, independently of its severity. Historical and informational evidence stays
- * available, but contributes neither an opportunity nor an alert. Older reports default to optional advice until
- * the current checks read their evidence again.
+ * available, but contributes neither an opportunity nor an alert.
  */
 export type Actionability = "needs-attention" | "optional-improvement" | "information" | "history";

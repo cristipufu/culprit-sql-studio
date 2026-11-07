@@ -1,8 +1,8 @@
 import type { Finding } from "../gen/Finding";
 
-/** Old saved reports have no classification until reanalysis. Their severity remains the fallback. */
+/** What a person can do with a finding: an inactive one is history, whatever its classification. */
 export function actionability(f: Finding): Finding["actionability"] {
-  return f.inactive ? "history" : (f.actionability ?? (f.severity === "low" ? "optional-improvement" : "needs-attention"));
+  return f.inactive ? "history" : f.actionability;
 }
 export function isActionable(f: Finding): boolean {
   return !f.inactive && ["needs-attention", "optional-improvement"].includes(actionability(f));

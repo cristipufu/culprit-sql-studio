@@ -38,4 +38,8 @@ count?: number | null,
 /**
  * In `since.again` only: how many happened since the previous digest's scan.
  */
-count_since?: number | null, check?: string, queries?: Array<string>, plan_baseline?: PlanBaseline, };
+count_since?: number | null, 
+/**
+ * The originating check, for evidence-aware comparisons of saved digests.
+ */
+check: string, queries?: Array<string>, plan_baseline?: PlanBaseline, };

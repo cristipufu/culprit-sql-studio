@@ -43,8 +43,7 @@ pub enum Confidence {
 }
 
 /// What a person can do with a finding, independently of its severity. Historical and informational evidence stays
-/// available, but contributes neither an opportunity nor an alert. Older reports default to optional advice until
-/// the current checks read their evidence again.
+/// available, but contributes neither an opportunity nor an alert.
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
@@ -169,7 +168,6 @@ pub struct Finding {
     pub check: String,
     pub category: Category,
     pub severity: Severity,
-    #[serde(default)]
     pub actionability: Actionability,
     pub confidence: Confidence,
     pub title: String,
@@ -180,7 +178,6 @@ pub struct Finding {
     pub queries: Vec<QueryRef>,
     pub fix: Option<Fix>,
     pub verify: Vec<String>,
-    #[serde(default)]
     pub verification_basis: VerificationBasis,
     pub caveats: Vec<String>,
     /// When the affected queries last ran, for query findings.
@@ -320,7 +317,6 @@ pub struct Report {
     pub findings: Vec<Finding>,
     pub locked: Vec<LockedCheck>,
     pub summary: Summary,
-    #[serde(default)]
     pub assessments: Vec<crate::check::CheckAssessment>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub refinement: Vec<crate::RefinementDecision>,
@@ -333,14 +329,14 @@ pub struct Report {
 }
 
 impl Report {
-    /// Older reports retain their prepared snapshot as the only available input, without claiming it is original.
+    /// The input the analysis read: the retained original, or, for a report without retained evidence (`--json`
+    /// output), its prepared snapshot, without claiming it is original.
     pub fn analysis_input(&self) -> &Snapshot {
         self.evidence.as_ref().map_or(&self.snapshot, |e| e.input.as_ref())
     }
 
     /// Why a missing finding cannot establish a clean result for this check. A partial source can still yield
     /// positive findings, so a `Findings` assessment with a reason retains that incomplete-evidence account.
-    /// Reports saved before assessments existed retain their capability-lock interpretation.
     pub fn check_absence_problem(&self, check: &str) -> Option<String> {
         if let Some(lock) = self.locked.iter().find(|l| l.check.id == check) {
             let names: Vec<_> = lock.missing.iter().map(|c| c.label().to_string()).collect();
@@ -351,7 +347,7 @@ impl Report {
             });
         }
         let Some(assessment) = self.assessments.iter().find(|a| a.check == check) else {
-            return (!self.assessments.is_empty()).then(|| "This check was not run in the new scan.".into());
+            return Some("This check was not run in the new scan.".into());
         };
         use crate::CheckStatus;
         match assessment.status {

@@ -226,9 +226,7 @@ pub struct DigestFinding {
     pub id: String,
     pub title: String,
     pub severity: Severity,
-    #[serde(default)]
     pub actionability: crate::Actionability,
-    #[serde(default)]
     pub verification_basis: crate::VerificationBasis,
     /// Share of database time behind it, 0–1, when it is about queries.
     pub db_time_share: Option<f64>,
@@ -249,10 +247,8 @@ pub struct DigestFinding {
     /// In `since.again` only: how many happened since the previous digest's scan.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub count_since: Option<f64>,
-    // The originating check, retained explicitly for evidence-aware comparisons of saved digests.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub check: Option<String>,
+    /// The originating check, for evidence-aware comparisons of saved digests.
+    pub check: String,
     // Statement identities needed to verify this finding against partially measured workloads.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[ts(as = "Option<Vec<String>>", optional)]

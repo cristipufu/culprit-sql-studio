@@ -404,7 +404,7 @@ fn schema_and_setting_changes_really_verify_with_natural_assessments() {
 }
 
 #[test]
-fn sharing_file_evidence_keeps_links_and_legacy_path_ids_do_not_prove_a_fix() {
+fn sharing_file_evidence_keeps_finding_links_without_the_path() {
     let mut s = snapshot();
     s.pressure.get_or_insert_default().files = vec![culprit_core::signals::FileIo {
         name: "/private/file-path-canary/data.db".into(),
@@ -425,23 +425,6 @@ fn sharing_file_evidence_keeps_links_and_legacy_path_ids_do_not_prove_a_fix() {
     let shared = culprit_checks::analyze(culprit_core::redact::redact_snapshot(&s));
     assert!(shared.findings.iter().any(|f| f.id == finding.id), "shared links still open the original finding");
     assert!(!serde_json::to_string(&shared).unwrap().contains("file-path-canary"));
-    let mut legacy = original;
-    let old = legacy.findings.iter_mut().find(|f| f.check == "slow-storage").unwrap();
-    old.id = format!("slow-storage:{}:/private/file-path-canary/data.db", s.server.database);
-    let old_id = old.id.clone();
-    legacy.assessments.clear();
-    let verification = culprit_core::verification::compare_reports(&legacy, &shared, std::slice::from_ref(&old_id));
-    assert_eq!(verification.findings[0].status, culprit_core::VerifyStatus::Unknown);
-    assert!(
-        !culprit_checks::digest(&shared, Some(&legacy), 100, 0).since.unwrap().fixed.iter().any(|f| f.id == old_id)
-    );
-    let mut previous = culprit_checks::digest(&legacy, None, 100, 0);
-    for f in &mut previous.findings {
-        f.check = None;
-    }
-    assert!(
-        !culprit_checks::digest_since(&shared, &previous, 100, 0).since.unwrap().fixed.iter().any(|f| f.id == old_id)
-    );
 }
 
 #[test]

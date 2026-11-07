@@ -2547,7 +2547,9 @@
     "title": "An update of orders spends nearly all its time waiting on locks, 28.7 s per run",
     "verify": [
      "Re-scan: lock waits should be a small part of its time."
-    ]
+    ],
+    "actionability": "needs-attention",
+    "verification_basis": "rescan"
    },
    {
     "category": "queries",
@@ -2610,7 +2612,9 @@
     "title": "A read from order_items times out on every run, at about 15 s",
     "verify": [
      "Re-scan after the change: runs that fail or are cancelled should drop to near zero."
-    ]
+    ],
+    "actionability": "needs-attention",
+    "verification_basis": "rescan"
    },
    {
     "category": "queries",
@@ -2667,7 +2671,9 @@
     "title": "A read from orders fails 25% of the time",
     "verify": [
      "Re-scan after the change: runs that fail or are cancelled should drop to near zero."
-    ]
+    ],
+    "actionability": "needs-attention",
+    "verification_basis": "rescan"
    },
    {
     "category": "queries",
@@ -2724,7 +2730,9 @@
     "title": "A read from orders spends nearly all its time waiting on locks, 23.9 s per run",
     "verify": [
      "Re-scan: lock waits should be a small part of its time."
-    ]
+    ],
+    "actionability": "needs-attention",
+    "verification_basis": "rescan"
    },
    {
     "category": "queries",
@@ -2781,7 +2789,9 @@
     "title": "An update of wide writes 7.9 KB of transaction log per row it changes",
     "verify": [
      "Re-scan: its share of the transaction log and the bytes per row should drop."
-    ]
+    ],
+    "actionability": "needs-attention",
+    "verification_basis": "rescan"
    },
    {
     "category": "indexes",
@@ -2850,7 +2860,9 @@
     "title": "Sessions wait 37.3 s each on row locks in orders",
     "verify": [
      "Re-scan a day later: lock waits on this index should stop growing."
-    ]
+    ],
+    "actionability": "needs-attention",
+    "verification_basis": "rescan"
    },
    {
     "category": "indexes",
@@ -2901,7 +2913,9 @@
     "title": "Inserts into hot queue for the last page of pk_hot",
     "verify": [
      "Re-scan under the same load: page latch waits on this index should stop growing."
-    ]
+    ],
+    "actionability": "needs-attention",
+    "verification_basis": "rescan"
    },
    {
     "category": "queries",
@@ -2966,7 +2980,9 @@
     "title": "Compiling takes 34% of the time of a read from orders",
     "verify": [
      "Re-scan: planning should be a small part of its time."
-    ]
+    ],
+    "actionability": "optional-improvement",
+    "verification_basis": "rescan"
    },
    {
     "category": "queries",
@@ -3017,7 +3033,9 @@
     "title": "A read from order_items returns 20K rows per run",
     "verify": [
      "Re-scan: rows per run should drop to what a page or a job actually uses."
-    ]
+    ],
+    "actionability": "optional-improvement",
+    "verification_basis": "rescan"
    },
    {
     "category": "maintenance",
@@ -3056,7 +3074,9 @@
     "title": "SQL Server doesn't trust 2 constraints on child",
     "verify": [
      "Re-scan: the constraint should no longer be listed."
-    ]
+    ],
+    "actionability": "optional-improvement",
+    "verification_basis": "rescan"
    }
   ],
   "histograms": null,
@@ -4221,7 +4241,9 @@
     "title": "A read from orders spends nearly all its time waiting on locks, 28.8 s per run",
     "verify": [
      "Re-scan: lock waits should be a small part of its time."
-    ]
+    ],
+    "actionability": "needs-attention",
+    "verification_basis": "rescan"
    },
    {
     "category": "queries",
@@ -4278,7 +4300,9 @@
     "title": "An update of orders spends nearly all its time waiting on locks, 14.4 s per run",
     "verify": [
      "Re-scan: lock waits should be a small part of its time."
-    ]
+    ],
+    "actionability": "needs-attention",
+    "verification_basis": "rescan"
    },
    {
     "category": "queries",
@@ -4343,7 +4367,9 @@
     "title": "An update of orders fails 28% of the time (1205 lock wait timeout)",
     "verify": [
      "Re-scan after the change: runs that fail or are cancelled should drop to near zero."
-    ]
+    ],
+    "actionability": "needs-attention",
+    "verification_basis": "rescan"
    },
    {
     "category": "maintenance",
@@ -4401,7 +4427,9 @@
     "title": "MySQL guesses how many orders rows match promo_code and created_at: no histogram",
     "verify": [
      "Re-scan: the columns should have histograms, and EXPLAIN ANALYZE should show estimated rows close to actual for that filter."
-    ]
+    ],
+    "actionability": "optional-improvement",
+    "verification_basis": "rescan"
    },
    {
     "category": "queries",
@@ -4452,7 +4480,9 @@
     "title": "A read from order_items returns 20K rows per run",
     "verify": [
      "Re-scan: rows per run should drop to what a page or a job actually uses."
-    ]
+    ],
+    "actionability": "optional-improvement",
+    "verification_basis": "rescan"
    }
   ],
   "histograms": [
@@ -5852,7 +5882,9 @@
     "title": "A read from orders returns 247K rows (\u2248 17.4 MB) per run",
     "verify": [
      "Re-scan: rows per run should drop to what a page or a job actually uses."
-    ]
+    ],
+    "actionability": "needs-attention",
+    "verification_basis": "rescan"
    },
    {
     "category": "queries",
@@ -5915,7 +5947,9 @@
     "title": "Planning takes almost all of the time of a read from orders",
     "verify": [
      "Re-scan: planning should be a small part of its time."
-    ]
+    ],
+    "actionability": "needs-attention",
+    "verification_basis": "rescan"
    },
    {
     "category": "queries",
@@ -5972,7 +6006,9 @@
     "title": "JIT compilation takes longer than running a read from products",
     "verify": [
      "Re-scan: JIT time per run should drop to zero or near it, and the average run time with it."
-    ]
+    ],
+    "actionability": "needs-attention",
+    "verification_basis": "rescan"
    },
    {
     "category": "queries",
@@ -6029,7 +6065,9 @@
     "title": "An update of wide writes 8.3 KB of WAL per row it changes",
     "verify": [
      "Re-scan: its share of the WAL and the bytes per row should drop."
-    ]
+    ],
+    "actionability": "needs-attention",
+    "verification_basis": "rescan"
    },
    {
     "category": "configuration",
@@ -6068,7 +6106,9 @@
     "title": "The inactive replication slot analytics_slot keeps 1.1 GB of WAL",
     "verify": [
      "Re-scan: the lag should be seconds, or the slot gone."
-    ]
+    ],
+    "actionability": "needs-attention",
+    "verification_basis": "rescan"
    },
    {
     "category": "maintenance",
@@ -6107,7 +6147,9 @@
     "title": "The check constraint wide_touched_positive on wide was never validated",
     "verify": [
      "Re-scan: the constraint should no longer be listed."
-    ]
+    ],
+    "actionability": "optional-improvement",
+    "verification_basis": "rescan"
    },
    {
     "category": "maintenance",
@@ -6164,7 +6206,9 @@
     "title": "No update to wide is HOT: each one rewrites every index",
     "verify": [
      "Re-scan a few days later: the HOT share counts since the last statistics reset, so compare how n_tup_hot_upd grows against n_tup_upd."
-    ]
+    ],
+    "actionability": "optional-improvement",
+    "verification_basis": "rescan"
    },
    {
     "category": "maintenance",
@@ -6215,7 +6259,9 @@
     "title": "wide is about 74% empty space (\u2248 123 MB)",
     "verify": [
      "Re-scan after the rewrite: the estimate should fall under 20%."
-    ]
+    ],
+    "actionability": "optional-improvement",
+    "verification_basis": "rescan"
    }
   ],
   "histograms": null,

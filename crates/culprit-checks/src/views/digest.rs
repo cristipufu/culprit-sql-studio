@@ -10,18 +10,7 @@ use culprit_core::{
 /// list of findings, index advice and deadlock patterns; `top_queries` is how many of the heaviest queries to list.
 pub fn digest(report: &Report, previous: Option<&Report>, top: usize, top_queries: usize) -> Digest {
     let baseline = previous.filter(|p| p.snapshot.report_comparison(&report.snapshot).allows_comparison()).map(|p| {
-        let findings = p
-            .findings
-            .iter()
-            .filter(|f| !f.inactive)
-            .map(|f| {
-                let mut entry = item(f, None);
-                if p.assessments.is_empty() && f.id.contains(['/', '\\']) {
-                    entry.check = None;
-                }
-                entry
-            })
-            .collect::<Vec<_>>();
+        let findings = p.findings.iter().filter(|f| !f.inactive).map(|f| item(f, None)).collect::<Vec<_>>();
         (p.snapshot.taken_at.clone(), findings)
     });
     build(report, baseline, top, top_queries)
@@ -118,29 +107,7 @@ fn build(report: &Report, baseline: Option<(String, Vec<DigestFinding>)>, top: u
 }
 
 fn absence_assessed(report: &Report, finding: &DigestFinding) -> bool {
-    // Older exports could use physical paths as ids. Their new private identifiers are not proof of a fix.
-    if finding.check.is_none() && finding.id.contains(['/', '\\']) {
-        return false;
-    }
-    let check = if let Some(check) = finding.check.as_deref() {
-        check
-    } else {
-        // Older digests retain only the stable id. Recover a check only when its registered prefix is unique;
-        // custom check ids and subjects can both contain colons, so splitting at the first colon is insufficient.
-        let registered: std::collections::BTreeSet<_> = report
-            .assessments
-            .iter()
-            .map(|a| a.check.as_str())
-            .chain(report.locked.iter().map(|l| l.check.id.as_str()))
-            .filter(|check| finding.id.strip_prefix(*check).is_some_and(|subject| subject.starts_with(':')))
-            .collect();
-        let mut matches = registered.into_iter();
-        match (matches.next(), matches.next()) {
-            (Some(check), None) => check,
-            (Some(_), Some(_)) => return false,
-            (None, _) => finding.id.split(':').next().unwrap_or(&finding.id),
-        }
-    };
+    let check = finding.check.as_str();
     report
         .finding_absence_problem_with_baseline(
             &finding.id,
@@ -501,7 +468,7 @@ fn counted_since(now: f64, before: f64) -> f64 {
 fn item(f: &Finding, was: Option<Severity>) -> DigestFinding {
     DigestFinding {
         plan_baseline: f.facts.plan_baseline.clone(),
-        check: Some(f.check.clone()),
+        check: f.check.clone(),
         queries: f.queries.iter().map(|q| q.id.clone()).collect(),
         id: f.id.clone(),
         title: f.title.clone(),
@@ -871,7 +838,7 @@ mod tests {
     }
 
     #[test]
-    fn saved_digests_keep_check_identity_and_legacy_ambiguous_ids_never_guess_it() {
+    fn saved_digests_compare_by_the_check_they_recorded_even_when_ids_share_its_colons() {
         let mut before = report();
         before.findings.truncate(1);
         let f = &mut before.findings[0];
@@ -879,12 +846,7 @@ mod tests {
         f.check = "team:policy".into();
         f.verification_basis = culprit_core::VerificationBasis::Rescan;
         let previous = digest(&before, None, 100, 0);
-        assert_eq!(previous.findings[0].check.as_deref(), Some("team:policy"));
-        let mut legacy = previous.clone();
-        for f in &mut legacy.findings {
-            f.check = None;
-        }
-        let legacy: Digest = serde_json::from_value(serde_json::to_value(legacy).unwrap()).unwrap();
+        assert_eq!(previous.findings[0].check, "team:policy");
         let mut after = before.clone();
         after.findings.clear();
         after.assessments = vec![
@@ -903,12 +865,9 @@ mod tests {
                 assessed_queries: Vec::new(),
             },
         ];
-        for baseline in [&previous, &legacy] {
-            assert!(digest_since(&after, baseline, 100, 0).since.unwrap().fixed.is_empty());
-        }
+        assert!(digest_since(&after, &previous, 100, 0).since.unwrap().fixed.is_empty());
         after.assessments[1].status = culprit_core::CheckStatus::Assessed;
         after.assessments[1].reason = None;
         assert_eq!(digest_since(&after, &previous, 100, 0).since.unwrap().fixed.len(), 1);
-        assert!(digest_since(&after, &legacy, 100, 0).since.unwrap().fixed.is_empty());
     }
 }

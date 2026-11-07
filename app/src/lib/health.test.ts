@@ -8,10 +8,16 @@ import { findingStatus, querySignalStatus, replicaStatus, storageStatus } from "
 import { partial } from "../test/fixtures";
 
 const check = (condition: boolean, message: string) => { if (!condition) throw new Error(message); };
-const finding = (extra: Partial<Finding>): Finding => ({
-  id: "example", check: "example", severity: "low", inactive: false, queries: [], metrics: [],
-  subject: { kind: "database", name: "example" }, ...extra,
-} as Finding);
+const finding = (extra: Partial<Finding>): Finding => {
+  const severity = extra.severity ?? "low";
+  return {
+    id: "example", check: "example", severity, inactive: false, queries: [], metrics: [],
+    subject: { kind: "database", name: "example" },
+    // As the checks classify them: a low finding is optional, a higher one needs attention.
+    actionability: severity === "low" ? "optional-improvement" : "needs-attention",
+    ...extra,
+  } as Finding;
+};
 const report = (findings: Finding[]) => partial<Report>({ findings });
 
 test("Health warnings follow measured evidence", () => {
@@ -25,8 +31,8 @@ test("Health warnings follow measured evidence", () => {
   const file = { name: "data", database: "shop", kind: "data", reads: 10000, read_ms: 1_000_000 } as FileIo;
   const storage = finding({ id: "slow-storage:shop:data", check: "slow-storage", metrics: [{ label: "File", text: "data", value: 0, unit: "count" }] });
   check(storageStatus(report([storage]), file) === "info", "Bulk or historical storage context cannot become a red disk warning");
-  check(storageStatus(report([{ ...storage, id: "slow-storage:other:data", severity: "high" }]), file) === "info", "Another database's matching filename cannot warn here");
-  check(storageStatus(report([{ ...storage, severity: "medium" }]), file) === "watch", "Assessed slow storage still warns");
+  check(storageStatus(report([{ ...storage, id: "slow-storage:other:data", severity: "high", actionability: "needs-attention" }]), file) === "info", "Another database's matching filename cannot warn here");
+  check(storageStatus(report([{ ...storage, severity: "medium", actionability: "needs-attention" }]), file) === "watch", "Assessed slow storage still warns");
 
   // An inactive slot may be between syncs or bounded by a WAL cap; inactivity and byte count alone do not grade it.
   const slot = { name: "batch_consumer", role: "slot", state: "inactive", lag_bytes: 2 * 1024 ** 3 } as const;
