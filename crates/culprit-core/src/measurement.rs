@@ -299,12 +299,15 @@ impl MeasurementContext {
                 hours,
             }
         };
-        let mut reset = if workload.windowed || !matches!(workload.kind(), Some(WorkloadKind::StatementStats)) {
-            // The oldest cached plan/digest is not a source-wide reset marker.
-            ResetMarker::Unknown
-        } else {
-            workload.window_start.clone().map(ResetMarker::At).unwrap_or(ResetMarker::Unknown)
-        };
+        let inferred = workload.history_inputs.iter().any(|r| r.purpose == crate::BaselinePurpose::WindowInference);
+        let mut reset =
+            if workload.windowed || !matches!(workload.kind(), Some(WorkloadKind::StatementStats)) || inferred {
+                // The oldest cached plan/digest is not a source-wide reset marker, nor is the earliest start the scan before
+                // allowed (`infer_window`): a bound, not when the counters started.
+                ResetMarker::Unknown
+            } else {
+                workload.window_start.clone().map(ResetMarker::At).unwrap_or(ResetMarker::Unknown)
+            };
         let mut scope = MeasurementScope::Database;
         if let Some(counters) = &workload.counter_set {
             let members: Vec<_> = counters.members.keys().collect();
@@ -489,44 +492,32 @@ impl Snapshot {
             _ => Comparison::Incompatible(ComparisonReason::DifferentSource),
         }
     }
+    /// The workload's measurement context: what its own period fields say, with the database it read. Worked out each
+    /// time from the workload, never stored beside it, so there is one description of the period to keep right.
     pub fn workload_measurement(&self) -> Option<MeasurementContext> {
         let workload = self.workload.as_ref()?;
-        Some(workload.measurement.clone().unwrap_or_else(|| {
-            MeasurementContext::workload(
-                self.database_identity(),
-                workload,
-                &self.taken_at,
-                self.options.as_ref().map(|o| o.window_in_minutes()),
-            )
-        }))
+        Some(MeasurementContext::workload(
+            self.database_identity(),
+            workload,
+            &self.taken_at,
+            self.options.as_ref().map(|o| o.window_in_minutes()),
+        ))
     }
+    /// Record which database the scan read: what its comparisons with other scans are decided by.
     pub fn bind_identity(&mut self, identity: DatabaseIdentity) {
         self.identity = Some(identity);
-        let context = self.workload.as_ref().map(|w| {
-            MeasurementContext::workload(
-                self.database_identity(),
-                w,
-                &self.taken_at,
-                self.options.as_ref().map(|o| o.window_in_minutes()),
-            )
-        });
-        if let Some(w) = self.workload.as_mut() {
-            w.measurement = context;
-        }
     }
 }
 
 impl Workload {
     pub fn is_cumulative(&self) -> bool {
-        self.measurement.as_ref().map(|c| c.period.is_cumulative()).unwrap_or(!self.windowed)
+        !self.windowed
     }
     pub fn is_windowed(&self) -> bool {
-        self.measurement.as_ref().map(|c| c.period.is_windowed()).unwrap_or(self.windowed)
+        self.windowed
     }
     pub fn measurement_hours(&self) -> f64 {
-        self.measurement.as_ref().map(|c| c.period.hours().unwrap_or(0.0)).unwrap_or_else(|| {
-            if self.window_hours.is_finite() && self.window_hours >= 0.0 { self.window_hours } else { 0.0 }
-        })
+        if self.window_hours.is_finite() && self.window_hours >= 0.0 { self.window_hours } else { 0.0 }
     }
 }
 
@@ -612,8 +603,9 @@ mod tests {
         );
         later.workload.as_mut().unwrap().counter_set.as_mut().unwrap().complete = false;
         later.bind_identity(identity);
-        assert_eq!(later.workload_measurement().unwrap().scope, MeasurementScope::Unknown);
-        assert_eq!(later.workload.as_ref().unwrap().measurement_hours(), 0.0);
+        let context = later.workload_measurement().unwrap();
+        assert_eq!(context.scope, MeasurementScope::Unknown);
+        assert_eq!(context.period.hours(), None);
     }
     fn database(host: &str) -> DatabaseIdentity {
         DatabaseIdentity::server(Engine::Postgres, "shop", host, 5432, None)
@@ -737,17 +729,12 @@ mod tests {
         assert!(b.period.hours().is_none(), "contradictory clocks are not silently reconciled");
     }
     #[test]
-    fn typed_period_is_canonical_and_cache_age_is_not_a_reset() {
+    fn a_digest_tables_oldest_entry_is_not_a_reset() {
         let s: Snapshot = serde_json::from_str(include_str!("../../../fixtures/postgres-demo.json")).unwrap();
         let mut w = s.workload.unwrap();
         w.kind = Some(WorkloadKind::PerformanceSchema);
         let c = MeasurementContext::workload(database("db.example"), &w, &s.taken_at, Some(60));
         assert_eq!(c.reset, ResetMarker::Unknown);
-        w.measurement = Some(c);
-        w.windowed = true;
-        w.window_hours = 999.0;
-        assert!(w.is_cumulative());
-        assert_ne!(w.measurement_hours(), 999.0);
     }
     #[test]
     fn cumulative_collection_time_is_not_the_last_execution_time() {
@@ -785,9 +772,11 @@ mod tests {
     fn an_unknown_selected_window_never_claims_one_minute_or_a_daily_rate() {
         let s: Snapshot = serde_json::from_str(include_str!("../../../fixtures/postgres-demo.json")).unwrap();
         let mut w = s.workload.unwrap();
-        let mut c = context("2026-10-10T00:00:00Z", ResetMarker::Unknown);
-        c.period = MeasurementPeriod::Window { span: None, hours: None, requested_minutes: Some(60) };
-        w.measurement = Some(c);
+        // A windowed source that didn't say how long its window is.
+        (w.windowed, w.window_hours) = (true, 0.0);
+        assert!(
+            MeasurementContext::workload(database("db.example"), &w, &s.taken_at, Some(60)).period.hours().is_none()
+        );
         assert_eq!(w.window_phrase(), "the recorded workload window");
         assert!(w.rate_per_day(1000.0).is_none());
     }

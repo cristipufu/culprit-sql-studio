@@ -295,8 +295,8 @@ fn workload_history_keeps_distinct_ids_with_the_same_rounded_time_and_excludes_o
     let history: Vec<_> =
         [&first, &second, &foreign].into_iter().map(|s| Counters::from_snapshot(s).unwrap()).collect();
     let mut current = point("first.invalid", "2026-10-11T00:00:00Z", "20261011T000000.000Z", 3.0);
-    trends::from_scans(current.workload.as_mut().unwrap(), "shop", &current.taken_at, None, &history);
-    trends::last_seen_from_scans(current.workload.as_mut().unwrap(), "shop", &current.taken_at, &history);
+    trends::from_scans(&mut current, None, &history);
+    trends::last_seen_from_scans(&mut current, &history);
     let refs = current.baseline_references();
     let ids: Vec<_> = refs
         .iter()
@@ -356,7 +356,7 @@ fn simultaneous_readings_do_not_make_a_quiet_query_look_recently_active() {
     for sources in [[&first, &second], [&second, &first]] {
         let history: Vec<_> = sources.into_iter().map(|s| Counters::from_snapshot(s).unwrap()).collect();
         let mut current = point("first.invalid", "2026-10-11T00:00:00Z", "20261011T000000.000Z", 2.0);
-        trends::last_seen_from_scans(current.workload.as_mut().unwrap(), "shop", &current.taken_at, &history);
+        trends::last_seen_from_scans(&mut current, &history);
         assert_eq!(current.workload.as_ref().unwrap().queries[0].last_seen.as_deref(), Some(at));
         let refs = current.baseline_references();
         assert_eq!(refs.iter().filter(|r| r.purpose == BaselinePurpose::QueryActivity).count(), 2);

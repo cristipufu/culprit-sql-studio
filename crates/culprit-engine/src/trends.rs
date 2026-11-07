@@ -122,11 +122,9 @@ impl Counters {
         if !snapshot.measurement_consistency().allows_comparison() {
             return None;
         }
-        let workload = snapshot.workload.as_ref().filter(|w| w.is_cumulative())?;
-        let mut counters =
-            Counters::of_workload(workload, &snapshot.server.database, &snapshot.taken_at, evictions(snapshot));
+        snapshot.workload.as_ref().filter(|w| w.is_cumulative())?;
+        let mut counters = Counters::of_scan(snapshot, evictions(snapshot))?;
         counters.reference = Some(culprit_core::ScanReference::of(snapshot));
-        counters.measurement = snapshot.identified_measurement();
         Some(counters)
     }
 
@@ -156,13 +154,15 @@ impl Counters {
         self.comparison(other).allows_comparison()
     }
 
-    fn of_workload(workload: &Workload, database: &str, taken_at: &str, evictions: Option<f64>) -> Counters {
-        Counters {
+    /// What a scan's workload counted, with the scan's measurement context when it knows which database it read.
+    fn of_scan(snapshot: &Snapshot, evictions: Option<f64>) -> Option<Counters> {
+        let workload = snapshot.workload.as_ref()?;
+        Some(Counters {
             reference: None,
-            measurement: workload.measurement.clone(),
-            taken_at: taken_at.to_string(),
+            measurement: snapshot.identified_measurement(),
+            taken_at: snapshot.taken_at.clone(),
             source: workload.source.clone(),
-            database: database.to_string(),
+            database: snapshot.server.database.clone(),
             window_start: workload.window_start.clone(),
             total_time_ms: workload.total_time_ms,
             total_executions: workload.total_executions,
@@ -183,7 +183,7 @@ impl Counters {
                 })
                 .collect(),
             evictions,
-        }
+        })
     }
 }
 
@@ -352,14 +352,10 @@ struct Step {
 
 /// Fill `workload.timeline` and the heaviest queries' trends from earlier scans of the same database and source.
 /// Leaves the workload alone when there is no earlier scan to compare with.
-pub fn from_scans(
-    workload: &mut Workload,
-    database: &str,
-    taken_at: &str,
-    evictions: Option<f64>,
-    history: &[Counters],
-) {
-    let current = Counters::of_workload(workload, database, taken_at, evictions);
+pub fn from_scans(snapshot: &mut Snapshot, evictions: Option<f64>, history: &[Counters]) {
+    let Some(current) = Counters::of_scan(snapshot, evictions) else { return };
+    let Some(workload) = snapshot.workload.as_mut() else { return };
+    let taken_at = current.taken_at.as_str();
     let Some(now) = epoch(taken_at) else { return };
     let mut points: Vec<(f64, &Counters)> = history
         .iter()
@@ -492,12 +488,10 @@ fn earlier<'a>(history: &'a [Counters], current: &Counters, now: f64) -> Vec<(f6
 /// had grown. It last ran after the scan before that one, so this is the latest it can have run, and the time since is
 /// how long it has been quiet at least. A statement no earlier scan tracked, or whose entry started over, is left
 /// unknown; one that hasn't run since the oldest scan that tracked it last ran by then.
-pub fn last_seen_from_scans(workload: &mut Workload, database: &str, taken_at: &str, history: &[Counters]) {
-    if !workload.is_cumulative() {
-        return;
-    }
-    let Some(now) = epoch(taken_at) else { return };
-    let current = Counters::of_workload(workload, database, taken_at, None);
+pub fn last_seen_from_scans(snapshot: &mut Snapshot, history: &[Counters]) {
+    let Some(current) = Counters::of_scan(snapshot, None) else { return };
+    let Some(workload) = snapshot.workload.as_mut().filter(|w| w.is_cumulative()) else { return };
+    let Some(now) = epoch(&current.taken_at) else { return };
     let points = earlier(history, &current, now);
     if points.is_empty() {
         return;
@@ -576,23 +570,19 @@ fn last_ran(
 /// leaves the window unknown. The scan before, of the same database, narrows it: if the statements it tracked kept
 /// counting, these are the same counters and started when it said (still unknown if it didn't know); if they started
 /// over, they did after it, so its time is the earliest they can have started, and the window at most that long.
-pub fn infer_window(workload: &mut Workload, previous: Option<(&Workload, &str)>, taken_at: &str) {
-    infer_window_referenced(workload, previous, taken_at, None);
-}
-
-pub(crate) fn infer_window_referenced(
-    workload: &mut Workload,
-    previous: Option<(&Workload, &str)>,
-    taken_at: &str,
-    reference: Option<culprit_core::ScanReference>,
-) {
+pub fn infer_window(snapshot: &mut Snapshot, previous: Option<&Snapshot>) {
+    let Some((previous, before)) = previous.and_then(|p| Some((p, p.workload.as_ref()?))) else { return };
+    let current = snapshot.identified_measurement();
+    let taken_at = snapshot.taken_at.clone();
+    let Some(workload) = snapshot.workload.as_mut() else { return };
     if !workload.is_cumulative() || !workload.window_unknown() {
         return;
     }
-    let Some((before, before_at)) = previous.filter(|(p, _)| p.is_cumulative() && p.source == workload.source) else {
+    if !before.is_cumulative() || before.source != workload.source {
         return;
-    };
-    match (&before.measurement, &workload.measurement) {
+    }
+    let measurement = previous.identified_measurement();
+    match (&measurement, &current) {
         (Some(a), Some(b)) => {
             // Unknown cache-entry ages or dropped totals cannot establish a source-wide reset or a rate period.
             if a.counter_transition(b) != CounterTransition::Continued {
@@ -602,27 +592,19 @@ pub(crate) fn infer_window_referenced(
         (None, None) => {}
         _ => return,
     }
-    let start = if started_over(before, workload) { Some(before_at.to_string()) } else { before.window_start.clone() };
+    let start =
+        if started_over(before, workload) { Some(previous.taken_at.clone()) } else { before.window_start.clone() };
     if let Some(start) = start
-        && let (Some(s), Some(n)) = (epoch(&start), epoch(taken_at))
+        && let (Some(s), Some(n)) = (epoch(&start), epoch(&taken_at))
         && n > s
     {
         workload.window_hours = (n - s) / 3600.0;
         workload.window_start = Some(start);
-        if let Some(context) = &mut workload.measurement
-            && let culprit_core::MeasurementPeriod::Cumulative { hours, .. } = &mut context.period
-        {
-            *hours = Some(workload.window_hours);
-        }
         workload.history_inputs.retain(|r| r.purpose != culprit_core::BaselinePurpose::WindowInference);
         workload.history_inputs.push(culprit_core::BaselineReference {
             purpose: culprit_core::BaselinePurpose::WindowInference,
-            scan: reference.unwrap_or_else(|| culprit_core::ScanReference {
-                id: None,
-                taken_at: before_at.into(),
-                database: before.measurement.as_ref().map(|m| m.database.clone()),
-            }),
-            measurement: before.measurement.clone(),
+            scan: culprit_core::ScanReference::of(previous),
+            measurement,
         });
     }
 }
@@ -668,7 +650,6 @@ mod tests {
         Workload {
             counter_set: None,
             history_inputs: Vec::new(),
-            measurement: None,
             source: "pg_stat_statements".into(),
             kind: Some(culprit_core::WorkloadKind::StatementStats),
             windowed: false,
@@ -688,23 +669,46 @@ mod tests {
         }
     }
 
-    /// The context an identified scan of `shop` at `at` records for `w`, as a provider's `bind_identity` builds it.
-    fn context(w: &Workload, at: &str) -> MeasurementContext {
-        let shop =
-            culprit_core::DatabaseIdentity::server(culprit_core::Engine::Postgres, "shop", "127.0.0.1", 5432, None);
-        MeasurementContext::workload(shop, w, at, None)
+    /// A scan of `shop` taken at `at` whose workload is `w`; identified, as a provider's scan is, unless `identified`
+    /// is false.
+    fn scan_of(w: Workload, at: &str, identified: bool) -> Snapshot {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/postgres-demo.json");
+        let mut s = crate::reports::load_snapshot(&path).expect("fixture");
+        (s.server.database, s.taken_at, s.workload, s.identity) = ("shop".into(), at.into(), Some(w), None);
+        s.settings.clear();
+        if identified {
+            s.bind_identity(culprit_core::DatabaseIdentity::server(
+                culprit_core::Engine::Postgres,
+                "shop",
+                "127.0.0.1",
+                5432,
+                None,
+            ));
+        }
+        s
+    }
+
+    fn scan(w: Workload, at: &str) -> Snapshot {
+        scan_of(w, at, true)
     }
 
     fn counters(at: &str, reset: &str, queries: &[(&str, f64, f64)]) -> Counters {
-        let mut w = workload(reset, queries.iter().map(|(id, t, r)| query(id, *t, *r)).collect());
-        w.measurement = Some(context(&w, at));
-        Counters::of_workload(&w, "shop", at, None)
+        let w = workload(reset, queries.iter().map(|(id, t, r)| query(id, *t, *r)).collect());
+        Counters::of_scan(&scan(w, at), None).unwrap()
     }
 
     /// [`from_scans`] for a scan of `shop` taken at `at`.
     fn rebuild(w: &mut Workload, at: &str, history: &[Counters]) {
-        w.measurement = Some(context(w, at));
-        from_scans(w, "shop", at, None, history);
+        let mut s = scan(w.clone(), at);
+        from_scans(&mut s, None, history);
+        *w = s.workload.unwrap();
+    }
+
+    /// [`last_seen_from_scans`] for a scan of `shop` taken at `at`.
+    fn last_seen(w: &mut Workload, at: &str, history: &[Counters]) {
+        let mut s = scan(w.clone(), at);
+        last_seen_from_scans(&mut s, history);
+        *w = s.workload.unwrap();
     }
 
     #[test]
@@ -865,8 +869,7 @@ mod tests {
             reset,
             vec![query("a", 20.0, 2.0), query("b", 60.0, 6.0), query("c", 9.0, 9.0), query("d", 1.0, 1.0)],
         );
-        w.measurement = Some(context(&w, "2026-10-10T18:00:00Z"));
-        last_seen_from_scans(&mut w, "shop", "2026-10-10T18:00:00Z", &history);
+        last_seen(&mut w, "2026-10-10T18:00:00Z", &history);
         let seen = |i: usize| w.queries[i].last_seen.clone();
         // "a" last grew between the 00:00 and 06:00 scans.
         assert_eq!(seen(0).as_deref(), Some("2026-10-10T06:00:00Z"));
@@ -883,27 +886,31 @@ mod tests {
             counters("2026-10-10T06:00:00Z", "2026-10-10T03:00:00Z", &[("a", 20.0, 2.0)]),
         ];
         let mut w = workload("2026-10-10T03:00:00Z", vec![query("a", 20.0, 2.0)]);
-        w.measurement = Some(context(&w, "2026-10-10T12:00:00Z"));
-        last_seen_from_scans(&mut w, "shop", "2026-10-10T12:00:00Z", &history);
+        last_seen(&mut w, "2026-10-10T12:00:00Z", &history);
         assert_eq!(w.queries[0].last_seen.as_deref(), Some("2026-10-10T06:00:00Z"));
     }
 
     #[test]
     fn an_unknown_window_takes_the_previous_scans_while_the_counters_keep_counting() {
         // PostgreSQL 13 with pg_stat_statements.save on: the provider can't say when the counters started.
+        // (Scans that don't say which database they read, so no reset marker decides it: the rule alone.)
+        let infer = |w: &Workload, before: &Workload| {
+            let mut s = scan_of(w.clone(), "2026-10-11T00:00:00Z", false);
+            infer_window(&mut s, Some(&scan_of(before.clone(), "2026-10-10T00:00:00Z", false)));
+            s.workload.unwrap()
+        };
         let mut unknown = workload("", vec![query("a", 200.0, 20.0)]);
         unknown.window_hours = 0.0;
         assert!(unknown.window_unknown());
         let before = workload("2026-09-01T00:00:00Z", vec![query("a", 100.0, 10.0)]);
-        let mut w = unknown.clone();
-        infer_window(&mut w, Some((&before, "2026-10-10T00:00:00Z")), "2026-10-11T00:00:00Z");
+        let w = infer(&unknown, &before);
         assert_eq!(w.window_start.as_deref(), Some("2026-09-01T00:00:00Z"));
         assert!((w.measurement_hours() - 40.0 * 24.0).abs() < 1e-6);
 
         // The counters started over after the previous scan: the window is at most the time since it.
         let mut reset = workload("", vec![query("a", 5.0, 1.0)]);
         reset.window_hours = 0.0;
-        infer_window(&mut reset, Some((&before, "2026-10-10T00:00:00Z")), "2026-10-11T00:00:00Z");
+        let reset = infer(&reset, &before);
         assert_eq!(reset.window_start.as_deref(), Some("2026-10-10T00:00:00Z"));
         assert!((reset.window_hours - 24.0).abs() < 1e-6);
 
@@ -912,14 +919,13 @@ mod tests {
         evicted_before.queries.push(query("gone", 10_000.0, 1_000.0));
         evicted_before.total_time_ms += 10_000.0;
         evicted_before.total_executions += 1_000.0;
-        let mut w = unknown.clone();
-        infer_window(&mut w, Some((&evicted_before, "2026-10-10T00:00:00Z")), "2026-10-11T00:00:00Z");
+        let w = infer(&unknown, &evicted_before);
         assert_eq!(w.window_start.as_deref(), Some("2026-09-01T00:00:00Z"));
 
         // No earlier scan: still unknown.
-        let mut alone = unknown.clone();
-        infer_window(&mut alone, None, "2026-10-11T00:00:00Z");
-        assert!(alone.window_unknown());
+        let mut alone = scan_of(unknown.clone(), "2026-10-11T00:00:00Z", false);
+        infer_window(&mut alone, None);
+        assert!(alone.workload.unwrap().window_unknown());
     }
 
     // A production reading: "about 2.9K a day" from 15,090 eviction rounds since a reset three years back, while

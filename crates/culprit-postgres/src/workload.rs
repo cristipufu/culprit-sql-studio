@@ -157,7 +157,6 @@ async fn collect_with_base(
         workload: Workload {
             counter_set: None,
             history_inputs: Vec::new(),
-            measurement: None,
             source: "pg_stat_statements".into(),
             kind: Some(culprit_core::WorkloadKind::StatementStats),
             windowed: false,

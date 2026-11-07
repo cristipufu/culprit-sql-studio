@@ -35,7 +35,7 @@ fn snapshot(host: &str, at: &str, time: f64, runs: f64) -> Snapshot {
     s
 }
 fn build(s: &mut Snapshot, history: &[Counters]) {
-    trends::from_scans(s.workload.as_mut().unwrap(), &s.server.database, &s.taken_at, None, history);
+    trends::from_scans(s, None, history);
 }
 
 #[test]
@@ -73,10 +73,10 @@ fn another_endpoints_counters_cannot_make_a_query_look_stopped() {
     let old = snapshot("first.example", "2026-10-07T00:00:00Z", 100.0, 10.0);
     let history = vec![Counters::from_snapshot(&old).unwrap()];
     let mut current = snapshot("second.example", "2026-10-11T00:00:00Z", 100.0, 10.0);
-    trends::last_seen_from_scans(current.workload.as_mut().unwrap(), "shop", &current.taken_at, &history);
+    trends::last_seen_from_scans(&mut current, &history);
     assert!(current.workload.as_ref().unwrap().queries[0].last_seen.is_none());
     let mut same = snapshot("first.example", "2026-10-11T00:00:00Z", 100.0, 10.0);
-    trends::last_seen_from_scans(same.workload.as_mut().unwrap(), "shop", &same.taken_at, &history);
+    trends::last_seen_from_scans(&mut same, &history);
     assert_eq!(same.workload.as_ref().unwrap().queries[0].last_seen.as_deref(), Some("2026-10-07T00:00:00Z"));
 }
 
@@ -84,7 +84,13 @@ fn another_endpoints_counters_cannot_make_a_query_look_stopped() {
 fn invalid_scope_cannot_enter_database_findings_or_cumulative_trends() {
     let old = snapshot("first.example", "2026-10-10T00:00:00Z", 100.0, 10.0);
     let mut current = snapshot("first.example", "2026-10-11T00:00:00Z", 1_000_000.0, 1_000.0);
-    current.workload.as_mut().unwrap().measurement.as_mut().unwrap().scope = MeasurementScope::Server;
+    // Counters kept per node, some of which can't say when they started counting: not this database's alone.
+    current.workload.as_mut().unwrap().counter_set = Some(culprit_core::CounterSet {
+        scope: culprit_core::CounterScope::Node,
+        members: [("node-a".to_string(), None)].into(),
+        complete: true,
+    });
+    assert_eq!(current.workload_measurement().unwrap().scope, MeasurementScope::Unknown);
     build(&mut current, &[Counters::from_snapshot(&old).unwrap()]);
     assert!(current.workload.as_ref().unwrap().timeline.is_none());
     let report = culprit_checks::analyze(current);
@@ -145,58 +151,52 @@ fn different_selected_windows_do_not_verify_query_findings_as_fixed() {
     let query = before.findings.iter().find(|f| !f.queries.is_empty()).expect("planted query finding");
     let mut after = before.clone();
     after.findings.clear();
-    after.snapshot.workload.as_mut().unwrap().measurement.as_mut().unwrap().period = MeasurementPeriod::Window {
-        span: Some(Period { start: "2026-10-10T23:00:00Z".into(), end: "2026-10-11T00:00:00Z".into() }),
-        hours: Some(1.0),
-        requested_minutes: Some(60),
-    };
+    let w = after.snapshot.workload.as_mut().unwrap();
+    (w.windowed, w.window_hours) = (true, 1.0);
+    (w.window_start, w.window_end) = (Some("2026-10-10T23:00:00Z".into()), Some("2026-10-11T00:00:00Z".into()));
+    assert!(matches!(
+        after.snapshot.workload_measurement().unwrap().period,
+        MeasurementPeriod::Window { span: Some(Period { .. }), hours: Some(1.0), .. }
+    ));
     let verification = culprit_core::compare_reports(&before, &after, std::slice::from_ref(&query.id));
     assert_eq!(verification.findings[0].status, VerifyStatus::Unknown);
 }
 
 #[test]
 fn source_and_period_changes_never_enter_counter_deltas_or_stopped_query_inference() {
-    use culprit_core::{MeasurementSource, WorkloadKind};
+    use culprit_core::WorkloadKind;
     let old = snapshot("db.example", "2026-10-10T00:00:00Z", 100.0, 10.0);
     let previous = Counters::from_snapshot(&old).unwrap();
     for source in [WorkloadKind::PlanCache, WorkloadKind::PerformanceSchema] {
         let mut current = snapshot("db.example", "2026-10-11T00:00:00Z", 100.0, 10.0);
-        current.workload.as_mut().unwrap().measurement.as_mut().unwrap().source = MeasurementSource::Workload(source);
+        current.workload.as_mut().unwrap().kind = Some(source);
         build(&mut current, std::slice::from_ref(&previous));
-        trends::last_seen_from_scans(
-            current.workload.as_mut().unwrap(),
-            "shop",
-            &current.taken_at,
-            std::slice::from_ref(&previous),
-        );
+        trends::last_seen_from_scans(&mut current, std::slice::from_ref(&previous));
         let w = current.workload.as_ref().unwrap();
         assert!(w.timeline.is_none());
         assert!(w.queries[0].last_seen.is_none());
     }
     let mut current = old.clone();
-    current.workload.as_mut().unwrap().measurement.as_mut().unwrap().period =
-        MeasurementPeriod::Instant { at: "2026-10-11T00:00:00Z".into() };
+    current.workload.as_mut().unwrap().windowed = true;
     assert!(Counters::from_snapshot(&current).is_none());
 }
 
 #[test]
 fn cache_entry_ages_never_establish_source_resets() {
-    use culprit_core::{MeasurementContext, WorkloadKind};
+    use culprit_core::WorkloadKind;
     let mut old = snapshot("db.example", "2026-10-10T00:00:00Z", 100.0, 10.0);
     let mut current = snapshot("db.example", "2026-10-11T00:00:00Z", 100.0, 10.0);
     for s in [&mut old, &mut current] {
-        let identity = s.database_identity();
         let w = s.workload.as_mut().unwrap();
         w.kind = Some(WorkloadKind::PlanCache);
         w.window_end = Some("2026-10-09T00:00:00Z".into());
-        w.measurement = Some(MeasurementContext::workload(identity, w, &s.taken_at, None));
     }
     // The oldest entry changed between scans, but the tracked entry's count did not change.
     current.workload.as_mut().unwrap().window_start = Some("2026-10-10T12:00:00Z".into());
     let before = Counters::from_snapshot(&old).unwrap();
     let after = Counters::from_snapshot(&current).unwrap();
     assert_eq!(trends::step_kind(trends::epoch(&old.taken_at).unwrap(), &before, &after), trends::StepKind::Growth);
-    trends::last_seen_from_scans(current.workload.as_mut().unwrap(), "shop", &current.taken_at, &[before]);
+    trends::last_seen_from_scans(&mut current, &[before]);
     assert_eq!(current.workload.as_ref().unwrap().queries[0].last_seen.as_deref(), Some(old.taken_at.as_str()));
 }
 
@@ -242,11 +242,10 @@ fn persisted_growth_and_reread_baselines_skip_another_endpoint() {
 }
 
 #[test]
-fn public_comparisons_reject_internally_conflicting_context() {
+fn public_comparisons_reject_a_scan_whose_identity_names_another_database() {
     let before = snapshot("db.example", "2026-10-10T00:00:00Z", 100.0, 10.0);
     let mut after = snapshot("db.example", "2026-10-11T00:00:00Z", 200.0, 20.0);
-    after.workload.as_mut().unwrap().measurement.as_mut().unwrap().database =
-        DatabaseIdentity::server(Engine::Postgres, "shop", "another.example", 5432, None);
+    after.server.database = "orders".into();
     assert!(!before.report_comparison(&after).allows_comparison());
     assert!(Counters::from_snapshot(&after).is_none());
     let digest = culprit_checks::digest(&culprit_checks::analyze(before), None, 5, 5);

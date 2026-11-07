@@ -7,6 +7,9 @@ use std::sync::Arc;
 fn snapshot(engine: Engine) -> Snapshot {
     let mut s: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
     s.server.engine = engine;
+    if let Some(identity) = &mut s.identity {
+        identity.engine = engine;
+    }
     s.taken_at = "2026-10-18T12:00:00Z".into();
     s.server.started_at = Some("2026-10-01T00:00:00Z".into());
     s.options = Some(culprit_core::SnapshotOptions::default().with_window_minutes(120));
@@ -64,8 +67,7 @@ fn measured_index_gate_is_provider_independent_and_keeps_costly_controls() {
         for (runs, mean, actionable) in [(2.0, 7.0, false), (2.0, 50.0, true), (1_000_000.0, 0.4, true)] {
             let mut s = snapshot(engine);
             let w = s.workload.as_mut().unwrap();
-            w.windowed = true;
-            w.window_hours = 2.0;
+            crate::last_hours(w, 2.0);
             w.timeline = None;
             w.queries.truncate(1);
             let q = &mut w.queries[0];
@@ -161,8 +163,7 @@ fn selected_window_changes_the_amount_behind_index_advice() {
             let mut s = snapshot(engine);
             s.options = Some(culprit_core::SnapshotOptions::default().with_window_minutes((hours * 60.0) as u32));
             let w = s.workload.as_mut().unwrap();
-            w.windowed = true;
-            w.window_hours = hours;
+            crate::last_hours(w, hours);
             w.timeline = None;
             w.queries.truncate(1);
             let q = &mut w.queries[0];

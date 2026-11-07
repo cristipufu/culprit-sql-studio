@@ -103,9 +103,12 @@ fn preparation() -> Vec<Arc<dyn Prepare>> {
     ]
 }
 
+/// A workload is graded on its own period fields; this checks what they add up to. One that doesn't isolate this
+/// database, or that names another, is left unassessed; a length nobody can stand behind (bounds the wrong way round, or
+/// a window whose bounds and length disagree) is unknown, not a rate's denominator.
 fn measurement_context(snapshot: &mut Snapshot) {
-    use culprit_core::{MeasurementScope, MeasurementSource};
-    let Some(context) = snapshot.workload.as_ref().and_then(|w| w.measurement.clone()) else { return };
+    use culprit_core::MeasurementScope;
+    let Some(context) = snapshot.identified_measurement() else { return };
     let reason = if context.scope != MeasurementScope::Database {
         Some(
             "The workload source does not isolate this database; its measurements cannot assess this database."
@@ -122,15 +125,7 @@ fn measurement_context(snapshot: &mut Snapshot) {
         return;
     }
     if let Some(workload) = &mut snapshot.workload {
-        workload.windowed = context.period.is_windowed();
         workload.window_hours = context.period.hours().unwrap_or(0.0);
-        if let culprit_core::MeasurementPeriod::Window { span: Some(span), .. } = &context.period {
-            workload.window_start = Some(span.start.clone());
-            workload.window_end = Some(span.end.clone());
-        }
-        if let MeasurementSource::Workload(kind) = context.source {
-            workload.kind = Some(kind);
-        }
     }
 }
 

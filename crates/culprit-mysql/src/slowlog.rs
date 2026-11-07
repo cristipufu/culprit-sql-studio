@@ -278,7 +278,6 @@ pub fn workload(
         workload: Workload {
             counter_set: None,
             history_inputs: Vec::new(),
-            measurement: None,
             source: SOURCE.into(),
             kind: Some(culprit_core::WorkloadKind::SlowLog),
             windowed: true,

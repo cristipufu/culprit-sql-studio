@@ -373,7 +373,7 @@ fn shared_snapshots_scrub_catalog_literals_and_all_retained_endpoint_references(
         None,
     ));
     let reference = Some(ScanReference::of(&snapshot));
-    let measurement = snapshot.workload.as_ref().unwrap().measurement.clone();
+    let measurement = snapshot.workload_measurement();
     snapshot.workload.as_mut().unwrap().history_inputs.push(BaselineReference {
         purpose: BaselinePurpose::WorkloadTrend,
         scan: reference.clone().unwrap(),

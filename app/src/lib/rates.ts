@@ -23,16 +23,17 @@ export type Honest = {
   value: (total: number) => number;
 };
 
-/** Whether nobody can say how long the workload covers: counters with no reset time, or a log without timestamps. */
+/** Whether nobody can say how long the workload covers: a source that didn't say, or a log without timestamps. The
+ * core's `Workload::window_unknown`. */
 export function windowUnknown(w: Workload): boolean {
-  return (!w.windowed || w.log != null) && w.window_start == null && w.window_hours <= 0;
+  return !(w.window_hours > 0);
 }
 
 /** "the last 7 days", "the 35 minutes since statistics were reset", "the 50 minutes the Rails log covers": the core's phrase. */
 export function windowPhrase(w: Workload): string {
   const span = windowLabel(w.window_hours).replace(/^last /, "");
   if (w.log != null) return windowUnknown(w) ? `the period the ${w.log} log covers` : `the ${span} the ${w.log} log covers`;
-  if (w.windowed) return `the last ${span}`;
+  if (w.windowed) return windowUnknown(w) ? "the recorded workload window" : `the last ${span}`;
   return windowUnknown(w) ? "the time since statistics were last reset" : `the ${span} since statistics were reset`;
 }
 

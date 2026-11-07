@@ -222,7 +222,6 @@ mod tests {
     fn snapshot() -> Snapshot {
         let mut s: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
         let w = s.workload.as_mut().unwrap();
-        w.measurement = None;
         w.timeline = None;
         w.window_hours = 24.0;
         w.queries.truncate(1);

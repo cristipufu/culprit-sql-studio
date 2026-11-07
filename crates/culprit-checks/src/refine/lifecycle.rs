@@ -425,7 +425,6 @@ mod tests {
     fn scenario() -> (Snapshot, Finding) {
         let mut s: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
         let w = s.workload.as_mut().unwrap();
-        w.measurement = None;
         w.timeline = None;
         w.window_hours = 96.0;
         w.window_end = Some("2026-10-20T00:00:00Z".into());

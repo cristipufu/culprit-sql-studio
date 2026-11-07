@@ -94,22 +94,16 @@ impl<'a> Scan<'a> {
             history::set_aside_replica_usage(&mut snapshot);
             let same_database = previous.as_ref().filter(|p| history::same_database(p, &snapshot));
             let evictions = trends::evictions(&snapshot);
-            if let Some(workload) = snapshot.workload.as_mut().filter(|w| w.is_cumulative()) {
+            if snapshot.workload.as_ref().is_some_and(|w| w.is_cumulative()) {
                 // A source that can't say when it started counting (pg_stat_statements before 14) gets its window from the
                 // scan before.
-                let before = same_database.and_then(|p| Some((p.workload.as_ref()?, p.taken_at.as_str())));
-                trends::infer_window_referenced(
-                    workload,
-                    before,
-                    &snapshot.taken_at,
-                    same_database.map(culprit_core::ScanReference::of),
-                );
+                trends::infer_window(&mut snapshot, same_database);
                 let history = reports::counters_history(&dir, &snapshot.taken_at);
-                if workload.timeline.is_none() {
-                    trends::from_scans(workload, &snapshot.server.database, &snapshot.taken_at, evictions, &history);
+                if snapshot.workload.as_ref().is_some_and(|w| w.timeline.is_none()) {
+                    trends::from_scans(&mut snapshot, evictions, &history);
                 }
                 // Statements whose source doesn't say when they last ran get it from the scans that saw them grow.
-                trends::last_seen_from_scans(workload, &snapshot.server.database, &snapshot.taken_at, &history);
+                trends::last_seen_from_scans(&mut snapshot, &history);
             }
             // This scan's changes come before the checks: an index the scans saw appear this week isn't unused yet, nor
             // one whose usage counters started over.

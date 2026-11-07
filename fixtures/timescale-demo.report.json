@@ -1506,33 +1506,6 @@
       "hourly_time_ms": null,
       "kind": "statement-stats",
       "log": null,
-      "measurement": {
-        "database": {
-          "database": "culprit_timescale",
-          "engine": "postgres",
-          "incarnation": null,
-          "location": {
-            "host": "127.0.0.1",
-            "instance": null,
-            "kind": "server",
-            "port": 55435
-          }
-        },
-        "period": {
-          "hours": 0.007630272222222222,
-          "kind": "cumulative",
-          "observed_at": "2026-10-23T21:32:41Z"
-        },
-        "reset": {
-          "kind": "at",
-          "value": "2026-10-23T21:32:14Z"
-        },
-        "scope": "database",
-        "source": {
-          "kind": "workload",
-          "source": "statement-stats"
-        }
-      },
       "min_logged_ms": null,
       "queries": [
         {

@@ -5215,33 +5215,6 @@
       "hourly_time_ms": null,
       "kind": "statement-stats",
       "log": null,
-      "measurement": {
-        "database": {
-          "database": "culprit_yugabyte",
-          "engine": "yugabyte",
-          "incarnation": "16384",
-          "location": {
-            "host": "127.0.0.1",
-            "instance": null,
-            "kind": "server",
-            "port": 55434
-          }
-        },
-        "period": {
-          "hours": 0.001489345563782586,
-          "kind": "cumulative",
-          "observed_at": "2026-10-24T06:52:49.190547Z"
-        },
-        "reset": {
-          "kind": "generation",
-          "value": "b9f8c876533dadfe3ba615a4ffda303eb5a004e5518cf34cceed8a9dc37200cf"
-        },
-        "scope": "database",
-        "source": {
-          "kind": "named",
-          "source": "YSQL pg_stat_statements (node 3d2d9e10555b4ae2a683a8402505e416):Node:c8c6dab9705b17164f3a71651b17596ed377e86ea3681b0f5f0d801ea5f8d0ae"
-        }
-      },
       "min_logged_ms": null,
       "queries": [
         {

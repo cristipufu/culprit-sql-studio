@@ -521,10 +521,13 @@ is dated by collection, not its last query execution. The oldest cache/digest en
 history, query activity, changes, baselines, verification and digests use these contracts. Different endpoints,
 sources, scopes or incompatible windows cannot establish a trend or verify a query finding's disappearance.
 
-Every provider binds the scan's `DatabaseIdentity` (`Snapshot::bind_identity`, which builds the measurement
-context); a plugged-in provider must too. A scan without identity, or whose location is unknown, compares with
-nothing: a database's name alone never says which server it is on. Preparation mirrors the typed context into the
-workload's flat window fields when context is present.
+Every provider binds the scan's `DatabaseIdentity` (`Snapshot::bind_identity`); a plugged-in provider must too. A
+scan without identity, or whose location is unknown, compares with nothing: a database's name alone never says which
+server it is on. A workload's period is said once, by its provider, in its own fields (`windowed`, `window_start`,
+`window_end`, `window_hours`: what each source's start and end mean differs, a reset, the oldest cached entry, a
+window's edge). The typed measurement context comparisons read (`Snapshot::workload_measurement`) is worked out from
+them each time, never stored beside them; preparation leaves a workload that doesn't isolate this database
+unassessed, and a length its bounds contradict unknown.
 
 Cumulative query evidence keeps its dates. `Workload::over_scans` uses complete intervals for shares and averages;
 when those intervals have gaps or end before the latest scan, `ScanSpan::phrase` dates them explicitly. A more recent

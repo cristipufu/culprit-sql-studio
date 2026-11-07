@@ -1876,7 +1876,7 @@ fn frequent_empty_results_do_not_establish_a_timer_or_multiple_pollers() {
     q.last_seen = None;
     w.total_time_ms = q.total_time_ms;
     w.total_executions = q.executions;
-    w.window_hours = 24.0;
+    crate::last_hours(w, 24.0);
     w.queries = vec![q];
     let report = analyze(s);
     let f = find(&report.findings, "chatty-query:request-check").unwrap();

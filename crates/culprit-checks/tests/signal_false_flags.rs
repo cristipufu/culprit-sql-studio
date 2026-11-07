@@ -589,7 +589,7 @@ fn an_explicit_recompile_hint_is_the_planning_time_fix() {
 
 fn big_read(text: &str, executions: f64, window_hours: f64) -> Report {
     let mut s = fixture("mssql-demo");
-    s.workload.as_mut().unwrap().window_hours = window_hours;
+    crate::last_hours(s.workload.as_mut().unwrap(), window_hours);
     let q = heaviest(&mut s);
     q.text = text.into();
     q.plan = None;

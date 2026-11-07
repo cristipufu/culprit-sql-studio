@@ -290,7 +290,6 @@ pub(crate) async fn read(
         untracked_time_ms: None,
         hourly_time_ms: None,
         min_logged_ms: None,
-        measurement: None,
         history_inputs: vec![],
         counter_set: Some(counter_set),
     })

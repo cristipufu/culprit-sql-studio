@@ -296,7 +296,7 @@ pub(crate) fn apply_counter_baselines(
 /// counters files already saved are read: nothing is written.
 pub fn rebuild_timeline(dir: &Path, snapshot: &mut culprit_core::Snapshot) {
     let evictions = trends::evictions(snapshot);
-    let (database, taken_at) = (snapshot.server.database.clone(), snapshot.taken_at.clone());
+    let taken_at = snapshot.taken_at.clone();
     let Some(workload) = snapshot.workload.as_mut().filter(|w| {
         w.is_cumulative() && w.timeline.as_ref().is_none_or(|t| t.source == culprit_core::TimelineSource::Scans)
     }) else {
@@ -325,8 +325,8 @@ pub fn rebuild_timeline(dir: &Path, snapshot: &mut culprit_core::Snapshot) {
     let trends: Vec<Option<culprit_core::QueryTrend>> = workload.queries.iter_mut().map(|q| q.trend.take()).collect();
     // from_scans replaces WorkloadTrend references only after finding comparable points. If it cannot rebuild,
     // the captured timeline, buckets and their retained references still describe the original observation.
-    trends::from_scans(workload, &database, &taken_at, evictions, &history);
-    if workload.timeline.is_none() {
+    trends::from_scans(snapshot, evictions, &history);
+    if let Some(workload) = snapshot.workload.as_mut().filter(|w| w.timeline.is_none()) {
         workload.timeline = saved;
         for (q, trend) in workload.queries.iter_mut().zip(trends) {
             q.trend = trend;

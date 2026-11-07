@@ -27,6 +27,14 @@ mod registry;
 mod signal_false_flags;
 mod sqlite;
 
+/// Make `w` a window of the last `hours`: its length, and a start that agrees with its end (a window whose bounds and
+/// length disagree has no length Culprit stands behind).
+pub fn last_hours(w: &mut culprit_core::Workload, hours: f64) {
+    use culprit_core::format::{epoch_seconds, iso_from_epoch};
+    (w.windowed, w.window_hours) = (true, hours);
+    w.window_start = w.window_end.as_deref().and_then(epoch_seconds).map(|end| iso_from_epoch(end - hours * 3600.0));
+}
+
 #[test]
 fn every_test_file_is_listed() {
     let listed = include_str!("all.rs");

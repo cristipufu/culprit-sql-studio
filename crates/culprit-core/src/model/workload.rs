@@ -66,9 +66,6 @@ pub struct Workload {
     /// Only runs slower than this were recorded (the slow query log's `long_query_time`), so totals, shares and run
     /// counts are of logged slow runs, not of everything the database ran. `None` when every run is counted.
     pub min_logged_ms: Option<f64>,
-    // Typed measurement context; legacy fields remain readable in older reports.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub measurement: Option<crate::measurement::MeasurementContext>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub history_inputs: Vec<crate::BaselineReference>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -569,11 +566,10 @@ impl Workload {
     /// The source's running totals started at a time nobody can say (pg_stat_statements before PostgreSQL 14 keeps no
     /// reset time, and its statistics outlive restarts), or its log has no timestamps: `window_hours` is 0 and no rate
     /// can be derived from it.
+    /// Whether nobody can say how long the workload's numbers cover: a source that didn't say, or a log whose records
+    /// carry no times.
     pub fn window_unknown(&self) -> bool {
-        if let Some(context) = &self.measurement {
-            return context.period.hours().is_none();
-        }
-        (self.is_cumulative() || self.log.is_some()) && self.window_start.is_none() && self.measurement_hours() <= 0.0
+        self.measurement_hours() <= 0.0
     }
 
     pub fn share(&self, time_ms: f64) -> f64 {

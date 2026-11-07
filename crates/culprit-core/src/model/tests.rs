@@ -86,7 +86,6 @@ fn how_often_never_extrapolates_a_short_window() {
     let w = |hours: f64, windowed: bool| Workload {
         counter_set: None,
         history_inputs: Vec::new(),
-        measurement: None,
         source: "Query Store".into(),
         kind: Some(WorkloadKind::QueryStore),
         windowed,
@@ -114,7 +113,8 @@ fn how_often_never_extrapolates_a_short_window() {
     assert!(unknown.window_unknown());
     assert_eq!(unknown.how_often(3.0), "3 runs over the time since statistics were last reset");
     assert_eq!(unknown.rate_per_day(3.0), None);
-    unknown.window_start = Some("2026-10-01T00:00:00Z".into());
+    // Once it says when it started, and so for how long, it has one.
+    (unknown.window_start, unknown.window_hours) = (Some("2026-10-01T00:00:00Z".into()), 240.0);
     assert!(!unknown.window_unknown());
     // An application's log covers its own period, which needn't end at the scan; one without timestamps, a period
     // nobody can say.

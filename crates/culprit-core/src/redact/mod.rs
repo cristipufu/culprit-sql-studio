@@ -238,9 +238,6 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             counters.members =
                 std::mem::take(&mut counters.members).into_iter().map(|(node, epoch)| (opaque(&node), epoch)).collect();
         }
-        if let Some(measurement) = &mut w.measurement {
-            redact_measurement(measurement);
-        }
         for reference in &mut w.history_inputs {
             redact_baseline(reference);
         }

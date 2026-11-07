@@ -410,7 +410,6 @@ GROUP BY ws.wait_category_desc
     let workload = Workload {
         counter_set: None,
         history_inputs: Vec::new(),
-        measurement: None,
         source: "Query Store".into(),
         kind: Some(culprit_core::WorkloadKind::QueryStore),
         windowed: true,
@@ -739,7 +738,6 @@ pub(crate) async fn from_plan_cache(
     let workload = Workload {
         counter_set: None,
         history_inputs: Vec::new(),
-        measurement: None,
         source: "Plan cache".into(),
         kind: Some(culprit_core::WorkloadKind::PlanCache),
         windowed: false,
