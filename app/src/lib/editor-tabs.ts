@@ -24,6 +24,19 @@ export function newEditorTab(sql = "", title = "Query 1", saved: string | null =
   return { id, sql, title, saved };
 }
 
+/** A tab's title from its first words (comments skipped), or "Query n" when it has none. */
+export function tabTitle(sql: string, index: number): string {
+  const words = sql
+    .replace(/--.*$/gm, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 4)
+    .join(" ");
+  return words ? (words.length > 28 ? `${words.slice(0, 27)}…` : words) : `Query ${index}`;
+}
+
 function deviceStorage(): StorageLike | null {
   try { return globalThis.localStorage; } catch { return null; }
 }

@@ -1,100 +1,36 @@
-import type { CompletionSource } from "@codemirror/autocomplete";
-import { MariaSQL, MSSQL, MySQL, PostgreSQL, SQLite, keywordCompletionSource, schemaCompletionSource } from "@codemirror/lang-sql";
-import { HighlightStyle, LanguageSupport, syntaxHighlighting } from "@codemirror/language";
-import { tags } from "@lezer/highlight";
-import { Compartment, EditorState, Prec, StateEffect, StateField, type Extension } from "@codemirror/state";
-import { Decoration, keymap, type DecorationSet } from "@codemirror/view";
+import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
+import { keymap } from "@codemirror/view";
 import { EditorView, basicSetup } from "codemirror";
-import { Bookmark, PanelLeftClose, PanelLeftOpen, Play, Plus, RefreshCw, Save, ScanSearch, TriangleAlert, WandSparkles, X, Zap } from "lucide-react";
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
+import { TriangleAlert } from "lucide-react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { ConfirmRun, type PendingRun } from "../components/ConfirmRun";
-import { LookToggle, PlanSurface, rememberLook, rememberedLook, type PlanLook } from "../components/PlanSurface";
-import { ResultGrid } from "../components/ResultGrid";
+import { rememberLook, rememberedLook, type PlanLook } from "../components/PlanSurface";
 import { SavedRail } from "../components/SavedRail";
 import type { Catalog } from "../gen/Catalog";
 import type { ConnectionInfo } from "../gen/ConnectionInfo";
 import type { ExplainMode } from "../gen/ExplainMode";
 import type { Finding } from "../gen/Finding";
-import type { Plan } from "../gen/Plan";
-import type { ResultSet } from "../gen/ResultSet";
 import type { SavedQuery } from "../gen/SavedQuery";
-import { api, errorMessage, type ApiError } from "../lib/api";
-import { catalogFromReport, completionConfig } from "../lib/completion";
-import { locateFindingSpan, splitSqlStatements, statementEndOffset } from "../lib/editor-sql";
-import { EditorTabStorage, MAX_EDITOR_TABS, newEditorTab, type EditorTab as Tab, type EditorTabs as Tabs } from "../lib/editor-tabs";
-import { duration, oneLine } from "../lib/format";
+import { api, errorMessage } from "../lib/api";
+import { catalogFromReport } from "../lib/completion";
+import { splitSqlStatements } from "../lib/editor-sql";
+import { EditorTabStorage, MAX_EDITOR_TABS, newEditorTab, tabTitle, type EditorTab as Tab, type EditorTabs as Tabs } from "../lib/editor-tabs";
+import { measuresRuns } from "../lib/engines";
+import { allLintFixes, lintFix } from "../lib/lint-fixes";
+import { remember, rememberedChoice } from "../lib/prefs";
 import { currentReport, getState, loadSaved, setState, toast, useStore } from "../lib/store";
-import { can, isMariadb, measuresRuns, sqlSyntax } from "../lib/engines";
-import { keys } from "../lib/keys";
-import { remember, rememberedAs, rememberedChoice } from "../lib/prefs";
+import { lintField, sqlColors, sqlLanguage } from "./editor/codemirror";
+import { PLACEHOLDER, useLiveLint, useSplit } from "./editor/hooks";
+import { LintPanel } from "./editor/LintPanel";
+import { EmptyOutput, OutputPane, type Output, type StatementResult } from "./editor/OutputPane";
+import { TabStrip } from "./editor/TabStrip";
+import { Toolbar } from "./editor/Toolbar";
 
-type StatementResult = { result: ResultSet; sql: string };
-
-type Output =
-  | { kind: "none" }
-  | { kind: "busy"; label: string }
-  | { kind: "plan"; plan: Plan }
-  | { kind: "rows"; results: StatementResult[] }
-  | { kind: "error"; error: ApiError };
-
-const SPLIT_KEY = "culprit.editor.split";
 const RAIL_KEY = "culprit.editor.rail";
 const ROW_LIMIT = 1000;
-const PLACEHOLDER = keys("-- Write a query. ⌘↵ runs it (or the selection), ⌘E shows its plan without running it, ⌘S saves it.\n");
-const HAS_DDL = /\b(create|alter|drop|truncate|rename|reindex|vacuum|cluster)\b/i;
-
-const setLintEffect = StateEffect.define<Finding[]>();
-
-const lintField = StateField.define<DecorationSet>({
-  create: () => Decoration.none,
-  update(decorations, tr) {
-    decorations = decorations.map(tr.changes);
-    for (const effect of tr.effects) {
-      if (effect.is(setLintEffect)) {
-        const docText = tr.state.doc.toString();
-        const marks = effect.value
-          .map((f) => {
-            const span = locateFindingSpan(docText, f);
-            if (!span) return null;
-            const cls = f.severity === "high" ? "cm-lint-error" : "cm-lint-warn";
-            return Decoration.mark({ class: cls, attributes: { title: f.title } }).range(span[0], span[1]);
-          })
-          .filter((r): r is NonNullable<typeof r> => r !== null)
-          .sort((a, b) => a.from - b.from);
-        decorations = Decoration.set(marks, true);
-      }
-    }
-    return decorations;
-  },
-  provide: (field) => EditorView.decorations.from(field),
-});
-
-/** SQL colors from the same tokens as every other code block, so they follow light and dark mode. */
-const sqlColors = syntaxHighlighting(
-  HighlightStyle.define([
-    { tag: [tags.keyword, tags.operatorKeyword, tags.modifier], color: "var(--code-keyword)" },
-    { tag: [tags.string, tags.special(tags.string)], color: "var(--code-string)" },
-    { tag: [tags.number, tags.bool, tags.null], color: "var(--code-number)" },
-    { tag: [tags.comment, tags.lineComment, tags.blockComment], color: "var(--code-comment)", fontStyle: "italic" },
-    { tag: [tags.special(tags.name), tags.variableName], color: "var(--code-param)" },
-    { tag: [tags.typeName, tags.standard(tags.name)], color: "var(--code-keyword)" },
-  ]),
-);
 
 /** Catalogs fetched this session, per connection. */
 const catalogs = new Map<string, Catalog>();
-
-function titleFor(sql: string, index: number): string {
-  const words = sql
-    .replace(/--.*$/gm, "")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 4)
-    .join(" ");
-  return words ? (words.length > 28 ? `${words.slice(0, 27)}…` : words) : `Query ${index}`;
-}
 
 export default function Editor({ connection }: { connection: ConnectionInfo }) {
   const host = useRef<HTMLDivElement>(null);
@@ -114,11 +50,9 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
   tabsRef.current = tabs;
   const [outputs, setOutputs] = useState<Record<string, Output>>({});
   const [pending, setPending] = useState<PendingRun | null>(null);
-  const [liveLint, setLiveLint] = useState<Finding[]>([]);
   const [naming, setNaming] = useState<string | null>(null);
   const [rail, setRail] = useState(() => rememberedChoice(RAIL_KEY, "open", ["open", "closed"] as const));
   const [look, setLook] = useState<PlanLook>(rememberedLook);
-  const [split, setSplit] = useState(() => rememberedAs(SPLIT_KEY, (v) => Math.min(0.8, Math.max(0.2, Number(v) || 0.45)), 0.45));
   const [catalog, setCatalog] = useState<Catalog | null>(() => catalogs.get(connection.name) ?? null);
   const [catalogBusy, setCatalogBusy] = useState(false);
   const report = useStore(currentReport);
@@ -133,17 +67,10 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
   const fallbackCatalog = useMemo(() => (report?.snapshot.connection === connection.name ? catalogFromReport(report) : null), [report, connection.name]);
   const effectiveCatalog = catalog ?? fallbackCatalog;
 
-  const languageExtension = useCallback((): Extension => {
-    const mariadb = isMariadb(connection.engine, connection.last_report?.product);
-    const dialect = { mssql: MSSQL, postgres: PostgreSQL, mysql: mariadb ? MariaSQL : MySQL, sqlite: SQLite }[sqlSyntax(connection.engine)];
-    const keywords = keywordCompletionSource(dialect, true);
-    // After `alias.` only that table's columns make sense; keywords there are noise.
-    const keywordsOutsideMembers: CompletionSource = (context) => (/[\w"`\]]\.\w*$/.test(context.state.sliceDoc(Math.max(0, context.pos - 120), context.pos)) ? null : keywords(context));
-    return new LanguageSupport(dialect.language, [
-      dialect.language.data.of({ autocomplete: schemaCompletionSource({ dialect, ...completionConfig(connection.engine, effectiveCatalog, report?.snapshot.connection === connection.name ? report : null) }) }),
-      dialect.language.data.of({ autocomplete: keywordsOutsideMembers }),
-    ]);
-  }, [connection.engine, connection.last_report?.product, effectiveCatalog, report, connection.name]);
+  const languageExtension = useCallback(
+    (): Extension => sqlLanguage(connection.engine, connection.last_report?.product, effectiveCatalog, report?.snapshot.connection === connection.name ? report : null),
+    [connection.engine, connection.last_report?.product, effectiveCatalog, report, connection.name],
+  );
 
   // ── tab bookkeeping ────────────────────────────────────────────────────────────────────────────
   const updateTabs = useCallback((next: (t: Tabs) => Tabs) => {
@@ -191,101 +118,21 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
     [languageExtension, updateTabs],
   );
 
-  const lintContextRef = useRef<string>("");
-
-  // Instantaneous live migration linter: skipped altogether unless DDL keywords are present.
-  useEffect(() => {
-    const sql = activeTab.sql;
-    const contextKey = `${connection.name}:${activeTab.id}`;
-    if (lintContextRef.current !== contextKey) {
-      lintContextRef.current = contextKey;
-      setLiveLint((prev) => (prev.length === 0 ? prev : []));
-      view.current?.dispatch({ effects: setLintEffect.of([]) });
-    }
-    if (!sql || sql === PLACEHOLDER.trim() || !HAS_DDL.test(sql)) {
-      setLiveLint((prev) => (prev.length === 0 ? prev : []));
-      view.current?.dispatch({ effects: setLintEffect.of([]) });
-      return;
-    }
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void api()
-        .then((client) => client.lintSql(connection.name, sql))
-        .then((findings) => {
-          if (cancelled) return;
-          setLiveLint(findings);
-          view.current?.dispatch({ effects: setLintEffect.of(findings) });
-        })
-        .catch(() => {
-          if (cancelled) return;
-          setLiveLint((prev) => (prev.length === 0 ? prev : []));
-          view.current?.dispatch({ effects: setLintEffect.of([]) });
-        });
-    }, 200);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [activeTab.id, activeTab.sql, connection.name]);
+  const liveLint = useLiveLint(connection.name, activeTab, view);
 
   const applyLintFix = (f: Finding) => {
-    const fixSql = f.fix?.sql?.trim();
     const editor = view.current;
-    if (!fixSql || !editor) return;
-    const docText = editor.state.doc.toString();
-    const span = locateFindingSpan(docText, f);
-    if (f.id.startsWith("sql-lint:unindexed-fk:")) {
-      const insertAt = span ? span[0] : 0;
-      editor.dispatch({ changes: { from: insertAt, to: insertAt, insert: `${fixSql}\n` } });
-      toast("Added supporting CREATE INDEX");
-      return;
-    }
-    if (span) {
-      const to = statementEndOffset(docText, span[0], span[1]);
-      editor.dispatch({ changes: { from: span[0], to, insert: fixSql } });
-      toast("Applied safe SQL");
-    }
+    const fix = editor && lintFix(editor.state.doc.toString(), f);
+    if (!editor || !fix) return;
+    editor.dispatch({ changes: fix.change });
+    toast(fix.message);
   };
 
   const applyAllLintFixes = () => {
     const editor = view.current;
     if (!editor) return;
-    const docText = editor.state.doc.toString();
-    const byStart = new Map<number, { from: number; to: number; prefixes: string[]; replacement: string | null }>();
-    let applied = 0;
-    for (const f of liveLint) {
-      const fixSql = f.fix?.sql?.trim();
-      if (!fixSql) continue;
-      const span = locateFindingSpan(docText, f);
-      if (f.id.startsWith("sql-lint:unindexed-fk:")) {
-        const from = span ? span[0] : 0;
-        const to = span ? statementEndOffset(docText, span[0], span[1]) : 0;
-        const entry = byStart.get(from) ?? { from, to, prefixes: [], replacement: null };
-        if (!entry.prefixes.includes(fixSql)) {
-          entry.prefixes.push(fixSql);
-          applied += 1;
-        }
-        byStart.set(from, entry);
-      } else if (span) {
-        const from = span[0];
-        const to = statementEndOffset(docText, from, span[1]);
-        const entry = byStart.get(from) ?? { from, to, prefixes: [], replacement: null };
-        entry.to = Math.max(entry.to, to);
-        if (entry.replacement === null) {
-          entry.replacement = fixSql;
-          applied += 1;
-        }
-        byStart.set(from, entry);
-      }
-    }
+    const { changes, applied } = allLintFixes(editor.state.doc.toString(), liveLint);
     if (applied === 0) return;
-    const changes = [...byStart.values()]
-      .sort((a, b) => a.from - b.from)
-      .map((entry) => {
-        const prefix = entry.prefixes.length > 0 ? `${entry.prefixes.join("\n")}\n` : "";
-        const body = entry.replacement ?? docText.slice(entry.from, entry.to);
-        return { from: entry.from, to: entry.to, insert: `${prefix}${body}` };
-      });
     editor.dispatch({ changes });
     toast(`Applied ${applied} safe DDL fixes`);
   };
@@ -410,7 +257,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
         toast(`Close a tab before opening another (${MAX_EDITOR_TABS} tabs open)`);
         return null;
       }
-      const tab = newEditorTab(sql, title ?? titleFor(sql, tabsRef.current.tabs.length + 1), savedName);
+      const tab = newEditorTab(sql, title ?? tabTitle(sql, tabsRef.current.tabs.length + 1), savedName);
       const { id } = tab;
       activate(id, tab);
       return id;
@@ -548,21 +395,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
     if (query) openQuery(query, openSaved.run);
   }, [openSaved, saved, openQuery]);
 
-  // ── splitter ───────────────────────────────────────────────────────────────────────────────────
-  const body = useRef<HTMLDivElement>(null);
-  const drag = (event: React.PointerEvent) => {
-    const box = body.current?.getBoundingClientRect();
-    if (!box) return;
-    event.preventDefault();
-    const move = (e: PointerEvent) => setSplit(Math.min(0.8, Math.max(0.2, (e.clientY - box.top) / box.height)));
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      setSplit((s) => (remember(SPLIT_KEY, String(s)), s));
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
+  const { split, body, drag } = useSplit();
 
   const savedQuery = saved?.find((q) => q.name === activeTab.saved);
   const dirty = (tab: Tab) => {
@@ -572,34 +405,21 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
 
   return (
     <div className="view editor-view">
-      <div className={`editor-tabs ${production ? "is-production" : ""}`} role="tablist">
-        <button className="icon-btn" title={rail === "open" ? "Hide saved queries" : "Show saved queries"} onClick={() => setRail((r) => { const next = r === "open" ? "closed" : "open"; remember(RAIL_KEY, next); return next; })}>
-          {rail === "open" ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
-        </button>
-        <div className="tab-strip">
-          {tabs.tabs.map((tab) => (
-            <div
-              key={tab.id}
-              role="tab"
-              aria-selected={tab.id === activeTab.id}
-              className={`editor-tab ${tab.id === activeTab.id ? "on" : ""}`}
-              onClick={() => activate(tab.id)}
-              onAuxClick={(e) => e.button === 1 && closeTab(tab.id)}
-              title={tab.saved ? `Saved query “${tab.saved}”` : tab.title}
-            >
-              {tab.saved && <Bookmark size={11} className="tab-saved" />}
-              <span className="tab-title">{tab.title}</span>
-              {dirty(tab) && <span className="tab-dirty" title="Changed since it was saved" />}
-              <button className="tab-close" title={keys("Close tab (⌘⇧W)")} onClick={(e) => (e.stopPropagation(), closeTab(tab.id))}>
-                <X size={11} />
-              </button>
-            </div>
-          ))}
-          <button className="icon-btn" title={tabs.tabs.length >= MAX_EDITOR_TABS ? "Close a tab before opening another" : keys("New tab (⌘T)")} disabled={tabs.tabs.length >= MAX_EDITOR_TABS} onClick={() => newTab()}>
-            <Plus size={14} />
-          </button>
-        </div>
-      </div>
+      <TabStrip
+        tabs={tabs.tabs}
+        activeId={activeTab.id}
+        dirty={dirty}
+        production={production}
+        railOpen={rail === "open"}
+        onToggleRail={() => {
+          const next = rail === "open" ? "closed" : "open";
+          setRail(next);
+          remember(RAIL_KEY, next);
+        }}
+        onActivate={activate}
+        onClose={closeTab}
+        onNew={() => newTab()}
+      />
       {persistenceError && <div className="editor-storage-error" role="alert">
         <TriangleAlert size={15} /><span>{persistenceError}</span>
         <button className="btn" onClick={() => save()}>Save query</button>
@@ -607,99 +427,26 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
       <div className="editor-main">
         {rail === "open" && <SavedRail current={connection} saved={saved} active={activeTab.saved} onOpen={openQuery} onRenamed={(from, to) => updateTabs((t) => ({ ...t, tabs: t.tabs.map((x) => (x.saved === from ? { ...x, saved: to, title: to } : x)) }))} onDeleted={(name) => updateTabs((t) => ({ ...t, tabs: t.tabs.map((x) => (x.saved === name ? { ...x, saved: null } : x)) }))} />}
         <div className="editor-work">
-          <div className="toolbar">
-            <button className="btn primary" onClick={() => run(target())} title="Run the selection, or the whole tab">
-              <Play size={13} /> Run <span className="kbd">{keys("⌘↵")}</span>
-            </button>
-            <button className="btn" onClick={() => explain("estimated")} title="Show the plan without running the statement">
-              <ScanSearch size={14} /> Explain <span className="kbd">{keys("⌘E")}</span>
-            </button>
-            {measuresRuns(connection.engine) && (
-              <button className="btn" onClick={() => explain("analyze")} title="Run the statement and measure each step">
-                <Zap size={13} /> Analyze <span className="kbd">{keys("⌘⇧E")}</span>
-              </button>
-            )}
-            {naming === null ? (
-              <button className="btn" onClick={() => save()} title={activeTab.saved ? `Update “${activeTab.saved}”` : "Save as a named query"}>
-                <Save size={13} /> {activeTab.saved ? "Save" : "Save as…"} <span className="kbd">{keys("⌘S")}</span>
-              </button>
-            ) : (
-              <form
-                className="name-query"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (naming.trim()) void save(naming.trim());
-                }}
-              >
-                <input autoFocus value={naming} placeholder="Name it, e.g. Open orders by customer" onChange={(e) => setNaming(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (setNaming(null), view.current?.focus())} />
-                <button className="btn primary" type="submit" disabled={!naming.trim()}>
-                  Save
-                </button>
-              </form>
-            )}
-            <span className="spacer" />
-            {!can(connection.engine, "writes") ? (
-              <span className="env-note" title="Culprit opens the file read-only: statements that read run; anything that would change it is refused">
-                Read-only file
-              </span>
-            ) : production ? (
-              <span className="env-chip env-production" title="Reads run as they are; anything that changes data asks first, and statements that touch every row need the connection's name typed">
-                Production · changes ask first
-              </span>
-            ) : (
-              <span className="env-note" title="Statements Culprit can prove only read run in a read-only transaction; anything else commits">
-                Reads roll back · changes commit
-              </span>
-            )}
-            <button className="icon-btn" title={catalogBusy ? "Loading table and column names…" : `Reload table and column names${effectiveCatalog ? ` (${effectiveCatalog.tables.length} tables)` : ""}`} onClick={refreshCatalog} disabled={catalogBusy}>
-              <RefreshCw size={13} className={catalogBusy ? "spin" : ""} />
-            </button>
-          </div>
+          <Toolbar
+            engine={connection.engine}
+            production={production}
+            savedName={activeTab.saved}
+            naming={naming}
+            onNaming={setNaming}
+            onRun={() => run(target())}
+            onExplain={explain}
+            onSave={save}
+            onCancelNaming={() => view.current?.focus()}
+            catalogBusy={catalogBusy}
+            tables={effectiveCatalog ? effectiveCatalog.tables.length : null}
+            onRefreshCatalog={refreshCatalog}
+          />
           {savedQuery?.connection && savedQuery.connection !== connection.name && (
             <div className="editor-note">
               Saved for <b>{savedQuery.connection}</b>; running on <b>{connection.name}</b>.
             </div>
           )}
-          {liveLint.length > 0 && (
-            <div className="editor-lint" role="status" aria-live="polite">
-              {liveLint.filter((f) => Boolean(f.fix?.sql)).length >= 2 && (
-                <div className="editor-lint-row">
-                  <WandSparkles size={13} className="editor-lint-icon" />
-                  <div className="editor-lint-copy">
-                    <strong>{liveLint.filter((f) => Boolean(f.fix?.sql)).length} auto-fixable DDL warnings</strong>
-                    <span>Rewrite all fixable statements in place with non-blocking DDL</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn ghost sm"
-                    onClick={applyAllLintFixes}
-                    title="Apply all safe DDL fixes"
-                  >
-                    <WandSparkles size={12} /> Apply all fixes
-                  </button>
-                </div>
-              )}
-              {liveLint.map((f, idx) => (
-                <div key={`${f.id}:${idx}`} className="editor-lint-row">
-                  <TriangleAlert size={13} className="editor-lint-icon" />
-                  <div className="editor-lint-copy">
-                    <strong>{f.title}</strong>
-                    <span>{f.fix?.summary ?? f.summary}</span>
-                  </div>
-                  {f.fix?.sql && (
-                    <button
-                      type="button"
-                      className="btn ghost sm"
-                      onClick={() => applyLintFix(f)}
-                      title="Replace statement with safer DDL"
-                    >
-                      <WandSparkles size={12} /> Quick fix
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+          <LintPanel findings={liveLint} onFix={applyLintFix} onFixAll={applyAllLintFixes} />
           <div className="editor-body" ref={body}>
             <div className="editor-host" ref={host} style={{ flex: `0 0 ${split * 100}%` }} />
             <div className="editor-splitter" onPointerDown={drag} role="separator" aria-orientation="horizontal" />
@@ -734,136 +481,4 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
       )}
     </div>
   );
-}
-
-/** Before anything ran: the shortcuts, and this connection's saved queries one click away. */
-function EmptyOutput({ saved, onOpen }: { saved: SavedQuery[]; onOpen: (q: SavedQuery) => void }) {
-  const shortcuts: [string, string][] = [
-    [keys("⌘↵"), "Run the selection, or the whole tab"],
-    [keys("⌘E"), "Plan without running"],
-    [keys("⌘⇧E"), "Run and measure each step"],
-    [keys("⌘S"), "Save as a named query"],
-  ];
-  return (
-    <div className="editor-empty">
-      <ul className="editor-keys">
-        {shortcuts.map(([key, label]) => (
-          <li key={key}>
-            <span className="kbd">{key}</span> {label}
-          </li>
-        ))}
-      </ul>
-      {saved.length > 0 && (
-        <div className="editor-recent">
-          <div className="eyebrow">Saved for this connection</div>
-          {saved.map((q) => (
-            <button key={q.name} className="editor-recent-item" onClick={() => onOpen(q)}>
-              <Bookmark size={12} />
-              <span>{q.name}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function OutputPane({ output, look, onLook, empty }: { output: Output; look: PlanLook; onLook: (look: PlanLook) => void; empty: ReactNode }) {
-  switch (output.kind) {
-    case "none":
-      return <>{empty}</>;
-    case "busy":
-      return (
-        <div className="empty">
-          <div className="spinner" />
-          {output.label}
-        </div>
-      );
-    case "error":
-      // "Not available here" (the browser demo, an engine that can't) is information, not a failure.
-      return (
-        <div className={`notice ${output.error.code === "unsupported" ? "info" : "error"}`} style={{ margin: 12 }}>
-          <div>
-            <b>{output.error.message}</b>
-            {output.error.hint && <div style={{ marginTop: 4 }}>{output.error.hint}</div>}
-          </div>
-        </div>
-      );
-    case "plan":
-      return (
-        <div style={{ padding: 12 }}>
-          <div className="output-head">
-            <LookToggle look={look} onChange={onLook} />
-          </div>
-          <PlanSurface plan={output.plan} look={look} />
-        </div>
-      );
-    case "rows": {
-      const { results } = output;
-      if (results.length === 1) {
-        const r = results[0]!.result;
-        const summary =
-          r.columns.length === 0
-            ? r.messages.join(" ")
-            : `${r.rows.length.toLocaleString()} row${r.rows.length === 1 ? "" : "s"}${r.truncated ? ` (first ${r.rows.length.toLocaleString()}; more exist)` : ""}`;
-        if (r.columns.length === 0) {
-          return (
-            <div className="result-message">
-              <b>{r.messages.join(" ") || "Done."}</b> <span className="muted">· {duration(r.elapsed_ms)}</span>
-            </div>
-          );
-        }
-        return <ResultGrid result={r} summary={`${summary} · ${duration(r.elapsed_ms)}`} />;
-      }
-
-      const rowResults = results.filter((item) => item.result.columns.length > 0);
-      const commandResults = results.filter((item) => item.result.columns.length === 0);
-      const commandElapsed = commandResults.reduce((sum, item) => sum + item.result.elapsed_ms, 0);
-      const commandMessages = commandResults.flatMap((item) => item.result.messages).filter(Boolean);
-
-      if (rowResults.length === 0) {
-        return (
-          <div className="result-message">
-            <b>
-              {commandMessages.join(" · ") ||
-                `${commandResults.length} statement${commandResults.length === 1 ? "" : "s"} completed.`}
-            </b>{" "}
-            <span className="muted">· {duration(commandElapsed)}</span>
-          </div>
-        );
-      }
-
-      if (rowResults.length === 1 && commandResults.length > 0) {
-        const r = rowResults[0]!.result;
-        const rowSummary = `${r.rows.length.toLocaleString()} row${r.rows.length === 1 ? "" : "s"}${r.truncated ? ` (first ${r.rows.length.toLocaleString()}; more exist)` : ""} · ${duration(r.elapsed_ms)}`;
-        const cmdPrefix = `${commandResults.length} statement${commandResults.length === 1 ? "" : "s"} completed (${duration(commandElapsed)})`;
-        return <ResultGrid result={r} summary={`${cmdPrefix} · ${rowSummary}`} />;
-      }
-
-      return (
-        <div className="multi-results" style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%", overflowY: "auto", paddingBottom: 12 }}>
-          {commandResults.length > 0 && (
-            <div className="result-message" style={{ paddingBottom: 0 }}>
-              <b>
-                {commandMessages.join(" · ") ||
-                  `${commandResults.length} statement${commandResults.length === 1 ? "" : "s"} completed`}
-              </b>{" "}
-              <span className="muted">· {duration(commandElapsed)}</span>
-            </div>
-          )}
-          {rowResults.map((item, idx) => {
-            const r = item.result;
-            const rawSnippet = oneLine(item.sql.replace(/--.*$/gm, "").trim());
-            const snippet = rawSnippet.length > 72 ? `${rawSnippet.slice(0, 71)}…` : rawSnippet;
-            const summary = `Result ${idx + 1} · ${r.rows.length.toLocaleString()} row${r.rows.length === 1 ? "" : "s"}${r.truncated ? ` (first ${r.rows.length.toLocaleString()}; more exist)` : ""} · ${duration(r.elapsed_ms)}${snippet ? ` · ${snippet}` : ""}`;
-            return (
-              <div key={idx} className="multi-result-pane" style={{ minHeight: 220, flex: "1 0 auto", display: "flex", flexDirection: "column", borderTop: idx > 0 || commandResults.length > 0 ? "1px solid var(--border)" : undefined }}>
-                <ResultGrid result={r} summary={summary} />
-              </div>
-            );
-          })}
-        </div>
-      );
-    }
-  }
 }

@@ -1,5 +1,5 @@
-import { test } from "bun:test";
-import { EditorTabStorage, MAX_EDITOR_TABS, editorScope, newEditorTab, removeEditorTabs, renameEditorTabs, type EditorTabs } from "./editor-tabs";
+import { expect, test } from "bun:test";
+import { EditorTabStorage, MAX_EDITOR_TABS, editorScope, newEditorTab, removeEditorTabs, renameEditorTabs, tabTitle, type EditorTabs } from "./editor-tabs";
 
 test("Editor tabs: scoped restore, exact SQL, incremental writes, rename, removal, bounded storage, corruption, quotas and legacy migration", () => {
   function check(ok: unknown, message: string): asserts ok { if (!ok) throw new Error(message); }
@@ -100,4 +100,10 @@ test("Editor tabs: scoped restore, exact SQL, incremental writes, rename, remova
   check(removeEditorTabs(b, new MemoryStorage()) === null && removeEditorTabs(a, null) === null, "Nothing to remove is not an error");
   const denied = { getItem(): string | null { throw new Error("denied"); }, setItem() {}, removeItem() {} };
   check(removeEditorTabs(a, denied), "A storage failure while removing must be reported");
+});
+
+test("tab titles come from the first words, skipping comments", () => {
+  expect(tabTitle("-- top orders\nSELECT id, total FROM orders ORDER BY total DESC", 2)).toBe("SELECT id, total FROM");
+  expect(tabTitle("/* report */ SELECT customer_name_with_a_long_suffix, x FROM t", 1)).toBe("SELECT customer_name_with_a…");
+  expect(tabTitle("-- nothing yet\n", 3)).toBe("Query 3");
 });
