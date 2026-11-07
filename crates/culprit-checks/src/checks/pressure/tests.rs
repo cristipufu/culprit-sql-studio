@@ -189,7 +189,7 @@ fn shared_compile_counters_raise_nothing() {
         ..sig("compiles-per-batch", 45.0)
     };
     let mut s = with_signals(Engine::Mssql, vec![shared, sig("batch-requests", 300.0)]);
-    s.server.cloud = Some("Azure SQL Database".into());
+    s.server.set_platform(Some(culprit_core::Platform::AzureSqlDatabase));
     assert!(compile_pressure(&s).is_empty());
     // Under an hour since the start there is no rate to judge.
     let mut s = with_signals(Engine::Mssql, vec![graded("compiles-per-batch", 45.0), sig("batch-requests", 300.0)]);
@@ -322,7 +322,7 @@ fn a_connection_peak_since_startup_is_not_a_current_emergency() {
 fn threadpool_waits_since_startup_are_totals_not_rates() {
     let mut s = with_signals(Engine::Mssql, vec![sig("threadpool-wait-ms", 72.0 * 120_000.0)]);
     assert!(worker_pressure(&s).is_empty(), "another database may account for the instance totals");
-    s.server.cloud = Some("Azure SQL Database".into());
+    s.server.set_platform(Some(culprit_core::Platform::AzureSqlDatabase));
     let f = worker_pressure(&s);
     assert_eq!(f[0].severity, Severity::Medium);
     assert!(

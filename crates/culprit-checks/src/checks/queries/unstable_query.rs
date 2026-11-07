@@ -735,10 +735,10 @@ mod tests {
         assert!(fix.summary.starts_with("Find what the slow runs wait for while they happen (Live"), "{}", fix.summary);
         assert_eq!(fix.sql, None);
         // The same runs over three and a half years of counters.
-        let rare = |cloud: Option<&str>| {
+        let rare = |platform: Option<culprit_core::Platform>| {
             let mut s = unstable_insert(SKIPS_EXISTING);
             s.workload.as_mut().unwrap().window_hours = 30_000.0;
-            s.server.cloud = cloud.map(str::to_string);
+            s.server.set_platform(platform);
             unstable(s).fix.unwrap()
         };
         let fix = rare(None);
@@ -753,7 +753,7 @@ mod tests {
         let sql = fix.sql.unwrap_or_default();
         assert!(sql.contains("ALTER SYSTEM SET log_lock_waits") && sql.contains("pg_reload_conf()"), "{sql}");
         // A managed server sets them in its own control.
-        let fix = rare(Some("Amazon RDS"));
+        let fix = rare(Some(culprit_core::Platform::AmazonRds));
         assert!(fix.summary.contains("DB parameter group"), "{}", fix.summary);
         assert_eq!(fix.sql, None);
     }

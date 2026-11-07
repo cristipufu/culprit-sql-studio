@@ -112,7 +112,7 @@ export function HealthTab({
           )}
         </>
       )}
-      {(report.snapshot.server.platform === "azure-sql-database" || report.snapshot.server.cloud === "Azure SQL Database") && !signals.some((s) => s.key === "cpu-use") && (
+      {report.snapshot.server.platform === "azure-sql-database" && !signals.some((s) => s.key === "cpu-use") && (
         <p className="muted">CPU utilization was not measured for the selected period in this scan.</p>
       )}
       {pressure?.oldest_transaction && <OpenTransactionCard t={pressure.oldest_transaction} status={findingStatus(worstFinding(report, (f) => f.check === "held-cleanup"))} />}

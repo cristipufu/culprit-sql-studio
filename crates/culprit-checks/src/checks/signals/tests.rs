@@ -113,7 +113,7 @@ fn log_volume_per_row_and_share() {
     assert!(f[0].fix.as_ref().unwrap().summary.contains("wal_compression already shrinks"));
     // On a managed service the advice is the platform's control.
     set(&mut s, "wal_compression", "off");
-    s.server.cloud = Some("Amazon RDS".into());
+    s.server.set_platform(Some(culprit_core::Platform::AmazonRds));
     let fix = log_volume(&s)[0].fix.clone().unwrap();
     assert!(fix.sql.is_none() && fix.summary.contains("DB parameter group"), "{}", fix.summary);
     // Reads are never log findings.
@@ -564,7 +564,7 @@ fn the_fix_starts_an_event_session_that_keeps_the_statement() {
     let start = |sql: &str| sql[..sql.find("-- Then read").unwrap()].to_string();
     assert_eq!(start(&sql), start(&again), "one session, defined one way for every table");
     let mut azure = escalations_on("orders", escalating(2.0, 0.0, 0.0), IndexContention::default());
-    azure.server.cloud = Some("Azure SQL Database".into());
+    azure.server.set_platform(Some(culprit_core::Platform::AzureSqlDatabase));
     let sql = lock_escalations(&azure)[0].fix.clone().unwrap().sql.unwrap();
     assert!(sql.contains("CREATE EVENT SESSION culprit_lock_escalation ON DATABASE"), "{sql}");
     assert!(sql.contains("FROM sys.dm_xe_database_session_targets t"), "{sql}");

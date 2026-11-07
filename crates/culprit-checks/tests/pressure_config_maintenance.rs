@@ -153,7 +153,7 @@ fn pg_stat_statements_evictions_are_the_servers_when_this_database_has_few_entri
 fn planner_cost_constants_alone_never_request_a_database_wide_change() {
     for (random, sequential) in [("4", "1"), ("8", "2"), ("4", "2"), ("100", "1")] {
         let mut s = snapshot("postgres-demo.json");
-        s.server.cloud = Some("Amazon RDS".into());
+        s.server.set_platform(Some(culprit_core::Platform::AmazonRds));
         set(&mut s, "random_page_cost", random);
         set(&mut s, "seq_page_cost", sequential);
         let report = analyze(s);
@@ -321,7 +321,7 @@ fn pg_stat_statements_evictions_after_the_limit_was_raised_are_a_floor() {
 #[test]
 fn every_config_finding_says_how_to_verify_it() {
     let mut pg = snapshot("postgres-demo.json");
-    pg.server.cloud = Some("Amazon RDS".into());
+    pg.server.set_platform(Some(culprit_core::Platform::AmazonRds));
     set(&mut pg, "random_page_cost", "4");
     set(&mut pg, "seq_page_cost", "1");
     set(&mut pg, "pg_stat_statements.dealloc", "15000");
@@ -561,32 +561,6 @@ fn mysql_and_mariadb_temp_limits_reach_existing_connections_only_when_the_app_se
     let f = spill(shared);
     assert!(!f.fix.as_ref().unwrap().summary.contains("new connections"), "{:?}", f.fix);
     assert!(f.verify[0].starts_with("Once the change is live"), "{:?}", f.verify);
-}
-
-// Aptabase EU: scans by older versions counted the server's WAL write and sync time as 99.98% of statement time. A
-// report read today puts it back with the rest, as a scan now does.
-#[test]
-fn old_postgres_scans_keep_the_servers_wal_time_out_of_statement_time() {
-    let mut s = snapshot("postgres-demo.json");
-    let wait = |category: &str, wait_type: &str, ms: f64| WaitStat {
-        category: category.into(),
-        wait_type: Some(wait_type.into()),
-        wait_ms: ms,
-        tasks: None,
-    };
-    s.waits = vec![
-        wait("Log", "WAL write and sync (the whole server's, over the same window)", 4_131_617.0),
-        wait("IO", "data file reads and writes", 750.0),
-        wait("Other", "CPU, locks and untimed waits", 1_000.0),
-    ];
-    let waits = analyze(s.clone()).snapshot.waits;
-    assert!(waits.iter().all(|w| w.category != "Log"), "{waits:?}");
-    assert_eq!(waits[0].category, "Other");
-    assert_eq!(waits[0].wait_ms, 4_132_617.0);
-    assert_eq!(waits[1].wait_ms, 750.0);
-    // Without disk time to set apart, the rest is all there is, which says nothing: no breakdown, as a scan now reads it.
-    s.waits = vec![wait("Log", "WAL write and sync (the whole server's, over the same window)", 4_131_617.0)];
-    assert!(analyze(s).snapshot.waits.is_empty());
 }
 
 // MySQL demo MY-2: the demo server keeps internal temporary tables in the MEMORY engine, where the cap is the smaller

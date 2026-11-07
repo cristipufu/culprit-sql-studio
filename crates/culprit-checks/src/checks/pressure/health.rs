@@ -289,7 +289,7 @@ mod tests {
 
     fn azure(cpu: impl Fn(usize) -> f64) -> Snapshot {
         let mut s = crate::waits::snapshot_with(Engine::Mssql);
-        s.server.cloud = Some("Azure SQL Database".into());
+        s.server.set_platform(Some(culprit_core::Platform::AzureSqlDatabase));
         s.taken_at = "2026-10-11T11:00:00Z".into();
         s.options = Some(SnapshotOptions::default().with_window_minutes(60));
         s.pressure = Some(Pressure { uptime_hours: Some(256.0), ..Pressure::default() });
@@ -351,11 +351,11 @@ mod tests {
         let whole = crate::analyze(s.clone());
         assert_eq!(whole.snapshot.pressure.as_ref().unwrap().signal("cpu-use").unwrap().status, SignalStatus::Bad);
         assert!(whole.findings.iter().any(|f| f.id == "tier-limit:cpu" && f.severity == Severity::High));
-        let mut legacy = s.clone();
-        legacy.server.cloud = None;
-        let legacy = crate::analyze(legacy);
+        let mut unlabeled = s.clone();
+        unlabeled.server.set_platform(None);
+        let unlabeled = crate::analyze(unlabeled);
         assert_eq!(
-            legacy.snapshot.pressure.as_ref().unwrap().signal("cpu-use").unwrap().status,
+            unlabeled.snapshot.pressure.as_ref().unwrap().signal("cpu-use").unwrap().status,
             SignalStatus::Bad,
             "saved resource samples and their findings must agree even without platform metadata"
         );

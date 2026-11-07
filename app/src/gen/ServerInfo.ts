@@ -11,6 +11,6 @@ export type ServerInfo = { engine: Engine, product: string, version: string, edi
  */
 cloud: string | null, 
 /**
- * The managed service it runs on (`None`: a server you run yourself). Older reports have only `cloud`.
+ * The managed service it runs on (`None`: a server you run yourself).
  */
 platform: Platform | null, database: string, database_size_bytes: number | null, started_at: string | null, read_only_session: boolean, capabilities: Array<Capability>, missing: Array<MissingCapability>, };

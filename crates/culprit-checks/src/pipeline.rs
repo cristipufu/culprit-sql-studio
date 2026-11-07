@@ -96,9 +96,8 @@ fn preparation() -> Vec<Arc<dyn Prepare>> {
         step("plans captured before a column changed type", culprit_core::insights::mark_snapshot),
         step("MySQL's possible keys named with their columns", culprit_core::insights::mark_snapshot_keys),
         step("plan operators marked with their index's kind", culprit_core::insights::mark_snapshot_index_kinds),
-        step("saved storage counters retain their source scope", storage_scope),
         step("health counters graded only on the evidence", crate::pressure::grade_on_evidence),
-        step("PostgreSQL's WAL time kept out of statement time", statement_time_without_wal),
+        step("PostgreSQL's I/O time within its statement time", io_within_statement_time),
         step("MariaDB's lock time unknown where it counts the whole run", lock_time_that_counts_the_run),
         step("a scan's filter judged by what its runs measured", crate::indexes::mark_measured_kept),
     ]
@@ -131,30 +130,6 @@ fn measurement_context(snapshot: &mut Snapshot) {
         }
         if let MeasurementSource::Workload(kind) = context.source {
             workload.kind = Some(kind);
-        }
-    }
-}
-
-/// Older snapshots did not save these facts. Reconstruct only scope and operation kind; an unknown source reset
-/// stays unknown instead of borrowing the database, bgwriter or server-start clock.
-fn storage_scope(s: &mut Snapshot) {
-    let engine = s.server.engine;
-    let major = s.server.version.split('.').next().and_then(|n| n.parse::<u32>().ok());
-    for f in s.pressure.iter_mut().flat_map(|p| p.files.iter_mut()) {
-        let scope = match engine {
-            Engine::Postgres if major.is_some_and(|v| v < 16) && f.kind == culprit_core::FileKind::Data => {
-                Some(culprit_core::FileScope::Database)
-            }
-            Engine::Postgres if f.kind == culprit_core::FileKind::Data && major.is_none() => None,
-            Engine::Postgres | Engine::Mysql => Some(culprit_core::FileScope::Server),
-            Engine::Mssql if f.database.is_some() => Some(culprit_core::FileScope::Database),
-            Engine::Mssql | Engine::Yugabyte | Engine::Sqlite => None,
-        };
-        if f.scope.is_none() {
-            f.scope = scope;
-        }
-        if engine == Engine::Postgres && f.kind == culprit_core::FileKind::Log {
-            f.write_operation.get_or_insert(culprit_core::FileWriteOperation::Flush);
         }
     }
 }
@@ -200,17 +175,13 @@ fn is_lock_time(w: &WaitStat) -> bool {
     w.category == "Lock" && w.wait_type.as_deref().is_some_and(|t| t.starts_with("lock time"))
 }
 
-/// Scans by older versions split PostgreSQL's statement time into disk I/O, WAL write and sync, and the rest. WAL time is
-/// the whole server's, spent mostly by the WAL writer and by commits after a statement's timing ends: no share of
-/// statement time. It goes back to the rest, as a scan now reads it (`culprit_postgres` `history_waits`), and without
-/// disk I/O to set apart the rest is all there is, which says nothing.
-fn statement_time_without_wal(snapshot: &mut Snapshot) {
-    let wal = |w: &WaitStat| w.category == "Log" && w.wait_type.as_deref().is_some_and(|t| t.starts_with("WAL write"));
+/// PostgreSQL's disk I/O time is a share of statement time only when it fits inside it: parallel I/O timings, or
+/// counters with a different coverage, can't be shown as exclusive shares of execution time. Then the breakdown goes,
+/// with a note; per-query I/O totals remain.
+fn io_within_statement_time(snapshot: &mut Snapshot) {
     if snapshot.server.engine != Engine::Postgres {
         return;
     }
-    // Saved scans need the same protection as freshly collected ones. Parallel I/O timings or counters with
-    // different coverage cannot be partitioned into exclusive shares of statement wall time.
     let io: f64 = snapshot.waits.iter().filter(|w| w.category == "IO").map(|w| w.wait_ms).sum();
     if snapshot.workload.as_ref().is_some_and(|w| io > w.total_time_ms) {
         snapshot.waits.clear();
@@ -219,27 +190,7 @@ fn statement_time_without_wal(snapshot: &mut Snapshot) {
             collector: "waits".into(),
             message: "Recorded I/O time exceeds statement execution time; parallel or differently covered timing cannot be shown as exclusive shares of execution time. Per-query I/O totals remain available.".into(),
         });
-        return;
     }
-    if !snapshot.waits.iter().any(wal) {
-        return;
-    }
-    let ms: f64 = snapshot.waits.iter().filter(|w| wal(w)).map(|w| w.wait_ms).sum();
-    snapshot.waits.retain(|w| !wal(w));
-    if !snapshot.waits.iter().any(|w| w.category == "IO" && w.wait_ms > 0.0) {
-        snapshot.waits.clear();
-        return;
-    }
-    match snapshot.waits.iter_mut().find(|w| w.category == "Other") {
-        Some(other) => other.wait_ms += ms,
-        None => snapshot.waits.push(WaitStat {
-            category: "Other".into(),
-            wait_type: Some("CPU, locks and untimed waits".into()),
-            wait_ms: ms,
-            tasks: None,
-        }),
-    }
-    snapshot.waits.sort_by(|a, b| b.wait_ms.total_cmp(&a.wait_ms));
 }
 
 /// The stages and what runs in each.

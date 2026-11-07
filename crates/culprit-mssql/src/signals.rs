@@ -397,6 +397,8 @@ ORDER BY s.name, t.name, prv.boundary_id
 // ── per server ─────────────────────────────────────────────────────────────────────────────────────
 
 fn file_io(r: &Rec, database: Option<String>, kind: FileKind) -> FileIo {
+    // A file of the scanned database counts that database's I/O; tempdb's and the instance's have no single scope.
+    let scope = database.is_some().then_some(culprit_core::FileScope::Database);
     FileIo {
         name: r.string("file_name"),
         kind,
@@ -407,7 +409,7 @@ fn file_io(r: &Rec, database: Option<String>, kind: FileKind) -> FileIo {
         writes: r.f64_or_zero("writes"),
         write_ms: r.f64("write_ms"),
         write_bytes: r.f64("write_bytes"),
-        scope: None,
+        scope,
         stats_reset: None,
         write_operation: None,
     }

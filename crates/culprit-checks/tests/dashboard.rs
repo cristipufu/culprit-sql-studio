@@ -346,7 +346,8 @@ fn storage_connections_replication_and_failures_say_what_they_saw() {
             writes: 0.0,
             write_ms: None,
             write_bytes: None,
-            scope: None,
+            // PostgreSQL 16 and later read pg_stat_io: the whole server's.
+            scope: Some(culprit_core::FileScope::Server),
             stats_reset: None,
             write_operation: None,
         },
@@ -360,9 +361,9 @@ fn storage_connections_replication_and_failures_say_what_they_saw() {
             writes: 20_000.0,
             write_ms: Some(20_000.0 * 40.0),
             write_bytes: None,
-            scope: None,
+            scope: Some(culprit_core::FileScope::Server),
             stats_reset: None,
-            write_operation: None,
+            write_operation: Some(culprit_core::FileWriteOperation::Flush),
         },
     ];
     p.replicas = vec![Replica {
@@ -516,9 +517,10 @@ fn postgres_storage_waits_and_plan_counts_keep_their_own_meaning() {
         writes: 2000.0,
         write_ms: Some(6000.0),
         write_bytes: None,
-        scope: None,
+        // As PostgreSQL 15's collector reads them: data from pg_stat_database (this database), WAL from pg_stat_wal.
+        scope: Some(if kind == FileKind::Data { FileScope::Database } else { FileScope::Server }),
         stats_reset: Some(reset.into()),
-        write_operation: None,
+        write_operation: (kind == FileKind::Log).then_some(FileWriteOperation::Flush),
     };
     r.snapshot.pressure.get_or_insert_with(Default::default).files = vec![
         f("Tables and indexes", FileKind::Data, "2026-10-19T00:00:00Z"),
@@ -540,11 +542,6 @@ fn postgres_storage_waits_and_plan_counts_keep_their_own_meaning() {
     assert!(waits.detail.as_deref().unwrap().contains("not a measurement of time spent waiting"));
     assert!(tile(&d, TileKey::Plans).detail.as_deref().unwrap().contains("historical or once-only"));
     assert!(tile(&d, TileKey::Statistics).metrics.iter().any(|m| m.label == "All queries with plans"));
-    // From PostgreSQL 16, pg_stat_io's data timing is also server-wide.
-    let mut s = r.snapshot;
-    s.server.version = "16.5".into();
-    s.pressure.as_mut().unwrap().files[0].scope = None;
-    assert_eq!(culprit_checks::analyze(s).snapshot.pressure.unwrap().files[0].scope, Some(FileScope::Server));
 }
 
 #[test]

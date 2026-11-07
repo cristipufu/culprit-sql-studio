@@ -53,7 +53,7 @@ fn text_helpers_never_panic_on_non_ascii() {
 #[test]
 fn a_per_database_setting_is_set_for_this_database_first_on_a_managed_server() {
     let mut server = crate::waits::snapshot_with(Engine::Postgres).server;
-    server.cloud = Some("Amazon RDS".into());
+    server.set_platform(Some(culprit_core::Platform::AmazonRds));
     let change = setting_change(&server, "random_page_cost", "1.1");
     assert_eq!(change.sql.as_deref(), Some("ALTER DATABASE demo SET random_page_cost = 1.1;"));
     assert!(change.how.starts_with("Set random_page_cost to 1.1 for this database only"), "{}", change.how);
@@ -68,11 +68,11 @@ fn a_per_database_setting_is_set_for_this_database_first_on_a_managed_server() {
     let change = setting_change(&server, "work_mem", "64MB");
     assert_eq!(change.sql.as_deref(), Some("ALTER DATABASE \"Shop-EU\" SET work_mem = '64MB';"));
     // A server you run takes ALTER SYSTEM, as before; MySQL keeps no settings per database.
-    server.cloud = None;
+    server.set_platform(None);
     let change = setting_change(&server, "random_page_cost", "1.1");
     assert!(change.sql.unwrap().starts_with("ALTER SYSTEM SET random_page_cost = 1.1;"));
     let mut mysql = crate::waits::snapshot_with(Engine::Mysql).server;
-    mysql.cloud = Some("Amazon RDS".into());
+    mysql.set_platform(Some(culprit_core::Platform::AmazonRds));
     let change = setting_change(&mysql, "sort_buffer_size", "4194304");
     assert!(change.sql.is_none() && change.how.contains("DB parameter group"), "{}", change.how);
 }

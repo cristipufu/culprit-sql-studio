@@ -235,7 +235,7 @@ pub struct ServerInfo {
     /// The managed service it runs on, as a person names it ("Amazon RDS"). For sentences; [`ServerInfo::platform`]
     /// is what code asks.
     pub cloud: Option<String>,
-    /// The managed service it runs on (`None`: a server you run yourself). Older reports have only `cloud`.
+    /// The managed service it runs on (`None`: a server you run yourself).
     #[serde(default)]
     pub platform: Option<crate::platform::Platform>,
     pub database: String,
@@ -268,9 +268,15 @@ impl ServerInfo {
         self.capabilities.contains(&capability)
     }
 
-    /// The managed service it runs on: the one the provider detected, or for an older report the one its label names.
+    /// The managed service it runs on, as the provider detected it.
     pub fn platform(&self) -> Option<crate::platform::Platform> {
-        self.platform.or_else(|| self.cloud.as_deref().and_then(crate::platform::Platform::from_label))
+        self.platform
+    }
+
+    /// Record the managed service it runs on, with the label `cloud` shows for it, as a provider does.
+    pub fn set_platform(&mut self, platform: Option<crate::platform::Platform>) {
+        self.platform = platform;
+        self.cloud = platform.map(|p| p.label(self.engine).to_string());
     }
 
     /// Whether it runs on `platform`.
@@ -280,7 +286,7 @@ impl ServerInfo {
 
     /// Whether it runs on a managed service at all: no superuser, no configuration file, no operating system.
     pub fn is_managed(&self) -> bool {
-        self.platform().is_some() || self.cloud.is_some()
+        self.platform.is_some()
     }
 
     /// The identified product, independently of the provider's execution family.

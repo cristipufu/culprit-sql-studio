@@ -585,7 +585,7 @@ mod tests {
         for s in pg.settings.iter_mut().filter(|s| s.name == "track_io_timing") {
             s.value = "off".into();
         }
-        pg.server.cloud = Some("Amazon RDS".into());
+        pg.server.set_platform(Some(culprit_core::Platform::AmazonRds));
         let notes = explain(&pg).unwrap().notes;
         let note = notes.iter().find(|n| n.contains("track_io_timing")).unwrap();
         assert!(note.contains("DB parameter group") && !note.contains("ALTER SYSTEM"), "{note}");

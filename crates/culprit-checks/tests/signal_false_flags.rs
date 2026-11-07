@@ -215,13 +215,13 @@ fn server_wide_connection_counts_say_the_server_and_a_pools_are_not_graded() {
     assert_eq!(of(&r, "connection-churn")[0].severity, Severity::Low);
     assert!(of(&r, "connection-churn")[0].caveats.iter().any(|c| c.contains("whole server")));
     // Azure SQL Database: the counter is the server process's, shared by the elastic pool.
-    let r = churn("mssql-demo", 400.0, |s| s.server.cloud = Some("Azure SQL Database".into()));
+    let r = churn("mssql-demo", 400.0, |s| s.server.set_platform(Some(culprit_core::Platform::AzureSqlDatabase)));
     assert!(of(&r, "connection-churn").is_empty());
     // MySQL: a thread cache already this big isn't made smaller; on RDS the platform's control, not SQL.
     let r = churn("mysql-demo", 40.0, |s| set(s, "thread_cache_size", "128"));
     let fix = of(&r, "connection-churn")[0].fix.clone().unwrap();
     assert!(fix.sql.is_none() && fix.summary.contains("already keeps 128 threads"), "{}", fix.summary);
-    let r = churn("mysql-demo", 40.0, |s| s.server.cloud = Some("Amazon RDS".into()));
+    let r = churn("mysql-demo", 40.0, |s| s.server.set_platform(Some(culprit_core::Platform::AmazonRds)));
     let fix = of(&r, "connection-churn")[0].fix.clone().unwrap();
     assert!(fix.sql.is_none() && fix.summary.contains("DB parameter group"), "{}", fix.summary);
 }
@@ -426,7 +426,7 @@ fn storage_latency_is_weighted_per_kind_and_tempdbs_log_holds_no_commit() {
     assert_eq!(f.severity, Severity::Low);
     assert!(f.summary.contains("backups, CHECKDB, read-ahead"), "{}", f.summary);
     // Managed Instance General Purpose: file size sets the IOPS.
-    s.server.cloud = Some("Azure SQL Managed Instance".into());
+    s.server.set_platform(Some(culprit_core::Platform::AzureSqlManagedInstance));
     assert!(of(&analyze(s), "slow-storage")[0].fix.as_ref().unwrap().summary.contains("come from the file's size"));
 }
 
@@ -866,7 +866,7 @@ fn jit_advice_raises_the_current_threshold_where_the_server_is_configured() {
     assert!(raised.contains("jit_above_cost = 50000000;"), "{raised}");
     // RDS refuses ALTER SYSTEM: the parameter group.
     let rds = jit(|s| {
-        s.server.cloud = Some("Amazon RDS".into());
+        s.server.set_platform(Some(culprit_core::Platform::AmazonRds));
         set(s, "jit_above_cost", "100000");
     });
     assert!(!rds.sql.unwrap().contains("ALTER SYSTEM") && rds.summary.contains("DB parameter group"));

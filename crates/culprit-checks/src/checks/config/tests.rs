@@ -83,7 +83,7 @@ fn cost_threshold_only_where_plans_can_go_parallel() {
     set(&mut s, "max degree of parallelism", "1");
     assert!(found(&mssql::check(&s), "config:cost-threshold-for-parallelism").is_none());
     set(&mut s, "max degree of parallelism", "0");
-    s.server.cloud = Some("Amazon RDS".into());
+    s.server.set_platform(Some(culprit_core::Platform::AmazonRds));
     let fix = found(&mssql::check(&s), "config:cost-threshold-for-parallelism").cloned().unwrap().fix.unwrap();
     assert!(fix.sql.is_none() && fix.summary.contains("DB parameter group"), "{}", fix.summary);
 }
@@ -92,7 +92,7 @@ fn cost_threshold_only_where_plans_can_go_parallel() {
 #[test]
 fn azure_compatibility_level_is_not_read_from_the_version() {
     let mut s = fixture("mssql-demo.json");
-    s.server.cloud = Some("Azure SQL Database".into());
+    s.server.set_platform(Some(culprit_core::Platform::AzureSqlDatabase));
     s.server.version = "12.0.2000.8".into();
     set(&mut s, "compatibility_level", "150");
     assert!(found(&mssql::check(&s), "config:compatibility-level").is_none(), "150 is one step behind 160");
@@ -136,7 +136,7 @@ fn settings_on_managed_services_name_the_platform_control() {
     set(&mut pg, "track_io_timing", "off");
     let fix = found(&postgres::check(&pg), "config:track_io_timing").cloned().unwrap().fix.unwrap();
     assert!(fix.sql.unwrap().starts_with("ALTER SYSTEM SET track_io_timing"));
-    pg.server.cloud = Some("Amazon RDS".into());
+    pg.server.set_platform(Some(culprit_core::Platform::AmazonRds));
     let fix = found(&postgres::check(&pg), "config:track_io_timing").cloned().unwrap().fix.unwrap();
     assert!(fix.sql.is_none() && fix.summary.contains("DB parameter group"), "{}", fix.summary);
 
@@ -145,7 +145,7 @@ fn settings_on_managed_services_name_the_platform_control() {
     set(&mut my, "log_output", "FILE");
     let fix = found(&mysql::check(&my), "config:slow_query_log").cloned().unwrap().fix.unwrap();
     assert!(fix.sql.as_deref().unwrap().contains("slow_query_log = 'ON'"), "{:?}", fix.sql);
-    my.server.cloud = Some("Google Cloud SQL".into());
+    my.server.set_platform(Some(culprit_core::Platform::GoogleCloudSql));
     let fix = found(&mysql::check(&my), "config:slow_query_log").cloned().unwrap().fix.unwrap();
     assert!(fix.sql.is_none());
     assert!(
@@ -155,7 +155,7 @@ fn settings_on_managed_services_name_the_platform_control() {
     );
     // MY-10: MySQL's lock time is the same either way; MariaDB's, written to a table, is the whole logged run.
     assert_eq!(fix.cost, None);
-    my.server.cloud = None;
+    my.server.set_platform(None);
     my.server.product = "MariaDB".into();
     let fix = found(&mysql::check(&my), "config:slow_query_log").cloned().unwrap().fix.unwrap();
     let cost = fix.cost.unwrap_or_default();
@@ -277,7 +277,7 @@ fn postgres_settings_are_worded_where_they_run() {
     );
     let max = found(&out, "config:pg_stat_statements.max").unwrap().fix.clone().unwrap();
     assert!(max.sql.unwrap().contains("pg_stat_statements.max = 100000"));
-    s.server.cloud = Some("Azure Database for PostgreSQL".into());
+    s.server.set_platform(Some(culprit_core::Platform::AzureDatabase));
     let fix = found(&postgres::check(&s), "config:autovacuum").unwrap().fix.clone().unwrap();
     assert!(fix.sql.is_none() && fix.summary.contains("server parameters"), "{}", fix.summary);
 }
@@ -290,7 +290,7 @@ fn mysql_restart_settings_on_a_managed_server() {
     set(&mut s, "slow_query_log", "OFF");
     let fix = found(&mysql::check(&s), "config:performance_schema").unwrap().fix.clone().unwrap();
     assert!(fix.sql.as_deref().unwrap().contains("[mysqld]\nperformance_schema = ON"));
-    s.server.cloud = Some("Amazon RDS".into());
+    s.server.set_platform(Some(culprit_core::Platform::AmazonRds));
     let fix = found(&mysql::check(&s), "config:performance_schema").unwrap().fix.clone().unwrap();
     assert!(fix.sql.is_none(), "{:?}", fix.sql);
     assert!(fix.summary.contains("in the instance's DB parameter group"), "{}", fix.summary);

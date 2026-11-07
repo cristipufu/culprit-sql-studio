@@ -73,24 +73,6 @@ impl Platform {
         }
     }
 
-    /// The platform a label names, for reports saved before the platform was recorded.
-    pub fn from_label(label: &str) -> Option<Platform> {
-        Some(match label.trim() {
-            "Amazon RDS" => Platform::AmazonRds,
-            "Amazon Aurora" => Platform::AmazonAurora,
-            "Azure SQL Database" => Platform::AzureSqlDatabase,
-            "Azure SQL Managed Instance" => Platform::AzureSqlManagedInstance,
-            l if l.starts_with("Azure Database for") => Platform::AzureDatabase,
-            "Google Cloud SQL" => Platform::GoogleCloudSql,
-            "Google AlloyDB" => Platform::GoogleAlloyDb,
-            "Neon" => Platform::Neon,
-            "Supabase" => Platform::Supabase,
-            "Tiger Data" | "Tiger Cloud" | "Timescale Cloud" => Platform::TigerData,
-            "MariaDB Cloud" => Platform::MariaDbCloud,
-            _ => return None,
-        })
-    }
-
     /// Where a server setting is changed when SQL can't (no superuser, no configuration file): a sentence's object,
     /// "Set work_mem to 64MB in {this}." `None` where the engine's own SQL does it (sp_configure on a managed
     /// instance) or where server settings aren't the person's to change (Azure SQL Database).
@@ -179,21 +161,6 @@ impl Platform {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn every_label_reads_back_as_its_platform() {
-        for p in PLATFORMS {
-            for engine in [Engine::Postgres, Engine::Mysql, Engine::Mssql] {
-                let label = p.label(engine);
-                if p == Platform::AzureDatabase && engine == Engine::Mssql {
-                    continue;
-                }
-                assert_eq!(Platform::from_label(label), Some(p), "{label}");
-            }
-        }
-        assert_eq!(Platform::from_label("Azure Database for MariaDB"), Some(Platform::AzureDatabase));
-        assert_eq!(Platform::from_label("Somewhere else"), None);
-    }
 
     #[test]
     fn a_platform_without_superuser_names_its_control() {
