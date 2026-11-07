@@ -71,16 +71,19 @@ export function OutputPane({ output, look, onLook, empty }: { output: Output; lo
           {output.label}
         </div>
       );
-    case "error":
-      // "Not available here" (the browser demo, an engine that can't) is information, not a failure.
+    case "error": {
+      // "Not available here" (the browser demo, an engine that can't) is information, not a failure: a screen reader
+      // hears it when it's next idle, and a failure at once.
+      const info = output.error.code === "unsupported";
       return (
-        <div className={`notice ${output.error.code === "unsupported" ? "info" : "error"}`} style={{ margin: 12 }}>
+        <div className={`notice ${info ? "info" : "error"}`} role={info ? "status" : "alert"} style={{ margin: 12 }}>
           <div>
             <b>{output.error.message}</b>
             {output.error.hint && <div style={{ marginTop: 4 }}>{output.error.hint}</div>}
           </div>
         </div>
       );
+    }
     case "plan":
       return (
         <div style={{ padding: 12 }}>
