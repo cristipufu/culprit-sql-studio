@@ -5,18 +5,9 @@ import type { Workload } from "../gen/Workload";
 import type { WorkloadKind } from "../gen/WorkloadKind";
 import { windowLabel } from "./format";
 
-/** What a workload was read from: the provider's kind, or, in a scan saved before providers said so, its source's name
- * (as `Workload::kind` reads it in culprit-core). */
+/** What a workload was read from, as its provider said. */
 export function workloadKind(w: Workload): WorkloadKind | null {
-  if (w.kind) return w.kind;
-  const byName: Record<string, WorkloadKind> = {
-    "Query Store": "query-store",
-    "Plan cache": "plan-cache",
-    pg_stat_statements: "statement-stats",
-    performance_schema: "performance-schema",
-    "slow query log": "slow-log",
-  };
-  return byName[w.source] ?? (w.log ? "query-log" : null);
+  return w.kind ?? null;
 }
 
 /** Below this, a per-day figure would be a forecast from a sliver of data; show what was measured instead. */

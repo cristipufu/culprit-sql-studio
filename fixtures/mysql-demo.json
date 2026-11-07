@@ -28,6 +28,7 @@
   },
   "workload": {
     "source": "performance_schema",
+    "kind": "performance-schema",
     "windowed": false,
     "window_start": "2026-10-11T12:07:13Z",
     "window_end": "2026-10-11T12:09:00Z",
@@ -1492,5 +1493,16 @@
     "window_days": 7,
     "top_queries": 60,
     "plans": 25
+  },
+  "identity": {
+    "engine": "mysql",
+    "database": "shop",
+    "location": {
+      "kind": "server",
+      "host": "127.0.0.1",
+      "port": 33306,
+      "instance": null
+    },
+    "incarnation": null
   }
 }

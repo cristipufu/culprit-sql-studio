@@ -30,6 +30,7 @@
   },
   "workload": {
     "source": "pg_stat_statements",
+    "kind": "statement-stats",
     "windowed": false,
     "window_start": "2026-10-11T07:01:50Z",
     "window_end": "2026-10-11T11:54:21Z",
@@ -2239,5 +2240,16 @@
     "window_days": 7,
     "top_queries": 60,
     "plans": 25
+  },
+  "identity": {
+    "engine": "postgres",
+    "database": "demo",
+    "location": {
+      "kind": "server",
+      "host": "127.0.0.1",
+      "port": 55432,
+      "instance": null
+    },
+    "incarnation": null
   }
 }

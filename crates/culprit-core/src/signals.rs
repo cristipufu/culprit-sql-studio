@@ -488,7 +488,7 @@ impl CountBaseline {
             baseline.reference = Some(crate::ScanReference::of(previous));
             baseline
         };
-        match (previous.captured_measurement(), current.captured_measurement()) {
+        match (previous.identified_measurement(), current.identified_measurement()) {
             (Some(a), Some(b)) => return Self::in_context(&previous.taken_at, then, now, &a, &b).map(referenced),
             (None, None) => {}
             _ => return None,
@@ -843,12 +843,14 @@ mod merge_tests {
                 count: 40.0,
                 restarted: false,
                 reference: Some(crate::ScanReference::of(&before)),
-                measurement: None,
+                // The earlier scan's context: both scans know which database they read.
+                measurement: before.identified_measurement(),
             })
         );
         let shrank =
             CountBaseline::from_setting(&before, &scan("2026-10-17T10:00:00Z", "3", "2023-04-17T10:00:21Z"), name);
-        assert!(shrank.is_some_and(|b| b.restarted && b.count == 0.0));
+        // With no reset on record, a count that shrank can't be read: it isn't taken for a fresh start.
+        assert_eq!(shrank, None);
         let reset =
             CountBaseline::from_setting(&before, &scan("2026-10-17T10:00:00Z", "52", "2026-10-16T08:00:00Z"), name);
         assert!(reset.is_some_and(|b| b.restarted), "reset after the earlier scan, then more rounds than before");

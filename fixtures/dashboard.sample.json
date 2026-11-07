@@ -675,7 +675,7 @@
             "key": "window-hours",
             "label": "Covers",
             "text": "5 hours",
-            "value": 4.583333
+            "value": 4.563055555555556
           }
         ],
         "next": "culprit changes mssql-demo",
@@ -1402,7 +1402,7 @@
             "key": "window-hours",
             "label": "Covers",
             "text": "5 hours",
-            "value": 4.583333
+            "value": 4.563055555555556
           },
           {
             "key": "locked",

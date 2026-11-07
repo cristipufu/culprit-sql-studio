@@ -12,6 +12,14 @@ fn snapshot() -> Snapshot {
     serde_json::from_str(include_str!("../../../fixtures/postgres-demo.json")).unwrap()
 }
 
+/// The same database scanned an hour later. Running totals can show what changed between two scans, never between a
+/// scan and itself.
+fn later(mut s: Snapshot) -> Snapshot {
+    s.id = "20261011T125421.000Z".into();
+    s.taken_at = "2026-10-11T12:54:21Z".into();
+    s
+}
+
 #[test]
 fn typed_success_is_not_reinterpreted_as_failure_by_informational_notes() {
     let mut s = snapshot();
@@ -238,7 +246,7 @@ fn an_unavailable_catalog_cannot_turn_a_disappearing_finding_into_a_verified_fix
         state: SourceState::Unavailable,
         reason: Some("Catalog request timed out.".into()),
     });
-    let after = culprit_checks::analyze(s);
+    let after = culprit_checks::analyze(later(s));
     assert!(!after.locked.iter().any(|l| l.check.id == finding.check));
     assert!(!after.findings.iter().any(|f| f.id == finding.id));
     let verification = culprit_core::verification::compare_reports(&before, &after, std::slice::from_ref(&finding.id));
@@ -263,7 +271,7 @@ fn a_finding_reclassified_under_another_cause_is_not_a_verified_improvement() {
         RefinementOutcome::Absorbed { into: retained.id.clone() },
         RefinementOutcome::Covered { by: vec![retained.id.clone()] },
     ] {
-        let mut after = before.clone();
+        let mut after = culprit_checks::analyze(later(snapshot()));
         after.findings.retain(|f| f.id != finding.id);
         let assessment = after.assessments.iter_mut().find(|a| a.check == finding.check).unwrap();
         assessment.status = CheckStatus::Findings;
@@ -296,7 +304,7 @@ fn removing_a_duplicate_is_verified_by_the_real_catalog_assessment() {
     let previous = culprit_checks::digest(&before, None, 100, 0);
     let mut s = snapshot();
     s.indexes.retain(|i| format!("{}.{}.{}", i.schema, i.table, i.name) != finding.subject.name);
-    let after = culprit_checks::analyze(s);
+    let after = culprit_checks::analyze(later(s));
     assert!(after.assessments.iter().find(|a| a.check == finding.check).unwrap().reason.is_none());
     assert_eq!(
         culprit_core::verification::compare_reports(&before, &after, std::slice::from_ref(&finding.id)).findings[0]
@@ -329,7 +337,7 @@ fn a_measured_query_can_be_verified_without_borrowing_evidence_from_other_querie
     let finding = before.findings.iter().find(|f| f.check == "unstable-query").expect("a real unstable statement");
     let previous = culprit_checks::digest(&before, None, 100, 0);
     s.workload.as_mut().unwrap().queries[0].stddev_time_ms = Some(1.0);
-    let after = culprit_checks::analyze(s.clone());
+    let after = culprit_checks::analyze(later(s.clone()));
     let verify = |after: &culprit_core::Report| {
         culprit_core::verification::compare_reports(&before, after, std::slice::from_ref(&finding.id)).findings[0]
             .status
@@ -342,7 +350,7 @@ fn a_measured_query_can_be_verified_without_borrowing_evidence_from_other_querie
     s.workload.as_mut().unwrap().queries[0].stddev_time_ms = None;
     s.workload.as_mut().unwrap().queries[1].executions = 1000.0;
     s.workload.as_mut().unwrap().queries[1].stddev_time_ms = Some(1.0);
-    let after = culprit_checks::analyze(s.clone());
+    let after = culprit_checks::analyze(later(s.clone()));
     assert_eq!(verify(&after), culprit_core::VerifyStatus::Unknown);
     assert!(
         !culprit_checks::digest_since(&after, &previous, 100, 0)
@@ -454,7 +462,7 @@ fn measured_zero_jit_and_wal_verify_but_missing_costs_do_not() {
         costs.jit_functions = Some(0.0);
         costs.log_bytes = Some(0.0);
         costs.log_share = Some(0.0);
-        let after = culprit_checks::analyze(s.clone());
+        let after = culprit_checks::analyze(later(s.clone()));
         let verify = |after: &culprit_core::Report| {
             culprit_core::verification::compare_reports(&before, after, std::slice::from_ref(&finding.id)).findings[0]
                 .status

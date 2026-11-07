@@ -1566,6 +1566,7 @@ fn mysqls_rows_examined_are_rows_and_measured_where_the_plan_reads_one_table() {
 fn slow_log(mut s: Snapshot) -> Snapshot {
     let w = s.workload.as_mut().unwrap();
     w.source = "slow query log".into();
+    w.kind = Some(culprit_core::WorkloadKind::SlowLog);
     w.windowed = true;
     set(&mut s, "long_query_time", "0.100000");
     s

@@ -130,18 +130,9 @@ pub const PER_DAY_MIN_HOURS: f64 = 20.0;
 pub const RATE_MIN_HOURS: f64 = 1.0;
 
 impl Workload {
-    /// What the workload was read from. Scans saved before providers said so are told by the source's name: the one
-    /// place that reads it.
+    /// What the workload was read from, as its provider said.
     pub fn kind(&self) -> Option<WorkloadKind> {
-        self.kind.or_else(|| match self.source.as_str() {
-            "Query Store" => Some(WorkloadKind::QueryStore),
-            "Plan cache" => Some(WorkloadKind::PlanCache),
-            "pg_stat_statements" => Some(WorkloadKind::StatementStats),
-            "performance_schema" => Some(WorkloadKind::PerformanceSchema),
-            "slow query log" => Some(WorkloadKind::SlowLog),
-            _ if self.log.is_some() => Some(WorkloadKind::QueryLog),
-            _ => None,
-        })
+        self.kind
     }
 
     /// Hours an entry of this workload has counted: from its first run (a cached plan's compile) to the window's end,

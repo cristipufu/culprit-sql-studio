@@ -198,8 +198,8 @@ Rules every source follows:
 - **Say what kind of source it is.** A provider sets `Workload::kind` (`WorkloadKind`: Query Store, the plan cache,
   pg_stat_statements, performance_schema, the slow log, an application's log) beside the source's name for sentences.
   The rules that depend on it (a slow log keeps only slow runs, performance_schema's histograms count from the start)
-  ask `Workload::kind()`, never the name; scans saved before it existed are read back in that one place. The same for a
-  product that rides on another's provider: `ServerInfo::is_mariadb()`, never a name compared.
+  ask `Workload::kind()`, never the name. The same for a product that rides on another's provider:
+  `ServerInfo::is_mariadb()`, never a name compared.
 - **Date the counters.** Usage counters count from the latest moment they may have started: the server's start, a
   statistics reset, a database restored since (SQL Server's `create_date`), one that reopens with AUTO_CLOSE, MariaDB's
   userstat turned on. The collector dates what it can see (`IndexStat::counters_since`) and the scans add what they saw
@@ -270,7 +270,7 @@ workload rates and retained activity samples.
 
 A managed service changes how Culprit reads and advises (no superuser, settings in a parameter group, the cloud's own
 metrics). It is one type, `culprit_core::Platform`, detected once by the provider that can see it and recorded on
-`ServerInfo::platform` (older reports carry only the `cloud` label, which `ServerInfo::platform()` reads back). Checks and
+`ServerInfo::platform`, with the `cloud` label derived from it for display (`ServerInfo::set_platform`). Checks and
 the engine ask it (`settings_control`, `preload_library`, `metrics`, `is_azure_sql_database`); nothing matches on
 platform names. A new platform is a variant in `crates/culprit-core/src/platform.rs` with its answers there, and its
 detection in the provider.
@@ -334,9 +334,9 @@ timestamp. Index-age history uses only this database's past scans; older event s
 from their own saved reports within a bounded backfill.
 
 Saved reports use a versioned private JSON encoding: the prepared snapshot appears once, with lossless flat-path
-differences for retained input and collection. Loading restores the full report; older full-report JSON remains
-readable. Immutable native plan text is shared in memory across these snapshots. Report lists read small summary
-sidecars, or stream only the header of an older report, without deserializing its plans and retained evidence.
+differences for retained input and collection. Loading restores the full report. Immutable native plan text is shared
+in memory across these snapshots. Report lists read small summary sidecars, without deserializing plans and retained
+evidence. Culprit reads only what the current version writes: files saved by older versions are not read.
 
 Consumers request only what they need. `latest_snapshot` and scan-to-scan comparisons read the prepared snapshot
 directly, skipping derived views and retained evidence. Analysis readers reconstruct retained input and collection
@@ -457,9 +457,8 @@ A capability lock, an unavailable or incomplete assessment, or a check that did 
 Positive findings from a partial source retain their assessment reason, so they cannot clear other observations from
 that check. Statement checks also record the identities with complete measurements: an unrelated statement with
 missing measurements cannot block verification of a measured statement, and a measured unrelated statement cannot
-stand in for the affected one. Saved digests retain those statement identities. A completed assessment or established
-inapplicability can confirm absence; older reports without
-assessments retain their capability-lock interpretation.
+stand in for the affected one. Saved digests retain those statement identities and each finding's check. A completed
+assessment or established inapplicability can confirm absence; a check missing from the assessments was not run.
 The same guard consults the refinement trace: an observation absorbed or covered by another cause was reclassified,
 so losing its old id is not proof of improvement.
 Saved digests retain the originating check in `DigestFinding.check`; older digests recover it only from an
@@ -526,10 +525,10 @@ is dated by collection, not its last query execution. The oldest cache/digest en
 history, query activity, changes, baselines, verification and digests use these contracts. Different endpoints,
 sources, scopes or incompatible windows cannot establish a trend or verify a query finding's disappearance.
 
-Saved exports without these optional fields still load. Two older unidentified scans retain an explicit `Legacy`
-comparison using their original identity and clock semantics. An identified scan cannot borrow identity for an old
-one from today's connection: fresh comparable scans establish new trends. The legacy fields remain serialized for
-readers of older report formats; preparation mirrors the typed context into them when context is present.
+Every provider binds the scan's `DatabaseIdentity` (`Snapshot::bind_identity`, which builds the measurement
+context); a plugged-in provider must too. A scan without identity, or whose location is unknown, compares with
+nothing: a database's name alone never says which server it is on. Preparation mirrors the typed context into the
+workload's flat window fields when context is present.
 
 Cumulative query evidence keeps its dates. `Workload::over_scans` uses complete intervals for shares and averages;
 when those intervals have gaps or end before the latest scan, `ScanSpan::phrase` dates them explicitly. A more recent

@@ -132,13 +132,12 @@ impl Counters {
         let mut counters =
             Counters::of_workload(workload, &snapshot.server.database, &snapshot.taken_at, evictions(snapshot));
         counters.reference = Some(culprit_core::ScanReference::of(snapshot));
-        if snapshot.identity.is_some() || workload.measurement.is_some() {
-            counters.measurement = snapshot.workload_measurement();
-        }
+        counters.measurement = snapshot.identified_measurement();
         Some(counters)
     }
 
-    /// Old counter files keep their original source/name correlation; known endpoints never borrow that identity.
+    /// Two scans' counters, compared by their measurement contexts: counters without one (an unidentified scan)
+    /// compare with nothing, whatever their names say.
     pub fn comparison(&self, other: &Self) -> Comparison {
         match (&self.measurement, &other.measurement) {
             (Some(a), Some(b)) => {
@@ -155,11 +154,6 @@ impl Counters {
                 }
                 a.series_comparison(b)
             }
-            (None, None) if self.source != other.source => Comparison::Incompatible(ComparisonReason::DifferentSource),
-            (None, None) if self.database != other.database => {
-                Comparison::Incompatible(ComparisonReason::DifferentDatabase)
-            }
-            (None, None) => Comparison::Legacy,
             _ => Comparison::Incompatible(ComparisonReason::UnknownIdentity),
         }
     }
@@ -700,9 +694,23 @@ mod tests {
         }
     }
 
+    /// The context an identified scan of `shop` at `at` records for `w`, as a provider's `bind_identity` builds it.
+    fn context(w: &Workload, at: &str) -> MeasurementContext {
+        let shop =
+            culprit_core::DatabaseIdentity::server(culprit_core::Engine::Postgres, "shop", "127.0.0.1", 5432, None);
+        MeasurementContext::workload(shop, w, at, None)
+    }
+
     fn counters(at: &str, reset: &str, queries: &[(&str, f64, f64)]) -> Counters {
-        let w = workload(reset, queries.iter().map(|(id, t, r)| query(id, *t, *r)).collect());
+        let mut w = workload(reset, queries.iter().map(|(id, t, r)| query(id, *t, *r)).collect());
+        w.measurement = Some(context(&w, at));
         Counters::of_workload(&w, "shop", at, None)
+    }
+
+    /// [`from_scans`] for a scan of `shop` taken at `at`.
+    fn rebuild(w: &mut Workload, at: &str, history: &[Counters]) {
+        w.measurement = Some(context(w, at));
+        from_scans(w, "shop", at, None, history);
     }
 
     #[test]
@@ -713,7 +721,7 @@ mod tests {
             counters("2026-10-10T06:00:00Z", reset, &[("a", 160.0, 16.0), ("b", 50.0, 5.0)]),
         ];
         let mut w = workload(reset, vec![query("a", 400.0, 20.0), query("b", 80.0, 8.0)]);
-        from_scans(&mut w, "shop", "2026-10-10T12:00:00Z", None, &history);
+        rebuild(&mut w, "2026-10-10T12:00:00Z", &history);
         let t = w.timeline.as_ref().unwrap();
         assert_eq!(t.source, TimelineSource::Scans);
         assert_eq!(t.starts, vec!["2026-10-10T00:00:00Z", "2026-10-10T06:00:00Z"]);
@@ -736,7 +744,7 @@ mod tests {
         let mut queries: Vec<QueryStat> = old.iter().map(|(id, t, r)| query(id, *t, *r)).collect();
         queries.push(query("new", 500.0, 1_000.0));
         let mut w = workload(reset, queries);
-        from_scans(&mut w, "shop", "2026-10-11T00:00:00Z", None, &history);
+        rebuild(&mut w, "2026-10-11T00:00:00Z", &history);
         let new = w.queries.iter().find(|q| q.id == "new").unwrap();
         assert_eq!(new.trend.as_ref().unwrap().executions, vec![Some(980.0)]);
     }
@@ -745,7 +753,7 @@ mod tests {
     fn a_statistics_reset_counts_from_zero() {
         let history = vec![counters("2026-10-10T00:00:00Z", "2026-10-01T00:00:00Z", &[("a", 1000.0, 100.0)])];
         let mut w = workload("2026-10-10T03:00:00Z", vec![query("a", 30.0, 3.0)]);
-        from_scans(&mut w, "shop", "2026-10-10T06:00:00Z", None, &history);
+        rebuild(&mut w, "2026-10-10T06:00:00Z", &history);
         let t = w.timeline.as_ref().unwrap();
         assert_eq!((t.time_ms[0], t.executions[0]), (30.0, 3.0));
         assert_eq!(w.queries[0].trend.as_ref().unwrap().time_ms, vec![Some(30.0)]);
@@ -758,12 +766,12 @@ mod tests {
         other.database = "billing".into();
         let history = vec![other.clone(), counters("2026-10-10T01:00:00Z", reset, &[("a", 10.0, 1.0)])];
         let mut w = workload(reset, vec![query("a", 20.0, 2.0), query("b", 5.0, 1.0)]);
-        from_scans(&mut w, "shop", "2026-10-10T02:00:00Z", None, &history);
+        rebuild(&mut w, "2026-10-10T02:00:00Z", &history);
         assert_eq!(w.timeline.as_ref().unwrap().len(), 1);
         assert_eq!(w.queries[1].trend.as_ref().unwrap().time_ms, vec![None]);
 
         let mut alone = workload(reset, vec![query("a", 20.0, 2.0)]);
-        from_scans(&mut alone, "shop", "2026-10-10T02:00:00Z", None, &[other]);
+        rebuild(&mut alone, "2026-10-10T02:00:00Z", &[other]);
         assert!(alone.timeline.is_none(), "no earlier scan of this database, no trend");
     }
 
@@ -774,7 +782,7 @@ mod tests {
             .map(|i| counters(&format!("2026-10-10T00:0{i}:00Z"), reset, &[("a", f64::from(i) * 10.0, f64::from(i))]))
             .collect();
         let mut w = workload(reset, vec![query("a", 100.0, 10.0)]);
-        from_scans(&mut w, "shop", "2026-10-10T00:10:00Z", None, &history);
+        rebuild(&mut w, "2026-10-10T00:10:00Z", &history);
         let t = w.timeline.as_ref().unwrap();
         assert_eq!(t.len(), 2, "ten one-minute steps fold into five-minute buckets");
         assert_eq!(t.time_ms.iter().sum::<f64>(), 100.0);
@@ -793,7 +801,7 @@ mod tests {
         let mut w = workload(reset, vec![query("a", 2_000.0, 200.0), query("new", 300.0, 30.0)]);
         w.total_time_ms = 2_300.0 + 400_000.0;
         w.total_executions = 230.0 + 20_000.0;
-        from_scans(&mut w, "shop", "2026-10-10T12:00:00Z", None, &history);
+        rebuild(&mut w, "2026-10-10T12:00:00Z", &history);
         let t = w.timeline.as_ref().unwrap();
         assert_eq!(t.unknown, Some(vec![false, true]));
         // The first step grew as usual; the second holds only what "a" grew by (the new entry's start is unknown).
@@ -818,7 +826,7 @@ mod tests {
         let history =
             vec![counters("2026-10-10T00:00:00Z", reset, &[("q", 110_822.000_000_2, 21_936.0), ("a", 100.0, 10.0)])];
         let mut w = workload(reset, vec![query("q", 110_821.999_999_9, 21_936.0), query("a", 3_198.0, 400.0)]);
-        from_scans(&mut w, "shop", "2026-10-10T06:00:00Z", None, &history);
+        rebuild(&mut w, "2026-10-10T06:00:00Z", &history);
         let t = w.timeline.as_ref().unwrap();
         assert_eq!((t.time_ms[0], t.executions[0]), (3_098.0, 390.0));
         let q = w.queries.iter().find(|q| q.id == "q").unwrap().trend.as_ref().unwrap();
@@ -863,6 +871,7 @@ mod tests {
             reset,
             vec![query("a", 20.0, 2.0), query("b", 60.0, 6.0), query("c", 9.0, 9.0), query("d", 1.0, 1.0)],
         );
+        w.measurement = Some(context(&w, "2026-10-10T18:00:00Z"));
         last_seen_from_scans(&mut w, "shop", "2026-10-10T18:00:00Z", &history);
         let seen = |i: usize| w.queries[i].last_seen.clone();
         // "a" last grew between the 00:00 and 06:00 scans.
@@ -880,6 +889,7 @@ mod tests {
             counters("2026-10-10T06:00:00Z", "2026-10-10T03:00:00Z", &[("a", 20.0, 2.0)]),
         ];
         let mut w = workload("2026-10-10T03:00:00Z", vec![query("a", 20.0, 2.0)]);
+        w.measurement = Some(context(&w, "2026-10-10T12:00:00Z"));
         last_seen_from_scans(&mut w, "shop", "2026-10-10T12:00:00Z", &history);
         assert_eq!(w.queries[0].last_seen.as_deref(), Some("2026-10-10T06:00:00Z"));
     }
@@ -935,11 +945,15 @@ mod tests {
             default_value: None,
             scope: "server".into(),
         });
+        // An earlier scan of the same database, counting since `start`, with the context it records.
         let scan = |at: &str, start: &str, evictions: f64| {
             let mut c = counters(at, start, &[("a", 1.0, 1.0)]);
             c.database = s.server.database.clone();
             c.source = s.workload.as_ref().unwrap().source.clone();
             c.evictions = Some(evictions);
+            let mut w = s.workload.clone().unwrap();
+            w.window_start = Some(start.into());
+            c.measurement = Some(MeasurementContext::workload(s.identity.clone().unwrap(), &w, at, None));
             c
         };
         let history = vec![
@@ -951,7 +965,7 @@ mod tests {
         assert_eq!((b.taken_at.as_str(), b.count, b.restarted), ("2026-10-11T14:31:51Z", 14_953.0, false));
         // Reset since the oldest: the oldest the count continues.
         let mut history = history;
-        history[0].window_start = Some("2022-01-01T00:00:00Z".into());
+        history[0] = scan("2026-10-11T14:31:51Z", "2022-01-01T00:00:00Z", 14_953.0);
         assert_eq!(evictions_baseline(&history, &s).map(|b| b.taken_at), Some("2026-10-13T12:00:00Z".into()));
         // Only scans under a day back: none (the scan before is the baseline then).
         assert_eq!(evictions_baseline(&history[2..], &s), None);

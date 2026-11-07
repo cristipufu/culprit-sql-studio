@@ -50,6 +50,7 @@ fn userstat_counters_count_from_the_scans_that_saw_them() {
     std::fs::create_dir_all(&dir).unwrap();
     let mut s = demo();
     s.server.engine = Engine::Mysql;
+    s.identity.as_mut().unwrap().engine = Engine::Mysql;
     s.server.product = "MariaDB 10.11".into();
     s.server.capabilities.retain(|c| *c != Capability::PerformanceSchema);
     s.server.capabilities.push(Capability::IndexUsage);

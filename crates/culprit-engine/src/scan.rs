@@ -50,7 +50,6 @@ impl<'a> Scan<'a> {
         snapshot.taken_at = self.taken_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         snapshot.connection = name.to_string();
         snapshot.duration_ms = self.started.elapsed().as_secs_f64() * 1000.0;
-        snapshot.ensure_measurement();
         let dir = self.dir;
         // What the database dated itself since the previous scan (schema, settings), for the change timeline.
         let summary_dir = dir.clone();

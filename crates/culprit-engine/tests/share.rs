@@ -247,7 +247,10 @@ fn verification_reads_fixed_still_present_and_new_for_every_engine() {
     for file in ["mssql-demo.report.json", "pg-demo.report.json", "mysql-demo.report.json"] {
         let before = report(file);
         assert!(before.findings.len() >= 2, "{file}");
+        // The next scan, an hour later: running totals compare between two scans, never a scan and itself.
         let mut after = before.clone();
+        let at = chrono::DateTime::parse_from_rfc3339(&after.snapshot.taken_at).unwrap() + chrono::Duration::hours(1);
+        after.snapshot.taken_at = at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         let gone = after.findings.remove(0);
         let assessed = after.assessments.iter_mut().find(|a| a.check == gone.check).unwrap();
         assessed.status = culprit_core::CheckStatus::Assessed;

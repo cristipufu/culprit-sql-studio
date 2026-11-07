@@ -174,7 +174,6 @@ pub fn counters_history(dir: &Path, now: &str) -> Vec<Counters> {
 /// scan-time baseline remains evidence when its original report was pruned; absence of that file does not erase
 /// the measurements stored in this scan. Writes nothing.
 pub fn rebase_on_scans(dir: &Path, snapshot: &mut culprit_core::Snapshot) {
-    snapshot.ensure_measurement();
     if let Some(baseline) = evictions_baseline(dir, snapshot) {
         snapshot.evictions_before = Some(baseline);
     }

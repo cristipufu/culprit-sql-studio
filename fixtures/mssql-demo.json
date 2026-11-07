@@ -30,10 +30,11 @@
   },
   "workload": {
     "source": "Query Store",
+    "kind": "query-store",
     "windowed": true,
     "window_start": "2026-10-11T07:40:00Z",
     "window_end": "2026-10-11T12:13:47Z",
-    "window_hours": 4.583333,
+    "window_hours": 4.563055555555556,
     "total_time_ms": 40746.58699999999,
     "total_cpu_ms": 91061.89799999999,
     "total_executions": 70112.0,
@@ -3186,5 +3187,16 @@
     "window_days": 7,
     "top_queries": 60,
     "plans": 25
+  },
+  "identity": {
+    "engine": "mssql",
+    "database": "culprit_demo",
+    "location": {
+      "kind": "server",
+      "host": "127.0.0.1",
+      "port": 14333,
+      "instance": null
+    },
+    "incarnation": null
   }
 }

@@ -98,6 +98,7 @@ fn without_performance_schema_the_slow_log_is_offered_first() {
     logged.server.capabilities.retain(|c| *c != Capability::PerformanceSchema);
     if let Some(w) = logged.workload.as_mut() {
         w.source = "slow query log".into();
+        w.kind = Some(culprit_core::WorkloadKind::SlowLog);
         w.windowed = true;
     }
     let report = analyze(logged);

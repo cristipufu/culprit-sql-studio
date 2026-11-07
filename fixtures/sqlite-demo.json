@@ -1126,5 +1126,14 @@
     "window_hours": 1.4991666666666668,
     "window_start": "2026-10-15T09:00:00Z",
     "windowed": true
+  },
+  "identity": {
+    "engine": "sqlite",
+    "database": "demo.db",
+    "location": {
+      "kind": "file",
+      "path": "/data/demo.db"
+    },
+    "incarnation": null
   }
 }

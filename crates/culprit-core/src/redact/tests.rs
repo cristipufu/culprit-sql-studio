@@ -322,7 +322,8 @@ fn endpoint_tokens_are_repeatable_and_never_merge_different_databases() {
         let once = redacted.clone();
         redact_identity(&mut redacted);
         assert_eq!(once, redacted);
-        assert!(once.comparison(&redacted).allows_comparison());
+        // Redacted, it still compares with itself; an unknown location compares with nothing either way.
+        assert_eq!(once.comparison(&redacted).allows_comparison(), !matches!(once.location, DatabaseLocation::Unknown));
         let encoded = serde_json::to_string(&redacted).unwrap();
         for secret in
             ["private-endpoint", "private-instance", "private-person", "socket-directory", "private-incarnation"]
@@ -371,7 +372,6 @@ fn shared_snapshots_scrub_catalog_literals_and_all_retained_endpoint_references(
         5432,
         None,
     ));
-    snapshot.ensure_measurement();
     let reference = Some(ScanReference::of(&snapshot));
     let measurement = snapshot.workload.as_ref().unwrap().measurement.clone();
     snapshot.workload.as_mut().unwrap().history_inputs.push(BaselineReference {

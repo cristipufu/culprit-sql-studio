@@ -67,8 +67,6 @@ impl ComparisonReason {
 #[ts(export)]
 pub enum Comparison {
     Compatible,
-    /// Both inputs predate endpoint identity. Retained for saved-data compatibility, never a claim about the endpoint.
-    Legacy,
     Incompatible(ComparisonReason),
 }
 
@@ -122,13 +120,7 @@ impl DatabaseIdentity {
             return different(UnknownIdentity);
         }
         match (&self.location, &other.location) {
-            (DatabaseLocation::Unknown, DatabaseLocation::Unknown) => {
-                if self.database.eq_ignore_ascii_case(&other.database) {
-                    Comparison::Legacy
-                } else {
-                    different(DifferentDatabase)
-                }
-            }
+            // A database's name alone says nothing about which server it is on.
             (DatabaseLocation::Unknown, _) | (_, DatabaseLocation::Unknown) => different(UnknownIdentity),
             (
                 DatabaseLocation::Server { host: a, port: ap, instance: ai },
@@ -446,15 +438,6 @@ impl MeasurementContext {
 }
 
 impl Snapshot {
-    /// Fill only missing context for an identified scan. A saved legacy scan never acquires today's endpoint.
-    pub fn ensure_measurement(&mut self) {
-        if self.identity.is_some() && self.workload.as_ref().is_some_and(|w| w.measurement.is_none()) {
-            let context = self.workload_measurement();
-            if let Some(workload) = &mut self.workload {
-                workload.measurement = context;
-            }
-        }
-    }
     pub fn database_identity(&self) -> DatabaseIdentity {
         self.identity.clone().unwrap_or_else(|| DatabaseIdentity {
             engine: self.server.engine,
@@ -484,13 +467,10 @@ impl Snapshot {
         }
         self.database_identity().comparison(&context.database)
     }
-    /// Context actually captured with an identified scan, as opposed to a legacy interpretation.
-    pub fn captured_measurement(&self) -> Option<MeasurementContext> {
-        if self.identity.is_some() || self.workload.as_ref().is_some_and(|w| w.measurement.is_some()) {
-            self.workload_measurement()
-        } else {
-            None
-        }
+    /// The workload's measurement context, for a scan that knows which database it read; `None` for one that doesn't,
+    /// which compares with nothing.
+    pub fn identified_measurement(&self) -> Option<MeasurementContext> {
+        self.identity.as_ref().and(self.workload_measurement())
     }
     pub fn report_comparison(&self, later: &Self) -> Comparison {
         for snapshot in [self, later] {
@@ -504,23 +484,6 @@ impl Snapshot {
             return identity;
         }
         match (self.workload_measurement(), later.workload_measurement()) {
-            (Some(a), Some(b)) if self.captured_measurement().is_none() && later.captured_measurement().is_none() => {
-                // Older exports did not establish that their dates delimit the reported hours. Keep their
-                // original clock semantics, while still refusing different sources and selected window lengths.
-                let series = a.series_comparison(&b);
-                if !series.allows_comparison() {
-                    return series;
-                }
-                let before = self.workload.as_ref().expect("measurement has a workload");
-                let after = later.workload.as_ref().expect("measurement has a workload");
-                if before.windowed != after.windowed
-                    || (before.windowed && ((before.window_hours - after.window_hours) * 3600.0).abs() > 1.0)
-                {
-                    Comparison::Incompatible(ComparisonReason::DifferentPeriod)
-                } else {
-                    series
-                }
-            }
             (Some(a), Some(b)) => a.report_comparison(&b),
             (None, None) => identity,
             _ => Comparison::Incompatible(ComparisonReason::DifferentSource),
@@ -576,11 +539,7 @@ impl crate::Digest {
         }
         match (&self.identity, &later.identity) {
             (Some(a), Some(b)) => a.comparison(b),
-            (None, _) if !self.database.is_empty() && self.database.eq_ignore_ascii_case(&later.server.database) => {
-                Comparison::Legacy
-            }
-            (None, _) => Comparison::Incompatible(ComparisonReason::DifferentDatabase),
-            (Some(_), None) => Comparison::Incompatible(ComparisonReason::UnknownIdentity),
+            _ => Comparison::Incompatible(ComparisonReason::UnknownIdentity),
         }
     }
     pub fn comparison(&self, later: &Snapshot) -> Comparison {
@@ -591,7 +550,7 @@ impl crate::Digest {
         if !later.measurement_consistency().allows_comparison() {
             return Comparison::Incompatible(ComparisonReason::UnknownIdentity);
         }
-        match (&self.measurement, later.captured_measurement()) {
+        match (&self.measurement, later.workload_measurement()) {
             (Some(a), Some(b)) => {
                 if self.identity.as_ref().is_some_and(|id| !id.comparison(&a.database).allows_comparison())
                     || a.database.database != self.database
@@ -601,7 +560,6 @@ impl crate::Digest {
                     a.report_comparison(&b)
                 }
             }
-            (None, _) if self.identity.is_none() => identity,
             (None, None) => identity,
             _ => Comparison::Incompatible(ComparisonReason::DifferentSource),
         }
@@ -701,12 +659,10 @@ mod tests {
         assert!(!a.comparison(&b).allows_comparison());
     }
     #[test]
-    fn legacy_identity_is_explicit_and_not_borrowed_from_a_new_endpoint() {
+    fn an_unknown_location_compares_with_nothing_whatever_the_names() {
         let mut a = database("db.example");
         a.location = DatabaseLocation::Unknown;
-        let mut b = a.clone();
-        b.database = "SHOP".into();
-        assert_eq!(a.comparison(&b), Comparison::Legacy);
+        assert_eq!(a.comparison(&a.clone()), Comparison::Incompatible(ComparisonReason::UnknownIdentity));
         assert_eq!(a.comparison(&database("db.example")), Comparison::Incompatible(ComparisonReason::UnknownIdentity));
         let mut invalid = database("");
         invalid.database.clear();
@@ -779,28 +735,6 @@ mod tests {
             *hours = Some(1.0);
         }
         assert!(b.period.hours().is_none(), "contradictory clocks are not silently reconciled");
-    }
-    #[test]
-    fn old_reports_round_trip_without_inventing_context_or_identity() {
-        let s: Snapshot = serde_json::from_str(include_str!("../../../fixtures/postgres-demo.json")).unwrap();
-        assert!(s.identity.is_none());
-        assert!(s.workload.as_ref().unwrap().measurement.is_none());
-        let saved = serde_json::to_value(&s).unwrap();
-        assert!(saved.get("identity").is_none());
-        assert!(saved["workload"].get("measurement").is_none());
-        assert_eq!(s.database_comparison(&s), Comparison::Legacy);
-        let mut identified = s.clone();
-        identified.bind_identity(DatabaseIdentity::server(
-            s.server.engine,
-            &s.server.database,
-            "db.example",
-            5432,
-            None,
-        ));
-        let restored: Snapshot = serde_json::from_value(serde_json::to_value(&identified).unwrap()).unwrap();
-        assert_eq!(restored.identity, identified.identity);
-        assert_eq!(restored.workload.as_ref().unwrap().measurement, identified.workload.as_ref().unwrap().measurement);
-        assert!(!identified.same_database(&s));
     }
     #[test]
     fn typed_period_is_canonical_and_cache_age_is_not_a_reset() {

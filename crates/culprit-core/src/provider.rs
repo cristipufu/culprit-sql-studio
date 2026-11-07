@@ -71,7 +71,9 @@ pub trait Provider: Send + Sync {
     /// Connect, identify the server and report which capabilities this login can use. Cheap; used by `conn test` and `doctor`.
     async fn probe(&self) -> Result<ServerInfo>;
 
-    /// Collect a normalized snapshot. Reads statistics views only; must be safe on production.
+    /// Collect a normalized snapshot. Reads statistics views only; must be safe on production. Bind the database's
+    /// identity on it (`Snapshot::bind_identity`, with `DatabaseLocation::Unknown` when the location can't be told): a
+    /// scan without identity compares with no other.
     async fn snapshot(&self, connection: &str, options: &SnapshotOptions) -> Result<Snapshot>;
 
     async fn explain(&self, sql: &str, mode: ExplainMode) -> Result<Plan>;

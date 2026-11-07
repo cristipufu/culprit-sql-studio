@@ -79,7 +79,7 @@ fn build(report: &Report, baseline: Option<(String, Vec<DigestFinding>)>, top: u
     });
     Digest {
         identity: report.snapshot.identity.clone(),
-        measurement: report.snapshot.captured_measurement(),
+        measurement: report.snapshot.identified_measurement(),
         connection: report.snapshot.connection.clone(),
         server: board.product.clone(),
         database: board.database.clone(),

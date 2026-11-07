@@ -431,7 +431,14 @@ mod tests {
     fn counters(at: &str, total: [f64; 2], queries: &[(&str, f64, f64, Option<&str>)]) -> Counters {
         Counters {
             reference: None,
-            measurement: None,
+            // What an identified scan of shop's pg_stat_statements at `at` records, counting since Oct 1.
+            measurement: Some(culprit_core::MeasurementContext {
+                database: culprit_core::DatabaseIdentity::server(Engine::Postgres, "shop", "127.0.0.1", 5432, None),
+                source: culprit_core::MeasurementSource::Workload(culprit_core::WorkloadKind::StatementStats),
+                scope: culprit_core::MeasurementScope::Database,
+                period: culprit_core::MeasurementPeriod::Cumulative { observed_at: at.into(), hours: None },
+                reset: culprit_core::ResetMarker::At("2026-10-01T00:00:00Z".into()),
+            }),
             taken_at: at.into(),
             source: "pg_stat_statements".into(),
             database: "shop".into(),
@@ -544,6 +551,7 @@ mod tests {
         // Statistics were reset before the first scans: they saw nothing, then a query appeared.
         let mut later = counters("2026-10-11T12:00:00Z", [500.0, 50.0], &[("a", 500.0, 50.0, None)]);
         later.window_start = Some("2026-10-11T07:00:00Z".into());
+        later.measurement.as_mut().unwrap().reset = culprit_core::ResetMarker::At("2026-10-11T07:00:00Z".into());
         let history = vec![
             counters("2026-10-11T00:00:00Z", [0.0, 0.0], &[]),
             counters("2026-10-11T06:00:00Z", [0.0, 0.0], &[]),

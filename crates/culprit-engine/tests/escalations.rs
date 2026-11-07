@@ -263,7 +263,7 @@ fn selecting_any_timespan_window_after_a_recent_scan_keeps_escalations_in_that_w
 }
 
 #[test]
-fn daily_ci_digest_compares_across_growing_query_store_cron_jitter_and_legacy_digests() {
+fn daily_ci_digest_compares_across_growing_query_store_and_cron_jitter() {
     let home = temp_home("daily-ci");
     std::fs::create_dir_all(&home).unwrap();
     let ws = Workspace::open_in(&home);
@@ -322,15 +322,6 @@ fn daily_ci_digest_compares_across_growing_query_store_cron_jitter_and_legacy_di
         day2_24h_digest.top.iter().any(|f| f.id == ID),
         "24h digest with 5m cron jitter must keep new escalations in top"
     );
-
-    // Pre-0.4.0 legacy digest (identity: None, measurement: None) must also compare cleanly.
-    let mut legacy = day1_digest;
-    legacy.identity = None;
-    legacy.measurement = None;
-    let legacy_path = write("legacy-digest.json", serde_json::to_vec(&legacy).unwrap());
-    let from_legacy = ws.digest(None, Some(&day2_snap_path), Some(&legacy_path), 10, 5).unwrap();
-    assert!(from_legacy.since.is_some(), "legacy digest without identity/measurement must still compare");
-    assert!(from_legacy.top.iter().any(|f| f.id == ID && f.title.contains("4 times since Oct 22, 06:00 UTC")));
 
     let _ = std::fs::remove_dir_all(home);
 }

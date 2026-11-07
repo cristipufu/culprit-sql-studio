@@ -332,20 +332,31 @@ pub fn snapshot(
         operations,
     };
     coverage.append_to(&mut snapshot);
-    if let Ok(path) = std::fs::canonicalize(path) {
-        let identity =
-            culprit_core::DatabaseIdentity::file(&snapshot.server.database, path.to_string_lossy().into_owned());
-        #[cfg(unix)]
-        let identity = {
-            use std::os::unix::fs::MetadataExt;
-            let mut identity = identity;
-            if let Ok(metadata) = std::fs::metadata(&path) {
-                identity.incarnation = Some(format!("{}:{}", metadata.dev(), metadata.ino()));
-            }
+    let identity = match std::fs::canonicalize(path) {
+        Ok(path) => {
+            let identity =
+                culprit_core::DatabaseIdentity::file(&snapshot.server.database, path.to_string_lossy().into_owned());
+            #[cfg(unix)]
+            let identity = {
+                use std::os::unix::fs::MetadataExt;
+                let mut identity = identity;
+                if let Ok(metadata) = std::fs::metadata(&path) {
+                    identity.incarnation = Some(format!("{}:{}", metadata.dev(), metadata.ino()));
+                }
+                identity
+            };
             identity
-        };
-        snapshot.bind_identity(identity);
-    }
+        }
+        // A file whose path can't be resolved is still this database, at a location nobody can say: its scans
+        // compare with none.
+        Err(_) => culprit_core::DatabaseIdentity {
+            engine: culprit_core::Engine::Sqlite,
+            database: snapshot.server.database.clone(),
+            location: culprit_core::DatabaseLocation::Unknown,
+            incarnation: None,
+        },
+    };
+    snapshot.bind_identity(identity);
     Ok(snapshot)
 }
 

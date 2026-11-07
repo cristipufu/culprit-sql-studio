@@ -258,6 +258,7 @@ mod counter_verification_tests {
             let mut before: Report =
                 serde_json::from_str(include_str!("../../../fixtures/mssql-demo.report.json")).unwrap();
             before.snapshot.server.engine = engine;
+            before.snapshot.identity.as_mut().unwrap().engine = engine;
             before.findings.truncate(1);
             before.findings[0].verification_basis = crate::VerificationBasis::CounterChange;
             let mut after = before.clone();
