@@ -8,8 +8,7 @@ import type { SavedQuery } from "../../gen/SavedQuery";
 import type { ApiError } from "../../lib/api";
 import { duration, oneLine } from "../../lib/format";
 import { keys } from "../../lib/keys";
-
-export type StatementResult = { result: ResultSet; sql: string };
+import type { StatementResult } from "../../lib/run-batch";
 
 /** What a tab's last action left below the editor. */
 export type Output =

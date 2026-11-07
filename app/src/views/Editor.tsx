@@ -3,7 +3,7 @@ import { keymap } from "@codemirror/view";
 import { EditorView, basicSetup } from "codemirror";
 import { TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
-import { ConfirmRun, type PendingRun } from "../components/ConfirmRun";
+import { ConfirmRun } from "../components/ConfirmRun";
 import { rememberLook, rememberedLook, type PlanLook } from "../components/PlanSurface";
 import { SavedRail } from "../components/SavedRail";
 import type { Catalog } from "../gen/Catalog";
@@ -17,12 +17,13 @@ import { splitSqlStatements } from "../lib/editor-sql";
 import { EditorTabStorage, MAX_EDITOR_TABS, newEditorTab, tabTitle, type EditorTab as Tab, type EditorTabs as Tabs } from "../lib/editor-tabs";
 import { measuresRuns } from "../lib/engines";
 import { allLintFixes, lintFix } from "../lib/lint-fixes";
+import { type PendingRun, runBatch } from "../lib/run-batch";
 import { remember, rememberedChoice } from "../lib/prefs";
 import { currentReport, getState, loadSaved, setState, toast, useStore } from "../lib/store";
 import { lintField, sqlColors, sqlLanguage } from "./editor/codemirror";
 import { PLACEHOLDER, useLiveLint, useSplit } from "./editor/hooks";
 import { LintPanel } from "./editor/LintPanel";
-import { EmptyOutput, OutputPane, type Output, type StatementResult } from "./editor/OutputPane";
+import { EmptyOutput, OutputPane, type Output } from "./editor/OutputPane";
 import { TabStrip } from "./editor/TabStrip";
 import { Toolbar } from "./editor/Toolbar";
 
@@ -140,55 +141,29 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
   // ── actions ────────────────────────────────────────────────────────────────────────────────────
   const run = async (sql: string, confirmed = false) => {
     if (!sql || sql === PLACEHOLDER.trim()) return;
-    const batch = splitSqlStatements(sql);
-    if (batch.length === 0) {
+    const statements = splitSqlStatements(sql);
+    if (statements.length === 0) {
       return toast("No runnable SQL statement — uncomment a statement or fill in placeholders first");
     }
     const tab = tabsRef.current.active;
     const client = await api();
-    if (production && !confirmed) {
-      const checks = await Promise.all(batch.map((stmt) => client.checkStatement(connection.engine, stmt)));
-      const nonReads = checks.filter((c) => !c.reads_only && !c.problem);
-      if (nonReads.length > 0) {
-        const warning = nonReads.find((c) => c.warning)?.warning ?? null;
-        const check = { ...nonReads[0]!, warning };
-        const lint = await client.lintSql(connection.name, sql).catch(() => []);
-        return setPending({ kind: "run", sql, check, lint });
-      }
+    let started = false;
+    const outcome = await runBatch(
+      client,
+      { connection: connection.name, engine: connection.engine, sql, statements, limit: ROW_LIMIT, production, confirmed },
+      (label) => {
+        started = true;
+        setOutput(tab, { kind: "busy", label });
+      },
+    );
+    if (outcome.kind === "confirm") {
+      if (started) setOutput(tab, { kind: "none" });
+      return setPending(outcome.pending);
     }
-    setOutput(tab, { kind: "busy", label: batch.length > 1 ? `Running 1 of ${batch.length}…` : "Running…" });
-    let currentIdx = 0;
-    try {
-      const results: StatementResult[] = [];
-      for (let i = 0; i < batch.length; i++) {
-        currentIdx = i;
-        const stmt = batch[i]!;
-        if (batch.length > 1 && i > 0) {
-          setOutput(tab, { kind: "busy", label: `Running ${i + 1} of ${batch.length}…` });
-        }
-        const result = await client.run(connection.name, stmt, ROW_LIMIT, confirmed);
-        results.push({ result, sql: stmt });
-      }
-      setOutput(tab, { kind: "rows", results });
-      const name = tabsRef.current.tabs.find((t) => t.id === tab)?.saved;
-      if (name) void client.savedQueryRan(name).then(() => loadSaved());
-    } catch (e) {
-      const error = errorMessage(e);
-      if (error.code === "confirmation_required") {
-        const checks = await Promise.all(batch.map((stmt) => client.checkStatement(connection.engine, stmt)));
-        const nonReads = checks.filter((c) => !c.reads_only && !c.problem);
-        const warning = nonReads.find((c) => c.warning)?.warning ?? null;
-        const baseCheck = nonReads[0] ?? checks[0]!;
-        const check = { ...baseCheck, warning: warning ?? baseCheck.warning };
-        const lint = await client.lintSql(connection.name, sql).catch(() => []);
-        setOutput(tab, { kind: "none" });
-        return setPending({ kind: "run", sql, check, lint });
-      }
-      if (batch.length > 1) {
-        error.message = `Statement ${currentIdx + 1} of ${batch.length}: ${error.message}`;
-      }
-      setOutput(tab, { kind: "error", error });
-    }
+    if (outcome.kind === "error") return setOutput(tab, { kind: "error", error: outcome.error });
+    setOutput(tab, { kind: "rows", results: outcome.results });
+    const name = tabsRef.current.tabs.find((t) => t.id === tab)?.saved;
+    if (name) void client.savedQueryRan(name).then(() => loadSaved());
   };
 
   const explain = async (mode: ExplainMode) => {

@@ -1,10 +1,7 @@
 import { TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ConnectionInfo } from "../gen/ConnectionInfo";
-import type { Finding } from "../gen/Finding";
-import type { StatementCheck } from "../gen/StatementCheck";
-
-export type PendingRun = { kind: "run"; sql: string; check: StatementCheck; lint?: Finding[] };
+import type { PendingRun } from "../lib/run-batch";
 
 /**
  * Asked before a statement that changes data runs on production. Cancel has focus; a statement that touches every row
