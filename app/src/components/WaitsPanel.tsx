@@ -103,14 +103,14 @@ export default function WaitsPanel({
             <X size={16} />
           </button>
         </header>
-        <nav className="waits-tabs" role="tablist">
+        <div className="waits-tabs" role="tablist">
           {tabs.map((t, i) => (
             <button type="button" key={t.key} role="tab" aria-selected={tab === t.key} className={tab === t.key ? "on" : ""} onClick={() => setTab(t.key)}>
               {t.key === "waits" && activity ? "Recorded activity" : t.label}
               <span className="kbd">{i + 1}</span>
             </button>
           ))}
-        </nav>
+        </div>
         <div className="waits-body">
           {tab === "waits" &&
             (loaded.status === "loading" ? (

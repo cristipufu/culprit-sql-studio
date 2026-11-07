@@ -2138,7 +2138,8 @@ table.grid td.sqlcell {
   border-radius: 10px;
 }
 
-.form-grid label {
+.form-grid label,
+.form-grid .form-grid-label {
   color: var(--text-2);
   font-size: var(--fs-ui);
 }

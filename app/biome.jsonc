@@ -12,7 +12,15 @@
       "preset": "none",
       "a11y": {
         // Without a type a button submits whatever form it ends up in, including one a parent component renders.
-        "useButtonType": "error"
+        "useButtonType": "error",
+        // What a screen reader is told: required and supported ARIA attributes, names, labels and roles.
+        "useAriaPropsForRole": "error",
+        "useAriaPropsSupportedByRole": "error",
+        "useAriaActivedescendantWithTabindex": "error",
+        "noSvgWithoutTitle": "error",
+        "noLabelWithoutControl": "error",
+        "noNoninteractiveElementToInteractiveRole": "error",
+        "noInteractiveElementToNoninteractiveRole": "error"
       },
       "correctness": {
         "preset": "recommended",

@@ -1,5 +1,5 @@
 import { GitCompareArrows, Lightbulb, PanelLeftClose, PanelLeftOpen, Search, X } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Report } from "../gen/Report";
 import type { TableStat } from "../gen/TableStat";
 import { bytes, count, rowCount } from "../lib/format";
@@ -75,6 +75,7 @@ export function Schema({ report }: { report: Report }) {
   const [collapsed, setCollapsed] = useState(() => rememberedAs(COLLAPSED_KEY, (v) => v === "1", false));
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
 
   const facts = useMemo(() => {
     const out = new Map<string, Facts>();
@@ -225,6 +226,12 @@ export function Schema({ report }: { report: Report }) {
               <Search size={13} />
               <input
                 ref={searchRef}
+                role="combobox"
+                aria-label="Find a table"
+                aria-controls={listId}
+                aria-expanded="true"
+                aria-autocomplete="list"
+                aria-activedescendant={advising ? "tl-advisor" : current ? `tl-${current.key}` : undefined}
                 value={query}
                 placeholder="Find a table"
                 spellCheck={false}
@@ -280,7 +287,7 @@ export function Schema({ report }: { report: Report }) {
               <GitCompareArrows size={14} />
             </button>
           </div>
-          <div className="tl-scroll" ref={listRef} role="listbox" aria-activedescendant={advising ? "tl-advisor" : current ? `tl-${current.key}` : undefined}>
+          <div className="tl-scroll" ref={listRef} id={listId} role="listbox" aria-label="Tables">
             {!query.trim() && (
               <button type="button"
                 id="tl-advisor"

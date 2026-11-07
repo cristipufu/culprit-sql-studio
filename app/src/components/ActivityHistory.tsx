@@ -10,7 +10,7 @@ export function ActivityHistoryView({ activity, selected, onSelect, onClose }: {
 }) {
   const current = activity.categories.find((c) => c.key === selected) ?? activity.categories[0];
   const p = activity.period;
-  return <div aria-label="Recorded active task samples">
+  return <section aria-label="Recorded active task samples">
     <div className="notice activity-notice">
       <b>{count(p.observations)} retained observations · sample weight {count(p.weighted_observations)}</b>
       <p title={`${p.first_sample ?? ""} — ${p.last_sample ?? ""}`}>{p.first_sample && p.last_sample ? `Observed ${when(p.first_sample).short} to ${when(p.last_sample).short}.` : "No activity samples were retained in this requested period."}
@@ -29,7 +29,7 @@ export function ActivityHistoryView({ activity, selected, onSelect, onClose }: {
       </div>
       <ActivityDetail key={current.key} category={current} onClose={onClose} />
     </div>}
-  </div>;
+  </section>;
 }
 
 const PAGE_SIZE = 25;

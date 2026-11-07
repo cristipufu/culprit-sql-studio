@@ -132,9 +132,9 @@ export default function Dashboard({ report, connection }: { report: Report; conn
         </div>
         <div className="dash-sub">
           {keys.length > 0 && (
-            <div className="dash-attn" role="list" aria-label="Needs a look">
+            <div className="dash-attn" role="group" aria-label="Needs a look">
               {keys.map((k) => (
-                <button type="button" key={k} role="listitem" className={`dash-chip ${tile(k).status}`} onClick={() => focusTile(k)} title={tile(k).takeaway}>
+                <button type="button" key={k} className={`dash-chip ${tile(k).status}`} onClick={() => focusTile(k)} title={tile(k).takeaway}>
                   <i aria-hidden /> {tile(k).title}
                 </button>
               ))}

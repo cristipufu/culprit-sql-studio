@@ -84,7 +84,12 @@ export function ResultGrid({ result, types, summary, order, onSort, sortDisabled
       const cell = selected ?? { row: start, col: 0 };
       select({ row: Math.min(result.rows.length - 1, Math.max(0, cell.row + move[0])), col: Math.min(result.columns.length - 1, Math.max(0, cell.col + move[1])) });
     }}>
-      <table ref={grid} className="rg" role="grid" tabIndex={0} aria-label="Query results" aria-rowcount={result.rows.length + 1} aria-colcount={result.columns.length + 1} aria-activedescendant={selected ? `${id}-${selected.row}-${selected.col}` : undefined} onFocus={(event) => {
+      <table
+        ref={grid}
+        className="rg"
+        // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: ARIA in HTML allows role="grid" on a table; arrow keys move the selected cell
+        role="grid"
+        tabIndex={0} aria-label="Query results" aria-rowcount={result.rows.length + 1} aria-colcount={result.columns.length + 1} aria-activedescendant={selected ? `${id}-${selected.row}-${selected.col}` : undefined} onFocus={(event) => {
         if (event.target !== event.currentTarget) return;
         if (result.rows.length && result.columns.length) setSelection((previous) => previous.result === result && previous.cell ? previous : { result, page: current.page, inspecting: false, cell: { row: start, col: 0 } });
       }}>
@@ -101,7 +106,32 @@ export function ResultGrid({ result, types, summary, order, onSort, sortDisabled
         })}</tr></thead>
         <tbody>{rows.map((row, index) => {
           const r = start + index;
-          return <tr key={r} aria-rowindex={r + 2} className={selected?.row === r ? "on" : ""}><td className="rg-n" role="rowheader">{r + 1}</td>{row.map((value, col) => <td key={col} id={`${id}-${r}-${col}`} role="gridcell" aria-selected={selected?.row === r && selected.col === col} className={`${numeric[col] ? "r" : ""} ${value.isNull ? "null" : ""} ${selected?.row === r && selected.col === col ? "sel" : ""}`} title={value.title} onClick={() => { select({ row: r, col }); grid.current?.focus({ preventScroll: true }); }} onDoubleClick={() => select({ row: r, col }, true)}>{value.text}</td>)}</tr>;
+          return (
+            <tr key={r} aria-rowindex={r + 2} className={selected?.row === r ? "on" : ""}>
+              <td
+                className="rg-n"
+                // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: ARIA in HTML lets a grid's td be its row header; a th would stick to the top with the column headers
+                role="rowheader"
+              >
+                {r + 1}
+              </td>
+              {row.map((value, col) => (
+                <td
+                  key={col}
+                  id={`${id}-${r}-${col}`}
+                  // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: ARIA in HTML's pattern for an interactive data grid's cells
+                  role="gridcell"
+                  aria-selected={selected?.row === r && selected.col === col}
+                  className={`${numeric[col] ? "r" : ""} ${value.isNull ? "null" : ""} ${selected?.row === r && selected.col === col ? "sel" : ""}`}
+                  title={value.title}
+                  onClick={() => { select({ row: r, col }); grid.current?.focus({ preventScroll: true }); }}
+                  onDoubleClick={() => select({ row: r, col }, true)}
+                >
+                  {value.text}
+                </td>
+              ))}
+            </tr>
+          );
         })}</tbody>
       </table>
       {!result.rows.length && <div className="rg-empty">No rows returned</div>}

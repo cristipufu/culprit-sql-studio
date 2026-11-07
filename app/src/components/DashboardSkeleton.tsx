@@ -20,7 +20,7 @@ const TILES = [
 /** The dashboard's grid while the scan or the view loads: the same tiles in the same places, so nothing jumps. */
 export function DashboardSkeleton() {
   return (
-    <div className="dash" aria-busy="true" aria-label="Loading the dashboard">
+    <div className="dash" role="status" aria-busy="true" aria-label="Loading the dashboard">
       <header className="dash-head">
         <div className="dash-headline">
           <span className="skeleton" style={{ height: 22, width: "52%" }} />

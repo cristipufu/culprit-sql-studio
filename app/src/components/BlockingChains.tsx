@@ -27,7 +27,7 @@ const HEAD_LABEL: Record<BlockingChain["head_kind"], string> = {
 /** Every chain, biggest first: a calm card with the head blocker, the story, and the tree of who waits behind whom. */
 export function BlockingChains({ blocking, sessions, actions, actionsNote, onInterrupt, onLocate }: Props) {
   return (
-    <div className="block-chains" aria-label={`${blocking.waiting} sessions waiting`}>
+    <div className="block-chains" role="group" aria-label={`${blocking.waiting} sessions waiting`}>
       {blocking.chains.map((chain, i) => (
         <ChainCard key={chain.head} chain={chain} sessions={sessions} actions={actions} actionsNote={actionsNote} onInterrupt={onInterrupt} onLocate={onLocate} defaultOpen={i < 2} />
       ))}
@@ -167,7 +167,7 @@ function HeadActions({ head, actions, onInterrupt }: { head: Session; actions: S
       setState({ status: "error", message: errorMessage(e).message });
     }
   };
-  if (state.status === "busy") return <span className="spinner" aria-label="Working" />;
+  if (state.status === "busy") return <span className="spinner" role="status" aria-label="Working" />;
   if (state.status === "error")
     return (
       <span className="inline-confirm">

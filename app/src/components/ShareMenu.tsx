@@ -86,6 +86,7 @@ export function ShareMenu({ actions, label = "Share", primary = false }: { actio
               </span>
               <input
                 type="checkbox"
+                // biome-ignore lint/a11y/useAriaPropsForRole: a checkbox states its checked state natively, and ARIA in HTML says not to repeat it in aria-checked
                 role="switch"
                 checked={redact}
                 onChange={(e) => {

@@ -247,8 +247,8 @@ export function NewConnectionForm({ onDone, canCancel }: { onDone: () => void; c
               setNameTouched(true);
             }}
           />
-          <label>Environment</label>
-          <div className="seg" role="radiogroup" aria-label="Environment">
+          <span id={`${ids}-environment`} className="form-grid-label">Environment</span>
+          <div className="seg" role="radiogroup" aria-labelledby={`${ids}-environment`}>
             {ENVIRONMENTS.map((env) => (
               <button
                 key={env}

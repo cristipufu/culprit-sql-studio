@@ -219,7 +219,7 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
         </div>
       ) : (
         <div className="dl-split">
-          <div className="dl-list" ref={listRef} role="listbox" aria-label="Deadlocks" aria-activedescendant={current ? `dl-${current.id}` : undefined}>
+          <div className="dl-list" ref={listRef} role="listbox" aria-label="Deadlocks">
             {all.map((d) => {
               const victim = d.processes.find((p) => p.victim);
               const t = when(d.at);
@@ -336,7 +336,7 @@ function DropZone({ onText }: { onText: (text: string) => Promise<void> }) {
 
 function Skeleton() {
   return (
-    <div className="dl-split" aria-busy="true" aria-label="Loading deadlocks">
+    <div className="dl-split" role="status" aria-busy="true" aria-label="Loading deadlocks">
       <div className="dl-list">
         {[0, 1, 2].map((i) => (
           <div key={i} className="dl-item skeleton">

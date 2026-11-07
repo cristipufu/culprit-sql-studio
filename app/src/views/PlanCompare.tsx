@@ -602,7 +602,7 @@ function PropsCompare({ a, b, planA, planB, names }: { a: PlanNode | null; b: Pl
         {r.label}
       </span>
       <span className={`cmp-prop-value ${r.a == null ? "none" : ""}`}>{r.a ?? "—"}</span>
-      <span className="cmp-prop-sign" aria-label={differs(r) ? "differs" : "same"}>
+      <span className="cmp-prop-sign" role="img" aria-label={differs(r) ? "differs" : "same"}>
         {differs(r) ? "≠" : ""}
       </span>
       <span className={`cmp-prop-value ${r.b == null ? "none" : ""}`}>{r.b ?? "—"}</span>

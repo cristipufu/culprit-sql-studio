@@ -117,17 +117,16 @@ export function PlanInsights({ plan, selectedNode, onSelectNode }: { plan: Plan;
         </button>
       </header>
       {note && <p className="ins-note"><Info size={13} /> {note}</p>}
-      <div className="ins-list" ref={list} role="listbox" aria-label="Insights, most important first">
+      <div className="ins-list" ref={list} role="list" aria-label="Insights, most important first">
         {shown.map((i, index) => {
           const area = AREA[i.area];
           const Icon = area.icon;
           const expanded = open === index;
           return (
-            <div key={`${i.rule}-${i.nodes[0] ?? index}`} className={`ins ${i.severity} ${expanded ? "open" : ""} ${related(i) ? "related" : ""}`}>
+            <div key={`${i.rule}-${i.nodes[0] ?? index}`} role="listitem" className={`ins ${i.severity} ${expanded ? "open" : ""} ${related(i) ? "related" : ""}`}>
               <button type="button"
                 className="ins-row"
-                role="option"
-                aria-selected={related(i)}
+                aria-current={related(i) || undefined}
                 aria-expanded={expanded}
                 onClick={() => {
                   setOpen(expanded ? null : index);

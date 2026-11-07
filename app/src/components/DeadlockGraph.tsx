@@ -110,8 +110,8 @@ export function DeadlockGraph({ deadlock, onPick }: { deadlock: Deadlock; onPick
   }, [layout]);
 
   return (
-    <figure className="dl-graph" aria-label={`Deadlock graph: ${deadlock.headline}`}>
-      <svg viewBox={`0 0 ${W} ${layout.height}`} role="img" preserveAspectRatio="xMidYMin meet">
+    <figure className="dl-graph">
+      <svg viewBox={`0 0 ${W} ${layout.height}`} role="group" aria-label={`Deadlock graph: ${deadlock.headline}`} preserveAspectRatio="xMidYMin meet">
         <defs>
           <marker id="dl-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" className="dl-arrowhead" />
