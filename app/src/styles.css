@@ -438,6 +438,81 @@ button.update-item:hover {
   flex: 1;
 }
 
+.scan-error-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  outline: none;
+}
+
+.scan-error-badge {
+  gap: 5px;
+  cursor: default;
+}
+
+.scan-error-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  width: min(420px, calc(100vw - 260px));
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--raised);
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+  font-size: var(--fs-ui-sm);
+  font-weight: 400;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease, visibility 120ms;
+}
+
+.scan-error-popover::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: 0;
+  right: 0;
+  height: 8px;
+}
+
+.scan-error-anchor:hover .scan-error-popover,
+.scan-error-anchor:focus-within .scan-error-popover {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.scan-error-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--high);
+  margin-bottom: 4px;
+}
+
+.scan-error-msg {
+  margin: 0;
+  color: var(--text);
+}
+
+.scan-error-hint {
+  margin: 6px 0 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--text-3);
+}
+
 /* While the webview takes a screenshot of the workspace, the button that asked for it and any toast stay out of it. */
 .capturing .shot-btn {
   visibility: hidden;

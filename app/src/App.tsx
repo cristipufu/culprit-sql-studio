@@ -1,3 +1,4 @@
+import { AlertCircle } from "lucide-react";
 import { lazy, Suspense, useEffect } from "react";
 import { CommandPalette } from "./components/CommandPalette";
 import { ScreenshotButton } from "./components/ScreenshotButton";
@@ -164,9 +165,22 @@ function TopBar() {
       )}
       <span className="spacer" />
       {report?.scanError && (
-        <span className="tag high" title={report.scanError.hint ?? ""}>
-          Last scan failed: {report.scanError.message}
-        </span>
+        <div className="scan-error-anchor" tabIndex={0}>
+          <span className="tag high scan-error-badge">
+            <AlertCircle size={12} aria-hidden />
+            Last scan failed
+          </span>
+          <div className="scan-error-popover" role="tooltip">
+            <div className="scan-error-title">
+              <span className="sev high" aria-hidden />
+              Last scan failed
+            </div>
+            <p className="scan-error-msg selectable">{report.scanError.message}</p>
+            {report.scanError.hint && (
+              <p className="scan-error-hint selectable">{report.scanError.hint}</p>
+            )}
+          </div>
+        </div>
       )}
       <ScreenshotButton />
     </header>
