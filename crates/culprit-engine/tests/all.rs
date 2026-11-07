@@ -3,6 +3,7 @@
 //! listed here, or `every_test_file_is_listed` fails.
 
 mod dashboard;
+mod demo_sidecars;
 mod escalations;
 mod file_pickers;
 mod golden;

@@ -11,6 +11,7 @@ import type { Report } from "../gen/Report";
 import type { Signal } from "../gen/Signal";
 import type { TableStat } from "../gen/TableStat";
 import type { TableStorage } from "../gen/TableStorage";
+import { fromRust } from "./rust-json";
 
 /** Signals beyond run time captured from the demo databases (fixtures/signals.sample.json); fixture reports predate them. */
 type SignalsPatch = {
@@ -27,10 +28,17 @@ type SignalsPatch = {
   signals: Signal[];
   findings: Finding[];
 };
-type SignalsSample = Record<string, SignalsPatch>;
+/** A note on how the capture was made, and a patch per connection (crates/culprit-engine/tests/demo_sidecars.rs). */
+type SignalsSample = { note: string; [connection: string]: SignalsPatch | string };
+
+/** The patch captured for a connection, if any. */
+export function signalsFor(sample: SignalsSample, connection: string): SignalsPatch | undefined {
+  const patch = sample[connection];
+  return typeof patch === "object" ? patch : undefined;
+}
 
 export const signalsSample: () => Promise<SignalsSample | null> = import.meta.env.DEV
-  ? () => import("../../../fixtures/signals.sample.json").then((m) => m.default as unknown as SignalsSample)
+  ? () => import("../../../fixtures/signals.sample.json").then((m) => fromRust<SignalsSample>(m.default))
   : async () => null;
 
 /** Merge the captured signals into a fixture report: costs by query id, the queries and objects new findings point at. */

@@ -30,10 +30,11 @@ import type { Api, UpdateProgress } from "./api";
 import { demoCloud } from "./demo-cloud";
 import { demoRows } from "./demo-rows";
 import { previewSql } from "./schema-model";
-import { signalsSample, withSignals } from "./demo-signals";
+import { signalsFor, signalsSample, withSignals } from "./demo-signals";
 import { can, connectFacts, refusal, sessionActions, waitingState } from "./engines";
 import { sameSamplePlan } from "./plan-samples";
 import { discoveryPage } from "./discovery-results";
+import { fromRust } from "./rust-json";
 
 /** The capabilities query history comes from (mirrors `Snapshot::no_workload_reason`). */
 /** A scan's window in minutes, also for scans from before windows could be hours. */
@@ -51,7 +52,7 @@ const discoverSample: () => Promise<DiscoveredDatabase[]> = import.meta.env.DEV
 
 /** The advisor's output for each demo connection, made with `culprit indexes fixtures/<name>.report.json --json`. */
 const adviceSample: () => Promise<Record<string, IndexAdvice>> = import.meta.env.DEV
-  ? () => import("../../../fixtures/index-advice.sample.json").then((m) => m.default as unknown as Record<string, IndexAdvice>)
+  ? () => import("../../../fixtures/index-advice.sample.json").then((m) => fromRust<Record<string, IndexAdvice>>(m.default))
   : async () => ({});
 
 /**
@@ -59,32 +60,32 @@ const adviceSample: () => Promise<Record<string, IndexAdvice>> = import.meta.env
  * reports merged with the sidecars below (pressure, waits, deadlocks), exactly as this demo serves them.
  */
 const dashboardSample: () => Promise<Record<string, Dashboard>> = import.meta.env.DEV
-  ? () => import("../../../fixtures/dashboard.sample.json").then((m) => m.default as unknown as Record<string, Dashboard>)
+  ? () => import("../../../fixtures/dashboard.sample.json").then((m) => fromRust<Record<string, Dashboard>>(m.default))
   : async () => ({});
 
 /** Sessions and blocking chains captured from the demo databases with a planted chain, per engine. */
 const liveSample: () => Promise<Record<string, LiveState> | null> = import.meta.env.DEV
-  ? () => import("../../../fixtures/live.sample.json").then((m) => m.default as unknown as Record<string, LiveState>)
+  ? () => import("../../../fixtures/live.sample.json").then((m) => fromRust<Record<string, LiveState>>(m.default))
   : async () => null;
 
 /** Rust-produced dashboard updates for every subset of the demo's planted sessions. */
 const dashboardLiveSample: () => Promise<Record<string, Record<string, DashboardLive>>> = import.meta.env.DEV
-  ? () => import("../../../fixtures/dashboard-live.sample.json").then((m) => m.default as unknown as Record<string, Record<string, DashboardLive>>)
+  ? () => import("../../../fixtures/dashboard-live.sample.json").then((m) => fromRust<Record<string, Record<string, DashboardLive>>>(m.default))
   : async () => ({});
 
 /** Deadlocks captured from the demo databases (and a key-lookup graph), per engine. */
 const deadlockSample: () => Promise<Record<string, DeadlockReport> | null> = import.meta.env.DEV
-  ? () => import("../../../fixtures/deadlocks.sample.json").then((m) => m.default as unknown as Record<string, DeadlockReport>)
+  ? () => import("../../../fixtures/deadlocks.sample.json").then((m) => fromRust<Record<string, DeadlockReport>>(m.default))
   : async () => null;
 
 /** "What changed" as the desktop app computed it on the demo databases (Query Store, and scans for PostgreSQL/MySQL). */
 const changesSample: () => Promise<Record<string, Changes> | null> = import.meta.env.DEV
-  ? () => import("../../../fixtures/changes.sample.json").then((m) => m.default as unknown as Record<string, Changes>)
+  ? () => import("../../../fixtures/changes.sample.json").then((m) => fromRust<Record<string, Changes>>(m.default))
   : async () => null;
 
 /** Marks and schema/settings changes around the demo reports' timelines (synthetic). */
 const eventsSample: () => Promise<Record<string, ChangeEvent[]> | null> = import.meta.env.DEV
-  ? () => import("../../../fixtures/events.sample.json").then((m) => m.default as unknown as Record<string, ChangeEvent[]>)
+  ? () => import("../../../fixtures/events.sample.json").then((m) => fromRust<Record<string, ChangeEvent[]>>(m.default))
   : async () => null;
 
 /** Runtime spread captured from the demo databases: fixture reports predate it. `extra` adds a planted
@@ -94,7 +95,7 @@ type SpreadPatch = Pick<QueryStat, "spread" | "max_time_ms" | "stddev_time_ms"> 
 };
 type SpreadSample = Record<string, { queries: Record<string, SpreadPatch>; extra: QueryStat[] }>;
 const spreadSample: () => Promise<SpreadSample | null> = import.meta.env.DEV
-  ? () => import("../../../fixtures/spread.sample.json").then((m) => m.default as unknown as SpreadSample)
+  ? () => import("../../../fixtures/spread.sample.json").then((m) => fromRust<SpreadSample>(m.default))
   : async () => null;
 
 function withSpread(report: Report, sample: SpreadSample[string] | undefined): Report {
@@ -131,7 +132,7 @@ export type ShareSample = {
 };
 
 export const shareSample: () => Promise<ShareSample | null> = import.meta.env.DEV
-  ? () => import("../../../fixtures/share.sample.json").then((m) => m.default as unknown as ShareSample)
+  ? () => import("../../../fixtures/share.sample.json").then((m) => fromRust<ShareSample>(m.default))
   : async () => null;
 
 /** Demo limitations are information, not errors: the UI shows them calmly. */
@@ -158,14 +159,14 @@ type WaitsSidecar = {
 };
 
 const waitsSample: () => Promise<WaitsSidecar | null> = import.meta.env.DEV
-  ? () => import("../../../fixtures/waits.sample.json").then((m) => m.default as unknown as WaitsSidecar)
+  ? () => import("../../../fixtures/waits.sample.json").then((m) => fromRust<WaitsSidecar>(m.default))
   : async () => null;
 
 type ActualSample = { last_actual: Record<string, Record<string, Plan>>; progress: Record<string, QueryProgress[]> };
 
 /** Last actual plans captured from the demo SQL Server, and progress frames for the running "reports" session. */
 const actualSample: () => Promise<ActualSample | null> = import.meta.env.DEV
-  ? () => import("../../../fixtures/actual.sample.json").then((m) => m.default as unknown as ActualSample)
+  ? () => import("../../../fixtures/actual.sample.json").then((m) => fromRust<ActualSample>(m.default))
   : async () => null;
 
 const importSample: () => Promise<ImportCandidate[]> = import.meta.env.DEV
@@ -178,7 +179,7 @@ function nameOf(path: string): string {
 
 /** The desktop app computes plan insights live; the demo reads the same output from a sidecar file. */
 const insightsSample: () => Promise<Record<string, Record<string, PlanInsights>>> = import.meta.env.DEV
-  ? () => import("../../../fixtures/insights.sample.json").then((m) => m.default as unknown as Record<string, Record<string, PlanInsights>>)
+  ? () => import("../../../fixtures/insights.sample.json").then((m) => fromRust<Record<string, Record<string, PlanInsights>>>(m.default))
   : async () => ({});
 
 async function load(name: string): Promise<Report | null> {
@@ -254,7 +255,7 @@ export async function demoApi(): Promise<Api> {
     // Every scan records a day of deadlocks; the fixtures predate that, so the captured sample stands in.
     const deadlocks = r.snapshot.deadlocks ?? recordedDeadlocks?.[name] ?? recordedDeadlocks?.[r.snapshot.server.engine] ?? null;
     return { ...r, snapshot: { ...r.snapshot, waits: recorded, pressure: r.snapshot.pressure ?? waits.pressure[name] ?? null, resources, deadlocks } };
-  }).map((r) => (r && signals ? withSignals(r, signals[r.snapshot.connection]) : r));
+  }).map((r) => (r && signals ? withSignals(r, signalsFor(signals, r.snapshot.connection)) : r));
   // `?first-run` in the dev demo starts with no saved connections, to see the first-run screen.
   const firstRun = import.meta.env.DEV && typeof location !== "undefined" && location.search.includes("first-run");
   let connections: ConnectionInfo[] = all

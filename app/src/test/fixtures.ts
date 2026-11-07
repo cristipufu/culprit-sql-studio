@@ -1,3 +1,5 @@
+import { fromRust as rustJson } from "../lib/rust-json";
+
 // Fixtures for the UI tests. Each helper holds the one cast its kind of fixture needs, so a test never writes
 // `as unknown as` and the fields it does write stay checked against the types generated from the Rust model.
 
@@ -12,10 +14,7 @@ export function partial<T>(value: DeepPartial<T>): T {
   return value as unknown as T;
 }
 
-/**
- * A copy of JSON the Rust model serialized from `T` (fixtures/, app/src/gen/). Importing JSON widens its string
- * unions to `string`, so TypeScript can't see that it is `T`; the Rust side writing it from `T` is what makes it one.
- */
+/** A copy of JSON the Rust model serialized from `T` (see lib/rust-json.ts), for a test to change freely. */
 export function fromRust<T>(json: unknown): T {
-  return structuredClone(json) as T;
+  return structuredClone(rustJson<T>(json));
 }
