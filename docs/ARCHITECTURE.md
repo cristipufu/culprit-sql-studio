@@ -677,6 +677,11 @@ Measured on this code in October 2026:
 - **A fifth engine**: a provider crate, one `EngineSpec` file and one line in `Engine::spec`, then the 52 matches that
   name every engine (21 in core, 19 in checks, 12 in the engine crate), which the compiler lists because they are
   exhaustive; most of those in checks are a check's own wording for each engine, which stays with the check.
+- **Splitting `culprit-core`** (a `culprit-sql` or plan crate) for build time: measured in November 2026, a body edit in
+  core rebuilds all 11 crates in 12.6 s against 5.0 s for the same edit in checks. Only modules no provider uses could
+  move after core and save that difference, and those (plan diff and compare, digest, verification) took under a tenth
+  of core's recent edits; the busiest (insights, engines, redact, sql, the model) are read by the providers' own plan
+  parsers and collectors, and a crate before core still rebuilds everything after it.
 
 What the chosen shape costs: the snapshot model grows with each engine's own fields (they stay optional, `None` when
 an engine doesn't keep them), checks are compiled in rather than dropped in, and a new engine is real work (a provider
