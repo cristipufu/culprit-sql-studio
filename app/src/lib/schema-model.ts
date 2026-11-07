@@ -8,6 +8,7 @@ import type { TableStat } from "../gen/TableStat";
 import type { TablePreviewOptions } from "../gen/TablePreviewOptions";
 import type { ColumnSort } from "../gen/ColumnSort";
 import { sqlSyntax } from "./engines";
+import { when } from "./format";
 
 export const tableKey = (t: { schema: string; name: string }) => `${t.schema}.${t.name}`;
 
@@ -127,9 +128,73 @@ export function relations(report: Report, table: TableStat): { outgoing: Relatio
 }
 
 /** Column name → the table it references through a single-column foreign key. */
+/** The foreign keys from a table (with whether an index backs each) and to it. */
+export type TableRelations = ReturnType<typeof relations>;
+
 export function referenceOf(outgoing: Relation[], column: string): ForeignKey | null {
   const name = column.toLowerCase();
   return outgoing.find((r) => r.fk.columns.length === 1 && bare(r.fk.columns[0] ?? "") === name)?.fk ?? null;
+}
+
+/** How long the index counters have been counting, as words that follow "Never read …". */
+export function countingSince(report: Report): string {
+  if (report.snapshot.server.engine === "yugabyte") return "across the recorded cluster nodes, with independent reset dates";
+  const since = report.snapshot.server.started_at;
+  return since ? `since ${when(since).short}` : "since the last restart";
+}
+
+/** The foreign key an index serves: it is usable and unfiltered, can seek on the key, and leads with its columns. */
+export function backedForeignKey(index: IndexStat, outgoing: Relation[]): ForeignKey | null {
+  const keys = index.columns.map((c) => c.replace(/\s+(ASC|DESC)$/i, "").toLowerCase());
+  return outgoing.find(({ fk }) => !index.is_disabled && !index.filter && canSeek(index, fk.columns) && fk.columns.every((c, n) => keys[n] === c.toLowerCase()))?.fk ?? null;
+}
+
+/** A line under an index in the Indexes tab; `finding` is the id of the finding it repeats, when there is one. */
+export type IndexNote = { tone: "high" | "medium" | "low"; text: string; finding?: string };
+
+const WEEK_MS = 7 * 24 * 3600 * 1000;
+
+/**
+ * What the Indexes tab says about one index, by the same evidence the checks use: an index that isn't read is called
+ * unused only when nothing explains it. It may be under a week old, enforce uniqueness, back a foreign key, or (on
+ * YugabyteDB) have counters no unused-index finding vouched for; each of those says so instead.
+ */
+export function indexNotes(report: Report, table: TableStat, index: IndexStat, siblings: IndexStat[], outgoing: Relation[]): IndexNote[] {
+  const engine = report.snapshot.server.engine;
+  const since = countingSince(report);
+  const subject = `${tableKey(table)}.${index.name}`.toLowerCase();
+  const finding = (check: string) => report.findings.find((f) => f.check === check && f.subject.kind === "index" && f.subject.name.toLowerCase() === subject);
+  const unused = finding("unused-index");
+  const unprovenNativeAbsence = engine === "yugabyte" && index.reads === 0 && !index.is_primary_key && !unused;
+  const neverRead = index.reads === 0 && !index.is_primary_key && !unprovenNativeAbsence;
+  const tooNew = index.created_at_latest != null && Date.parse(report.snapshot.taken_at) - Date.parse(index.created_at_latest) < WEEK_MS;
+  const serves = backedForeignKey(index, outgoing);
+  const wider = coveredBy(index, siblings);
+  const notes: IndexNote[] = [];
+  if (index.is_disabled) {
+    const maintained = index.maintained == null ? "maintenance state was not recorded" : index.maintained ? "still maintained by writes" : "not ready for write maintenance";
+    const text =
+      index.state === "invisible" ? "Invisible to the optimizer; still maintained by writes"
+      : index.state === "ignored" ? "Ignored by the optimizer; still maintained by writes"
+      : index.state === "invalid" ? `Invalid: unavailable to the optimizer; ${maintained}`
+      : "Disabled: unavailable to the optimizer and not maintained";
+    notes.push({ tone: "medium", text });
+  }
+  if (unprovenNativeAbsence) {
+    notes.push({ tone: "low", text: `No reads recorded; complete cluster usage with at least a week of known reset history is needed before calling this index unused.${serves ? ` It also supports foreign key ${serves.name}.` : ""}` });
+  }
+  if (neverRead && serves) {
+    const why = engine === "mysql" ? "InnoDB requires it" : `without it, deleting a ${serves.ref_table} row scans ${table.name}`;
+    notes.push({ tone: "low", text: `Never read ${since}, but it backs foreign key ${serves.name}: ${why}` });
+  } else if (neverRead && !index.is_unique && tooNew) {
+    notes.push({ tone: "low", text: `Not read yet, but it may be new (it existed by ${when(index.created_at_latest).short}): too soon to call it unused` });
+  } else if (neverRead && !index.is_unique) {
+    notes.push({ tone: "high", text: `Never read ${since}, yet every write to ${table.name} maintains it`, finding: unused?.id });
+  } else if (neverRead) {
+    notes.push({ tone: "low", text: `Never read ${since}; it still enforces uniqueness` });
+  }
+  if (wider) notes.push({ tone: "medium", text: `Covered by ${wider.name}: it leads with the same keys`, finding: finding("duplicate-index")?.id });
+  return notes;
 }
 
 export function quoteIdent(engine: Engine, name: string): string {
