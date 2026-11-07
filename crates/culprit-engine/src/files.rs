@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use culprit_core::{Error, Result};
 
+/// The largest file an export writes to Downloads.
 pub const MAX_EXPORT_BYTES: usize = 64 * 1024 * 1024;
 
 /// Save an export to Downloads with a plain document filename and no overwrite.

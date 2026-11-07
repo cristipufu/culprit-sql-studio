@@ -6,12 +6,20 @@ use tokio::{sync::Semaphore, time::Instant};
 
 use super::*;
 
+/// Rows asked of each inventory page: the AWS CLI's `--page-size` and `--max-items`, Resource Graph's `$top`. A search
+/// holds one page and its matches, never the whole inventory.
 const PAGE_SIZE: usize = 50;
+/// Requests one search may send across all its pages and regions; running out is reported, never an empty result.
 const MAX_REQUESTS: usize = 256;
+/// AWS regions one search may cover.
 const MAX_REGIONS: usize = 100;
+/// The longest continuation token accepted from a cloud; a longer, malformed or repeated one stops the search.
 const MAX_CURSOR: usize = 16 * 1024;
+/// One whole search, every page and region included.
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(60);
+/// One page request, within what is left of the search's deadline.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// Searches that may run at once.
 static SEARCHES: Semaphore = Semaphore::const_new(2);
 
 trait Transport: Send + Sync {

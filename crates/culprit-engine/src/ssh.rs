@@ -25,11 +25,18 @@ use crate::process::OwnedChild;
 use config::Target;
 pub(crate) use config::normalize;
 
+/// SSH routes one workspace keeps; a dial past it fails before creating a listener or task.
 const MAX_ROUTES: usize = 16;
+/// Database sessions, pending or connected, through one route.
 const MAX_ROUTE_SESSIONS: usize = 8;
+/// Database sessions, pending or connected, across all of a workspace's routes.
 const MAX_SESSIONS: usize = 32;
+/// The most of OpenSSH's error output kept to diagnose a failed route.
 const MAX_STDERR: usize = 16 * 1024;
+/// How long a stopping SSH child gets to exit and report before it is killed.
 const STOP_TIMEOUT: Duration = Duration::from_secs(1);
+/// After the client closes its side, how long the final response may stay idle before the route closes, so a gone
+/// client can't keep an SSH process alive.
 const DRAIN_IDLE_TIMEOUT: Duration = Duration::from_secs(1);
 
 type Factory = Arc<dyn Fn(&SshConfig, &Target) -> Result<Command> + Send + Sync>;

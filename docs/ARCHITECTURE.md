@@ -50,12 +50,14 @@ Services do not hold a `Workspace` or call the façade to perform their work. Ex
 provider registration, cloud transport and pure analysis; services compose them without duplicating their rules.
 
 `files.rs` owns the desktop export writer shared by query results, plans and reports: document extensions only,
-a plain filename, a 64 MiB limit and exclusive creation in Downloads. Files inherit the folder's Windows access rules;
+a plain filename, a size limit (`MAX_EXPORT_BYTES`) and exclusive creation in Downloads. Files inherit the folder's Windows access rules;
 macOS/Linux files use owner-only read/write permissions. Result serialization
 lives beside the grid in `app/src/lib/result-export.ts`; it exports the loaded result and yields between row batches.
 
-Interactive database work uses the shared policy in `culprit-core/src/limits.rs`: 30 seconds for queries and measured
-plans, 10 seconds for observations, and at most 10,000 retained result rows or 8 MiB of cell data. `execution.rs` bounds
+Interactive database work uses the shared policy in `culprit-core/src/limits.rs`: a deadline for queries and measured
+plans (`QUERY_TIMEOUT`), a shorter one for observations (`OBSERVE_TIMEOUT`), and a cap on retained result rows and cell
+data (`MAX_RESULT_ROWS`, `MAX_RESULT_BYTES`). The numbers live on those constants, with what they bound; this page names
+them so it stays true when one is tuned. The same goes for the discovery, subprocess and SSH limits below. `execution.rs` bounds
 the provider future, including database connection setup and server validation, with one deadline per operation;
 human credential sign-in happens before that deadline. Wait samples have their requested duration plus bounded
 overhead. Dropping a caller drops its driver future and session. Native workers keep an `OperationGuard` in the async
@@ -68,13 +70,13 @@ preview, reloading or closing its window drops its backend future. A preview rep
 future to release its workspace permit before starting.
 Table previews use `sql::table_preview_sql` to keep a filter inside its WHERE expression under every supported
 quoting mode, quote identifiers and bound server rows. `Execution::preview_table` holds a workspace-wide permit,
-uses the same read-only checks as the editor, and dispatches `Provider::preview`. Built-in preview execution has a
-five-second budget: PostgreSQL/YSQL statement timeouts, MySQL/MariaDB session timeouts, SQLite's VM progress guard,
+uses the same read-only checks as the editor, and dispatches `Provider::preview`. Built-in preview execution has its
+own budget (`PREVIEW_TIMEOUT`): PostgreSQL/YSQL statement timeouts, MySQL/MariaDB session timeouts, SQLite's VM progress guard,
 and a SQL Server worker that retains its client to send Attention on timeout or caller cancellation. MySQL/MariaDB
 also retain a control session to send KILL QUERY for the owned request; a unique leading comment guards against
 server-local IDs behind proxies. Unsupported timeout settings remain optional, and worker slots include cancellation
-and bounded disconnects. The client query clock starts after setup and includes 250 ms for the native timeout
-reply. During cancellation, Culprit accepts either the original statement's protocol completion or an acknowledged
+and bounded disconnects. The client query clock starts after setup and allows a grace period for the native
+timeout reply (`REPLY_GRACE` in `culprit-mysql/src/preview.rs`). During cancellation, Culprit accepts either the original statement's protocol completion or an acknowledged
 KILL QUERY as confirmation; a broken socket alone does not qualify. An unconfirmed cancellation is reported explicitly. See [MySQL KILL](https://dev.mysql.com/doc/refman/8.0/en/kill.html).
 Limits protect
 returned data and query lifetime; a server-side sort or selective-looking predicate can still need a scan.
@@ -84,16 +86,18 @@ A bounded metadata index records tabs and selection; each tab has its own SQL bo
 serialize other queries. Renaming moves only the index; removing the connection deletes the index and its bodies. Results and execution confirmations are never restored,
 and failed writes keep the prior index and surface an error in the editor.
 
-Cloud discovery uses `discover/paging.rs` and returns `DiscoveryResult` to the CLI and desktop: up to 20 matches,
-a `has_more` indicator and bounded warnings. It retains one source page plus matching rows, stopping after the 21st
-match establishes that more exist. AWS CLI calls use matching `--page-size` / `--max-items` limits of 50 and resume
-through the CLI's opaque `NextToken`; they never aggregate the whole RDS inventory. Azure Resource Graph uses
-`$top: 50`, stable ordering and `$skipToken`. Flexible-server collections follow `nextLink` only within the original
+Cloud discovery uses `discover/paging.rs` and returns `DiscoveryResult` to the CLI and desktop: up to
+`DISCOVERY_LIMIT` matches, a `has_more` indicator and bounded warnings. It retains one source page plus matching rows,
+stopping at the first match past the limit, which establishes that more exist. AWS CLI calls ask for `PAGE_SIZE` rows
+(`--page-size` and `--max-items` alike) and resume through the CLI's opaque `NextToken`; they never aggregate the whole
+RDS inventory. Azure Resource Graph uses the same `$top`, stable ordering and `$skipToken`. Flexible-server collections follow `nextLink` only within the original
 HTTPS host and collection. Unpaged ARM responses are still bounded by size.
 
-Searches share a two-operation gate, a 60-second deadline and a 256-request budget. CLI subprocesses have a 15-second
-deadline, 2 MiB stdout / 16 KiB stderr limits and use process groups / Windows Job Objects to kill the owned process tree when canceled. ARM inventory bodies have a 2 MiB limit;
-four native HTTP readers retain their permits until they finish, including after an async caller retires. Queued
+Searches share a gate (`SEARCHES`), a deadline (`SEARCH_TIMEOUT`) and a request budget (`MAX_REQUESTS`).
+`cloud_process.rs` gives CLI subprocesses a deadline and stdout/stderr limits, and uses process groups / Windows Job
+Objects to kill the owned process tree when canceled. ARM inventory bodies share the stdout limit (`MAX_OUTPUT`); native
+HTTP readers are gated (`http.rs::INVENTORY_HTTP`) and retain their permits until they finish, including after an async
+caller retires. Queued
 native reads check their caller's operation guard before starting. Exhausted budgets, malformed/repeated cursors and
 partial source failures cannot produce a complete empty result. Exact remaining counts are intentionally absent.
 CLI bulk saving refuses incomplete results. Pagination tests use scripted pages and never require a cloud login.
@@ -117,12 +121,14 @@ Each dial owns a loopback listener from allocation through acceptance, avoiding 
 exactly one database socket, which owns an OpenSSH `-W` child; an existing user-owned SSH master may be reused, but Culprit creates no
 background master. `process.rs` owns process groups on Unix and Job Objects on Windows, shared with cloud subprocesses.
 Closing a database socket or dropping the last provider kills its owned SSH children, including proxy descendants.
-Forwarding uses fixed buffers; stderr is limited to 16 KiB and mapped to curated errors before a driver receives EOF.
-Closing stderr cannot discard pending database bytes. A client half-close drains the final response, with a one-second
-idle grace period so a closed client cannot retain an SSH process indefinitely. Each `ConnectionEndpoint` owns its
+Forwarding uses fixed buffers; stderr is bounded (`ssh.rs::MAX_STDERR`) and mapped to curated errors before a driver
+receives EOF.
+Closing stderr cannot discard pending database bytes. A client half-close drains the final response, with a short idle
+grace period (`DRAIN_IDLE_TIMEOUT`) so a closed client cannot retain an SSH process indefinitely. Each `ConnectionEndpoint` owns its
 attempt's diagnosis and cancels an unaccepted listener on drop; parallel dials cannot clear or inherit another error.
-After the first database byte, protocol errors belong to the driver. There are at most 16 live routes per workspace,
-8 pending or connected sessions per route and 32 per workspace; excess dials fail before creating listeners or tasks.
+After the first database byte, protocol errors belong to the driver. Live routes per workspace and pending or
+connected sessions per route and per workspace are capped (`MAX_ROUTES`, `MAX_ROUTE_SESSIONS`, `MAX_SESSIONS`); excess
+dials fail before creating listeners or tasks.
 
 Only SSH destination, optional port and identity-file path are persisted. Known hosts must already be trusted;
 OpenSSH runs in batch mode, with agent/X11 forwarding and local commands disabled. Passwords and key passphrases are

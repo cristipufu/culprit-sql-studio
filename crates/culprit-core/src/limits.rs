@@ -8,10 +8,17 @@ use std::time::{Duration, Instant};
 
 use crate::{Error, ErrorCode, Result};
 
+/// One query or measured plan, from connection setup and server validation to its last row. A person's credential
+/// sign-in happens before this deadline starts.
 pub const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
+/// One observation (live sessions, a plan read, a catalog, a session action), and a session's statement timeout.
 pub const OBSERVE_TIMEOUT: Duration = Duration::from_secs(10);
+/// A table preview, enforced by the engine itself where it can (statement or session timeout, SQLite's progress
+/// handler, SQL Server's Attention).
 pub const PREVIEW_TIMEOUT: Duration = Duration::from_secs(5);
+/// Rows a result keeps. Providers still drain the rest, so a failure after the last kept row is reported.
 pub const MAX_RESULT_ROWS: usize = 10_000;
+/// Cell data a result keeps, counted by [`ResultBudget`] before display values are allocated.
 pub const MAX_RESULT_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone)]

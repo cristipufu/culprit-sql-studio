@@ -8,7 +8,10 @@ use std::time::Duration;
 use culprit_core::{Error, ErrorCode, Result};
 use serde_json::Value;
 
+/// One HTTPS request to a cloud's API.
 const TIMEOUT: Duration = Duration::from_secs(20);
+/// Native inventory reads that may run at once. A reader keeps its permit until it finishes, even after its caller
+/// gave up, so abandoned searches can't pile up requests.
 static INVENTORY_HTTP: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 
 fn agent() -> &'static ureq::Agent {

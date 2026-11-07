@@ -6,8 +6,11 @@ use crate::process::OwnedChild;
 use culprit_core::{Error, ErrorCode, Result};
 use tokio::{io::AsyncReadExt, process::Command};
 
+/// The most a cloud CLI call may print, and the largest Azure Resource Manager inventory body read over HTTP.
 pub(crate) const MAX_OUTPUT: usize = 2 * 1024 * 1024;
+/// The most of a cloud CLI's error output kept for its message.
 const MAX_STDERR: usize = 16 * 1024;
+/// One cloud CLI call (Azure, AWS, Entra tokens, metrics); the process tree is killed when it passes.
 const TIMEOUT: Duration = Duration::from_secs(15);
 
 async fn read(reader: impl tokio::io::AsyncRead + Unpin, limit: usize) -> Result<Vec<u8>> {

@@ -18,7 +18,9 @@ use crate::rows::tagged;
 
 // Include retiring workers: rapid navigation cannot accumulate cancellation connections behind the UI's gate.
 static PREVIEWS: Semaphore = Semaphore::const_new(2);
+/// Closing a preview's connections after it ends or is cancelled.
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
+/// Time past the preview budget for the server's own timeout reply to arrive before Culprit sends KILL QUERY.
 const REPLY_GRACE: Duration = Duration::from_millis(250);
 
 fn marker() -> String {

@@ -14,6 +14,7 @@ mod paging;
 
 const RESOURCE_GRAPH: &str =
     "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01";
+/// Matches a search returns. Finding one more is how it knows `has_more`; it never counts the rest.
 pub const DISCOVERY_LIMIT: usize = 20;
 const MANAGEMENT: &str = "https://management.azure.com";
 
