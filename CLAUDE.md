@@ -28,7 +28,7 @@ These rules apply to every coding agent. `AGENTS.md` links to this file; keep on
 
 ### Checks by change
 
-Run commands from the repository root unless a working directory is shown. Use the existing lockfile; when changing dependencies, update it deliberately, then validate with `--locked`. A new crate must pass `deny.toml` (permissive licenses, no open advisories, crates.io only), which CI's Dependencies job checks with `cargo deny check` alongside `bun audit`; an accepted advisory is an entry there with its reason.
+Run commands from the repository root unless a working directory is shown. Use the existing lockfile; when changing dependencies, update it deliberately, then validate with `--locked`. A new crate must pass `deny.toml` (permissive licenses, no open advisories, crates.io only), which CI's Dependencies job checks with `cargo deny check` alongside `bun audit`; an accepted advisory is an entry there with its reason. The same job runs `python3 dev/licenses.py` (needs `cargo install cargo-about --locked --features cli`), which writes the third-party notices every release ships under `deny.toml`'s licenses; a dependency whose license it can't read fails there.
 
 | Change | During implementation | Final validation |
 |---|---|---|

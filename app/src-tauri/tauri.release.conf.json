@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "../../target/licenses/THIRD-PARTY-LICENSES.txt": "THIRD-PARTY-LICENSES.txt"
+    }
+  }
+}

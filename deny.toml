@@ -21,7 +21,7 @@ ignore = [
 
 [licenses]
 # Permissive licenses, and MPL-2.0 for the crates named below only, so a new MPL-2.0 crate fails the check until it is
-# decided on here.
+# decided on here. dev/licenses.py ships the notices under the same list.
 # - MPL-2.0 is file-level copyleft: changes to those crates' own files would have to be shared; they are used
 #   unmodified. cssparser, cssparser-macros, selectors and dtoa-short are Tauri's HTML tooling, used at build time on
 #   the platforms Culprit ships (wry uses them at run time only on Android). option-ext is a one-trait helper of dirs,

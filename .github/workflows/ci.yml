@@ -80,6 +80,14 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun audit
+      # The third-party notices the release ships: a dependency whose license can't be read fails here, not on
+      # release day.
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+      - uses: ./.github/actions/install-cargo-about
+      - name: Write the third-party notices
+        run: python3 dev/licenses.py
 
   coverage:
     name: Coverage

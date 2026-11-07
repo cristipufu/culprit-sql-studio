@@ -21,6 +21,9 @@ name: Release
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  that key's password
 #
 # The release notes are the version's section in CHANGELOG.md; a version without one isn't drafted.
+#
+# THIRD-PARTY-LICENSES.txt (dev/licenses.py) is written once, then goes inside each desktop app (as a resource, through
+# app/src-tauri/tauri.release.conf.json), into each CLI archive and among the release's files, for the bare CLIs.
 on:
   push:
     tags: ["v*"]
@@ -38,8 +41,34 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  licenses:
+    name: Third-party licenses
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: Install UI dependencies
+        working-directory: app
+        run: bun install --frozen-lockfile
+      - uses: ./.github/actions/install-cargo-about
+      - name: Write the third-party notices
+        run: python3 dev/licenses.py
+      # Named release-* so the publish job attaches it to the release with the other files.
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: release-licenses
+          path: target/licenses/THIRD-PARTY-LICENSES.txt
+          if-no-files-found: error
+          retention-days: 7
+
   macos:
     name: macOS (universal, signed and notarized)
+    needs: [licenses]
     runs-on: macos-latest
     # Signing secrets can live in this environment, so required reviewers can gate who may sign a build.
     environment: release
@@ -51,6 +80,10 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-licenses
+          path: target/licenses
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
@@ -90,7 +123,7 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ env.SIGN_IDENTITY || '-' }}
         run: |
           set -euo pipefail
-          (cd app && bunx tauri build --target universal-apple-darwin --bundles app)
+          (cd app && bunx tauri build --target universal-apple-darwin --bundles app --config src-tauri/tauri.release.conf.json)
           cargo build --locked --release -p culprit-cli --target aarch64-apple-darwin
           cargo build --locked --release -p culprit-cli --target x86_64-apple-darwin
           mkdir -p dist
@@ -160,7 +193,8 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          tar -czf culprit-cli-macos.tar.gz culprit
+          cp ../target/licenses/THIRD-PARTY-LICENSES.txt .
+          tar -czf culprit-cli-macos.tar.gz culprit THIRD-PARTY-LICENSES.txt
           # The bare binary too, for `culprit update` to swap in.
           cp culprit culprit-cli-macos
           mkdir -p ../out && mv Culprit-SQL-Studio-macOS.dmg culprit-cli-macos.tar.gz culprit-cli-macos ../out/
@@ -195,6 +229,7 @@ jobs:
 
   windows:
     name: Windows (x64)
+    needs: [licenses]
     runs-on: windows-latest
     # The update-signing secrets can live in this environment, limited to release tags.
     environment: release
@@ -205,6 +240,10 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-licenses
+          path: target/licenses
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
@@ -214,11 +253,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          (cd app && bun install --frozen-lockfile && bunx tauri build --bundles nsis)
+          (cd app && bun install --frozen-lockfile && bunx tauri build --bundles nsis --config src-tauri/tauri.release.conf.json)
           cargo build --locked --release -p culprit-cli
           mkdir -p out
           cp target/release/bundle/nsis/*-setup.exe out/Culprit-SQL-Studio-Windows-x64-setup.exe
-          (cd target/release && 7z a -tzip ../../out/culprit-cli-windows-x64.zip culprit.exe >/dev/null)
+          cp target/licenses/THIRD-PARTY-LICENSES.txt target/release/
+          (cd target/release && 7z a -tzip ../../out/culprit-cli-windows-x64.zip culprit.exe THIRD-PARTY-LICENSES.txt >/dev/null)
           cp target/release/culprit.exe out/culprit-cli-windows-x64.exe
       - name: Sign the update
         # The installer is the update: the app runs it, unattended, in place of the installed version.
@@ -241,6 +281,7 @@ jobs:
 
   linux:
     name: Linux (x86_64)
+    needs: [licenses]
     # The oldest supported runner, so the AppImage and CLI run on older glibc too.
     runs-on: ubuntu-22.04
     # The update-signing secrets can live in this environment, limited to release tags.
@@ -252,6 +293,10 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-licenses
+          path: target/licenses
       - name: Linux libraries
         run: |
           sudo apt-get update
@@ -265,12 +310,13 @@ jobs:
       - name: Build the AppImage, the Debian package and the CLI
         run: |
           set -euo pipefail
-          (cd app && bun install --frozen-lockfile && bunx tauri build --bundles appimage,deb)
+          (cd app && bun install --frozen-lockfile && bunx tauri build --bundles appimage,deb --config src-tauri/tauri.release.conf.json)
           cargo build --locked --release -p culprit-cli
           mkdir -p out
           cp target/release/bundle/appimage/*.AppImage out/Culprit-SQL-Studio-Linux-x86_64.AppImage
           cp target/release/bundle/deb/*.deb out/Culprit-SQL-Studio-Linux-amd64.deb
-          tar -C target/release -czf out/culprit-cli-linux-x86_64.tar.gz culprit
+          cp target/licenses/THIRD-PARTY-LICENSES.txt target/release/
+          tar -C target/release -czf out/culprit-cli-linux-x86_64.tar.gz culprit THIRD-PARTY-LICENSES.txt
           cp target/release/culprit out/culprit-cli-linux-x86_64
       - name: Sign the updates
         # Each kind of install updates from its own package: the AppImage replaces itself, the .deb reinstalls.

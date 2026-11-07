@@ -1,0 +1,19 @@
+name: Install cargo-about
+description: cargo-about's release binary for Linux x86_64, checked against the checksum pinned here, for dev/licenses.py.
+runs:
+  using: composite
+  steps:
+    - name: Install cargo-about
+      shell: bash
+      env:
+        VERSION: "0.9.3"
+        # cargo-about-0.9.3-x86_64-unknown-linux-musl.tar.gz, as its release's .sha256 file and GitHub's digest give it.
+        SHA256: 3ad1e94ea1e63d69d1961f4fb15ccbbe9575d906111f96d2cb4dce6df48f71b4
+      run: |
+        set -euo pipefail
+        name="cargo-about-$VERSION-x86_64-unknown-linux-musl"
+        curl -fsSL --proto '=https' -o "$RUNNER_TEMP/$name.tar.gz" \
+          "https://github.com/EmbarkStudios/cargo-about/releases/download/$VERSION/$name.tar.gz"
+        echo "$SHA256  $RUNNER_TEMP/$name.tar.gz" | sha256sum --check --strict -
+        tar -xzf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP"
+        echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
