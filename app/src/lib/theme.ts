@@ -1,25 +1,18 @@
 import { useSyncExternalStore } from "react";
+import { remember, rememberedChoice } from "./prefs";
 
 export type Theme = "system" | "light" | "dark";
 
 const KEY = "culprit.theme";
 
 function read(): Theme {
-  try {
-    const v = localStorage.getItem(KEY);
-    return v === "light" || v === "dark" ? v : "system";
-  } catch {
-    return "system";
-  }
+  return rememberedChoice<Theme>(KEY, "system", ["light", "dark"]);
 }
 
 function apply(theme: Theme): void {
   if (theme === "system") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = theme;
-  try {
-    if (theme === "system") localStorage.removeItem(KEY);
-    else localStorage.setItem(KEY, theme);
-  } catch {}
+  remember(KEY, theme === "system" ? null : theme);
 }
 
 // One theme for the whole app: every control that shows or changes it reads the same value.

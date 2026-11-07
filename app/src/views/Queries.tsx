@@ -20,6 +20,7 @@ import { querySummary } from "../lib/query-summary";
 import { figures, honest, workloadKind, windowPhrase, type Figures } from "../lib/rates";
 import { setState, toast, useStore } from "../lib/store";
 import { compareSince } from "./Overview";
+import { remember, rememberedChoice } from "../lib/prefs";
 
 const PAGE_SIZE = 100;
 type QueryEntry = { query: QueryStat; figures: Figures; search: string };
@@ -222,12 +223,12 @@ type DetailTab = "summary" | "plan" | "history";
 const TAB_KEY = "culprit.query.tab";
 
 function rememberedTab(): DetailTab {
-  try {
-    const v = localStorage.getItem(TAB_KEY);
-    return v === "plan" || v === "history" ? v : "summary";
-  } catch {
-    return "summary";
-  }
+  return rememberedChoice<DetailTab>(TAB_KEY, "summary", ["summary", "plan", "history"]);
+}
+
+/** Open Queries on this tab next time it shows a query (the dashboard opens a query on its plan). */
+export function rememberQueryTab(tab: DetailTab): void {
+  remember(TAB_KEY, tab);
 }
 
 function QueryDetail({ report, query }: { report: Report; query: QueryStat }) {
@@ -248,9 +249,7 @@ function QueryDetail({ report, query }: { report: Report; query: QueryStat }) {
 
   const choose = (next: DetailTab) => {
     setTab(next);
-    try {
-      localStorage.setItem(TAB_KEY, next);
-    } catch {}
+    remember(TAB_KEY, next);
   };
   useHotkeys({ p: () => choose(tab === "plan" ? "summary" : "plan") });
 

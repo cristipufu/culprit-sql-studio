@@ -2,22 +2,17 @@ import type { ExportFile } from "../gen/ExportFile";
 import type { ExportOptions } from "../gen/ExportOptions";
 import { api, copyText, errorMessage } from "./api";
 import { toast } from "./store";
+import { remember, remembered } from "./prefs";
 
 const REDACT_KEY = "culprit.share.redact";
 
 /** Redacting literal values is on unless the person turned it off (remembered per browser). */
 export function rememberedRedact(): boolean {
-  try {
-    return localStorage.getItem(REDACT_KEY) !== "off";
-  } catch {
-    return true;
-  }
+  return remembered(REDACT_KEY) !== "off";
 }
 
 export function rememberRedact(on: boolean): void {
-  try {
-    localStorage.setItem(REDACT_KEY, on ? "on" : "off");
-  } catch {}
+  remember(REDACT_KEY, on ? "on" : "off");
 }
 
 export function exportOptions(redact: boolean): ExportOptions {

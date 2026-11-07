@@ -11,24 +11,18 @@ import { PlanDiagram } from "./PlanDiagram";
 import { PlanInsights } from "./PlanInsights";
 import { PlanOperations } from "./PlanOperations";
 import { PlanView } from "./PlanView";
+import { remember, rememberedChoice } from "../lib/prefs";
 
 export type PlanLook = "diagram" | "tree" | "operations";
 
 const LOOK_KEY = "culprit.plan.look";
 
 export function rememberedLook(): PlanLook {
-  try {
-    const v = localStorage.getItem(LOOK_KEY);
-    return v === "tree" || v === "operations" ? v : "diagram";
-  } catch {
-    return "diagram";
-  }
+  return rememberedChoice<PlanLook>(LOOK_KEY, "diagram", ["diagram", "tree", "operations"]);
 }
 
 export function rememberLook(look: PlanLook): void {
-  try {
-    localStorage.setItem(LOOK_KEY, look);
-  } catch {}
+  remember(LOOK_KEY, look);
 }
 
 const LOOKS: { look: PlanLook; label: string; icon: typeof Network; hint: string }[] = [

@@ -9,23 +9,10 @@ import { engineLabel } from "../../lib/engines";
 import { discoveryKey, preselectedDiscoveries, type DiscoveryPage } from "../../lib/discovery-results";
 import { LatestRequest } from "../../lib/requests";
 import { loadConnections } from "../../lib/store";
+import { remember, remembered } from "../../lib/prefs";
 
 const TERMS_KEY: Record<CloudKind, string> = { azure: "culprit.discover.terms", aws: "culprit.discover.aws.terms" };
 const REGIONS_KEY = "culprit.discover.aws.regions";
-
-export function remembered(key: string): string {
-  try {
-    return localStorage.getItem(key) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-export function remember(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {}
-}
 
 const words = (text: string) => text.split(/[\s,]+/).filter(Boolean);
 
@@ -48,8 +35,8 @@ type DiscoverState = { status: "idle" } | { status: "busy" } | ({ status: "done"
 
 export function DiscoverPanel({ cloud, onDone }: { cloud: CloudKind; onDone: () => void }) {
   const copy = CLOUD_COPY[cloud];
-  const [terms, setTerms] = useState(() => remembered(TERMS_KEY[cloud]));
-  const [regions, setRegions] = useState(() => (cloud === "aws" ? remembered(REGIONS_KEY) : ""));
+  const [terms, setTerms] = useState(() => remembered(TERMS_KEY[cloud]) ?? "");
+  const [regions, setRegions] = useState(() => (cloud === "aws" ? (remembered(REGIONS_KEY) ?? "") : ""));
   const [state, setDiscover] = useState<DiscoverState>({ status: "idle" });
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [aliases, setAliases] = useState<Record<string, string>>({});

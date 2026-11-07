@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { api, errorMessage, type UpdateInfo } from "./api";
 import { toast } from "./store";
+import { remember, remembered } from "./prefs";
 
 // Whether the app checks once a day by itself (on unless turned off), and when a check last found nothing new.
 const AUTO_KEY = "culprit.updates.auto";
@@ -36,23 +37,10 @@ export function useUpdate(): UpdateState {
   return useSyncExternalStore(subscribe, () => state);
 }
 
-function read(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
 
-function write(key: string, value: string | null): void {
-  try {
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, value);
-  } catch {}
-}
 
 export function autoCheckEnabled(): boolean {
-  return read(AUTO_KEY) !== "off";
+  return remembered(AUTO_KEY) !== "off";
 }
 
 export function useAutoCheck(): boolean {
@@ -60,7 +48,7 @@ export function useAutoCheck(): boolean {
 }
 
 export function setAutoCheck(on: boolean): void {
-  write(AUTO_KEY, on ? null : "off");
+  remember(AUTO_KEY, on ? null : "off");
   listeners.forEach((listener) => listener());
 }
 
@@ -83,7 +71,7 @@ export async function checkForUpdates(manual: boolean): Promise<void> {
       set({ status: "available", info });
       if (manual) toast(`Culprit ${info.version} is available`);
     } else {
-      write(LAST_KEY, String(Date.now()));
+      remember(LAST_KEY, String(Date.now()));
       set({ status: "idle" });
       if (manual) toast("Culprit is up to date");
     }
@@ -118,7 +106,7 @@ export async function restartToUpdate(): Promise<void> {
 
 /** The daily check: first a few seconds after start, then on the hour, whenever a day has passed since the last. */
 export function startUpdateChecks(): () => void {
-  const due = () => autoCheckEnabled() && Date.now() - Number(read(LAST_KEY) ?? 0) >= DAY_MS;
+  const due = () => autoCheckEnabled() && Date.now() - Number(remembered(LAST_KEY) ?? 0) >= DAY_MS;
   const run = () => {
     if (due()) void checkForUpdates(false);
   };

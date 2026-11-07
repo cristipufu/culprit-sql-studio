@@ -7,7 +7,7 @@ import { api, errorMessage, type ApiError } from "../../lib/api";
 import { connectFacts, ENGINES } from "../../lib/engines";
 import { LatestRequest } from "../../lib/requests";
 import { loadConnections, openConnection } from "../../lib/store";
-import { remember, remembered } from "./DiscoverPanel";
+import { remember, rememberedChoice } from "../../lib/prefs";
 import { SshFields } from "./SshFields";
 import { sshConfig, type SshDraft } from "../../lib/ssh";
 import { EnginePicker } from "./EnginePicker";
@@ -26,8 +26,8 @@ const ENGINE_KEY = "culprit.new.engine";
  */
 export function NewConnectionForm({ onDone, canCancel }: { onDone: () => void; canCancel: boolean }) {
   const [engine, setEngine] = useState<Engine | null>(() => {
-    const last = remembered(ENGINE_KEY) as Engine;
-    return ENGINES.includes(last) ? last : null;
+    const last = rememberedChoice<Engine | "">(ENGINE_KEY, "", ENGINES);
+    return last || null;
   });
   const [switched, setSwitched] = useState(false);
   const [input, setInput] = useState("");

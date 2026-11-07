@@ -8,6 +8,7 @@ import { fuzzy, tableFindings, tableKey } from "../lib/schema-model";
 import { getState, setState, useStore } from "../lib/store";
 import { DriftPanel } from "../components/DriftPanel";
 import { SchemaTable } from "./SchemaTable";
+import { remember, rememberedAs } from "../lib/prefs";
 
 const IndexAdvisor = lazy(() => import("../components/IndexAdvisor"));
 
@@ -31,21 +32,6 @@ const MIN_W = 220;
 const MAX_W = 460;
 const DEFAULT_W = 290;
 
-function remembered<T>(key: string, parse: (v: string) => T | null, fallback: T): T {
-  try {
-    const v = localStorage.getItem(key);
-    return (v == null ? null : parse(v)) ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function remember(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {}
-}
-
 type Facts = {
   findings: number;
   titles: string[];
@@ -65,7 +51,7 @@ const SEVERITY_RANK = { high: 3, medium: 2, low: 1 } as const;
 export function Schema({ report }: { report: Report }) {
   const { snapshot } = report;
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<SortKey>(() => remembered(SORT_KEY, (v) => (SORTS.some((s) => s.key === v) ? (v as SortKey) : null), "size"));
+  const [sort, setSort] = useState<SortKey>(() => rememberedAs(SORT_KEY, (v) => (SORTS.some((s) => s.key === v) ? (v as SortKey) : null), "size"));
   const [selected, setSelected] = useState<string | null>(null);
   const [comparing, setComparing] = useState(false);
   // The dashboard's Indexes tile opens straight on the advisor.
@@ -85,8 +71,8 @@ export function Schema({ report }: { report: Report }) {
   // One index each: the schema-wide foreign-key finding lists many and is counted in the advisor instead.
   const toAdd = report.findings.filter((f) => ADD_CHECKS.includes(f.check) && f.subject.kind === "table").length;
   const toClean = report.findings.filter((f) => CLEANUP_CHECKS.includes(f.check)).length;
-  const [width, setWidth] = useState(() => remembered(WIDTH_KEY, (v) => Math.min(MAX_W, Math.max(MIN_W, Number(v) || DEFAULT_W)), DEFAULT_W));
-  const [collapsed, setCollapsed] = useState(() => remembered(COLLAPSED_KEY, (v) => v === "1", false));
+  const [width, setWidth] = useState(() => rememberedAs(WIDTH_KEY, (v) => Math.min(MAX_W, Math.max(MIN_W, Number(v) || DEFAULT_W)), DEFAULT_W));
+  const [collapsed, setCollapsed] = useState(() => rememberedAs(COLLAPSED_KEY, (v) => v === "1", false));
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 

@@ -9,6 +9,7 @@ import { can, serverName } from "../lib/engines";
 import { count, duration, oneLine } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
 import { currentReport, setState, toast, useStore } from "../lib/store";
+import { remember, rememberedChoice } from "../lib/prefs";
 
 const Deadlocks = lazy(() => import("./Deadlocks"));
 
@@ -21,18 +22,12 @@ type Tab = "sessions" | "deadlocks";
 type Sample = { at: number; active: number; blocked: number };
 
 function rememberedTab(): Tab {
-  try {
-    return localStorage.getItem(TAB_KEY) === "deadlocks" ? "deadlocks" : "sessions";
-  } catch {
-    return "sessions";
-  }
+  return rememberedChoice<Tab>(TAB_KEY, "sessions", ["sessions", "deadlocks"]);
 }
 
 /** Open Live on a tab, e.g. from the dashboard's Right now and Deadlocks tiles. */
 export function openLive(tab: Tab): void {
-  try {
-    localStorage.setItem(TAB_KEY, tab);
-  } catch {}
+  remember(TAB_KEY, tab);
   setState({ view: "live" });
 }
 
@@ -78,9 +73,7 @@ function LiveSessions({ connection }: { connection: string }) {
 
   const chooseTab = (next: Tab) => {
     setTab(next);
-    try {
-      localStorage.setItem(TAB_KEY, next);
-    } catch {}
+    remember(TAB_KEY, next);
   };
 
   // Polling stops while the window is hidden; the freshness label says so.

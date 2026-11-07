@@ -12,18 +12,14 @@ import { useHotkeys } from "../lib/hotkeys";
 import { indexKey, indexUsage, plannedQueryCount } from "../lib/index-usage";
 import { canSeek, columnMembership, coveredBy, ddl, referenceOf, relations, tableFindings, tableKey } from "../lib/schema-model";
 import { setState, toast } from "../lib/store";
+import { remember, rememberedChoice } from "../lib/prefs";
 
 type Tab = "columns" | "indexes" | "relations" | "data" | "ddl";
 
 const TAB_KEY = "culprit.schema.tab";
 
 function rememberedTab(): Tab {
-  try {
-    const v = localStorage.getItem(TAB_KEY);
-    return v === "indexes" || v === "relations" || v === "data" || v === "ddl" ? v : "columns";
-  } catch {
-    return "columns";
-  }
+  return rememberedChoice<Tab>(TAB_KEY, "columns", ["columns", "indexes", "relations", "data", "ddl"]);
 }
 
 async function copy(text: string, what: string) {
@@ -50,9 +46,7 @@ export function SchemaTable({ report, table, onOpenTable }: { report: Report; ta
   const findings = useMemo(() => tableFindings(report, table), [report, table]);
   const choose = (next: Tab) => {
     setTab(next);
-    try {
-      localStorage.setItem(TAB_KEY, next);
-    } catch {}
+    remember(TAB_KEY, next);
   };
   useHotkeys({
     c: () => choose("columns"),

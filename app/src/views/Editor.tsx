@@ -26,6 +26,7 @@ import { duration, oneLine } from "../lib/format";
 import { currentReport, getState, loadSaved, setState, toast, useStore } from "../lib/store";
 import { can, isMariadb, measuresRuns, sqlSyntax } from "../lib/engines";
 import { keys } from "../lib/keys";
+import { remember, rememberedAs, rememberedChoice } from "../lib/prefs";
 
 type StatementResult = { result: ResultSet; sql: string };
 
@@ -95,21 +96,6 @@ function titleFor(sql: string, index: number): string {
   return words ? (words.length > 28 ? `${words.slice(0, 27)}…` : words) : `Query ${index}`;
 }
 
-function remembered<T extends string>(key: string, fallback: T, allowed: readonly T[]): T {
-  try {
-    const v = localStorage.getItem(key) as T | null;
-    return v && allowed.includes(v) ? v : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function remember(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {}
-}
-
 export default function Editor({ connection }: { connection: ConnectionInfo }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
@@ -130,15 +116,9 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
   const [pending, setPending] = useState<PendingRun | null>(null);
   const [liveLint, setLiveLint] = useState<Finding[]>([]);
   const [naming, setNaming] = useState<string | null>(null);
-  const [rail, setRail] = useState(() => remembered(RAIL_KEY, "open", ["open", "closed"] as const));
+  const [rail, setRail] = useState(() => rememberedChoice(RAIL_KEY, "open", ["open", "closed"] as const));
   const [look, setLook] = useState<PlanLook>(rememberedLook);
-  const [split, setSplit] = useState(() => {
-    try {
-      return Math.min(0.8, Math.max(0.2, Number(localStorage.getItem(SPLIT_KEY)) || 0.45));
-    } catch {
-      return 0.45;
-    }
-  });
+  const [split, setSplit] = useState(() => rememberedAs(SPLIT_KEY, (v) => Math.min(0.8, Math.max(0.2, Number(v) || 0.45)), 0.45));
   const [catalog, setCatalog] = useState<Catalog | null>(() => catalogs.get(connection.name) ?? null);
   const [catalogBusy, setCatalogBusy] = useState(false);
   const report = useStore(currentReport);

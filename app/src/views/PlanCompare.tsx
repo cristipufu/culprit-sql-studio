@@ -33,6 +33,7 @@ import { useHotkeys } from "../lib/hotkeys";
 import { SAMPLES, setSide, swapSides, trySample, usePlans, type LoadedPlan } from "../lib/plans";
 import { deliver, exportOptions } from "../lib/share";
 import { can, planEngineName } from "../lib/engines";
+import { remember, rememberedChoice } from "../lib/prefs";
 
 const KIND: Record<Plan["kind"], string> = { estimated: "estimated", generic: "generic", actual: "actual" };
 const LOOK_KEY = "culprit.plan.look";
@@ -62,21 +63,6 @@ const SCENARIO: Record<ScenarioKind, { label: string; icon: ReactNode }> = {
   parallelism: { label: "Parallelism", icon: <Split size={15} /> },
   memory: { label: "Memory", icon: <MemoryStick size={15} /> },
 };
-
-function remembered<T extends string>(key: string, fallback: T, allowed: readonly T[]): T {
-  try {
-    const v = localStorage.getItem(key) as T | null;
-    return v && allowed.includes(v) ? v : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function remember(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {}
-}
 
 function cost(value: number): string {
   if (value < 10) return value.toFixed(3);
@@ -121,8 +107,8 @@ export function PlanCompare() {
   const [pickB, setPickB] = useState<number | null>(null);
   const [active, setActive] = useState<number | null>(null);
   const [tab, setTab] = useState<Tab>("changes");
-  const [look, setLookState] = useState<Look>(() => remembered(LOOK_KEY, "diagram", ["diagram", "tree"] as const));
-  const [sync, setSyncState] = useState(() => remembered(SYNC_KEY, "on", ["on", "off"] as const) === "on");
+  const [look, setLookState] = useState<Look>(() => rememberedChoice(LOOK_KEY, "diagram", ["diagram", "tree"] as const));
+  const [sync, setSyncState] = useState(() => rememberedChoice(SYNC_KEY, "on", ["on", "off"] as const) === "on");
   const [zoom, setZoom] = useState(0.8);
   const sideA = useRef<HTMLDivElement>(null);
   const sideB = useRef<HTMLDivElement>(null);

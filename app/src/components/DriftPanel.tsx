@@ -12,6 +12,7 @@ import { Sql } from "./Sql";
 import { serverName } from "../lib/engines";
 import { copyAndTell } from "../lib/clipboard";
 import { canOpenFixInEditor } from "../lib/editor-sql";
+import { remember, remembered } from "../lib/prefs";
 
 type DriftState = { status: "idle" } | { status: "loading" } | { status: "ready"; drift: Drift } | { status: "error"; error: ApiError };
 
@@ -27,21 +28,13 @@ function pickKey(name: string): string {
   return `culprit.drift.${name}`;
 }
 
-function remembered(name: string): string | null {
-  try {
-    return localStorage.getItem(pickKey(name));
-  } catch {
-    return null;
-  }
-}
-
 /** What differs between this connection's latest scan and another connection of the same engine. */
 export function DriftPanel({ report, onClose }: { report: Report; onClose: () => void }) {
   const active = useStore((s) => s.active) ?? report.snapshot.connection;
   const connections = useStore((s) => s.connections);
   const others = connections.filter((c) => c.engine === report.snapshot.server.engine && c.name !== active);
   const [other, setOther] = useState<string | null>(() => {
-    const last = remembered(active);
+    const last = remembered(pickKey(active));
     return others.find((c) => c.name === last)?.name ?? others[0]?.name ?? null;
   });
   const [state, setDrift] = useState<DriftState>({ status: "idle" });
@@ -61,9 +54,7 @@ export function DriftPanel({ report, onClose }: { report: Report; onClose: () =>
 
   const choose = (name: string) => {
     setOther(name);
-    try {
-      localStorage.setItem(pickKey(active), name);
-    } catch {}
+    remember(pickKey(active), name);
   };
 
   return (

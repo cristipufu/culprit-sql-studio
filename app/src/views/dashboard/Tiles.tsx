@@ -12,14 +12,11 @@ import { keys } from "../../lib/keys";
 import { querySummary } from "../../lib/query-summary";
 import { scan, setState } from "../../lib/store";
 import { openLive } from "../Live";
+import { rememberQueryTab } from "../Queries";
 
 /** Open a query in Queries, on one of its tabs. */
 export function openQuery(id: string, tab?: "summary" | "plan" | "history"): void {
-  if (tab) {
-    try {
-      localStorage.setItem("culprit.query.tab", tab);
-    } catch {}
-  }
+  if (tab) rememberQueryTab(tab);
   setState({ view: "queries", query: id });
 }
 
