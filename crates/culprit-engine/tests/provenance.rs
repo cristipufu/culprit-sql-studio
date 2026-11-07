@@ -447,13 +447,15 @@ fn digest_replays_retained_input_and_leaves_archived_private_evidence_out() {
         "2026-10-10T00:00:00Z",
         "ARCHIVED_PRIVATE_CHANGE",
     ));
-    let path = home.join("current.json");
-    std::fs::write(&path, serde_json::to_vec(&report).unwrap()).unwrap();
+    // Saved as a scan is, with its retained evidence.
+    let dir = home.join("saved");
+    let path = dir.join(format!("{}.json", report.snapshot.id));
+    culprit_engine::reports::save(&dir, &report).unwrap();
     let expected = ws.digest(None, Some(&path), None, 100, 100).unwrap();
     report.snapshot.workload = None;
     report.snapshot.tables.clear();
     report.findings.clear();
-    std::fs::write(&path, serde_json::to_vec(&report).unwrap()).unwrap();
+    culprit_engine::reports::save(&dir, &report).unwrap();
     let actual = ws.digest(None, Some(&path), None, 100, 100).unwrap();
     assert_eq!(serde_json::to_value(actual.clone()).unwrap(), serde_json::to_value(expected).unwrap());
     let json = serde_json::to_string(&actual).unwrap();

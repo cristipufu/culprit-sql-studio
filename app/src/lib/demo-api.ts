@@ -279,7 +279,6 @@ export async function demoApi(): Promise<Api> {
         taken_at: r.snapshot.taken_at,
         opportunities: r.summary.opportunities,
         headline: r.summary.headline,
-        window_days: r.snapshot.options && r.snapshot.options.window_minutes == null ? r.snapshot.options.window_days : null,
         window_minutes: windowMinutesOf(r.snapshot.options),
         product: r.snapshot.server.product,
         no_workload: r.snapshot.workload ? null : (r.summary.no_workload ?? "This scan has no query history."),

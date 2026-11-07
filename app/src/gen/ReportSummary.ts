@@ -2,11 +2,7 @@
 
 export type ReportSummary = { id: string, taken_at: string, opportunities: number, headline: string, 
 /**
- * The scan's window in whole days; absent when it was hours (`window_minutes`).
- */
-window_days: number | null, 
-/**
- * The scan's window in minutes. Absent from summaries written before windows could be hours.
+ * The scan's window in minutes; `None` for a scan taken without options.
  */
 window_minutes: number | null, 
 /**

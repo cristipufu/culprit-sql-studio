@@ -97,20 +97,6 @@ fn short_object(name: &str) -> String {
 }
 
 impl Counters {
-    /// Older counters omitted the scan id; the sidecar's actual file key can retain it. Never reconstruct an id
-    /// from a rounded timestamp or fill endpoint identity from today's connection.
-    pub(crate) fn bind_artifact(&mut self, id: &str) {
-        if self.reference.is_none()
-            && crate::reports::id_epoch(id).zip(epoch(&self.taken_at)).is_some_and(|(a, b)| (a - b).abs() <= 1.0)
-        {
-            self.reference = Some(culprit_core::ScanReference {
-                id: Some(id.into()),
-                taken_at: self.taken_at.clone(),
-                database: self.measurement.as_ref().map(|m| m.database.clone()),
-            });
-        }
-    }
-
     pub(crate) fn scan_reference(&self) -> culprit_core::ScanReference {
         self.reference
             .as_ref()

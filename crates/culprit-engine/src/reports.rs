@@ -38,10 +38,7 @@ pub struct ReportSummary {
     pub taken_at: String,
     pub opportunities: u32,
     pub headline: String,
-    /// The scan's window in whole days; absent when it was hours (`window_minutes`).
-    #[serde(default)]
-    pub window_days: Option<u32>,
-    /// The scan's window in minutes. Absent from summaries written before windows could be hours.
+    /// The scan's window in minutes; `None` for a scan taken without options.
     #[serde(default)]
     pub window_minutes: Option<u32>,
     /// The server as the scan saw it ("MariaDB 11.8.9"), so a list of connections can tell MariaDB from MySQL.
@@ -50,13 +47,6 @@ pub struct ReportSummary {
     /// Why the scan has no query history ("Query Store is OFF on this database."); `None` when it has one.
     #[serde(default)]
     pub no_workload: Option<String>,
-}
-
-impl ReportSummary {
-    /// The scan's window in minutes, for summaries from before hour windows too.
-    pub fn window(&self) -> Option<u32> {
-        self.window_minutes.or_else(|| self.window_days.map(|days| days.saturating_mul(MINUTES_PER_DAY)))
-    }
 }
 
 /// The pointer to the latest scan with a window (`latest-7d.json`, `latest-6h.json`), or to the latest of any.
@@ -73,7 +63,6 @@ fn summary_of(report: &Report) -> ReportSummary {
         taken_at: report.snapshot.taken_at.clone(),
         opportunities: report.summary.opportunities,
         headline: report.summary.headline.clone(),
-        window_days: report.snapshot.options.as_ref().filter(|o| o.window_minutes.is_none()).map(|o| o.window_days),
         window_minutes: report.snapshot.options.as_ref().map(|o| o.window_in_minutes()),
         product: Some(report.snapshot.server.product.clone()),
         no_workload: report.snapshot.no_workload_reason(),
@@ -96,7 +85,7 @@ pub fn save(dir: &Path, report: &Report) -> Result<()> {
     if latest_summary(dir, None).is_none_or(|old| may_replace_latest(&old, &summary)) {
         write_atomic(&summary_path(dir, None), &json)?;
     }
-    if let Some(minutes) = summary.window()
+    if let Some(minutes) = summary.window_minutes
         && latest_summary(dir, Some(minutes)).is_none_or(|old| may_replace_latest(&old, &summary))
     {
         write_atomic(&summary_path(dir, Some(minutes)), &json)?;
@@ -114,7 +103,7 @@ fn may_replace_latest(old: &ReportSummary, new: &ReportSummary) -> bool {
             .filter(|id| at.timestamp_subsec_nanos() == 0 && id.timestamp() == at.timestamp());
         Some(precise.unwrap_or(at))
     }
-    // Unparseable legacy timestamps cannot establish an ordering: preserve last-writer behavior for them.
+    // A timestamp that doesn't parse can't establish an ordering: the last writer wins.
     time(old).zip(time(new)).is_none_or(|(old, new)| old <= new)
 }
 
@@ -123,8 +112,6 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 const COUNTERS_SUFFIX: &str = ".counters.json";
-/// Reports from before counters files existed are read in full once; cap that work for a single scan.
-const MAX_BACKFILL: usize = 60;
 
 fn counters_path(dir: &Path, id: &str) -> PathBuf {
     dir.join(format!("{id}{COUNTERS_SUFFIX}"))
@@ -156,8 +143,7 @@ pub(crate) fn report_ids(dir: &Path) -> Vec<String> {
     ids
 }
 
-/// Running totals of every saved scan in the last [`trends::HISTORY_DAYS`] days, oldest first. Writes the counters file
-/// for older reports that don't have one yet.
+/// Running totals of every saved scan in the last [`trends::HISTORY_DAYS`] days, oldest first, from their counters files.
 pub fn counters_history(dir: &Path, now: &str) -> Vec<Counters> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
@@ -166,27 +152,15 @@ pub fn counters_history(dir: &Path, now: &str) -> Vec<Counters> {
     let mut paths: Vec<PathBuf> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
     paths.sort();
     let mut out = Vec::new();
-    let mut backfilled = 0;
     for path in paths.iter().filter(|p| is_report_file(p)) {
         let id = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         // Snapshot ids are their UTC timestamps (`20261011T120000.000Z`); skip old ones without opening them.
         if id_epoch(&id).is_some_and(|t| t < oldest) {
             continue;
         }
-        let sidecar = counters_path(dir, &id);
-        if let Some(mut c) = fs::read(&sidecar).ok().and_then(|b| serde_json::from_slice::<Counters>(&b).ok()) {
-            c.bind_artifact(&id);
-            out.push(c);
-            continue;
-        }
-        if backfilled >= MAX_BACKFILL {
-            continue;
-        }
-        backfilled += 1;
-        if let Some(c) = load_snapshot(path).ok().as_ref().and_then(Counters::from_snapshot) {
-            if let Ok(json) = serde_json::to_vec(&c) {
-                let _ = write_atomic(&sidecar, &json);
-            }
+        if let Some(c) =
+            fs::read(counters_path(dir, &id)).ok().and_then(|b| serde_json::from_slice::<Counters>(&b).ok())
+        {
             out.push(c);
         }
     }
@@ -345,11 +319,7 @@ pub fn rebuild_timeline(dir: &Path, snapshot: &mut culprit_core::Snapshot) {
         .into_iter()
         .filter(|id| id_epoch(id).is_some_and(|t| t >= oldest - 1.0 && t < now))
         .filter_map(|id| {
-            let mut counters = fs::read(counters_path(dir, &id))
-                .ok()
-                .and_then(|bytes| serde_json::from_slice::<Counters>(&bytes).ok())?;
-            counters.bind_artifact(&id);
-            Some(counters)
+            fs::read(counters_path(dir, &id)).ok().and_then(|bytes| serde_json::from_slice::<Counters>(&bytes).ok())
         })
         .collect();
     if history.is_empty() {
@@ -368,34 +338,22 @@ pub fn rebuild_timeline(dir: &Path, snapshot: &mut culprit_core::Snapshot) {
     }
 }
 
-/// Saved reports read for their eviction count where their counters file was written before it kept one, at most.
-const MAX_EVICTION_READS: usize = 10;
-
 /// [`trends::evictions_baseline`] over the scans saved in `dir` (the last [`trends::HISTORY_DAYS`] days, a day or more
-/// before `snapshot`), oldest first, stopping at the first the count continues: the oldest. A counters file written
-/// before counters kept pg_stat_statements' eviction count gets it from its report, a few at most. Writes nothing.
+/// before `snapshot`), oldest first, stopping at the first the count continues: the oldest. Writes nothing.
 pub fn evictions_baseline(dir: &Path, snapshot: &culprit_core::Snapshot) -> Option<culprit_core::CountBaseline> {
     trends::evictions(snapshot)?;
     let at = trends::epoch(&snapshot.taken_at)?;
     let newest = at - culprit_core::PER_DAY_MIN_HOURS * 3600.0;
     let oldest = at - trends::HISTORY_DAYS * 86_400.0;
     let mut history = Vec::new();
-    let mut reads = 0;
     for id in report_ids(dir) {
         // Ids are UTC timestamps to the millisecond, so a scan within a second of the cut is read and judged by its own.
         if id_epoch(&id).is_none_or(|t| t < oldest - 1.0 || t > newest + 1.0) {
             continue;
         }
-        // A report without a counters file has none to give: every scan writes one for those that do
-        // ([`counters_history`]).
+        // A report without a counters file has none to give.
         let saved = fs::read(counters_path(dir, &id)).ok().and_then(|b| serde_json::from_slice::<Counters>(&b).ok());
-        let Some(mut counters) = saved else { continue };
-        counters.bind_artifact(&id);
-        if counters.evictions.is_none() && reads < MAX_EVICTION_READS {
-            reads += 1;
-            counters.evictions =
-                load_snapshot(&dir.join(format!("{id}.json"))).ok().and_then(|s| trends::evictions(&s));
-        }
+        let Some(counters) = saved else { continue };
         history.push(counters);
         if let Some(baseline) = trends::evictions_baseline(&history, snapshot) {
             return Some(baseline);
@@ -445,8 +403,6 @@ struct StoredHistoryScan {
     snapshot: culprit_core::Snapshot,
     #[serde(default, rename = "_culprit_store")]
     stored: Option<StoredRecordedChanges>,
-    #[serde(default)]
-    evidence: Option<StoredRecordedChanges>,
 }
 
 #[derive(Deserialize)]
@@ -480,7 +436,7 @@ pub(crate) fn load_snapshot_and_recorded_changes(
     let bytes = fs::read(path).map_err(|e| Error::not_found(format!("{}: {e}", path.display())))?;
     match serde_json::from_slice::<StoredHistoryScan>(&bytes) {
         Ok(scan) => {
-            let recorded = scan.stored.or(scan.evidence).map(|r| r.recorded_changes).unwrap_or_default();
+            let recorded = scan.stored.map(|r| r.recorded_changes).unwrap_or_default();
             Ok((scan.snapshot, recorded))
         }
         Err(e) if e.to_string().starts_with("missing field `snapshot`") => {
@@ -492,21 +448,19 @@ pub(crate) fn load_snapshot_and_recorded_changes(
     }
 }
 
-/// Analysis reads retained input, while history's `load_snapshot` continues to read the scan's prepared picture.
-/// A wrapper containing only `snapshot` remains accepted, as it was before reports retained replay evidence.
+/// Analysis reads retained input, while history's `load_snapshot` continues to read the scan's prepared picture. The
+/// file is a saved report or a bare snapshot (`culprit analyze file.json`).
 pub(crate) fn load_analysis_input(path: &Path) -> Result<crate::analysis::Input> {
     let bytes = fs::read(path).map_err(|e| Error::not_found(format!("{}: {e}", path.display())))?;
-    let mut value: serde_json::Value =
+    let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|e| Error::invalid(format!("{}: {e}", path.display())))?;
     if value.get("snapshot").is_some() && value.get("findings").is_some() && value.get("summary").is_some() {
         return storage::analysis_input(value)
             .map_err(|e| Error::invalid(format!("{} is not a Culprit report: {e}", path.display())));
     }
-    let wrapped = value.get("snapshot").is_some();
-    let snapshot = if wrapped { value["snapshot"].take() } else { value };
-    let snapshot: culprit_core::Snapshot = serde_json::from_value(snapshot)
+    let snapshot: culprit_core::Snapshot = serde_json::from_value(value)
         .map_err(|e| Error::invalid(format!("{} is not a Culprit snapshot or report: {e}", path.display())))?;
-    Ok(if wrapped { crate::analysis::Input::prepared(snapshot) } else { crate::analysis::Input::from(snapshot) })
+    Ok(crate::analysis::Input::from(snapshot))
 }
 
 pub fn list(dir: &Path) -> Result<Vec<ReportSummary>> {
@@ -524,51 +478,10 @@ pub fn list(dir: &Path) -> Result<Vec<ReportSummary>> {
                 .ok()
                 .and_then(|b| serde_json::from_slice::<ReportSummary>(&b).ok())
                 .filter(|s| s.id == id)
-                .or_else(|| summary_from_file(&p))
         })
         .collect();
     out.sort_by(|a, b| b.taken_at.cmp(&a.taken_at));
     Ok(out)
-}
-
-/// Legacy reports have no summary sidecar. Deserialize only the few fields a history row needs, skipping plans,
-/// findings and retained evidence directly in the JSON parser. Listing remains read-only.
-fn summary_from_file(path: &Path) -> Option<ReportSummary> {
-    #[derive(Deserialize)]
-    struct Header {
-        snapshot: Picture,
-        summary: Headline,
-    }
-    #[derive(Deserialize)]
-    struct Picture {
-        id: String,
-        taken_at: String,
-        options: Option<culprit_core::SnapshotOptions>,
-        server: Product,
-    }
-    #[derive(Deserialize)]
-    struct Product {
-        product: String,
-    }
-    #[derive(Deserialize)]
-    struct Headline {
-        opportunities: u32,
-        headline: String,
-        #[serde(default)]
-        no_workload: Option<String>,
-    }
-    let reader = std::io::BufReader::new(fs::File::open(path).ok()?);
-    let h: Header = serde_json::from_reader(reader).ok()?;
-    Some(ReportSummary {
-        id: h.snapshot.id,
-        taken_at: h.snapshot.taken_at,
-        opportunities: h.summary.opportunities,
-        headline: h.summary.headline,
-        window_days: h.snapshot.options.as_ref().filter(|o| o.window_minutes.is_none()).map(|o| o.window_days),
-        window_minutes: h.snapshot.options.as_ref().map(|o| o.window_in_minutes()),
-        product: Some(h.snapshot.server.product),
-        no_workload: h.summary.no_workload,
-    })
 }
 
 #[cfg(test)]
@@ -589,7 +502,7 @@ mod tests {
     }
 
     #[test]
-    fn history_rows_use_sidecars_or_stream_only_the_legacy_header() {
+    fn history_rows_come_from_summary_sidecars_without_reading_reports() {
         let dir = std::env::temp_dir().join(format!("culprit-summary-header-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let report = fixture_report("20261021T100000.000Z", 60);
@@ -597,16 +510,15 @@ mod tests {
         assert_eq!(report_ids(&dir), vec![report.snapshot.id.clone()]);
         let path = dir.join(format!("{}.json", report.snapshot.id));
         let header = list(&dir).unwrap();
-        // No full report deserialization is needed for a history row, even without the new sidecar.
+        assert_eq!(header[0].window_minutes, Some(60));
+        // The report itself isn't read for its row.
         let mut value = serde_json::to_value(display(&report)).unwrap();
         value["findings"] = serde_json::json!("Not a typed finding array");
         fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
         assert_eq!(list(&dir).unwrap()[0].id, header[0].id);
+        // Without its summary, a report has no row.
         fs::remove_file(dir.join(format!("{}.summary.json", report.snapshot.id))).unwrap();
-        let legacy = list(&dir).unwrap();
-        assert_eq!(legacy[0].id, header[0].id);
-        assert_eq!(legacy[0].headline, header[0].headline);
-        assert_eq!(legacy[0].window(), Some(60));
+        assert!(list(&dir).unwrap().is_empty());
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -676,7 +588,7 @@ mod tests {
         assert_eq!(id(None), "20261013T090000");
         assert_eq!(id(Some(360)), "20261013T090000");
         let summary = latest_summary(&dir, Some(360)).expect("6h summary");
-        assert_eq!((summary.window_days, summary.window_minutes, summary.window()), (None, Some(360), Some(360)));
+        assert_eq!(summary.window_minutes, Some(360));
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -704,15 +616,6 @@ mod tests {
         save(&dir, &older).unwrap();
         assert_latest("release-10");
         fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn a_summary_from_before_hour_windows_still_names_its_window() {
-        let old: ReportSummary =
-            serde_json::from_str(r#"{"id":"x","taken_at":"t","opportunities":1,"headline":"h","window_days":7}"#)
-                .expect("old summary");
-        assert_eq!(old.window(), Some(7 * MINUTES_PER_DAY));
-        assert_eq!(summary_path(Path::new("/r"), old.window()), Path::new("/r/latest-7d.json"));
     }
 
     #[test]

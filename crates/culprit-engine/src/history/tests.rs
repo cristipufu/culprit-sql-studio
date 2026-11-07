@@ -69,7 +69,7 @@ fn userstat_counters_count_from_the_scans_that_saw_them() {
 }
 
 #[test]
-fn index_age_uses_its_database_and_past_scans_and_upgrades_old_event_sidecars() {
+fn index_age_uses_its_database_and_past_scans() {
     let dir = std::env::temp_dir().join(format!("culprit-history-scoped-age-{}", std::process::id()));
     let mut current = demo();
     let bind = |s: &mut Snapshot, host: &str| {
@@ -95,10 +95,10 @@ fn index_age_uses_its_database_and_past_scans_and_upgrades_old_event_sidecars() 
     own.id = "20261010T080000.000Z".into();
     own.taken_at = "2026-10-10T08:00:00Z".into();
     reports::save(&dir, &culprit_checks::analyze(own.clone())).unwrap();
-    // Existing Vec sidecars remain useful, but their identity must come from their saved report.
+    // The scan kept a creation the database dated.
     let mut dated_creation = created("2026-10-09T08:00:00Z");
     dated_creation.source = EventSource::Database;
-    keep(&dir, &own.id, &[dated_creation]);
+    keep_scan(&dir, &own, None, &[dated_creation]);
     let mut foreign = own.clone();
     bind(&mut foreign, "foreign.invalid");
     foreign.id = "20261011T080000.000Z".into();

@@ -122,8 +122,8 @@ impl Reports<'_> {
         let previous = match (since, name, report) {
             (Some(path), _, _) => Some(recheck(load_file(path)?)),
             (None, Some(name), None) => {
-                let window = history.first().and_then(|r| r.window());
-                match history.iter().skip(1).find(|r| r.window() == window) {
+                let window = history.first().and_then(|r| r.window_minutes);
+                match history.iter().skip(1).find(|r| r.window_minutes == window) {
                     Some(summary) => Some(recheck(load(name, &summary.id)?)),
                     None => None,
                 }
