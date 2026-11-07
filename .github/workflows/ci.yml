@@ -161,6 +161,9 @@ jobs:
           bun run build
       - name: Clippy (desktop app)
         run: cargo clippy --locked -p culprit-app --all-targets -- -D warnings
+      # The workspace tests leave the desktop crate out; its own run here, on each platform it ships for.
+      - name: Test (desktop app)
+        run: cargo test --locked -p culprit-app --lib
       # Unsigned: no certificates or notarization secrets in CI. Local signed builds use dev/build-local.sh.
       - name: Bundle
         working-directory: app
