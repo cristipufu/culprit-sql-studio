@@ -41,15 +41,13 @@ pub(super) fn misestimate(cx: &Cx) -> Vec<Draft> {
             let mut spill_above = false;
             // What was planned from this estimate: joins, sorts, aggregates, spools, parallelism above it.
             let mut consumers = false;
-            let mut cur = cx.parent(n);
-            while let Some(p) = cur {
+            for p in cx.ancestors(n) {
                 above += cx.share(p);
                 spill_above |= p.warnings.contains(&PlanWarning::Spill);
                 consumers |= matches!(
                     p.kind,
                     NodeKind::Join | NodeKind::Sort | NodeKind::Aggregate | NodeKind::Spool | NodeKind::Parallelism
                 ) || p.op.contains("Hash");
-                cur = cx.parent(p);
             }
             let impact = (cx.subtree(n) + above).min(1.0);
             let mut d = Draft::new("misestimate", InsightArea::Statistics, impact, vec![n.id]);

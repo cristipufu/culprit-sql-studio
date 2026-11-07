@@ -627,6 +627,23 @@ fn lookups_need_volume_and_name_the_covering_index() {
     assert_eq!(i.severity, Severity::Low);
 }
 
+// The fuzz tests' damaged plans: a step that repeats its parent's id led the misestimate's walk up the plan back to
+// itself, forever.
+#[test]
+fn a_plan_whose_ids_repeat_cannot_trap_the_walk_up_it() {
+    let mut scan = node(1, "Seq Scan", NodeKind::Scan);
+    scan.object = Some("public.customers".into());
+    scan.est_rows = 248.0;
+    scan.act_rows = Some(49_997.0);
+    scan.warnings = vec![PlanWarning::Misestimate];
+    let mut sort = node(1, "Sort", NodeKind::Sort);
+    sort.act_rows = Some(49_997.0);
+    sort.children = vec![scan];
+    let mut p = plan(Engine::Postgres, sort);
+    p.kind = PlanKind::Actual;
+    assert!(insights(&p).iter().any(|i| i.rule == "misestimate"));
+}
+
 #[test]
 fn spills_and_misestimates_explain_each_other() {
     let mut scan = node(2, "Seq Scan", NodeKind::Scan);

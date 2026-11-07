@@ -476,6 +476,18 @@ impl<'a> Cx<'a> {
         self.parent.get(&n.id).copied()
     }
 
+    /// The steps above `n`, nearest first. Parents are found by id, so a plan whose ids repeat (damaged or hand-edited
+    /// text) can lead back to a step already passed: the walk stops after as many steps as the plan has.
+    fn ancestors(&self, n: &PlanNode) -> impl Iterator<Item = &'a PlanNode> + '_ {
+        let mut cur = self.parent(n);
+        std::iter::from_fn(move || {
+            let p = cur?;
+            cur = self.parent(p);
+            Some(p)
+        })
+        .take(self.nodes.len())
+    }
+
     fn statement(&self) -> String {
         self.plan.statement.clone().unwrap_or_default().to_ascii_lowercase()
     }
