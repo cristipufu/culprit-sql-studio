@@ -5,10 +5,12 @@
 all-features = true
 
 [advisories]
-# Vulnerabilities, unsound code, unmaintained crates and yanked versions fail the check, except the advisories below.
+# Vulnerabilities, unsound code and unmaintained crates anywhere in the graph (cargo-deny reports unsound code only in
+# direct dependencies by default), and yanked versions, fail the check, except the advisories below.
 # Each is a crate this workspace doesn't depend on directly and that has no fixed release reachable from here; drop the
 # entry when the crate that pulls it in moves on.
 yanked = "deny"
+unsound = "all"
 ignore = [
     { id = "RUSTSEC-2024-0429", reason = "glib 0.18 (unsound VariantStrIter, fixed in 0.20): Tauri's GTK3 stack on Linux pins it" },
     { id = "RUSTSEC-2024-0370", reason = "proc-macro-error (unmaintained): a build-time macro dependency of glib 0.18 in Tauri's GTK3 stack" },
