@@ -92,13 +92,13 @@ pub(super) fn events_traced(
         // A scan's file holds what happened since the scan before it (or, for the first, what the database dated).
         let wanted = reports::id_epoch(id).is_some_and(|t| t >= start - 1.0 && (current.is_none() || t <= end));
         if let Some(record) = read(dir, id) {
-            if wanted {
-                if current.is_none_or(|s| {
+            if wanted
+                && current.is_none_or(|s| {
                     !record.inputs.is_empty() && record.inputs.iter().all(|r| reference_matches(r, s, end))
-                }) {
-                    out.extend(record.events);
-                    inputs.extend(record.inputs);
-                }
+                })
+            {
+                out.extend(record.events);
+                inputs.extend(record.inputs);
             }
             previous = None;
             continue;
