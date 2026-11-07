@@ -24,6 +24,7 @@ export function Columns({
     return <div className="notice">{note?.message ?? "This scan has no column metadata. Re-scan to collect it."}</div>;
   }
   return (
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling region takes focus so the keyboard can scroll it
     <div className="td-grid-wrap" role="region" aria-label="Columns" tabIndex={0}>
       <table className="grid td-grid columns-grid">
         <colgroup>

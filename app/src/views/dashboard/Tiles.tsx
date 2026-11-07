@@ -48,6 +48,7 @@ export function Frame({ tile, action, onOpen, className = "", children, foot }: 
     <section
       className={`dash-tile t-${tile.key} ${tile.status} ${onOpen ? "openable" : ""} ${className}`}
       data-tile={tile.key}
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: Enter or Space opens the tile's view; its own buttons stay separate stops
       tabIndex={0}
       aria-labelledby={titleId}
       aria-describedby={`dash-${tile.key}-takeaway`}

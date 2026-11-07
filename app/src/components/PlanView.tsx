@@ -153,11 +153,22 @@ export function PlanView({ plan, query, focus, compact, selectedId, onSelect }: 
                 onSelect?.(node.id);
               }}
               onDoubleClick={() => toggle(node.id)}
+              // A tree's keys: ArrowRight opens a step's children, ArrowLeft closes them.
+              aria-expanded={node.children.length > 0 ? expanded.has(node.id) : undefined}
+              onKeyDown={(e) => {
+                const open = expanded.has(node.id);
+                if (node.children.length > 0 && ((e.key === "ArrowRight" && !open) || (e.key === "ArrowLeft" && open))) {
+                  e.preventDefault();
+                  toggle(node.id);
+                }
+              }}
             >
               <span className="label">
                 <span className="indent" style={{ width: Math.min(depth, 12) * 12 }} />
+                {/* A pointer shortcut: the row's ArrowRight and ArrowLeft open and close it. */}
                 <span
                   className="twisty"
+                  aria-hidden
                   onClick={(e) => {
                     e.stopPropagation();
                     toggle(node.id);

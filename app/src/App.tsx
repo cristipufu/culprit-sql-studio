@@ -165,6 +165,7 @@ function TopBar() {
       )}
       <span className="spacer" />
       {report?.scanError && (
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: focusing it opens the error's details (:focus-within), as hovering does
         <div className="scan-error-anchor" tabIndex={0}>
           <span className="tag high scan-error-badge">
             <AlertCircle size={12} aria-hidden />

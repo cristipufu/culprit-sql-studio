@@ -214,6 +214,7 @@ export function TimeChart({ buckets, max, format, height, children, readout, pea
         ref={plot}
         className={`tc-plot ${onSelect ? "brushable" : ""}`}
         style={{ height }}
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: arrow keys move the time cursor, Shift+arrows select a period
         tabIndex={0}
         role="img"
         aria-label={ariaLabel}

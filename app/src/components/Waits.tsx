@@ -80,6 +80,7 @@ export function WaitsVital({ report, onOpen }: { report: Report; onOpen: OpenWai
       </div>
       <div className="waits-bar" aria-hidden>
         {waits.map((w) => (
+          // biome-ignore lint/a11y/useKeyWithClickEvents: a pointer shortcut in an aria-hidden bar; the card opens the same view from the keyboard
           <span
             key={w.key}
             title={`${w.label} · ${percent(w.share)}`}

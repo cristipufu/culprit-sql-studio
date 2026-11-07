@@ -32,6 +32,7 @@ export function Indexes({ report, table, indexes, links }: { report: Report; tab
     );
   return (
     <>
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling region takes focus so the keyboard can scroll it */}
       <div className="td-grid-wrap" role="region" aria-label="Indexes" tabIndex={0}>
         <table className="grid td-grid ix-grid">
           <colgroup>

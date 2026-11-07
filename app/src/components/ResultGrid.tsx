@@ -108,6 +108,7 @@ export function ResultGrid({ result, types, summary, order, onSort, sortDisabled
           const r = start + index;
           return (
             <tr key={r} aria-rowindex={r + 2} className={selected?.row === r ? "on" : ""}>
+              {/* biome-ignore lint/a11y/useFocusableInteractive: the grid takes focus; its cells are named by aria-activedescendant */}
               <td
                 className="rg-n"
                 // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: ARIA in HTML lets a grid's td be its row header; a th would stick to the top with the column headers
@@ -116,6 +117,7 @@ export function ResultGrid({ result, types, summary, order, onSort, sortDisabled
                 {r + 1}
               </td>
               {row.map((value, col) => (
+                // biome-ignore lint/a11y/useFocusableInteractive lint/a11y/useKeyWithClickEvents: the grid takes focus and its arrow keys move this selection; a click is the pointer's way to it
                 <td
                   key={col}
                   id={`${id}-${r}-${col}`}

@@ -140,6 +140,7 @@ export function PlanOperations({ plan, query: statement, focus, selectedId, onSe
       </div>
       <div
         className="ops-scroll"
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: arrow keys and j/k move the selected operation from here
         tabIndex={0}
         onKeyDown={(e) => {
           if (e.key === "ArrowDown" || e.key === "j") {

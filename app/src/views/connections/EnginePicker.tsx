@@ -90,6 +90,7 @@ export function EnginePicker({ id, value, onChange, autoFocus }: { id: string; v
           </div>
           <div className="engine-options" id={listId} role="listbox" aria-label="Database types">
             {options.map((engine, index) => (
+              // biome-ignore lint/a11y/useFocusableInteractive lint/a11y/useKeyWithClickEvents: focus stays in the search field, whose arrow keys and Enter pick an option through aria-activedescendant
               <div key={engine} id={optionId(engine)} role="option" aria-selected={value === engine}
                 className={`engine-option ${index === current ? "active" : ""}`}
                 onPointerMove={() => setActive(index)} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(engine)}>

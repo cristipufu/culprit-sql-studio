@@ -2659,6 +2659,24 @@ table.grid td.sqlcell {
   border-color: var(--border);
 }
 
+/* The name and SQL open the query: a plain block that reads as the card, not as a button. */
+.saved-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.saved-open .saved-name,
+.saved-open .saved-sql {
+  display: block;
+}
+
 .saved-name {
   font-weight: 600;
   font-size: var(--fs-ui);

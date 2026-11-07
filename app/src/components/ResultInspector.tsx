@@ -91,6 +91,7 @@ function ValuePreview({ text, wrap, isNull }: { text: string; wrap: boolean; isN
   const [limit, setLimit] = useState(VALUE_PREVIEW_CHARS);
   const preview = valuePreview(text, limit);
   return <div className="rg-value-preview">
+    {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling region takes focus so the keyboard can scroll it */}
     <div className="rg-value-scroll" role="region" tabIndex={0} aria-label="Cell value"><pre className={`${wrap ? "wrap" : ""} ${isNull ? "null" : ""}`}>{preview}</pre></div>
     {preview.length < text.length && <div className="rg-preview-more"><span>Showing {preview.length.toLocaleString()} of {text.length.toLocaleString()} characters. Copy includes the full value.</span><button type="button" className="btn ghost" onClick={() => setLimit(Math.min(text.length, limit * 2))}>Show more</button></div>}
   </div>;

@@ -250,13 +250,13 @@ export function StorageLatency({ files, engine, report, compact }: { files: File
       )}
       <p className={`beyond-lead ${lead.status}`}>{lead.text}</p>
       <div className="io-table" role="table" aria-label="Storage latency per file">
-        <div className="io-row io-th" role="row">
-          <span role="columnheader">File</span>
-          <span role="columnheader">Reads</span>
-          <span role="columnheader">{writeHeading}</span>
-        </div>
+        <IoRow className="io-th">
+          <IoHeader>File</IoHeader>
+          <IoHeader>Reads</IoHeader>
+          <IoHeader>{writeHeading}</IoHeader>
+        </IoRow>
         {files.slice(0, compact ? 8 : 12).map((f) => (
-          <div key={`${f.database ?? ""}:${f.name}`} className="io-row" role="row">
+          <IoRow key={`${f.database ?? ""}:${f.name}`}>
             <span className="io-name" role="cell">
               <i className={`sig-dot ${storageStatus(report, f)}`} aria-hidden />
               <span className="io-file" title={`${fileName(f)} · ${f.stats_reset ? `statistics since ${f.stats_reset}` : "statistics period not recorded"}`}>
@@ -266,7 +266,7 @@ export function StorageLatency({ files, engine, report, compact }: { files: File
             </span>
             <Latency ms={f.read_ms} n={f.reads} label="reads" />
             <Latency ms={f.write_ms} n={f.writes} label={f.write_operation === "flush" ? "flushes" : "writes"} />
-          </div>
+          </IoRow>
         ))}
       </div>
     </section>
@@ -290,7 +290,7 @@ export function Replication({ replicas, report }: { replicas: Replica[]; report:
       <p className={`beyond-lead ${ws}`}>{lead}</p>
       <div className="io-table" role="table" aria-label="Replicas">
         {replicas.map((r) => (
-          <div key={`${r.role}:${r.name}`} className="io-row repl" role="row">
+          <IoRow key={`${r.role}:${r.name}`} className="repl">
             <span className="io-name" role="cell">
               <i className={`sig-dot ${replicaStatus(report, r)}`} aria-hidden />
               <span className="io-file">{r.name}</span>
@@ -309,7 +309,7 @@ export function Replication({ replicas, report }: { replicas: Replica[]; report:
                 .filter(Boolean)
                 .join(" · ") || "—"}
             </span>
-          </div>
+          </IoRow>
         ))}
       </div>
     </section>
@@ -481,16 +481,16 @@ export function SignalEvidence({ report, finding }: { report: Report; finding: F
         <section>
           <h3>Evidence</h3>
           <div className="io-table" role="table" aria-label={`Lock escalations on ${table}`}>
-            <div className="io-row io-th" role="row">
-              <span role="columnheader">On {table}</span>
-              <span role="columnheader">Table locks</span>
-              <span role="columnheader">Lock waits</span>
-            </div>
+            <IoRow className="io-th">
+              <IoHeader>On {table}</IoHeader>
+              <IoHeader>Table locks</IoHeader>
+              <IoHeader>Lock waits</IoHeader>
+            </IoRow>
             {indexes.map((i) => {
               const c = i.contention!;
               const waits = c.row_lock_waits + c.page_lock_waits;
               return (
-                <div key={i.name} className="io-row" role="row">
+                <IoRow key={i.name}>
                   <span className="io-name" role="cell">
                     {i.name}
                   </span>
@@ -500,7 +500,7 @@ export function SignalEvidence({ report, finding }: { report: Report; finding: F
                   <span className="io-cell" role="cell">
                     {waits > 0 ? `${count(waits)}, ${duration(c.row_lock_wait_ms + c.page_lock_wait_ms)}` : "none"}
                   </span>
-                </div>
+                </IoRow>
               );
             })}
           </div>
@@ -525,14 +525,14 @@ export function SignalEvidence({ report, finding }: { report: Report; finding: F
         <section>
           <h3>Evidence</h3>
           <div className="io-table" role="table" aria-label={`Waits on ${index.name}`}>
-            <div className="io-row four io-th" role="row">
-              <span role="columnheader">On {index.name}</span>
-              <span role="columnheader">Waits</span>
-              <span role="columnheader">In all</span>
-              <span role="columnheader">Average</span>
-            </div>
+            <IoRow className="four io-th">
+              <IoHeader>On {index.name}</IoHeader>
+              <IoHeader>Waits</IoHeader>
+              <IoHeader>In all</IoHeader>
+              <IoHeader>Average</IoHeader>
+            </IoRow>
             {rows.map(([label, n, ms]) => (
-              <div key={label} className={`io-row four ${n > 0 ? "" : "quiet"}`} role="row">
+              <IoRow key={label} className={`four ${n > 0 ? "" : "quiet"}`}>
                 <span className="io-name" role="cell">
                   {label}
                 </span>
@@ -545,7 +545,7 @@ export function SignalEvidence({ report, finding }: { report: Report; finding: F
                 <span className="io-cell" role="cell">
                   {n > 0 ? <b>{duration(ms / n)}</b> : "—"}
                 </span>
-              </div>
+              </IoRow>
             ))}
           </div>
           <p className="beyond-foot">
@@ -559,4 +559,22 @@ export function SignalEvidence({ report, finding }: { report: Report; finding: F
     default:
       return null;
   }
+}
+
+/** A row of a static table (role="table"): read, never focused or operated, unlike a grid's row. */
+function IoRow({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    // biome-ignore lint/a11y/useFocusableInteractive: a static table's row; only a grid's rows take focus
+    <div className={className ? `io-row ${className}` : "io-row"} role="row">
+      {children}
+    </div>
+  );
+}
+
+/** A column header of a static table. */
+function IoHeader({ children }: { children: ReactNode }) {
+  return (
+    // biome-ignore lint/a11y/useFocusableInteractive: a static table's column header; only a grid's headers take focus
+    <span role="columnheader">{children}</span>
+  );
 }

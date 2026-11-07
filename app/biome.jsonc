@@ -11,16 +11,21 @@
     "rules": {
       "preset": "none",
       "a11y": {
+        "preset": "recommended",
         // Without a type a button submits whatever form it ends up in, including one a parent component renders.
         "useButtonType": "error",
-        // What a screen reader is told: required and supported ARIA attributes, names, labels and roles.
-        "useAriaPropsForRole": "error",
-        "useAriaPropsSupportedByRole": "error",
-        "useAriaActivedescendantWithTabindex": "error",
-        "noSvgWithoutTitle": "error",
-        "noLabelWithoutControl": "error",
-        "noNoninteractiveElementToInteractiveRole": "error",
-        "noInteractiveElementToNoninteractiveRole": "error"
+        // Focus moves into a dialog, an inline confirmation or a rename field when the person opens it (the WAI-ARIA
+        // dialog pattern); nothing takes focus on its own when a view loads.
+        "noAutofocus": "off",
+        // ARIA tables, radio groups and statuses on styled elements are accessible as written; swapping in native
+        // elements would change the layout without changing what a screen reader says.
+        "useSemanticElements": "off",
+        // These flag containers: backdrops that close on a click (Escape closes them from the keyboard), drop zones
+        // (Paste or Open does the same), composite widgets whose key handlers serve their focusable children, menus
+        // that keep their clicks inside. A click without keys, or a control that can't take focus, is still an
+        // error: useKeyWithClickEvents and useFocusableInteractive stay on.
+        "noStaticElementInteractions": "off",
+        "noNoninteractiveElementInteractions": "off"
       },
       "correctness": {
         "preset": "recommended",

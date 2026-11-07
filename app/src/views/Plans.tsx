@@ -290,7 +290,20 @@ function Single({ item }: { item: LoadedPlan }) {
         </button>
       </div>
       {plan.statement && (
-        <div className={`plans-sql ${showSql ? "open" : ""}`} onClick={() => setShowSql((v) => !v)} title={showSql ? "Collapse" : "Show the whole statement"}>
+        <div
+          className={`plans-sql ${showSql ? "open" : ""}`}
+          role="button"
+          tabIndex={0}
+          aria-expanded={showSql}
+          onClick={() => setShowSql((v) => !v)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setShowSql((v) => !v);
+            }
+          }}
+          title={showSql ? "Collapse" : "Show the whole statement"}
+        >
           <Sql text={plan.statement} />
         </div>
       )}

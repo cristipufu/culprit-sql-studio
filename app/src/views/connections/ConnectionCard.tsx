@@ -275,7 +275,7 @@ function QueryLogSetting({ connection: c }: { connection: ConnectionInfo }) {
   };
   if (isDesktop() && open) {
     return (
-      <span className="conn-settings-editor" onClick={(e) => e.stopPropagation()}>
+      <span className="conn-settings-editor">
         <span className="muted mono" title={c.query_log ?? ""}>
           {file}
         </span>
@@ -309,7 +309,7 @@ function QueryLogSetting({ connection: c }: { connection: ConnectionInfo }) {
     );
   }
   return (
-    <span className="conn-settings-editor" onClick={(e) => e.stopPropagation()}>
+    <span className="conn-settings-editor">
       <input
         className="alias-input"
         autoFocus
@@ -364,7 +364,7 @@ function SetPassword({ name }: { name: string }) {
     );
   }
   return (
-    <span className="conn-settings-editor" onClick={(e) => e.stopPropagation()}>
+    <span className="conn-settings-editor">
       <input
         className="alias-input"
         type="password"

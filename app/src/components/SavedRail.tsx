@@ -103,21 +103,25 @@ export function SavedRail({ current, saved, active, onOpen, onRenamed, onDeleted
           </div>
         )}
         {list.map((q) => (
-          <div key={q.name} className={`saved-item ${active === q.name ? "on" : ""}`} onClick={() => onOpen(q, false)} title={q.description ?? q.sql}>
+          <div key={q.name} className={`saved-item ${active === q.name ? "on" : ""}`} title={q.description ?? q.sql}>
             {renaming?.from === q.name ? (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void rename();
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <input autoFocus className="saved-rename" value={renaming.to} onChange={(e) => setRenaming({ ...renaming, to: e.target.value })} onBlur={() => void rename()} onKeyDown={(e) => e.key === "Escape" && setRenaming(null)} />
-              </form>
+              <>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void rename();
+                  }}
+                >
+                  <input autoFocus className="saved-rename" value={renaming.to} onChange={(e) => setRenaming({ ...renaming, to: e.target.value })} onBlur={() => void rename()} onKeyDown={(e) => e.key === "Escape" && setRenaming(null)} />
+                </form>
+                <div className="saved-sql">{firstLine(q.sql)}</div>
+              </>
             ) : (
-              <div className="saved-name">{q.name}</div>
+              <button type="button" className="saved-open" onClick={() => onOpen(q, false)}>
+                <span className="saved-name">{q.name}</span>
+                <span className="saved-sql">{firstLine(q.sql)}</span>
+              </button>
             )}
-            <div className="saved-sql">{firstLine(q.sql)}</div>
             <div className="saved-meta">
               {q.connection && (
                 <span className={`saved-conn ${q.connection === current.name ? "here" : ""} ${engineOf(connections, q.connection) && engineOf(connections, q.connection) !== current.engine ? "other-engine" : ""}`} title={engineOf(connections, q.connection) && engineOf(connections, q.connection) !== current.engine ? `Saved for a different engine than ${current.name}` : undefined}>
@@ -129,7 +133,7 @@ export function SavedRail({ current, saved, active, onOpen, onRenamed, onDeleted
               )}
               <span className="spacer" />
               {deleting === q.name ? (
-                <span className="saved-confirm" onClick={(e) => e.stopPropagation()}>
+                <span className="saved-confirm">
                   Delete?
                   <button type="button" className="link danger" onClick={() => remove(q.name)}>
                     Yes
@@ -139,7 +143,7 @@ export function SavedRail({ current, saved, active, onOpen, onRenamed, onDeleted
                   </button>
                 </span>
               ) : (
-                <span className="saved-actions" onClick={(e) => e.stopPropagation()}>
+                <span className="saved-actions">
                   <button type="button" className="icon-btn" title={`Run on ${current.name}`} onClick={() => onOpen(q, true)}>
                     <Play size={12} />
                   </button>
