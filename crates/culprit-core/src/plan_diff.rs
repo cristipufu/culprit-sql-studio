@@ -142,20 +142,23 @@ pub fn verify_hypothetical_index(baseline: Plan, hypothetical: Plan) -> Hypothet
     }
     let hyp_indexes: Vec<&str> = hypothetical.nodes().into_iter().filter_map(|n| n.index.as_deref()).collect();
     let base_indexes: Vec<&str> = baseline.nodes().into_iter().filter_map(|n| n.index.as_deref()).collect();
+    let norm_leaf = |s: &str| normalize(s.rsplit('.').next().unwrap_or(s));
+    let same_index_name = |a: &str, b: &str| {
+        let (na, nb) = (normalize(a), normalize(b));
+        !na.is_empty() && (na == nb || norm_leaf(a) == norm_leaf(b))
+    };
     let mut used_virtual_indexes = Vec::new();
     if !virtual_indexes.is_empty() {
         for vi in &virtual_indexes {
-            let chosen = hyp_indexes.iter().any(|idx| {
-                idx.eq_ignore_ascii_case(vi) || idx.rsplit('.').next().is_some_and(|leaf| leaf.eq_ignore_ascii_case(vi))
-            });
-            if chosen && !used_virtual_indexes.iter().any(|u: &String| u.eq_ignore_ascii_case(vi)) {
+            let chosen = hyp_indexes.iter().any(|idx| same_index_name(idx, vi));
+            if chosen && !used_virtual_indexes.iter().any(|u: &String| same_index_name(u, vi)) {
                 used_virtual_indexes.push(vi.clone());
             }
         }
     } else {
         for idx in hyp_indexes {
-            let in_base = base_indexes.iter().any(|b| b.eq_ignore_ascii_case(idx));
-            if !in_base && !used_virtual_indexes.iter().any(|u: &String| u.eq_ignore_ascii_case(idx)) {
+            let in_base = base_indexes.iter().any(|b| same_index_name(b, idx));
+            if !in_base && !used_virtual_indexes.iter().any(|u: &String| same_index_name(u, idx)) {
                 used_virtual_indexes.push(idx.to_string());
             }
         }
@@ -315,7 +318,9 @@ fn regions(fa: &Flat, fb: &Flat, m: &Matching) -> Vec<PlanRegion> {
         if !identical(i) {
             continue;
         }
-        let j = m.a[i].expect("identical implies matched");
+        let Some(j) = m.a[i] else {
+            continue;
+        };
         let joined = fa.parent[i].and_then(|p| {
             let same_parents = identical(p) && fb.parent[j].is_some_and(|q| m.a[p] == Some(q));
             if same_parents { group[p] } else { None }
@@ -642,16 +647,13 @@ fn headlines(diff: &PlanDiff, a: &Plan, b: &Plan, fa: &Flat, fb: &Flat, name_a: 
     let mut explained: Vec<String> = Vec::new();
 
     // The lead sentence says how much slower (or faster) B is and, when one change carries it, why.
-    let lead = diff.changes.first().filter(|c| {
-        c.weight >= HEADLINE_WEIGHT
-            && matches!(c.kind, ChangeKind::Access | ChangeKind::Operator)
-            && node_a(c.a).is_some()
-            && node_b(c.b).is_some()
+    let lead = diff.changes.first().and_then(|c| {
+        (c.weight >= HEADLINE_WEIGHT && matches!(c.kind, ChangeKind::Access | ChangeKind::Operator))
+            .then(|| Some((c, node_a(c.a)?, node_b(c.b)?)))?
     });
     let mut used_lead = false;
     match (magnitude_of(diff), lead) {
-        (Some(m), Some(change)) => {
-            let (x, y) = (node_a(change.a).expect("filtered"), node_b(change.b).expect("filtered"));
+        (Some(m), Some((change, x, y))) => {
             let because = if change.kind == ChangeKind::Access {
                 explained.push(normalize(&table(x)));
                 if m.b_worse {
@@ -1109,8 +1111,18 @@ mod tests {
         );
         let mut hyp_unchanged = base_idx.clone();
         hyp_unchanged.facts_mut().virtual_indexes = vec!["<13542>btree_orders_customer_id".into()];
-        let ignored = verify_hypothetical_index(base_idx, hyp_unchanged);
+        let ignored = verify_hypothetical_index(base_idx.clone(), hyp_unchanged);
         assert!(!ignored.uses_virtual_index);
         assert!(ignored.used_virtual_indexes.is_empty());
+
+        // Schema-qualified or quoted virtual index names match unqualified plan node index names.
+        let mut hyp_qualified = plan(
+            Engine::Postgres,
+            node("Index Scan", NodeKind::Seek, Some("public.orders"), Some("ix_orders_status"), 9.0, vec![]),
+        );
+        hyp_qualified.facts_mut().virtual_indexes = vec!["public.\"ix_orders_status\"".into()];
+        let matched = verify_hypothetical_index(base_idx, hyp_qualified);
+        assert!(matched.uses_virtual_index);
+        assert_eq!(matched.used_virtual_indexes, vec!["public.\"ix_orders_status\""]);
     }
 }

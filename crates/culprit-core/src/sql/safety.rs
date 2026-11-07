@@ -167,7 +167,7 @@ fn second_statement_at<'a>(tokens: &[Token<'a>], nesting: u8) -> Option<&'a str>
     for (i, token) in tokens.iter().enumerate() {
         match token {
             Token::Punct('(') => depth += 1,
-            Token::Punct(')') => depth -= 1,
+            Token::Punct(')') => depth = (depth - 1).max(0),
             _ => {}
         }
         let Token::Word(raw) = token else {

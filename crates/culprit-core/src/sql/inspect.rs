@@ -190,7 +190,7 @@ pub fn isolated_counter_update(text: &str, engine: Engine, column: &str) -> bool
         for (i, t) in tokens.iter().enumerate().skip(set + 1) {
             match t {
                 Token::Punct('(') => depth += 1,
-                Token::Punct(')') => depth -= 1,
+                Token::Punct(')') => depth = (depth - 1).max(0),
                 Token::Punct(',') if depth == 0 => return false,
                 Token::Word(w)
                     if depth == 0
@@ -331,7 +331,7 @@ pub fn cte_write_target(text: &str, engine: Engine) -> Option<String> {
                         .any(|t| {
                             match t {
                                 Token::Punct('(') => depth += 1,
-                                Token::Punct(')') => depth -= 1,
+                                Token::Punct(')') => depth = (depth - 1).max(0),
                                 Token::Punct(',') if depth == 0 => return true,
                                 _ => {}
                             }
@@ -472,7 +472,7 @@ fn after_limit(text: &str, engine: Engine) -> Option<&str> {
         for t in &tokens {
             match t {
                 Token::Punct('(') => depth += 1,
-                Token::Punct(')') => depth -= 1,
+                Token::Punct(')') => depth = (depth - 1).max(0),
                 Token::Word(w) if depth == 0 && w.eq_ignore_ascii_case("limit") => {
                     last = Some(w.as_ptr() as usize - text.as_ptr() as usize + w.len());
                 }
@@ -518,7 +518,7 @@ pub fn offset_count(text: &str, engine: Engine) -> Option<f64> {
         for token in tokens {
             match token {
                 Token::Punct('(') => depth += 1,
-                Token::Punct(')') => depth -= 1,
+                Token::Punct(')') => depth = (depth - 1).max(0),
                 Token::Word(w) if depth == 0 && w.eq_ignore_ascii_case("offset") => {
                     let end = w.as_ptr() as usize - text.as_ptr() as usize + w.len();
                     value = literal(text.get(end..)?);

@@ -351,4 +351,42 @@ fn flags_vacuum_full_cluster_blocking_reindex_and_suppresses_concurrent_quick_fi
     let dotted_sql = "CREATE INDEX CONCURRENTLY idx_audit_parent ON \"audit.events\" (parent_id);\n\
                       ALTER TABLE \"audit.events\" ADD CONSTRAINT fk_audit FOREIGN KEY (parent_id) REFERENCES \"audit.events\" (id) NOT VALID;";
     assert!(lint_sql(&dotted_snap, dotted_sql).is_empty(), "{:?}", lint_sql(&dotted_snap, dotted_sql));
+
+    // `CREATE INDEX CONCURRENTLY IF NOT EXISTS` inside a transaction extracts the index name (`idx_orders`), not `EXISTS`.
+    let conc_if_not_exists = lint_sql(
+        &s,
+        &format!("BEGIN;\nCREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders ON {table} (customer_id);\nCOMMIT;"),
+    );
+    assert!(
+        conc_if_not_exists.iter().any(|f| f.id == "sql-lint:concurrent-in-tx:idx_orders"),
+        "{conc_if_not_exists:?}"
+    );
+
+    // Multi-clause `ALTER TABLE` adding both a `NOT VALID` CHECK and a `NOT VALID` FK still lets `VALIDATE CONSTRAINT`
+    // for the CHECK constraint satisfy `SET NOT NULL`.
+    let multi_constraint_sql = format!(
+        "ALTER TABLE {table} \
+         ADD CONSTRAINT chk_orders_total CHECK (total IS NOT NULL) NOT VALID, \
+         ADD CONSTRAINT fk_orders_parent FOREIGN KEY (parent_id) REFERENCES {table} (id) NOT VALID;\n\
+         CREATE INDEX CONCURRENTLY idx_orders_parent ON {table} (parent_id);\n\
+         ALTER TABLE {table} VALIDATE CONSTRAINT chk_orders_total;\n\
+         ALTER TABLE {table} ALTER COLUMN total SET NOT NULL;"
+    );
+    assert!(lint_sql(&s, &multi_constraint_sql).is_empty(), "{:?}", lint_sql(&s, &multi_constraint_sql));
+
+    // `ALTER TABLE ... RENAME <old_col> TO <new_col>` (without `COLUMN`) detects active workload column references.
+    let mut snap_with_query = s.clone();
+    let schema = snap_with_query.tables[0].schema.clone();
+    if let Some(w) = snap_with_query.workload.as_mut()
+        && let Some(q) = w.queries.first_mut()
+    {
+        q.text = format!("SELECT id, legacy_col FROM {schema}.{table} WHERE id = $1");
+        q.plan = None;
+        q.last_seen = None;
+    }
+    let rename_short = lint_sql(&snap_with_query, &format!("ALTER TABLE {table} RENAME legacy_col TO buyer_id;"));
+    assert!(
+        rename_short.iter().any(|f| f.id == format!("sql-lint:workload-break:{schema}.{table}.legacy_col")),
+        "{rename_short:?}"
+    );
 }

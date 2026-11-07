@@ -18,10 +18,12 @@ pub(super) fn collect_validated_constraint_tables(statements: &[String]) -> Vec<
     for stmt in statements {
         let tokens = tokenize(stmt);
         let upper: Vec<String> = tokens.iter().map(|t| t.to_ascii_uppercase()).collect();
-        if upper.windows(2).any(|w| w == ["FOREIGN", "KEY"]) {
-            for (i, w) in upper.windows(2).enumerate() {
-                if w[0] == "CONSTRAINT" {
-                    fk_constraints.push(unquote_ident(&tokens[i + 1]).to_ascii_lowercase());
+        for (clause_tokens, clause_upper) in split_top_level_commas(&tokens, &upper) {
+            if clause_upper.windows(2).any(|w| w == ["FOREIGN", "KEY"]) {
+                for (i, w) in clause_upper.windows(2).enumerate() {
+                    if w[0] == "CONSTRAINT" {
+                        fk_constraints.push(unquote_ident(&clause_tokens[i + 1]).to_ascii_lowercase());
+                    }
                 }
             }
         }
@@ -228,6 +230,35 @@ fn check_drop_or_rename_column(
             }
         } else if second == "TO" {
             check_workload_references(scope.snapshot, scope.stmt, scope.table, None, "RENAME TABLE", findings);
+        } else if !matches!(second, "CONSTRAINT" | "INDEX" | "KEY" | "")
+            && upper.get(2).map(String::as_str) == Some("TO")
+            && let Some(raw_col) = tokens.get(1)
+        {
+            let col_name = unquote_ident(raw_col);
+            check_workload_references(
+                scope.snapshot,
+                scope.stmt,
+                scope.table,
+                Some(&col_name),
+                "RENAME COLUMN",
+                findings,
+            );
+        }
+    } else if upper.first().map(String::as_str) == Some("CHANGE") {
+        let col_idx = if upper.get(1).map(String::as_str) == Some("COLUMN") { 2 } else { 1 };
+        if let (Some(raw_old), Some(raw_new)) = (tokens.get(col_idx), tokens.get(col_idx + 1)) {
+            let old_col = unquote_ident(raw_old);
+            let new_col = unquote_ident(raw_new);
+            if !old_col.eq_ignore_ascii_case(&new_col) {
+                check_workload_references(
+                    scope.snapshot,
+                    scope.stmt,
+                    scope.table,
+                    Some(&old_col),
+                    "RENAME COLUMN",
+                    findings,
+                );
+            }
         }
     }
 }
@@ -243,7 +274,19 @@ fn check_add_not_null_without_default(
         return;
     }
     let second = upper.get(1).map(String::as_str).unwrap_or("");
-    if matches!(second, "CONSTRAINT" | "FOREIGN" | "CHECK" | "PRIMARY" | "UNIQUE" | "EXCLUDE") {
+    if matches!(
+        second,
+        "CONSTRAINT"
+            | "FOREIGN"
+            | "CHECK"
+            | "PRIMARY"
+            | "UNIQUE"
+            | "EXCLUDE"
+            | "INDEX"
+            | "KEY"
+            | "FULLTEXT"
+            | "SPATIAL"
+    ) {
         return;
     }
     let mut col_idx = if second == "COLUMN" { 2 } else { 1 };
@@ -525,7 +568,7 @@ fn check_column_type_or_set_not_null(
     upper: &[String],
     findings: &mut Vec<Finding>,
 ) {
-    if !matches!(upper.first().map(String::as_str), Some("ALTER" | "MODIFY")) {
+    if !matches!(upper.first().map(String::as_str), Some("ALTER" | "MODIFY" | "CHANGE")) {
         return;
     }
     let idx = 0;
@@ -795,8 +838,9 @@ pub(super) fn normalized_base_type(ty: &str) -> String {
     if is_unsigned { format!("{canonical} unsigned") } else { canonical.to_string() }
 }
 
-/// Parse an `ALTER [COLUMN] <col> [SET DATA] TYPE <new_type>`, `MODIFY [COLUMN] <col> <new_type>`, or SQL Server
-/// `ALTER COLUMN <col> <new_type>` clause into `(column_name, new_type_spec, has_using_or_collate)`.
+/// Parse an `ALTER [COLUMN] <col> [SET DATA] TYPE <new_type>`, `MODIFY [COLUMN] <col> <new_type>`,
+/// `CHANGE [COLUMN] <old_col> <new_col> <new_type>`, or SQL Server `ALTER COLUMN <col> <new_type>` clause into
+/// `(column_name, new_type_spec, has_using_or_collate)`.
 fn parse_column_type_change(tokens: &[String], upper: &[String], idx: usize) -> Option<(String, String, bool)> {
     let head = upper.get(idx)?.as_str();
     let mut pos = idx + 1;
@@ -808,6 +852,9 @@ fn parse_column_type_change(tokens: &[String], upper: &[String], idx: usize) -> 
     pos += 1;
     let type_start = if head == "MODIFY" {
         pos
+    } else if head == "CHANGE" {
+        // MySQL: CHANGE [COLUMN] <old_col> <new_col> <new_type>
+        pos + 1
     } else if let Some(type_offset) = upper[pos..].iter().position(|t| t == "TYPE") {
         let between = &upper[pos..pos + type_offset];
         if !between.is_empty() && between != ["SET", "DATA"] {
@@ -817,7 +864,7 @@ fn parse_column_type_change(tokens: &[String], upper: &[String], idx: usize) -> 
     } else if head == "ALTER"
         && had_column_kw
         && let Some(next_kw) = upper.get(pos).map(String::as_str)
-        && !matches!(next_kw, "SET" | "DROP" | "RESET" | "ADD" | "TYPE")
+        && !matches!(next_kw, "SET" | "DROP" | "RESET" | "ADD" | "TYPE" | "RESTART")
     {
         pos
     } else {

@@ -429,7 +429,7 @@ pub(crate) fn split_top_level_and(text: &str) -> Vec<&str> {
                 continue;
             }
             b'(' => depth += 1,
-            b')' => depth -= 1,
+            b')' => depth = (depth - 1).max(0),
             _ if depth == 0
                 && boundary_before(i)
                 && bytes.get(i..i + 7).is_some_and(|w| w.eq_ignore_ascii_case(b"between"))

@@ -33,10 +33,25 @@ pub(super) fn check_concurrent_in_tx(
     if !matches!(head, "CREATE" | "DROP" | "REINDEX") {
         return;
     }
+    let mut target_pos = conc_pos + 1;
+    if upper.get(target_pos).map(String::as_str) == Some("IF") {
+        if upper.get(target_pos + 1).map(String::as_str) == Some("NOT")
+            && upper.get(target_pos + 2).map(String::as_str) == Some("EXISTS")
+        {
+            target_pos += 3;
+        } else if upper.get(target_pos + 1).map(String::as_str) == Some("EXISTS") {
+            target_pos += 2;
+        }
+    }
+    if upper.get(target_pos).map(String::as_str) == Some("ON") {
+        target_pos += 1;
+        if upper.get(target_pos).map(String::as_str) == Some("ONLY") {
+            target_pos += 1;
+        }
+    }
     let target = tokens
-        .get(conc_pos + 1)
-        .filter(|t| !t.eq_ignore_ascii_case("IF") && !t.eq_ignore_ascii_case("ON"))
-        .or_else(|| tokens.get(conc_pos + 3))
+        .get(target_pos)
+        .filter(|t| !matches!(t.as_str(), "(" | ")" | ";" | ","))
         .map(|s| unquote_ident(s))
         .unwrap_or_else(|| "index".into());
     let kind_word = if head == "REINDEX" && upper[..conc_pos].iter().any(|t| t == "TABLE") { "TABLE" } else { "INDEX" };
@@ -682,22 +697,73 @@ pub(super) fn collect_script_indexes(statements: &[String]) -> Vec<(String, Vec<
     for stmt in statements {
         let tokens = tokenize(stmt);
         let upper: Vec<String> = tokens.iter().map(|t| t.to_ascii_uppercase()).collect();
-        if upper.first().map(String::as_str) != Some("CREATE") {
-            continue;
-        }
-        let Some(on_pos) = upper.iter().position(|t| t == "ON") else {
-            continue;
-        };
-        let after_on = if upper.get(on_pos + 1).map(String::as_str) == Some("ONLY") { on_pos + 2 } else { on_pos + 1 };
-        let Some(table) = tokens.get(after_on) else {
-            continue;
-        };
-        let mut col_start = after_on + 1;
-        if upper.get(col_start).map(String::as_str) == Some("USING") {
-            col_start += 2;
-        }
-        if let Some((cols, _)) = parse_paren_list(&tokens, col_start) {
-            out.push((table.clone(), cols));
+        match upper.first().map(String::as_str) {
+            Some("CREATE") => {
+                if !upper.iter().take(4).any(|t| t == "INDEX") {
+                    continue;
+                }
+                let Some(on_pos) = upper.iter().position(|t| t == "ON") else {
+                    continue;
+                };
+                let after_on =
+                    if upper.get(on_pos + 1).map(String::as_str) == Some("ONLY") { on_pos + 2 } else { on_pos + 1 };
+                let Some(table) = tokens.get(after_on) else {
+                    continue;
+                };
+                let mut col_start = after_on + 1;
+                if upper.get(col_start).map(String::as_str) == Some("USING") {
+                    col_start += 2;
+                }
+                if let Some((cols, _)) = parse_paren_list(&tokens, col_start) {
+                    out.push((table.clone(), cols));
+                }
+            }
+            Some("ALTER") if upper.get(1).map(String::as_str) == Some("TABLE") => {
+                let mut pos = 2;
+                if upper.get(pos).map(String::as_str) == Some("IF")
+                    && upper.get(pos + 1).map(String::as_str) == Some("EXISTS")
+                {
+                    pos += 2;
+                }
+                if upper.get(pos).map(String::as_str) == Some("ONLY") {
+                    pos += 1;
+                }
+                let Some(table) = tokens.get(pos) else {
+                    continue;
+                };
+                for (clause_tokens, clause_upper) in
+                    super::lex::split_top_level_commas(&tokens[pos + 1..], &upper[pos + 1..])
+                {
+                    if clause_upper.first().map(String::as_str) != Some("ADD") {
+                        continue;
+                    }
+                    let mut idx = 1;
+                    if matches!(clause_upper.get(idx).map(String::as_str), Some("UNIQUE" | "FULLTEXT" | "SPATIAL")) {
+                        idx += 1;
+                    }
+                    if !matches!(clause_upper.get(idx).map(String::as_str), Some("INDEX" | "KEY")) {
+                        continue;
+                    }
+                    idx += 1;
+                    if clause_upper.get(idx).map(String::as_str) == Some("IF")
+                        && clause_upper.get(idx + 1).map(String::as_str) == Some("NOT")
+                        && clause_upper.get(idx + 2).map(String::as_str) == Some("EXISTS")
+                    {
+                        idx += 3;
+                    }
+                    // Optional index name before '(' or 'USING'.
+                    if clause_tokens.get(idx).is_some_and(|t| t != "(" && !t.eq_ignore_ascii_case("USING")) {
+                        idx += 1;
+                    }
+                    if clause_upper.get(idx).map(String::as_str) == Some("USING") {
+                        idx += 2;
+                    }
+                    if let Some((cols, _)) = parse_paren_list(clause_tokens, idx) {
+                        out.push((table.clone(), cols));
+                    }
+                }
+            }
+            _ => {}
         }
     }
     out
