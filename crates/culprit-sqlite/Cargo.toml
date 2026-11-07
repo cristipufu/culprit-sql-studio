@@ -4,6 +4,7 @@ description = "SQLite provider for Culprit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [lib]
 # Its doc comments hold no Rust examples: rustdoc would have nothing to test.

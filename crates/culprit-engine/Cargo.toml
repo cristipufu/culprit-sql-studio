@@ -4,6 +4,7 @@ description = "Culprit's engine: connection store, provider registry, scans and 
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 # The files in tests/ are modules of one test binary, tests/all.rs.
 autotests = false
 

@@ -49,9 +49,10 @@ confidence-threshold = 0.93
 [bans]
 # Tauri brings several versions of some crates (windows-sys, syn); duplicates are reported, not failed.
 multiple-versions = "warn"
-# The workspace's own crates depend on each other by path without a version, which cargo-deny counts as a wildcard
-# unless the crates are marked `publish = false`; no registry dependency uses `*`.
-wildcards = "allow"
+# A dependency must name its versions. The workspace's own crates depend on each other by path without one, which is
+# fine since none of them is published (`publish = false`).
+wildcards = "deny"
+allow-wildcard-paths = true
 
 [sources]
 # crates.io only: no git dependencies, no other registries.

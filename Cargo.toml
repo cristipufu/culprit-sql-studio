@@ -7,6 +7,8 @@ default-members = ["crates/*"]
 version = "0.5.5"
 edition = "2024"
 license = "MIT"
+# Built and released from this repository only: none of the crates goes to crates.io.
+publish = false
 repository = "https://github.com/cristipufu/culprit-sql-studio"
 
 [workspace.dependencies]

@@ -4,6 +4,7 @@ description = "Native YugabyteDB YSQL/DocDB provider for Culprit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [lib]
 doctest = false

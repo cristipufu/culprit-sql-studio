@@ -4,6 +4,7 @@ description = "culprit: find what is slowing your database down"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [[bin]]
 name = "culprit"
