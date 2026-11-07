@@ -141,7 +141,7 @@ pub fn server_info(
 }
 
 pub fn snapshot(
-    conn: &Connection,
+    conn: &mut Connection,
     path: &Path,
     connection: &str,
     environment: Environment,
@@ -482,7 +482,11 @@ struct ObjectSizes {
 /// Bytes per table and index, and each table's rows, from one pass over `dbstat` stopped after `budget`. A rowid
 /// table's rows are the cells of its leaf pages (interior cells point to pages); a WITHOUT ROWID table is a b-tree of
 /// entries, every one a row, interior pages included.
-fn object_sizes(conn: &Connection, without_rowid: &HashSet<&str>, budget: Duration) -> rusqlite::Result<ObjectSizes> {
+fn object_sizes(
+    conn: &mut Connection,
+    without_rowid: &HashSet<&str>,
+    budget: Duration,
+) -> rusqlite::Result<ObjectSizes> {
     let started = Instant::now();
     conn.progress_handler(1_000, Some(move || started.elapsed() > budget))?;
     let read = (|| {
@@ -770,7 +774,7 @@ fn read_foreign_keys(conn: &Connection, table: &str) -> rusqlite::Result<Vec<For
 pub fn run(conn: &Connection, sql: &str, limit: usize) -> Result<ResultSet> {
     let started = Instant::now();
     let mut stmt = conn.prepare(sql).map_err(|e| map_error(&e))?;
-    let columns: Vec<String> = stmt.column_names().iter().map(|c| c.to_string()).collect();
+    let columns: Vec<String> = stmt.column_names().map(str::to_string).collect();
     let mut rows = stmt.query([]).map_err(|e| map_error(&e))?;
     let mut out = Vec::new();
     let mut budget = culprit_core::limits::ResultBudget::new(limit);
@@ -830,7 +834,7 @@ mod tests {
 
     #[test]
     fn an_unavailable_virtual_module_does_not_fail_the_scan() {
-        let conn = Connection::open_in_memory().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
         // Emulate a catalog written by an application with a module that this reader does not have.
         conn.execute_batch(
             "CREATE TABLE ordinary(id INTEGER PRIMARY KEY);
@@ -841,7 +845,7 @@ mod tests {
              PRAGMA schema_version = 100;",
         )
         .unwrap();
-        let s = snapshot(&conn, Path::new("demo.db"), "demo", Environment::Local, Instant::now()).unwrap();
+        let s = snapshot(&mut conn, Path::new("demo.db"), "demo", Environment::Local, Instant::now()).unwrap();
         assert!(s.tables.iter().any(|t| t.name == "ordinary" && t.rows == Some(0.0)));
         assert!(s.tables.iter().any(|t| t.name == "vectors" && t.is_virtual() && t.definition.is_some()));
         assert!(s.notes.iter().any(|n| n.collector == "catalog" && n.message.contains("module_not_installed")));
@@ -849,7 +853,7 @@ mod tests {
 
     #[test]
     fn virtual_tables_keep_their_schema_without_exposing_module_storage() {
-        let conn = Connection::open_in_memory().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE documents (id INTEGER PRIMARY KEY, title TEXT UNIQUE);
              CREATE INDEX documents_title ON documents(title);
@@ -864,7 +868,7 @@ mod tests {
              CREATE TABLE other.documents (id INTEGER PRIMARY KEY);",
         )
         .unwrap();
-        let s = snapshot(&conn, Path::new("demo.db"), "demo", Environment::Local, Instant::now()).unwrap();
+        let s = snapshot(&mut conn, Path::new("demo.db"), "demo", Environment::Local, Instant::now()).unwrap();
         let names: Vec<_> = s.tables.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(names, ["bounds", "documents", "ordinary", "other_content", "search", "search_archive"]);
         for name in ["search", "bounds"] {
@@ -894,9 +898,9 @@ mod tests {
 
     #[test]
     fn statistics_on_an_older_index_do_not_cover_an_index_added_later() {
-        let conn = Connection::open_in_memory().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("CREATE TABLE items(id INTEGER PRIMARY KEY, a TEXT, b TEXT); CREATE INDEX old_index ON items(a); INSERT INTO items(a,b) VALUES ('a','b'); ANALYZE; CREATE INDEX new_index ON items(b);").unwrap();
-        let s = snapshot(&conn, Path::new("demo.db"), "demo", Environment::Local, Instant::now()).unwrap();
+        let s = snapshot(&mut conn, Path::new("demo.db"), "demo", Environment::Local, Instant::now()).unwrap();
         assert!(s.server.has(Capability::Statistics));
         assert_eq!(s.indexes.iter().find(|i| i.name == "old_index").unwrap().has_statistics, Some(true));
         assert_eq!(s.indexes.iter().find(|i| i.name == "new_index").unwrap().has_statistics, Some(false));
@@ -932,7 +936,7 @@ mod tests {
 
     #[test]
     fn multiline_trigger_header_ignores_dml_keywords_inside_body() {
-        let conn = Connection::open_in_memory().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE orders (id INTEGER PRIMARY KEY, total INTEGER, is_deleted INTEGER);
              CREATE TABLE audit_log (id INTEGER PRIMARY KEY, msg TEXT);
@@ -948,7 +952,7 @@ mod tests {
              END;",
         )
         .unwrap();
-        let s = snapshot(&conn, Path::new("demo.db"), "demo", Environment::Local, Instant::now()).unwrap();
+        let s = snapshot(&mut conn, Path::new("demo.db"), "demo", Environment::Local, Instant::now()).unwrap();
         let orders = s.tables.iter().find(|t| t.name == "orders").unwrap();
         let opts = &orders.storage.as_ref().unwrap().options;
         assert_eq!(opts, &["trigger=trg_delete_flag:U", "trigger=update_audit_on_insert:I"]);

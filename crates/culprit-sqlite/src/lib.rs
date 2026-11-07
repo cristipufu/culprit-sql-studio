@@ -107,7 +107,7 @@ async fn interactive<T: Send + 'static>(
     blocking(move || {
         let _permit = permit;
         handle.check()?;
-        let conn = open(&path)?;
+        let mut conn = open(&path)?;
         handle.check()?;
         conn.progress_handler(1_000, Some(move || handle.stopped())).map_err(|e| map_error(&e))?;
         operation(&conn)
@@ -140,8 +140,8 @@ impl Provider for SqliteProvider {
         let (connection, environment) = (connection.to_string(), self.spec.environment);
         blocking(move || {
             let started = Instant::now();
-            let conn = open(&path)?;
-            collect::snapshot(&conn, &path, &connection, environment, started)
+            let mut conn = open(&path)?;
+            collect::snapshot(&mut conn, &path, &connection, environment, started)
         })
         .await
     }
@@ -242,8 +242,8 @@ mod tests {
         std::fs::create_dir(&dir).unwrap();
         let path = dir.join("shop.sqlite");
         let read = |path: &std::path::Path| {
-            let conn = open(&path.to_path_buf()).unwrap();
-            collect::snapshot(&conn, path, "shop", culprit_core::Environment::Local, Instant::now()).unwrap()
+            let mut conn = open(&path.to_path_buf()).unwrap();
+            collect::snapshot(&mut conn, path, "shop", culprit_core::Environment::Local, Instant::now()).unwrap()
         };
         drop(Connection::open(&path).unwrap());
         let first = read(&path);
@@ -272,10 +272,10 @@ mod tests {
 
     #[test]
     fn collection_outcomes_distinguish_empty_catalog_and_inapplicable_wal() {
-        let conn = Connection::open_in_memory().unwrap();
-        let read = || {
+        let mut conn = Connection::open_in_memory().unwrap();
+        let read = |conn: &mut Connection| {
             collect::snapshot(
-                &conn,
+                conn,
                 std::path::Path::new("example.sqlite"),
                 "example",
                 culprit_core::Environment::Local,
@@ -283,14 +283,14 @@ mod tests {
             )
             .unwrap()
         };
-        let empty = read();
+        let empty = read(&mut conn);
         assert_eq!(empty.source_outcome("catalog").unwrap().state, culprit_core::SourceState::Empty);
         assert_eq!(empty.source_outcome("wal_file").unwrap().state, culprit_core::SourceState::NotApplicable);
         conn.execute_batch(
             "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT); CREATE INDEX items_name ON items(name);",
         )
         .unwrap();
-        let populated = read();
+        let populated = read(&mut conn);
         assert_eq!(populated.source_outcome("catalog").unwrap().state, culprit_core::SourceState::Collected);
         assert!(populated.tables.iter().any(|t| t.name == "items"));
         assert!(populated.indexes.iter().any(|i| i.name == "items_name"));
@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn an_unreadable_statistics_source_locks_only_its_capability() {
         use rusqlite::hooks::{AuthAction, Authorization};
-        let conn = Connection::open_in_memory().unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("CREATE TABLE items (name TEXT); CREATE INDEX items_name ON items(name); ANALYZE;").unwrap();
         conn.authorizer(Some(|context: rusqlite::hooks::AuthContext<'_>| {
             if matches!(context.action, AuthAction::Read { table_name: "sqlite_stat1", .. }) {
@@ -311,7 +311,7 @@ mod tests {
         }))
         .unwrap();
         let snapshot = collect::snapshot(
-            &conn,
+            &mut conn,
             std::path::Path::new("example.sqlite"),
             "example",
             culprit_core::Environment::Local,
