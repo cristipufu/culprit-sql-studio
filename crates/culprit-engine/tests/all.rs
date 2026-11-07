@@ -6,6 +6,7 @@ mod dashboard;
 mod demo_sidecars;
 mod escalations;
 mod file_pickers;
+mod fuzz;
 mod golden;
 mod insights;
 mod invariants;

@@ -41,6 +41,7 @@ pub mod sql;
 pub mod verification;
 pub mod waits;
 pub mod window;
+pub mod xml;
 
 pub use actual::{ActualSummary, NodeProgress, NodeRuntime, NodeState, QueryProgress, actual_summary, self_times};
 pub use advice::*;

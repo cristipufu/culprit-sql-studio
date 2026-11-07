@@ -236,8 +236,10 @@ fn redact_showplan(xml: &str) -> String {
         let Some(end) = trimmed.find("?>") else { return redaction_failed() };
         let decl_end = xml.len() - trimmed.len() + end + 2;
         let decl_probe = format!("{}<culprit/>", &xml[..decl_end]);
-        let Ok(decl_doc) = roxmltree::Document::parse(&decl_probe) else { return redaction_failed() };
-        if decl_doc.descendants().any(|n| n.is_pi() || n.is_comment()) {
+        let declaration_only = crate::xml::read(&decl_probe, |doc| {
+            doc.is_ok_and(|doc| !doc.descendants().any(|n| n.is_pi() || n.is_comment()))
+        });
+        if !declaration_only {
             return redaction_failed();
         }
         decl_end
@@ -246,34 +248,38 @@ fn redact_showplan(xml: &str) -> String {
     };
     const PREFIX: &str = "<culprit>";
     let wrapped = format!("{PREFIX}{}</culprit>", &xml[offset..]);
-    let Ok(doc) = roxmltree::Document::parse(&wrapped) else { return redaction_failed() };
-    let mut replacements = Vec::new();
-    for node in doc.descendants() {
-        if node.is_pi() {
-            return redaction_failed();
-        }
-        if node.is_comment() {
-            replacements.push((node.range(), "<!-- … -->".to_string()));
-        }
-        if node.is_text()
-            && let Some(text) = node.text().filter(|t| !t.trim().is_empty())
-        {
-            replacements.push((node.range(), xml_escape(&strip_database(&redact_sql(text, Engine::Mssql)))));
-        }
-        for attr in node.attributes() {
-            let replacement = match attr.name() {
-                "Database" => Some("[database]".to_string()),
-                "Server" => Some("[server]".to_string()),
-                name if SHOWPLAN_TEXT.contains(&name) => {
-                    Some(xml_escape(&strip_database(&redact_sql(attr.value(), Engine::Mssql))))
+    let replacements = crate::xml::read(&wrapped, |doc| {
+        let doc = doc.ok()?;
+        let mut replacements = Vec::new();
+        for node in doc.descendants() {
+            if node.is_pi() {
+                return None;
+            }
+            if node.is_comment() {
+                replacements.push((node.range(), "<!-- … -->".to_string()));
+            }
+            if node.is_text()
+                && let Some(text) = node.text().filter(|t| !t.trim().is_empty())
+            {
+                replacements.push((node.range(), xml_escape(&strip_database(&redact_sql(text, Engine::Mssql)))));
+            }
+            for attr in node.attributes() {
+                let replacement = match attr.name() {
+                    "Database" => Some("[database]".to_string()),
+                    "Server" => Some("[server]".to_string()),
+                    name if SHOWPLAN_TEXT.contains(&name) => {
+                        Some(xml_escape(&strip_database(&redact_sql(attr.value(), Engine::Mssql))))
+                    }
+                    _ => None,
+                };
+                if let Some(replacement) = replacement {
+                    replacements.push((attr.range_value(), replacement));
                 }
-                _ => None,
-            };
-            if let Some(replacement) = replacement {
-                replacements.push((attr.range_value(), replacement));
             }
         }
-    }
+        Some(replacements)
+    });
+    let Some(mut replacements) = replacements else { return redaction_failed() };
     replacements.sort_by_key(|(range, _)| range.start);
     let mut out = String::with_capacity(xml.len());
     let mut copied = 0;

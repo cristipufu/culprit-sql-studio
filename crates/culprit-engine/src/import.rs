@@ -450,7 +450,17 @@ fn parse_dbeaver(text: &str, file: &str) -> Result<Vec<ImportCandidate>> {
 // ───────── DataGrip ─────────
 
 fn parse_datagrip(text: &str, file: &str, users: &BTreeMap<String, String>) -> Result<Vec<ImportCandidate>> {
-    let doc = roxmltree::Document::parse(text).map_err(|e| Error::invalid(format!("{file} is not valid XML: {e}")))?;
+    culprit_core::xml::read(text, |doc| {
+        let doc = doc.map_err(|e| Error::invalid(format!("{file} is not valid XML: {e}")))?;
+        datagrip_sources(&doc, file, users)
+    })
+}
+
+fn datagrip_sources(
+    doc: &roxmltree::Document,
+    file: &str,
+    users: &BTreeMap<String, String>,
+) -> Result<Vec<ImportCandidate>> {
     let mut out = Vec::new();
     for ds in doc.descendants().filter(|n| n.has_tag_name("data-source")) {
         let child = |tag: &str| ds.children().find(|n| n.has_tag_name(tag)).and_then(|n| n.text()).map(str::trim);
@@ -486,7 +496,10 @@ fn parse_datagrip(text: &str, file: &str, users: &BTreeMap<String, String>) -> R
 
 /// User names from `dataSources.local.xml`, by data source uuid (and name).
 fn datagrip_users(text: &str) -> BTreeMap<String, String> {
-    let Ok(doc) = roxmltree::Document::parse(text) else { return BTreeMap::new() };
+    culprit_core::xml::read(text, |doc| doc.map(|doc| datagrip_user_names(&doc)).unwrap_or_default())
+}
+
+fn datagrip_user_names(doc: &roxmltree::Document) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     for ds in doc.descendants().filter(|n| n.has_tag_name("data-source")) {
         let user = ds.children().find(|n| n.has_tag_name("user-name")).and_then(|n| n.text()).map(str::trim);

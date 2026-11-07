@@ -113,6 +113,10 @@ pub fn parse_plan(input: &str) -> Result<Plan> {
         PlanFormat::Culprit => culprit_json(text),
     }
     .map_err(unreadable)?;
+    // Before anything walks the tree: a deeper one would make the scan or file it's saved in unreadable.
+    if plan.depth() > culprit_core::plan::MAX_PLAN_DEPTH {
+        return Err(unreadable(culprit_core::plan::too_deep()));
+    }
     if format != PlanFormat::Culprit {
         plan.raw = Some(block.into());
     }

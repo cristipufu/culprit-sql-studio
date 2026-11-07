@@ -212,6 +212,15 @@ pub fn fingerprint(sql: &str, engine: Engine) -> Fingerprint {
             {
                 i += 1;
             }
+            // `= -1` is one value, as `= 1` is: a sign right after an operator, a parenthesis, a comma, a keyword or
+            // the start is the number's own. MySQL keeps it a token of its own, so a logged statement still matches
+            // the digest it is compared with token for token.
+            if engine != SqlSyntax::Mysql && unary_sign(&tokens) {
+                tokens.pop();
+                let kept = display.trim_end().len();
+                display.truncate(kept);
+                display.pop();
+            }
             value(&mut tokens, &mut display);
             continue;
         }
@@ -269,6 +278,28 @@ pub fn fingerprint(sql: &str, engine: Engine) -> Fingerprint {
     Fingerprint { key: collapse(tokens).join(" "), display: display.trim().to_string() }
 }
 
+/// Whether the last token is a `-` or `+` that signs the number after it rather than subtracting it: nothing that
+/// could be a value (a name, a literal, a closing parenthesis) comes before it.
+fn unary_sign(tokens: &[String]) -> bool {
+    let [.., before, sign] = tokens else {
+        return matches!(tokens, [s] if s == "-" || s == "+");
+    };
+    if sign != "-" && sign != "+" {
+        return false;
+    }
+    const KEYWORDS: &[&str] = &[
+        "select", "where", "and", "or", "not", "when", "then", "else", "case", "values", "in", "between", "by",
+        "return", "returns", "limit", "offset", "top", "set", "on", "having", "like", "is", "as",
+    ];
+    let value_like = |t: &str| {
+        t == "?"
+            || t == ")"
+            || t == "]"
+            || t.chars().next().is_some_and(|c| c.is_alphanumeric() || "_\"`@#$:".contains(c))
+    };
+    KEYWORDS.contains(&before.as_str()) || !value_like(before)
+}
+
 fn word_before(chars: &[char], i: usize) -> bool {
     i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_')
 }
@@ -322,6 +353,37 @@ pub fn id(key: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_signed_number_is_one_value_and_subtraction_stays_subtraction() {
+        for engine in [Engine::Postgres, Engine::Mssql, Engine::Sqlite, Engine::Yugabyte] {
+            let key = |sql: &str| super::fingerprint(sql, engine).key;
+            assert_eq!(key("SELECT * FROM t WHERE n = -1"), key("SELECT * FROM t WHERE n = 5"), "{engine:?}");
+            assert_eq!(key("SELECT -1"), key("SELECT 2"), "{engine:?}");
+            assert_eq!(
+                key("SELECT * FROM t WHERE n IN (-1, 2)"),
+                key("SELECT * FROM t WHERE n IN (3, 4)"),
+                "{engine:?}"
+            );
+            assert_eq!(key("UPDATE t SET n = n - 1"), key("UPDATE t SET n = n - 7"), "{engine:?}");
+            assert_ne!(
+                key("UPDATE t SET n = n - 1"),
+                key("UPDATE t SET n = n + 1"),
+                "{engine:?}: subtraction is not addition"
+            );
+            assert_eq!(key("SELECT @x - 1"), key("SELECT @x - 2"), "{engine:?}");
+            assert_eq!(
+                super::fingerprint("SELECT * FROM t WHERE n = -1", engine).display,
+                "SELECT * FROM t WHERE n = ?"
+            );
+        }
+        let mysql = |sql: &str| super::fingerprint(sql, Engine::Mysql).key;
+        assert_ne!(
+            mysql("SELECT * FROM t WHERE n = -1"),
+            mysql("SELECT * FROM t WHERE n = 1"),
+            "MySQL keeps the digest's token"
+        );
+    }
+
     use super::*;
 
     #[test]

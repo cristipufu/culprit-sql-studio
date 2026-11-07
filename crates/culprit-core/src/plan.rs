@@ -381,7 +381,30 @@ pub struct Plan {
     pub view: Option<crate::plan_view::PlanView>,
 }
 
+/// The deepest operator tree a plan keeps. A saved report has to read back under serde_json's nesting limit of 128,
+/// and each step of a plan is two levels of its JSON (the step and the list of its inputs): measured, a report holding
+/// a 60-deep plan reads back and a 62-deep one doesn't. This leaves room for the facts inside a step.
+pub const MAX_PLAN_DEPTH: usize = 56;
+
+/// A plan nested deeper than [`MAX_PLAN_DEPTH`]: refused, so it can't make a saved scan unreadable.
+pub fn too_deep() -> crate::Error {
+    crate::Error::invalid(format!(
+        "The plan nests its steps more than {MAX_PLAN_DEPTH} deep, deeper than a saved scan can hold"
+    ))
+}
+
 impl Plan {
+    /// How many steps deep the operator tree goes (the root alone is 1), counted without recursion.
+    pub fn depth(&self) -> usize {
+        let mut deepest = 0;
+        let mut pending = vec![(&self.root, 1usize)];
+        while let Some((node, depth)) = pending.pop() {
+            deepest = deepest.max(depth);
+            pending.extend(node.children.iter().map(|c| (c, depth + 1)));
+        }
+        deepest
+    }
+
     pub fn facts(&self) -> std::borrow::Cow<'_, crate::PlanFacts> {
         self.facts
             .as_ref()

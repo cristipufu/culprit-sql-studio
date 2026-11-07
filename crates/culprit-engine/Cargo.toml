@@ -51,5 +51,6 @@ ureq.workspace = true
 
 [dev-dependencies]
 culprit-checks.workspace = true
+proptest.workspace = true
 rusqlite.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

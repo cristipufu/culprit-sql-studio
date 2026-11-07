@@ -3,7 +3,7 @@ use culprit_core::{
     Engine, Error, NodeKind, NodeRuntime, PARALLEL_THREADS, Plan, PlanIndexHint, PlanKind, PlanNode, PlanWarning,
     Properties, Result,
 };
-use roxmltree::{Document, Node, ParsingOptions};
+use roxmltree::{Document, Node};
 
 /// RelOp children that describe the operator rather than being the operator itself.
 const RELOP_METADATA: &[&str] =
@@ -49,14 +49,14 @@ const MAX_LIST_PROP_LEN: usize = 600;
 /// Every statement in a showplan document, by the type SQL Server gives it (`SELECT`, `COMMIT TRANSACTION`, `COND`…),
 /// nested ones included (the branches of an IF are statements of their own).
 pub fn statement_types(xml: &str) -> Result<Vec<String>> {
-    let options = ParsingOptions { allow_dtd: false, ..ParsingOptions::default() };
-    let doc = Document::parse_with_options(xml, options)
-        .map_err(|e| Error::internal(format!("Could not read the SQL Server plan XML: {e}")))?;
-    Ok(doc
-        .descendants()
-        .filter(|n| n.is_element() && n.tag_name().name().starts_with("Stmt"))
-        .filter_map(|n| n.attribute("StatementType").map(str::to_string))
-        .collect())
+    culprit_core::xml::read(xml, |doc| {
+        let doc = doc.map_err(|e| Error::internal(format!("Could not read the SQL Server plan XML: {e}")))?;
+        Ok(doc
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name().starts_with("Stmt"))
+            .filter_map(|n| n.attribute("StatementType").map(str::to_string))
+            .collect())
+    })
 }
 
 pub fn parse(xml: &str) -> Result<Plan> {
@@ -66,8 +66,10 @@ pub fn parse(xml: &str) -> Result<Plan> {
 /// Query Store also keeps valid empty showplans for maintenance such as UPDATE STATISTICS. They provide no
 /// operator tree; that is absent plan data, not a parser failure. Malformed or nonempty unsupported XML is not empty.
 pub(crate) fn is_empty(xml: &str) -> bool {
-    let options = ParsingOptions { allow_dtd: false, ..ParsingOptions::default() };
-    let Ok(doc) = Document::parse_with_options(xml, options) else { return false };
+    culprit_core::xml::read(xml, |doc| doc.is_ok_and(|doc| empty_showplan(&doc)))
+}
+
+fn empty_showplan(doc: &Document) -> bool {
     doc.root_element().has_tag_name_local("ShowPlanXML")
         && doc.descendants().any(|n| n.has_tag_name_local("Statements"))
         && doc
@@ -97,9 +99,13 @@ pub fn reparse(saved: &Plan) -> Option<Plan> {
 /// Parse the statement whose `QueryHash` matches (a batch or procedure plan holds every statement), or the most
 /// expensive statement when none matches.
 pub fn parse_statement(xml: &str, query_hash: Option<&str>) -> Result<Plan> {
-    let options = ParsingOptions { allow_dtd: false, ..ParsingOptions::default() };
-    let doc = Document::parse_with_options(xml, options)
-        .map_err(|e| Error::internal(format!("Could not read the SQL Server plan XML: {e}")))?;
+    culprit_core::xml::read(xml, |doc| {
+        let doc = doc.map_err(|e| Error::internal(format!("Could not read the SQL Server plan XML: {e}")))?;
+        read_statement(&doc, xml, query_hash)
+    })
+}
+
+fn read_statement(doc: &Document, xml: &str, query_hash: Option<&str>) -> Result<Plan> {
     fn query_plan_of<'a, 'input>(n: Node<'a, 'input>) -> Option<Node<'a, 'input>> {
         if n.has_tag_name_local("StmtSimple") {
             child(n, "QueryPlan")
@@ -122,7 +128,7 @@ pub fn parse_statement(xml: &str, query_hash: Option<&str>) -> Result<Plan> {
     let query_plan = query_plan_of(statement).expect("filtered on QueryPlan above");
     let root_op = child(query_plan, "RelOp").ok_or_else(|| Error::internal("The query plan has no operators"))?;
 
-    let mut root = parse_relop(root_op);
+    let mut root = parse_relop(root_op, 1)?;
     let total_cost =
         statement.attribute("StatementSubTreeCost").and_then(|v| v.parse().ok()).unwrap_or(root.subtree_cost);
     let is_actual = query_plan.descendants().any(|n| n.has_tag_name_local("RunTimeInformation"));
@@ -267,7 +273,12 @@ fn statement_facts(statement: Node, plan: Node) -> culprit_core::PlanFacts {
     }
 }
 
-fn parse_relop(relop: Node) -> PlanNode {
+/// One operator and its inputs, `depth` steps from the root; deeper than [`culprit_core::plan::MAX_PLAN_DEPTH`] is
+/// refused before the recursion can exhaust the stack.
+fn parse_relop(relop: Node, depth: usize) -> Result<PlanNode> {
+    if depth > culprit_core::plan::MAX_PLAN_DEPTH {
+        return Err(culprit_core::plan::too_deep());
+    }
     let physical = relop.attribute("PhysicalOp").unwrap_or("Unknown").to_string();
     let logical = relop.attribute("LogicalOp").unwrap_or_default().to_string();
     let operator = operator_element(relop);
@@ -438,7 +449,7 @@ fn parse_relop(relop: Node) -> PlanNode {
         runtime,
         warnings,
         props,
-        children: child_ops.into_iter().map(parse_relop).collect(),
+        children: child_ops.into_iter().map(|c| parse_relop(c, depth + 1)).collect::<Result<_>>()?,
     };
     // Rows read across every execution, like `act_rows`: counted by SQL Server when it did (ActualRowsRead), else its
     // estimate per execution times the executions (the measured ones in an actual plan).
@@ -451,20 +462,23 @@ fn parse_relop(relop: Node) -> PlanNode {
     {
         push_unique(&mut node.warnings, PlanWarning::ResidualPredicate);
     }
-    node
+    Ok(node)
 }
 
 fn operator_element<'a, 'i>(relop: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
     relop.children().rfind(|n| n.is_element() && !RELOP_METADATA.contains(&n.tag_name().name()))
 }
 
-/// Nearest RelOp descendants: the operator's inputs.
+/// Nearest RelOp descendants, in document order: the operator's inputs. Walked with a stack of its own, so elements
+/// nested however deep between two operators can't exhaust the thread's.
 fn collect_relops<'a, 'i>(node: Node<'a, 'i>, out: &mut Vec<Node<'a, 'i>>) {
-    for c in node.children().filter(Node::is_element) {
+    let mut pending: Vec<Node<'a, 'i>> = node.children().filter(Node::is_element).collect();
+    pending.reverse();
+    while let Some(c) = pending.pop() {
         if c.has_tag_name_local("RelOp") {
             out.push(c);
         } else {
-            collect_relops(c, out);
+            pending.extend(c.children().filter(Node::is_element).collect::<Vec<_>>().into_iter().rev());
         }
     }
 }

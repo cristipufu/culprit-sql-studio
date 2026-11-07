@@ -41,6 +41,7 @@ process-wrap = { version = "10.0.1", default-features = false, features = ["toki
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "time", "process", "sync"] }
 rusqlite = { version = "0.40.2", features = ["bundled", "hooks"] }
 tokio-postgres = "0.7.18"
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 tokio-postgres-rustls = "0.14.0"
 tokio-util = { version = "0.7.20", features = ["compat"] }
 ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }

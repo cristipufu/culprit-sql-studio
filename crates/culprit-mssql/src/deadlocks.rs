@@ -6,7 +6,7 @@ use culprit_core::deadlock::classify;
 use culprit_core::{
     Deadlock, DeadlockProcess, DeadlockReport, DeadlockResource, Engine, Error, LockHolder, LockWait, Result,
 };
-use roxmltree::{Document, Node, ParsingOptions};
+use roxmltree::{Document, Node};
 
 use crate::conn::{MsClient, query, query_one};
 
@@ -176,8 +176,10 @@ fn normalize_time(text: &str) -> String {
 /// The deadlocks in one telemetry event, unless it names another database: the telemetry may be the logical server's,
 /// and deadlock graphs there name databases by their physical name, so the event's `database_name` is what tells.
 fn telemetry_deadlocks(xml: &str, database: &str, at: Option<String>) -> Vec<Deadlock> {
-    let options = ParsingOptions { allow_dtd: false, ..ParsingOptions::default() };
-    let Ok(doc) = Document::parse_with_options(xml, options) else { return Vec::new() };
+    culprit_core::xml::read(xml, |doc| doc.map(|doc| telemetry_event(&doc, xml, database, at)).unwrap_or_default())
+}
+
+fn telemetry_event(doc: &Document, xml: &str, database: &str, at: Option<String>) -> Vec<Deadlock> {
     let other = doc
         .descendants()
         .find(|n| n.has_tag_name("data") && n.attribute("name") == Some("database_name"))
@@ -207,9 +209,13 @@ fn parse_with_time(xml: &str, source: &str, at: Option<String>) -> Result<Vec<De
 
 /// Every deadlock in `xml`: a saved .xdl (`<deadlock-list>` or `<deadlock>`), a system_health event, or a ring buffer.
 pub fn parse_deadlock_xml(xml: &str, source: &str) -> Result<Vec<Deadlock>> {
-    let options = ParsingOptions { allow_dtd: false, ..ParsingOptions::default() };
-    let doc = Document::parse_with_options(xml.trim_start_matches('\u{feff}'), options)
-        .map_err(|e| Error::invalid(format!("This isn't a deadlock graph Culprit can read: {e}")))?;
+    culprit_core::xml::read(xml.trim_start_matches('\u{feff}'), |doc| {
+        let doc = doc.map_err(|e| Error::invalid(format!("This isn't a deadlock graph Culprit can read: {e}")))?;
+        deadlock_graphs(&doc, source)
+    })
+}
+
+fn deadlock_graphs(doc: &Document, source: &str) -> Result<Vec<Deadlock>> {
     let mut out = Vec::new();
     for node in doc.descendants().filter(|n| n.has_tag_name("deadlock")) {
         // Ring buffers hold every kind of event; only deadlock reports carry a <deadlock>.
