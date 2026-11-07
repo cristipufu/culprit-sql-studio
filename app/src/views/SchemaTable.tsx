@@ -98,7 +98,7 @@ export function SchemaTable({ report, table, onOpenTable }: { report: Report; ta
       </div>
       <div id={`${tabId}-panel`} className={`td-body ${tab === "data" ? "fill" : tab === "columns" || tab === "indexes" ? "grid-tab" : ""}`} role="tabpanel" aria-labelledby={`${tabId}-${tab}`}>
         {tab === "columns" && <Columns report={report} table={table} indexes={indexes} links={links} onOpenTable={onOpenTable} />}
-        {tab === "indexes" && <Indexes report={report} table={table} indexes={indexes} links={links} />}
+        {tab === "indexes" && <Indexes report={report} table={table} indexes={indexes} />}
         {tab === "relations" && <Relations links={links} onOpenTable={onOpenTable} />}
         {tab === "data" && <SchemaData key={JSON.stringify([snapshot.connection, engine, table.schema, table.name])} report={report} table={table} />}
         {tab === "ddl" && <Ddl text={ddl(engine, table, columns, indexes, links.outgoing)} original={table.definition != null} />}

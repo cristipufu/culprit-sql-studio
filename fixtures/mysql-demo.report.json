@@ -833,7 +833,7 @@
     "analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.4"
+      "version": "0.5.5"
     },
     "baselines": [],
     "collection": null,
@@ -846,7 +846,7 @@
         "parser": {
           "component": "culprit-mysql",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "04cd7be9c366fadc"
       },
@@ -856,7 +856,7 @@
         "parser": {
           "component": "culprit-mysql",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "19bd4ff468839ea3"
       },
@@ -866,7 +866,7 @@
         "parser": {
           "component": "culprit-mysql",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "c7b5ac9bb4bcecfe"
       },
@@ -876,7 +876,7 @@
         "parser": {
           "component": "culprit-mysql",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "9b30e6ad79d940fe"
       },
@@ -886,7 +886,7 @@
         "parser": {
           "component": "culprit-mysql",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "17f97e6ec7a22e0a"
       },
@@ -896,7 +896,7 @@
         "parser": {
           "component": "culprit-mysql",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "b4c0f3861e32013e"
       },
@@ -906,7 +906,7 @@
         "parser": {
           "component": "culprit-mysql",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "4167fe7f2c20deb7"
       },
@@ -916,7 +916,7 @@
         "parser": {
           "component": "culprit-mysql",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "7f47c8550af0c644"
       }
@@ -1033,7 +1033,7 @@
     "previous_analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.0"
+      "version": "0.5.4"
     }
   },
   "refinement": [
@@ -5900,7 +5900,70 @@
         "severity": "low"
       }
     ],
+    "foreign_key_indexes": [
+      {
+        "indexed": true,
+        "name": "fk_items_order",
+        "schema": "shop",
+        "table": "order_items"
+      },
+      {
+        "indexed": true,
+        "name": "fk_items_product",
+        "schema": "shop",
+        "table": "order_items"
+      },
+      {
+        "indexed": true,
+        "name": "fk_orders_customer",
+        "schema": "shop",
+        "table": "orders"
+      }
+    ],
     "headline": "10 opportunities. The top ones touch 4 min of database time over the 2 minutes since statistics were reset (85%).",
+    "index_counting": "since the server started or its performance_schema counters were last reset",
+    "index_notes": [
+      {
+        "finding": null,
+        "index": "ix_customers_region",
+        "schema": "shop",
+        "table": "customers",
+        "text": "No reads since the server started or its performance_schema counters were last reset; a week of counting is needed before calling it unused",
+        "tone": "low"
+      },
+      {
+        "finding": null,
+        "index": "fk_items_product",
+        "schema": "shop",
+        "table": "order_items",
+        "text": "Never read since the server started or its performance_schema counters were last reset, but it backs foreign key fk_items_product: InnoDB requires it",
+        "tone": "low"
+      },
+      {
+        "finding": "duplicate-index:shop.orders.ix_orders_status",
+        "index": "ix_orders_status",
+        "schema": "shop",
+        "table": "orders",
+        "text": "Covered by ix_orders_status_created: it leads with the same keys",
+        "tone": "medium"
+      },
+      {
+        "finding": "duplicate-index:shop.products.ix_products_sku",
+        "index": "ix_products_sku",
+        "schema": "shop",
+        "table": "products",
+        "text": "Same keys as uq_products_sku: one of them is enough",
+        "tone": "medium"
+      },
+      {
+        "finding": null,
+        "index": "uq_products_sku",
+        "schema": "shop",
+        "table": "products",
+        "text": "Never read since the server started or its performance_schema counters were last reset; it still enforces uniqueness",
+        "tone": "low"
+      }
+    ],
     "no_workload": null,
     "opportunities": 10,
     "over_scans": [],

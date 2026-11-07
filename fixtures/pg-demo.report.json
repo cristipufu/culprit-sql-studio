@@ -1266,7 +1266,7 @@
     "analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.4"
+      "version": "0.5.5"
     },
     "baselines": [],
     "collection": null,
@@ -1279,7 +1279,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "9065391607317686058"
       },
@@ -1289,7 +1289,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "5308963031944094559"
       },
@@ -1299,7 +1299,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "-8886085649470066503"
       },
@@ -1309,7 +1309,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "4911431806993420100"
       },
@@ -1319,7 +1319,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "-3722457391793582113"
       },
@@ -1329,7 +1329,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "2004611025554862962"
       },
@@ -1339,7 +1339,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "2885972271926804069"
       },
@@ -1349,7 +1349,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "3432126458605143571"
       },
@@ -1359,7 +1359,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "8465053948014496855"
       },
@@ -1369,7 +1369,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "-6576252161252119529"
       },
@@ -1379,7 +1379,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "5306524445554315840"
       },
@@ -1389,7 +1389,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "2169115237613314459"
       },
@@ -1399,7 +1399,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "-463560455567765064"
       },
@@ -1409,7 +1409,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "-967240904657798800"
       },
@@ -1419,7 +1419,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "6425265648074738764"
       }
@@ -1536,7 +1536,7 @@
     "previous_analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.0"
+      "version": "0.5.4"
     }
   },
   "refinement": [
@@ -9206,7 +9206,70 @@
         "severity": "low"
       }
     ],
+    "foreign_key_indexes": [
+      {
+        "indexed": false,
+        "name": "orders_customer_id_fkey",
+        "schema": "public",
+        "table": "orders"
+      },
+      {
+        "indexed": false,
+        "name": "order_items_product_id_fkey",
+        "schema": "public",
+        "table": "order_items"
+      },
+      {
+        "indexed": false,
+        "name": "order_items_order_id_fkey",
+        "schema": "public",
+        "table": "order_items"
+      }
+    ],
     "headline": "14 opportunities. The top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).",
+    "index_counting": "in the 7 hours since the server last restarted",
+    "index_notes": [
+      {
+        "finding": null,
+        "index": "products_sku_key",
+        "schema": "public",
+        "table": "products",
+        "text": "Never read in the 7 hours since the server last restarted; it still enforces uniqueness",
+        "tone": "low"
+      },
+      {
+        "finding": "duplicate-index:public.products.products_sku_idx",
+        "index": "products_sku_idx",
+        "schema": "public",
+        "table": "products",
+        "text": "Same keys as products_sku_key: one of them is enough",
+        "tone": "medium"
+      },
+      {
+        "finding": "duplicate-index:public.orders.orders_status_idx",
+        "index": "orders_status_idx",
+        "schema": "public",
+        "table": "orders",
+        "text": "Covered by orders_status_created_idx: it leads with the same keys",
+        "tone": "medium"
+      },
+      {
+        "finding": null,
+        "index": "customers_region_idx",
+        "schema": "public",
+        "table": "customers",
+        "text": "No reads in the 7 hours since the server last restarted; a week of counting is needed before calling it unused",
+        "tone": "low"
+      },
+      {
+        "finding": null,
+        "index": "wide_touched",
+        "schema": "archive",
+        "table": "wide",
+        "text": "No reads in the 7 hours since the server last restarted; a week of counting is needed before calling it unused",
+        "tone": "low"
+      }
+    ],
     "no_workload": null,
     "opportunities": 14,
     "over_scans": [

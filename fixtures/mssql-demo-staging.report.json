@@ -717,7 +717,7 @@
     "analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.4"
+      "version": "0.5.5"
     },
     "baselines": [],
     "collection": null,
@@ -836,7 +836,7 @@
     "previous_analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.0"
+      "version": "0.5.4"
     }
   },
   "snapshot": {
@@ -4751,7 +4751,90 @@
         "severity": "low"
       }
     ],
+    "foreign_key_indexes": [
+      {
+        "indexed": true,
+        "name": "fk_order_items_order",
+        "schema": "shop",
+        "table": "order_items"
+      },
+      {
+        "indexed": true,
+        "name": "fk_order_items_product",
+        "schema": "shop",
+        "table": "order_items"
+      },
+      {
+        "indexed": true,
+        "name": "fk_orders_customer",
+        "schema": "shop",
+        "table": "orders"
+      },
+      {
+        "indexed": true,
+        "name": "fk_support_tickets_customer",
+        "schema": "shop",
+        "table": "support_tickets"
+      },
+      {
+        "indexed": false,
+        "name": "fk_ticket_events_ticket",
+        "schema": "shop",
+        "table": "ticket_events"
+      }
+    ],
     "headline": "7 opportunities.",
+    "index_counting": "in the 2 minutes since the server last restarted",
+    "index_notes": [
+      {
+        "finding": null,
+        "index": "uq_products_sku",
+        "schema": "shop",
+        "table": "products",
+        "text": "Never read in the 2 minutes since the server last restarted; it still enforces uniqueness",
+        "tone": "low"
+      },
+      {
+        "finding": "duplicate-index:shop.products.ix_products_sku",
+        "index": "ix_products_sku",
+        "schema": "shop",
+        "table": "products",
+        "text": "Same keys as uq_products_sku: one of them is enough",
+        "tone": "medium"
+      },
+      {
+        "finding": "duplicate-index:shop.orders.ix_orders_status",
+        "index": "ix_orders_status",
+        "schema": "shop",
+        "table": "orders",
+        "text": "Covered by ix_orders_status_created: it leads with the same keys",
+        "tone": "medium"
+      },
+      {
+        "finding": null,
+        "index": "ix_orders_status_created",
+        "schema": "shop",
+        "table": "orders",
+        "text": "No reads in the 2 minutes since the server last restarted; a week of counting is needed before calling it unused",
+        "tone": "low"
+      },
+      {
+        "finding": null,
+        "index": "ix_order_items_product_id",
+        "schema": "shop",
+        "table": "order_items",
+        "text": "Never read in the 2 minutes since the server last restarted, but it backs foreign key fk_order_items_product: without it, deleting or updating a products row scans order_items",
+        "tone": "low"
+      },
+      {
+        "finding": null,
+        "index": "ix_support_tickets_customer_id",
+        "schema": "shop",
+        "table": "support_tickets",
+        "text": "Never read in the 2 minutes since the server last restarted, but it backs foreign key fk_support_tickets_customer: without it, deleting or updating a customers row scans support_tickets",
+        "tone": "low"
+      }
+    ],
     "no_workload": "Query Store is OFF on this database.",
     "opportunities": 7,
     "over_scans": [],

@@ -25,21 +25,7 @@ pub fn unused_index(snapshot: &Snapshot) -> Vec<Finding> {
     // What the counters have surely watched: on performance_schema counters that may have been reset, the digests' days.
     let days = crate::support::watched_days(snapshot);
     let mut by_table: Vec<(String, String, Vec<&IndexStat>)> = Vec::new();
-    // By table and name: MySQL and SQL Server index names are unique only within a table.
-    let redundant: Vec<(&str, &str, &str)> = redundant_indexes(snapshot)
-        .iter()
-        .map(|(a, _)| (a.schema.as_str(), a.table.as_str(), a.name.as_str()))
-        .collect();
-    let mysql = snapshot.server.engine == Engine::Mysql;
-    // InnoDB refuses to drop the index a foreign key relies on.
-    for i in snapshot
-        .indexes
-        .iter()
-        .filter(|i| {
-            is_unused(snapshot, i) && !redundant.contains(&(i.schema.as_str(), i.table.as_str(), i.name.as_str()))
-        })
-        .filter(|i| !(mysql && backs_foreign_key(snapshot, i).is_some()))
-    {
+    for i in unused_indexes(snapshot) {
         match by_table.iter_mut().find(|(s, t, _)| *s == i.schema && *t == i.table) {
             Some((_, _, list)) => list.push(i),
             None => by_table.push((i.schema.clone(), i.table.clone(), vec![i])),
@@ -156,7 +142,7 @@ pub fn unused_index(snapshot: &Snapshot) -> Vec<Finding> {
             }
             f
         })
-        .chain(invalid_postgres_indexes(snapshot, &redundant))
+        .chain(invalid_postgres_indexes(snapshot, &covered(snapshot)))
         .collect()
 }
 
@@ -242,6 +228,27 @@ fn invalid_postgres_indexes(snapshot: &Snapshot, redundant: &[(&str, &str, &str)
             f
         })
         .collect()
+}
+
+/// The indexes this check calls unused ([`is_unused`]), less those a wider index covers (the duplicate-index check says
+/// those) and, on MySQL, those a foreign key relies on (InnoDB refuses to drop them). The schema view's notes say
+/// "unused" of exactly these.
+pub(crate) fn unused_indexes(snapshot: &Snapshot) -> Vec<&IndexStat> {
+    let redundant = covered(snapshot);
+    let mysql = snapshot.server.engine == Engine::Mysql;
+    snapshot
+        .indexes
+        .iter()
+        .filter(|i| {
+            is_unused(snapshot, i) && !redundant.contains(&(i.schema.as_str(), i.table.as_str(), i.name.as_str()))
+        })
+        .filter(|i| !(mysql && backs_foreign_key(snapshot, i).is_some()))
+        .collect()
+}
+
+/// The indexes a wider one covers, by table and name: MySQL and SQL Server index names are unique only within a table.
+fn covered(snapshot: &Snapshot) -> Vec<(&str, &str, &str)> {
+    redundant_indexes(snapshot).iter().map(|(a, _)| (a.schema.as_str(), a.table.as_str(), a.name.as_str())).collect()
 }
 
 /// Writes a day to a table that make keeping an unread index up to date a Medium problem.

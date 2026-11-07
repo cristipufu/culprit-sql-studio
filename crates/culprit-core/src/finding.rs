@@ -247,6 +247,45 @@ pub struct Summary {
     /// their totals over the window.
     #[serde(default)]
     pub over_scans: Vec<crate::model::StatementCost>,
+    /// What the schema view says under an index, from the evidence the index checks use: whether no reads makes it
+    /// unused (a week of counters, not too new, not needed for a key, uniqueness or a foreign key), and what covers it.
+    /// The app renders these instead of judging the counters itself.
+    #[serde(default)]
+    pub index_notes: Vec<IndexNote>,
+    /// The period the index usage counters cover, as the notes say it ("in the 12 days since the server last
+    /// restarted"); empty when the scan has no index usage.
+    #[serde(default)]
+    pub index_counting: String,
+    /// Whether an index can serve each foreign key, as the unindexed-foreign-key check decides it.
+    #[serde(default)]
+    pub foreign_key_indexes: Vec<ForeignKeyIndex>,
+}
+
+/// One line under an index in the schema view ([`Summary::index_notes`]).
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct IndexNote {
+    pub schema: String,
+    pub table: String,
+    pub index: String,
+    /// How much it matters: high for an index the checks call unused, medium for one that is disabled or covered by
+    /// another, low for an explanation (it backs a foreign key, enforces uniqueness, may be new).
+    pub tone: Severity,
+    pub text: String,
+    /// The finding that says the same, to open from the note.
+    pub finding: Option<String>,
+}
+
+/// Whether an index serves a foreign key ([`Summary::foreign_key_indexes`]).
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct ForeignKeyIndex {
+    pub schema: String,
+    pub table: String,
+    /// The foreign key's name.
+    pub name: String,
+    /// `None` where the index catalog can't establish it (a source failed, or native sharding metadata is missing).
+    pub indexed: Option<bool>,
 }
 
 /// How one statement's runs are said where a rate a day would misstate them ([`Summary::runs_said`]).

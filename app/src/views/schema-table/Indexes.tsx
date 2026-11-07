@@ -1,22 +1,31 @@
 import { ArrowRight, ChevronRight } from "lucide-react";
 import { Fragment, useId, useMemo, useState } from "react";
+import type { IndexNote } from "../../gen/IndexNote";
 import type { IndexStat } from "../../gen/IndexStat";
 import type { Report } from "../../gen/Report";
 import type { TableStat } from "../../gen/TableStat";
 import { bytes, count, oneLine } from "../../lib/format";
 import { indexKey, indexUsage, plannedQueryCount } from "../../lib/index-usage";
-import { countingSince, indexNotes, type TableRelations } from "../../lib/schema-model";
 import { setState } from "../../lib/store";
 
 /** Each index: keys, the captured queries that use it, reads and writes, size, and what its counters do and don't show. */
-export function Indexes({ report, table, indexes, links }: { report: Report; table: TableStat; indexes: IndexStat[]; links: TableRelations }) {
+export function Indexes({ report, table, indexes }: { report: Report; table: TableStat; indexes: IndexStat[] }) {
   const engine = report.snapshot.server.engine;
   const usageId = useId();
   const usage = useMemo(() => indexUsage(report), [report]);
   const [open, setOpen] = useState<string | null>(null);
   const planned = plannedQueryCount(report);
   const hasUsage = indexes.some((index) => index.reads != null || index.writes != null);
-  const sinceText = countingSince(report);
+  // What the counters cover and what each index's counters say, as the index checks decide them.
+  const sinceText = report.summary.index_counting;
+  const notesOf = useMemo(() => {
+    const byIndex = new Map<string, IndexNote[]>();
+    for (const note of report.summary.index_notes) {
+      const key = indexKey(note.schema, note.table, note.index);
+      byIndex.set(key, [...(byIndex.get(key) ?? []), note]);
+    }
+    return (i: IndexStat) => byIndex.get(indexKey(i.schema, i.table, i.name)) ?? [];
+  }, [report]);
   const biggest = Math.max(1, ...indexes.map((i) => i.size_bytes ?? 0));
   if (indexes.length === 0)
     return (
@@ -59,7 +68,7 @@ export function Indexes({ report, table, indexes, links }: { report: Report; tab
               const reads = i.reads ?? 0;
               const writes = i.writes ?? 0;
               const rw = Math.max(1, reads + writes);
-              const notes = indexNotes(report, table, i, indexes, links.outgoing);
+              const notes = notesOf(i);
               return (
                 <Fragment key={i.name}>
                   <tr className={`row ${expanded ? "selected" : ""} ${notes.length > 0 ? "ix-has-notes" : ""}`}>

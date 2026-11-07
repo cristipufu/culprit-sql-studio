@@ -79,11 +79,21 @@ pub fn source_failed(s: &Snapshot, names: &[&str]) -> Option<String> {
 }
 
 pub fn index_catalog(s: &Snapshot) -> Option<String> {
+    catalog_of(s, |_| true)
+}
+
+/// [`index_catalog`] for what one table's indexes can serve: a YugabyteDB index elsewhere without sharding metadata
+/// says nothing about this table's, while a failed source still does.
+pub fn index_catalog_for_table(s: &Snapshot, schema: &str, table: &str) -> Option<String> {
+    catalog_of(s, |i| i.schema.eq_ignore_ascii_case(schema) && i.table.eq_ignore_ascii_case(table))
+}
+
+fn catalog_of(s: &Snapshot, judged: impl Fn(&culprit_core::IndexStat) -> bool) -> Option<String> {
     if s.server.engine == culprit_core::Engine::Yugabyte {
         if let Some(reason) = source_failed(s, &[source_id::TABLE_STORAGE]) {
             return Some(reason);
         }
-        if s.indexes.iter().any(|index| index.docdb.is_none()) {
+        if s.indexes.iter().filter(|index| judged(index)).any(|index| index.docdb.is_none()) {
             return Some("Native index sharding metadata was not collected; a PostgreSQL key prefix cannot establish DocDB lookup coverage or redundancy.".into());
         }
     }

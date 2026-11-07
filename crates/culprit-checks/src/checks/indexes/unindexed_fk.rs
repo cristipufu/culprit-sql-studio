@@ -169,9 +169,11 @@ pub(crate) fn plan_reads_whole(snapshot: &Snapshot, q: &QueryStat, table: &str, 
 }
 
 pub(crate) fn unindexed_foreign_keys(snapshot: &Snapshot) -> Vec<(&culprit_core::ForeignKey, Option<f64>)> {
-    if crate::evidence::index_catalog(snapshot).is_some() {
-        return Vec::new();
-    }
+    // Absence needs the catalog of the key's own table: a source that failed, or (on YugabyteDB) one of its indexes
+    // without sharding metadata, leaves the key unjudged.
+    let catalog_known = |fk: &culprit_core::ForeignKey| {
+        crate::evidence::index_catalog_for_table(snapshot, &fk.schema, &fk.table).is_none()
+    };
     let keys = |fk: &culprit_core::ForeignKey| fk.columns.iter().map(|c| c.to_ascii_lowercase()).collect::<Vec<_>>();
     let same_table = |a: &culprit_core::ForeignKey, b: &culprit_core::ForeignKey| {
         a.schema.eq_ignore_ascii_case(&b.schema) && a.table.eq_ignore_ascii_case(&b.table)
@@ -179,8 +181,9 @@ pub(crate) fn unindexed_foreign_keys(snapshot: &Snapshot) -> Vec<(&culprit_core:
     // A foreign key on a partition is the partitioned table's key, copied: judged once, at the parent.
     let is_partition =
         |fk: &culprit_core::ForeignKey| snapshot.table(&fk.schema, &fk.table).is_some_and(|t| t.partition_of.is_some());
-    let candidates: Vec<&culprit_core::ForeignKey> =
-        enforced_foreign_keys(snapshot).filter(|fk| !fk_is_indexed(snapshot, fk) && !is_partition(fk)).collect();
+    let candidates: Vec<&culprit_core::ForeignKey> = enforced_foreign_keys(snapshot)
+        .filter(|fk| !fk_is_indexed(snapshot, fk) && !is_partition(fk) && catalog_known(fk))
+        .collect();
     let mut out: Vec<(&culprit_core::ForeignKey, Option<f64>)> = Vec::new();
     for fk in &candidates {
         let (mine, longer) = (keys(fk), |o: &&culprit_core::ForeignKey| {

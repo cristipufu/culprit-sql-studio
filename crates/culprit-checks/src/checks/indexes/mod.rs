@@ -10,6 +10,7 @@ use crate::support::*;
 mod duplicate_index;
 mod filtered_scan;
 mod missing_index;
+pub(crate) mod notes;
 #[cfg(test)]
 mod tests;
 mod unindexed_fk;

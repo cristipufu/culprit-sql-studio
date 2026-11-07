@@ -80,6 +80,9 @@ pub fn summarize(snapshot: &Snapshot, findings: &[Finding]) -> Summary {
         no_workload: snapshot.no_workload_reason(),
         runs_said: runs_said(snapshot),
         over_scans: over_scans(snapshot),
+        index_notes: crate::indexes::notes::index_notes(snapshot, findings),
+        index_counting: crate::indexes::notes::index_counting(snapshot),
+        foreign_key_indexes: crate::indexes::notes::foreign_key_indexes(snapshot),
     }
 }
 

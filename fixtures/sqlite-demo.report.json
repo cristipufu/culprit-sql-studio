@@ -336,7 +336,7 @@
     "analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.4"
+      "version": "0.5.5"
     },
     "baselines": [],
     "collection": null,
@@ -506,7 +506,7 @@
     "previous_analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.0"
+      "version": "0.5.4"
     }
   },
   "refinement": [
@@ -2434,7 +2434,38 @@
         "severity": "low"
       }
     ],
+    "foreign_key_indexes": [
+      {
+        "indexed": false,
+        "name": "order_items_fk_0",
+        "schema": "main",
+        "table": "order_items"
+      },
+      {
+        "indexed": true,
+        "name": "order_items_fk_1",
+        "schema": "main",
+        "table": "order_items"
+      },
+      {
+        "indexed": false,
+        "name": "orders_fk_0",
+        "schema": "main",
+        "table": "orders"
+      }
+    ],
     "headline": "5 opportunities. The top ones touch 43.9 s of database time over the 90 minutes the Rails log covers (99%).",
+    "index_counting": "",
+    "index_notes": [
+      {
+        "finding": "duplicate-index:main.orders.ix_orders_status_again",
+        "index": "ix_orders_status_again",
+        "schema": "main",
+        "table": "orders",
+        "text": "Same keys as ix_orders_status: one of them is enough",
+        "tone": "medium"
+      }
+    ],
     "no_workload": null,
     "opportunities": 5,
     "over_scans": [],

@@ -387,7 +387,7 @@
     "analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.4"
+      "version": "0.5.5"
     },
     "baselines": [],
     "collection": null,
@@ -400,7 +400,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "-6927356924371546951"
       },
@@ -410,7 +410,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "3152047327284928468"
       },
@@ -420,7 +420,7 @@
         "parser": {
           "component": "culprit-postgres",
           "revision": null,
-          "version": "0.5.4"
+          "version": "0.5.5"
         },
         "query": "-2225272007542897168"
       }
@@ -537,7 +537,7 @@
     "previous_analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.0"
+      "version": "0.5.4"
     }
   },
   "refinement": [
@@ -6413,7 +6413,10 @@
         "severity": "low"
       }
     ],
+    "foreign_key_indexes": [],
     "headline": "2 opportunities. The top ones touch 767 ms of database time over the 1 minute since statistics were reset (99%).",
+    "index_counting": "in the 34 minutes since the server last restarted",
+    "index_notes": [],
     "no_workload": null,
     "opportunities": 2,
     "over_scans": [],

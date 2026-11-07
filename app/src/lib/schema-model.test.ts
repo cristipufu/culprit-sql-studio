@@ -3,7 +3,7 @@ import type { IndexStat } from "../gen/IndexStat";
 import type { TableStat } from "../gen/TableStat";
 import type { Report } from "../gen/Report";
 import type { Snapshot } from "../gen/Snapshot";
-import { coveredBy, ddl, nextColumnSort, previewSql, relations } from "./schema-model";
+import { ddl, nextColumnSort, previewSql, relations } from "./schema-model";
 import { ENGINES } from "./engines";
 import nativeSnapshot from "../../../fixtures/yugabyte-demo.json";
 import { fromRust, partial } from "../test/fixtures";
@@ -37,17 +37,15 @@ test("Table previews: every provider, quoted names, bounded rows and sort transi
   const hashPk = { ...nativePk, columns: ["tenant", "id", "created_at DESC"], docdb: { hash_columns: ["tenant", "id"], tablets: 3 } } as IndexStat;
   check(ddl("yugabyte", nativeTable, [], [hashPk], []).includes('PRIMARY KEY (("tenant", "id") HASH, "created_at" DESC)'), "Composite hashes must stay one group");
   check(!ddl("yugabyte", { ...nativeTable, storage: null }, [], [nativePk], []).includes("CREATE TABLE"), "Unknown native distribution cannot become a guessed recreation script");
-  const hashIndex = { ...nativePk, is_primary_key: false, name: "hash", docdb: { hash_columns: ["id"], tablets: 3 } } as IndexStat;
-  const rangeIndex = { ...hashIndex, name: "range", columns: ["id", "created_at"], docdb: { hash_columns: [], tablets: 3 } } as IndexStat;
-  check(coveredBy(hashIndex, [rangeIndex]) === null, "Ordered keys cannot establish redundancy of a hash index");
-  const nativeReport = partial<Report>({ snapshot: fromRust<Snapshot>(nativeSnapshot) });
-  const orders = nativeReport.snapshot.tables.find((table) => table.name === "orders")!;
-  check(relations(nativeReport, orders).outgoing[0]?.indexed === false, "A complete catalog can establish a missing FK index");
-  delete nativeReport.snapshot.indexes[0]!.docdb;
-  // Unknown metadata on a different table does not invalidate this table's known index coverage.
-  check(relations(nativeReport, orders).outgoing[0]?.indexed === false, "FK coverage is scoped to its own table");
-  delete nativeReport.snapshot.indexes.find((index) => index.table === "orders")!.docdb;
-  check(relations(nativeReport, orders).outgoing[0]?.indexed === null, "Unknown hash keys cannot establish that an FK index is missing");
+  // Whether an index serves a foreign key is the checks' verdict (Summary.foreign_key_indexes), unknown stays unknown.
+  const snapshot = fromRust<Snapshot>(nativeSnapshot);
+  const orders = snapshot.tables.find((table) => table.name === "orders")!;
+  const keys = snapshot.foreign_keys.filter((fk) => fk.table === orders.name);
+  const withVerdict = (indexed: boolean | null) =>
+    partial<Report>({ snapshot, summary: { foreign_key_indexes: keys.map((fk) => ({ schema: fk.schema, table: fk.table, name: fk.name, indexed })) } });
+  check(relations(withVerdict(false), orders).outgoing.every((r) => r.indexed === false), "A missing index is the checks' verdict");
+  check(relations(withVerdict(null), orders).outgoing.every((r) => r.indexed === null), "An unknown verdict stays unknown");
+  check(relations(partial<Report>({ snapshot, summary: { foreign_key_indexes: [] } }), orders).outgoing.every((r) => r.indexed === null), "No verdict is not a missing index");
 
   for (const engine of ENGINES) {
     const query = previewSql(engine, { schema: 'odd"`]schema', name: 'order' }, 1000, { filter: "id > 1 -- comment", order: { column: 'odd"`]column', direction: "desc" } });
