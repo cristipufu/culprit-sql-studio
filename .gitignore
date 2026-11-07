@@ -10,3 +10,5 @@ node_modules
 _site/
 dev/sqlite/demo.db
 dev/sqlite/development.log
+/app/test-results
+/app/playwright-report

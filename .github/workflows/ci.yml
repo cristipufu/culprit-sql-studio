@@ -89,6 +89,31 @@ jobs:
       - name: Write the third-party notices
         run: python3 dev/licenses.py
 
+  e2e:
+    name: Interface (browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: UI packages and the browser
+        working-directory: app
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps --only-shell chromium
+      # The UI in a real browser against the demo: navigation, the editor, findings, schema and plans by keyboard.
+      - name: Interaction tests
+        working-directory: app
+        run: bun run e2e
+      - name: Keep the traces of what failed
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-traces
+          path: app/test-results/
+          retention-days: 7
+
   coverage:
     name: Coverage
     # Measures, doesn't gate: the table goes to the run's summary, the LCOV reports to an artifact. On pushes to main,

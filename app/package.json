@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.e2e.json",
     "test": "bun test src",
+    "e2e": "playwright test",
     "lint": "biome lint",
     "check": "bun run typecheck && bun run test && bun run lint",
     "tauri": "tauri"
@@ -27,6 +28,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",
+    "@playwright/test": "1.65.0",
     "@tauri-apps/cli": "2.12.4",
     "@types/bun": "1.4.4",
     "@types/react": "19.3.0",

@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   // Lint only: the code keeps its own formatting, and src/gen is generated from the Rust model.
-  "files": { "includes": ["src/**", "!src/gen"] },
+  "files": { "includes": ["src/**", "e2e/**", "!src/gen"] },
   "formatter": { "enabled": false },
   "assist": { "enabled": false },
   "css": { "linter": { "enabled": false } },
