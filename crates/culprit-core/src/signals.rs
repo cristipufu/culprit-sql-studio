@@ -55,7 +55,6 @@ pub struct QueryCosts {
     pub log_full_pages: Option<f64>,
     /// Estimated bytes per returned row, from the plan's output width (SQL Server AvgRowSize, PostgreSQL width).
     pub row_bytes: Option<f64>,
-    #[serde(default)]
     pub compile_history: Option<CompileHistory>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -250,25 +249,19 @@ pub struct Replica {
     pub error: Option<String>,
     /// A delay it is configured to apply changes with, on purpose (MySQL SQL_Delay, PostgreSQL
     /// recovery_min_apply_delay); already taken out of `lag_seconds`.
-    #[serde(default)]
     pub delay_seconds: Option<f64>,
     /// A logical consumer (a subscription, a CDC tool such as Debezium or Fivetran) rather than a copy of the server.
-    #[serde(default)]
     pub logical: Option<bool>,
     /// How long a replication slot has been without a consumer (PostgreSQL 17+ `inactive_since`).
-    #[serde(default)]
     pub inactive_seconds: Option<f64>,
     /// Whether a slot's WAL is still kept for it: reserved, extended, unreserved (about to be given up) or lost
     /// (PostgreSQL 13+).
-    #[serde(default)]
     pub wal_status: Option<String>,
     /// WAL that can still be written before the slot is given up under max_slot_wal_keep_size; `None` when nothing
     /// caps what slots keep (PostgreSQL 13+ `safe_wal_size`).
-    #[serde(default)]
     pub safe_wal_bytes: Option<f64>,
     /// The database a logical walsender or slot decodes (PostgreSQL); `None` for a physical one, which carries every
     /// database. Another database's consumer is that database's lag, though its slot keeps WAL for the whole server.
-    #[serde(default)]
     pub database: Option<String>,
 }
 
@@ -320,7 +313,6 @@ pub struct IndexContention {
     pub lock_escalations: f64,
     /// Escalations SQL Server tried, the ones that happened included: an attempt fails when another session holds a
     /// conflicting lock on the table, and the statement keeps its row locks.
-    #[serde(default)]
     pub lock_escalation_attempts: f64,
     pub leaf_inserts: Option<f64>,
     /// The leading key column only grows (identity or sequence), so every insert lands on the last page.
@@ -657,7 +649,6 @@ pub struct ConstraintIssue {
     pub disabled: bool,
     /// The table inherits from another (PostgreSQL legacy inheritance, not a declarative partition): the planner reads
     /// CHECK constraints there to skip it (constraint exclusion), and only validated ones.
-    #[serde(default)]
     pub inheritance_child: bool,
 }
 
@@ -711,15 +702,12 @@ pub struct TableStorage {
     /// Hours the update counters have been counting: since the database's statistics were last reset. `None` when
     /// that is unknown: PostgreSQL 15+ leaves `stats_reset` empty until the first reset, and the counters outlive a
     /// clean restart, so they may be far older than the server's start.
-    #[serde(default)]
     pub counter_hours: Option<f64>,
     /// The planner's row count (pg_class.reltuples), which a statistics reset, crash or failover doesn't zero the way
     /// it does the live-row counter.
-    #[serde(default)]
     pub planner_rows: Option<f64>,
     /// The table's own storage parameters as set (`autovacuum_vacuum_scale_factor=0.01`, `fillfactor=70`): what
     /// overrides the server's autovacuum settings for it. Empty when it has none, or the scan predates them.
-    #[serde(default)]
     pub options: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -732,7 +720,6 @@ pub struct TableStorage {
 /// Native DocDB work; requests, operations and storage rows are different from PostgreSQL pages or SQL result rows.
 /// Timings can overlap and must not be turned into exclusive shares of execution time.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
-#[serde(default)]
 #[ts(export)]
 pub struct DocdbMetrics {
     pub read_requests: Option<f64>,

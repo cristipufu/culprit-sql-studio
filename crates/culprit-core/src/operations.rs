@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default)]
-#[serde(default)]
 #[ts(export)]
 pub struct OperationalStats {
     pub log_failures: Vec<LoggedFailure>,
@@ -171,7 +170,6 @@ pub struct RequestEvidence {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct SpaceUsage {
-    #[serde(default)]
     pub parts: Vec<SpacePart>,
     pub name: String,
     pub kind: FileKind,

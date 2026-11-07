@@ -1306,7 +1306,7 @@
         "table": "order_items"
       }
     ],
-    "format": 1,
+    "format": 2,
     "histograms": null,
     "id": "20261011T160540.394Z",
     "identity": {

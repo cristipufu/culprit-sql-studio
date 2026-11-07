@@ -2867,7 +2867,7 @@
         "table": "ticket_events"
       }
     ],
-    "format": 1,
+    "format": 2,
     "histograms": null,
     "id": "20261011T121347.162Z",
     "identity": {

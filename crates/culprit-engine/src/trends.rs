@@ -40,11 +40,9 @@ pub struct Counters {
     pub total_executions: f64,
     pub queries: BTreeMap<String, [f64; 2]>,
     /// What "What changed" needs to name a query and notice a new plan without re-reading the report.
-    #[serde(default)]
     pub meta: BTreeMap<String, QueryMeta>,
     /// Eviction rounds since the source's counters started (pg_stat_statements_info.dealloc, 14+; each round evicts
     /// about 5% of the entries): when it grew between two scans, entries left and took their totals with them.
-    #[serde(default)]
     pub evictions: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub measurement: Option<MeasurementContext>,
@@ -58,14 +56,10 @@ pub(crate) const EVICTIONS_SETTING: &str = "pg_stat_statements.dealloc";
 pub struct QueryMeta {
     pub text: String,
     /// The captured plan's shape (operators and objects, in order); a different shape is a different plan.
-    #[serde(default)]
     pub shape: Option<String>,
     /// Where that plan spends most of its effort, in words: "Seq Scan on orders".
-    #[serde(default)]
     pub hot: Option<String>,
-    #[serde(default)]
     pub first_seen: Option<String>,
-    #[serde(default)]
     pub last_seen: Option<String>,
 }
 

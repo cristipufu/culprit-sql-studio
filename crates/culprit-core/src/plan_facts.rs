@@ -6,7 +6,6 @@ use ts_rs::TS;
 use crate::model::Properties;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
-#[serde(default)]
 #[ts(export)]
 pub struct PlanFacts {
     // The source removed constants from the stored plan; selectivity cannot be justified by those hidden values.
@@ -118,7 +117,6 @@ pub struct PlanFacts {
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
-#[serde(default)]
 #[ts(export)]
 pub struct PlanNodeFacts {
     #[serde(default, skip_serializing_if = "is_false")]
@@ -225,7 +223,6 @@ pub struct PlanNodeFacts {
     pub cacheable: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub functions_in_seek_only: Option<bool>,
-    #[serde(default)]
     pub expression_cache: bool,
     pub conditions: Vec<String>,
     pub conversions: Vec<PlanConversion>,
@@ -608,11 +605,8 @@ mod trigger_measurements {
     #[derive(Deserialize)]
     struct Input {
         name: String,
-        #[serde(default)]
         relation: Option<String>,
-        #[serde(default)]
         time_ms: Option<f64>,
-        #[serde(default)]
         calls: Option<f64>,
     }
     pub fn serialize<S: serde::Serializer>(value: &[crate::actual::TriggerTiming], s: S) -> Result<S::Ok, S::Error> {

@@ -332,7 +332,8 @@ from their own saved reports within a bounded backfill.
 Saved reports use a versioned private JSON encoding: the prepared snapshot appears once, with lossless flat-path
 differences for retained input and collection. Loading restores the full report. Immutable native plan text is shared
 in memory across these snapshots. Report lists read small summary sidecars, without deserializing plans and retained
-evidence. Culprit reads only what the current version writes: files saved by older versions are not read.
+evidence. Culprit reads only what the current version writes: a snapshot records its format (`SNAPSHOT_FORMAT`), and one
+in another format is refused, never half-read with missing fields filled in.
 
 Consumers request only what they need. `latest_snapshot` and scan-to-scan comparisons read the prepared snapshot
 directly, skipping derived views and retained evidence. Analysis readers reconstruct retained input and collection

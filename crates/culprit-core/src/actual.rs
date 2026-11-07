@@ -18,7 +18,6 @@ pub struct NodeRuntime {
     /// The part of `logical_reads` that had to come from disk.
     pub physical_reads: Option<f64>,
     /// Rows each worker produced for parallel operators; uneven numbers mean one worker did most of the work.
-    #[serde(default)]
     pub thread_rows: Vec<f64>,
     /// Pages written to and read back from tempdb / temp files: the operator ran out of memory.
     pub spill_pages: Option<f64>,
@@ -227,7 +226,6 @@ pub fn self_times(plan: &Plan) -> Option<std::collections::HashMap<u32, f64>> {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct ActualSummary {
-    #[serde(default)]
     pub triggers: Vec<TriggerTiming>,
     pub elapsed_ms: Option<f64>,
     pub cpu_ms: Option<f64>,
@@ -243,7 +241,6 @@ pub struct ActualSummary {
     /// The operator whose row count was furthest from the estimate (×, signed like `PlanNode::misestimate`).
     pub worst_estimate_node: Option<u32>,
     pub worst_estimate: Option<f64>,
-    #[serde(default)]
     pub timed: bool,
     pub operator_time_ms: Option<f64>,
     pub spill_pages: Option<f64>,

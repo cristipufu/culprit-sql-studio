@@ -76,16 +76,12 @@ pub struct TuningRecommendation {
     pub script: Option<String>,
     pub valid_since: Option<String>,
     /// When the query last ran, by Query Store (UTC). A recommendation outlives the query a deploy replaced.
-    #[serde(default)]
     pub last_execution: Option<String>,
     /// SQL Server's estimate of its value, 0–100.
-    #[serde(default)]
     pub score: Option<f64>,
     /// When SQL Server applied it itself (UTC): automatic tuning forced the plan, or created the index.
-    #[serde(default)]
     pub applied_at: Option<String>,
     /// The index a CreateIndex or DropIndex recommendation is about.
-    #[serde(default)]
     pub index: Option<RecommendedIndex>,
 }
 
@@ -110,7 +106,6 @@ pub struct ForcedPlan {
     pub last_failure_reason: Option<String>,
     pub last_execution: Option<String>,
     /// MANUAL (someone ran sp_query_store_force_plan) or AUTO (automatic plan correction), where the server says.
-    #[serde(default)]
     pub forcing: Option<String>,
 }
 

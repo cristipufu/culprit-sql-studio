@@ -438,3 +438,13 @@ fn cached_plan_statistics_never_substitute_for_workload_variants() {
     assert!(!roundtrip.plan_history_matches_workload());
     assert!(roundtrip.workload_plans().is_empty());
 }
+
+#[test]
+fn a_snapshot_saved_in_another_format_is_refused_not_half_read() {
+    let mut saved: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../fixtures/postgres-demo.json")).unwrap();
+    assert!(serde_json::from_value::<Snapshot>(saved.clone()).is_ok());
+    saved["format"] = 1.into();
+    let refused = serde_json::from_value::<Snapshot>(saved).unwrap_err().to_string();
+    assert!(refused.contains("saved by another version of Culprit (format 1)"), "{refused}");
+}

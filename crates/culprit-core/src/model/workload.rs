@@ -34,17 +34,14 @@ pub struct Workload {
     /// Where the statements were read from, by name, for sentences ("Query Store covers …").
     pub source: String,
     /// The same, typed: see [`Workload::kind`]. `None` in scans saved before it existed.
-    #[serde(default)]
     pub kind: Option<WorkloadKind>,
     /// The source keeps history by time, so a scan can choose its window (Query Store), or records a period of its own
     /// (an application's log): its numbers are of that period, never running totals to subtract. Cumulative sources
     /// (pg_stat_statements, the plan cache) cover "since the last reset" and ignore the requested window.
-    #[serde(default)]
     pub windowed: bool,
     /// The application's log the statements were read from, by format ("Rails"), for an engine that keeps no statement
     /// history (SQLite). Its period is what the log's own timestamps span, which may have ended long before the scan;
     /// a log without timestamps covers a period nobody can say. `None` when the database's statistics are the source.
-    #[serde(default)]
     pub log: Option<String>,
     pub window_start: Option<String>,
     pub window_end: Option<String>,
@@ -56,22 +53,18 @@ pub struct Workload {
     pub queries: Vec<QueryStat>,
     /// Database time across the window, oldest first. `None` when the source keeps no history and Culprit has no
     /// earlier scans of this connection to compare with.
-    #[serde(default)]
     pub timeline: Option<Timeline>,
     /// Time the source measured but couldn't put on any statement, so it is in neither `queries` nor `total_time_ms`:
     /// MySQL's catch-all digest row once its digest table is full. That row is server-wide (it doesn't say which
     /// database ran it), so shares are of the attributed time and this says how much more there may be. `None` when
     /// nothing was left out or the source can't say.
-    #[serde(default)]
     pub untracked_time_ms: Option<f64>,
     /// For a source whose entries count from different moments (the plan cache counts each plan from its compile): the
     /// sum of every entry's time an hour of its own life, in ms. Shares are then weighed by it ([`Workload::share_of`])
     /// so a plan cached for a month doesn't outweigh one compiled an hour ago by its age alone. `None` elsewhere.
-    #[serde(default)]
     pub hourly_time_ms: Option<f64>,
     /// Only runs slower than this were recorded (the slow query log's `long_query_time`), so totals, shares and run
     /// counts are of logged slow runs, not of everything the database ran. `None` when every run is counted.
-    #[serde(default)]
     pub min_logged_ms: Option<f64>,
     // Typed measurement context; legacy fields remain readable in older reports.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -875,10 +868,8 @@ fn days_when(from: &str, to: Option<&str>) -> String {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct QueryStat {
-    #[serde(default)]
     pub requests: Option<crate::operations::RequestEvidence>,
     /// A CTE write's unambiguous base table, resolved by shared SQL analysis. Absent when unknown or unnecessary.
-    #[serde(default)]
     pub resolved_write_target: Option<String>,
     pub id: String,
     pub query_hash: Option<String>,
@@ -902,22 +893,17 @@ pub struct QueryStat {
     pub plan: Option<Plan>,
     pub waits: Vec<WaitStat>,
     /// This query's part of each bucket of the workload's timeline (only the heaviest queries carry one).
-    #[serde(default)]
     pub trend: Option<QueryTrend>,
     /// How run times spread beyond the average, as far as the engine keeps it.
-    #[serde(default)]
     pub spread: Option<Spread>,
     /// Failed runs, planning, JIT, log volume and result size, as far as the engine keeps them.
-    #[serde(default)]
     pub costs: Option<crate::signals::QueryCosts>,
     /// Rows the statement changed (inserted, updated or deleted), where the engine counts them apart from the rows it
     /// returned (`rows`): MySQL and MariaDB's performance_schema. `None` where the engine doesn't separate them.
-    #[serde(default)]
     pub rows_affected: Option<f64>,
     /// Which of `plans` the attached `plan` is (Query Store's plan_id): the plan still in use (the heaviest of the
     /// variants no newer variant replaced), not merely the heaviest over the window. `None` when the source keeps one
     /// plan per statement.
-    #[serde(default)]
     pub plan_id: Option<String>,
     // Where retained plan statistics come from when they have a different lifetime from statement statistics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -935,10 +921,8 @@ pub struct Spread {
     pub p95_ms: Option<f64>,
     pub p99_ms: Option<f64>,
     /// `[low_ms, high_ms, runs]` per bucket, fastest first (MySQL).
-    #[serde(default)]
     pub histogram: Vec<[f64; 3]>,
     /// Time spent waiting for locks across all runs (MySQL).
-    #[serde(default)]
     pub lock_ms: Option<f64>,
 }
 
@@ -981,7 +965,6 @@ pub struct Timeline {
     /// Buckets the source can't account for in full, by index: its running totals shrank between two scans without a
     /// reset (entries evicted from pg_stat_statements, plans dropped from the cache), so `time_ms` and `executions`
     /// there hold only the growth of the statements Culprit tracks, a lower bound. `None` when every bucket is known.
-    #[serde(default)]
     pub unknown: Option<Vec<bool>>,
 }
 
@@ -1102,23 +1085,16 @@ pub struct PlanVariant {
     pub first_seen: Option<String>,
     pub last_seen: Option<String>,
     pub is_forced: bool,
-    #[serde(default)]
     pub min_time_ms: Option<f64>,
-    #[serde(default)]
     pub max_time_ms: Option<f64>,
-    #[serde(default)]
     pub stddev_time_ms: Option<f64>,
     /// The parameter values this plan was compiled for, as the engine reports them (SQL Server showplan).
-    #[serde(default)]
     pub compiled: Option<String>,
     /// SQL Server 2022 parameter-sensitive plans: the variant query this plan belongs to.
-    #[serde(default)]
     pub variant_query: Option<String>,
     /// CPU time and logical reads across its runs, where the source keeps them per plan (Query Store): whether a
     /// slower plan does more work, or only waited longer while it ran.
-    #[serde(default)]
     pub cpu_time_ms: Option<f64>,
-    #[serde(default)]
     pub logical_reads: Option<f64>,
 }
 

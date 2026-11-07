@@ -16,7 +16,30 @@ pub use workload::{
     WorkloadKind, span_when, span_words,
 };
 
-pub const SNAPSHOT_FORMAT: u32 = 1;
+/// The format a snapshot is saved in. One saved in another (by an older Culprit) isn't read: its fields may be missing
+/// or mean something else.
+pub const SNAPSHOT_FORMAT: u32 = 2;
+
+/// [`SNAPSHOT_FORMAT`] as a snapshot writes it, and the refusal of any other as it is read.
+mod current_format {
+    use super::SNAPSHOT_FORMAT;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(format: &u32, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u32(*format)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
+        let format = u32::deserialize(deserializer)?;
+        if format == SNAPSHOT_FORMAT {
+            Ok(format)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "this snapshot was saved by another version of Culprit (format {format}); this version reads format {SNAPSHOT_FORMAT}"
+            )))
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
@@ -236,7 +259,6 @@ pub struct ServerInfo {
     /// is what code asks.
     pub cloud: Option<String>,
     /// The managed service it runs on (`None`: a server you run yourself).
-    #[serde(default)]
     pub platform: Option<crate::platform::Platform>,
     pub database: String,
     pub database_size_bytes: Option<f64>,
@@ -331,31 +353,24 @@ pub struct TableStat {
     pub xid_age: Option<f64>,
     /// Reads of a heap that followed a forwarding pointer to the row's new page, since the table's metadata was cached
     /// (SQL Server).
-    #[serde(default)]
     pub forwarded_fetches: Option<f64>,
     /// How updates land on its pages and how much is empty space (PostgreSQL).
-    #[serde(default)]
     pub storage: Option<crate::signals::TableStorage>,
     /// Bytes of the table's own rows (its heap or clustered index) kept in the rows' pages. With `lob_bytes` and
     /// `overflow_bytes`, how its data splits between the rows and the large values kept apart from them. `None` where
     /// the engine doesn't say.
-    #[serde(default)]
     pub in_row_bytes: Option<f64>,
     /// Bytes of large values kept apart from the rows: SQL Server's LOB pages (`nvarchar(max)`, `varbinary(max)`,
     /// `xml`…), PostgreSQL's TOAST table.
-    #[serde(default)]
     pub lob_bytes: Option<f64>,
     /// Bytes of variable-length values pushed off a row that outgrew its page (SQL Server row-overflow pages).
-    #[serde(default)]
     pub overflow_bytes: Option<f64>,
     /// The partitioned table this one is a partition of (`schema.table`, PostgreSQL). Its rows, sizes and counters are
     /// the partition's own; judge the table as a whole at the parent. `None` for a table that isn't a partition.
-    #[serde(default)]
     pub partition_of: Option<String>,
     /// The latest its usage counters (scans, reads, writes) may have started over (UTC), when a scan saw them shrink
     /// since the scan before without the server restarting: a statistics reset for the table, a database taken offline,
     /// restored or failed over. What they count covers the time since then at least. `None`: as old as the server's.
-    #[serde(default)]
     pub counters_since: Option<String>,
     // The engine's table kind (SQLite: "table" or "virtual"). Absent in older scans and where not collected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -390,13 +405,10 @@ pub struct IndexStat {
     pub is_clustered: bool,
     pub is_disabled: bool,
     /// Engine-specific availability. `is_disabled` remains the compatibility flag for optimizer unavailability.
-    #[serde(default)]
     pub state: Option<IndexState>,
     /// Whether writes maintain it; unknown for an old invalid PostgreSQL index without indisready evidence.
-    #[serde(default)]
     pub maintained: Option<bool>,
     /// Whether this index has a sqlite_stat1 entry; unknown on other engines or an unread catalog.
-    #[serde(default)]
     pub has_statistics: Option<bool>,
     pub size_bytes: Option<f64>,
     pub reads: Option<f64>,
@@ -407,30 +419,25 @@ pub struct IndexStat {
     pub last_read: Option<String>,
     pub definition: Option<String>,
     /// Lock and latch waits on this index (SQL Server).
-    #[serde(default)]
     pub contention: Option<crate::signals::IndexContention>,
     /// The latest it may have been created (UTC), set by a scan only when something says it may be new: an earlier
     /// scan saw its table without it, or the database dated a change to its table that no earlier scan was there to
     /// see, or its usage counters started over (`counters_since`). Its usage counters cover the time since at least.
     /// `None`: as old as the counters, as far as anyone knows.
-    #[serde(default)]
     pub created_at_latest: Option<String>,
     /// The partitioned index this one is a partition of (`schema.index`, PostgreSQL): every partition of a table gets its
     /// own copy of the parent's index. Judge it (unused, duplicate) at the parent. `None` for an index of its own.
-    #[serde(default)]
     pub partition_of: Option<String>,
     /// Per key column, what the index compares it by when that isn't the column type's default: an operator class
     /// (`text_pattern_ops`, `jsonb_path_ops`) and/or a collation (`COLLATE "C"`), empty for a key that uses the
     /// defaults. Two indexes on the same columns with different ones serve different queries, so neither duplicates
     /// the other. `None` when every key uses the defaults, or the engine has no such thing.
-    #[serde(default)]
     pub opclasses: Option<Vec<String>>,
     /// The latest its usage counters may have started over (UTC), when a scan saw them shrink or vanish since the scan
     /// before without the server restarting: a database taken offline, restored or failed over (SQL Server keeps index
     /// usage per database), an ALTER or OPTIMIZE of its table (MySQL), a statistics reset. No reads says nothing about
     /// the time before it; `created_at_latest` moves to it too, so a check that waits for a young index waits for these
     /// counters as well. `None`: as old as the server's counters, as far as anyone knows.
-    #[serde(default)]
     pub counters_since: Option<String>,
     // Predicate relationships retained before shared-copy literal redaction; absent on ordinary collected indexes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -609,8 +616,9 @@ pub struct CollectorNote {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct Snapshot {
-    #[serde(default)]
     pub operations: crate::operations::OperationalStats,
+    #[serde(with = "current_format")]
+    #[ts(as = "u32")]
     pub format: u32,
     pub id: String,
     pub connection: String,
@@ -621,7 +629,6 @@ pub struct Snapshot {
     pub workload: Option<Workload>,
     pub tables: Vec<TableStat>,
     pub indexes: Vec<IndexStat>,
-    #[serde(default)]
     pub columns: Vec<ColumnInfo>,
     pub foreign_keys: Vec<ForeignKey>,
     pub missing_indexes: Vec<MissingIndex>,
@@ -631,44 +638,32 @@ pub struct Snapshot {
     pub settings: Vec<Setting>,
     pub notes: Vec<CollectorNote>,
     /// Pressure signals from cheap counters (compiles, memory grants, cache hits, open transactions).
-    #[serde(default)]
     pub pressure: Option<crate::waits::Pressure>,
     /// What the scan asked for; the workload's own window says what the source could actually cover.
-    #[serde(default)]
     pub options: Option<SnapshotOptions>,
     /// Statements that differ only in literal values (Query Store query_hash, pg_stat_statements entries).
-    #[serde(default)]
     pub query_families: Vec<crate::advice::QueryFamily>,
     /// Single-use plans in the plan cache (SQL Server).
-    #[serde(default)]
     pub plan_cache: Option<crate::advice::PlanCacheUse>,
     /// Query Store's tuning recommendations, forced plans and hints (SQL Server).
-    #[serde(default)]
     pub tuning: Option<crate::advice::TuningAdvice>,
     /// Deadlocks the engine recorded in the last day (graphs on SQL Server and MySQL, a counter on Postgres).
-    #[serde(default)]
     pub deadlocks: Option<crate::deadlock::DeadlockReport>,
     /// Constraints the optimizer can't rely on: unchecked against existing rows or switched off.
-    #[serde(default)]
     pub constraints: Vec<crate::signals::ConstraintIssue>,
     /// Column histograms (MySQL 8, MariaDB); `None` when the engine has none or they couldn't be read.
-    #[serde(default)]
     pub histograms: Option<Vec<crate::signals::ColumnHistogram>>,
     /// The lock escalations an earlier scan counted (SQL Server), set from the scans Culprit keeps or a previous
     /// digest: what tells escalations since then from old ones. `None` without an earlier scan to compare with.
-    #[serde(default)]
     pub escalations_before: Option<crate::signals::EscalationBaseline>,
     /// Per-index lock counters read by an earlier scan of this database; absent without comparable history.
-    #[serde(default)]
     pub contention_before: Option<crate::signals::ContentionBaseline>,
     /// pg_stat_statements' eviction rounds an earlier scan counted, set from the scans Culprit keeps: what tells rounds
     /// since then from old ones, since the count outlives restarts and a higher limit. `None` without an earlier scan
     /// that read them.
-    #[serde(default)]
     pub evictions_before: Option<crate::signals::CountBaseline>,
     /// How big each table's data was at an earlier scan of the same database, set from the scans Culprit keeps: what
     /// tells how fast a table grows. `None` without an earlier scan.
-    #[serde(default)]
     pub sizes_before: Option<crate::signals::SizeBaseline>,
     // Collection outcomes, separate from informational notes. Missing on scans saved by older versions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -736,19 +731,15 @@ pub struct Session {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct LiveState {
-    #[serde(default)]
     pub notes: Vec<String>,
     pub taken_at: String,
     pub sessions: Vec<Session>,
     pub waits: Vec<WaitStat>,
     /// What Live may do to other sessions on this connection; empty on production connections.
-    #[serde(default)]
     pub session_actions: Vec<SessionAction>,
     /// Why `session_actions` is empty, in plain language.
-    #[serde(default)]
     pub session_actions_note: Option<String>,
     /// Who blocks whom, as chains under each head blocker, when anyone waits on a lock.
-    #[serde(default)]
     pub blocking: Option<crate::blocking::Blocking>,
 }
 

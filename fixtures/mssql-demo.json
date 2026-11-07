@@ -1,5 +1,14 @@
 {
-  "format": 1,
+  "operations": {
+    "log_failures": [],
+    "spaces": [],
+    "counters": [],
+    "sequences": [],
+    "multixacts": [],
+    "sqlite": null,
+    "cluster": null
+  },
+  "format": 2,
   "id": "20261011T121347.162Z",
   "connection": "mssql-demo",
   "environment": "local",
@@ -11,6 +20,7 @@
     "version": "16.0.4295.3",
     "edition": "Developer Edition (64-bit)",
     "cloud": null,
+    "platform": null,
     "database": "culprit_demo",
     "database_size_bytes": 411041792.0,
     "started_at": "2026-10-11T12:13:03Z",
@@ -32,11 +42,12 @@
     "source": "Query Store",
     "kind": "query-store",
     "windowed": true,
+    "log": null,
     "window_start": "2026-10-11T07:40:00Z",
     "window_end": "2026-10-11T12:13:47Z",
     "window_hours": 4.563055555555556,
     "total_time_ms": 40746.58699999999,
-    "total_cpu_ms": 91061.89799999999,
+    "total_cpu_ms": 91061.898,
     "total_executions": 70112.0,
     "query_count": 7.0,
     "queries": [
@@ -2173,8 +2184,12 @@
         3883.0,
         4508.0,
         4170.0
-      ]
-    }
+      ],
+      "unknown": null
+    },
+    "untracked_time_ms": null,
+    "hourly_time_ms": null,
+    "min_logged_ms": null
   },
   "tables": [
     {
@@ -2197,7 +2212,14 @@
       "last_vacuum": null,
       "last_analyze": null,
       "forwarded_records": null,
-      "xid_age": null
+      "xid_age": null,
+      "forwarded_fetches": null,
+      "storage": null,
+      "in_row_bytes": null,
+      "lob_bytes": null,
+      "overflow_bytes": null,
+      "partition_of": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2219,7 +2241,14 @@
       "last_vacuum": null,
       "last_analyze": null,
       "forwarded_records": null,
-      "xid_age": null
+      "xid_age": null,
+      "forwarded_fetches": null,
+      "storage": null,
+      "in_row_bytes": null,
+      "lob_bytes": null,
+      "overflow_bytes": null,
+      "partition_of": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2241,7 +2270,14 @@
       "last_vacuum": null,
       "last_analyze": null,
       "forwarded_records": null,
-      "xid_age": null
+      "xid_age": null,
+      "forwarded_fetches": null,
+      "storage": null,
+      "in_row_bytes": null,
+      "lob_bytes": null,
+      "overflow_bytes": null,
+      "partition_of": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2263,7 +2299,14 @@
       "last_vacuum": null,
       "last_analyze": null,
       "forwarded_records": null,
-      "xid_age": null
+      "xid_age": null,
+      "forwarded_fetches": null,
+      "storage": null,
+      "in_row_bytes": null,
+      "lob_bytes": null,
+      "overflow_bytes": null,
+      "partition_of": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2285,7 +2328,14 @@
       "last_vacuum": null,
       "last_analyze": null,
       "forwarded_records": null,
-      "xid_age": null
+      "xid_age": null,
+      "forwarded_fetches": null,
+      "storage": null,
+      "in_row_bytes": null,
+      "lob_bytes": null,
+      "overflow_bytes": null,
+      "partition_of": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2307,7 +2357,14 @@
       "last_vacuum": null,
       "last_analyze": null,
       "forwarded_records": null,
-      "xid_age": null
+      "xid_age": null,
+      "forwarded_fetches": null,
+      "storage": null,
+      "in_row_bytes": null,
+      "lob_bytes": null,
+      "overflow_bytes": null,
+      "partition_of": null,
+      "counters_since": null
     }
   ],
   "indexes": [
@@ -2325,6 +2382,9 @@
       "is_primary_key": true,
       "is_clustered": true,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 17506304.0,
       "reads": 600.0,
       "writes": 0.0,
@@ -2332,7 +2392,12 @@
       "scans": 0.0,
       "lookups": 600.0,
       "last_read": "2026-10-11T12:13:36Z",
-      "definition": null
+      "definition": null,
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2348,6 +2413,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 7413760.0,
       "reads": 602.0,
       "writes": 0.0,
@@ -2355,7 +2423,12 @@
       "scans": 602.0,
       "lookups": 0.0,
       "last_read": "2026-10-11T12:13:36Z",
-      "definition": null
+      "definition": null,
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2371,6 +2444,9 @@
       "is_primary_key": true,
       "is_clustered": true,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 1646592.0,
       "reads": 30000.0,
       "writes": 0.0,
@@ -2378,7 +2454,12 @@
       "scans": 0.0,
       "lookups": 0.0,
       "last_read": "2026-10-11T12:13:25Z",
-      "definition": null
+      "definition": null,
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2394,6 +2475,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 663552.0,
       "reads": 0.0,
       "writes": 0.0,
@@ -2401,7 +2485,12 @@
       "scans": 0.0,
       "lookups": 0.0,
       "last_read": null,
-      "definition": null
+      "definition": null,
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2417,6 +2506,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 663552.0,
       "reads": 1.0,
       "writes": 0.0,
@@ -2424,7 +2516,12 @@
       "scans": 1.0,
       "lookups": 0.0,
       "last_read": "2026-10-11T12:13:19Z",
-      "definition": null
+      "definition": null,
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2440,6 +2537,9 @@
       "is_primary_key": true,
       "is_clustered": true,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 62070784.0,
       "reads": 2150.0,
       "writes": 0.0,
@@ -2447,7 +2547,12 @@
       "scans": 150.0,
       "lookups": 2000.0,
       "last_read": "2026-10-11T12:13:40Z",
-      "definition": null
+      "definition": null,
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2464,6 +2569,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 24649728.0,
       "reads": 2000.0,
       "writes": 0.0,
@@ -2471,7 +2579,12 @@
       "scans": 0.0,
       "lookups": 0.0,
       "last_read": "2026-10-11T12:13:20Z",
-      "definition": null
+      "definition": null,
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2487,6 +2600,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 27795456.0,
       "reads": 0.0,
       "writes": 0.0,
@@ -2494,7 +2610,12 @@
       "scans": 0.0,
       "lookups": 0.0,
       "last_read": null,
-      "definition": null
+      "definition": null,
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2511,6 +2632,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 33890304.0,
       "reads": 0.0,
       "writes": 0.0,
@@ -2518,7 +2642,12 @@
       "scans": 0.0,
       "lookups": 0.0,
       "last_read": null,
-      "definition": null
+      "definition": null,
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2534,6 +2663,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 22290432.0,
       "reads": 1.0,
       "writes": 0.0,
@@ -2541,7 +2673,12 @@
       "scans": 1.0,
       "lookups": 0.0,
       "last_read": "2026-10-11T12:13:19Z",
-      "definition": null
+      "definition": null,
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2557,6 +2694,9 @@
       "is_primary_key": true,
       "is_clustered": true,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 64495616.0,
       "reads": 300.0,
       "writes": 0.0,
@@ -2564,7 +2704,12 @@
       "scans": 300.0,
       "lookups": 0.0,
       "last_read": "2026-10-11T12:13:44Z",
-      "definition": null
+      "definition": null,
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2580,6 +2725,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 27729920.0,
       "reads": 0.0,
       "writes": 0.0,
@@ -2587,7 +2735,12 @@
       "scans": 0.0,
       "lookups": 0.0,
       "last_read": null,
-      "definition": null
+      "definition": null,
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2603,6 +2756,9 @@
       "is_primary_key": true,
       "is_clustered": true,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 27992064.0,
       "reads": 2005.0,
       "writes": 0.0,
@@ -2610,7 +2766,12 @@
       "scans": 0.0,
       "lookups": 2005.0,
       "last_read": "2026-10-11T12:13:47Z",
-      "definition": null
+      "definition": null,
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2626,6 +2787,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 4464640.0,
       "reads": 0.0,
       "writes": 0.0,
@@ -2633,7 +2797,12 @@
       "scans": 0.0,
       "lookups": 0.0,
       "last_read": null,
-      "definition": null
+      "definition": null,
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2649,6 +2818,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 3481600.0,
       "reads": 2005.0,
       "writes": 0.0,
@@ -2656,7 +2828,12 @@
       "scans": 0.0,
       "lookups": 0.0,
       "last_read": "2026-10-11T12:13:47Z",
-      "definition": null
+      "definition": null,
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -2672,6 +2849,9 @@
       "is_primary_key": true,
       "is_clustered": true,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 39460864.0,
       "reads": 0.0,
       "writes": 0.0,
@@ -2679,7 +2859,12 @@
       "scans": 0.0,
       "lookups": 0.0,
       "last_read": null,
-      "definition": null
+      "definition": null,
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     }
   ],
   "columns": [
@@ -3785,11 +3970,22 @@
     }
   ],
   "notes": [],
+  "pressure": null,
   "options": {
     "window_days": 7,
     "top_queries": 60,
     "plans": 25
   },
+  "query_families": [],
+  "plan_cache": null,
+  "tuning": null,
+  "deadlocks": null,
+  "constraints": [],
+  "histograms": null,
+  "escalations_before": null,
+  "contention_before": null,
+  "evictions_before": null,
+  "sizes_before": null,
   "identity": {
     "engine": "mssql",
     "database": "culprit_demo",

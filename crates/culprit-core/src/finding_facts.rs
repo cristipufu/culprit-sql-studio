@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
-#[serde(default)]
 #[ts(export)]
 pub struct FindingFacts {
     pub histogram_columns: Vec<String>,

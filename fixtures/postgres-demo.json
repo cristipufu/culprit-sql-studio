@@ -1,5 +1,14 @@
 {
-  "format": 1,
+  "operations": {
+    "log_failures": [],
+    "spaces": [],
+    "counters": [],
+    "sequences": [],
+    "multixacts": [],
+    "sqlite": null,
+    "cluster": null
+  },
+  "format": 2,
   "id": "20261011T115421.485Z",
   "connection": "pg-demo",
   "environment": "local",
@@ -11,6 +20,7 @@
     "version": "18.6 (Debian 18.6-1.pgdg13+2)",
     "edition": null,
     "cloud": null,
+    "platform": null,
     "database": "demo",
     "database_size_bytes": 596555455.0,
     "started_at": "2026-10-11T11:54:02Z",
@@ -32,6 +42,7 @@
     "source": "pg_stat_statements",
     "kind": "statement-stats",
     "windowed": false,
+    "log": null,
     "window_start": "2026-10-11T07:01:50Z",
     "window_end": "2026-10-11T11:54:21Z",
     "window_hours": 4.87542468,
@@ -362,7 +373,7 @@
                     "rows_read": null,
                     "table_rows": null,
                     "subtree_cost": 44202.74,
-                    "self_cost": 1001.0999999999985,
+                    "self_cost": 1001.0999999999984,
                     "act_time_ms": null,
                     "runtime": null,
                     "warnings": [],
@@ -800,7 +811,7 @@
                 "rows_read": null,
                 "table_rows": null,
                 "subtree_cost": 13561.97,
-                "self_cost": 1000.1999999999989,
+                "self_cost": 1000.1999999999988,
                 "act_time_ms": null,
                 "runtime": null,
                 "warnings": [],
@@ -1345,7 +1356,7 @@
                 "rows_read": null,
                 "table_rows": null,
                 "subtree_cost": 12.33,
-                "self_cost": 0.009999999999999787,
+                "self_cost": 0.009999999999999789,
                 "act_time_ms": null,
                 "runtime": null,
                 "warnings": [],
@@ -2175,7 +2186,11 @@
         "rows_affected": null,
         "plan_id": null
       }
-    ]
+    ],
+    "timeline": null,
+    "untracked_time_ms": null,
+    "hourly_time_ms": null,
+    "min_logged_ms": null
   },
   "tables": [
     {
@@ -2198,7 +2213,14 @@
       "last_vacuum": null,
       "last_analyze": null,
       "forwarded_records": null,
-      "xid_age": 78.0
+      "xid_age": 78.0,
+      "forwarded_fetches": null,
+      "storage": null,
+      "in_row_bytes": null,
+      "lob_bytes": null,
+      "overflow_bytes": null,
+      "partition_of": null,
+      "counters_since": null
     },
     {
       "schema": "public",
@@ -2220,7 +2242,14 @@
       "last_vacuum": null,
       "last_analyze": null,
       "forwarded_records": null,
-      "xid_age": 80.0
+      "xid_age": 80.0,
+      "forwarded_fetches": null,
+      "storage": null,
+      "in_row_bytes": null,
+      "lob_bytes": null,
+      "overflow_bytes": null,
+      "partition_of": null,
+      "counters_since": null
     },
     {
       "schema": "public",
@@ -2242,7 +2271,14 @@
       "last_vacuum": null,
       "last_analyze": null,
       "forwarded_records": null,
-      "xid_age": 77.0
+      "xid_age": 77.0,
+      "forwarded_fetches": null,
+      "storage": null,
+      "in_row_bytes": null,
+      "lob_bytes": null,
+      "overflow_bytes": null,
+      "partition_of": null,
+      "counters_since": null
     },
     {
       "schema": "public",
@@ -2264,7 +2300,14 @@
       "last_vacuum": null,
       "last_analyze": null,
       "forwarded_records": null,
-      "xid_age": 79.0
+      "xid_age": 79.0,
+      "forwarded_fetches": null,
+      "storage": null,
+      "in_row_bytes": null,
+      "lob_bytes": null,
+      "overflow_bytes": null,
+      "partition_of": null,
+      "counters_since": null
     },
     {
       "schema": "public",
@@ -2286,7 +2329,14 @@
       "last_vacuum": null,
       "last_analyze": null,
       "forwarded_records": null,
-      "xid_age": 76.0
+      "xid_age": 76.0,
+      "forwarded_fetches": null,
+      "storage": null,
+      "in_row_bytes": null,
+      "lob_bytes": null,
+      "overflow_bytes": null,
+      "partition_of": null,
+      "counters_since": null
     }
   ],
   "indexes": [
@@ -2304,6 +2354,9 @@
       "is_primary_key": true,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 4513792.0,
       "reads": 8193.0,
       "writes": null,
@@ -2311,7 +2364,12 @@
       "scans": 8193.0,
       "lookups": null,
       "last_read": "2026-10-11T07:02:20Z",
-      "definition": "CREATE UNIQUE INDEX customers_pkey ON public.customers USING btree (id)"
+      "definition": "CREATE UNIQUE INDEX customers_pkey ON public.customers USING btree (id)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "public",
@@ -2327,6 +2385,9 @@
       "is_primary_key": true,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 245760.0,
       "reads": 2.0,
       "writes": null,
@@ -2334,7 +2395,12 @@
       "scans": 2.0,
       "lookups": null,
       "last_read": "2026-10-11T07:03:36Z",
-      "definition": "CREATE UNIQUE INDEX products_pkey ON public.products USING btree (id)"
+      "definition": "CREATE UNIQUE INDEX products_pkey ON public.products USING btree (id)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "public",
@@ -2350,6 +2416,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 335872.0,
       "reads": 0.0,
       "writes": null,
@@ -2357,7 +2426,12 @@
       "scans": 0.0,
       "lookups": null,
       "last_read": null,
-      "definition": "CREATE UNIQUE INDEX products_sku_key ON public.products USING btree (sku)"
+      "definition": "CREATE UNIQUE INDEX products_sku_key ON public.products USING btree (sku)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "public",
@@ -2373,6 +2447,9 @@
       "is_primary_key": true,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 44941312.0,
       "reads": 0.0,
       "writes": null,
@@ -2380,7 +2457,12 @@
       "scans": 0.0,
       "lookups": null,
       "last_read": null,
-      "definition": "CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)"
+      "definition": "CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "public",
@@ -2396,6 +2478,9 @@
       "is_primary_key": true,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 22487040.0,
       "reads": 0.0,
       "writes": null,
@@ -2403,7 +2488,12 @@
       "scans": 0.0,
       "lookups": null,
       "last_read": null,
-      "definition": "CREATE UNIQUE INDEX order_items_pkey ON public.order_items USING btree (id)"
+      "definition": "CREATE UNIQUE INDEX order_items_pkey ON public.order_items USING btree (id)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "public",
@@ -2419,6 +2509,9 @@
       "is_primary_key": true,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 17989632.0,
       "reads": 0.0,
       "writes": null,
@@ -2426,7 +2519,12 @@
       "scans": 0.0,
       "lookups": null,
       "last_read": null,
-      "definition": "CREATE UNIQUE INDEX events_pkey ON public.events USING btree (id)"
+      "definition": "CREATE UNIQUE INDEX events_pkey ON public.events USING btree (id)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "public",
@@ -2442,6 +2540,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 14860288.0,
       "reads": 1738.0,
       "writes": null,
@@ -2449,7 +2550,12 @@
       "scans": 1738.0,
       "lookups": null,
       "last_read": "2026-10-11T07:02:20Z",
-      "definition": "CREATE INDEX events_customer_idx ON public.events USING btree (customer_id)"
+      "definition": "CREATE INDEX events_customer_idx ON public.events USING btree (customer_id)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "public",
@@ -2465,6 +2571,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 335872.0,
       "reads": 0.0,
       "writes": null,
@@ -2472,7 +2581,12 @@
       "scans": 0.0,
       "lookups": null,
       "last_read": null,
-      "definition": "CREATE INDEX products_sku_idx ON public.products USING btree (sku)"
+      "definition": "CREATE INDEX products_sku_idx ON public.products USING btree (sku)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "public",
@@ -2488,6 +2602,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 13975552.0,
       "reads": 0.0,
       "writes": null,
@@ -2495,7 +2612,12 @@
       "scans": 0.0,
       "lookups": null,
       "last_read": null,
-      "definition": "CREATE INDEX orders_status_idx ON public.orders USING btree (status)"
+      "definition": "CREATE INDEX orders_status_idx ON public.orders USING btree (status)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "public",
@@ -2512,6 +2634,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 70361088.0,
       "reads": 2508.0,
       "writes": null,
@@ -2519,7 +2644,12 @@
       "scans": 2508.0,
       "lookups": null,
       "last_read": "2026-10-11T07:02:20Z",
-      "definition": "CREATE INDEX orders_status_created_idx ON public.orders USING btree (status, created_at)"
+      "definition": "CREATE INDEX orders_status_created_idx ON public.orders USING btree (status, created_at)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "public",
@@ -2535,6 +2665,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 1400832.0,
       "reads": 0.0,
       "writes": null,
@@ -2542,7 +2675,12 @@
       "scans": 0.0,
       "lookups": null,
       "last_read": null,
-      "definition": "CREATE INDEX customers_region_idx ON public.customers USING btree (region)"
+      "definition": "CREATE INDEX customers_region_idx ON public.customers USING btree (region)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     }
   ],
   "columns": [
@@ -2986,11 +3124,22 @@
     }
   ],
   "notes": [],
+  "pressure": null,
   "options": {
     "window_days": 7,
     "top_queries": 60,
     "plans": 25
   },
+  "query_families": [],
+  "plan_cache": null,
+  "tuning": null,
+  "deadlocks": null,
+  "constraints": [],
+  "histograms": null,
+  "escalations_before": null,
+  "contention_before": null,
+  "evictions_before": null,
+  "sizes_before": null,
   "identity": {
     "engine": "postgres",
     "database": "demo",

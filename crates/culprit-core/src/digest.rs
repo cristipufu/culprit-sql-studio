@@ -29,7 +29,6 @@ pub struct Digest {
     /// the last day only; `None` without query history or under a day of it.
     pub database_time: Option<String>,
     /// The same as numbers.
-    #[serde(default)]
     pub day: Option<DigestDay>,
     pub counts: DigestCounts,
     /// What changed since the previous digest; `None` when there was nothing to compare with.
@@ -39,16 +38,12 @@ pub struct Digest {
     pub top: Vec<DigestFinding>,
     /// Every finding about the database as it runs now: what the next digest compares with, so a scheduled job can
     /// keep this digest instead of the report (which holds statement text and parameter values).
-    #[serde(default)]
     pub findings: Vec<DigestFinding>,
     /// The queries that used the most database time over the window, most first (`--top-queries`, 5 by default).
-    #[serde(default)]
     pub top_queries: Vec<DigestTopQuery>,
     /// What the index advisor suggests creating and dropping, Azure SQL's own recommendations included.
-    #[serde(default)]
     pub index_advice: Option<DigestIndexAdvice>,
     /// The deadlocks the scan read, grouped by pattern; `count` is `None` when they couldn't be read (see `note`).
-    #[serde(default)]
     pub deadlocks: Option<DigestDeadlocks>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<crate::measurement::DatabaseIdentity>,
@@ -215,7 +210,6 @@ pub struct DigestChanges {
     pub worse: Vec<DigestFinding>,
     /// Active both times, and what it counts since startup (lock escalations) happened again in between: each item's
     /// `count_since` says how many times.
-    #[serde(default)]
     pub again: Vec<DigestFinding>,
 }
 

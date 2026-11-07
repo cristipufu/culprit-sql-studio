@@ -293,9 +293,7 @@ pub struct GrantStat {
     pub max_granted_kb: f64,
     /// The most recent run's grant and use: memory grant feedback (SQL Server 2019+) shrinks a repeated grant, and the
     /// averages over the plan's life still carry the early oversized ones. `None` when the engine doesn't say.
-    #[serde(default)]
     pub last_granted_kb: Option<f64>,
-    #[serde(default)]
     pub last_used_kb: Option<f64>,
 }
 
@@ -318,7 +316,6 @@ pub enum CleanupHolder {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Default)]
 #[ts(export)]
 pub struct OpenTransaction {
-    #[serde(default)]
     pub catalog_only: bool,
     /// The session id; for a replication slot its name, for a prepared transaction its global id.
     pub session: String,
@@ -332,15 +329,12 @@ pub struct OpenTransaction {
     /// What it is: a session, a replication slot or a prepared transaction.
     pub holder: CleanupHolder,
     /// Transactions started since its snapshot (PostgreSQL `age(backend_xmin)`): how far back it holds the horizon.
-    #[serde(default)]
     pub xid_age: Option<f64>,
     /// It changed data in the scanned database and hasn't committed (SQL Server, MySQL): its locks stay held, and on
     /// SQL Server the log can't be reused past its first change.
-    #[serde(default)]
     pub wrote: Option<bool>,
     /// The database its session is connected to, when that may not be the scanned one (MySQL: InnoDB's purge is the
     /// whole server's, so a transaction in another database holds this one's cleanup too).
-    #[serde(default)]
     pub database: Option<String>,
 }
 
@@ -354,16 +348,12 @@ pub struct Pressure {
     pub grants: Vec<GrantStat>,
     pub oldest_transaction: Option<OpenTransaction>,
     /// Read and write latency per database file (or kind of I/O), since startup.
-    #[serde(default)]
     pub files: Vec<crate::signals::FileIo>,
     /// Replicas and replication slots, and how far behind they are.
-    #[serde(default)]
     pub replicas: Vec<crate::signals::Replica>,
     /// Logical processors the server schedules work on (SQL Server `cpu_count`), when the engine says.
-    #[serde(default)]
     pub cpus: Option<f64>,
     /// NUMA nodes those processors are split into (SQL Server), when the engine says.
-    #[serde(default)]
     pub numa_nodes: Option<f64>,
 }
 

@@ -39,13 +39,10 @@ pub struct ReportSummary {
     pub opportunities: u32,
     pub headline: String,
     /// The scan's window in minutes; `None` for a scan taken without options.
-    #[serde(default)]
     pub window_minutes: Option<u32>,
     /// The server as the scan saw it ("MariaDB 11.8.9"), so a list of connections can tell MariaDB from MySQL.
-    #[serde(default)]
     pub product: Option<String>,
     /// Why the scan has no query history ("Query Store is OFF on this database."); `None` when it has one.
-    #[serde(default)]
     pub no_workload: Option<String>,
 }
 
@@ -406,7 +403,6 @@ struct StoredHistoryScan {
 
 #[derive(Deserialize)]
 struct StoredRecordedChanges {
-    #[serde(default)]
     recorded_changes: Vec<culprit_core::ChangeEvent>,
 }
 

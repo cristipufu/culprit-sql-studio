@@ -181,10 +181,8 @@ pub struct Finding {
     pub verification_basis: VerificationBasis,
     pub caveats: Vec<String>,
     /// When the affected queries last ran, for query findings.
-    #[serde(default)]
     pub last_seen: Option<String>,
     /// The affected queries stopped running well before the end of the window: a deploy may have fixed or replaced them.
-    #[serde(default)]
     pub inactive: bool,
     #[serde(default, skip_serializing_if = "crate::FindingFacts::is_empty")]
     pub facts: crate::FindingFacts,
@@ -230,31 +228,25 @@ pub struct Summary {
     pub headline: String,
     /// Why the scan has no statement statistics ("Query Store is OFF on this database."), `None` when it has them: one
     /// sentence every surface shows instead of deciding for itself which capability explains it.
-    #[serde(default)]
     pub no_workload: Option<String>,
     /// How the runs of the statements a rate a day would misstate are said ([`crate::Workload::cadence`]): those that
     /// came in bursts, and in a window of a day or more those that ran fewer times than it has days. Every surface
     /// that lists statements says these instead of a rate a day ("750 runs on Oct 11, 15:51–15:55 UTC"); the others'
     /// runs came a day at a time, or are counted in a window under a day.
-    #[serde(default)]
     pub runs_said: Vec<RunsSaid>,
     /// What Culprit's own scans measured of the statements they did, on a source of running totals with a day or more
     /// of them ([`crate::Workload::scans_of`]): their share, runs a day and average as every surface states them
     /// ([`crate::Workload::cost_of`]). A surface that lists statements (the app) says these; the others' figures are
     /// their totals over the window.
-    #[serde(default)]
     pub over_scans: Vec<crate::model::StatementCost>,
     /// What the schema view says under an index, from the evidence the index checks use: whether no reads makes it
     /// unused (a week of counters, not too new, not needed for a key, uniqueness or a foreign key), and what covers it.
     /// The app renders these instead of judging the counters itself.
-    #[serde(default)]
     pub index_notes: Vec<IndexNote>,
     /// The period the index usage counters cover, as the notes say it ("in the 12 days since the server last
     /// restarted"); empty when the scan has no index usage.
-    #[serde(default)]
     pub index_counting: String,
     /// Whether an index can serve each foreign key, as the unindexed-foreign-key check decides it.
-    #[serde(default)]
     pub foreign_key_indexes: Vec<ForeignKeyIndex>,
 }
 

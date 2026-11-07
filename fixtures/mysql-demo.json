@@ -1,5 +1,14 @@
 {
-  "format": 1,
+  "operations": {
+    "log_failures": [],
+    "spaces": [],
+    "counters": [],
+    "sequences": [],
+    "multixacts": [],
+    "sqlite": null,
+    "cluster": null
+  },
+  "format": 2,
   "id": "20261011T120900.394Z",
   "connection": "mysql-demo",
   "environment": "local",
@@ -11,6 +20,7 @@
     "version": "8.4.11",
     "edition": "MySQL Community Server - GPL",
     "cloud": null,
+    "platform": null,
     "database": "shop",
     "database_size_bytes": 170065920.0,
     "started_at": "2026-10-11T12:06:57Z",
@@ -30,10 +40,11 @@
     "source": "performance_schema",
     "kind": "performance-schema",
     "windowed": false,
+    "log": null,
     "window_start": "2026-10-11T12:07:13Z",
     "window_end": "2026-10-11T12:09:00Z",
     "window_hours": 0.029722222222222223,
-    "total_time_ms": 44871.362586999996,
+    "total_time_ms": 44871.362587,
     "total_cpu_ms": null,
     "total_executions": 40080.0,
     "query_count": 6.0,
@@ -63,7 +74,7 @@
           "engine": "mysql",
           "kind": "estimated",
           "statement": "SELECT `customer_id` , CHANNEL , SUM ( `total` ) AS `spent` , COUNT ( * ) AS `orders` FROM `orders` GROUP BY `customer_id` , CHANNEL ORDER BY `spent` DESC LIMIT ?",
-          "total_cost": 50940.200000000004,
+          "total_cost": 50940.2,
           "root": {
             "id": 0,
             "op": "Query block",
@@ -79,7 +90,7 @@
             "act_executions": null,
             "rows_read": null,
             "table_rows": null,
-            "subtree_cost": 50940.200000000004,
+            "subtree_cost": 50940.2,
             "self_cost": 0.0,
             "act_time_ms": null,
             "runtime": null,
@@ -111,7 +122,7 @@
                 "act_executions": null,
                 "rows_read": null,
                 "table_rows": null,
-                "subtree_cost": 50940.200000000004,
+                "subtree_cost": 50940.2,
                 "self_cost": 0.0,
                 "act_time_ms": null,
                 "runtime": null,
@@ -143,7 +154,7 @@
                     "act_executions": null,
                     "rows_read": null,
                     "table_rows": null,
-                    "subtree_cost": 50940.200000000004,
+                    "subtree_cost": 50940.2,
                     "self_cost": 0.0,
                     "act_time_ms": null,
                     "runtime": null,
@@ -176,8 +187,8 @@
                         "act_executions": null,
                         "rows_read": 498573.0,
                         "table_rows": null,
-                        "subtree_cost": 50940.200000000004,
-                        "self_cost": 50940.200000000004,
+                        "subtree_cost": 50940.2,
+                        "self_cost": 50940.2,
                         "act_time_ms": null,
                         "runtime": null,
                         "warnings": [],
@@ -1030,7 +1041,11 @@
         "rows_affected": null,
         "plan_id": null
       }
-    ]
+    ],
+    "timeline": null,
+    "untracked_time_ms": null,
+    "hourly_time_ms": null,
+    "min_logged_ms": null
   },
   "tables": [
     {
@@ -1053,7 +1068,14 @@
       "last_vacuum": null,
       "last_analyze": "2026-10-11T12:07:11Z",
       "forwarded_records": null,
-      "xid_age": null
+      "xid_age": null,
+      "forwarded_fetches": null,
+      "storage": null,
+      "in_row_bytes": null,
+      "lob_bytes": null,
+      "overflow_bytes": null,
+      "partition_of": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -1075,7 +1097,14 @@
       "last_vacuum": null,
       "last_analyze": "2026-10-11T12:07:11Z",
       "forwarded_records": null,
-      "xid_age": null
+      "xid_age": null,
+      "forwarded_fetches": null,
+      "storage": null,
+      "in_row_bytes": null,
+      "lob_bytes": null,
+      "overflow_bytes": null,
+      "partition_of": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -1097,7 +1126,14 @@
       "last_vacuum": null,
       "last_analyze": "2026-10-11T12:07:37Z",
       "forwarded_records": null,
-      "xid_age": null
+      "xid_age": null,
+      "forwarded_fetches": null,
+      "storage": null,
+      "in_row_bytes": null,
+      "lob_bytes": null,
+      "overflow_bytes": null,
+      "partition_of": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -1119,7 +1155,14 @@
       "last_vacuum": null,
       "last_analyze": "2026-10-11T12:07:27Z",
       "forwarded_records": null,
-      "xid_age": null
+      "xid_age": null,
+      "forwarded_fetches": null,
+      "storage": null,
+      "in_row_bytes": null,
+      "lob_bytes": null,
+      "overflow_bytes": null,
+      "partition_of": null,
+      "counters_since": null
     }
   ],
   "indexes": [
@@ -1137,6 +1180,9 @@
       "is_primary_key": true,
       "is_clustered": true,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 17317888.0,
       "reads": 0.0,
       "writes": 0.0,
@@ -1144,7 +1190,12 @@
       "scans": null,
       "lookups": null,
       "last_read": null,
-      "definition": "ALTER TABLE `shop`.`customers` ADD PRIMARY KEY (id)"
+      "definition": "ALTER TABLE `shop`.`customers` ADD PRIMARY KEY (id)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -1160,6 +1211,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 4734976.0,
       "reads": 0.0,
       "writes": 0.0,
@@ -1167,7 +1221,12 @@
       "scans": null,
       "lookups": null,
       "last_read": null,
-      "definition": "CREATE INDEX `ix_customers_region` ON `shop`.`customers` (region)"
+      "definition": "CREATE INDEX `ix_customers_region` ON `shop`.`customers` (region)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -1183,6 +1242,9 @@
       "is_primary_key": true,
       "is_clustered": true,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 34144256.0,
       "reads": 0.0,
       "writes": 0.0,
@@ -1190,7 +1252,12 @@
       "scans": null,
       "lookups": null,
       "last_read": null,
-      "definition": "ALTER TABLE `shop`.`order_items` ADD PRIMARY KEY (id)"
+      "definition": "ALTER TABLE `shop`.`order_items` ADD PRIMARY KEY (id)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -1206,6 +1273,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 22593536.0,
       "reads": 10398.0,
       "writes": 0.0,
@@ -1213,7 +1283,12 @@
       "scans": null,
       "lookups": null,
       "last_read": null,
-      "definition": "CREATE INDEX `fk_items_order` ON `shop`.`order_items` (order_id)"
+      "definition": "CREATE INDEX `fk_items_order` ON `shop`.`order_items` (order_id)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -1229,6 +1304,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 19447808.0,
       "reads": 0.0,
       "writes": 0.0,
@@ -1236,7 +1314,12 @@
       "scans": null,
       "lookups": null,
       "last_read": null,
-      "definition": "CREATE INDEX `fk_items_product` ON `shop`.`order_items` (product_id)"
+      "definition": "CREATE INDEX `fk_items_product` ON `shop`.`order_items` (product_id)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -1252,6 +1335,9 @@
       "is_primary_key": true,
       "is_clustered": true,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 28901376.0,
       "reads": 0.0,
       "writes": 0.0,
@@ -1259,7 +1345,12 @@
       "scans": null,
       "lookups": null,
       "last_read": null,
-      "definition": "ALTER TABLE `shop`.`orders` ADD PRIMARY KEY (id)"
+      "definition": "ALTER TABLE `shop`.`orders` ADD PRIMARY KEY (id)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -1275,6 +1366,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 9977856.0,
       "reads": 9991.0,
       "writes": 0.0,
@@ -1282,7 +1376,12 @@
       "scans": null,
       "lookups": null,
       "last_read": null,
-      "definition": "CREATE INDEX `fk_orders_customer` ON `shop`.`orders` (customer_id)"
+      "definition": "CREATE INDEX `fk_orders_customer` ON `shop`.`orders` (customer_id)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -1298,6 +1397,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 11026432.0,
       "reads": 0.0,
       "writes": 0.0,
@@ -1305,7 +1407,12 @@
       "scans": null,
       "lookups": null,
       "last_read": null,
-      "definition": "CREATE INDEX `ix_orders_status` ON `shop`.`orders` (status)"
+      "definition": "CREATE INDEX `ix_orders_status` ON `shop`.`orders` (status)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -1322,6 +1429,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 19447808.0,
       "reads": 21430710.0,
       "writes": 0.0,
@@ -1329,7 +1439,12 @@
       "scans": null,
       "lookups": null,
       "last_read": null,
-      "definition": "CREATE INDEX `ix_orders_status_created` ON `shop`.`orders` (status, created_at)"
+      "definition": "CREATE INDEX `ix_orders_status_created` ON `shop`.`orders` (status, created_at)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -1345,6 +1460,9 @@
       "is_primary_key": true,
       "is_clustered": true,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 1589248.0,
       "reads": 34006.0,
       "writes": 0.0,
@@ -1352,7 +1470,12 @@
       "scans": null,
       "lookups": null,
       "last_read": null,
-      "definition": "ALTER TABLE `shop`.`products` ADD PRIMARY KEY (id)"
+      "definition": "ALTER TABLE `shop`.`products` ADD PRIMARY KEY (id)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -1368,6 +1491,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 442368.0,
       "reads": 0.0,
       "writes": 0.0,
@@ -1375,7 +1501,12 @@
       "scans": null,
       "lookups": null,
       "last_read": null,
-      "definition": "CREATE INDEX `ix_products_sku` ON `shop`.`products` (sku)"
+      "definition": "CREATE INDEX `ix_products_sku` ON `shop`.`products` (sku)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     },
     {
       "schema": "shop",
@@ -1391,6 +1522,9 @@
       "is_primary_key": false,
       "is_clustered": false,
       "is_disabled": false,
+      "state": null,
+      "maintained": null,
+      "has_statistics": null,
       "size_bytes": 442368.0,
       "reads": 0.0,
       "writes": 0.0,
@@ -1398,7 +1532,12 @@
       "scans": null,
       "lookups": null,
       "last_read": null,
-      "definition": "CREATE UNIQUE INDEX `uq_products_sku` ON `shop`.`products` (sku)"
+      "definition": "CREATE UNIQUE INDEX `uq_products_sku` ON `shop`.`products` (sku)",
+      "contention": null,
+      "created_at_latest": null,
+      "partition_of": null,
+      "opclasses": null,
+      "counters_since": null
     }
   ],
   "columns": [
@@ -1772,11 +1911,22 @@
     }
   ],
   "notes": [],
+  "pressure": null,
   "options": {
     "window_days": 7,
     "top_queries": 60,
     "plans": 25
   },
+  "query_families": [],
+  "plan_cache": null,
+  "tuning": null,
+  "deadlocks": null,
+  "constraints": [],
+  "histograms": null,
+  "escalations_before": null,
+  "contention_before": null,
+  "evictions_before": null,
+  "sizes_before": null,
   "identity": {
     "engine": "mysql",
     "database": "shop",

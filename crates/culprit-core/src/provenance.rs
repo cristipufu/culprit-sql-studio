@@ -214,9 +214,7 @@ impl<'de> Deserialize<'de> for ReportEvidence {
         #[derive(Deserialize)]
         struct Wire {
             input: Box<Snapshot>,
-            #[serde(default)]
             collected: Option<CollectedWire>,
-            #[serde(default)]
             recorded_changes: Vec<ChangeEvent>,
         }
         let wire = Wire::deserialize(deserializer)?;

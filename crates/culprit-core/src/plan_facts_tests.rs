@@ -16,6 +16,15 @@ fn plan() -> Plan {
     p
 }
 
+/// A facts object as Culprit writes one, with `fields` set in it.
+fn facts_json<T: Default + serde::Serialize>(fields: serde_json::Value) -> serde_json::Value {
+    let mut value = serde_json::to_value(T::default()).unwrap();
+    for (key, field) in fields.as_object().unwrap() {
+        value[key] = field.clone();
+    }
+    value
+}
+
 #[test]
 fn statement_facts_drive_actuals_and_memory_advice_without_display_properties() {
     let mut p = plan();
@@ -41,9 +50,11 @@ fn invalid_imported_numbers_become_unknown_and_do_not_revive_legacy_properties()
     let mut p = plan();
     p.props.insert("MemoryMaxUsedKB".into(), "0".into());
     let mut value = serde_json::to_value(&p).unwrap();
-    value["facts"] = serde_json::json!({"memory_granted_kb": 1024000, "memory_max_used_kb": -1, "elapsed_ms": -1});
-    value["root"]["facts"] = serde_json::json!({"measured_kept_share": 1.1, "estimated_filtered_percent": -1,
-        "workers_planned": -1, "workers_launched": 0, "hash_batches": 1.5});
+    value["facts"] = facts_json::<PlanFacts>(
+        serde_json::json!({"memory_granted_kb": 1024000, "memory_max_used_kb": -1, "elapsed_ms": -1}),
+    );
+    value["root"]["facts"] = facts_json::<PlanNodeFacts>(serde_json::json!({"measured_kept_share": 1.1,
+        "estimated_filtered_percent": -1, "workers_planned": -1, "workers_launched": 0, "hash_batches": 1.5}));
     let p: Plan = serde_json::from_value(value).unwrap();
     assert_eq!(p.facts().memory_max_used_kb, None);
     assert_eq!(p.facts().elapsed_ms, None);
@@ -340,10 +351,10 @@ fn trigger_measurements_reject_invalid_time_and_invalid_call_counts() {
     assert_eq!((triggers[0].time_ms, triggers[0].calls), (0.004, Some(1.0)));
     assert_eq!(triggers[1].calls, None);
     assert_eq!(triggers[2].calls, None);
-    let imported: PlanFacts = serde_json::from_value(serde_json::json!({"trigger_timings":[
+    let imported: PlanFacts = serde_json::from_value(facts_json::<PlanFacts>(serde_json::json!({"trigger_timings":[
         {"name":"missing time"}, {"name":"invalid time","time_ms":-1},
         {"name":"zero","time_ms":0,"calls":1.5}, {"name":"measured","time_ms":0.004,"calls":1}
-    ]}))
+    ]})))
     .unwrap();
     assert_eq!(imported.trigger_timings.len(), 2);
     assert_eq!((imported.trigger_timings[0].time_ms, imported.trigger_timings[0].calls), (0.0, None));

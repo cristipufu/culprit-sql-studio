@@ -87,7 +87,6 @@ pub struct PlanNode {
     pub self_cost: f64,
     pub act_time_ms: Option<f64>,
     // CPU, reads, per-thread rows and spills, when the plan carries runtime counters (actual plans, live progress).
-    #[serde(default)]
     pub runtime: Option<crate::actual::NodeRuntime>,
     pub warnings: Vec<PlanWarning>,
     pub props: Properties,
