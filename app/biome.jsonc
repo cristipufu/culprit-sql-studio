@@ -31,7 +31,11 @@
         "preset": "recommended",
         // A missing dependency is a stale closure. An extra one is how an effect reruns when a key changes, which
         // React's own rule allows too.
-        "useExhaustiveDependencies": { "level": "error", "options": { "reportUnnecessaryDependencies": false } }
+        "useExhaustiveDependencies": { "level": "error", "options": { "reportUnnecessaryDependencies": false } },
+        // New in the recommended set with Biome 2.6. It takes any capitalised object property holding a function for a
+        // component, so it reports the key names of every useHotkeys map (Escape, ArrowDown, Enter) and found nothing
+        // else: biomejs/biome#12625, open. Turn it back on once that is fixed.
+        "noComponentHookFactories": "off"
       },
       "suspicious": {
         "preset": "recommended",
