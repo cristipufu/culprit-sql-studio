@@ -11,8 +11,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use culprit_core::{
-    Comparison, ComparisonReason, CounterTransition, MeasurementContext, Plan, QueryTrend, Report, Snapshot, Timeline,
-    TimelineSource, Workload,
+    Comparison, ComparisonReason, CounterTransition, MeasurementContext, Plan, QueryTrend, Report, ResetMarker,
+    Snapshot, Timeline, TimelineSource, Workload, WorkloadKind,
 };
 use serde::{Deserialize, Serialize};
 
@@ -581,15 +581,16 @@ pub fn infer_window(snapshot: &mut Snapshot, previous: Option<&Snapshot>) {
     if !before.is_cumulative() || before.source != workload.source {
         return;
     }
-    let measurement = previous.identified_measurement();
-    match (&measurement, &current) {
-        (Some(a), Some(b)) => {
-            // Unknown cache-entry ages or dropped totals cannot establish a source-wide reset or a rate period.
-            if a.counter_transition(b) != CounterTransition::Continued {
-                return;
-            }
-        }
-        (None, None) => {}
+    // Only scans that say which database they read compare (a name alone never does).
+    let (Some(measurement), Some(current)) = (previous.identified_measurement(), current) else { return };
+    match measurement.counter_transition(&current) {
+        CounterTransition::Continued => {}
+        // Neither scan has a reset time (pg_stat_statements before 14): whether the totals started over decides. Not
+        // a cache's or a digest table's totals, whose entries come and go on their own clocks.
+        CounterTransition::Unmarked
+            if measurement.reset == ResetMarker::Unknown
+                && current.reset == ResetMarker::Unknown
+                && workload.kind() == Some(WorkloadKind::StatementStats) => {}
         _ => return,
     }
     let start =
@@ -604,7 +605,7 @@ pub fn infer_window(snapshot: &mut Snapshot, previous: Option<&Snapshot>) {
         workload.history_inputs.push(culprit_core::BaselineReference {
             purpose: culprit_core::BaselinePurpose::WindowInference,
             scan: culprit_core::ScanReference::of(previous),
-            measurement,
+            measurement: Some(measurement),
         });
     }
 }
@@ -893,19 +894,28 @@ mod tests {
     #[test]
     fn an_unknown_window_takes_the_previous_scans_while_the_counters_keep_counting() {
         // PostgreSQL 13 with pg_stat_statements.save on: the provider can't say when the counters started.
-        // (Scans that don't say which database they read, so no reset marker decides it: the rule alone.)
         let infer = |w: &Workload, before: &Workload| {
-            let mut s = scan_of(w.clone(), "2026-10-11T00:00:00Z", false);
-            infer_window(&mut s, Some(&scan_of(before.clone(), "2026-10-10T00:00:00Z", false)));
+            let mut s = scan(w.clone(), "2026-10-11T00:00:00Z");
+            infer_window(&mut s, Some(&scan(before.clone(), "2026-10-10T00:00:00Z")));
             s.workload.unwrap()
         };
         let mut unknown = workload("", vec![query("a", 200.0, 20.0)]);
         unknown.window_hours = 0.0;
         assert!(unknown.window_unknown());
-        let before = workload("2026-09-01T00:00:00Z", vec![query("a", 100.0, 10.0)]);
+        // The scan before had narrowed its own window the same way: a bound, not a reset time.
+        let mut before = workload("2026-09-01T00:00:00Z", vec![query("a", 100.0, 10.0)]);
+        before.window_hours = 39.0 * 24.0;
+        before.history_inputs.push(culprit_core::BaselineReference {
+            purpose: culprit_core::BaselinePurpose::WindowInference,
+            scan: culprit_core::ScanReference::dated("2026-08-31T00:00:00Z"),
+            measurement: None,
+        });
         let w = infer(&unknown, &before);
         assert_eq!(w.window_start.as_deref(), Some("2026-09-01T00:00:00Z"));
         assert!((w.measurement_hours() - 40.0 * 24.0).abs() < 1e-6);
+        assert!(w.history_inputs.iter().any(|r| r.purpose == culprit_core::BaselinePurpose::WindowInference
+            && r.scan.taken_at == "2026-10-10T00:00:00Z"
+            && r.measurement.is_some()));
 
         // The counters started over after the previous scan: the window is at most the time since it.
         let mut reset = workload("", vec![query("a", 5.0, 1.0)]);
@@ -922,10 +932,33 @@ mod tests {
         let w = infer(&unknown, &evicted_before);
         assert_eq!(w.window_start.as_deref(), Some("2026-09-01T00:00:00Z"));
 
+        // Kept counting from a start the scan before didn't know either: still unknown.
+        let mut unknown_before = workload("", vec![query("a", 100.0, 10.0)]);
+        unknown_before.window_hours = 0.0;
+        assert!(infer(&unknown, &unknown_before).window_unknown());
+
+        // A digest table's totals come and go with its entries: shrinking says nothing of when they started.
+        let (mut digests, mut digests_before) = (reset_workload(), unknown_before.clone());
+        digests.kind = Some(WorkloadKind::PerformanceSchema);
+        digests_before.kind = Some(WorkloadKind::PerformanceSchema);
+        assert!(infer(&digests, &digests_before).window_unknown());
+
+        // Scans that don't say which database they read compare with nothing.
+        let mut s = scan_of(reset_workload(), "2026-10-11T00:00:00Z", false);
+        infer_window(&mut s, Some(&scan_of(before.clone(), "2026-10-10T00:00:00Z", false)));
+        assert!(s.workload.unwrap().window_unknown());
+
         // No earlier scan: still unknown.
-        let mut alone = scan_of(unknown.clone(), "2026-10-11T00:00:00Z", false);
+        let mut alone = scan(unknown.clone(), "2026-10-11T00:00:00Z");
         infer_window(&mut alone, None);
         assert!(alone.workload.unwrap().window_unknown());
+    }
+
+    /// A PostgreSQL 13 workload whose totals started over since the scan before.
+    fn reset_workload() -> Workload {
+        let mut w = workload("", vec![query("a", 5.0, 1.0)]);
+        w.window_hours = 0.0;
+        w
     }
 
     // A production reading: "about 2.9K a day" from 15,090 eviction rounds since a reset three years back, while
