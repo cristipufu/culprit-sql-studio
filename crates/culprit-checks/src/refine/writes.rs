@@ -136,13 +136,16 @@ impl Refine for Rule {
                     "PostgreSQL's statistics also estimate about {} of {} ({}) as empty space: these dead rows. VACUUM makes it reusable; rewrite the table (pg_repack) only if the estimate stays high after a vacuum.",
                     format::bytes(bloat.bytes),leaf(&finding_table(&a.source)),format::percent(bloat.share))),
                 Evidence::Cold {query,rows,log,once}=> {
-                    let q=s.workload.as_ref().unwrap().query(&query).unwrap();
-                    target.summary.push_str(&format!(
-                        " {} changed {} of these rows and wrote {} of WAL for them{}: an update that isn't HOT logs the new row version and an entry in every index, and the first change to each page after a checkpoint logs the whole page.",
-                        capitalize(&support::query_handle(q)),format::count(rows),format::bytes(log.bytes),log.per_row.map(|bytes|format!(", about {} a row",format::bytes(bytes))).unwrap_or_default()));
-                    target.metrics.push(culprit_core::Metric::new("WAL its update wrote",log.bytes,culprit_core::Unit::Bytes));
-                    if once {target.caveats.insert(0,format!("The update behind most of these ran once in {}: a backfill or a migration looks like this, and its share stays in the counts long after. It needs work only if updates like it keep coming.",s.workload.as_ref().unwrap().window_phrase()));}
-                    note=Some(format!("Wrote {} of WAL.",format::bytes(log.bytes)));
+                    if let Some((w, q)) = s.workload.as_ref().and_then(|w| Some((w, w.query(&query)?))) {
+                        target.summary.push_str(&format!(
+                            " {} changed {} of these rows and wrote {} of WAL for them{}: an update that isn't HOT logs the new row version and an entry in every index, and the first change to each page after a checkpoint logs the whole page.",
+                            capitalize(&support::query_handle(q)),format::count(rows),format::bytes(log.bytes),log.per_row.map(|bytes|format!(", about {} a row",format::bytes(bytes))).unwrap_or_default()));
+                        target.metrics.push(culprit_core::Metric::new("WAL its update wrote",log.bytes,culprit_core::Unit::Bytes));
+                        if once {
+                            target.caveats.insert(0,format!("The update behind most of these ran once in {}: a backfill or a migration looks like this, and its share stays in the counts long after. It needs work only if updates like it keep coming.",w.window_phrase()));
+                        }
+                        note=Some(format!("Wrote {} of WAL.",format::bytes(log.bytes)));
+                    }
                 }
                 Evidence::Large=>{joined.insert(target.id.clone());}
             }

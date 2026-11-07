@@ -122,13 +122,11 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Vec<Decision> {
                     .zip(f.impact.db_time_share)
                     .is_some_and(|(impact, share)| (impact.share - share).abs() < 1e-9);
                 if same_share && let Some(cost) = support::query_cost_context(s, &queries) {
-                    let title_share = (f.check == "heavy-query").then(|| {
-                        format!(
-                            "{} of {}",
-                            format::percent(f.impact.db_time_share.unwrap()),
-                            crate::queries::time_noun(s)
-                        )
-                    });
+                    let title_share = f
+                        .impact
+                        .db_time_share
+                        .filter(|_| f.check == "heavy-query")
+                        .map(|share| format!("{} of {}", format::percent(share), crate::queries::time_noun(s)));
                     let direct =
                         matches!(f.check.as_str(), "heavy-query" | "chatty-query" | "missing-index" | "filtered-scan");
                     out.push(Decision { at, change: Change::Cost { cost, title_share, direct } });

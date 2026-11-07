@@ -273,7 +273,9 @@ impl Requirement<'_> {
                 source_id::RESOURCE_USE,
             ]).map(Insufficient).unwrap_or(Available),
             Self::Deadlocks => source_failed(s, &[source_id::DEADLOCKS]).map(Unavailable).unwrap_or_else(|| {
-                let d = s.deadlocks.as_ref().unwrap();
+                let Some(d) = s.deadlocks.as_ref() else {
+                    return insufficient("No deadlock evidence was collected.");
+                };
                 if d.counted.is_some() || d.note.is_some() {
                     insufficient("A cumulative counter or a limited deadlock sample cannot verify the absence of this deadlock pattern.")
                 } else { Available }

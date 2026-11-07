@@ -130,9 +130,12 @@ pub(super) fn health(report: &Report) -> Tile {
             tx.state.as_deref().map(|s| format!(" · {s}")).unwrap_or_default()
         ));
         item.status = Some(tx_status);
-        if tx_status >= TileStatus::Watch && status < tx_status {
+        if let Some(assessed) = assessed
+            && tx_status >= TileStatus::Watch
+            && status < tx_status
+        {
             status = tx_status;
-            takeaway = format!("{}.", assessed.unwrap().title.trim_end_matches('.'));
+            takeaway = format!("{}.", assessed.title.trim_end_matches('.'));
         }
         items.push(item);
     }

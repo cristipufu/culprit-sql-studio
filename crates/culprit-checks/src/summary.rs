@@ -41,7 +41,7 @@ pub fn summarize(snapshot: &Snapshot, findings: &[Finding]) -> Summary {
             "{} {}. The top ones touch {}.",
             n,
             plural(n, "opportunity", "opportunities"),
-            cost.as_deref().unwrap()
+            cost.as_deref().unwrap_or_default()
         ),
         (n, Some(share), Some(window)) if share >= 0.05 => format!(
             "{} {}. The top ones touch {} of database time over {}.",

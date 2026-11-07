@@ -58,8 +58,9 @@ pub(crate) fn normalize(mut ssh: SshConfig, engine: Engine) -> Result<SshConfig>
         let end = host.find(']').ok_or_else(|| Error::invalid("The SSH IPv6 address needs a closing bracket"))?;
         let rest = &host[end + 1..];
         (&host[..=end], (!rest.is_empty()).then_some(rest))
-    } else if host.matches(':').count() == 1 {
-        let separator = host.find(':').unwrap();
+    } else if host.matches(':').count() == 1
+        && let Some(separator) = host.find(':')
+    {
         (&host[..separator], Some(&host[separator..]))
     } else {
         (host, None)

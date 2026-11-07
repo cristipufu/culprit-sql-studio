@@ -189,7 +189,9 @@ fn normalize_for_comparison(text: &str) -> (String, Vec<Range<usize>>) {
             i = (i + 2).min(bytes.len());
             continue;
         }
-        let ch = text[i..].chars().next().unwrap();
+        let Some(ch) = text[i..].chars().next() else {
+            break;
+        };
         if !matches!(ch, '[' | ']' | '"') {
             out.push(ch.to_ascii_lowercase());
         }

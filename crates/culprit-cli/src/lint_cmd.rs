@@ -119,13 +119,12 @@ pub(crate) fn run(ws: &Workspace, args: LintSqlArgs, out: &Out) -> culprit_core:
 
 fn collect_sql_files(inputs: &[PathBuf]) -> culprit_core::Result<Vec<PathBuf>> {
     let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for path in inputs {
         if path.is_file() {
-            if !out.contains(path) {
-                out.push(path.clone());
-            }
+            push_unique_file(path, &mut seen, &mut out);
         } else if path.is_dir() {
-            collect_sql_dir(path, 0, &mut out)?;
+            collect_sql_dir(path, 0, &mut seen, &mut out)?;
         } else {
             return Err(Error::invalid(format!("{}: no such file or directory", path.display())));
         }
@@ -136,7 +135,19 @@ fn collect_sql_files(inputs: &[PathBuf]) -> culprit_core::Result<Vec<PathBuf>> {
     Ok(out)
 }
 
-fn collect_sql_dir(dir: &std::path::Path, depth: usize, out: &mut Vec<PathBuf>) -> culprit_core::Result<()> {
+fn push_unique_file(path: &std::path::Path, seen: &mut std::collections::HashSet<PathBuf>, out: &mut Vec<PathBuf>) {
+    let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if seen.insert(key) {
+        out.push(path.to_path_buf());
+    }
+}
+
+fn collect_sql_dir(
+    dir: &std::path::Path,
+    depth: usize,
+    seen: &mut std::collections::HashSet<PathBuf>,
+    out: &mut Vec<PathBuf>,
+) -> culprit_core::Result<()> {
     if depth > 16 {
         return Ok(());
     }
@@ -154,13 +165,12 @@ fn collect_sql_dir(dir: &std::path::Path, depth: usize, out: &mut Vec<PathBuf>) 
             continue;
         }
         if ft.is_dir() {
-            let is_hidden = p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.'));
+            let is_hidden = p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'));
             if !is_hidden {
-                collect_sql_dir(&p, depth + 1, out)?;
+                collect_sql_dir(&p, depth + 1, seen, out)?;
             }
-        } else if ft.is_file() && p.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("sql")) && !out.contains(&p)
-        {
-            out.push(p);
+        } else if ft.is_file() && p.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("sql")) {
+            push_unique_file(&p, seen, out);
         }
     }
     Ok(())
@@ -183,7 +193,8 @@ mod tests {
         for f in [&a, &b, &hidden, &txt] {
             std::fs::write(f, "SELECT 1;").unwrap();
         }
-        let found = collect_sql_files(&[dir.clone(), a.clone()]).unwrap();
+        let dot_a = dir.join(".").join("001_init.sql");
+        let found = collect_sql_files(&[dir.clone(), a.clone(), dot_a]).unwrap();
         assert_eq!(found, vec![a, b]);
         std::fs::remove_dir_all(&dir).unwrap();
     }

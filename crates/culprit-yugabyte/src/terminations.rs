@@ -70,14 +70,13 @@ pub(crate) async fn read(
     let mut seen = BTreeSet::new();
     let mut events = Vec::with_capacity(rows.len());
     for row in rows {
-        let Some(ended_at) = row
-            .text("ended")
-            .filter(|at| culprit_core::format::epoch_seconds(at).is_some_and(|t| t >= start && t < end))
-        else {
+        let Some((ended_at, ended)) = row.text("ended").and_then(|at| {
+            let t = culprit_core::format::epoch_seconds(&at)?;
+            (t >= start && t < end).then_some((at, t))
+        }) else {
             partial = true;
             continue;
         };
-        let ended = culprit_core::format::epoch_seconds(&ended_at).unwrap();
         let started_at =
             row.text("started").filter(|at| culprit_core::format::epoch_seconds(at).is_some_and(|t| t <= ended));
         partial |= started_at.is_none();

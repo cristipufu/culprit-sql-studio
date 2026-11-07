@@ -139,8 +139,9 @@ impl Refine for Rule {
             let window = s.workload.as_ref().map(|w| format!(" in {}", w.window_phrase())).unwrap_or_default();
             match d.evidence {
                 Evidence::Episode { query, table, wait } => {
-                    let w = s.workload.as_ref().unwrap();
-                    let q = w.query(&query).unwrap();
+                    let Some((w, q)) = s.workload.as_ref().and_then(|w| Some((w, w.query(&query)?))) else {
+                        continue;
+                    };
                     let share = if wait.share >= 0.97 {
                         "nearly all of its time".into()
                     } else {
@@ -175,7 +176,7 @@ impl Refine for Rule {
                         let table = finding_table(target);
                         target.title = format!("Queries on {} recorded lock waits{window}", leaf(&table));
                     }
-                    for q in merge::complete_queries(s, &absorption.source).unwrap() {
+                    for q in merge::complete_queries(s, &absorption.source).unwrap_or_default() {
                         let lock = signals::lock_ms(q);
                         let share = (lock / q.total_time_ms).min(1.0);
                         let share = if share >= 0.97 {

@@ -674,7 +674,7 @@ fn collect_cleanups(scope: &AdvisorScope<'_>, candidates: &[IndexCandidate]) -> 
                 format::count(a.reads.unwrap_or(0.0)),
                 b.name,
                 format::count(b.reads.unwrap_or(0.0)),
-                a.key_names()[0],
+                a.key_names().first().copied().unwrap_or(""),
                 b.name
             ),
             sql: Some(hide_index_sql(s, a)),

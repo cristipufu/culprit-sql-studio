@@ -179,7 +179,9 @@ impl Refine for Rule {
             let target = &mut findings[d.into];
             match d.action {
                 Action::Spill => {
-                    let q = s.workload.as_ref().unwrap().query(&source.queries[0].id).unwrap();
+                    let Some(q) = source.queries.first().and_then(|r| s.workload.as_ref()?.query(&r.id)) else {
+                        continue;
+                    };
                     let said = signals::result_of_a_spill(s, q).expect("selected result rows");
                     target.summary.push_str(&said.summary);
                     if let Some(fix) = &mut target.fix {
@@ -204,7 +206,9 @@ impl Refine for Rule {
                 }
                 Action::Recommendation => target.caveats.push(recommendation_caveat(&source, target)),
                 Action::Scan(reads) => {
-                    let q = s.workload.as_ref().unwrap().query(&source.queries[0].id).unwrap();
+                    let Some(q) = source.queries.first().and_then(|r| s.workload.as_ref()?.query(&r.id)) else {
+                        continue;
+                    };
                     let sentence = timeline(&source);
                     let sentence = if target.queries.len() > 1 {
                         sentence.replacen("this query", &format!("query {}", q.id), 1)

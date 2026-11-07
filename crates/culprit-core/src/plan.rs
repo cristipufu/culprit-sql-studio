@@ -149,10 +149,7 @@ impl PlanNode {
 
     /// Materialize legacy evidence before a preparation step changes it, preserving the other captured facts.
     pub fn facts_mut(&mut self) -> &mut crate::PlanNodeFacts {
-        if self.facts.is_none() {
-            self.facts = Some(crate::PlanNodeFacts::from_legacy_properties(&self.props));
-        }
-        self.facts.as_mut().unwrap()
+        self.facts.get_or_insert_with(|| crate::PlanNodeFacts::from_legacy_properties(&self.props))
     }
     pub fn walk<'a>(&'a self, out: &mut Vec<&'a PlanNode>) {
         out.push(self);
@@ -392,10 +389,7 @@ impl Plan {
             .unwrap_or_else(|| std::borrow::Cow::Owned(crate::PlanFacts::from_legacy_properties(&self.props)))
     }
     pub fn facts_mut(&mut self) -> &mut crate::PlanFacts {
-        if self.facts.is_none() {
-            self.facts = Some(crate::PlanFacts::from_legacy_properties(&self.props));
-        }
-        self.facts.as_mut().unwrap()
+        self.facts.get_or_insert_with(|| crate::PlanFacts::from_legacy_properties(&self.props))
     }
     pub fn nodes(&self) -> Vec<&PlanNode> {
         let mut out = Vec::new();

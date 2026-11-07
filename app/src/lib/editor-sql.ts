@@ -152,7 +152,13 @@ export function splitSqlStatements(rawText: string): string[] {
     else if (ch === '"' && !inSingle && !inBacktick && !inBracket) inDouble = !inDouble;
     else if (ch === "`" && !inSingle && !inDouble && !inBracket) inBacktick = !inBacktick;
     else if (ch === "[" && !inSingle && !inDouble && !inBacktick && !inBracket) inBracket = true;
-    else if (ch === "]" && inBracket) inBracket = false;
+    else if (ch === "]" && inBracket) {
+      if (next === "]") {
+        i += 1;
+        continue;
+      }
+      inBracket = false;
+    }
   }
 
   pushSlice(docText.slice(start));
@@ -367,25 +373,34 @@ function normalizeSqlWithOffsets(docText: string): { norm: string; offsets: numb
   let dollarTag: string | null = null;
   let lastSpace = true;
 
+  const pushNorm = (ch: string, offset: number) => {
+    const lower = ch.toLowerCase();
+    norm += lower;
+    for (let k = 0; k < lower.length; k++) {
+      offsets.push(offset);
+    }
+    lastSpace = false;
+  };
+  const pushSpace = (offset: number) => {
+    if (!lastSpace) {
+      norm += " ";
+      offsets.push(offset);
+      lastSpace = true;
+    }
+  };
+
   for (let i = 0; i < docText.length; i++) {
     const ch = docText[i]!;
     const next = docText[i + 1];
     if (dollarTag !== null) {
       if (/\s/.test(ch)) {
-        if (!lastSpace) {
-          norm += " ";
-          offsets.push(i);
-          lastSpace = true;
-        }
+        pushSpace(i);
       } else {
-        norm += ch.toLowerCase();
-        offsets.push(i);
-        lastSpace = false;
+        pushNorm(ch, i);
       }
       if (ch === "$" && docText.startsWith(dollarTag, i)) {
         for (let k = 1; k < dollarTag.length; k++) {
-          norm += docText[i + k]!.toLowerCase();
-          offsets.push(i + k);
+          pushNorm(docText[i + k]!, i + k);
         }
         i += dollarTag.length - 1;
         dollarTag = null;
@@ -393,9 +408,8 @@ function normalizeSqlWithOffsets(docText: string): { norm: string; offsets: numb
       continue;
     }
     if (inSingle && ch === "\\" && i + 1 < docText.length) {
-      norm += ch.toLowerCase() + next!.toLowerCase();
-      offsets.push(i, i + 1);
-      lastSpace = false;
+      pushNorm(ch, i);
+      pushNorm(next!, i + 1);
       i += 1;
       continue;
     }
@@ -405,10 +419,8 @@ function normalizeSqlWithOffsets(docText: string): { norm: string; offsets: numb
         if (m) {
           dollarTag = m[0];
           for (let k = 0; k < dollarTag.length; k++) {
-            norm += docText[i + k]!.toLowerCase();
-            offsets.push(i + k);
+            pushNorm(docText[i + k]!, i + k);
           }
-          lastSpace = false;
           i += dollarTag.length - 1;
           continue;
         }
@@ -417,22 +429,14 @@ function normalizeSqlWithOffsets(docText: string): { norm: string; offsets: numb
         const nl = docText.indexOf("\n", i + 2);
         if (nl === -1) break;
         i = nl;
-        if (!lastSpace) {
-          norm += " ";
-          offsets.push(i);
-          lastSpace = true;
-        }
+        pushSpace(i);
         continue;
       }
       if (ch === "/" && next === "*") {
         const end = docText.indexOf("*/", i + 2);
         if (end === -1) break;
         i = end + 1;
-        if (!lastSpace) {
-          norm += " ";
-          offsets.push(i);
-          lastSpace = true;
-        }
+        pushSpace(i);
         continue;
       }
     }
@@ -440,18 +444,20 @@ function normalizeSqlWithOffsets(docText: string): { norm: string; offsets: numb
     else if (ch === '"' && !inSingle && !inBacktick && !inBracket) inDouble = !inDouble;
     else if (ch === "`" && !inSingle && !inDouble && !inBracket) inBacktick = !inBacktick;
     else if (ch === "[" && !inSingle && !inDouble && !inBacktick && !inBracket) inBracket = true;
-    else if (ch === "]" && inBracket) inBracket = false;
+    else if (ch === "]" && inBracket) {
+      if (next === "]") {
+        pushNorm(ch, i);
+        pushNorm(next, i + 1);
+        i += 1;
+        continue;
+      }
+      inBracket = false;
+    }
 
     if (/\s/.test(ch)) {
-      if (!lastSpace) {
-        norm += " ";
-        offsets.push(i);
-        lastSpace = true;
-      }
+      pushSpace(i);
     } else {
-      norm += ch.toLowerCase();
-      offsets.push(i);
-      lastSpace = false;
+      pushNorm(ch, i);
     }
   }
   return { norm, offsets };
@@ -517,7 +523,14 @@ function statementStartOffset(docText: string, targetOffset: number): number {
     else if (ch === '"' && !inSingle && !inBacktick && !inBracket) inDouble = !inDouble;
     else if (ch === "`" && !inSingle && !inDouble && !inBracket) inBacktick = !inBacktick;
     else if (ch === "[" && !inSingle && !inDouble && !inBacktick && !inBracket) inBracket = true;
-    else if (ch === "]" && inBracket) inBracket = false;
+    else if (ch === "]" && inBracket) {
+      if (next === "]") {
+        if (stmtStart === null) stmtStart = i;
+        i += 1;
+        continue;
+      }
+      inBracket = false;
+    }
     if (!/\s/.test(ch) && stmtStart === null) {
       stmtStart = i;
     }
@@ -578,6 +591,7 @@ export function statementEndOffset(docText: string, from: number, fallbackTo: nu
   let inBacktick = false;
   let inBracket = false;
   let dollarTag: string | null = null;
+  let lastTokenEnd = fallbackTo;
   for (let i = from; i < docText.length; i++) {
     const ch = docText[i]!;
     const next = docText[i + 1];
@@ -586,21 +600,24 @@ export function statementEndOffset(docText: string, from: number, fallbackTo: nu
         i += dollarTag.length - 1;
         dollarTag = null;
       }
+      lastTokenEnd = i + 1;
       continue;
     }
     if (inSingle && ch === "\\" && i + 1 < docText.length) {
       i += 1;
+      lastTokenEnd = i + 1;
       continue;
     }
     if (!inSingle && !inDouble && !inBacktick && !inBracket) {
       if (i > from && docText[i - 1] === "\n" && GO_LINE_RE.test(docText.slice(i))) {
-        return i >= 2 && docText[i - 2] === "\r" ? i - 2 : i - 1;
+        return lastTokenEnd;
       }
       if (ch === "$") {
         const m = DOLLAR_TAG_RE.exec(docText.slice(i));
         if (m) {
           dollarTag = m[0];
           i += dollarTag.length - 1;
+          lastTokenEnd = i + 1;
           continue;
         }
       }
@@ -622,7 +639,17 @@ export function statementEndOffset(docText: string, from: number, fallbackTo: nu
     else if (ch === '"' && !inSingle && !inBacktick && !inBracket) inDouble = !inDouble;
     else if (ch === "`" && !inSingle && !inDouble && !inBracket) inBacktick = !inBacktick;
     else if (ch === "[" && !inSingle && !inDouble && !inBacktick && !inBracket) inBracket = true;
-    else if (ch === "]" && inBracket) inBracket = false;
+    else if (ch === "]" && inBracket) {
+      if (next === "]") {
+        i += 1;
+        lastTokenEnd = i + 1;
+        continue;
+      }
+      inBracket = false;
+    }
+    if (!/\s/.test(ch)) {
+      lastTokenEnd = i + 1;
+    }
   }
-  return fallbackTo;
+  return lastTokenEnd;
 }

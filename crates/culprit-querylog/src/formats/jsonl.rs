@@ -194,7 +194,7 @@ fn entry(line: &str) -> Option<Entry> {
             c if c.contains("SQLITE_LOCKED") => "SQLITE_LOCKED",
             c if c.contains("SQLITE_FULL") => "SQLITE_FULL",
             c if c.contains("SQLITE_CORRUPT") => "SQLITE_CORRUPT",
-            c if c.parse::<u64>().is_ok_and(|n| n > 255) => match c.parse::<u64>().unwrap() & 255 {
+            c if c.parse::<u64>().is_ok_and(|n| n > 255) => match c.parse::<u64>().unwrap_or(0) & 255 {
                 5 => "SQLITE_BUSY",
                 6 => "SQLITE_LOCKED",
                 19 => "SQLITE_CONSTRAINT",

@@ -255,8 +255,8 @@ fn parse_at(text: &str, at: Option<String>) -> Vec<Deadlock> {
         });
         let Some(process) = by_owner.or_else(|| current.clone()) else { return };
         let id = format!("{object}/{index}/{page}/{}", heap.unwrap_or("?"));
-        let r = match resources.iter_mut().position(|r| r.id == id) {
-            Some(i) => &mut resources[i],
+        let idx = match resources.iter().position(|r| r.id == id) {
+            Some(i) => i,
             None => {
                 resources.push(DeadlockResource {
                     id: id.clone(),
@@ -266,9 +266,10 @@ fn parse_at(text: &str, at: Option<String>) -> Vec<Deadlock> {
                     holders: vec![],
                     waiters: vec![],
                 });
-                resources.last_mut().unwrap()
+                resources.len() - 1
             }
         };
+        let r = &mut resources[idx];
         let entry = LockHolder { process, mode: Some(mode) };
         if holding == Some(false) { r.waiters.push(entry) } else { r.holders.push(entry) }
     };

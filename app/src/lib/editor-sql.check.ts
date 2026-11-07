@@ -182,7 +182,7 @@ assert(
 );
 
 // T-SQL GO batch boundaries in locateFindingSpan and statementEndOffset
-const tsqlGoScript = `CREATE TABLE dbo.audit_log (id int)\nGO\nALTER TABLE dbo.orders\n  ADD status nvarchar(32)\nGO\nSELECT 1`;
+const tsqlGoScript = `CREATE TABLE dbo.audit_log (id int)\nGO\nALTER TABLE dbo.orders\n  ADD status nvarchar(32)\n-- trailing comment before GO\nGO\nSELECT 1`;
 const tsqlSpan = locateFindingSpan(tsqlGoScript, subjectFallbackFinding);
 assert(tsqlSpan !== null, "expected locateFindingSpan to find statement after GO");
 assert(
@@ -192,7 +192,22 @@ assert(
 const tsqlEnd = statementEndOffset(tsqlGoScript, tsqlSpan![0], tsqlSpan![1]);
 assert(
   tsqlGoScript.slice(tsqlSpan![0], tsqlEnd) === "ALTER TABLE dbo.orders\n  ADD status nvarchar(32)",
-  `expected statementEndOffset to stop before GO, got ${JSON.stringify(tsqlGoScript.slice(tsqlSpan![0], tsqlEnd))}`,
+  `expected statementEndOffset to stop at last token before GO, got ${JSON.stringify(tsqlGoScript.slice(tsqlSpan![0], tsqlEnd))}`,
+);
+
+// Multi-line statement without a trailing semicolon at EOF, plus T-SQL [[escaped]] brackets and Unicode İ
+const noSemicolonScript = `SELECT 'İ' AS [col]]1;still_bracket];\nCREATE INDEX idx_orders_customer\n  ON public.orders (customer_id)\n  -- trailing comment`;
+assert(splitSqlStatements(noSemicolonScript).length === 2, "escaped T-SQL bracket ]] should not close bracket before ;");
+const noSemiSpan = locateFindingSpan(noSemicolonScript, indexFinding);
+assert(noSemiSpan !== null, "expected locateFindingSpan to locate statement after Unicode İ and [[bracket]]");
+assert(
+  noSemicolonScript.slice(noSemiSpan![0], noSemiSpan![1]) === "CREATE INDEX idx_orders_customer",
+  "expected first line of CREATE INDEX after Unicode İ",
+);
+const noSemiEnd = statementEndOffset(noSemicolonScript, noSemiSpan![0], noSemiSpan![1]);
+assert(
+  noSemicolonScript.slice(noSemiSpan![0], noSemiEnd) === "CREATE INDEX idx_orders_customer\n  ON public.orders (customer_id)",
+  `expected unterminated multi-line statement end to cover all tokens, got ${JSON.stringify(noSemicolonScript.slice(noSemiSpan![0], noSemiEnd))}`,
 );
 
 console.log("editor-sql.ts passed all checks");

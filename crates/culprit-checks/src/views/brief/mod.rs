@@ -53,12 +53,13 @@ pub fn agent_brief(report: &Report, finding: &Finding) -> String {
             // What it costs as every list of statements says it (`Workload::cost_of`): over Culprit's scans where they
             // measured it, with the totals beside where those differ twofold; when it ran as well as how often, a
             // burst on its day and a rate a day only where its runs came that way.
-            let Some(cost) = s.workload.as_ref().map(|w| w.cost_of(q)) else { continue };
+            let Some(workload) = s.workload.as_ref() else { continue };
+            let cost = workload.cost_of(q);
             let period_note = cost
                 .activity
                 .as_ref()
                 .map(|_| {
-                    let basis = cost.over.clone().unwrap_or_else(|| s.workload.as_ref().unwrap().window_phrase());
+                    let basis = cost.over.clone().unwrap_or_else(|| workload.window_phrase());
                     format!(" (share and average over {basis}; the observed calls have their own period)")
                 })
                 .unwrap_or_default();

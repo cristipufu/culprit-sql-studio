@@ -93,7 +93,7 @@ impl EngineSpec for Yugabyte {
     fn refusal(&self, ability: Ability) -> Refusal {
         match ability {
             Ability::Deadlocks => Refusal::new(
-                self.deadlock_limitation().unwrap(),
+                self.deadlock_limitation().unwrap_or_default(),
                 Some("Correlate YSQL errors and the YB-TServer logs for the affected transaction."),
             ),
             Ability::LastActualPlan => Refusal::new(

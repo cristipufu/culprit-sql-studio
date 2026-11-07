@@ -132,15 +132,17 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Vec<Decision> {
                 };
                 let one = queries.len() == 1;
                 let silences: Vec<_> = queries.iter().filter_map(|q| query_stopped(s, q)).collect();
-                if silences.len() == queries.len() {
-                    let (seconds, last) = silences.into_iter().min_by(|a, b| a.0.total_cmp(&b.0)).unwrap();
+                if silences.len() == queries.len()
+                    && let Some((seconds, last)) = silences.into_iter().min_by(|a, b| a.0.total_cmp(&b.0))
+                {
                     let by_first_scan = last_ran_by_first_scan(w, &last);
                     let successor = one.then(|| query_successor(s, queries[0])).flatten().map(|q| q.id.clone());
                     push(at, Change::Stopped { seconds, last, one, by_first_scan, successor }, Vec::new());
                 } else {
                     let quiet: Vec<_> = queries.iter().filter_map(|q| query_quiet(s, q)).collect();
-                    if quiet.len() == queries.len() {
-                        let (seconds, last) = quiet.into_iter().min_by(|a, b| a.0.total_cmp(&b.0)).unwrap();
+                    if quiet.len() == queries.len()
+                        && let Some((seconds, last)) = quiet.into_iter().min_by(|a, b| a.0.total_cmp(&b.0))
+                    {
                         let by_first_scan = last_ran_by_first_scan(w, &last);
                         push(at, Change::Quiet { seconds, last, one, by_first_scan }, Vec::new());
                     }
@@ -304,7 +306,7 @@ impl Decision {
         match &self.change {
             Change::SourceHistory | Change::LastSeen(_) | Change::MissingQueries(_) => {}
             Change::Once { one, slow_log } => {
-                let window = s.workload.as_ref().unwrap().window_phrase();
+                let window = s.workload.as_ref().map(|w| w.window_phrase()).unwrap_or_default();
                 let caveat = if *slow_log {
                     format!(
                         "{} logged once in {}: the slow query log keeps only runs over long_query_time, so it may run more often, faster. One slow run shows what it cost once, not a pattern; it needs work if it keeps showing up.",
@@ -362,23 +364,27 @@ impl Decision {
                 f.caveats.insert(0, caveat + &successor(next, false));
             }
             Change::Gone => {
-                f.fix.as_mut().unwrap().summary = format!(
-                    "Nothing to change: {} {} in the database's catalog any more, so {} dropped or renamed since these statements ran. If the application now uses other tables, scan those before making a change.",
-                    format::list(&self.tables),
-                    if self.tables.len() == 1 { "isn't" } else { "aren't" },
-                    if self.tables.len() == 1 { "it was" } else { "they were" }
-                );
+                if let Some(fix) = f.fix.as_mut() {
+                    fix.summary = format!(
+                        "Nothing to change: {} {} in the database's catalog any more, so {} dropped or renamed since these statements ran. If the application now uses other tables, scan those before making a change.",
+                        format::list(&self.tables),
+                        if self.tables.len() == 1 { "isn't" } else { "aren't" },
+                        if self.tables.len() == 1 { "it was" } else { "they were" }
+                    );
+                }
                 f.verify=vec!["Nothing to check: the tables are gone. If these statements return against replacement tables, scan those to see what needs a change.".into()];
             }
             Change::Creation { one, successor: next } => {
-                f.fix.as_mut().unwrap().summary = format!(
-                    "Nothing to create: {} stopped running, so an index or statistics made for {} now would serve code that no longer runs. If {} again, a scan shows this finding again with the SQL for {}.{}",
-                    if *one { "the statement behind this finding" } else { "the statements behind this finding" },
-                    if *one { "it" } else { "them" },
-                    if *one { "it runs" } else { "they run" },
-                    if *one { "it" } else { "them" },
-                    successor(next, true)
-                );
+                if let Some(fix) = f.fix.as_mut() {
+                    fix.summary = format!(
+                        "Nothing to create: {} stopped running, so an index or statistics made for {} now would serve code that no longer runs. If {} again, a scan shows this finding again with the SQL for {}.{}",
+                        if *one { "the statement behind this finding" } else { "the statements behind this finding" },
+                        if *one { "it" } else { "them" },
+                        if *one { "it runs" } else { "they run" },
+                        if *one { "it" } else { "them" },
+                        successor(next, true)
+                    );
+                }
             }
             Change::IndexWork => {
                 if let Some(fix) = &mut f.fix {
