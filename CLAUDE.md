@@ -28,7 +28,7 @@ These rules apply to every coding agent. `AGENTS.md` links to this file; keep on
 
 ### Checks by change
 
-Run commands from the repository root unless a working directory is shown. Use the existing lockfile; when changing dependencies, update it deliberately, then validate with `--locked`.
+Run commands from the repository root unless a working directory is shown. Use the existing lockfile; when changing dependencies, update it deliberately, then validate with `--locked`. A new crate must pass `deny.toml` (permissive licenses, no open advisories, crates.io only), which CI's Dependencies job checks with `cargo deny check` alongside `bun audit`; an accepted advisory is an entry there with its reason.
 
 | Change | During implementation | Final validation |
 |---|---|---|

@@ -1,0 +1,48 @@
+# cargo-deny: what the dependency graph may contain. CI runs `cargo deny check` on every push and pull request.
+
+[graph]
+# Every platform the desktop app and CLI ship on, with every feature, so a Windows- or Linux-only crate is judged too.
+all-features = true
+
+[advisories]
+# Vulnerabilities, unsound code, unmaintained crates and yanked versions fail the check, except the advisories below.
+# Each is a crate this workspace doesn't depend on directly and that has no fixed release reachable from here; drop the
+# entry when the crate that pulls it in moves on.
+yanked = "deny"
+ignore = [
+    { id = "RUSTSEC-2024-0429", reason = "glib 0.18 (unsound VariantStrIter, fixed in 0.20): Tauri's GTK3 stack on Linux pins it" },
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error (unmaintained): a build-time macro dependency of glib 0.18 in Tauri's GTK3 stack" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant (unmaintained): keyring's Linux Secret Service backend, through zbus" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names (unmaintained): keyring's Linux Secret Service backend, through zbus" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive (unmaintained): keyring's Linux Secret Service backend, through zbus" },
+]
+
+[licenses]
+# Permissive licenses, and two that need a word:
+# - MPL-2.0 is file-level copyleft: cssparser, selectors and dtoa-short (Tauri's build-time HTML tooling) and option-ext
+#   (through dirs), used unmodified. Their source stays where it is published.
+# - CDLA-Permissive-2.0: webpki-roots and webpki-root-certs, Mozilla's root certificates as data.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.93
+
+[bans]
+# Tauri brings several versions of some crates (windows-sys, syn); duplicates are reported, not failed.
+multiple-versions = "warn"
+# The workspace's own crates depend on each other by path without a version, which cargo-deny counts as a wildcard
+# unless the crates are marked `publish = false`; no registry dependency uses `*`.
+wildcards = "allow"
+
+[sources]
+# crates.io only: no git dependencies, no other registries.
+unknown-registry = "deny"
+unknown-git = "deny"

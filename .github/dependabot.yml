@@ -1,0 +1,27 @@
+# Weekly update pull requests for the Rust crates, the UI's packages and the workflows' pinned actions. Minor and patch
+# updates arrive together per ecosystem.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      crates:
+        update-types: [minor, patch]
+
+  - package-ecosystem: bun
+    directory: /app
+    schedule:
+      interval: weekly
+    groups:
+      ui:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
