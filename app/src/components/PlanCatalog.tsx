@@ -17,7 +17,7 @@ export function PlanCatalog({ onSample }: { onSample: (product: DatabaseProduct)
       <div className="welcome-samples">
         <span className="muted">See it with a sample comparison:</span>
         {PRODUCTS.map((product) => (
-          <button key={product.id} className="btn ghost small" data-product={product.id} onClick={() => onSample(product.id)}>
+          <button type="button" key={product.id} className="btn ghost small" data-product={product.id} onClick={() => onSample(product.id)}>
             <EngineBadge engine={product.engine} product={product.prefix} />
             {product.label}
           </button>

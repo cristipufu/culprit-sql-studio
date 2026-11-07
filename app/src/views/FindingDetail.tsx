@@ -111,7 +111,7 @@ export function FindingDetail({ report, finding }: { report: Report; finding: Fi
                   aboutThePlan={aboutThePlan(firstWithPlan.query.plan, finding.check)}
                   weighed={can(firstWithPlan.query.plan.engine, "plan_estimates") || firstWithPlan.query.plan.kind === "actual"}
                 />
-                <button className="btn ghost" style={{ marginTop: 8 }} onClick={() => setShowPlan((v) => !v)}>
+                <button type="button" className="btn ghost" style={{ marginTop: 8 }} onClick={() => setShowPlan((v) => !v)}>
                   {showPlan ? "Hide plan" : "Show full plan"}
                 </button>
                 {showPlan && (
@@ -130,7 +130,7 @@ export function FindingDetail({ report, finding }: { report: Report; finding: Fi
               Fix
               {finding.fix.sql && (
                 <span className="actions">
-                  <button className="btn" onClick={copyFix}>
+                  <button type="button" className="btn" onClick={copyFix}>
                     <Copy size={13} /> Copy <span className="kbd">C</span>
                   </button>
                 </span>
@@ -176,18 +176,18 @@ export function FindingDetail({ report, finding }: { report: Report; finding: Fi
 
         <div className="actionbar">
           <VerifyResult result={verify.result} report={report} onClose={verify.clear} />
-          <button className="btn primary" onClick={copyBrief}>
+          <button type="button" className="btn primary" onClick={copyBrief}>
             <Bot size={14} /> Copy for agent <span className="kbd">A</span>
           </button>
           {canOpenFix && (
-            <button className="btn" onClick={openInEditor}>
+            <button type="button" className="btn" onClick={openInEditor}>
               <SquarePen size={13} /> Open in editor <span className="kbd">E</span>
             </button>
           )}
           <VerifyButton running={verify.result?.status === "running"} onRun={verify.run} />
           <FindingShareMenu report={report} finding={finding} />
           <span className="spacer" />
-          <button className="btn ghost dismiss" onClick={() => toggleDismissed(finding.id)} aria-label={dismissed ? "Restore" : "Dismiss"} title={`${dismissed ? "Restore" : "Dismiss"} (D)`}>
+          <button type="button" className="btn ghost dismiss" onClick={() => toggleDismissed(finding.id)} aria-label={dismissed ? "Restore" : "Dismiss"} title={`${dismissed ? "Restore" : "Dismiss"} (D)`}>
             <EyeOff size={13} /> <span className="btn-label">{dismissed ? "Restore" : "Dismiss"}</span> <span className="kbd">D</span>
           </button>
         </div>
@@ -199,7 +199,7 @@ export function FindingDetail({ report, finding }: { report: Report; finding: Fi
 function CopyId({ id }: { id: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <button
+    <button type="button"
       className="tag mono"
       title="Copy finding id (for culprit show)"
       onClick={async () => {
@@ -235,7 +235,7 @@ function SqlPreview({ text }: { text: string }) {
         <Sql text={text} />
       </div>
       {(clipped || open) && (
-        <button
+        <button type="button"
           className="sql-more"
           aria-expanded={open}
           onClick={(e) => {

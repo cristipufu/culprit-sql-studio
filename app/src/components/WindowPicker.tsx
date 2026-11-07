@@ -47,7 +47,7 @@ export function WindowPicker({ coveredHours, source }: { coveredHours: number | 
 
   return (
     <div className="menu-anchor" ref={anchor}>
-      <button className="picker" aria-haspopup="listbox" aria-expanded={open} title="Workload window (W)" onClick={() => setOpen((o) => !o)}>
+      <button type="button" className="picker" aria-haspopup="listbox" aria-expanded={open} title="Workload window (W)" onClick={() => setOpen((o) => !o)}>
         <CalendarClock size={13} />
         {LABEL[minutes]}
         <ChevronDown size={13} className="muted" />
@@ -60,7 +60,7 @@ export function WindowPicker({ coveredHours, source }: { coveredHours: number | 
       {open && (
         <div className="menu" role="listbox" aria-label="Workload window">
           {WINDOW_OPTIONS.map((d) => (
-            <button key={d} role="option" aria-selected={d === minutes} className={`menu-item ${d === minutes ? "on" : ""} ${same(d) ? "same" : ""}`} onClick={() => choose(d)}>
+            <button type="button" key={d} role="option" aria-selected={d === minutes} className={`menu-item ${d === minutes ? "on" : ""} ${same(d) ? "same" : ""}`} onClick={() => choose(d)}>
               <span>
                 {LABEL[d]}
                 {same(d) && <span className="menu-sub">same data: {held} kept</span>}

@@ -145,7 +145,7 @@ export function PlanView({ plan, query, focus, compact, selectedId, onSelect }: 
           // Shown as off only where the core flagged it (10× on 100+ rows, not an operator stopped early).
           const mis = node.warnings.includes("misestimate") ? misestimate(plan, node) : null;
           return (
-            <button
+            <button type="button"
               key={node.id}
               className={`pnode ${selected === node.id ? "sel" : ""} ${hotPath.has(node.id) ? "hot" : ""}`}
               onClick={() => {

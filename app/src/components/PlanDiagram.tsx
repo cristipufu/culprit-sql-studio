@@ -160,7 +160,7 @@ export function CostStrip({ plan, query, focus, onPick }: { plan: Plan; query?: 
       <div className="eyebrow">{shares.basis === "time" ? `Where the ${duration(shares.total)} went` : "Where the cost goes"}</div>
       <div className="cost-bar">
         {top.map((n) => (
-          <button
+          <button type="button"
             key={n.id}
             // Outlined only for the step where the work is (never an exchange), in a plan that does real work.
             className={n.id === shares.hottest?.id ? "hottest" : ""}
@@ -173,7 +173,7 @@ export function CostStrip({ plan, query, focus, onPick }: { plan: Plan; query?: 
       </div>
       <div className="cost-legend">
         {top.map((n) => (
-          <button key={n.id} onClick={() => onPick(n.id)}>
+          <button type="button" key={n.id} onClick={() => onPick(n.id)}>
             <OpIcon node={n} size={12} />
             <b>{percent(own(n))}</b> {n.op}
             {n.object && <span className="mono muted"> {n.object.split(".").pop()}</span>}
@@ -413,7 +413,7 @@ export function PlanDiagram(props: {
               ))}
               {overlay && boxes.map((b) => <span key={`overlay-${b.node.id}`}>{overlay(b.node, { x: px(b.x), y: py(b.y), w: CARD_W, h: CARD_H })}</span>)}
               {folds.map((f) => (
-                <button
+                <button type="button"
                   key={f.id}
                   className="fold-pill"
                   style={{ left: px(f.x) + CARD_W / 2 - 78, top: py(f.y) + CARD_H / 2 - 14 }}
@@ -450,17 +450,17 @@ export function PlanDiagram(props: {
 function ZoomControls({ zoom, setZoom, fit }: { zoom: number; setZoom: (f: (z: number) => number) => void; fit: () => void }) {
   return (
     <span className="zoom">
-      <button className="btn icon ghost" title="Zoom out" onClick={() => setZoom((z) => Math.max(0.3, +(z - 0.15).toFixed(2)))}>
+      <button type="button" className="btn icon ghost" title="Zoom out" onClick={() => setZoom((z) => Math.max(0.3, +(z - 0.15).toFixed(2)))}>
         <Minus size={13} />
       </button>
       <span className="zoom-level">{Math.round(zoom * 100)}%</span>
-      <button className="btn icon ghost" title="Zoom in" onClick={() => setZoom((z) => Math.min(1.6, +(z + 0.15).toFixed(2)))}>
+      <button type="button" className="btn icon ghost" title="Zoom in" onClick={() => setZoom((z) => Math.min(1.6, +(z + 0.15).toFixed(2)))}>
         <Plus size={13} />
       </button>
-      <button className="btn icon ghost" title="Fit the whole plan" onClick={fit}>
+      <button type="button" className="btn icon ghost" title="Fit the whole plan" onClick={fit}>
         <Scan size={13} />
       </button>
-      <button className="btn icon ghost" title="Actual size" onClick={() => setZoom(() => 1)}>
+      <button type="button" className="btn icon ghost" title="Actual size" onClick={() => setZoom(() => 1)}>
         <Maximize2 size={12} />
       </button>
     </span>
@@ -503,7 +503,7 @@ function PlanCard(props: {
     .filter(Boolean)
     .join("\n");
   return (
-    <button
+    <button type="button"
       data-node={node.id}
       data-tint={tint}
       className={`plan-card ${selected ? "sel" : ""} ${hot ? "hot" : ""} ${mark ? `mark-${mark}` : ""} ${worst ? `flag-${worst.severity}` : ""}`}

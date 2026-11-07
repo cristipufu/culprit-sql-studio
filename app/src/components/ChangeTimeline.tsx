@@ -92,12 +92,12 @@ export function AroundThen({ changes, onFocusQuery }: { changes: Changes; onFocu
               </span>
               <span className="around-side">
                 {queries.length > 0 && (
-                  <button className="around-links" onClick={() => onFocusQuery(queries[0]!)} title="Show the query it may explain">
+                  <button type="button" className="around-links" onClick={() => onFocusQuery(queries[0]!)} title="Show the query it may explain">
                     may explain {queries.length} {queries.length === 1 ? "query" : "queries"}
                   </button>
                 )}
                 {e.kind === "mark" && e.source === "mark" && (
-                  <button className="icon-btn" title="Remove this mark" aria-label={`Remove the mark ${e.title}`} onClick={() => void remove(e)}>
+                  <button type="button" className="icon-btn" title="Remove this mark" aria-label={`Remove the mark ${e.title}`} onClick={() => void remove(e)}>
                     <X size={12} />
                   </button>
                 )}
@@ -107,7 +107,7 @@ export function AroundThen({ changes, onFocusQuery }: { changes: Changes; onFocu
         })}
       </ol>
       {events.length > limit && (
-        <button className="link-button around-toggle" onClick={() => setAll((v) => !v)}>
+        <button type="button" className="link-button around-toggle" onClick={() => setAll((v) => !v)}>
           {all ? "Show fewer" : `Show all ${events.length}`}
         </button>
       )}

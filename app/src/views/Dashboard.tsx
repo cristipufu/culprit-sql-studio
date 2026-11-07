@@ -84,7 +84,7 @@ export default function Dashboard({ report, connection }: { report: Report; conn
         <h3>Couldn't build the dashboard</h3>
         <p>{loaded.error.message}</p>
         {loaded.error.hint && <p className="muted">{loaded.error.hint}</p>}
-        <button className="btn" onClick={() => setState({ view: "overview" })}>
+        <button type="button" className="btn" onClick={() => setState({ view: "overview" })}>
           Open findings
         </button>
       </div>
@@ -134,7 +134,7 @@ export default function Dashboard({ report, connection }: { report: Report; conn
           {keys.length > 0 && (
             <div className="dash-attn" role="list" aria-label="Needs a look">
               {keys.map((k) => (
-                <button key={k} role="listitem" className={`dash-chip ${tile(k).status}`} onClick={() => focusTile(k)} title={tile(k).takeaway}>
+                <button type="button" key={k} role="listitem" className={`dash-chip ${tile(k).status}`} onClick={() => focusTile(k)} title={tile(k).takeaway}>
                   <i aria-hidden /> {tile(k).title}
                 </button>
               ))}
@@ -275,7 +275,7 @@ function DbTimeTile({ tile, report }: { tile: Tile; report: Report }) {
               (periods ? (trendNote(w) ?? "Not enough history for a trend yet.") : `${serverName(report.snapshot.server.engine)} keeps no history to chart: the log Culprit read is one period.`)}
           </p>
           {periods && (
-            <button className="btn small" onClick={compare} title="Compare two periods (V)">
+            <button type="button" className="btn small" onClick={compare} title="Compare two periods (V)">
               <GitCompareArrows size={12} /> What changed?
             </button>
           )}
@@ -285,7 +285,7 @@ function DbTimeTile({ tile, report }: { tile: Tile; report: Report }) {
         <ul className="dash-rows compact">
           {tile.items.slice(0, 2).map((item) => (
             <li key={item.id + item.query_id}>
-              <button className="dash-row" onClick={() => item.query_id && openQuery(item.query_id, "history")} title="Open the query's plan history">
+              <button type="button" className="dash-row" onClick={() => item.query_id && openQuery(item.query_id, "history")} title="Open the query's plan history">
                 <i className="dash-flag" aria-hidden />
                 <span className="dash-row-label">
                   {queryLabel(item, report)} <span className="muted">switched plans{item.at ? ` ${ago(item.at)}` : ""}</span>
@@ -341,7 +341,7 @@ function FindingsTile({ tile, report }: { tile: Tile; report: Report }) {
         <ul className="dash-rows">
           {rows.map((item) => (
             <li key={item.id}>
-              <button className="dash-row two-line" onClick={() => openFinding(item.id)}>
+              <button type="button" className="dash-row two-line" onClick={() => openFinding(item.id)}>
                 <span className={`sev ${severityOf(item.status)}`} aria-hidden />
                 <span className="dash-row-stack">
                   <span className="dash-row-label clamp">{item.label}</span>
@@ -377,7 +377,7 @@ function TopQueriesTile({ tile, report }: { tile: Tile; report: Report }) {
           const q = item.query_id ? byId.get(item.query_id) : undefined;
           return (
             <li key={item.id}>
-              <button className="dash-row query" onClick={() => item.query_id && openQuery(item.query_id)} title={q?.text.slice(0, 400)}>
+              <button type="button" className="dash-row query" onClick={() => item.query_id && openQuery(item.query_id)} title={q?.text.slice(0, 400)}>
                 <span className="dash-row-label">{queryLabel(item, report)}</span>
                 {q && w.timeline && <Sparkline query={q} timeline={w.timeline} />}
                 <span className="dash-share" aria-hidden>
@@ -405,7 +405,7 @@ function WaitsTile({ tile, onOpen, sample }: { tile: Tile; onOpen: (tab: WaitsTa
     return (
       <Frame tile={tile} action="Sample now" onOpen={() => onOpen("now")}>
         <div className="dash-actions">
-          <button className="btn small" onClick={() => onOpen("now")}>
+          <button type="button" className="btn small" onClick={() => onOpen("now")}>
             <Radio size={12} /> Sample what it waits on now
           </button>
         </div>
@@ -431,7 +431,7 @@ function WaitsTile({ tile, onOpen, sample }: { tile: Tile; onOpen: (tab: WaitsTa
       <ul className="dash-legend">
         {items.slice(0, 6).map((i) => (
           <li key={i.id}>
-            <button onClick={() => onOpen("waits", i.id)}>
+            <button type="button" onClick={() => onOpen("waits", i.id)}>
               <i style={{ background: waitColor(i.id) }} aria-hidden />
               <span className="dash-legend-label">{i.label}</span>
               <span className="dash-row-value">{i.value}</span>

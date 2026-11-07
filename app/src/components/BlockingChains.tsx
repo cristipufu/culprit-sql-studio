@@ -86,12 +86,12 @@ function ChainCard({ chain, sessions, actions, actionsNote, onInterrupt, onLocat
         {chain.advice}{" "}
       </p>
       {!adviceOpen && clamped && (
-        <button className="link-button block-more" onClick={() => setAdviceOpen(true)} aria-label="Show the full explanation">
+        <button type="button" className="link-button block-more" onClick={() => setAdviceOpen(true)} aria-label="Show the full explanation">
           More
         </button>
       )}
       <div className="block-tree-head">
-        <button className="link-button" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <button type="button" className="link-button" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} {open ? "Hide" : "Show"} who waits behind whom
         </button>
         <span className="spacer" />
@@ -174,7 +174,7 @@ function HeadActions({ head, actions, onInterrupt }: { head: Session; actions: S
         <span className="error-text" title={state.message}>
           {state.message}
         </span>
-        <button className="btn ghost small" onClick={() => setState({ status: "idle" })}>
+        <button type="button" className="btn ghost small" onClick={() => setState({ status: "idle" })}>
           OK
         </button>
       </span>
@@ -183,10 +183,10 @@ function HeadActions({ head, actions, onInterrupt }: { head: Session; actions: S
     return (
       <span className="inline-confirm" onKeyDown={(e) => e.key === "Escape" && setState({ status: "idle" })}>
         <span className="muted">{COPY[state.action].explain}</span>
-        <button className="btn danger small" autoFocus onClick={() => run(state.action)}>
+        <button type="button" className="btn danger small" autoFocus onClick={() => run(state.action)}>
           {COPY[state.action].confirm} {head.id}
         </button>
-        <button className="btn ghost small" onClick={() => setState({ status: "idle" })}>
+        <button type="button" className="btn ghost small" onClick={() => setState({ status: "idle" })}>
           Keep
         </button>
       </span>
@@ -194,7 +194,7 @@ function HeadActions({ head, actions, onInterrupt }: { head: Session; actions: S
   return (
     <span className="block-actions">
       {offered.map((a) => (
-        <button key={a} className="btn small" title={COPY[a].explain} onClick={() => setState({ status: "confirm", action: a })}>
+        <button type="button" key={a} className="btn small" title={COPY[a].explain} onClick={() => setState({ status: "confirm", action: a })}>
           {COPY[a].button}
         </button>
       ))}

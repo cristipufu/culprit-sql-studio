@@ -15,7 +15,7 @@ function UpdateItem() {
   switch (update.status) {
     case "available":
       return (
-        <button className="update-item" onClick={() => void installUpdate()} title={`Download and install Culprit ${update.info.version} (you have ${update.info.current}); you choose when to restart`}>
+        <button type="button" className="update-item" onClick={() => void installUpdate()} title={`Download and install Culprit ${update.info.version} (you have ${update.info.current}); you choose when to restart`}>
           <CircleArrowUp size={13} /> Update to {update.info.version}
         </button>
       );
@@ -28,13 +28,13 @@ function UpdateItem() {
       );
     case "ready":
       return (
-        <button className="update-item" onClick={() => void restartToUpdate()} title={`Culprit ${update.info.version} is installed; restart to use it`}>
+        <button type="button" className="update-item" onClick={() => void restartToUpdate()} title={`Culprit ${update.info.version} is installed; restart to use it`}>
           <RotateCw size={13} /> Restart to update
         </button>
       );
     case "failed":
       return (
-        <button className="update-item failed" onClick={() => void installUpdate()} title={`${update.error} Click to try again.`}>
+        <button type="button" className="update-item failed" onClick={() => void installUpdate()} title={`${update.error} Click to try again.`}>
           <CircleAlert size={13} /> Update failed · try again
         </button>
       );
@@ -51,13 +51,13 @@ function ConnectionList() {
     <div className="side-connections">
       <div className="sidebar-section side-section-row">
         Connections
-        <button className="side-add" onClick={() => setState({ view: "connections" })} aria-label="Add or manage connections" title="Add or manage connections">
+        <button type="button" className="side-add" onClick={() => setState({ view: "connections" })} aria-label="Add or manage connections" title="Add or manage connections">
           <Plus size={13} />
         </button>
       </div>
       {groupByEnvironment(connections).flatMap((g) =>
         g.items.map((c) => (
-          <button
+          <button type="button"
             key={c.name}
             className={`nav-item conn-item ${c.name === active ? "active" : ""}`}
             title={`${c.display} · ${c.environment}`}
@@ -94,7 +94,7 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-drag" data-tauri-drag-region />
-      <button
+      <button type="button"
         className="conn-switch"
         onClick={() => setState({ view: "connections" })}
         title={report ? `${active} · ${report.snapshot.server.product} · ${report.snapshot.server.database}` : undefined}
@@ -118,13 +118,13 @@ export function Sidebar() {
         </span>
         <ChevronsUpDown size={14} className="chev" />
       </button>
-      <button className="side-search" onClick={() => setState({ palette: true })} aria-label={keys("Search or jump to (⌘K)")}>
+      <button type="button" className="side-search" onClick={() => setState({ palette: true })} aria-label={keys("Search or jump to (⌘K)")}>
         <Search size={13} /> Search or jump to… <span className="kbd">{keys("⌘K")}</span>
       </button>
       {(
         <nav className="nav">
           {NAV.filter((n) => (active || n.view === "plans") && (n.view !== "live" || !connection || can(connection.engine, "sessions"))).map((n) => (
-            <button key={n.view} className={`nav-item ${view === n.view ? "active" : ""}`} onClick={() => setState({ view: n.view })}>
+            <button type="button" key={n.view} className={`nav-item ${view === n.view ? "active" : ""}`} onClick={() => setState({ view: n.view })}>
               {n.icon}
               {n.label}
               {n.view === "overview" && report && <span className="count">{report.summary.opportunities}</span>}
@@ -137,7 +137,7 @@ export function Sidebar() {
       <div className="sidebar-foot">
         <UpdateItem />
         {active && (
-          <button className="scan-status" onClick={() => scan(active)} title={keys("Re-scan (⌘R)")}>
+          <button type="button" className="scan-status" onClick={() => scan(active)} title={keys("Re-scan (⌘R)")}>
             {scanning ? <span className="spinner" style={{ width: 12, height: 12 }} /> : <RefreshCw size={13} />}
             {scanning ? "Scanning…" : report ? `Scanned ${ago(report.snapshot.taken_at)}` : "Scan"}
           </button>
@@ -152,7 +152,7 @@ export function Sidebar() {
                 ["dark", <Moon size={12} key="d" />, "Dark"],
               ] as const
             ).map(([value, icon, label]) => (
-              <button key={value} role="radio" aria-checked={theme === value} aria-label={label} title={label} className={theme === value ? "on" : ""} onClick={() => setTheme(value)}>
+              <button type="button" key={value} role="radio" aria-checked={theme === value} aria-label={label} title={label} className={theme === value ? "on" : ""} onClick={() => setTheme(value)}>
                 {icon}
               </button>
             ))}

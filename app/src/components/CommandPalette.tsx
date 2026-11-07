@@ -201,7 +201,7 @@ export function CommandPalette() {
                   {item.section}
                 </div>
               )}
-              <button
+              <button type="button"
                 id={`palette-item-${i}`}
                 role="option"
                 aria-selected={i === index}

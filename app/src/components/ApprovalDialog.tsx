@@ -145,10 +145,10 @@ export default function ApprovalDialog() {
             Denied automatically in {secondsLeft} s{waiting.length > 1 ? ` · ${waiting.length - 1} more waiting` : ""}
           </span>
           <span style={{ flex: 1 }} />
-          <button className="btn" autoFocus onClick={() => decide(false)}>
+          <button type="button" className="btn" autoFocus onClick={() => decide(false)}>
             Deny <span className="kbd">Esc</span>
           </button>
-          <button className={`btn ${production ? "danger" : "primary"}`} onClick={() => decide(true)}>
+          <button type="button" className={`btn ${production ? "danger" : "primary"}`} onClick={() => decide(true)}>
             Run once <span className="kbd">{keys("⌘↵")}</span>
           </button>
         </div>

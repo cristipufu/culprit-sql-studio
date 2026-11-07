@@ -60,7 +60,7 @@ export function Columns({
                     {c.generated && <span className="tag">auto</span>}
                   </span>
                   {ref && (
-                    <button className="fk-link" title={`${ref.ref_table}.${ref.ref_columns[0]} · Foreign key ${ref.name}`} onClick={() => onOpenTable(`${ref.ref_schema}.${ref.ref_table}`)}>
+                    <button type="button" className="fk-link" title={`${ref.ref_table}.${ref.ref_columns[0]} · Foreign key ${ref.name}`} onClick={() => onOpenTable(`${ref.ref_schema}.${ref.ref_table}`)}>
                       <Link2 size={11} />
                       <span>{ref.ref_table}.{ref.ref_columns[0]}</span>
                     </button>

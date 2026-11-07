@@ -38,7 +38,7 @@ export function LookToggle({ look, onChange }: { look: PlanLook; onChange: (look
       {LOOKS.map((l) => {
         const Icon = l.icon;
         return (
-          <button key={l.look} role="tab" aria-selected={look === l.look} className={look === l.look ? "on" : ""} title={l.hint} onClick={() => onChange(l.look)}>
+          <button type="button" key={l.look} role="tab" aria-selected={look === l.look} className={look === l.look ? "on" : ""} title={l.hint} onClick={() => onChange(l.look)}>
             <Icon size={12} />
             {l.label}
           </button>

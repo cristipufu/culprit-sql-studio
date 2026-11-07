@@ -54,7 +54,7 @@ export function WorkloadUnlock({ report }: { report: Report }) {
         </p>
         <div className="unlock-foot">
           <span className="muted">Culprit reads the file only; nothing changes in the application.</span>
-          <button className="btn small" onClick={() => setState({ view: "connections" })}>
+          <button type="button" className="btn small" onClick={() => setState({ view: "connections" })}>
             <FileText size={12} /> Add query log
           </button>
         </div>
@@ -76,11 +76,11 @@ export function WorkloadUnlock({ report }: { report: Report }) {
         <div className="unlock-sql">
           <code>{sql}</code>
           <span className="spacer" />
-          <button className="btn small" onClick={() => copyAndTell(sql, "Copied")} aria-label="Copy the statement">
+          <button type="button" className="btn small" onClick={() => copyAndTell(sql, "Copied")} aria-label="Copy the statement">
             <Copy size={12} /> Copy
           </button>
           {canOpenFixInEditor(sql, report.snapshot.server.engine) && (
-            <button className="btn small" onClick={() => setState({ view: "editor", editorSql: sql })} aria-label="Open the statement in the editor">
+            <button type="button" className="btn small" onClick={() => setState({ view: "editor", editorSql: sql })} aria-label="Open the statement in the editor">
               <SquarePen size={12} /> Open in editor
             </button>
           )}
@@ -91,7 +91,7 @@ export function WorkloadUnlock({ report }: { report: Report }) {
         <span className="muted">
           {SOURCE[missing.capability] ? `Culprit reads ${SOURCE[missing.capability]} only; it never changes the database for you.` : ""}
         </span>
-        <button className="btn small" onClick={() => scan(report.snapshot.connection)} title={keys("Scan again once it's on (⌘R)")}>
+        <button type="button" className="btn small" onClick={() => scan(report.snapshot.connection)} title={keys("Scan again once it's on (⌘R)")}>
           <RefreshCw size={12} /> Done, re-scan
         </button>
       </div>

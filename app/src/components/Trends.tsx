@@ -99,7 +99,7 @@ export function WorkloadTrend({ timeline, windowStart, flags, onSelect, selectio
             {onCompare && <span className="muted trend-hint">drag to compare</span>}
             {actions}
             {onCompare && (
-              <button className="btn small" onClick={onCompare} title="Compare two periods (V)">
+              <button type="button" className="btn small" onClick={onCompare} title="Compare two periods (V)">
                 What changed?
               </button>
             )}

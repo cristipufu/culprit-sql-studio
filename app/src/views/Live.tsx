@@ -153,11 +153,11 @@ function LiveSessions({ connection }: { connection: string }) {
         </span>
         {tab === "sessions" && <Sparkline samples={history} />}
         <span className="seg live-tabs" role="tablist" aria-label="Live">
-          <button role="tab" aria-selected={tab === "sessions"} className={tab === "sessions" ? "on" : ""} onClick={() => chooseTab("sessions")}>
+          <button type="button" role="tab" aria-selected={tab === "sessions"} className={tab === "sessions" ? "on" : ""} onClick={() => chooseTab("sessions")}>
             Sessions
             {blocked.length > 0 && <span className="tab-count warn">{blocked.length} waiting</span>}
           </button>
-          <button role="tab" aria-selected={tab === "deadlocks"} className={tab === "deadlocks" ? "on" : ""} onClick={() => chooseTab("deadlocks")}>
+          <button type="button" role="tab" aria-selected={tab === "deadlocks"} className={tab === "deadlocks" ? "on" : ""} onClick={() => chooseTab("deadlocks")}>
             Deadlocks
             {recentDeadlocks > 0 && <span className="tab-count">{recentDeadlocks}</span>}
           </button>
@@ -168,7 +168,7 @@ function LiveSessions({ connection }: { connection: string }) {
             <label className="muted live-idle">
               <input type="checkbox" checked={showIdle} onChange={(e) => setShowIdle(e.target.checked)} /> Show idle
             </label>
-            <button className="btn" onClick={() => setPaused((p) => !p)} aria-pressed={paused}>
+            <button type="button" className="btn" onClick={() => setPaused((p) => !p)} aria-pressed={paused}>
               {paused ? <Play size={13} /> : <Pause size={13} />} {paused ? "Resume" : "Pause"} <span className="kbd">Space</span>
             </button>
           </>
@@ -339,16 +339,16 @@ function SessionRow({
         <td className="r session-actions">
           {row.status === "idle" &&
             offered.map((a) => (
-              <button key={a} className="btn ghost small" title={ACTION_COPY[a].explain} onClick={() => setRow({ status: "confirm", action: a })}>
+              <button type="button" key={a} className="btn ghost small" title={ACTION_COPY[a].explain} onClick={() => setRow({ status: "confirm", action: a })}>
                 {ACTION_COPY[a].button}
               </button>
             ))}
           {row.status === "confirm" && (
             <span className="inline-confirm" onKeyDown={(e) => e.key === "Escape" && setRow({ status: "idle" })}>
-              <button className="btn danger small" autoFocus title={ACTION_COPY[row.action].explain} onClick={() => run(row.action)}>
+              <button type="button" className="btn danger small" autoFocus title={ACTION_COPY[row.action].explain} onClick={() => run(row.action)}>
                 {ACTION_COPY[row.action].confirm} {s.id}
               </button>
-              <button className="btn ghost small" onClick={() => setRow({ status: "idle" })}>
+              <button type="button" className="btn ghost small" onClick={() => setRow({ status: "idle" })}>
                 Keep
               </button>
             </span>
@@ -359,7 +359,7 @@ function SessionRow({
               <span className="error-text" title={row.message}>
                 {row.message}
               </span>
-              <button className="btn ghost small" onClick={() => setRow({ status: "idle" })}>
+              <button type="button" className="btn ghost small" onClick={() => setRow({ status: "idle" })}>
                 OK
               </button>
             </span>

@@ -422,7 +422,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
       />
       {persistenceError && <div className="editor-storage-error" role="alert">
         <TriangleAlert size={15} /><span>{persistenceError}</span>
-        <button className="btn" onClick={() => save()}>Save query</button>
+        <button type="button" className="btn" onClick={() => save()}>Save query</button>
       </div>}
       <div className="editor-main">
         {rail === "open" && <SavedRail current={connection} saved={saved} active={activeTab.saved} onOpen={openQuery} onRenamed={(from, to) => updateTabs((t) => ({ ...t, tabs: t.tabs.map((x) => (x.saved === from ? { ...x, saved: to, title: to } : x)) }))} onDeleted={(name) => updateTabs((t) => ({ ...t, tabs: t.tabs.map((x) => (x.saved === name ? { ...x, saved: null } : x)) }))} />}

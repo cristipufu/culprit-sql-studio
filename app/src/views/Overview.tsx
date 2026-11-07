@@ -112,11 +112,11 @@ export function Overview({ report }: { report: Report }) {
       <div className="ov-list">
         <Header report={report} onOpenWaits={openWaits} changes={changes} />
         <div className="filters">
-          <button className={`chip ${category === "all" ? "on" : ""}`} onClick={() => setCategory("all")}>
+          <button type="button" className={`chip ${category === "all" ? "on" : ""}`} onClick={() => setCategory("all")}>
             All <span className="n">{counted.length}</span>
           </button>
           {categoryCounts(counted).map((c) => (
-            <button key={c.category} className={`chip ${category === c.category ? "on" : ""}`} onClick={() => setCategory(c.category)}>
+            <button type="button" key={c.category} className={`chip ${category === c.category ? "on" : ""}`} onClick={() => setCategory(c.category)}>
               {CATEGORY_LABEL[c.category]} <span className="n">{c.count}</span>
             </button>
           ))}
@@ -155,12 +155,12 @@ export function Overview({ report }: { report: Report }) {
             </div>
           )}
           {contextCount > 0 && (
-            <button className="btn ghost" style={{ margin: "8px 4px" }} onClick={() => setShowContext((v) => !v)}>
+            <button type="button" className="btn ghost" style={{ margin: "8px 4px" }} onClick={() => setShowContext((v) => !v)}>
               {showContext ? "Hide" : "Show"} information and history ({contextCount})
             </button>
           )}
           {dismissedCount > 0 && (
-            <button className="btn ghost" style={{ margin: "8px 4px" }} onClick={() => setShowDismissed((v) => !v)}>
+            <button type="button" className="btn ghost" style={{ margin: "8px 4px" }} onClick={() => setShowDismissed((v) => !v)}>
               {showDismissed ? "Hide" : "Show"} {dismissedCount} dismissed
             </button>
           )}
@@ -266,7 +266,7 @@ function Header({
       ) : w && trendNote(w) && can(snapshot.server.engine, "periods") ? (
         <p className="trend-note">
           {trendNote(w)}{" "}
-          <button className="link-button" onClick={compare} title="Compare two periods (V)">
+          <button type="button" className="link-button" onClick={compare} title="Compare two periods (V)">
             <GitCompareArrows size={12} /> What changed?
           </button>
         </p>
@@ -308,7 +308,7 @@ function FindingRow({ finding, selected, dismissed, firstScan }: { finding: Find
   const share = finding.impact.db_time_share;
   const fill = share != null ? Math.sqrt(share) : finding.impact.score / 100;
   return (
-    <button
+    <button type="button"
       className={`frow ${selected ? "selected" : ""} ${dismissed || !isActionable(finding) ? "dismissed" : ""}`}
       onClick={() => setState({ finding: finding.id, changes: null })}
     >

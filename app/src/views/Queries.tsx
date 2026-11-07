@@ -209,8 +209,8 @@ export function Queries({ report }: { report: Report }) {
           <nav className="toolbar query-pages" aria-label="Query pages">
             <span className="muted" aria-live="polite">{(pageStart + 1).toLocaleString()}–{Math.min(pageStart + PAGE_SIZE, rows.length).toLocaleString()} of {rows.length.toLocaleString()}</span>
             <span className="spacer" />
-            <button className="btn" disabled={pageStart === 0} onClick={() => select(pageStart - PAGE_SIZE)} aria-label="Previous query page"><ChevronLeft size={13} /> Previous</button>
-            <button className="btn" disabled={pageStart + PAGE_SIZE >= rows.length} onClick={() => select(pageStart + PAGE_SIZE)} aria-label="Next query page">Next <ChevronRight size={13} /></button>
+            <button type="button" className="btn" disabled={pageStart === 0} onClick={() => select(pageStart - PAGE_SIZE)} aria-label="Previous query page"><ChevronLeft size={13} /> Previous</button>
+            <button type="button" className="btn" disabled={pageStart + PAGE_SIZE >= rows.length} onClick={() => select(pageStart + PAGE_SIZE)} aria-label="Next query page">Next <ChevronRight size={13} /></button>
           </nav>
         )}
       </div>
@@ -276,7 +276,7 @@ function QueryDetail({ report, query }: { report: Report; query: QueryStat }) {
             const editorSql = prepareQueryForEditor(query, report.snapshot.server.engine);
             return (
               canOpenQueryInEditor(query.text, editorSql) && (
-                <button className="btn" onClick={() => setState({ view: "editor", editorSql })}>
+                <button type="button" className="btn" onClick={() => setState({ view: "editor", editorSql })}>
                   <SquarePen size={13} /> Open in editor
                 </button>
               )
@@ -285,7 +285,7 @@ function QueryDetail({ report, query }: { report: Report; query: QueryStat }) {
         </div>
         <div className="qd-tabs" role="tablist" aria-label="Query detail">
           {tabs.map((t) => (
-            <button key={t.tab} role="tab" aria-selected={tab === t.tab} className={`qd-tab ${tab === t.tab ? "on" : ""}`} onClick={() => choose(t.tab)}>
+            <button type="button" key={t.tab} role="tab" aria-selected={tab === t.tab} className={`qd-tab ${tab === t.tab ? "on" : ""}`} onClick={() => choose(t.tab)}>
               {t.label}
               {t.extra}
               {t.hint && <span className="kbd">{t.hint}</span>}
@@ -327,7 +327,7 @@ function QueryDetail({ report, query }: { report: Report; query: QueryStat }) {
               )}
             </section>
             {insights.length > 0 && (
-              <button className={`plan-teaser ${worst}`} onClick={() => choose("plan")}>
+              <button type="button" className={`plan-teaser ${worst}`} onClick={() => choose("plan")}>
                 <span className="pt-label">In the plan</span>
                 <span className="pt-title">{insights[0]!.title}</span>
                 {insights.length > 1 && <span className="muted">+{insights.length - 1} more</span>}
@@ -349,7 +349,7 @@ function QueryDetail({ report, query }: { report: Report; query: QueryStat }) {
               <section>
                 <h3>Findings</h3>
                 {related.map((f) => (
-                  <button key={f.id} className="frow" onClick={() => setState({ view: "overview", finding: f.id })}>
+                  <button type="button" key={f.id} className="frow" onClick={() => setState({ view: "overview", finding: f.id })}>
                     <span className={`sev ${f.severity}`} />
                     <span className="title">{f.title}</span>
                     <span />
@@ -519,12 +519,12 @@ function QueryPlans(props: { report: Report; query: QueryStat; focus: number | n
         )}
         <span className="actions">
           {variants.length > 1 && (
-            <button className="btn ghost" disabled={comparing} title="Compare the plan that took the most time with the selected one" onClick={compareVariants}>
+            <button type="button" className="btn ghost" disabled={comparing} title="Compare the plan that took the most time with the selected one" onClick={compareVariants}>
               {comparing ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <GitCompareArrows size={13} />} Compare
             </button>
           )}
           {state.status === "ready" && (
-            <button className="btn ghost" title="Open this plan in Plans to save it or compare it with another" onClick={() => addPlan(state.plan, nameOf(planId), origin, { source: { connection, queryId: query.id, planId }, query: planQuery ? { ...planQuery, plan_id: planId } : undefined })}>
+            <button type="button" className="btn ghost" title="Open this plan in Plans to save it or compare it with another" onClick={() => addPlan(state.plan, nameOf(planId), origin, { source: { connection, queryId: query.id, planId }, query: planQuery ? { ...planQuery, plan_id: planId } : undefined })}>
               <SquareArrowOutUpRight size={13} /> Open in Plans
             </button>
           )}
@@ -535,12 +535,12 @@ function QueryPlans(props: { report: Report; query: QueryStat; focus: number | n
       {cachedHistory && <p className="muted">{query.plan_history!.source}. {query.plan_history!.note}</p>}
       {(variants.length > 1 || (cachedHistory && variants.length > 0)) && (
         <div className="plan-variants">
-          {cachedHistory && <button className={`variant ${planId === null ? "on" : ""}`} onClick={() => setPlanId(null)}>
+          {cachedHistory && <button type="button" className={`variant ${planId === null ? "on" : ""}`} onClick={() => setPlanId(null)}>
             <span className="v-name">Current estimate</span>
             <span className="v-stats">Estimated independently of retained history</span>
           </button>}
           {variants.map((v, i) => (
-            <button key={v.id} className={`variant ${planId === v.id ? "on" : ""}`} onClick={() => setPlanId(v.id)}>
+            <button type="button" key={v.id} className={`variant ${planId === v.id ? "on" : ""}`} onClick={() => setPlanId(v.id)}>
               <span className="v-name">
                 Plan {v.id}
                 {i === 0 && <span className="tag" style={{ marginLeft: 6 }}>{cachedHistory ? "most retained time" : "most time"}</span>}

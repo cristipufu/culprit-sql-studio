@@ -264,7 +264,7 @@ function Header({ advice, report }: { advice: IndexAdvice | null; report: Report
 
 function Tile({ on, n, label, sub, onClick }: { on: boolean; n: number; label: string; sub: string; onClick: () => void }) {
   return (
-    <button role="tab" aria-selected={on} className={`ia-tile ${on ? "on" : ""} ${n === 0 ? "zero" : ""}`} onClick={onClick} disabled={n === 0}>
+    <button type="button" role="tab" aria-selected={on} className={`ia-tile ${on ? "on" : ""} ${n === 0 ? "zero" : ""}`} onClick={onClick} disabled={n === 0}>
       <span className="ia-tile-n">{n}</span>
       <span className="ia-tile-label">{label}</span>
       <span className="ia-tile-sub">{sub}</span>
@@ -310,7 +310,7 @@ function SqlBlock({ sql, onCopy }: { sql: string | null; onCopy: () => void }) {
     <div className="ia-sql">
       <div className="ia-sql-bar">
         <span className="muted">Copy and run it yourself</span>
-        <button className="btn ghost" onClick={onCopy}>
+        <button type="button" className="btn ghost" onClick={onCopy}>
           <Copy size={12} /> Copy <span className="kbd">c</span>
         </button>
       </div>
@@ -326,7 +326,7 @@ function Queries({ queries, onQuery, title }: { queries: AdviceQuery[]; onQuery:
     <div className="ia-block">
       <div className="ia-label">{title}</div>
       {queries.map((q) => (
-        <button key={q.id} className="ia-query" onClick={() => onQuery(q)} title="Open in Queries">
+        <button type="button" key={q.id} className="ia-query" onClick={() => onQuery(q)} title="Open in Queries">
           <span className="ia-qbar" aria-hidden>
             <span style={{ width: `${Math.max(4, ((q.share ?? 0) / max) * 100)}%` }} />
           </span>
@@ -358,11 +358,11 @@ function Links({ onFinding, hasFinding, onTable }: { onFinding: () => void; hasF
   return (
     <div className="ia-links">
       {hasFinding && (
-        <button className="btn ghost" onClick={onFinding}>
+        <button type="button" className="btn ghost" onClick={onFinding}>
           Open finding <span className="kbd">o</span>
         </button>
       )}
-      <button className="btn ghost" onClick={onTable}>
+      <button type="button" className="btn ghost" onClick={onTable}>
         Open table <span className="kbd">t</span>
       </button>
     </div>
@@ -377,7 +377,7 @@ function CandidateRow({ c, rank, focused, onFocus, expanded, onToggle, onCopy, o
   if (c.writes_per_day != null) facts.push(`${count(c.writes_per_day)} writes/day`);
   return (
     <div className={`ia-item ${focused ? "focus" : ""} ${expanded ? "expanded" : ""}`}>
-      <button className="ia-row" onClick={onToggle} onFocus={onFocus} aria-expanded={expanded}>
+      <button type="button" className="ia-row" onClick={onToggle} onFocus={onFocus} aria-expanded={expanded}>
         <span className="ia-rank">{rank}</span>
         <span className="ia-main">
           <span className="ia-title">
@@ -453,7 +453,7 @@ function CleanupRow({ c, focused, onFocus, expanded, onToggle, onCopy, onFinding
   const prefix = shared === -1 ? c.keys.length : shared;
   return (
     <div className={`ia-item ${focused ? "focus" : ""} ${expanded ? "expanded" : ""}`}>
-      <button className="ia-row" onClick={onToggle} onFocus={onFocus} aria-expanded={expanded}>
+      <button type="button" className="ia-row" onClick={onToggle} onFocus={onFocus} aria-expanded={expanded}>
         <span className={`ia-pill ${kind.tone}`}>{kind.label}</span>
         <span className="ia-main">
           <span className="ia-title">
@@ -499,7 +499,7 @@ function TableRow({ t, focused, onFocus, expanded, onToggle, onCopy, onFinding, 
   if (t.writes_per_day != null) facts.push(`${count(t.writes_per_day)} writes/day`);
   return (
     <div className={`ia-item ${focused ? "focus" : ""} ${expanded ? "expanded" : ""}`}>
-      <button className="ia-row" onClick={onToggle} onFocus={onFocus} aria-expanded={expanded}>
+      <button type="button" className="ia-row" onClick={onToggle} onFocus={onFocus} aria-expanded={expanded}>
         <span className="ia-kind-icon">{kind.icon}</span>
         <span className="ia-main">
           <span className="ia-title">

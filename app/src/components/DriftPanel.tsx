@@ -60,14 +60,14 @@ export function DriftPanel({ report, onClose }: { report: Report; onClose: () =>
   return (
     <div className="drift">
       <div className="toolbar">
-        <button className="btn ghost" onClick={onClose}>
+        <button type="button" className="btn ghost" onClick={onClose}>
           <ArrowLeft size={13} /> Schema
         </button>
         <span className="drift-with">
           Compare <b>{active}</b> with
         </span>
         {others.map((c) => (
-          <button key={c.name} className={`chip ${other === c.name ? "on" : ""}`} onClick={() => choose(c.name)}>
+          <button type="button" key={c.name} className={`chip ${other === c.name ? "on" : ""}`} onClick={() => choose(c.name)}>
             <span className={`env-dot env-${c.environment}`} style={{ width: 6, height: 6, boxShadow: "none" }} /> {c.name}
           </button>
         ))}
@@ -194,11 +194,11 @@ function DriftRow({ item, drift, active }: { item: DriftItem; drift: Drift; acti
                 To align, on <b>{item.sql_for}</b>
               </span>
               <span className="actions">
-                <button className="btn ghost" onClick={copy}>
+                <button type="button" className="btn ghost" onClick={copy}>
                   <Copy size={12} /> Copy
                 </button>
                 {item.sql_for === active && canOpenFixInEditor(item.sql, drift.a.engine) && (
-                  <button className="btn ghost" onClick={() => setState({ view: "editor", editorSql: item.sql })}>
+                  <button type="button" className="btn ghost" onClick={() => setState({ view: "editor", editorSql: item.sql })}>
                     <SquarePen size={12} /> Open in editor
                   </button>
                 )}

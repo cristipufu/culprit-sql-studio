@@ -64,7 +64,7 @@ export function ShareMenu({ actions, label = "Share", primary = false }: { actio
 
   return (
     <div className="share" ref={root} onKeyDown={onKey}>
-      <button
+      <button type="button"
         className={`btn ${primary ? "" : "ghost"}`}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -96,7 +96,7 @@ export function ShareMenu({ actions, label = "Share", primary = false }: { actio
             </label>
           )}
           {actions.map((a, i) => (
-            <button
+            <button type="button"
               key={a.id}
               role="menuitem"
               ref={(el) => {

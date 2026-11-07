@@ -152,7 +152,7 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
         {engine !== "postgres" && (
           <span className="seg" role="radiogroup" aria-label="How far back">
             {RANGES.map((r) => (
-              <button key={r.hours} role="radio" aria-checked={hours === r.hours} className={hours === r.hours ? "on" : ""} onClick={() => setHours(r.hours)}>
+              <button type="button" key={r.hours} role="radio" aria-checked={hours === r.hours} className={hours === r.hours ? "on" : ""} onClick={() => setHours(r.hours)}>
                 {r.label}
               </button>
             ))}
@@ -169,7 +169,7 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
         <div className="dl-inline-note" role="alert">
           <span className="sev medium" aria-hidden /> {pasteError.message}
           {pasteError.hint && <span className="muted"> {pasteError.hint}</span>}
-          <button className="btn ghost small" onClick={() => setPasteError(null)}>
+          <button type="button" className="btn ghost small" onClick={() => setPasteError(null)}>
             Dismiss
           </button>
         </div>
@@ -224,7 +224,7 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
               const victim = d.processes.find((p) => p.victim);
               const t = when(d.at);
               return (
-                <button
+                <button type="button"
                   key={d.id}
                   id={`dl-${d.id}`}
                   data-id={d.id}
@@ -269,13 +269,13 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
                       {f.sql && (
                         <div className="dl-fix-sql">
                           <Sql text={f.sql} pretty={false} />
-                          <button className="btn ghost small" onClick={() => copyAndTell(f.sql!, "Copied")} aria-label="Copy SQL">
+                          <button type="button" className="btn ghost small" onClick={() => copyAndTell(f.sql!, "Copied")} aria-label="Copy SQL">
                             <Copy size={12} /> Copy
                           </button>
                         </div>
                       )}
                       {related && f.finding && (
-                        <button className="link-button dl-related" onClick={() => setState({ view: "overview", finding: f.finding })}>
+                        <button type="button" className="link-button dl-related" onClick={() => setState({ view: "overview", finding: f.finding })}>
                           Same fix as the finding “{related}” <ArrowUpRight size={12} />
                         </button>
                       )}
@@ -326,7 +326,7 @@ function DropZone({ onText }: { onText: (text: string) => Promise<void> }) {
           rows={3}
           spellCheck={false}
         />
-        <button className="btn small" disabled={!text.trim()} onClick={() => onText(text).then(() => setText(""))}>
+        <button type="button" className="btn small" disabled={!text.trim()} onClick={() => onText(text).then(() => setText(""))}>
           Explain
         </button>
       </div>

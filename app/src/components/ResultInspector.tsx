@@ -44,15 +44,15 @@ export function ResultInspector({ result, cell, types, onSelect, onClose }: {
             <h2 id={title} title={column}>{tab === "value" ? column : `Row ${(cell.row + 1).toLocaleString()}`}</h2>
             <div className="rg-inspector-meta"><span className="rg-value-kind">{tab === "value" ? kind : `${result.columns.length} columns`}</span><span>Row {(cell.row + 1).toLocaleString()} of {result.rows.length.toLocaleString()}</span></div>
           </div>
-          <button ref={close} className="icon-btn" aria-label="Close result inspector" title="Close (Esc)" onClick={onClose}><X size={17} /></button>
+          <button type="button" ref={close} className="icon-btn" aria-label="Close result inspector" title="Close (Esc)" onClick={onClose}><X size={17} /></button>
         </header>
         <div className="rg-inspector-toolbar">
           <div className="rg-switch" role="group" aria-label="Inspect">
-            <button className={tab === "value" ? "on" : ""} aria-pressed={tab === "value"} onClick={() => setTab("value")}>Value</button>
-            <button className={tab === "row" ? "on" : ""} aria-pressed={tab === "row"} onClick={() => setTab("row")}>Row</button>
+            <button type="button" className={tab === "value" ? "on" : ""} aria-pressed={tab === "value"} onClick={() => setTab("value")}>Value</button>
+            <button type="button" className={tab === "row" ? "on" : ""} aria-pressed={tab === "row"} onClick={() => setTab("row")}>Row</button>
           </div>
           <span className="spacer" />
-          <button className="btn ghost" onClick={() => void copy()}><Copy size={13} /> {tab === "row" ? "Copy row" : "Copy value"}</button>
+          <button type="button" className="btn ghost" onClick={() => void copy()}><Copy size={13} /> {tab === "row" ? "Copy row" : "Copy value"}</button>
         </div>
         {tab === "value" ? <>
           <div className="rg-inspector-column">
@@ -63,14 +63,14 @@ export function ResultInspector({ result, cell, types, onSelect, onClose }: {
           </div>
           <div className="rg-value-toolbar">
             {formatted !== null ? <div className="rg-switch" role="group" aria-label="Value format">
-              <button className={pretty ? "on" : ""} aria-pressed={pretty} onClick={() => setPretty(true)}><Braces size={12} /> Formatted</button>
-              <button className={!pretty ? "on" : ""} aria-pressed={!pretty} onClick={() => setPretty(false)}>Raw</button>
+              <button type="button" className={pretty ? "on" : ""} aria-pressed={pretty} onClick={() => setPretty(true)}><Braces size={12} /> Formatted</button>
+              <button type="button" className={!pretty ? "on" : ""} aria-pressed={!pretty} onClick={() => setPretty(false)}>Raw</button>
             </div> : <span className="muted">{value == null ? "SQL NULL" : "Value as returned"}</span>}
-            <button className={`btn ghost rg-wrap ${wrap ? "on" : ""}`} aria-label="Wrap value text" aria-pressed={wrap} onClick={() => setWrap(!wrap)}><WrapText size={14} /> Wrap</button>
+            <button type="button" className={`btn ghost rg-wrap ${wrap ? "on" : ""}`} aria-label="Wrap value text" aria-pressed={wrap} onClick={() => setWrap(!wrap)}><WrapText size={14} /> Wrap</button>
           </div>
           <ValuePreview key={`${cell.row}:${cell.col}:${pretty}`} text={displayed} wrap={wrap} isNull={value == null} />
         </> : <div className="rg-row-fields">
-          {result.columns.map((name, col) => <button key={col} className={`rg-row-field ${col === cell.col ? "on" : ""}`} onClick={() => { onSelect({ row: cell.row, col }); setTab("value"); }}>
+          {result.columns.map((name, col) => <button type="button" key={col} className={`rg-row-field ${col === cell.col ? "on" : ""}`} onClick={() => { onSelect({ row: cell.row, col }); setTab("value"); }}>
             <span className="rg-field-name"><span>{name}</span><small>{columnType(types, name) ?? `Column ${col + 1}`}</small></span>
             <span className={`rg-field-preview ${result.rows[cell.row]?.[col] == null ? "null" : ""}`}>{valuePreview(cellText(result.rows[cell.row]?.[col]), 240)}</span>
           </button>)}
@@ -78,8 +78,8 @@ export function ResultInspector({ result, cell, types, onSelect, onClose }: {
         <footer className="rg-inspector-foot">
           <span className="muted">{tab === "value" ? `${raw.length.toLocaleString()} characters` : "Choose a field to inspect its value"}</span>
           <div className="rg-row-navigation">
-            <button className="icon-btn" aria-label="Previous result row" title="Previous row" disabled={cell.row === 0} onClick={() => onSelect({ ...cell, row: cell.row - 1 })}><ArrowUp size={15} /></button>
-            <button className="icon-btn" aria-label="Next result row" title="Next row" disabled={cell.row === result.rows.length - 1} onClick={() => onSelect({ ...cell, row: cell.row + 1 })}><ArrowDown size={15} /></button>
+            <button type="button" className="icon-btn" aria-label="Previous result row" title="Previous row" disabled={cell.row === 0} onClick={() => onSelect({ ...cell, row: cell.row - 1 })}><ArrowUp size={15} /></button>
+            <button type="button" className="icon-btn" aria-label="Next result row" title="Next row" disabled={cell.row === result.rows.length - 1} onClick={() => onSelect({ ...cell, row: cell.row + 1 })}><ArrowDown size={15} /></button>
           </div>
         </footer>
       </div>
@@ -92,6 +92,6 @@ function ValuePreview({ text, wrap, isNull }: { text: string; wrap: boolean; isN
   const preview = valuePreview(text, limit);
   return <div className="rg-value-preview">
     <div className="rg-value-scroll" tabIndex={0} aria-label="Cell value"><pre className={`${wrap ? "wrap" : ""} ${isNull ? "null" : ""}`}>{preview}</pre></div>
-    {preview.length < text.length && <div className="rg-preview-more"><span>Showing {preview.length.toLocaleString()} of {text.length.toLocaleString()} characters. Copy includes the full value.</span><button className="btn ghost" onClick={() => setLimit(Math.min(text.length, limit * 2))}>Show more</button></div>}
+    {preview.length < text.length && <div className="rg-preview-more"><span>Showing {preview.length.toLocaleString()} of {text.length.toLocaleString()} characters. Copy includes the full value.</span><button type="button" className="btn ghost" onClick={() => setLimit(Math.min(text.length, limit * 2))}>Show more</button></div>}
   </div>;
 }

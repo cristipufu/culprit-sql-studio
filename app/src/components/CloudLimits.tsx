@@ -55,7 +55,7 @@ export function CloudLimits({ connection, windowMinutes, onCompare }: { connecti
         )}
         <span className="spacer" />
         <span className="muted">Selected period · {duration(windowMinutes * 60_000)}</span>
-        <button className="icon-btn" title="Read the metrics again" aria-label="Read the cloud metrics again" onClick={() => setRefresh((n) => n + 1)}>
+        <button type="button" className="icon-btn" title="Read the metrics again" aria-label="Read the cloud metrics again" onClick={() => setRefresh((n) => n + 1)}>
           <RefreshCw size={13} className={state.status === "loading" ? "spin" : ""} />
         </button>
       </div>
@@ -90,7 +90,7 @@ function Signals({ signals, onCompare }: { signals: CloudSignals; onCompare?: (f
                 <b>{e.title}</b> <span className="when">{episodeWhen(e)}</span>
                 <div className="muted">{e.detail}</div>
                 {onCompare && (
-                  <button className="link-button" onClick={() => onCompare(Date.parse(e.start), Date.parse(e.end))}>
+                  <button type="button" className="link-button" onClick={() => onCompare(Date.parse(e.start), Date.parse(e.end))}>
                     What changed while it lasted?
                   </button>
                 )}

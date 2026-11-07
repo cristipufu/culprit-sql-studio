@@ -62,15 +62,15 @@ export function SignInDialog() {
             <p>This connection signs in with Entra ID and the Azure CLI isn't available. Open Microsoft's sign-in page and enter this code:</p>
             <div className="device-code">
               <span className="code">{dialog.prompt.user_code}</span>
-              <button className="btn ghost" onClick={() => copyAndTell(dialog.prompt.user_code, "Code copied")}>
+              <button type="button" className="btn ghost" onClick={() => copyAndTell(dialog.prompt.user_code, "Code copied")}>
                 <Copy size={13} /> Copy
               </button>
             </div>
             <div className="actions">
-              <button className="btn primary" autoFocus onClick={async () => (await api()).openSignInPage()}>
+              <button type="button" className="btn primary" autoFocus onClick={async () => (await api()).openSignInPage()}>
                 <ExternalLink size={13} /> Open {dialog.prompt.verification_uri.replace("https://", "")}
               </button>
-              <button className="btn ghost" onClick={cancel}>
+              <button type="button" className="btn ghost" onClick={cancel}>
                 Cancel
               </button>
             </div>
@@ -82,7 +82,7 @@ export function SignInDialog() {
           <>
             <p>{dialog.message}</p>
             <div className="actions">
-              <button className="btn" autoFocus onClick={() => setDialog({ status: "closed" })}>
+              <button type="button" className="btn" autoFocus onClick={() => setDialog({ status: "closed" })}>
                 Close
               </button>
             </div>

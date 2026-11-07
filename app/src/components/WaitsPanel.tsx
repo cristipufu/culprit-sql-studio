@@ -99,13 +99,13 @@ export default function WaitsPanel({
               {tab === "waits" && loaded.status === "ready" && loaded.report ? ` · ${activity?.period.source ?? loaded.report.source}` : ""}
             </div>
           </div>
-          <button className="icon-btn" onClick={onClose} title="Close (Esc)" aria-label="Close">
+          <button type="button" className="icon-btn" onClick={onClose} title="Close (Esc)" aria-label="Close">
             <X size={16} />
           </button>
         </header>
         <nav className="waits-tabs" role="tablist">
           {tabs.map((t, i) => (
-            <button key={t.key} role="tab" aria-selected={tab === t.key} className={tab === t.key ? "on" : ""} onClick={() => setTab(t.key)}>
+            <button type="button" key={t.key} role="tab" aria-selected={tab === t.key} className={tab === t.key ? "on" : ""} onClick={() => setTab(t.key)}>
               {t.key === "waits" && activity ? "Recorded activity" : t.label}
               <span className="kbd">{i + 1}</span>
             </button>
@@ -179,7 +179,7 @@ function NoHistory({ engine, product, reason, onSample }: { engine: Engine; prod
       <p>{isMariadb(engine, product) ? NO_WAIT_HISTORY.mysql.replace("performance_schema", "MariaDB's performance_schema") : NO_WAIT_HISTORY[engine]}</p>
       {reason && <p className="muted">{reason}</p>}
       {onSample && (
-        <button className="btn primary" onClick={onSample}>
+        <button type="button" className="btn primary" onClick={onSample}>
           <Radio size={13} /> Sample right now
         </button>
       )}
@@ -219,7 +219,7 @@ function WaitsView({
       <div className="waits-list" role="listbox" aria-label="Wait categories">
         <Bar items={report.categories} />
         {report.categories.map((c) => (
-          <button
+          <button type="button"
             key={c.key}
             role="option"
             aria-selected={c.key === current.key}
@@ -263,7 +263,7 @@ function WaitsView({
         {current.queries.length ? (
           <div className="wq-list">
             {current.queries.map((q) => (
-              <button key={q.id} className="wq-row" onClick={() => openQuery(q.id)} title="Open in Queries">
+              <button type="button" key={q.id} className="wq-row" onClick={() => openQuery(q.id)} title="Open in Queries">
                 <span className="wq-share">
                   <span className="wq-track">
                     <span style={{ width: `${Math.max(2, q.share_of_category * 100)}%`, background: waitColor(current.key) }} />
@@ -286,7 +286,7 @@ function WaitsView({
             <Info size={14} />
             <span>
               {current.attribution ?? "No query recorded this wait."}{" "}
-              <button className="link" onClick={onSample}>
+              <button type="button" className="link" onClick={onSample}>
                 Sample right now
               </button>
             </span>
@@ -354,12 +354,12 @@ function RightNow({ connection, history, engine }: { connection: string; history
         <div className="now-actions">
           <span className="seg" role="radiogroup" aria-label="Sample length">
             {LENGTHS.map((s) => (
-              <button key={s} role="radio" aria-checked={seconds === s} className={seconds === s ? "on" : ""} onClick={() => setSeconds(s)}>
+              <button type="button" key={s} role="radio" aria-checked={seconds === s} className={seconds === s ? "on" : ""} onClick={() => setSeconds(s)}>
                 {s} s
               </button>
             ))}
           </span>
-          <button className="btn primary" onClick={start}>
+          <button type="button" className="btn primary" onClick={start}>
             {state.status === "done" ? <RotateCw size={13} /> : <Radio size={13} />} {state.status === "done" ? "Sample again" : `Sample for ${seconds} s`} <span className="kbd">R</span>
           </button>
         </div>

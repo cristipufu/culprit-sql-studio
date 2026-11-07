@@ -127,7 +127,7 @@ export function DiscoverPanel({ cloud, onDone }: { cloud: CloudKind; onDone: () 
             onKeyDown={(e) => e.key === "Enter" && !adding && search()}
           />
         )}
-        <button className="btn" disabled={adding} onClick={search}>
+        <button type="button" className="btn" disabled={adding} onClick={search}>
           Search
         </button>
       </label>
@@ -176,7 +176,7 @@ export function DiscoverPanel({ cloud, onDone }: { cloud: CloudKind; onDone: () 
           })}
           {state.items.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "10px 4px 2px" }}>
-              <button className="btn primary" disabled={selected.length === 0 || adding} onClick={add}>
+              <button type="button" className="btn primary" disabled={selected.length === 0 || adding} onClick={add}>
                 Add {selected.length} {selected.length === 1 ? "connection" : "connections"}
               </button>
               <span className="muted">{copy.note}</span>
@@ -251,11 +251,11 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
       {state.status === "done" && items.length > 0 && (
         <div className="import-sources">
           <div className="seg">
-            <button className={source === null ? "on" : ""} onClick={() => setSource(null)}>
+            <button type="button" className={source === null ? "on" : ""} onClick={() => setSource(null)}>
               All {items.length}
             </button>
             {SOURCES.filter((s) => (counts[s] ?? 0) > 0).map((s) => (
-              <button key={s} className={source === s ? "on" : ""} onClick={() => setSource(s)}>
+              <button type="button" key={s} className={source === s ? "on" : ""} onClick={() => setSource(s)}>
                 {SOURCE_LABEL[s]} {counts[s] ?? 0}
               </button>
             ))}
@@ -309,7 +309,7 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
             );
           })}
           <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "10px 4px 2px" }}>
-            <button className="btn primary" disabled={selected.length === 0 || adding} onClick={add}>
+            <button type="button" className="btn primary" disabled={selected.length === 0 || adding} onClick={add}>
               Import {selected.length} {selected.length === 1 ? "connection" : "connections"}
             </button>
             <span className="muted">Names, hosts, databases and user names only. Passwords stay in the other tool; Culprit asks once and keeps them in the OS keychain.</span>

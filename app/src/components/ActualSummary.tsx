@@ -147,7 +147,7 @@ export function ActualSummary({ plan, onPick }: { plan: Plan; onPick?: (id: numb
         <div className="as-callouts">
           {callouts.map((c) =>
             c.node != null && onPick ? (
-              <button key={c.key} className={`as-callout ${c.tone}`} title={c.title} onClick={() => onPick(c.node!)}>
+              <button type="button" key={c.key} className={`as-callout ${c.tone}`} title={c.title} onClick={() => onPick(c.node!)}>
                 {c.icon}
                 <span>{c.text}</span>
               </button>

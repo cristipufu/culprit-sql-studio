@@ -214,7 +214,7 @@ export function Schema({ report }: { report: Report }) {
     <div className={`schema ${collapsed ? "collapsed" : ""}`} style={{ "--list-w": `${width}px` } as React.CSSProperties}>
       {collapsed ? (
         <div className="schema-rail">
-          <button className="btn ghost icon" title="Show tables ( [ )" onClick={toggleList}>
+          <button type="button" className="btn ghost icon" title="Show tables ( [ )" onClick={toggleList}>
             <PanelLeftOpen size={15} />
           </button>
         </div>
@@ -245,13 +245,13 @@ export function Schema({ report }: { report: Report }) {
                 }}
               />
               {query && (
-                <button className="clear" title="Clear" onClick={() => setQuery("")}>
+                <button type="button" className="clear" title="Clear" onClick={() => setQuery("")}>
                   <X size={12} />
                 </button>
               )}
               {!query && <span className="kbd">/</span>}
             </label>
-            <button className="btn ghost icon" title="Hide tables ( [ )" onClick={toggleList}>
+            <button type="button" className="btn ghost icon" title="Hide tables ( [ )" onClick={toggleList}>
               <PanelLeftClose size={15} />
             </button>
           </div>
@@ -276,13 +276,13 @@ export function Schema({ report }: { report: Report }) {
                 ))}
               </select>
             </label>
-            <button className="icon-btn" title="Compare with another connection: indexes, columns and settings that differ" onClick={() => setComparing(true)}>
+            <button type="button" className="icon-btn" title="Compare with another connection: indexes, columns and settings that differ" onClick={() => setComparing(true)}>
               <GitCompareArrows size={14} />
             </button>
           </div>
           <div className="tl-scroll" ref={listRef} role="listbox" aria-activedescendant={advising ? "tl-advisor" : current ? `tl-${current.key}` : undefined}>
             {!query.trim() && (
-              <button
+              <button type="button"
                 id="tl-advisor"
                 role="option"
                 aria-selected={advising}
@@ -307,7 +307,7 @@ export function Schema({ report }: { report: Report }) {
                   </div>
                 )}
                 {list.map((e) => (
-                  <button
+                  <button type="button"
                     key={e.key}
                     id={`tl-${e.key}`}
                     role="option"

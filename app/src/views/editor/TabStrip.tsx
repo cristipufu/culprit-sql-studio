@@ -20,7 +20,7 @@ export function TabStrip({ tabs, activeId, dirty, production, railOpen, onToggle
   const full = tabs.length >= MAX_EDITOR_TABS;
   return (
     <div className={`editor-tabs ${production ? "is-production" : ""}`} role="tablist">
-      <button className="icon-btn" title={railOpen ? "Hide saved queries" : "Show saved queries"} onClick={onToggleRail}>
+      <button type="button" className="icon-btn" title={railOpen ? "Hide saved queries" : "Show saved queries"} onClick={onToggleRail}>
         {railOpen ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
       </button>
       <div className="tab-strip">
@@ -37,12 +37,12 @@ export function TabStrip({ tabs, activeId, dirty, production, railOpen, onToggle
             {tab.saved && <Bookmark size={11} className="tab-saved" />}
             <span className="tab-title">{tab.title}</span>
             {dirty(tab) && <span className="tab-dirty" title="Changed since it was saved" />}
-            <button className="tab-close" title={keys("Close tab (⌘⇧W)")} onClick={(e) => (e.stopPropagation(), onClose(tab.id))}>
+            <button type="button" className="tab-close" title={keys("Close tab (⌘⇧W)")} onClick={(e) => (e.stopPropagation(), onClose(tab.id))}>
               <X size={11} />
             </button>
           </div>
         ))}
-        <button className="icon-btn" title={full ? "Close a tab before opening another" : keys("New tab (⌘T)")} disabled={full} onClick={onNew}>
+        <button type="button" className="icon-btn" title={full ? "Close a tab before opening another" : keys("New tab (⌘T)")} disabled={full} onClick={onNew}>
           <Plus size={14} />
         </button>
       </div>

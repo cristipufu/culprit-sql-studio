@@ -232,21 +232,21 @@ export function PlanCompare() {
     <div className="plans-compare cmp">
       <div className="compare-pickers">
         <SidePicker side="A" value={a.id} onChange={(id) => setSide("a", id)} />
-        <button className="btn icon ghost" title="Swap A and B (X)" aria-label="Swap A and B" onClick={swapSides}>
+        <button type="button" className="btn icon ghost" title="Swap A and B (X)" aria-label="Swap A and B" onClick={swapSides}>
           <ArrowLeftRight size={14} />
         </button>
         <SidePicker side="B" value={b.id} onChange={(id) => setSide("b", id)} />
         <span className="spacer" />
         <span className="seg" role="group" aria-label="Plan view">
-          <button className={look === "diagram" ? "on" : ""} onClick={() => setLook("diagram")}>
+          <button type="button" className={look === "diagram" ? "on" : ""} onClick={() => setLook("diagram")}>
             Diagram
           </button>
-          <button className={look === "tree" ? "on" : ""} onClick={() => setLook("tree")}>
+          <button type="button" className={look === "tree" ? "on" : ""} onClick={() => setLook("tree")}>
             Tree
           </button>
         </span>
         {look === "diagram" && (
-          <button className={`btn ghost cmp-sync ${sync ? "on" : ""}`} aria-pressed={sync} title={sync ? "Zoom and scroll move both plans together" : "Zoom and scroll each plan on its own"} onClick={() => setSync(!sync)}>
+          <button type="button" className={`btn ghost cmp-sync ${sync ? "on" : ""}`} aria-pressed={sync} title={sync ? "Zoom and scroll move both plans together" : "Zoom and scroll each plan on its own"} onClick={() => setSync(!sync)}>
             {sync ? <Link2 size={13} /> : <Unlink2 size={13} />} Sync
           </button>
         )}
@@ -289,7 +289,7 @@ export function PlanCompare() {
               <div className="cmp-samples">
                 Try a sample:{" "}
                 {SAMPLES.map((e) => (
-                  <button key={e.id} className="link" onClick={() => trySample(e.id)}>
+                  <button type="button" key={e.id} className="link" onClick={() => trySample(e.id)}>
                     {e.label}
                   </button>
                 ))}
@@ -356,7 +356,7 @@ export function PlanCompare() {
                 <ul className="cmp-changes">
                   {ready.changes.map((c, i) => (
                     <li key={i}>
-                      <button className={`cmp-change ${active === i ? "on" : ""}`} onClick={() => pickChange(i)}>
+                      <button type="button" className={`cmp-change ${active === i ? "on" : ""}`} onClick={() => pickChange(i)}>
                         <span className={`cmp-tag ${CHANGE[c.kind].tone}`}>{CHANGE[c.kind].label}</span>
                         <span className="cmp-change-text">
                           <span className="cmp-title">{c.title}</span>
@@ -390,7 +390,7 @@ export function PlanCompare() {
                         <div className="cmp-title">{s.title}</div>
                         {s.detail && <div className="cmp-detail wrap">{s.detail}</div>}
                         {(s.a != null || s.b != null) && (
-                          <button
+                          <button type="button"
                             className="link"
                             onClick={() => {
                               setPickA(s.a ?? (s.b != null ? view.bToA.get(s.b) ?? null : null));
@@ -480,7 +480,7 @@ export function PlanCompare() {
 
 function TabButton({ id, tab, onPick, label, count: n, hotkey }: { id: Tab; tab: Tab; onPick: (t: Tab) => void; label: string; count?: number; hotkey: string }) {
   return (
-    <button role="tab" aria-selected={tab === id} className={`cmp-tab ${tab === id ? "on" : ""}`} onClick={() => onPick(id)} title={`${label} (${hotkey})`}>
+    <button type="button" role="tab" aria-selected={tab === id} className={`cmp-tab ${tab === id ? "on" : ""}`} onClick={() => onPick(id)} title={`${label} (${hotkey})`}>
       {label}
       {n != null && <span className="cmp-count">{n}</span>}
     </button>
@@ -636,7 +636,7 @@ function PropsCompare({ a, b, planA, planB, names }: { a: PlanNode | null; b: Pl
           </div>
           {changed.map(line)}
           {same.length > 0 && (
-            <button className="link cmp-prop-more" onClick={() => setShowSame((v) => !v)}>
+            <button type="button" className="link cmp-prop-more" onClick={() => setShowSame((v) => !v)}>
               {showSame ? "Hide" : "Show"} {same.length} identical
             </button>
           )}

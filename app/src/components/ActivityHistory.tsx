@@ -20,7 +20,7 @@ export function ActivityHistoryView({ activity, selected, onSelect, onClose }: {
     </div>
     {current && <div className="waits-grid">
       <div className="waits-list" role="listbox" aria-label="Activity categories">
-        {activity.categories.map((c) => <button key={c.key} role="option" aria-selected={c.key === current.key}
+        {activity.categories.map((c) => <button type="button" key={c.key} role="option" aria-selected={c.key === current.key}
           className={`waits-row ${c.key === current.key ? "on" : ""}`} onClick={() => onSelect(c.key)}
           style={{ "--cat": waitColor(c.key) } as React.CSSProperties}>
           <i className="swatch" /><span className="waits-row-text"><span className="name">{c.label}</span></span>
@@ -44,12 +44,12 @@ function ActivityDetail({ category: c, onClose }: { category: ActivityCategory; 
       <tbody>{events.map((e, i) => <tr key={i}><td className="mono" title={e.node}>{e.node?.slice(0, 8) ?? "Unknown"}</td><td>{e.component}</td><td className="mono" style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>{e.wait_event}{e.query_id && <div className="muted">Query {e.query_id}</div>}</td><td className="r">{count(e.observations)}</td><td className="r">{count(e.weighted_observations)}</td></tr>)}</tbody>
     </table>
     {c.events.length > PAGE_SIZE && <div className="actions">
-      <button className="btn" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous</button>
+      <button type="button" className="btn" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous</button>
       <span className="muted">{currentPage * PAGE_SIZE + 1}–{Math.min((currentPage + 1) * PAGE_SIZE, c.events.length)} of {c.events.length} event groups</span>
-      <button className="btn" disabled={(currentPage + 1) * PAGE_SIZE >= c.events.length} onClick={() => setPage(currentPage + 1)}>Next</button>
+      <button type="button" className="btn" disabled={(currentPage + 1) * PAGE_SIZE >= c.events.length} onClick={() => setPage(currentPage + 1)}>Next</button>
     </div>}
     <h4 className="section-title">Queries behind these observations</h4>
-    <div className="wq-list">{c.queries.map((q) => <button className="wq-row" key={q.id} disabled={!q.text}
+    <div className="wq-list">{c.queries.map((q) => <button type="button" className="wq-row" key={q.id} disabled={!q.text}
       title={q.text ? "Open in Queries" : "This query is outside the collected workload"}
       onClick={() => { setState({ view: "queries", query: q.id }); onClose(); }}>
       <span className="wq-share">{percent(q.share_of_category)}</span><span>Query {q.id}<br />{q.text ?? "Not retained in the statement statistics"}</span>

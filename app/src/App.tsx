@@ -208,7 +208,7 @@ function Workspace({ view, name }: { view: View; name: string }) {
         <h3>Couldn't scan {name}</h3>
         <p>{state.error.message}</p>
         {state.error.hint && <p className="muted">{state.error.hint}</p>}
-        <button className="btn" onClick={() => scan(name)}>
+        <button type="button" className="btn" onClick={() => scan(name)}>
           Try again
         </button>
       </div>

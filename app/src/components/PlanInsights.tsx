@@ -108,7 +108,7 @@ export function PlanInsights({ plan, selectedNode, onSelectNode }: { plan: Plan;
             ))}
         </span>
         <span className="spacer" />
-        <button
+        <button type="button"
           className="btn ghost small ins-copy-all"
           onClick={() => copyAndTell(insightsMarkdown(plan, items), items.length === 1 ? "Copied the insight" : `Copied ${items.length} insights`)}
           title="Copy every insight as Markdown, most important first, for a pull request or a coding agent"
@@ -124,7 +124,7 @@ export function PlanInsights({ plan, selectedNode, onSelectNode }: { plan: Plan;
           const expanded = open === index;
           return (
             <div key={`${i.rule}-${i.nodes[0] ?? index}`} className={`ins ${i.severity} ${expanded ? "open" : ""} ${related(i) ? "related" : ""}`}>
-              <button
+              <button type="button"
                 className="ins-row"
                 role="option"
                 aria-selected={related(i)}
@@ -174,7 +174,7 @@ export function PlanInsights({ plan, selectedNode, onSelectNode }: { plan: Plan;
                     {i.fix_sql && (
                       <div className="ins-sql">
                         <Sql text={i.fix_sql} />
-                        <button className="btn ghost small ins-copy" onClick={() => copyAndTell(i.fix_sql!, "Copied the fix")} title="Copy the SQL; Culprit never runs it">
+                        <button type="button" className="btn ghost small ins-copy" onClick={() => copyAndTell(i.fix_sql!, "Copied the fix")} title="Copy the SQL; Culprit never runs it">
                           <Copy size={12} /> Copy
                         </button>
                       </div>
@@ -186,11 +186,11 @@ export function PlanInsights({ plan, selectedNode, onSelectNode }: { plan: Plan;
                   </div>
                   <div className="ins-actions">
                     {i.nodes[0] != null && (
-                      <button className="btn ghost small" onClick={() => onSelectNode(i.nodes[0]!)}>
+                      <button type="button" className="btn ghost small" onClick={() => onSelectNode(i.nodes[0]!)}>
                         <Crosshair size={12} /> Show the operator
                       </button>
                     )}
-                    <button className="btn ghost small" onClick={() => copyAndTell(insightMarkdown(i, shareOf(plan, i)), "Copied the insight")} title="Copy this insight as Markdown">
+                    <button type="button" className="btn ghost small" onClick={() => copyAndTell(insightMarkdown(i, shareOf(plan, i)), "Copied the insight")} title="Copy this insight as Markdown">
                       <Copy size={12} /> Copy insight
                     </button>
                   </div>
@@ -201,7 +201,7 @@ export function PlanInsights({ plan, selectedNode, onSelectNode }: { plan: Plan;
         })}
       </div>
       {items.length > SHOWN && (
-        <button className="ins-more" onClick={() => setAll((v) => !v)}>
+        <button type="button" className="ins-more" onClick={() => setAll((v) => !v)}>
           {all ? "Show fewer" : `Show ${items.length - SHOWN} more`}
         </button>
       )}

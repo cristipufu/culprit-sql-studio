@@ -79,7 +79,7 @@ export function SchemaTable({ report, table, onOpenTable }: { report: Report; ta
         }}
       >
         {tabs.map((t) => (
-          <button
+          <button type="button"
             key={t.key}
             id={`${tabId}-${t.key}`}
             data-tab={t.key}
@@ -113,7 +113,7 @@ function Ddl({ text, original }: { text: string; original: boolean }) {
       <div className="data-bar">
         <span className="muted">{original ? "Table definition captured from the database." : "Rebuilt from catalog metadata."} Check it against the database before running it anywhere.</span>
         <span className="spacer" />
-        <button className="btn" onClick={() => copyAndTell(text, "Copied the DDL")}>
+        <button type="button" className="btn" onClick={() => copyAndTell(text, "Copied the DDL")}>
           <Copy size={12} /> Copy
         </button>
       </div>

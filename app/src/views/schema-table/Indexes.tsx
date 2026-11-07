@@ -88,7 +88,7 @@ export function Indexes({ report, table, indexes, links }: { report: Report; tab
                     </td>
                     <td className="ix-used">
                       {uses.length > 0 ? (
-                        <button className="used-btn" onClick={() => setOpen(expanded ? null : i.name)} aria-expanded={expanded} aria-controls={expanded ? usesId : undefined} title={`${uses.length} captured ${uses.length === 1 ? "query uses" : "queries use"} ${i.name}`}>
+                        <button type="button" className="used-btn" onClick={() => setOpen(expanded ? null : i.name)} aria-expanded={expanded} aria-controls={expanded ? usesId : undefined} title={`${uses.length} captured ${uses.length === 1 ? "query uses" : "queries use"} ${i.name}`}>
                           <ChevronRight size={12} className={expanded ? "rot" : ""} />
                           <b>{count(uses.length)}</b> {uses.length === 1 ? "query" : "queries"}
                         </button>
@@ -140,7 +140,7 @@ export function Indexes({ report, table, indexes, links }: { report: Report; tab
                           {notes.map((n) => (
                             <div key={n.text} className={`ix-note ${n.tone}`} title={n.text}>
                               {n.finding ? (
-                                <button onClick={() => setState({ view: "overview", finding: n.finding! })} title="Open the finding">
+                                <button type="button" onClick={() => setState({ view: "overview", finding: n.finding! })} title="Open the finding">
                                   {n.text} <ArrowRight size={11} />
                                 </button>
                               ) : n.text}
@@ -159,7 +159,7 @@ export function Indexes({ report, table, indexes, links }: { report: Report; tab
                             <span className="muted">{uses.length} captured</span>
                           </div>
                           {uses.map((u) => (
-                            <button
+                            <button type="button"
                               key={u.query.id}
                               className="use-row"
                               onClick={() => setState({ view: "queries", query: u.query.id })}

@@ -30,12 +30,12 @@ export function TerminationHistoryView({ history, report }: { history: Terminati
         <tbody>{events.map((event, i) => <tr key={i}>
           <td title={event.ended_at}>{when(event.ended_at).short}</td><td>{REASONS[event.reason]}</td>
           <td className="mono" title={event.node ?? undefined}>{event.node?.slice(0, 8) ?? "Unknown"}</td>
-          <td>{event.query_id ? queries.has(event.query_id) ? <button className="link mono" onClick={() => setState({ view: "queries", query: event.query_id! })}>{event.query_id}</button> : <span className="mono" title="This query is outside the retained statement statistics">{event.query_id}</span> : "Unresolved"}</td>
+          <td>{event.query_id ? queries.has(event.query_id) ? <button type="button" className="link mono" onClick={() => setState({ view: "queries", query: event.query_id! })}>{event.query_id}</button> : <span className="mono" title="This query is outside the retained statement statistics">{event.query_id}</span> : "Unresolved"}</td>
         </tr>)}</tbody></table></div>
       {records.length > PAGE_SIZE && <div className="actions">
-        <button className="btn" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous records</button>
+        <button type="button" className="btn" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous records</button>
         <span className="muted">{currentPage * PAGE_SIZE + 1}–{Math.min((currentPage + 1) * PAGE_SIZE, records.length)} of {records.length}</span>
-        <button className="btn" disabled={(currentPage + 1) * PAGE_SIZE >= records.length} onClick={() => setPage(currentPage + 1)}>Next records</button>
+        <button type="button" className="btn" disabled={(currentPage + 1) * PAGE_SIZE >= records.length} onClick={() => setPage(currentPage + 1)}>Next records</button>
       </div>}
     </>}
   </section>;

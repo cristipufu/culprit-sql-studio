@@ -30,9 +30,9 @@ export function NodeResourcesView({ resources: r }: { resources: NodeResources }
       </>}
     </tr>)}</tbody></table></div>}
     {nodes.length > PAGE_SIZE && <div className="actions">
-      <button className="btn" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous nodes</button>
+      <button type="button" className="btn" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous nodes</button>
       <span className="muted">{currentPage * PAGE_SIZE + 1}–{Math.min((currentPage + 1) * PAGE_SIZE, nodes.length)} of {nodes.length}</span>
-      <button className="btn" disabled={(currentPage + 1) * PAGE_SIZE >= nodes.length} onClick={() => setPage(currentPage + 1)}>Next nodes</button>
+      <button type="button" className="btn" disabled={(currentPage + 1) * PAGE_SIZE >= nodes.length} onClick={() => setPage(currentPage + 1)}>Next nodes</button>
     </div>}
     {r.nodes.length > nodes.length && <p className="muted">Showing the first {nodes.length} of {r.nodes.length} nodes in this saved input.</p>}
   </section>;

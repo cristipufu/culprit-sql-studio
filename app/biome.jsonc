@@ -7,9 +7,13 @@
   "css": { "linter": { "enabled": false } },
   "linter": {
     "enabled": true,
-    // The groups that catch bugs; style and a11y are not enforced yet.
+    // The groups that catch bugs, and accessibility; style is not enforced.
     "rules": {
       "preset": "none",
+      "a11y": {
+        // Without a type a button submits whatever form it ends up in, including one a parent component renders.
+        "useButtonType": "error"
+      },
       "correctness": {
         "preset": "recommended",
         // A missing dependency is a stale closure. An extra one is how an effect reruns when a key changes, which

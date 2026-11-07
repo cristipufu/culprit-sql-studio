@@ -211,7 +211,7 @@ function AgentAccessMenu({ connection: c }: { connection: ConnectionInfo }) {
 
   return (
     <span className="agent-access" ref={root} onClick={(e) => e.stopPropagation()} onKeyDown={onKey}>
-      <button className={`agent-chip access-${c.agent_access}`} aria-haspopup="menu" aria-expanded={open} aria-controls={menuId} title={current.title} onClick={() => setOpen((o) => !o)}>
+      <button type="button" className={`agent-chip access-${c.agent_access}`} aria-haspopup="menu" aria-expanded={open} aria-controls={menuId} title={current.title} onClick={() => setOpen((o) => !o)}>
         <Bot size={12} /> Agents: {current.label}
         <ChevronDown size={11} />
       </button>
@@ -219,7 +219,7 @@ function AgentAccessMenu({ connection: c }: { connection: ConnectionInfo }) {
         <span className="agent-menu" role="menu" id={menuId}>
           <span className="agent-menu-head">What coding agents may do here</span>
           {AGENT_ACCESS.map((a, i) => (
-            <button
+            <button type="button"
               key={a.value}
               role="menuitemradio"
               aria-checked={a.value === c.agent_access}
@@ -279,13 +279,13 @@ function QueryLogSetting({ connection: c }: { connection: ConnectionInfo }) {
         <span className="muted mono" title={c.query_log ?? ""}>
           {file}
         </span>
-        <button className="btn" onClick={choose}>
+        <button type="button" className="btn" onClick={choose}>
           Choose another…
         </button>
-        <button className="btn ghost" onClick={() => save(null)}>
+        <button type="button" className="btn ghost" onClick={() => save(null)}>
           Remove
         </button>
-        <button className="btn ghost" onClick={() => setOpen(false)}>
+        <button type="button" className="btn ghost" onClick={() => setOpen(false)}>
           Done
         </button>
         {error && <span className="muted">{error}</span>}
@@ -294,7 +294,7 @@ function QueryLogSetting({ connection: c }: { connection: ConnectionInfo }) {
   }
   if (!open) {
     return (
-      <button
+      <button type="button"
         className="btn ghost conn-log"
         aria-label={c.query_log ? `Query log for ${c.name}: ${file}` : `Add query log for ${c.name}`}
         title={c.query_log ? `Scans read the statements from ${c.query_log}` : "Read the statements and their times from the log your framework writes (Rails, Django, EF Core, Phoenix)"}
@@ -322,11 +322,11 @@ function QueryLogSetting({ connection: c }: { connection: ConnectionInfo }) {
           if (e.key === "Escape") setOpen(false);
         }}
       />
-      <button className="btn" disabled={!path.trim()} onClick={() => save(path.trim())}>
+      <button type="button" className="btn" disabled={!path.trim()} onClick={() => save(path.trim())}>
         Save
       </button>
       {c.query_log && (
-        <button className="btn ghost" onClick={() => save(null)}>
+        <button type="button" className="btn ghost" onClick={() => save(null)}>
           Remove
         </button>
       )}
@@ -352,7 +352,7 @@ function SetPassword({ name }: { name: string }) {
   };
   if (!open) {
     return (
-      <button
+      <button type="button"
         className="btn ghost conn-key" title="Set password" aria-label={`Set password for ${name}`}
         onClick={(e) => {
           e.stopPropagation();
@@ -378,7 +378,7 @@ function SetPassword({ name }: { name: string }) {
           if (e.key === "Escape") setOpen(false);
         }}
       />
-      <button className="btn" disabled={!password} onClick={save}>
+      <button type="button" className="btn" disabled={!password} onClick={save}>
         Save
       </button>
       {error && <span className="muted">{error}</span>}

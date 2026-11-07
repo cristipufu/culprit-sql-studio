@@ -58,10 +58,10 @@ export function ConfirmRun({ pending, connection, onCancel, onConfirm }: { pendi
           </label>
         )}
         <div className="confirm-actions">
-          <button ref={cancel} className="btn" onClick={onCancel}>
+          <button type="button" ref={cancel} className="btn" onClick={onCancel}>
             Cancel
           </button>
-          <button className="btn danger" disabled={!ready} onClick={onConfirm}>
+          <button type="button" className="btn danger" disabled={!ready} onClick={onConfirm}>
             Run on {connection.name}
           </button>
         </div>

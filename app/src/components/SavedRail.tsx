@@ -80,10 +80,10 @@ export function SavedRail({ current, saved, active, onOpen, onRenamed, onDeleted
         </span>
         {saved && saved.length > 0 && (
           <span className="seg saved-scope" role="radiogroup" aria-label="Which saved queries to show">
-            <button role="radio" aria-checked={scope === "here"} className={scope === "here" ? "on" : ""} onClick={() => setScope("here")} title={`Saved for ${current.name} or another ${current.engine} connection`}>
+            <button type="button" role="radio" aria-checked={scope === "here"} className={scope === "here" ? "on" : ""} onClick={() => setScope("here")} title={`Saved for ${current.name} or another ${current.engine} connection`}>
               {serverName(current.engine, current.last_report?.product)}
             </button>
-            <button role="radio" aria-checked={scope === "all"} className={scope === "all" ? "on" : ""} onClick={() => setScope("all")}>
+            <button type="button" role="radio" aria-checked={scope === "all"} className={scope === "all" ? "on" : ""} onClick={() => setScope("all")}>
               All {saved.length}
             </button>
           </span>
@@ -131,22 +131,22 @@ export function SavedRail({ current, saved, active, onOpen, onRenamed, onDeleted
               {deleting === q.name ? (
                 <span className="saved-confirm" onClick={(e) => e.stopPropagation()}>
                   Delete?
-                  <button className="link danger" onClick={() => remove(q.name)}>
+                  <button type="button" className="link danger" onClick={() => remove(q.name)}>
                     Yes
                   </button>
-                  <button className="link" onClick={() => setDeleting(null)}>
+                  <button type="button" className="link" onClick={() => setDeleting(null)}>
                     No
                   </button>
                 </span>
               ) : (
                 <span className="saved-actions" onClick={(e) => e.stopPropagation()}>
-                  <button className="icon-btn" title={`Run on ${current.name}`} onClick={() => onOpen(q, true)}>
+                  <button type="button" className="icon-btn" title={`Run on ${current.name}`} onClick={() => onOpen(q, true)}>
                     <Play size={12} />
                   </button>
-                  <button className="icon-btn" title="Rename" onClick={() => setRenaming({ from: q.name, to: q.name })}>
+                  <button type="button" className="icon-btn" title="Rename" onClick={() => setRenaming({ from: q.name, to: q.name })}>
                     <Pencil size={12} />
                   </button>
-                  <button className="icon-btn" title="Delete" onClick={() => setDeleting(q.name)}>
+                  <button type="button" className="icon-btn" title="Delete" onClick={() => setDeleting(q.name)}>
                     <Trash2 size={12} />
                   </button>
                 </span>

@@ -57,7 +57,7 @@ export function MarkButton({ connection, label = "Mark" }: { connection: string;
 
   return (
     <span className="mark-anchor" ref={box}>
-      <button className="btn small" onClick={() => setOpen((o) => !o)} title="Put a deploy or a change on the timeline" aria-expanded={open}>
+      <button type="button" className="btn small" onClick={() => setOpen((o) => !o)} title="Put a deploy or a change on the timeline" aria-expanded={open}>
         <Flag size={12} /> {label}
       </button>
       {open && (
@@ -85,10 +85,10 @@ export function MarkButton({ connection, label = "Mark" }: { connection: string;
           </label>
           {error && <div className="warn-text" style={{ fontSize: "var(--fs-ui-sm)", marginBottom: 6 }}>{error}</div>}
           <div className="row">
-            <button className="btn small ghost" onClick={() => setOpen(false)}>
+            <button type="button" className="btn small ghost" onClick={() => setOpen(false)}>
               Cancel
             </button>
-            <button className="btn small primary" onClick={() => void save()} disabled={!text.trim() || busy}>
+            <button type="button" className="btn small primary" onClick={() => void save()} disabled={!text.trim() || busy}>
               {busy ? "Marking…" : "Mark"}
             </button>
           </div>

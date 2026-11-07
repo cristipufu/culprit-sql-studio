@@ -18,10 +18,10 @@ const TURN_ON = "ALTER DATABASE SCOPED CONFIGURATION SET LAST_QUERY_PLAN_STATS =
 export function PlanSourceToggle({ value, onChange }: { value: PlanSource; onChange: (v: PlanSource) => void }) {
   return (
     <span className="seg" role="tablist" aria-label="Which plan">
-      <button role="tab" aria-selected={value === "plan"} className={value === "plan" ? "on" : ""} onClick={() => onChange("plan")} title="The plan the optimizer chose, with its estimates">
+      <button type="button" role="tab" aria-selected={value === "plan"} className={value === "plan" ? "on" : ""} onClick={() => onChange("plan")} title="The plan the optimizer chose, with its estimates">
         Estimated
       </button>
-      <button role="tab" aria-selected={value === "actual"} className={value === "actual" ? "on" : ""} onClick={() => onChange("actual")} title="Real row counts (and timings, when measured) from a run of this query">
+      <button type="button" role="tab" aria-selected={value === "actual"} className={value === "actual" ? "on" : ""} onClick={() => onChange("actual")} title="Real row counts (and timings, when measured) from a run of this query">
         <History size={12} /> Last run
       </button>
     </span>
@@ -118,7 +118,7 @@ export function LastActualRun(props: { connection: string; engine: Engine; query
       {settingOff && (
         <div className="am-code">
           <code>{TURN_ON}</code>
-          <button
+          <button type="button"
             className="btn small"
             onClick={() =>
               copyAndTell(TURN_ON).then((ok) => {
@@ -134,7 +134,7 @@ export function LastActualRun(props: { connection: string; engine: Engine; query
       )}
       <div className="am-actions">
         {canRun && (
-          <button className="btn primary" onClick={measure} title="Runs the statement once; reads only on production, and writes are rolled back elsewhere">
+          <button type="button" className="btn primary" onClick={measure} title="Runs the statement once; reads only on production, and writes are rolled back elsewhere">
             <Play size={13} /> Measure it once
           </button>
         )}
@@ -142,7 +142,7 @@ export function LastActualRun(props: { connection: string; engine: Engine; query
           const editorSql = prepareQueryForEditor(query, engine);
           return (
             canOpenQueryInEditor(query.text, editorSql) && (
-              <button className="btn" onClick={() => setState({ view: "editor", editorSql })}>
+              <button type="button" className="btn" onClick={() => setState({ view: "editor", editorSql })}>
                 <SquarePen size={13} /> Open in editor
               </button>
             )

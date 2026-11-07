@@ -106,18 +106,18 @@ export function Plans() {
         <>
           <aside className="plans-list">
             <div className="plans-actions">
-              <button className="btn" onClick={openFile} title={keys("Open a plan file (⌘O)")}>
+              <button type="button" className="btn" onClick={openFile} title={keys("Open a plan file (⌘O)")}>
                 <FileUp size={13} /> Open
               </button>
-              <button className="btn" onClick={pasteFromClipboard} title={keys("Paste a plan (⌘V)")}>
+              <button type="button" className="btn" onClick={pasteFromClipboard} title={keys("Paste a plan (⌘V)")}>
                 <ClipboardPaste size={13} /> Paste
               </button>
             </div>
             <div className="plans-mode seg">
-              <button className={mode === "single" ? "on" : ""} onClick={() => setMode("single")}>
+              <button type="button" className={mode === "single" ? "on" : ""} onClick={() => setMode("single")}>
                 One plan
               </button>
-              <button className={mode === "compare" ? "on" : ""} disabled={items.length < 2} title={items.length < 2 ? "Open a second plan to compare" : "Compare two plans"} onClick={() => setMode("compare")}>
+              <button type="button" className={mode === "compare" ? "on" : ""} disabled={items.length < 2} title={items.length < 2 ? "Open a second plan to compare" : "Compare two plans"} onClick={() => setMode("compare")}>
                 <GitCompareArrows size={12} /> Compare
               </button>
             </div>
@@ -151,10 +151,10 @@ function Welcome({ busy, error, onOpen, onPaste }: { busy: boolean; error: ApiEr
         <h2>Paste, drop or open a query plan</h2>
         <p className="muted">Culprit draws it, shows where the cost goes, and compares any two plans step by step.</p>
         <div className="welcome-actions">
-          <button className="btn primary" onClick={onOpen}>
+          <button type="button" className="btn primary" onClick={onOpen}>
             <FileUp size={14} /> Open a file…
           </button>
-          <button className="btn" onClick={onPaste}>
+          <button type="button" className="btn" onClick={onPaste}>
             <ClipboardPaste size={14} /> Paste <span className="kbd">{keys("⌘V")}</span>
           </button>
         </div>
@@ -180,7 +180,7 @@ function ErrorNote({ error, onDismiss }: { error: ApiError; onDismiss?: () => vo
         {error.hint && <div className="muted">{error.hint}</div>}
       </div>
       {onDismiss && (
-        <button className="btn icon ghost" title="Dismiss" onClick={onDismiss} style={{ width: 20, height: 20 }}>
+        <button type="button" className="btn icon ghost" title="Dismiss" onClick={onDismiss} style={{ width: 20, height: 20 }}>
           <X size={12} />
         </button>
       )}
@@ -195,7 +195,7 @@ function PlanRow({ item, active }: { item: LoadedPlan; active: boolean }) {
   const side = item.id === a ? "A" : item.id === b ? "B" : null;
   return (
     <div className={`plan-row ${active ? "on" : ""} ${mode === "compare" && side ? "in-compare" : ""}`}>
-      <button
+      <button type="button"
         className="plan-row-main"
         title={mode === "compare" ? (side === "A" ? "Swap A and B" : "Compare this plan as B") : undefined}
         onClick={() => (mode !== "compare" ? selectPlan(item.id) : side === "A" ? swapSides() : setSide("b", item.id))}
@@ -209,7 +209,7 @@ function PlanRow({ item, active }: { item: LoadedPlan; active: boolean }) {
         </span>
         {item.origin !== item.name && <span className="plan-row-origin">{item.origin}</span>}
       </button>
-      <button className="btn icon ghost plan-row-remove" title="Close this plan" onClick={() => removePlan(item.id)}>
+      <button type="button" className="btn icon ghost plan-row-remove" title="Close this plan" onClick={() => removePlan(item.id)}>
         <X size={13} />
       </button>
     </div>
@@ -282,10 +282,10 @@ function Single({ item }: { item: LoadedPlan }) {
             },
           ]}
         />
-        <button className="btn icon ghost" title="Copy the plan text" aria-label="Copy the plan text" onClick={() => copyAndTell(file.contents, "Plan copied")}>
+        <button type="button" className="btn icon ghost" title="Copy the plan text" aria-label="Copy the plan text" onClick={() => copyAndTell(file.contents, "Plan copied")}>
           <Copy size={13} />
         </button>
-        <button className="btn icon ghost" title="Close this plan" onClick={() => removePlan(item.id)}>
+        <button type="button" className="btn icon ghost" title="Close this plan" onClick={() => removePlan(item.id)}>
           <Trash2 size={13} />
         </button>
       </div>

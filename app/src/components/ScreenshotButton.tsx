@@ -5,7 +5,7 @@ import { canScreenshot, screenshotWorkspace } from "../lib/screenshot";
 export function ScreenshotButton() {
   if (!canScreenshot()) return null;
   return (
-    <button
+    <button type="button"
       className="btn ghost icon shot-btn"
       onClick={() => void screenshotWorkspace()}
       title="Screenshot this view: copies it without the sidebar"

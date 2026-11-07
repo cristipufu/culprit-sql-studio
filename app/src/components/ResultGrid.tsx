@@ -62,12 +62,12 @@ export function ResultGrid({ result, types, summary, order, onSort, sortDisabled
     <div className="rg-bar">
       <span className="muted rg-summary" title={summary}>{summary ?? `${result.rows.length.toLocaleString()} row${result.rows.length === 1 ? "" : "s"}${result.truncated ? " (more exist)" : ""}`}</span>
       <div className="rg-actions">
-        <button className="btn ghost" disabled={!result.rows.length || !result.columns.length} onClick={inspect} title="Inspect a value (Enter or double-click)"><PanelRightOpen size={13} /> Inspect</button>
+        <button type="button" className="btn ghost" disabled={!result.rows.length || !result.columns.length} onClick={inspect} title="Inspect a value (Enter or double-click)"><PanelRightOpen size={13} /> Inspect</button>
         {selected && <>
-          <button className="btn ghost" onClick={() => void copyValue()}><Copy size={12} /> Value</button>
-          <button className="btn ghost" onClick={() => void copyAndTell(header + "\n" + rowTsv(result, selected.row), "Row copied as TSV")}><Copy size={12} /> Row</button>
+          <button type="button" className="btn ghost" onClick={() => void copyValue()}><Copy size={12} /> Value</button>
+          <button type="button" className="btn ghost" onClick={() => void copyAndTell(header + "\n" + rowTsv(result, selected.row), "Row copied as TSV")}><Copy size={12} /> Row</button>
         </>}
-        <button className="btn ghost" onClick={() => void copyAndTell([header, ...result.rows.map((_, row) => rowTsv(result, row))].join("\n"), `${result.rows.length.toLocaleString()} rows copied as TSV`)}><Copy size={12} /> All as TSV</button>
+        <button type="button" className="btn ghost" onClick={() => void copyAndTell([header, ...result.rows.map((_, row) => rowTsv(result, row))].join("\n"), `${result.rows.length.toLocaleString()} rows copied as TSV`)}><Copy size={12} /> All as TSV</button>
         <ResultExportMenu result={result} />
       </div>
     </div>
@@ -109,7 +109,7 @@ export function ResultGrid({ result, types, summary, order, onSort, sortDisabled
     <footer className="rg-footer">
       <span className="muted">{result.rows.length ? `${(start + 1).toLocaleString()}–${end.toLocaleString()} of ${result.rows.length.toLocaleString()} rows` : "0 rows"}{result.truncated && " · partial result"}</span>
       <span className="rg-hint">Double-click a cell to inspect</span>
-      {result.rows.length > pageSize && <div className="rg-pages"><button className="icon-btn" aria-label="Previous result page" disabled={current.page === 0} onClick={() => changePage(current.page - 1)}><ChevronLeft size={14} /></button><span>{current.page + 1} / {Math.ceil(result.rows.length / pageSize)}</span><button className="icon-btn" aria-label="Next result page" disabled={end === result.rows.length} onClick={() => changePage(current.page + 1)}><ChevronRight size={14} /></button></div>}
+      {result.rows.length > pageSize && <div className="rg-pages"><button type="button" className="icon-btn" aria-label="Previous result page" disabled={current.page === 0} onClick={() => changePage(current.page - 1)}><ChevronLeft size={14} /></button><span>{current.page + 1} / {Math.ceil(result.rows.length / pageSize)}</span><button type="button" className="icon-btn" aria-label="Next result page" disabled={end === result.rows.length} onClick={() => changePage(current.page + 1)}><ChevronRight size={14} /></button></div>}
     </footer>
     {current.inspecting && selected && <ResultInspector result={result} cell={selected} types={types} onSelect={(cell) => select(cell, true)} onClose={() => setSelection({ ...current, inspecting: false })} />}
   </div>;

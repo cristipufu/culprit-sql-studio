@@ -57,7 +57,7 @@ export function Header({ report, table, findings }: { report: Report; table: Tab
         </h2>
         {table.kind === "virtual" && <span className="tag">Virtual table</span>}
         {table.kind === "hypertable" && <span className="tag">Hypertable</span>}
-        <button className="btn ghost icon" title="Copy the qualified name" onClick={() => copyAndTell(tableKey(table), "Copied the table name")}>
+        <button type="button" className="btn ghost icon" title="Copy the qualified name" onClick={() => copyAndTell(tableKey(table), "Copied the table name")}>
           <Copy size={13} />
         </button>
         {health.map((h) => (
@@ -121,13 +121,13 @@ export function Header({ report, table, findings }: { report: Report; table: Tab
         <div className="td-findings">
           {shown.map((f, n) => (
             <div key={f.id} className="td-finding-row">
-              <button className="td-finding" onClick={() => setState({ view: "overview", finding: f.id })} title="Open in Findings">
+              <button type="button" className="td-finding" onClick={() => setState({ view: "overview", finding: f.id })} title="Open in Findings">
                 <span className={`sev ${f.severity}`} />
                 <span className="t">{f.title}</span>
                 <ChevronRight size={13} className="muted" />
               </button>
               {n === 0 && findings.length > 1 && (
-                <button className="td-more" onClick={() => setAll((a) => !a)} aria-expanded={all}>
+                <button type="button" className="td-more" onClick={() => setAll((a) => !a)} aria-expanded={all}>
                   {all ? "Fewer" : `+${findings.length - 1} more`}
                 </button>
               )}
@@ -159,7 +159,7 @@ function HypertableChunks({ table }: { table: TableStat }) {
               </tr>)}</tbody>
             </table>
           </div>
-          {shown < chunks.length && <button className="btn small" onClick={() => setShown((n) => n + 20)}>Show 20 more ({chunks.length - shown} remaining)</button>}
+          {shown < chunks.length && <button type="button" className="btn small" onClick={() => setShown((n) => n + 20)}>Show 20 more ({chunks.length - shown} remaining)</button>}
           <p className="muted">Sizes include compressed storage. Chunks are managed by TimescaleDB; index advice targets the hypertable.</p>
         </>
       )}

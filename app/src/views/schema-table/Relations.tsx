@@ -17,7 +17,7 @@ export function Relations({ links, onOpenTable }: { links: TableRelations; onOpe
               <span className="mono rel-columns" title={fk.columns.join(", ")}>{fk.columns.join(", ")}</span>
               <ArrowRight size={14} className="muted" />
               <div className="rel-endpoint">
-                <button className="rel-target" title={`${fk.ref_schema}.${fk.ref_table}`} onClick={() => onOpenTable(`${fk.ref_schema}.${fk.ref_table}`)}>
+                <button type="button" className="rel-target" title={`${fk.ref_schema}.${fk.ref_table}`} onClick={() => onOpenTable(`${fk.ref_schema}.${fk.ref_table}`)}>
                   {fk.ref_schema}.{fk.ref_table}
                 </button>
                 <span className="mono muted rel-columns" title={fk.ref_columns.join(", ")}>({fk.ref_columns.join(", ")})</span>
@@ -51,7 +51,7 @@ export function Relations({ links, onOpenTable }: { links: TableRelations; onOpe
           <div key={`${fk.schema}.${fk.table}.${fk.name}`} className="rel-row">
             <div className="rel-path">
               <div className="rel-endpoint">
-                <button className="rel-target" title={`${fk.schema}.${fk.table}`} onClick={() => onOpenTable(`${fk.schema}.${fk.table}`)}>
+                <button type="button" className="rel-target" title={`${fk.schema}.${fk.table}`} onClick={() => onOpenTable(`${fk.schema}.${fk.table}`)}>
                   {fk.schema}.{fk.table}
                 </button>
                 <span className="mono muted rel-columns" title={fk.columns.join(", ")}>({fk.columns.join(", ")})</span>

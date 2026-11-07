@@ -63,7 +63,7 @@ export function Frame({ tile, action, onOpen, className = "", children, foot }: 
         <span className={`dash-dot ${tile.status}`} title={STATUS_LABEL[tile.status]} aria-label={STATUS_LABEL[tile.status]} role="img" />
         <h3 id={titleId}>{tile.title}</h3>
         {onOpen && action && (
-          <button className="dash-open" onClick={onOpen} tabIndex={-1} aria-hidden>
+          <button type="button" className="dash-open" onClick={onOpen} tabIndex={-1} aria-hidden>
             {action} <ChevronRight size={12} />
           </button>
         )}
@@ -89,7 +89,7 @@ export function Fix({ sql }: { sql: string }) {
   return (
     <div className="dash-fix" data-own-click>
       <code>{sql}</code>
-      <button className="btn small" onClick={() => copyAndTell(sql, "Copied")} aria-label="Copy the statement">
+      <button type="button" className="btn small" onClick={() => copyAndTell(sql, "Copied")} aria-label="Copy the statement">
         <Copy size={12} /> Copy
       </button>
     </div>
@@ -128,7 +128,7 @@ export function HealthTile({ tile, onOpen }: { tile: Tile; onOpen: () => void })
         <ul className="dash-rows compact">
           {rows.map((i) => (
             <li key={i.id}>
-              <button className="dash-row" onClick={onOpen}>
+              <button type="button" className="dash-row" onClick={onOpen}>
                 <i className={`sig-dot ${i.status}`} aria-hidden />
                 <span className="dash-row-label">{i.label}</span>
                 <span className="dash-row-value">{i.value}</span>
@@ -174,7 +174,7 @@ export function SignalsTile({
         <ul className="dash-rows compact">
           {tile.items.map((i) => (
             <li key={i.id}>
-              <button className="dash-row" onClick={() => (onRow ? onRow(i) : onOpen())}>
+              <button type="button" className="dash-row" onClick={() => (onRow ? onRow(i) : onOpen())}>
                 <i className={`sig-dot ${i.status ?? "info"}`} aria-hidden />
                 <span className="dash-row-label">{report ? queryLabel(i, report) : i.label}</span>
                 <span className="dash-row-value">{i.value}</span>
@@ -219,7 +219,7 @@ export function DeadlocksTile({ tile, report }: { tile: Tile; report: Report }) 
         <ul className="dash-rows compact">
           {tile.items.slice(0, 2).map((i) => (
             <li key={i.id}>
-              <button className="dash-row" onClick={() => (i.finding_id ? openFinding(i.finding_id) : open())}>
+              <button type="button" className="dash-row" onClick={() => (i.finding_id ? openFinding(i.finding_id) : open())}>
                 <span className="dash-row-label">{i.label}</span>
                 <span className="dash-row-value">{i.value}</span>
               </button>
@@ -253,7 +253,7 @@ export function IndexesTile({ tile }: { tile: Tile }) {
       {candidate && (
         <ul className="dash-rows compact">
           <li>
-            <button className="dash-row" onClick={() => (candidate.finding_id ? openFinding(candidate.finding_id) : open())}>
+            <button type="button" className="dash-row" onClick={() => (candidate.finding_id ? openFinding(candidate.finding_id) : open())}>
               <span className="dash-plus" aria-hidden>
                 +
               </span>
@@ -283,7 +283,7 @@ export function PlansTile({ tile }: { tile: Tile }) {
         <ul className="dash-rows compact">
           {tile.items.slice(0, 2).map((i) => (
             <li key={i.id}>
-              <button className="dash-row" onClick={() => i.query_id && openQuery(i.query_id, "plan")} title={`Open the costliest plan with this (${percent(i.share)} of database time)`}>
+              <button type="button" className="dash-row" onClick={() => i.query_id && openQuery(i.query_id, "plan")} title={`Open the costliest plan with this (${percent(i.share)} of database time)`}>
                 <span className={`sev ${severityOf(i.status)}`} aria-hidden />
                 <span className="dash-row-label">{i.label}</span>
                 <span className="dash-row-value">{i.value}</span>
@@ -303,7 +303,7 @@ export function StatisticsTile({ tile, report }: { tile: Tile; report: Report })
       <Frame tile={tile} className="unlocking">
         <div className="dash-actions">
           <span className="muted">Culprit reads the log file only; nothing changes in the application.</span>
-          <button className="btn small" onClick={() => setState({ view: "connections" })}>
+          <button type="button" className="btn small" onClick={() => setState({ view: "connections" })}>
             <FileText size={12} /> Add query log
           </button>
         </div>
@@ -317,11 +317,11 @@ export function StatisticsTile({ tile, report }: { tile: Tile; report: Report })
         {sql && (
           <div className="dash-fix" data-own-click>
             <code>{sql}</code>
-            <button className="btn small" onClick={() => copyAndTell(sql, "Copied")} aria-label="Copy the statement">
+            <button type="button" className="btn small" onClick={() => copyAndTell(sql, "Copied")} aria-label="Copy the statement">
               <Copy size={12} /> Copy
             </button>
             {canOpenFixInEditor(sql, report.snapshot.server.engine) && (
-              <button className="btn small" onClick={() => setState({ view: "editor", editorSql: sql })} title="Opens in the editor; production asks before it runs">
+              <button type="button" className="btn small" onClick={() => setState({ view: "editor", editorSql: sql })} title="Opens in the editor; production asks before it runs">
                 <SquarePen size={12} /> Open in editor
               </button>
             )}
@@ -329,7 +329,7 @@ export function StatisticsTile({ tile, report }: { tile: Tile; report: Report })
         )}
         <div className="dash-actions">
           <span className="muted">Culprit only reads statistics; it never changes the database for you.</span>
-          <button className="btn small" onClick={() => scan(report.snapshot.connection)} title={keys("Scan again once it's on (⌘R)")}>
+          <button type="button" className="btn small" onClick={() => scan(report.snapshot.connection)} title={keys("Scan again once it's on (⌘R)")}>
             <RefreshCw size={12} /> Done, re-scan
           </button>
         </div>

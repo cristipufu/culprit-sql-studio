@@ -170,10 +170,10 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
           <span className="dot" />
           {paused ? "Paused" : !visible ? "Paused while hidden" : load.status === "error" ? "Can't refresh" : progress && !progress.running ? "Stopped" : age != null ? `Live · ${age < 1 ? "just now" : `${age.toFixed(0)} s ago`}` : "Connecting…"}
         </span>
-        <button className="btn ghost small" onClick={() => setPaused((p) => !p)} title={paused ? "Resume" : "Pause"}>
+        <button type="button" className="btn ghost small" onClick={() => setPaused((p) => !p)} title={paused ? "Resume" : "Pause"}>
           {paused ? <Play size={12} /> : <Pause size={12} />}
         </button>
-        <button className="btn ghost small" onClick={onClose} title="Close (Esc)">
+        <button type="button" className="btn ghost small" onClick={onClose} title="Close (Esc)">
           <X size={13} />
         </button>
       </header>

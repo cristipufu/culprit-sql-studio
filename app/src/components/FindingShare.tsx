@@ -59,7 +59,7 @@ export function useVerify(report: Report, finding: Finding) {
 
 export function VerifyButton({ running, onRun }: { running: boolean; onRun: () => void }) {
   return (
-    <button className="btn" onClick={onRun} disabled={running} title="Re-scan and check whether this finding is gone">
+    <button type="button" className="btn" onClick={onRun} disabled={running} title="Re-scan and check whether this finding is gone">
       {running ? <span className="spinner" style={{ width: 12, height: 12 }} /> : <RotateCw size={13} />} {running ? "Re-scanning…" : "Verify fix"}
       {!running && <span className="kbd">V</span>}
     </button>
@@ -77,7 +77,7 @@ export function VerifyResult({ result, report, onClose }: { result: Result | nul
           <b>{result.error.message}</b>
           {result.error.hint && <div className="muted">{result.error.hint}</div>}
         </div>
-        <button className="btn icon ghost" aria-label="Close" onClick={onClose}>
+        <button type="button" className="btn icon ghost" aria-label="Close" onClick={onClose}>
           <X size={13} />
         </button>
       </div>
@@ -115,11 +115,11 @@ export function VerifyResult({ result, report, onClose }: { result: Result | nul
             The scan also found {newCount} new finding{newCount === 1 ? "" : "s"}.
           </div>
         )}
-        <button className="link" onClick={showNewScan}>
+        <button type="button" className="link" onClick={showNewScan}>
           Show the new scan
         </button>
       </div>
-      <button className="btn icon ghost" aria-label="Close" onClick={onClose}>
+      <button type="button" className="btn icon ghost" aria-label="Close" onClick={onClose}>
         <X size={13} />
       </button>
     </div>

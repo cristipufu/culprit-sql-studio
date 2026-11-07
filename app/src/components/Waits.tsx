@@ -122,14 +122,14 @@ export function HealthLine({ report, onOpen }: { report: Report; onOpen: OpenWai
         </span>
       ) : (
         notable.slice(0, 1).map((s) => (
-          <button key={s.key} className="health-pill" onClick={() => onOpen("health")} title={`${s.label}: ${signalValue(s)}${s.healthy ? ` (${s.healthy})` : ""}`}>
+          <button type="button" key={s.key} className="health-pill" onClick={() => onOpen("health")} title={`${s.label}: ${signalValue(s)}${s.healthy ? ` (${s.healthy})` : ""}`}>
             <i className={`sig-dot ${s.status}`} />
             <span className="health-pill-label">{s.label}</span> <b>{signalValue(s)}</b>
           </button>
         ))
       )}
       <span className="spacer" />
-      <button className="health-more" onClick={() => onOpen("health")}>
+      <button type="button" className="health-more" onClick={() => onOpen("health")}>
         {notable.length > 1 ? `${notable.length - 1} more · ` : ""}All signals <ChevronRight size={12} />
       </button>
     </div>

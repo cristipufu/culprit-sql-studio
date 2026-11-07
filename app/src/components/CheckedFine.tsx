@@ -13,7 +13,7 @@ export function CheckedFine({ report }: { report: Report }) {
   if (!assessments.length) return <p className="muted">This saved report has no check coverage assessment. Scan again to see which problems could be assessed.</p>;
   return (
     <div className="checked-fine">
-      <button className="checked-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+      <button type="button" className="checked-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <ChevronRight size={13} className={open ? "turned" : ""} />
         <span>Check coverage <span className="n">{assessed.length} assessed without a finding · {limited.length} limited</span></span>
       </button>

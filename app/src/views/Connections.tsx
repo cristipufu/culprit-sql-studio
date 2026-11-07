@@ -32,16 +32,16 @@ export function Connections() {
         {/* Adding comes first: with many connections, the actions and the form they open stay in view, above the list. */}
         {!firstRun && (
           <div className="conn-actions">
-            <button className={`btn ${active === "new" || connections.length === 0 ? "primary" : ""}`} onClick={() => setPanel(active === "new" ? "none" : "new")}>
+            <button type="button" className={`btn ${active === "new" || connections.length === 0 ? "primary" : ""}`} onClick={() => setPanel(active === "new" ? "none" : "new")}>
               <Plus size={14} /> New connection
             </button>
-            <button className={`btn ${active === "azure" ? "primary" : ""}`} onClick={() => setPanel(active === "azure" ? "none" : "azure")} title="Find Azure SQL, PostgreSQL and MySQL servers your az login can see">
+            <button type="button" className={`btn ${active === "azure" ? "primary" : ""}`} onClick={() => setPanel(active === "azure" ? "none" : "azure")} title="Find Azure SQL, PostgreSQL and MySQL servers your az login can see">
               <Cloud size={14} /> From Azure
             </button>
-            <button className={`btn ${active === "aws" ? "primary" : ""}`} onClick={() => setPanel(active === "aws" ? "none" : "aws")} title="Find RDS and Aurora databases your aws login can see">
+            <button type="button" className={`btn ${active === "aws" ? "primary" : ""}`} onClick={() => setPanel(active === "aws" ? "none" : "aws")} title="Find RDS and Aurora databases your aws login can see">
               <Cloud size={14} /> From AWS
             </button>
-            <button className={`btn ${active === "import" ? "primary" : ""}`} onClick={() => setPanel(active === "import" ? "none" : "import")} title="Import connections saved in Azure Data Studio, VS Code, DBeaver or DataGrip">
+            <button type="button" className={`btn ${active === "import" ? "primary" : ""}`} onClick={() => setPanel(active === "import" ? "none" : "import")} title="Import connections saved in Azure Data Studio, VS Code, DBeaver or DataGrip">
               <Import size={14} /> Import
             </button>
           </div>
@@ -90,7 +90,7 @@ function FirstRun({ chosen, onChoose }: { chosen: Panel; onChoose: (panel: Exclu
     <div className="first-run">
       <div className="first-tiles">
         {FIRST_RUN.map((t) => (
-          <button key={t.panel} className={`first-tile ${chosen === t.panel ? "on" : ""}`} aria-pressed={chosen === t.panel} onClick={() => onChoose(t.panel)}>
+          <button type="button" key={t.panel} className={`first-tile ${chosen === t.panel ? "on" : ""}`} aria-pressed={chosen === t.panel} onClick={() => onChoose(t.panel)}>
             <span className="first-icon">{t.icon}</span>
             <b>{t.title}</b>
             <span>{t.text}</span>

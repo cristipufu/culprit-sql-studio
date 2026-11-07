@@ -50,7 +50,7 @@ export function EmptyOutput({ saved, onOpen }: { saved: SavedQuery[]; onOpen: (q
         <div className="editor-recent">
           <div className="eyebrow">Saved for this connection</div>
           {saved.map((q) => (
-            <button key={q.name} className="editor-recent-item" onClick={() => onOpen(q)}>
+            <button type="button" key={q.name} className="editor-recent-item" onClick={() => onOpen(q)}>
               <Bookmark size={12} />
               <span>{q.name}</span>
             </button>

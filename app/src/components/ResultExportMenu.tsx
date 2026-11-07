@@ -62,7 +62,7 @@ export function ResultExportMenu({ result }: { result: ResultSet }) {
   };
 
   return <>
-    <button ref={trigger} className="btn ghost" disabled={!result.columns.length} aria-disabled={busy} aria-haspopup="menu" aria-expanded={current.open} aria-controls={current.open ? id : undefined} onClick={() => { if (!busy) setState({ ...current, open: !current.open }); }} onKeyDown={(event) => {
+    <button type="button" ref={trigger} className="btn ghost" disabled={!result.columns.length} aria-disabled={busy} aria-haspopup="menu" aria-expanded={current.open} aria-controls={current.open ? id : undefined} onClick={() => { if (!busy) setState({ ...current, open: !current.open }); }} onKeyDown={(event) => {
       if (event.key === "ArrowDown") { event.preventDefault(); event.stopPropagation(); if (!busy) setState({ ...current, open: true }); }
     }}><Download size={13} /> {busy ? "Exporting…" : "Export"} <ChevronDown size={11} /></button>
     {current.open && createPortal(<div ref={menu} id={id} className="rg-export-menu" role="menu" aria-label="Export query results" style={position} onKeyDown={(event) => {
@@ -79,8 +79,8 @@ export function ResultExportMenu({ result }: { result: ResultSet }) {
       }
     }}>
       <div className="rg-export-head"><b>Export query results</b><span>{result.rows.length.toLocaleString()} loaded rows · {result.columns.length.toLocaleString()} columns</span></div>
-      <button role="menuitem" disabled={busy} onClick={() => void save("csv")}><span className="rg-export-symbol"><FileSpreadsheet size={17} /></span><span><b>CSV file</b><small>UTF-8 · formula-like text escaped</small></span></button>
-      <button role="menuitem" disabled={busy} onClick={() => void save("json")}><span className="rg-export-symbol"><Braces size={17} /></span><span><b>JSON file</b><small>Column names, rows and original types</small></span></button>
+      <button type="button" role="menuitem" disabled={busy} onClick={() => void save("csv")}><span className="rg-export-symbol"><FileSpreadsheet size={17} /></span><span><b>CSV file</b><small>UTF-8 · formula-like text escaped</small></span></button>
+      <button type="button" role="menuitem" disabled={busy} onClick={() => void save("json")}><span className="rg-export-symbol"><Braces size={17} /></span><span><b>JSON file</b><small>Column names, rows and original types</small></span></button>
       <div className="rg-export-foot">{result.truncated ? "Partial result: only the loaded rows are included." : "Includes every loaded row, across all pages."}<span>CSV prefixes formula-like text with a tab. JSON keeps the loaded values.</span></div>
     </div>, document.body)}
   </>;

@@ -27,19 +27,19 @@ type Props = {
 export function Toolbar({ engine, production, savedName, naming, onNaming, onRun, onExplain, onSave, onCancelNaming, catalogBusy, tables, onRefreshCatalog }: Props) {
   return (
     <div className="toolbar">
-      <button className="btn primary" onClick={onRun} title="Run the selection, or the whole tab">
+      <button type="button" className="btn primary" onClick={onRun} title="Run the selection, or the whole tab">
         <Play size={13} /> Run <span className="kbd">{keys("⌘↵")}</span>
       </button>
-      <button className="btn" onClick={() => onExplain("estimated")} title="Show the plan without running the statement">
+      <button type="button" className="btn" onClick={() => onExplain("estimated")} title="Show the plan without running the statement">
         <ScanSearch size={14} /> Explain <span className="kbd">{keys("⌘E")}</span>
       </button>
       {measuresRuns(engine) && (
-        <button className="btn" onClick={() => onExplain("analyze")} title="Run the statement and measure each step">
+        <button type="button" className="btn" onClick={() => onExplain("analyze")} title="Run the statement and measure each step">
           <Zap size={13} /> Analyze <span className="kbd">{keys("⌘⇧E")}</span>
         </button>
       )}
       {naming === null ? (
-        <button className="btn" onClick={() => onSave()} title={savedName ? `Update “${savedName}”` : "Save as a named query"}>
+        <button type="button" className="btn" onClick={() => onSave()} title={savedName ? `Update “${savedName}”` : "Save as a named query"}>
           <Save size={13} /> {savedName ? "Save" : "Save as…"} <span className="kbd">{keys("⌘S")}</span>
         </button>
       ) : (
@@ -58,7 +58,7 @@ export function Toolbar({ engine, production, savedName, naming, onNaming, onRun
       )}
       <span className="spacer" />
       <RunsHere engine={engine} production={production} />
-      <button className="icon-btn" title={catalogBusy ? "Loading table and column names…" : `Reload table and column names${tables !== null ? ` (${tables} tables)` : ""}`} onClick={onRefreshCatalog} disabled={catalogBusy}>
+      <button type="button" className="icon-btn" title={catalogBusy ? "Loading table and column names…" : `Reload table and column names${tables !== null ? ` (${tables} tables)` : ""}`} onClick={onRefreshCatalog} disabled={catalogBusy}>
         <RefreshCw size={13} className={catalogBusy ? "spin" : ""} />
       </button>
     </div>

@@ -178,7 +178,7 @@ export default function WhatChanged({ report, request, onClose }: { report: Repo
           <GitCompareArrows size={15} />
           <h2>What changed</h2>
           <span className="spacer" />
-          <button className="icon-btn" title="Close (Esc)" onClick={onClose}>
+          <button type="button" className="icon-btn" title="Close (Esc)" onClick={onClose}>
             <X size={15} />
           </button>
         </div>
@@ -212,7 +212,7 @@ export default function WhatChanged({ report, request, onClose }: { report: Repo
         <div className="wc-controls">
           <span className="seg">
             {PRESETS.map((p) => (
-              <button key={p.label} className={request.recent_hours === p.hours && !request.since ? "on" : ""} onClick={() => setRequest({ recent_hours: p.hours })}>
+              <button type="button" key={p.label} className={request.recent_hours === p.hours && !request.since ? "on" : ""} onClick={() => setRequest({ recent_hours: p.hours })}>
                 {p.label}
               </button>
             ))}
@@ -279,7 +279,7 @@ export default function WhatChanged({ report, request, onClose }: { report: Repo
                     q.plan_switch?.what ?? (q.plan_switch?.from_label && q.plan_switch?.to_label ? `${q.plan_switch.from_label} → ${q.plan_switch.to_label}` : undefined);
                   return (
                     <div key={q.query_id} className={`wc-row ${index === cursor ? "cursor" : ""} ${expanded ? "open" : ""}`}>
-                      <button
+                      <button type="button"
                         className="wc-main"
                         onClick={() => {
                           setCursor(index);
@@ -322,7 +322,7 @@ export default function WhatChanged({ report, request, onClose }: { report: Repo
             );
           })}
           {changes.unchanged > 0 && (
-            <button className="btn ghost wc-more" onClick={() => setShowUnchanged((v) => !v)}>
+            <button type="button" className="btn ghost wc-more" onClick={() => setShowUnchanged((v) => !v)}>
               {showUnchanged ? "Hide" : "Show"} {changes.unchanged} {changes.unchanged === 1 ? "query" : "queries"} that ran about the same
             </button>
           )}
@@ -461,12 +461,12 @@ function Detail({ q, changes, report, inReport }: { q: QueryChange; changes: Cha
         <span className="muted">query {q.query_id}</span>
         <span className="spacer" />
         {inReport && (
-          <button className="btn small" onClick={() => setState({ view: "queries", query: q.query_id })}>
+          <button type="button" className="btn small" onClick={() => setState({ view: "queries", query: q.query_id })}>
             Open in Queries
           </button>
         )}
         {canOpenQueryInEditor(q.text, editorSql) && (
-          <button className="btn small" onClick={() => setState({ view: "editor", editorSql })}>
+          <button type="button" className="btn small" onClick={() => setState({ view: "editor", editorSql })}>
             <SquarePen size={12} /> Open in editor
           </button>
         )}
