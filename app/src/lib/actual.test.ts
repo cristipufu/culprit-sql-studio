@@ -1,0 +1,23 @@
+import { test } from "bun:test";
+import samples from "../../../fixtures/plan-view.sample.json";
+import type { Plan } from "../gen/Plan";
+import { actualFacts, planShares } from "./actual";
+
+test("Actual-plan renderer consumes shared Rust facts without losing missing measurements", () => {
+  const check = (condition: boolean, message: string) => { if (!condition) throw new Error(message); };
+  const plan = (name: string) => samples.find((c) => c.name === name)!.plan as unknown as Plan;
+  const trigger = actualFacts(plan("triggers"))!;
+  check(trigger.usedKb === null && trigger.grantedKb === 1024, "Unknown memory use must remain unknown");
+  check(trigger.triggers.length === 1 && trigger.triggers[0]?.ms === 120.5, "Trigger timings retain Rust's validation");
+  check(trigger.elapsedMs === 10, "Trigger time must not be added to operator elapsed time");
+  const rows = actualFacts(plan("rows-only"))!;
+  check(rows.elapsedMs === null && rows.cpuMs === null && !rows.timed, "Rows-only plans cannot claim zero elapsed or CPU time");
+  check(planShares(plan("rows-only")).basis === "cost", "Rows-only plans use the cost projection");
+  const batch = planShares(plan("batch-mode"));
+  check(batch.basis === "time" && batch.total === 47 && batch.ms.get(2) === 15, "Batch operators must not double-count their inputs");
+  check(batch.stated.get(1) == null && batch.ms.get(1) == null, "An untimed operator must not display zero measured work");
+  const estimate = actualFacts(plan("estimate-origin"))!;
+  check(estimate.worstEstimate?.node.id === 1 && estimate.worstEstimate.factor === 5000, "The row-estimate callout must name the origin, not its parent");
+  const progress = plan("in-progress");
+  check(actualFacts(progress) === null && planShares(progress).basis === "cost", "Partial execution cannot appear as a completed actual run");
+});

@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit && bun src/lib/rates.check.ts && bun src/lib/format.check.ts && bun src/lib/plan-format.check.ts && bun src/lib/health.check.ts && bun src/lib/actual.check.ts && bun src/lib/query-summary.check.ts && bun src/lib/query-costs.check.tsx && bun src/lib/products.check.ts && bun src/lib/plan-samples.check.ts && bun src/lib/discovery-results.check.ts && bun src/lib/owned-requests.check.ts && bun src/lib/result-values.check.ts && bun src/lib/result-export.check.ts && bun src/lib/schema-model.check.ts && bun src/lib/editor-sql.check.ts && bun src/lib/editor-tabs.check.ts && bun src/lib/ssh.check.ts && bun src/lib/report-requests.check.ts && bun src/lib/sql-highlight.check.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "bun test src",
     "lint": "biome lint",
+    "check": "bun run typecheck && bun run test && bun run lint",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -26,6 +28,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
     "@tauri-apps/cli": "2.12.2",
+    "@types/bun": "1.4.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",

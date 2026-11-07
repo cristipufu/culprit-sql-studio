@@ -491,7 +491,7 @@ mod tests {
 
     // The app formats metrics and figures from raw values; a value must read the same there as in the finding's prose
     // and brief ("2.6 ms" both, not "3 ms" in the app). `cargo test -p culprit-core` writes the cases to
-    // app/src/gen/format-cases.json, and `bun run typecheck` runs app/src/lib/format.check.ts over them.
+    // app/src/gen/format-cases.json, and `bun run test` runs app/src/lib/format.test.ts over them.
     #[test]
     fn the_app_formats_numbers_as_this_module_does() {
         let cases = shared_cases();

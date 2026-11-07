@@ -1,7 +1,7 @@
 import type { Unit } from "../gen/Unit";
 
 // Every number here reads as culprit_core::format writes it in findings and briefs, so a value reads the same on
-// every surface. `bun run typecheck` compares them on the cases Rust writes to gen/format-cases.json (format.check.ts).
+// every surface. `bun run test` compares them on the cases Rust writes to gen/format-cases.json (format.test.ts).
 
 /** `x.toFixed(digits)` rounded as Rust's `format!("{:.N}")` rounds: an exact tie goes to the even digit (2.5 → "2",
  * 0.125 → "0.12", 12.5% → "12%"), where toFixed rounds it up. Exact ties are the values that are an odd number of

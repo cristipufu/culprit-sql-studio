@@ -1,0 +1,7 @@
+{
+  // Tests run under Bun: they typecheck with its test API, which the app itself must not see.
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["vite/client", "bun"] },
+  "include": ["src"],
+  "exclude": []
+}

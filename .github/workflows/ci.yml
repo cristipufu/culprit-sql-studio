@@ -57,11 +57,12 @@ jobs:
       - name: Test
         run: cargo test --locked --workspace --exclude culprit-app
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-      - name: Typecheck and lint the UI
+      - name: Typecheck, test and lint the UI
         working-directory: app
         run: |
           bun install --frozen-lockfile
           bun run typecheck
+          bun run test
           bun run lint
 
   app:
