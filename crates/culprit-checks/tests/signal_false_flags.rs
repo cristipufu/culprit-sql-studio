@@ -54,12 +54,12 @@ fn heaviest(s: &mut Snapshot) -> &mut culprit_core::QueryStat {
 
 // ── 1. replica lag ─────────────────────────────────────────────────────────────────────────────────
 
-// On a quiet primary a standby's last replayed commit gets older by the minute with nothing to replay. Scans before
-// the collector fixed this reported that age as lag: with nothing received left to replay, it's caught up.
+// On a quiet primary a standby's last replayed commit gets older by the minute with nothing to replay; the collector
+// reports a standby with nothing received left to replay as caught up, and so is it read.
 #[test]
 fn a_caught_up_standby_of_a_quiet_primary_is_not_behind() {
     let idle = Replica {
-        lag_seconds: Some(3_600.0),
+        lag_seconds: Some(0.0),
         lag_bytes: Some(0.0),
         ..replica("this server", ReplicaRole::ThisServer, "streaming")
     };
@@ -560,7 +560,8 @@ fn an_explicit_recompile_hint_is_the_planning_time_fix() {
     // The saved demo's query 249: 300 compiles / 300 runs and 6.9 seconds spent compiling.
     let mut s = demo("mssql-demo");
     let id = "planning-time:249";
-    // Only an entry whose recorded compiles all fall within the period can support this comparison.
+    // Only an entry whose recorded compiles all fall within the period can support this comparison: the collector
+    // then reports them as the query's planning.
     let c = s.workload.as_mut().unwrap().queries.iter_mut().find(|q| q.id == "249").unwrap().costs.as_mut().unwrap();
     c.compile_history = Some(culprit_core::signals::CompileHistory {
         count: 300.0,
@@ -568,6 +569,7 @@ fn an_explicit_recompile_hint_is_the_planning_time_fix() {
         within_window: true,
         ..Default::default()
     });
+    (c.plan_ms, c.plans) = (Some(6900.0), Some(300.0));
     let r = analyze(s.clone());
     let f = r.findings.iter().find(|f| f.id == id).expect("demo's explicit RECOMPILE");
     assert!(f.summary.contains("hint explicitly asks SQL Server for a new plan"), "{}", f.summary);

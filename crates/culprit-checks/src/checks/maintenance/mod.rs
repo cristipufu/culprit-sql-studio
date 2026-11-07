@@ -30,7 +30,7 @@ fn short_date(iso: &str) -> String {
 }
 
 pub(super) fn cleanup_holder_phrase(h: &culprit_core::OpenTransaction) -> String {
-    let kind = match h.holder.unwrap_or(culprit_core::CleanupHolder::Session) {
+    let kind = match h.holder {
         culprit_core::CleanupHolder::PreparedTransaction => format!("prepared transaction '{}'", h.session),
         culprit_core::CleanupHolder::ReplicationSlot => format!("replication slot '{}'", h.session),
         culprit_core::CleanupHolder::Session => format!("session {}", h.session),

@@ -3319,15 +3319,6 @@
      "value": 972.7317798710956
     },
     {
-     "healthy": "0 is healthy",
-     "key": "threadpool-waiting",
-     "label": "Tasks without a worker",
-     "scope": "now",
-     "status": "good",
-     "unit": "count",
-     "value": 0.0
-    },
-    {
      "healthy": "small, and shrinking when transactions end",
      "key": "version-store",
      "label": "Version store",
@@ -3343,11 +3334,11 @@
    "grants": [],
    "oldest_transaction": {
     "held_bytes": null,
-    "held_versions": null,
     "program": "psql",
     "seconds": 4.189612,
     "session": "869",
-    "state": "idle in transaction"
+    "state": "idle in transaction",
+    "holder": "session"
    },
    "signals": [
     {
@@ -3438,11 +3429,11 @@
    "grants": [],
    "oldest_transaction": {
     "held_bytes": null,
-    "held_versions": 0.0,
     "program": "mysql",
     "seconds": 5.0,
     "session": "104",
-    "state": "idle in transaction"
+    "state": "idle in transaction",
+    "holder": "session"
    },
    "signals": [
     {

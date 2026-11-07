@@ -234,7 +234,7 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
     if probe.privileged
         && let Some(t) = cleanup_holder(client, &mut coverage).await
     {
-        if t.holder != Some(CleanupHolder::ReplicationSlot) {
+        if t.holder != CleanupHolder::ReplicationSlot {
             p.signals.push(
                 Signal::new(
                     culprit_core::signal_id::OLDEST_TRANSACTION,
@@ -287,7 +287,7 @@ async fn cleanup_holder(client: &Client, coverage: &mut Coverage) -> Option<Open
             seconds: r.number("seconds").unwrap_or(0.0),
             program: r.text("program").filter(|s| !s.is_empty()),
             state: r.text("state"),
-            holder: Some(CleanupHolder::Session),
+            holder: CleanupHolder::Session,
             xid_age: r.number("xid_age"),
             ..OpenTransaction::default()
         });
@@ -297,7 +297,7 @@ async fn cleanup_holder(client: &Client, coverage: &mut Coverage) -> Option<Open
             catalog_only: r.flag("catalog_only"),
             session: r.string("session"),
             state: Some(if r.flag("active") { "active slot" } else { "inactive slot" }.into()),
-            holder: Some(CleanupHolder::ReplicationSlot),
+            holder: CleanupHolder::ReplicationSlot,
             xid_age: r.number("xid_age"),
             ..OpenTransaction::default()
         });
@@ -308,7 +308,7 @@ async fn cleanup_holder(client: &Client, coverage: &mut Coverage) -> Option<Open
             seconds: r.number("seconds").unwrap_or(0.0),
             program: r.text("owner").filter(|s| !s.is_empty()),
             state: Some("prepared".into()),
-            holder: Some(CleanupHolder::PreparedTransaction),
+            holder: CleanupHolder::PreparedTransaction,
             xid_age: r.number("xid_age"),
             ..OpenTransaction::default()
         });
@@ -481,7 +481,7 @@ mod tests {
     fn the_holder_furthest_behind_holds_the_horizon() {
         let holder = |session: &str, kind, age| OpenTransaction {
             session: session.into(),
-            holder: Some(kind),
+            holder: kind,
             xid_age: Some(age),
             ..OpenTransaction::default()
         };
@@ -491,7 +491,7 @@ mod tests {
             holder("tx-17", CleanupHolder::PreparedTransaction, 300.0),
         ])
         .unwrap();
-        assert_eq!((oldest.session.as_str(), oldest.holder), ("standby_1", Some(CleanupHolder::ReplicationSlot)));
+        assert_eq!((oldest.session.as_str(), oldest.holder), ("standby_1", CleanupHolder::ReplicationSlot));
         assert!(oldest_holder(Vec::new()).is_none());
     }
 }

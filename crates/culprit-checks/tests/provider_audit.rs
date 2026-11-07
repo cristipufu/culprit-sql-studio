@@ -411,7 +411,7 @@ fn catalog_only_holds_do_not_explain_application_dead_rows() {
     let mut s = snapshot(Engine::Postgres);
     s.pressure.get_or_insert_with(Default::default).oldest_transaction = Some(culprit_core::OpenTransaction {
         session: "decoder".into(),
-        holder: Some(culprit_core::CleanupHolder::ReplicationSlot),
+        holder: culprit_core::CleanupHolder::ReplicationSlot,
         xid_age: Some(150_000_000.0),
         catalog_only: true,
         ..Default::default()

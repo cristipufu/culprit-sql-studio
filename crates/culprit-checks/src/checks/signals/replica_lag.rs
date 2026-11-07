@@ -34,7 +34,7 @@ pub(super) enum ReplicaStatus {
     Fine,
 }
 
-pub(super) fn replica_status(snapshot: &Snapshot, r: &Replica) -> ReplicaStatus {
+pub(super) fn replica_status(r: &Replica) -> ReplicaStatus {
     // Group Replication's own channels idle by design; the group reports its members elsewhere.
     if r.name.to_ascii_lowercase().starts_with("group_replication_") {
         return ReplicaStatus::Fine;
@@ -49,7 +49,7 @@ pub(super) fn replica_status(snapshot: &Snapshot, r: &Replica) -> ReplicaStatus 
     if state.contains("stopped") || state == "not receiving" || state.eq_ignore_ascii_case("NOT SYNCHRONIZING") {
         return ReplicaStatus::Stopped;
     }
-    let seconds = replica_lag_seconds(snapshot, r);
+    let seconds = r.lag_seconds;
     // A configured delay keeps WAL waiting on purpose: only the seconds beyond it say whether it is behind.
     let bytes = r.lag_bytes.filter(|_| r.delay_seconds.is_none() && seconds.is_none_or(|s| s > 0.0));
     if seconds.is_some_and(|s| s >= 30.0) || bytes.is_some_and(|b| b >= GB) {
@@ -57,12 +57,6 @@ pub(super) fn replica_status(snapshot: &Snapshot, r: &Replica) -> ReplicaStatus 
     } else {
         ReplicaStatus::Fine
     }
-}
-
-/// Seconds behind beyond any configured delay. A PostgreSQL standby with nothing received left to replay is caught up,
-/// whatever the time since its last replayed commit (older scans reported that time as lag).
-pub(super) fn replica_lag_seconds(snapshot: &Snapshot, r: &Replica) -> Option<f64> {
-    r.effective_lag_seconds(snapshot.server.engine)
 }
 
 pub fn replica_lag(snapshot: &Snapshot) -> Vec<Finding> {
@@ -83,14 +77,14 @@ pub(super) fn replica_finding(snapshot: &Snapshot, r: &Replica) -> Option<Findin
     if r.is_logical() && r.database.as_deref().is_some_and(|d| !d.eq_ignore_ascii_case(&snapshot.server.database)) {
         return None;
     }
-    let status = replica_status(snapshot, r);
+    let status = replica_status(r);
     if status == ReplicaStatus::Fine {
         return None;
     }
     let pg = snapshot.server.engine == Engine::Postgres;
     let mysql = snapshot.server.engine == Engine::Mysql;
     let consumer = r.is_logical();
-    let seconds = replica_lag_seconds(snapshot, r);
+    let seconds = r.lag_seconds;
     let mut f = finding("replica-lag", &r.name, Category::Configuration, subject(SubjectKind::Database, &r.name));
     let lag = seconds
         .map(|s| format::duration(s * 1000.0))

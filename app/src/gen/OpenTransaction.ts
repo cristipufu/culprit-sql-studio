@@ -25,14 +25,9 @@ state: string | null,
  */
 held_bytes: number | null, 
 /**
- * No longer filled: InnoDB's history list length is the whole server's and counts undo logs, not this
- * transaction's row versions (see the `history-length` signal). Kept so older scans still read.
+ * What it is: a session, a replication slot or a prepared transaction.
  */
-held_versions: number | null, 
-/**
- * What it is; `None` in scans taken before Culprit told them apart (a session).
- */
-holder: CleanupHolder | null, 
+holder: CleanupHolder, 
 /**
  * Transactions started since its snapshot (PostgreSQL `age(backend_xmin)`): how far back it holds the horizon.
  */

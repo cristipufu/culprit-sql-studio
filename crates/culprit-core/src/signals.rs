@@ -278,17 +278,6 @@ pub struct Replica {
 pub const STANDBY_BEHIND_BYTES: f64 = 16.0 * 1024.0 * 1024.0;
 
 impl Replica {
-    /// Older standby scans reported time since the last replayed commit as lag even when replay was current.
-    pub fn effective_lag_seconds(&self, engine: crate::Engine) -> Option<f64> {
-        if engine == crate::Engine::Postgres
-            && self.role == ReplicaRole::ThisServer
-            && self.lag_bytes.is_some_and(|b| b < STANDBY_BEHIND_BYTES)
-        {
-            return Some(0.0);
-        }
-        self.lag_seconds
-    }
-
     /// A replica, slot or this server by name, with nothing measured yet.
     pub fn new(name: impl Into<String>, role: ReplicaRole) -> Replica {
         Replica {

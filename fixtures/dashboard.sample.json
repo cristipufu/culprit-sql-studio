@@ -997,17 +997,6 @@
           {
             "at": null,
             "finding_id": null,
-            "id": "threadpool-waiting",
-            "kind": "signal",
-            "label": "Tasks without a worker (whole instance)",
-            "query_id": null,
-            "share": null,
-            "status": "info",
-            "value": "0"
-          },
-          {
-            "at": null,
-            "finding_id": null,
             "id": "version-store",
             "kind": "signal",
             "label": "Version store",
@@ -1015,6 +1004,17 @@
             "share": null,
             "status": "info",
             "value": "0 B"
+          },
+          {
+            "at": null,
+            "finding_id": null,
+            "id": "new-connections",
+            "kind": "signal",
+            "label": "New connections (whole server)",
+            "query_id": null,
+            "share": null,
+            "status": "info",
+            "value": "0.0/s"
           }
         ],
         "key": "health",

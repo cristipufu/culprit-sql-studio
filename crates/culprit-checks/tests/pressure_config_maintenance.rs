@@ -411,7 +411,7 @@ fn a_slot_holding_vacuum_back_joins_its_replica_finding() {
     s.pressure.as_mut().unwrap().oldest_transaction = Some(OpenTransaction {
         session: "analytics_slot".into(),
         state: Some("inactive slot".into()),
-        holder: Some(CleanupHolder::ReplicationSlot),
+        holder: CleanupHolder::ReplicationSlot,
         xid_age: Some(5_000_000.0),
         ..OpenTransaction::default()
     });

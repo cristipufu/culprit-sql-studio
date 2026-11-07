@@ -73,7 +73,7 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Vec<Decision> {
                 .pressure
                 .as_ref()
                 .and_then(|p| p.oldest_transaction.as_ref())
-                .filter(|h| h.holder == Some(CleanupHolder::ReplicationSlot))
+                .filter(|h| h.holder == CleanupHolder::ReplicationSlot)
             else {
                 return out;
             };
@@ -189,7 +189,7 @@ mod tests {
     fn slot() -> (Snapshot, Vec<Finding>) {
         let mut s: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/postgres-demo.json")).unwrap();
         s.pressure.get_or_insert_with(Default::default).oldest_transaction = Some(OpenTransaction {
-            holder: Some(CleanupHolder::ReplicationSlot),
+            holder: CleanupHolder::ReplicationSlot,
             session: "consumer_a".into(),
             xid_age: Some(2_000_000.0),
             ..Default::default()
@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn a_title_alone_cannot_turn_a_session_into_a_replication_slot() {
         let (mut s, mut findings) = slot();
-        s.pressure.as_mut().unwrap().oldest_transaction.as_mut().unwrap().holder = Some(CleanupHolder::Session);
+        s.pressure.as_mut().unwrap().oldest_transaction.as_mut().unwrap().holder = CleanupHolder::Session;
         findings[0].title = "Replication slot consumer_a holds VACUUM back".into();
         assert!(decide(Policy::Slot, &s, &findings).is_empty());
         Rule(Policy::Slot).refine(&s, &mut findings);

@@ -25,7 +25,7 @@ pub(crate) fn grade_findings(snapshot: &mut Snapshot, findings: &[Finding]) {
     for s in &mut p.signals {
         let check = match s.key.as_str() {
             "memory-grants-pending" => "memory-queue",
-            "threadpool-waiting" if s.label.contains("in this database") => "worker-pressure",
+            "threadpool-waiting" => "worker-pressure",
             "oldest-transaction" => "held-cleanup",
             _ => continue,
         };
@@ -77,23 +77,6 @@ pub(super) fn resource_usage(samples: &[ResourceSample], pick: ResourcePick) -> 
 pub(crate) fn grade_on_evidence(snapshot: &mut Snapshot) {
     let engine = snapshot.server.engine;
     let azure = snapshot.server.on(culprit_core::Platform::AzureSqlDatabase);
-    // Never divide lifetime Query Store compilations by the selected window's runs. Older saved scans held a
-    // prorated estimate without the original compilation totals: withdraw it rather than presenting it as measured.
-    if engine == Engine::Mssql
-        && let Some(w) = snapshot.workload.as_mut()
-    {
-        for q in &mut w.queries {
-            if let Some(c) = &mut q.costs {
-                if let Some(h) = c.compile_history.as_ref().filter(|h| h.within_window) {
-                    c.plan_ms = Some(h.total_ms);
-                    c.plans = Some(h.count);
-                } else {
-                    c.plan_ms = None;
-                    c.plans = None;
-                }
-            }
-        }
-    }
     let selected = snapshot.options.as_ref().map(|o| o.window_in_minutes());
     let scan_at = epoch(&snapshot.taken_at);
     if let (Some(minutes), Some(end)) = (selected, scan_at) {
@@ -128,14 +111,6 @@ pub(crate) fn grade_on_evidence(snapshot: &mut Snapshot) {
                     | "pooled-reuse"
             )
         });
-    }
-    for r in &mut p.replicas {
-        r.lag_seconds = r.effective_lag_seconds(engine);
-    }
-    if engine == Engine::Mysql
-        && let Some(t) = &mut p.oldest_transaction
-    {
-        t.held_versions = None;
     }
     let counted = p.uptime_hours.is_some_and(|h| h >= culprit_core::RATE_MIN_HOURS);
     for s in &mut p.signals {
@@ -244,13 +219,6 @@ pub(crate) fn grade_on_evidence(snapshot: &mut Snapshot) {
             s.status = SignalStatus::Watch;
             s.healthy = Some("Requests waiting at the scan's instant. Sample again to establish whether the queue persists before changing settings.".into());
         }
-        // A legacy worker count came from the whole instance with no database filter.
-        if s.key == "threadpool-waiting" && !s.label.contains("in this database") {
-            s.status = SignalStatus::Info;
-            if !s.label.contains("whole instance") {
-                s.label.push_str(" (whole instance)");
-            }
-        }
     }
     let dimensions: [(&str, &str, ResourcePick); 5] = [
         ("cpu-use", "CPU used against its limit", |s| s.cpu_pct),
@@ -317,7 +285,7 @@ pub(crate) fn grade_on_evidence(snapshot: &mut Snapshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use culprit_core::{SnapshotOptions, signals::CompileHistory};
+    use culprit_core::SnapshotOptions;
 
     fn azure(cpu: impl Fn(usize) -> f64) -> Snapshot {
         let mut s = crate::waits::snapshot_with(Engine::Mssql);
@@ -492,20 +460,5 @@ mod tests {
         let p = s.pressure.unwrap();
         assert_eq!(p.signal("memory-use").unwrap().status, SignalStatus::Info);
         assert_eq!(p.signal("memory-grants-pending").unwrap().status, SignalStatus::Good);
-    }
-
-    #[test]
-    fn old_compilation_estimates_cannot_be_mixed_with_the_selected_period() {
-        let mut s = azure(|_| 2.0);
-        let q = &mut s.workload.as_mut().unwrap().queries[0];
-        q.costs =
-            Some(culprit_core::QueryCosts { plan_ms: Some(1_000_000.0), plans: Some(500.0), ..Default::default() });
-        grade_on_evidence(&mut s);
-        assert!(s.queries()[0].costs.as_ref().unwrap().plan_ms.is_none());
-        let c = s.workload.as_mut().unwrap().queries[0].costs.as_mut().unwrap();
-        c.compile_history =
-            Some(CompileHistory { count: 50.0, total_ms: 5000.0, within_window: true, ..Default::default() });
-        grade_on_evidence(&mut s);
-        assert_eq!(s.queries()[0].costs.as_ref().unwrap().plan_ms, Some(5000.0));
     }
 }

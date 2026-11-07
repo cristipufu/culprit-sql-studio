@@ -370,7 +370,7 @@ pub async fn collect(conn: &mut Conn) -> (Pressure, Coverage) {
             } else {
                 "running".into()
             }),
-            holder: Some(CleanupHolder::Session),
+            holder: CleanupHolder::Session,
             wrote: r.number("modified").map(|m| m > 0.0),
             database: r.text("db").filter(|d| !d.is_empty()),
             ..OpenTransaction::default()

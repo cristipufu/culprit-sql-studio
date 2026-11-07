@@ -4134,15 +4134,6 @@
           "value": 972.7317798710956
         },
         {
-          "healthy": "0 is healthy",
-          "key": "threadpool-waiting",
-          "label": "Tasks without a worker (whole instance)",
-          "scope": "now",
-          "status": "info",
-          "unit": "count",
-          "value": 0.0
-        },
-        {
           "healthy": "Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.",
           "key": "version-store",
           "label": "Version store",

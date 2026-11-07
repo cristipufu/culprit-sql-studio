@@ -27,7 +27,7 @@ pub fn held_cleanup(snapshot: &Snapshot) -> Vec<Finding> {
     let Some(t) = pressure(snapshot).and_then(|p| p.oldest_transaction.as_ref()) else { return Vec::new() };
     let engine = snapshot.server.engine;
     // Collectors report only what holds this database's cleanup; scans before they said what it is held a session.
-    let holder = t.holder.unwrap_or(CleanupHolder::Session);
+    let holder = t.holder;
     let slot = holder == CleanupHolder::ReplicationSlot;
     let held_gb = t.held_bytes.unwrap_or(0.0) / 1024.0 / 1024.0 / 1024.0;
     let behind = t.xid_age.unwrap_or(0.0);

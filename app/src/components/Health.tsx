@@ -57,7 +57,6 @@ function OpenTransactionCard({ t, status }: { t: OpenTransaction; status: Signal
         <div className="open-txn-meta">
           {t.program ? `From ${t.program}. ` : ""}
           {t.held_bytes ? `The database's version store held ${Math.round(t.held_bytes / 1024 / 1024)} MB. ` : ""}
-          {t.held_versions ? `InnoDB keeps ${Math.round(t.held_versions).toLocaleString()} old row versions for it. ` : ""}
           {long ? "See the held-cleanup finding for the measured impact and next step." : "Recorded when the scan ran."}
         </div>
       </div>

@@ -203,7 +203,7 @@ fn transaction(session: &str, seconds: f64) -> OpenTransaction {
         seconds,
         program: Some("billing-worker".into()),
         state: Some("idle in transaction".into()),
-        holder: Some(CleanupHolder::Session),
+        holder: CleanupHolder::Session,
         ..OpenTransaction::default()
     }
 }
@@ -230,8 +230,7 @@ fn open_transactions_are_explained_per_engine() {
 #[test]
 fn a_young_mysql_transaction_is_not_blamed_for_the_servers_history() {
     let mut s = with_signals(Engine::Mysql, vec![sig("history-length", 2_100_000.0)]);
-    s.pressure.as_mut().unwrap().oldest_transaction =
-        Some(OpenTransaction { held_versions: Some(2_100_000.0), ..transaction("104", 2.0) });
+    s.pressure.as_mut().unwrap().oldest_transaction = Some(transaction("104", 2.0));
     assert!(held_cleanup(&s).is_empty());
     s.pressure.as_mut().unwrap().oldest_transaction =
         Some(OpenTransaction { database: Some("billing".into()), ..transaction("104", 2.0 * 3600.0) });
@@ -261,7 +260,7 @@ fn postgres_slots_and_prepared_transactions_get_their_own_fix() {
     s.pressure.as_mut().unwrap().oldest_transaction = Some(OpenTransaction {
         session: "standby_1".into(),
         state: Some("inactive slot".into()),
-        holder: Some(CleanupHolder::ReplicationSlot),
+        holder: CleanupHolder::ReplicationSlot,
         xid_age: Some(150_000_000.0),
         ..OpenTransaction::default()
     });
@@ -276,7 +275,7 @@ fn postgres_slots_and_prepared_transactions_get_their_own_fix() {
         session: "tx-17".into(),
         seconds: 7200.0,
         state: Some("prepared".into()),
-        holder: Some(CleanupHolder::PreparedTransaction),
+        holder: CleanupHolder::PreparedTransaction,
         xid_age: Some(40_000.0),
         ..OpenTransaction::default()
     });
@@ -286,7 +285,7 @@ fn postgres_slots_and_prepared_transactions_get_their_own_fix() {
     // A slot only a few transactions behind holds nothing worth a finding.
     s.pressure.as_mut().unwrap().oldest_transaction = Some(OpenTransaction {
         session: "standby_2".into(),
-        holder: Some(CleanupHolder::ReplicationSlot),
+        holder: CleanupHolder::ReplicationSlot,
         xid_age: Some(800.0),
         ..OpenTransaction::default()
     });

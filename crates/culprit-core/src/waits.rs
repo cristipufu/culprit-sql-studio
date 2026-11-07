@@ -301,10 +301,11 @@ pub struct GrantStat {
 
 /// What holds cleanup back: an open transaction in a session, or (PostgreSQL) a replication slot or a prepared
 /// transaction, which keep the VACUUM horizon where they started just as a session does.
-#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
 pub enum CleanupHolder {
+    #[default]
     Session,
     ReplicationSlot,
     PreparedTransaction,
@@ -328,12 +329,8 @@ pub struct OpenTransaction {
     pub state: Option<String>,
     /// Bytes of old versions held (SQL Server version store of this database).
     pub held_bytes: Option<f64>,
-    /// No longer filled: InnoDB's history list length is the whole server's and counts undo logs, not this
-    /// transaction's row versions (see the `history-length` signal). Kept so older scans still read.
-    pub held_versions: Option<f64>,
-    /// What it is; `None` in scans taken before Culprit told them apart (a session).
-    #[serde(default)]
-    pub holder: Option<CleanupHolder>,
+    /// What it is: a session, a replication slot or a prepared transaction.
+    pub holder: CleanupHolder,
     /// Transactions started since its snapshot (PostgreSQL `age(backend_xmin)`): how far back it holds the horizon.
     #[serde(default)]
     pub xid_age: Option<f64>,
