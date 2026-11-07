@@ -3,12 +3,13 @@
 import { test } from "bun:test";
 import cases from "../gen/format-cases.json";
 import { bytes, count, days, duration, percent, percentValue } from "./format";
+import { fromRust } from "../test/fixtures";
 
 test("format.ts reads every shared case as culprit_core::format does", () => {
   const formatters: Record<string, (value: number) => string> = { duration, bytes, count, percent, percent_value: percentValue, days };
   const failures: string[] = [];
   let checked = 0;
-  for (const [name, list] of Object.entries(cases as unknown as Record<string, [number, string][]>)) {
+  for (const [name, list] of Object.entries(fromRust<Record<string, [number, string][]>>(cases))) {
     const format = formatters[name];
     if (!format) {
       failures.push(`format.ts has no ${name}`);

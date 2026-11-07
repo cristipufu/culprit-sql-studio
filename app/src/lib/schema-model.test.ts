@@ -2,9 +2,11 @@ import { test } from "bun:test";
 import type { IndexStat } from "../gen/IndexStat";
 import type { TableStat } from "../gen/TableStat";
 import type { Report } from "../gen/Report";
+import type { Snapshot } from "../gen/Snapshot";
 import { coveredBy, ddl, nextColumnSort, previewSql, relations } from "./schema-model";
 import { ENGINES } from "./engines";
 import nativeSnapshot from "../../../fixtures/yugabyte-demo.json";
+import { fromRust, partial } from "../test/fixtures";
 
 const check = (condition: boolean, message: string) => { if (!condition) throw new Error(message); };
 const table = { schema: "main", name: "search", kind: "virtual", definition: "CREATE VIRTUAL TABLE search USING fts5(title, tokenize = 'unicode61')" } as TableStat;
@@ -29,7 +31,7 @@ test("Schema DDL keeps native definitions, constraint indexes and managed tables
 
 test("Table previews: every provider, quoted names, bounded rows and sort transitions", () => {
   const nativeTable = { ...ordinary, schema: "public", kind: "docdb", definition: null, storage: { docdb: { tablets: 3, hash_key_columns: 0, colocated: false, tablegroup: null } } } as TableStat;
-  const nativePk = { ...indexes[1], name: "documents_pkey", kind: "lsm", columns: ["id"], include: [], is_primary_key: true, docdb: { hash_columns: [], tablets: 3 } } as unknown as IndexStat;
+  const nativePk = partial<IndexStat>({ ...indexes[1], name: "documents_pkey", kind: "lsm", columns: ["id"], include: [], is_primary_key: true, docdb: { hash_columns: [], tablets: 3 } });
   const nativeSql = ddl("yugabyte", nativeTable, [], [nativePk], []);
   check(nativeSql.includes('PRIMARY KEY ("id" ASC)'), "A range primary key must not silently become the YSQL default HASH key");
   const hashPk = { ...nativePk, columns: ["tenant", "id", "created_at DESC"], docdb: { hash_columns: ["tenant", "id"], tablets: 3 } } as IndexStat;
@@ -38,7 +40,7 @@ test("Table previews: every provider, quoted names, bounded rows and sort transi
   const hashIndex = { ...nativePk, is_primary_key: false, name: "hash", docdb: { hash_columns: ["id"], tablets: 3 } } as IndexStat;
   const rangeIndex = { ...hashIndex, name: "range", columns: ["id", "created_at"], docdb: { hash_columns: [], tablets: 3 } } as IndexStat;
   check(coveredBy(hashIndex, [rangeIndex]) === null, "Ordered keys cannot establish redundancy of a hash index");
-  const nativeReport = { snapshot: structuredClone(nativeSnapshot) } as unknown as Report;
+  const nativeReport = partial<Report>({ snapshot: fromRust<Snapshot>(nativeSnapshot) });
   const orders = nativeReport.snapshot.tables.find((table) => table.name === "orders")!;
   check(relations(nativeReport, orders).outgoing[0]?.indexed === false, "A complete catalog can establish a missing FK index");
   delete nativeReport.snapshot.indexes[0]!.docdb;

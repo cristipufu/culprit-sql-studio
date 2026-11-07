@@ -6,6 +6,7 @@ import type { Report } from "../gen/Report";
 import { QueryCostsPanel } from "../components/BeyondTime";
 import { RuntimeSpread } from "../components/RuntimeSpread";
 import { ENGINES, engineLabel, statementMetrics } from "./engines";
+import { fromRust } from "../test/fixtures";
 
 function check(ok: boolean, message: string) {
   if (!ok) throw new Error(message);
@@ -15,7 +16,7 @@ const profiles = ENGINES.map((engine) => ({ engine, product: engineLabel(engine)
 profiles.push({ engine: "mysql", product: "MariaDB 11.8.9" });
 test(`Query cost rendering follows shared statement metrics for all ${profiles.length} engine/product profiles`, () => {
   for (const { engine, product } of profiles) {
-    const report = structuredClone(demo) as unknown as Report;
+    const report = fromRust<Report>(demo);
     report.snapshot.server.engine = engine;
     report.snapshot.server.product = product;
     const query = report.snapshot.workload!.queries[0]!;
@@ -55,7 +56,7 @@ test(`Query cost rendering follows shared statement metrics for all ${profiles.l
 
 test("MySQL and MariaDB runtime coverage follows collected data and preserves the source's scope", () => {
   for (const product of ["MySQL 5.7.44", "MySQL 8.0.36", "MariaDB 10.5.29", "MariaDB 11.8.9"]) {
-    const report = structuredClone(demo) as unknown as Report;
+    const report = fromRust<Report>(demo);
     const query = report.snapshot.workload!.queries[0]!;
     query.plans = [];
     query.spread = null;

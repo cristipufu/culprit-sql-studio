@@ -2,6 +2,7 @@ import { test } from "bun:test";
 import type { Report } from "../gen/Report";
 import { ReportRequests, type ReportState } from "./report-requests";
 import { LatestRequest, lazyResource } from "./requests";
+import { partial } from "../test/fixtures";
 
 function equal(actual: unknown, expected: unknown, why: string): void {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`${why}: ${JSON.stringify(actual)}`);
@@ -13,9 +14,9 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-const report = (id: string) => ({ snapshot: { id, connection: "a" }, findings: [
+const report = (id: string) => partial<Report>({ snapshot: { id, connection: "a" }, findings: [
   { id: "info", actionability: "information" }, { id: "issue", actionability: "needs-attention" },
-] }) as unknown as Report;
+] });
 
 type Client = { latestReport: (name: string, minutes: number | null) => Promise<Report | null>;
   scan: (name: string, minutes: number | null) => Promise<Report> };

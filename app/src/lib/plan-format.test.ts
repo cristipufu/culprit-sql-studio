@@ -4,12 +4,13 @@ import type { Plan } from "../gen/Plan";
 import type { QueryStat } from "../gen/QueryStat";
 import { findingNoShareReason, noShareReason, sharesNote } from "./plan-format";
 import { addPlan, getPlans, removePlan } from "./plans";
+import { fromRust } from "../test/fixtures";
 
 test("Plan renderer preserves Rust's explanations, variants and retained measurements", () => {
   function check(ok: boolean, message: string): void { if (!ok) throw new Error(message); }
   function sample(name: string): { plan: Plan; query: QueryStat } {
     const value = samples.find((c) => c.name === name)!;
-    return structuredClone(value) as unknown as { plan: Plan; query: QueryStat };
+    return fromRust<{ plan: Plan; query: QueryStat }>(value);
   }
   const read = sample("wide-read");
   check(sharesNote(read.plan, read.query)!.includes("72 pages a run"), "The renderer lost the captured read evidence");

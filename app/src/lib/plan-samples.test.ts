@@ -7,6 +7,7 @@ import type { PlanSample } from "../gen/PlanSample";
 import { PRODUCTS } from "./engines";
 import { planSamples, sameSamplePlan } from "./plan-samples";
 import { getPlans, removePlan, SAMPLES, trySample } from "./plans";
+import { fromRust } from "../test/fixtures";
 import shared from "../../../fixtures/share.sample.json";
 
 test("Plan samples: every core product, native captures, standalone loading and cost collisions", async () => {
@@ -28,7 +29,7 @@ test("Plan samples: every core product, native captures, standalone loading and 
     const sidecar = shared.compares.find((entry) => entry.product === sample.product)!;
     check(!!sidecar, `${sample.product}: missing browser comparison`);
     const [a, b] = sample.plans;
-    check(sameSamplePlan(a, sidecar.a as unknown as Plan) && sameSamplePlan(b, sidecar.b as unknown as Plan), `${sample.product}: browser and desktop samples differ`);
+    check(sameSamplePlan(a, fromRust<Plan>(sidecar.a)) && sameSamplePlan(b, fromRust<Plan>(sidecar.b)), `${sample.product}: browser and desktop samples differ`);
     check(!sameSamplePlan(a, b), `${sample.product}: sample plans must be distinct`);
     const clone = structuredClone(a);
     check(sameSamplePlan(a, clone), `${sample.product}: copied sample must retain its identity`);

@@ -5,13 +5,14 @@ import type { Replica } from "../gen/Replica";
 import type { Report } from "../gen/Report";
 import type { QueryStat } from "../gen/QueryStat";
 import { findingStatus, querySignalStatus, replicaStatus, storageStatus } from "./health";
+import { partial } from "../test/fixtures";
 
 const check = (condition: boolean, message: string) => { if (!condition) throw new Error(message); };
 const finding = (extra: Partial<Finding>): Finding => ({
   id: "example", check: "example", severity: "low", inactive: false, queries: [], metrics: [],
   subject: { kind: "database", name: "example" }, ...extra,
 } as Finding);
-const report = (findings: Finding[]): Report => ({ findings } as Report);
+const report = (findings: Finding[]) => partial<Report>({ findings });
 
 test("Health warnings follow measured evidence", () => {
   // A tiny query can spend nearly all its time planning or in JIT without costing a meaningful amount of time.

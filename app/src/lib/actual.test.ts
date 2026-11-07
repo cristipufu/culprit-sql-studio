@@ -2,10 +2,11 @@ import { test } from "bun:test";
 import samples from "../../../fixtures/plan-view.sample.json";
 import type { Plan } from "../gen/Plan";
 import { actualFacts, planShares } from "./actual";
+import { fromRust } from "../test/fixtures";
 
 test("Actual-plan renderer consumes shared Rust facts without losing missing measurements", () => {
   const check = (condition: boolean, message: string) => { if (!condition) throw new Error(message); };
-  const plan = (name: string) => samples.find((c) => c.name === name)!.plan as unknown as Plan;
+  const plan = (name: string) => fromRust<Plan>(samples.find((c) => c.name === name)!.plan);
   const trigger = actualFacts(plan("triggers"))!;
   check(trigger.usedKb === null && trigger.grantedKb === 1024, "Unknown memory use must remain unknown");
   check(trigger.triggers.length === 1 && trigger.triggers[0]?.ms === 120.5, "Trigger timings retain Rust's validation");
