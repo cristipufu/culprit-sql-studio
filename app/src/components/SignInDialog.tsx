@@ -31,7 +31,10 @@ export function SignInDialog() {
           if (event.state === "failed") setDialog((d) => (d.status === "code" ? { status: "failed", message: event.message } : d));
         }),
       )
-      .then((off) => (gone ? off() : (unsubscribe = off)));
+      .then((off) => {
+        if (gone) off();
+        else unsubscribe = off;
+      });
     return () => {
       gone = true;
       unsubscribe?.();

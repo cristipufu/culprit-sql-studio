@@ -1,5 +1,5 @@
 import { Lock, Pause, Play } from "lucide-react";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useEffectEvent, useRef, useState } from "react";
 import { BlockingChains } from "../components/BlockingChains";
 import type { LiveState } from "../gen/LiveState";
 import type { Session } from "../gen/Session";
@@ -102,9 +102,11 @@ function LiveSessions({ connection }: { connection: string }) {
     setHistory((h) => [...h.slice(-(HISTORY - 1)), { at: Date.now(), active, blocked }]);
   }, [state]);
 
+  // `state` only gates the first read; depending on it would restart the timer on every tick.
+  const hasRead = useEffectEvent(() => state != null);
   useEffect(() => {
     // The first read always happens; after that, polling stops while paused, hidden, or on Deadlocks.
-    if (stopped && state) return;
+    if (stopped && hasRead()) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
@@ -126,8 +128,6 @@ function LiveSessions({ connection }: { connection: string }) {
       cancelled = true;
       clearTimeout(timer);
     };
-    // `state` only gates the first read; re-running on every new state would restart the timer each tick.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection, stopped, refresh]);
 
   const locate = (id: string) => {

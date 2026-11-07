@@ -6,7 +6,7 @@ import { Compartment, EditorState, Prec, StateEffect, StateField, type Extension
 import { Decoration, keymap, type DecorationSet } from "@codemirror/view";
 import { EditorView, basicSetup } from "codemirror";
 import { Bookmark, PanelLeftClose, PanelLeftOpen, Play, Plus, RefreshCw, Save, ScanSearch, TriangleAlert, WandSparkles, X, Zap } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 import { ConfirmRun, type PendingRun } from "../components/ConfirmRun";
 import { LookToggle, PlanSurface, rememberLook, rememberedLook, type PlanLook } from "../components/PlanSurface";
 import { ResultGrid } from "../components/ResultGrid";
@@ -475,20 +475,19 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
     activate(list[(index + delta + list.length) % list.length]!.id);
   };
 
+  const actions = useRef({ run, explain, save, newTab, closeTab, cycle, target });
+  actions.current = { run, explain, save, newTab, closeTab, cycle, target };
+
   const openQuery = useCallback(
     (query: SavedQuery, thenRun: boolean) => {
       const open = tabsRef.current.tabs.find((t) => t.saved === query.name);
       if (open) activate(open.id);
       else if (newTab(query.sql, query.name, query.name) === null) return;
-      if (thenRun) void run(query.sql);
+      // The latest run, against the connection as it is now.
+      if (thenRun) void actions.current.run(query.sql);
     },
-    // run reads the latest connection through closures; re-binding on connection change is enough.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activate, newTab, connection.name],
+    [activate, newTab],
   );
-
-  const actions = useRef({ run, explain, save, newTab, closeTab, cycle, target });
-  actions.current = { run, explain, save, newTab, closeTab, cycle, target };
   const actionKeys = useRef<Extension>(
     keymap.of([
       { key: "Mod-Enter", preventDefault: true, run: () => (void actions.current.run(actions.current.target()), true) },
@@ -503,11 +502,13 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
   );
 
   // ── lifecycle ──────────────────────────────────────────────────────────────────────────────────
+  // The connection owns this view; tab switches swap states, so a new state function doesn't rebuild it.
+  const initialState = useEffectEvent((tab: Tab) => stateFor(tab, actionKeys.current));
   useEffect(() => {
     if (!host.current) return;
     const current = tabsRef.current;
     const tab = current.tabs.find((tab) => tab.id === current.active) ?? current.tabs[0]!;
-    const editor = new EditorView({ parent: host.current, state: stateFor(tab, actionKeys.current) });
+    const editor = new EditorView({ parent: host.current, state: initialState(tab) });
     view.current = editor;
     editor.focus();
     return () => {
@@ -515,8 +516,6 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
       editor.destroy();
       view.current = null;
     };
-    // The connection owns this view; tab switches swap states.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection.engine]);
 
   // New table/column names: reconfigure the visible tab and drop cached states so other tabs pick them up on switch.

@@ -1,5 +1,5 @@
 import { Search } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { EngineBadge } from "../../components/EngineBadge";
 import type { Cloud as CloudKind } from "../../gen/Cloud";
 import type { ImportCandidate } from "../../gen/ImportCandidate";
@@ -92,8 +92,10 @@ export function DiscoverPanel({ cloud, onDone }: { cloud: CloudKind; onDone: () 
     }
   };
 
+  // The panel opens with a search for the remembered terms.
+  const searchOnOpen = useEffectEvent(() => void search());
   useEffect(() => {
-    void search();
+    searchOnOpen();
     return () => {
       requests.current.invalidate();
       pending.current?.abort();
@@ -210,6 +212,10 @@ function target(c: ImportCandidate): string {
   return `${c.host}${c.port ? `:${c.port}` : ""}${c.database ? `/${c.database}` : ""}`;
 }
 
+function importKey(c: ImportCandidate): string {
+  return `${c.source}/${c.engine}/${target(c)}/${c.user ?? ""}`;
+}
+
 /** Connections saved in Azure Data Studio, VS Code, DBeaver and DataGrip on this computer. Metadata only; never passwords. */
 export function ImportPanel({ onDone }: { onDone: () => void }) {
   const [state, setImport] = useState<ImportState>({ status: "busy" });
@@ -218,16 +224,14 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
   const [aliases, setAliases] = useState<Record<string, string>>({});
   const [adding, setAdding] = useState(false);
 
-  const keyOf = (c: ImportCandidate) => `${c.source}/${c.engine}/${target(c)}/${c.user ?? ""}`;
-
   useEffect(() => {
     (async () => {
       try {
         const items = await (await api()).importCandidates(null);
         setImport({ status: "done", items });
         const fresh = items.filter((c) => !c.saved_as && c.environment !== "production");
-        setPicked(fresh.length <= IMPORT_PRESELECT_LIMIT ? Object.fromEntries(fresh.map((c) => [keyOf(c), true])) : {});
-        setAliases(Object.fromEntries(items.map((c) => [keyOf(c), c.alias])));
+        setPicked(fresh.length <= IMPORT_PRESELECT_LIMIT ? Object.fromEntries(fresh.map((c) => [importKey(c), true])) : {});
+        setAliases(Object.fromEntries(items.map((c) => [importKey(c), c.alias])));
       } catch (e) {
         setImport({ status: "error", error: errorMessage(e) });
       }
@@ -236,13 +240,13 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
 
   const items = state.status === "done" ? state.items : [];
   const shown = items.filter((c) => source === null || c.source === source);
-  const selected = items.filter((c) => picked[keyOf(c)] && !c.saved_as);
+  const selected = items.filter((c) => picked[importKey(c)] && !c.saved_as);
   const counts = Object.fromEntries(SOURCES.map((s) => [s, items.filter((c) => c.source === s).length]));
 
   const add = async () => {
     setAdding(true);
     try {
-      await (await api()).importConnections(selected.map((c) => ({ ...c, alias: aliases[keyOf(c)] ?? c.alias })));
+      await (await api()).importConnections(selected.map((c) => ({ ...c, alias: aliases[importKey(c)] ?? c.alias })));
       await loadConnections();
       onDone();
     } catch (e) {
@@ -296,7 +300,7 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
       {shown.length > 0 && (
         <div className="discover-list">
           {shown.map((c) => {
-            const key = keyOf(c);
+            const key = importKey(c);
             return (
               <div key={key}>
                 <label className={`discover-row ${c.saved_as ? "saved" : ""}`}>

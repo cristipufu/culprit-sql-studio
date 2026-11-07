@@ -128,6 +128,8 @@ export default function WhatChanged({ report, request, onClose }: { report: Repo
   const list = useRef<HTMLDivElement>(null);
   const connection = report.snapshot.connection;
   const key = JSON.stringify(request);
+  // The request as of its contents: a new object with the same fields doesn't reload.
+  const asked = useMemo(() => JSON.parse(key) as ChangeRequest, [key]);
   // A mark added or removed anywhere changes what explains the queries.
   const marks = useEventsVersion();
 
@@ -137,15 +139,13 @@ export default function WhatChanged({ report, request, onClose }: { report: Repo
     setOpen(null);
     setCursor(0);
     api()
-      .then((client) => client.changes(connection, request))
+      .then((client) => client.changes(connection, asked))
       .then((changes) => !cancelled && setLocal({ status: "ready", changes }))
       .catch((e) => !cancelled && setLocal({ status: "error", error: errorMessage(e) }));
     return () => {
       cancelled = true;
     };
-    // `key` stands for the request's contents.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection, key, marks]);
+  }, [connection, asked, marks]);
 
   const changes = state.status === "ready" ? state.changes : null;
   const rows = useMemo(() => (changes ? changes.queries.filter((q) => q.status !== "unchanged" || showUnchanged) : []), [changes, showUnchanged]);

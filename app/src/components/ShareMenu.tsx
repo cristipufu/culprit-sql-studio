@@ -11,7 +11,8 @@ export type ShareAction = {
   unavailable?: string;
   /** Whether redaction applies (the menu's switch is shown when any action uses it). */
   redacts?: boolean;
-  run: (redact: boolean) => Promise<unknown> | void;
+  /** Awaited, so it may be async. */
+  run: (redact: boolean) => unknown;
 };
 
 /**

@@ -45,12 +45,13 @@ export default function ApprovalDialog() {
 
   const waiting = pending.filter((r) => !answered.has(r.id));
   const request = waiting[0] ?? null;
+  const requestId = request?.id ?? null;
 
   useEffect(() => {
-    if (!request) return;
+    if (requestId === null) return;
     const t = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(t);
-  }, [request?.id]);
+  }, [requestId]);
 
   const decide = async (approved: boolean) => {
     if (!request) return;

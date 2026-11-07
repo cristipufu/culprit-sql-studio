@@ -52,7 +52,9 @@ function load(raw: string, storage: StorageLike): EditorTabs {
   let chars = 0;
   return { ...parsed, tabs: parsed.tabs.map(({ id, title, saved }) => {
     const sql = storage.getItem(BODY_PREFIX + id);
-    if (sql === null || (chars += sql.length) > MAX_SQL_CHARS) throw new Error(INVALID);
+    if (sql === null) throw new Error(INVALID);
+    chars += sql.length;
+    if (chars > MAX_SQL_CHARS) throw new Error(INVALID);
     return { id, title, saved, sql };
   }) };
 }
@@ -104,9 +106,9 @@ export class EditorTabStorage {
 
   write(tabs: EditorTabs): string | null {
     if (this.blocked) return this.error;
-    if (!this.storage) return this.error = UNAVAILABLE;
+    if (!this.storage) return this.settle(UNAVAILABLE);
     const index = metadata(tabs);
-    if (tabs.tabs.length > MAX_EDITOR_TABS || index.length > MAX_INDEX_CHARS || tabs.tabs.reduce((sum, t) => sum + t.sql.length, 0) > MAX_SQL_CHARS) return this.error = TOO_LARGE;
+    if (tabs.tabs.length > MAX_EDITOR_TABS || index.length > MAX_INDEX_CHARS || tabs.tabs.reduce((sum, t) => sum + t.sql.length, 0) > MAX_SQL_CHARS) return this.settle(TOO_LARGE);
     const added: string[] = [];
     let committed = false;
     try {
@@ -128,14 +130,20 @@ export class EditorTabStorage {
         if (!kept.has(id)) { this.storage.removeItem(BODY_PREFIX + id); this.bodies.delete(id); }
       }
       if (this.legacy) { this.storage.removeItem(LEGACY_KEY); this.legacy = false; }
-      return this.error = null;
+      return this.settle(null);
     } catch {
       // A rejected index must not leave newly allocated SQL bodies consuming quota forever.
       if (!committed) for (const id of added) {
         try { this.storage.removeItem(BODY_PREFIX + id); this.bodies.delete(id); } catch { /* Keep the source index intact. */ }
       }
-      return this.error = UNAVAILABLE;
+      return this.settle(UNAVAILABLE);
     }
+  }
+
+  /** Remember how the last write ended, and report it. */
+  private settle(error: string | null): string | null {
+    this.error = error;
+    return error;
   }
 }
 

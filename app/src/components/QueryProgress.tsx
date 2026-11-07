@@ -200,7 +200,7 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
           <Check size={13} /> Session {session} isn't running a statement right now: it finished, was cancelled, or is idle.
         </div>
       )}
-      {progress && progress.running && (
+      {progress?.running && (
         <div className="qp-body">
           <div className="qp-side">
             {progress.statement && (

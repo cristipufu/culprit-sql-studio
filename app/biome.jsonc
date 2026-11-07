@@ -1,0 +1,34 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  // Lint only: the code keeps its own formatting, and src/gen is generated from the Rust model.
+  "files": { "includes": ["src/**", "!src/gen"] },
+  "formatter": { "enabled": false },
+  "assist": { "enabled": false },
+  "css": { "linter": { "enabled": false } },
+  "linter": {
+    "enabled": true,
+    // The groups that catch bugs; style and a11y are not enforced yet.
+    "rules": {
+      "preset": "none",
+      "correctness": {
+        "preset": "recommended",
+        // A missing dependency is a stale closure. An extra one is how an effect reruns when a key changes, which
+        // React's own rule allows too.
+        "useExhaustiveDependencies": { "level": "error", "options": { "reportUnnecessaryDependencies": false } }
+      },
+      "suspicious": {
+        "preset": "recommended",
+        // Index keys here are on lists rebuilt whole from a report or a result, never reordered with state per item.
+        "noArrayIndexKey": "off",
+        // A callback that must return (map, filter, find) still has to; `forEach(x => set.add(x))` may.
+        "useIterableCallbackReturn": { "level": "error", "options": { "checkForEach": false } }
+      },
+      "complexity": {
+        "preset": "recommended",
+        // `() => (act(), true)` is the house idiom for one-line handlers and CodeMirror commands.
+        "noCommaOperator": "off"
+      }
+    },
+    "domains": { "react": "recommended" }
+  }
+}

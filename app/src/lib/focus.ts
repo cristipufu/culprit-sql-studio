@@ -6,7 +6,7 @@ const traps: HTMLElement[] = [];
 
 /** Keep focus and keyboard events in the topmost modal, including when focused controls disappear or become disabled. */
 export function useFocusTrap(ref: RefObject<HTMLElement | null>, active = true, onEscape?: () => void): void {
-  const escape = useRef(onEscape); escape.current = onEscape;
+  const escapeRef = useRef(onEscape); escapeRef.current = onEscape;
   useEffect(() => {
     const root = ref.current;
     if (!active || !root) return;
@@ -26,7 +26,7 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, active = true, 
       if (!inside) {
         contain();
         event.stopPropagation();
-        if (event.key === "Escape" && escape.current) { event.preventDefault(); escape.current(); }
+        if (event.key === "Escape" && escapeRef.current) { event.preventDefault(); escapeRef.current(); }
       }
       if (event.key !== "Tab") return;
       const controls = items();

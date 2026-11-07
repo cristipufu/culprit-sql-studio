@@ -13,12 +13,12 @@ export function cellText(value: unknown): string {
 
 export function columnType(types: Record<string, string> | undefined, name: string): string | undefined {
   const key = name.toLowerCase();
-  return types && Object.prototype.hasOwnProperty.call(types, key) ? types[key] : undefined;
+  return types && Object.hasOwn(types, key) ? types[key] : undefined;
 }
 
 /** Preserve the original number literals and escapes rather than reserializing decoded JSON values. */
 export function formattedJson(raw: string): string | null {
-  if (raw.length > FORMAT_INPUT_CHARS || !/^[\s]*[\[{]/.test(raw)) return null;
+  if (raw.length > FORMAT_INPUT_CHARS || !/^\s*[[{]/.test(raw)) return null;
   const parts: string[] = [];
   let size = 0, depth = 0, quoted = false, escaped = false, last = "";
   const append = (text: string) => { size += text.length; parts.push(text); };

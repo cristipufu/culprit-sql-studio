@@ -30,9 +30,10 @@ export function EnginePicker({ id, value, onChange, autoFocus }: { id: string; v
     };
   }, [open]);
 
+  const highlighted = open ? options[current] : undefined;
   useEffect(() => {
-    if (open && options[current]) document.getElementById(optionId(options[current]))?.scrollIntoView({ block: "nearest" });
-  }, [open, current, query]);
+    if (highlighted) document.getElementById(`${listId}-${highlighted}`)?.scrollIntoView({ block: "nearest" });
+  }, [highlighted, listId, query]);
 
   const show = (last = false) => {
     setQuery("");

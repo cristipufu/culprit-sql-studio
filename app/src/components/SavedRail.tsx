@@ -26,10 +26,13 @@ function firstLine(sql: string): string {
   );
 }
 
+function engineOf(connections: ConnectionInfo[], name: string | null) {
+  return connections.find((c) => c.name === name)?.engine;
+}
+
 /** The collection of saved queries: search, open, rerun, rename, delete. */
 export function SavedRail({ current, saved, active, onOpen, onRenamed, onDeleted }: Props) {
   const connections = useStore((s) => s.connections);
-  const engineOf = (name: string | null) => connections.find((c) => c.name === name)?.engine;
   const [filter, setFilter] = useState("");
   const [scope, setScope] = useState<"here" | "all">("all");
   const [renaming, setRenaming] = useState<{ from: string; to: string } | null>(null);
@@ -38,10 +41,8 @@ export function SavedRail({ current, saved, active, onOpen, onRenamed, onDeleted
   const list = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return (saved ?? [])
-      .filter((s) => scope === "all" || s.connection === current.name || engineOf(s.connection) === current.engine)
+      .filter((s) => scope === "all" || s.connection === current.name || engineOf(connections, s.connection) === current.engine)
       .filter((s) => !q || s.name.toLowerCase().includes(q) || s.sql.toLowerCase().includes(q) || (s.connection ?? "").toLowerCase().includes(q));
-    // engineOf reads the store's connections, which change with them.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saved, filter, scope, current.name, current.engine, connections]);
 
   const rename = async () => {
@@ -119,9 +120,9 @@ export function SavedRail({ current, saved, active, onOpen, onRenamed, onDeleted
             <div className="saved-sql">{firstLine(q.sql)}</div>
             <div className="saved-meta">
               {q.connection && (
-                <span className={`saved-conn ${q.connection === current.name ? "here" : ""} ${engineOf(q.connection) && engineOf(q.connection) !== current.engine ? "other-engine" : ""}`} title={engineOf(q.connection) && engineOf(q.connection) !== current.engine ? `Saved for a different engine than ${current.name}` : undefined}>
-                  {engineOf(q.connection) && (
-                    <EngineBadge engine={engineOf(q.connection)!} product={connections.find((c) => c.name === q.connection)?.last_report?.product} />
+                <span className={`saved-conn ${q.connection === current.name ? "here" : ""} ${engineOf(connections, q.connection) && engineOf(connections, q.connection) !== current.engine ? "other-engine" : ""}`} title={engineOf(connections, q.connection) && engineOf(connections, q.connection) !== current.engine ? `Saved for a different engine than ${current.name}` : undefined}>
+                  {engineOf(connections, q.connection) && (
+                    <EngineBadge engine={engineOf(connections, q.connection)!} product={connections.find((c) => c.name === q.connection)?.last_report?.product} />
                   )}
                   {q.connection}
                 </span>

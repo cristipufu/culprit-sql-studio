@@ -66,7 +66,7 @@ export default function Dashboard({ report, connection }: { report: Report; conn
     return () => {
       current = false;
     };
-  }, [connection.name, windowMinutes, report.snapshot.id]);
+  }, [connection.name, windowMinutes, report.snapshot.id, scope]);
 
   const model = live.dashboard ?? cold;
 

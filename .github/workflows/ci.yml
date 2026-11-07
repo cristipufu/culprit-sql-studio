@@ -57,11 +57,12 @@ jobs:
       - name: Test
         run: cargo test --locked --workspace --exclude culprit-app
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-      - name: Typecheck the UI
+      - name: Typecheck and lint the UI
         working-directory: app
         run: |
           bun install --frozen-lockfile
           bun run typecheck
+          bun run lint
 
   app:
     name: Desktop app (${{ matrix.os }})

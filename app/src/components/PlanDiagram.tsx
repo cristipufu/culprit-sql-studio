@@ -1,5 +1,5 @@
 import { Flame, Maximize2, Minus, Plus, Scan, TriangleAlert } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Plan } from "../gen/Plan";
 import type { PlanInsight } from "../gen/PlanInsight";
 import type { PlanNode } from "../gen/PlanNode";
@@ -239,11 +239,14 @@ export function PlanDiagram(props: {
   const [selected, setSelected] = useState<number>(target);
   const [ownZoom, setOwnZoom] = useState(initialZoom ?? 1);
   const zoom = props.zoom ?? ownZoom;
-  const setZoom = (next: number | ((z: number) => number)) => {
-    const value = typeof next === "function" ? next(zoom) : next;
-    setOwnZoom(value);
-    onZoomChange?.(value);
-  };
+  const setZoom = useCallback(
+    (next: number | ((z: number) => number)) => {
+      const value = typeof next === "function" ? next(zoom) : next;
+      setOwnZoom(value);
+      onZoomChange?.(value);
+    },
+    [zoom, onZoomChange],
+  );
   const [fitted, setFitted] = useState(initialZoom != null || props.zoom != null);
   const scroller = useRef<HTMLDivElement>(null);
   const hot = useMemo(() => pathTo(plan.root, target), [plan.root, target]);
@@ -261,7 +264,7 @@ export function PlanDiagram(props: {
     const box = scroller.current?.getBoundingClientRect();
     if (!box || box.width === 0) return;
     setZoom(Math.max(MIN_FIT, Math.min(1, (box.width - 8) / width)));
-  }, [width]);
+  }, [width, setZoom]);
 
   useLayoutEffect(() => {
     if (fitted) return;
@@ -277,9 +280,12 @@ export function PlanDiagram(props: {
     setExpanded((prev) => new Set([...prev, ...pathTo(plan.root, visibleId)]));
   };
 
+  // Follow a selection made outside (a comparison, an insight); the latest nodes decide whether it is in this plan.
+  const followSelection = useEffectEvent((id: number) => {
+    if (nodes.some((n) => n.id === id)) pick(id);
+  });
   useEffect(() => {
-    if (selectedId != null && nodes.some((n) => n.id === selectedId)) pick(selectedId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (selectedId != null) followSelection(selectedId);
   }, [selectedId]);
 
   // Keep the selected card in view, scrolling the canvas only (never the page around it).

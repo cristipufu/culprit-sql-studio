@@ -95,7 +95,7 @@ export function PlanOperations({ plan, query: statement, focus, selectedId, onSe
       .filter((r) => !issuesOnly || r.issues > 0)
       .filter((r) => !q || `${r.node.op} ${r.node.object ?? ""} ${r.node.index ?? ""} ${r.node.predicate ?? ""}`.toLowerCase().includes(q))
       .sort((a, b) => (sort.desc ? value(b) - value(a) : value(a) - value(b)));
-  }, [all, sort, query, issuesOnly]);
+  }, [all, plan, sort, query, issuesOnly]);
 
   useEffect(() => {
     body.current?.querySelector("tr.sel")?.scrollIntoView({ block: "nearest" });

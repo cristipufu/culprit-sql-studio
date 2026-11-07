@@ -27,6 +27,18 @@ function shortMode(mode: string | null): string | null {
   return m && m.length <= 3 ? m : null;
 }
 
+function path(e: Edge): { d: string; mx: number; my: number } {
+  // Connect the facing sides; holds and wants between the same pair bow apart so both stay readable.
+  const fromRight = e.from.x + e.from.w <= e.to.x;
+  const x1 = fromRight ? e.from.x + e.from.w : e.from.x;
+  const x2 = fromRight ? e.to.x : e.to.x + e.to.w;
+  const bow = e.kind === "holds" ? -9 : 9;
+  const y1 = e.from.y + e.from.h / 2 + bow;
+  const y2 = e.to.y + e.to.h / 2 + bow;
+  const dx = (x2 - x1) * 0.45;
+  return { d: `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`, mx: (x1 + x2) / 2, my: (y1 + y2) / 2 };
+}
+
 function who(p: DeadlockProcess): string {
   return p.session ? `Session ${p.session}` : `Process ${p.id}`;
 }
@@ -74,18 +86,6 @@ export function DeadlockGraph({ deadlock, onPick }: { deadlock: Deadlock; onPick
   }, [deadlock]);
 
   const lit = (e: Edge) => !focus || focus === e.proc || focus === e.res;
-
-  const path = (e: Edge) => {
-    // Connect the facing sides; holds and wants between the same pair bow apart so both stay readable.
-    const fromRight = e.from.x + e.from.w <= e.to.x;
-    const x1 = fromRight ? e.from.x + e.from.w : e.from.x;
-    const x2 = fromRight ? e.to.x : e.to.x + e.to.w;
-    const bow = e.kind === "holds" ? -9 : 9;
-    const y1 = e.from.y + e.from.h / 2 + bow;
-    const y2 = e.to.y + e.to.h / 2 + bow;
-    const dx = (x2 - x1) * 0.45;
-    return { d: `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`, mx: (x1 + x2) / 2, my: (y1 + y2) / 2 };
-  };
 
   // Labels sit on their curve (the halo hides the line beneath); labels that would touch are pushed apart vertically.
   const labelY = useMemo(() => {

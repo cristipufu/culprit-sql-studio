@@ -1,5 +1,5 @@
 import { Braces, ChevronDown, Download, FileSpreadsheet } from "lucide-react";
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ResultSet } from "../gen/ResultSet";
 import { api, errorMessage } from "../lib/api";
@@ -18,10 +18,10 @@ export function ResultExportMenu({ result }: { result: ResultSet }) {
   const menu = useRef<HTMLDivElement>(null);
   const id = useId();
   const busy = current.operation !== null;
-  const close = (restore: boolean) => {
+  const close = useCallback((restore: boolean) => {
     if (restore && menu.current?.contains(document.activeElement)) trigger.current?.focus();
     setState((old) => ({ ...old, open: false }));
-  };
+  }, []);
 
   useLayoutEffect(() => {
     if (!current.open || !menu.current || !trigger.current) return;
@@ -38,7 +38,7 @@ export function ResultExportMenu({ result }: { result: ResultSet }) {
     document.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onResize);
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("scroll", onScroll, true); window.removeEventListener("resize", onResize); };
-  }, [current.open]);
+  }, [current.open, close]);
 
   const save = async (format: ResultFileFormat) => {
     if (activeOperation.current !== null) return;

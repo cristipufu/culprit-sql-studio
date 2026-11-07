@@ -42,8 +42,10 @@ export function ResultGrid({ result, types, summary, order, onSort, sortDisabled
   const header = result.columns.join("\t");
   const copyValue = () => selected && copyAndTell(cellText(result.rows[selected.row]?.[selected.col]), "Value copied");
   const changePage = (page: number) => setSelection({ result, page, inspecting: false, cell: selected ? { row: page * pageSize, col: selected.col } : null });
+  const selectedRow = selected?.row;
+  const selectedCol = selected?.col;
   useEffect(() => {
-    const cell = selected && document.getElementById(`${id}-${selected.row}-${selected.col}`);
+    const cell = selectedRow != null && selectedCol != null ? document.getElementById(`${id}-${selectedRow}-${selectedCol}`) : null;
     const area = scroll.current;
     if (!cell || !area) return;
     const bounds = area.getBoundingClientRect();
@@ -54,7 +56,7 @@ export function ResultGrid({ result, types, summary, order, onSort, sortDisabled
     else if (rect.bottom > bounds.bottom) area.scrollTop += rect.bottom - bounds.bottom;
     if (rect.left < left || rect.width > bounds.right - left) area.scrollLeft += rect.left - left;
     else if (rect.right > bounds.right) area.scrollLeft += rect.right - bounds.right;
-  }, [id, selected?.row, selected?.col, result]);
+  }, [id, selectedRow, selectedCol, result]);
 
   return <div className="result-grid">
     <div className="rg-bar">

@@ -55,7 +55,9 @@ export function completionConfig(engine: Engine, catalog: Catalog | null, report
       // Among equal matches the shorter name first: "ord" offers orders before order_items.
       boost: -Math.min(table.name.length, 90) / 100,
     };
-    (schemas[table.schema] ??= {})[table.name] = { self, children: columns };
+    const tables = schemas[table.schema] ?? {};
+    tables[table.name] = { self, children: columns };
+    schemas[table.schema] = tables;
   }
   const schema: Record<string, SQLNamespace> = {};
   for (const [name, tables] of Object.entries(schemas)) {
