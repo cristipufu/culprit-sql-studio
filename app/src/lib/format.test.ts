@@ -7,12 +7,9 @@ import { registerCatalogs, setLanguage } from "./i18n";
 import { fromRust } from "../test/fixtures";
 
 test("format.ts writes digits with the language's separators and units in its words", () => {
-  // The language is chosen from the system's when catalogs register; Bun's navigator names none.
-  Object.defineProperty(navigator, "languages", { value: ["en-US"], configurable: true });
   registerCatalogs({
     xx: {
       _meta: { name: "Test", english_name: "Test", plural: "one_below_2", decimal: ",", group: "." },
-      "ui.format.number": "{n}",
       "ui.format.days": "{n, plural, one {{count} jour} other {{count} jours}}",
       "ui.format.count.thousands": "{value} k",
     },

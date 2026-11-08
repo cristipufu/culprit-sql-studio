@@ -130,7 +130,6 @@
   "ui.format.duration.ms": "{value} ms",
   "ui.format.duration.s": "{value} s",
   "ui.format.duration.us": "{value} µs",
-  "ui.format.number": "{n}",
   "ui.format.percent.over": ">{value}%",
   "ui.format.percent.under": "<{value}%",
   "ui.format.percent.value": "{value}%",

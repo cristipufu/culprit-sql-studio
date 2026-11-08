@@ -1,5 +1,5 @@
 import type { Unit } from "../gen/Unit";
-import { language, t } from "./i18n";
+import { language, locale, t } from "./i18n";
 
 // Every number here reads as culprit_core::format writes it in findings and briefs, so a value reads the same on
 // every surface. `bun run test` compares them on the cases Rust writes to gen/format-cases.json (format.test.ts).
@@ -23,22 +23,9 @@ function roundHalfAway(x: number): number {
   return Math.sign(x) * Math.round(Math.abs(x));
 }
 
-let separators: { language: string; decimal: string; group: string } | null = null;
-
-/** The decimal and thousands separators of the app's language (its catalog's `_meta`), as its `ui.format.number`
- * message writes 1234.5: a message writes a number in the digits of the catalog it comes from. */
-function numberMarks(): { decimal: string; group: string } {
-  const code = language();
-  if (separators?.language !== code) {
-    const parts = /^1(.*)234(.+)5$/.exec(t("ui.format.number", { n: 1234.5 }));
-    separators = { language: code, group: parts?.[1] ?? ",", decimal: parts?.[2] ?? "." };
-  }
-  return separators;
-}
-
 /** Digits written the English way ("1234.5", "1,234.5") in the app's language's separators ("1234,5", "1.234,5"). */
 export function digits(text: string): string {
-  const { decimal, group } = numberMarks();
+  const { decimal, group } = locale();
   if (decimal === "." && group === ",") return text;
   return text.replace(/[.,]/g, (c) => (c === "." ? decimal : group));
 }

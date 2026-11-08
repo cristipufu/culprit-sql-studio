@@ -41,6 +41,11 @@ export function language(): string {
   return current;
 }
 
+/** How the app's language writes numbers and counts: its catalog's `_meta`. */
+export function locale(): Locale {
+  return (catalogs.get(current) ?? ENGLISH)._meta;
+}
+
 /** Show the app in `code` from now on, on this device. */
 export function setLanguage(code: string): void {
   if (!catalogs.has(code) || code === current) return;
@@ -90,7 +95,7 @@ function chosen(): string {
     // No storage: fall through to the system's language.
   }
   const system = typeof navigator === "undefined" ? [] : (navigator.languages ?? [navigator.language]);
-  for (const tag of system) {
+  for (const tag of system.filter((tag): tag is string => typeof tag === "string" && tag.length > 0)) {
     if (catalogs.has(tag)) return tag;
     const base = tag.split("-")[0]!;
     if (catalogs.has(base)) return base;
