@@ -1,9 +1,32 @@
 // Every value in gen/format-cases.json (written by `cargo test -p culprit-core` from culprit_core::format) must read
 // the same here, so a metric in the app says what the finding's prose and brief say.
-import { test } from "bun:test";
+import { expect, test } from "bun:test";
 import cases from "../gen/format-cases.json";
-import { bytes, count, days, duration, percent, percentValue } from "./format";
+import { bytes, count, days, digits, duration, percent, percentValue, rowCount } from "./format";
+import { registerCatalogs, setLanguage } from "./i18n";
 import { fromRust } from "../test/fixtures";
+
+test("format.ts writes digits with the language's separators and units in its words", () => {
+  // The language is chosen from the system's when catalogs register; Bun's navigator names none.
+  Object.defineProperty(navigator, "languages", { value: ["en-US"], configurable: true });
+  registerCatalogs({
+    xx: {
+      _meta: { name: "Test", english_name: "Test", plural: "one_below_2", decimal: ",", group: "." },
+      "ui.format.number": "{n}",
+      "ui.format.days": "{n, plural, one {{count} jour} other {{count} jours}}",
+      "ui.format.count.thousands": "{value} k",
+    },
+  });
+  try {
+    setLanguage("xx");
+    expect([duration(2590), bytes(1536), count(1234), days(1.5), days(12), percentValue(12.345), rowCount(1500), digits("1,234,567.5")])
+      .toEqual(["2,6 s", "1,5 KB", "1,2 k", "1,5 jour", "12 jours", "12,35%", "1,5 k rows", "1.234.567,5"]);
+  } finally {
+    setLanguage("en");
+    Reflect.deleteProperty(navigator, "languages");
+  }
+  expect([duration(2590), count(1234), days(1.5), rowCount(1), digits("1,234,567.5")]).toEqual(["2.6 s", "1.2K", "1.5 days", "1 row", "1,234,567.5"]);
+});
 
 test("format.ts reads every shared case as culprit_core::format does", () => {
   const formatters: Record<string, (value: number) => string> = { duration, bytes, count, percent, percent_value: percentValue, days };

@@ -1,7 +1,9 @@
 import type { Unit } from "../gen/Unit";
+import { language, t } from "./i18n";
 
 // Every number here reads as culprit_core::format writes it in findings and briefs, so a value reads the same on
 // every surface. `bun run test` compares them on the cases Rust writes to gen/format-cases.json (format.test.ts).
+// Digits take the app's language's separators, and units and time words are its messages; English reads as Rust's.
 
 /** `x.toFixed(digits)` rounded as Rust's `format!("{:.N}")` rounds: an exact tie goes to the even digit (2.5 → "2",
  * 0.125 → "0.12", 12.5% → "12%"), where toFixed rounds it up. Exact ties are the values that are an odd number of
@@ -21,35 +23,74 @@ function roundHalfAway(x: number): number {
   return Math.sign(x) * Math.round(Math.abs(x));
 }
 
+let separators: { language: string; decimal: string; group: string } | null = null;
+
+/** The decimal and thousands separators of the app's language (its catalog's `_meta`), as its `ui.format.number`
+ * message writes 1234.5: a message writes a number in the digits of the catalog it comes from. */
+function numberMarks(): { decimal: string; group: string } {
+  const code = language();
+  if (separators?.language !== code) {
+    const parts = /^1(.*)234(.+)5$/.exec(t("ui.format.number", { n: 1234.5 }));
+    separators = { language: code, group: parts?.[1] ?? ",", decimal: parts?.[2] ?? "." };
+  }
+  return separators;
+}
+
+/** Digits written the English way ("1234.5", "1,234.5") in the app's language's separators ("1234,5", "1.234,5"). */
+export function digits(text: string): string {
+  const { decimal, group } = numberMarks();
+  if (decimal === "." && group === ",") return text;
+  return text.replace(/[.,]/g, (c) => (c === "." ? decimal : group));
+}
+
+/** The locale dates and times are written in: the system's own where it speaks the app's language (so en-GB keeps
+ * "7 Oct"), else the app's language. */
+export function dateLocale(): string {
+  const code = language();
+  const base = code.split("-")[0];
+  const system = typeof navigator === "undefined" ? [] : (navigator.languages ?? [navigator.language]);
+  return system.find((tag) => tag && (tag === code || tag.split("-")[0] === base)) ?? code;
+}
+
 export function duration(ms: number | null | undefined): string {
   if (ms == null) return "—";
   const v = Math.max(0, ms);
-  if (v === 0) return "0 ms";
+  if (v === 0) return t("ui.format.duration.ms", { value: "0" });
   // Under a hundredth of a millisecond, "0.00 ms" says nothing: microseconds do.
-  if (v < 0.01) return `${fixed(Math.max(1, v * 1000), 0)} µs`;
-  if (v < 1) return `${fixed(v, 2)} ms`;
+  if (v < 0.01) return t("ui.format.duration.us", { value: digits(fixed(Math.max(1, v * 1000), 0)) });
+  if (v < 1) return t("ui.format.duration.ms", { value: digits(fixed(v, 2)) });
   // A tenth under 10 ms: rounding 2.59 ms to "3 ms" is off by 16%. A whole number reads without its ".0".
   if (v < 9.95) {
     const tenths = fixed(v, 1);
-    return `${tenths.endsWith(".0") ? tenths.slice(0, -2) : tenths} ms`;
+    return t("ui.format.duration.ms", { value: digits(tenths.endsWith(".0") ? tenths.slice(0, -2) : tenths) });
   }
-  if (v < 1000) return `${fixed(v, 0)} ms`;
+  if (v < 1000) return t("ui.format.duration.ms", { value: digits(fixed(v, 0)) });
   const s = v / 1000;
-  if (s < 60) return `${fixed(s, 1)} s`;
+  if (s < 60) return t("ui.format.duration.s", { value: digits(fixed(s, 1)) });
   const m = s / 60;
-  if (m < 60) return `${fixed(m, 0)} min`;
+  if (m < 60) return t("ui.format.duration.min", { value: digits(fixed(m, 0)) });
   const h = m / 60;
   if (h < 48) {
     const whole = Math.floor(h);
     const minutes = roundHalfAway((h - whole) * 60);
-    return minutes >= 1 ? `${whole} h ${minutes} min` : `${whole} h`;
+    return minutes >= 1 ? t("ui.format.duration.h_min", { hours: whole, minutes }) : t("ui.format.duration.h", { hours: whole });
   }
-  return `${fixed(h / 24, 1)} days`;
+  return dayCount(fixed(h / 24, 1));
+}
+
+/** "1 day", "9.5 days", from a number of days in English digits. */
+function dayCount(english: string): string {
+  return t("ui.format.days", { n: Number(english), count: digits(english) });
 }
 
 /** Days counted, never more than were: a tenth under 10 (9.51 days are "9.5", not "10"), whole days from 10 on.
  * Mirrors culprit_core::format::days_counted. */
 export function daysCounted(value: number): string {
+  return digits(countedDays(value));
+}
+
+/** `daysCounted` in English digits. */
+function countedDays(value: number): string {
   // A hair under a whole number from adding hours is that number.
   const d = value + 1e-9;
   if (d < 10) {
@@ -63,21 +104,34 @@ export function daysCounted(value: number): string {
  * "0 days". Mirrors culprit_core::format::days. */
 export function days(value: number): string {
   if (value < 1) return duration(Math.max(0, value) * 86_400_000);
-  const n = daysCounted(value);
-  return n === "1" ? "1 day" : `${n} days`;
+  return dayCount(countedDays(value));
 }
 
 export function bytes(value: number | null | undefined): string {
   if (value == null) return "—";
-  const units = ["B", "KB", "MB", "GB", "TB"];
   let v = Math.max(0, value);
   let unit = 0;
-  while (v >= 1024 && unit < units.length - 1) {
+  while (v >= 1024 && unit < 4) {
     v /= 1024;
     unit++;
   }
-  if (unit === 0 || v >= 100) return `${fixed(v, 0)} ${units[unit]}`;
-  return `${fixed(v, 1)} ${units[unit]}`;
+  return byteSize(unit, digits(unit === 0 || v >= 100 ? fixed(v, 0) : fixed(v, 1)));
+}
+
+/** `value` in the `unit`th of B, KB, MB, GB and TB. */
+function byteSize(unit: number, value: string): string {
+  switch (unit) {
+    case 0:
+      return t("ui.format.bytes.b", { value });
+    case 1:
+      return t("ui.format.bytes.kb", { value });
+    case 2:
+      return t("ui.format.bytes.mb", { value });
+    case 3:
+      return t("ui.format.bytes.gb", { value });
+    default:
+      return t("ui.format.bytes.tb", { value });
+  }
 }
 
 export function count(value: number | null | undefined): string {
@@ -85,33 +139,34 @@ export function count(value: number | null | undefined): string {
   // An empty sum is -0; it reads as nothing, not as a negative.
   const n = value === 0 ? 0 : value;
   const v = Math.abs(n);
-  if (v >= 1e9) return `${fixed(n / 1e9, 1)}B`;
-  if (v >= 1e6) return `${fixed(n / 1e6, 1)}M`;
-  if (v >= 1e4) return `${fixed(n / 1e3, 0)}K`;
-  if (v >= 1e3) return `${fixed(n / 1e3, 1)}K`;
-  if (v >= 100 || Number.isInteger(n)) return fixed(n, 0);
-  return fixed(n, 1);
+  if (v >= 1e9) return t("ui.format.count.billions", { value: digits(fixed(n / 1e9, 1)) });
+  if (v >= 1e6) return t("ui.format.count.millions", { value: digits(fixed(n / 1e6, 1)) });
+  if (v >= 1e4) return t("ui.format.count.thousands", { value: digits(fixed(n / 1e3, 0)) });
+  if (v >= 1e3) return t("ui.format.count.thousands", { value: digits(fixed(n / 1e3, 1)) });
+  if (v >= 100 || Number.isInteger(n)) return digits(fixed(n, 0));
+  return digits(fixed(n, 1));
 }
 
 /** "1 row", "12 rows", "1.2K rows"; "— rows" when unknown. */
 export function rowCount(value: number | null | undefined): string {
-  const n = count(value);
-  return `${n} ${n === "1" ? "row" : "rows"}`;
+  return t("ui.format.row_count", { n: value ?? Number.NaN, count: count(value) });
 }
 
 export function percent(ratio: number | null | undefined): string {
   if (ratio == null) return "—";
   const p = ratio * 100;
-  if (p > 0 && p < 1) return "<1%";
-  return `${fixed(p, 0)}%`;
+  if (p > 0 && p < 1) return t("ui.format.percent.under", { value: digits("1") });
+  return t("ui.format.percent.value", { value: digits(fixed(p, 0)) });
 }
 
 /** A measured percentage on a 0–100 scale. Mirrors culprit_core::format::percent_value. */
 export function percentValue(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  if (value === 0) return "0%";
-  if (Math.abs(value) < 0.01) return value > 0 ? "<0.01%" : ">-0.01%";
-  return `${fixed(value, 2).replace(/0+$/, "").replace(/\.$/, "")}%`;
+  if (value === 0) return t("ui.format.percent.value", { value: "0" });
+  if (Math.abs(value) < 0.01) {
+    return value > 0 ? t("ui.format.percent.under", { value: digits("0.01") }) : t("ui.format.percent.over", { value: digits("-0.01") });
+  }
+  return t("ui.format.percent.value", { value: digits(fixed(value, 2).replace(/0+$/, "").replace(/\.$/, "")) });
 }
 
 /** A total wait to the second under an hour: "1 min 29 s", where `duration` would round 88,960 ms down to "1 min" next to
@@ -121,7 +176,7 @@ export function totalWait(ms: number): string {
   if (seconds < 60 || seconds >= 3600) return duration(ms);
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
-  return rest === 0 ? `${minutes} min` : `${minutes} min ${rest} s`;
+  return rest === 0 ? t("ui.format.duration.min", { value: String(minutes) }) : t("ui.format.duration.min_s", { minutes, seconds: rest });
 }
 
 /** Metrics that total a wait, said to the second as their findings' titles say them. Mirrors
@@ -151,14 +206,15 @@ export function metric(value: number, unit: Unit, text?: string | null): string 
 }
 
 export function ago(iso: string | null | undefined, now = Date.now()): string {
-  if (!iso) return "never";
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return iso;
-  const s = Math.max(0, (now - t) / 1000);
-  if (s < 45) return "just now";
-  if (s < 3600) return `${Math.round(s / 60)} min ago`;
-  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
-  return `${Math.round(s / 86400)} days ago`;
+  if (!iso) return t("ui.format.ago.never");
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return iso;
+  const s = Math.max(0, (now - at) / 1000);
+  if (s < 45) return t("ui.format.ago.just_now");
+  if (s < 3600) return t("ui.format.ago.minutes", { n: Math.round(s / 60) });
+  if (s < 86400) return t("ui.format.ago.hours", { n: Math.round(s / 3600) });
+  const n = Math.round(s / 86400);
+  return t("ui.format.ago.days", { n, count: String(n) });
 }
 
 /** A moment as people say it: "today 12:13", "yesterday 09:02", "Oct 7, 12:13", "Oct 7, 2025". `full` is for tooltips. */
@@ -166,25 +222,43 @@ export function when(iso: string | null | undefined, now = new Date()): { short:
   if (!iso) return { short: "", full: "" };
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return { short: iso, full: iso };
-  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const locale = dateLocale();
+  const time = d.toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" });
   const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const days = Math.round((day(now) - day(d)) / 86_400_000);
   const short =
     days === 0
-      ? `today ${time}`
+      ? t("ui.format.when.today", { time })
       : days === 1
-        ? `yesterday ${time}`
+        ? t("ui.format.when.yesterday", { time })
         : d.getFullYear() === now.getFullYear()
-          ? `${d.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`
-          : d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
-  return { short, full: d.toLocaleString([], { dateStyle: "full", timeStyle: "short" }) };
+          ? t("ui.format.when.this_year", { date: d.toLocaleDateString(locale, { month: "short", day: "numeric" }), time })
+          : d.toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric" });
+  return { short, full: d.toLocaleString(locale, { dateStyle: "full", timeStyle: "short" }) };
 }
 
+/** A period's length in the unit it reads best in, rounded. */
+function periodLength(hours: number): { unit: "day" | "hour" | "minute"; args: { n: number; count: string } } {
+  const [unit, n] = hours >= 47 ? (["day", Math.round(hours / 24)] as const)
+    : hours >= 1.5 ? (["hour", Math.round(hours)] as const)
+    : (["minute", Math.max(1, Math.round(hours * 60))] as const);
+  return { unit, args: { n, count: String(n) } };
+}
+
+/** A recent period by its length: "last 7 days", "last 5 hours", "last 35 minutes". */
 export function windowLabel(hours: number): string {
-  const unit = (n: number, word: string) => `last ${n} ${word}${n === 1 ? "" : "s"}`;
-  if (hours >= 47) return unit(Math.round(hours / 24), "day");
-  if (hours >= 1.5) return unit(Math.round(hours), "hour");
-  return unit(Math.max(1, Math.round(hours * 60)), "minute");
+  const { unit, args } = periodLength(hours);
+  if (unit === "day") return t("ui.format.window.days", args);
+  if (unit === "hour") return t("ui.format.window.hours", args);
+  return t("ui.format.window.minutes", args);
+}
+
+/** How long a period is, rounded as `windowLabel` rounds it: "7 days", "5 hours", "35 minutes". */
+export function windowSpan(hours: number): string {
+  const { unit, args } = periodLength(hours);
+  if (unit === "day") return t("ui.format.span.days", args);
+  if (unit === "hour") return t("ui.format.span.hours", args);
+  return t("ui.format.span.minutes", args);
 }
 
 export function oneLine(sql: string): string {
