@@ -237,7 +237,7 @@ mod window_tests {
         let mut cached = snapshot.clone();
         cached.workload.as_mut().unwrap().hourly_time_ms = Some(1_000.0);
         assert_eq!(
-            summarize(&cached, &[active.clone()]).headline,
+            summarize(&cached, std::slice::from_ref(&active)).headline,
             "1 opportunity. The top ones touch 54% of database time over the last 5 hours."
         );
         let mut none = snapshot.clone();
@@ -246,6 +246,6 @@ mod window_tests {
             summarize(&none, &[]).headline,
             "Nothing stands out in the tables, indexes and settings; this scan has no query history."
         );
-        assert_eq!(summarize(&none, &[active.clone()]).headline, "1 opportunity.");
+        assert_eq!(summarize(&none, std::slice::from_ref(&active)).headline, "1 opportunity.");
     }
 }
