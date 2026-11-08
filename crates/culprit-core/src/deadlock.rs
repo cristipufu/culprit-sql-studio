@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::model::Engine;
+use crate::{format, t};
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Default)]
 #[ts(export)]
@@ -70,14 +71,14 @@ pub enum DeadlockPattern {
 }
 
 impl DeadlockPattern {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            DeadlockPattern::KeyLookup => "key-lookup deadlock",
-            DeadlockPattern::LockConversion => "read-then-update",
-            DeadlockPattern::OppositeOrder => "opposite access order",
-            DeadlockPattern::LockEscalation => "lock escalation",
-            DeadlockPattern::Parallelism => "intra-query parallelism",
-            DeadlockPattern::Cycle => "lock cycle",
+            DeadlockPattern::KeyLookup => t!("core.deadlock.pattern.key_lookup"),
+            DeadlockPattern::LockConversion => t!("core.deadlock.pattern.lock_conversion"),
+            DeadlockPattern::OppositeOrder => t!("core.deadlock.pattern.opposite_order"),
+            DeadlockPattern::LockEscalation => t!("core.deadlock.pattern.lock_escalation"),
+            DeadlockPattern::Parallelism => t!("core.deadlock.pattern.parallelism"),
+            DeadlockPattern::Cycle => t!("core.deadlock.pattern.cycle"),
         }
     }
 }
@@ -158,10 +159,13 @@ impl Deadlock {
         self.processes.iter().find(|p| p.victim)
     }
 
-    fn label(&self, process: &str) -> String {
-        match self.processes.iter().find(|p| p.id == process).and_then(|p| p.session.clone()) {
-            Some(session) => format!("session {session}"),
-            None => format!("process {process}"),
+    /// "session 61", or "process p1" without a session; `opening` at the start of a sentence ("Session 61").
+    fn label(&self, process: &str, opening: bool) -> String {
+        match (self.processes.iter().find(|p| p.id == process).and_then(|p| p.session.clone()), opening) {
+            (Some(session), false) => t!("core.deadlock.participant.session", id = session),
+            (Some(session), true) => t!("core.deadlock.participant.session_opening", id = session),
+            (None, false) => t!("core.deadlock.participant.process", id = process),
+            (None, true) => t!("core.deadlock.participant.process_opening", id = process),
         }
     }
 }
@@ -227,13 +231,8 @@ pub fn classify(engine: Engine, deadlock: &mut Deadlock) {
         DeadlockPattern::Cycle
     };
 
-    let victim = d.victim().map(|v| d.label(&v.id));
-    let rolled_back = victim.as_ref().map(|v| format!("; {v}'s transaction was rolled back")).unwrap_or_default();
-    let tables = match objects.len() {
-        0 => "the same data".to_string(),
-        1 => objects[0].clone(),
-        _ => format!("{} and {}", objects[..objects.len() - 1].join(", "), objects[objects.len() - 1]),
-    };
+    let victim = d.victim().map(|v| d.label(&v.id, false));
+    let tables = if objects.is_empty() { t!("core.deadlock.tables.unknown") } else { format::list(&objects) };
     let (lookup_object, lookup_indexes) = indexes_per_object
         .iter()
         .find(|(_, ixs)| ixs.len() >= 2)
@@ -247,86 +246,76 @@ pub fn classify(engine: Engine, deadlock: &mut Deadlock) {
         })
         .cloned();
 
-    let headline = match pattern {
-        DeadlockPattern::KeyLookup => format!(
-            "Key-lookup deadlock on {lookup_object}: a read through {} and a write to the same rows took their locks in opposite order{rolled_back}.",
-            secondary.as_deref().unwrap_or("a secondary index")
-        ),
-        DeadlockPattern::LockConversion => {
-            format!("Two transactions read the same rows of {tables}, then both tried to change them{rolled_back}.")
+    let n = d.processes.len().max(2);
+    let headline = match (pattern, victim) {
+        (DeadlockPattern::KeyLookup, None) => match &secondary {
+            Some(index) => t!("core.deadlock.headline.key_lookup", table = &lookup_object, index = index),
+            None => t!("core.deadlock.headline.key_lookup_unnamed", table = &lookup_object),
+        },
+        (DeadlockPattern::KeyLookup, Some(victim)) => match &secondary {
+            Some(index) => {
+                t!("core.deadlock.headline.key_lookup_victim", table = &lookup_object, index = index, victim = victim)
+            }
+            None => t!("core.deadlock.headline.key_lookup_unnamed_victim", table = &lookup_object, victim = victim),
+        },
+        (DeadlockPattern::LockConversion, None) => t!("core.deadlock.headline.lock_conversion", tables = &tables),
+        (DeadlockPattern::LockConversion, Some(victim)) => {
+            t!("core.deadlock.headline.lock_conversion_victim", tables = &tables, victim = victim)
         }
-        DeadlockPattern::OppositeOrder => {
-            format!("Two transactions locked {tables} in opposite order and waited on each other{rolled_back}.")
+        (DeadlockPattern::OppositeOrder, None) => t!("core.deadlock.headline.opposite_order", tables = &tables),
+        (DeadlockPattern::OppositeOrder, Some(victim)) => {
+            t!("core.deadlock.headline.opposite_order_victim", tables = &tables, victim = victim)
         }
-        DeadlockPattern::LockEscalation => {
-            format!("A table-wide lock on {tables} (lock escalation) collided with another transaction{rolled_back}.")
+        (DeadlockPattern::LockEscalation, None) => t!("core.deadlock.headline.lock_escalation", tables = &tables),
+        (DeadlockPattern::LockEscalation, Some(victim)) => {
+            t!("core.deadlock.headline.lock_escalation_victim", tables = &tables, victim = victim)
         }
-        DeadlockPattern::Parallelism => {
-            "A parallel query deadlocked with its own threads; SQL Server broke the cycle, but the query lost time."
-                .to_string()
+        (DeadlockPattern::Parallelism, _) => t!("core.deadlock.headline.parallelism"),
+        (DeadlockPattern::Cycle, None) => {
+            t!("core.deadlock.headline.cycle", n = n, count = n.to_string(), tables = &tables)
         }
-        DeadlockPattern::Cycle => format!(
-            "{} transactions waited on each other in a cycle on {tables}{rolled_back}.",
-            d.processes.len().max(2)
-        ),
+        (DeadlockPattern::Cycle, Some(victim)) => {
+            t!("core.deadlock.headline.cycle_victim", n = n, count = n.to_string(), tables = &tables, victim = victim)
+        }
     };
 
     let explanation = match pattern {
-        DeadlockPattern::KeyLookup => format!(
-            "The read finds rows through {} and then looks each one up in the table's main index; the write changes the \
-             main index first and then {}. Each ends up holding the lock the other needs next. It recurs whenever the two \
-             statements touch the same rows at the same time.",
-            secondary.as_deref().unwrap_or("a secondary index"),
-            secondary.as_deref().unwrap_or("the secondary index")
-        ),
-        DeadlockPattern::LockConversion => "Both took a shared lock to read, then asked for an exclusive lock to write. A \
-             shared lock lets the other reader in, so neither can upgrade: whoever asks second deadlocks. Typical of \
-             'read, check, then update' code."
-            .to_string(),
-        DeadlockPattern::OppositeOrder => match who_held_what(d).or_else(|| who_ran_what(d)) {
-            Some(story) => format!("{story}. With the same order in both, the second would simply wait instead of deadlocking."),
-            None => "Each transaction locked one thing and then wanted what the other had already locked. With the same \
-                     order in both, the second would simply wait instead of deadlocking."
-                .to_string(),
+        DeadlockPattern::KeyLookup => match &secondary {
+            Some(index) => t!("core.deadlock.explanation.key_lookup", index = index),
+            None => t!("core.deadlock.explanation.key_lookup_unnamed"),
         },
-        DeadlockPattern::LockEscalation => "SQL Server turned thousands of row locks into one lock on the whole table to save \
-             memory. That table lock blocks everyone touching the table, so an otherwise harmless overlap became a cycle."
-            .to_string(),
-        DeadlockPattern::Parallelism => "Threads of the same parallel plan exchange rows and waited on each other. These are \
-             usually a symptom of a plan that goes parallel when it shouldn't (a scan that an index would avoid)."
-            .to_string(),
-        DeadlockPattern::Cycle => "Each transaction holds a lock the next one needs. Consistent access order and shorter \
-             transactions break most cycles."
-            .to_string(),
+        DeadlockPattern::LockConversion => t!("core.deadlock.explanation.lock_conversion"),
+        DeadlockPattern::OppositeOrder => match who_held_what(d).or_else(|| who_ran_what(d)) {
+            Some(story) => t!("core.deadlock.explanation.opposite_order_story", story = story),
+            None => t!("core.deadlock.explanation.opposite_order"),
+        },
+        DeadlockPattern::LockEscalation => t!("core.deadlock.explanation.lock_escalation"),
+        DeadlockPattern::Parallelism => t!("core.deadlock.explanation.parallelism"),
+        DeadlockPattern::Cycle => t!("core.deadlock.explanation.cycle"),
     };
 
     let mut fixes = match (pattern, engine) {
         (DeadlockPattern::KeyLookup, Engine::Mssql) => vec![
             DeadlockFix {
-                title: "Make the read skip the lookup".into(),
-                detail: format!(
-                    "Add the columns the read needs to {} (as INCLUDE columns) so it never touches the main index the \
-                     write locks. The query's plan in Queries shows the Key Lookup and its output columns.",
-                    secondary.as_deref().unwrap_or("the index it seeks")
-                ),
+                title: t!("core.deadlock.fix.skip_lookup.title"),
+                detail: match &secondary {
+                    Some(index) => t!("core.deadlock.fix.skip_lookup.detail", index = index),
+                    None => t!("core.deadlock.fix.skip_lookup.detail_unnamed"),
+                },
                 sql: None,
                 finding: None,
             },
             rcsi(d),
         ],
         (DeadlockPattern::KeyLookup, _) => vec![DeadlockFix {
-            title: "Change rows through the primary key".into(),
-            detail: "Look up the primary key values first, then update or lock by primary key, so both statements lock the \
-                     main index in the same order."
-                .into(),
+            title: t!("core.deadlock.fix.primary_key.title"),
+            detail: t!("core.deadlock.fix.primary_key.detail"),
             sql: None,
             finding: None,
         }],
         (DeadlockPattern::LockConversion, engine) => vec![DeadlockFix {
-            title: "Take the write lock when you read".into(),
-            detail: "Read the rows you are about to change with an update lock, or do the check and the change in one \
-                     UPDATE … WHERE statement."
-                .into(),
+            title: t!("core.deadlock.fix.write_lock.title"),
+            detail: t!("core.deadlock.fix.write_lock.detail"),
             sql: Some(match engine {
                 Engine::Mssql => "SELECT … FROM … WITH (UPDLOCK, ROWLOCK) WHERE …;".into(),
                 _ => "SELECT … FROM … WHERE … FOR UPDATE;".into(),
@@ -335,55 +324,40 @@ pub fn classify(engine: Engine, deadlock: &mut Deadlock) {
         }],
         (DeadlockPattern::OppositeOrder | DeadlockPattern::Cycle, _) => vec![
             DeadlockFix {
-                title: "Touch tables and rows in the same order everywhere".into(),
-                detail: format!(
-                    "Make every code path that changes {tables} do it in one order (for example, always the parent row \
-                     first, and rows sorted by key). Then the second transaction waits instead of deadlocking."
-                ),
+                title: t!("core.deadlock.fix.same_order.title"),
+                detail: t!("core.deadlock.fix.same_order.detail", tables = &tables),
                 sql: None,
                 finding: None,
             },
             DeadlockFix {
-                title: "Keep transactions short".into(),
-                detail: "Do reads, validation and outside calls before the transaction starts; hold locks only for the \
-                         writes."
-                    .into(),
+                title: t!("core.deadlock.fix.short_transactions.title"),
+                detail: t!("core.deadlock.fix.short_transactions.detail"),
                 sql: None,
                 finding: None,
             },
         ],
         (DeadlockPattern::LockEscalation, _) => vec![DeadlockFix {
-            title: "Change fewer rows per statement".into(),
-            detail: "Modify in batches (for example 2,000 rows at a time) and index the WHERE columns, so SQL Server keeps row \
-                     locks instead of locking the whole table."
-                .into(),
+            title: t!("core.deadlock.fix.fewer_rows.title"),
+            detail: t!("core.deadlock.fix.fewer_rows.detail"),
             sql: None,
             finding: None,
         }],
         (DeadlockPattern::Parallelism, _) => vec![DeadlockFix {
-            title: "Fix the plan that goes parallel".into(),
-            detail: "Find the query in Queries: usually a scan an index would avoid. As a stopgap, OPTION (MAXDOP 1) on that \
-                     query, or raise cost threshold for parallelism if it is still 5."
-                .into(),
+            title: t!("core.deadlock.fix.parallel_plan.title"),
+            detail: t!("core.deadlock.fix.parallel_plan.detail"),
             sql: None,
             finding: Some("config:cost-threshold-for-parallelism".into()),
         }],
     };
     if pattern != DeadlockPattern::Parallelism {
-        fixes.push(DeadlockFix {
-            title: "Retry the victim".into(),
-            detail: format!(
-                "A deadlock victim can be retried safely; the application should catch {} and run the transaction again.",
-                match engine {
-                    Engine::Mssql => "error 1205",
-                    Engine::Postgres | Engine::Yugabyte => "SQLSTATE 40P01",
-                    Engine::Mysql => "error 1213",
-                    Engine::Sqlite => "SQLITE_BUSY",
-                }
-            ),
-            sql: None,
-            finding: None,
-        });
+        // What the application catches: the engine's error number, or the code it reports a deadlock with.
+        let detail = match engine {
+            Engine::Mssql => t!("core.deadlock.fix.retry.detail_error", error = "1205"),
+            Engine::Mysql => t!("core.deadlock.fix.retry.detail_error", error = "1213"),
+            Engine::Postgres | Engine::Yugabyte => t!("core.deadlock.fix.retry.detail_code", code = "SQLSTATE 40P01"),
+            Engine::Sqlite => t!("core.deadlock.fix.retry.detail_code", code = "SQLITE_BUSY"),
+        };
+        fixes.push(DeadlockFix { title: t!("core.deadlock.fix.retry.title"), detail, sql: None, finding: None });
     }
 
     deadlock.pattern = pattern;
@@ -399,31 +373,37 @@ fn who_held_what(d: &Deadlock) -> Option<String> {
     if d.resources.iter().any(|r| r.object.is_none()) {
         return None;
     }
-    let thing = |r: &DeadlockResource| -> String {
+    // What a lock is on: the table, and the index when the table has more than one locked resource.
+    let thing = |r: &DeadlockResource| -> (Option<String>, Option<String>) {
         match (&r.object, &r.index) {
             (Some(o), Some(i)) if d.resources.iter().filter(|x| x.object.as_ref() == Some(o)).count() > 1 => {
-                format!("a row of {o} ({i})")
+                (Some(o.clone()), Some(i.clone()))
             }
-            (Some(o), _) => o.clone(),
-            (None, _) => r.kind.clone(),
+            (object, _) => (object.clone(), None),
         }
+    };
+    let words = |(object, index): (Option<String>, Option<String>), r: &DeadlockResource| match (object, index) {
+        (Some(table), Some(index)) => t!("core.deadlock.story.row_of", table = table, index = index),
+        (Some(table), None) => table,
+        (None, _) => r.kind.clone(),
     };
     let mut parts = Vec::new();
     for p in &d.processes {
         let held = d.resources.iter().find(|r| r.holders.iter().any(|h| h.process == p.id))?;
         let wanted = d.resources.iter().find(|r| r.waiters.iter().any(|h| h.process == p.id))?;
-        let held = thing(held);
-        let wanted = thing(wanted);
-        if held == wanted {
+        if thing(held) == thing(wanted) {
             return None;
         }
-        parts.push(format!("{} held {held} and wanted {wanted}", d.label(&p.id)));
+        parts.push(t!(
+            "core.deadlock.story.held",
+            who = d.label(&p.id, parts.is_empty()),
+            held = words(thing(held), held),
+            wanted = words(thing(wanted), wanted)
+        ));
     }
-    let mut story = parts.join("; ");
-    if let Some(first) = story.get_mut(0..1) {
-        first.make_ascii_uppercase();
-    }
-    (!story.is_empty()).then_some(story)
+    // "Session 61 held …; session 64 held …".
+    let last = parts.pop()?;
+    Some(parts.into_iter().rev().fold(last, |rest, first| t!("core.deadlock.story.then", first = first, rest = rest)))
 }
 
 /// "Each transaction had already changed rows the other one wanted next: session 539 was running “UPDATE customers …”
@@ -435,23 +415,20 @@ fn who_ran_what(d: &Deadlock) -> Option<String> {
     };
     let [a, b] = d.processes.as_slice() else { return None };
     let (sa, sb) = (a.statement.as_deref()?, b.statement.as_deref()?);
-    Some(format!(
-        "Each transaction had already changed rows the other one wanted next: {} was running “{}” and {} “{}”",
-        d.label(&a.id),
-        clip(sa),
-        d.label(&b.id),
-        clip(sb)
+    Some(t!(
+        "core.deadlock.story.ran",
+        first = d.label(&a.id, false),
+        first_sql = clip(sa),
+        second = d.label(&b.id, false),
+        second_sql = clip(sb)
     ))
 }
 
 fn rcsi(d: &Deadlock) -> DeadlockFix {
     let database = d.processes.iter().find_map(|p| p.database.clone());
     DeadlockFix {
-        title: "Let reads stop taking shared locks".into(),
-        detail:
-            "With READ_COMMITTED_SNAPSHOT on, reads use row versions instead of shared locks, so a read can't be part \
-                 of this cycle. It costs some tempdb space for the versions."
-                .into(),
+        title: t!("core.deadlock.fix.rcsi.title"),
+        detail: t!("core.deadlock.fix.rcsi.detail"),
         sql: database.map(|db| {
             format!(
                 "ALTER DATABASE [{}] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;",
@@ -549,6 +526,339 @@ mod tests {
         );
         classify(Engine::Mssql, &mut p);
         assert_eq!(p.pattern, DeadlockPattern::Parallelism);
+    }
+
+    /// Every pattern, with and without a victim, a session or tables, as each engine words it.
+    fn every_case() -> Vec<(&'static str, Deadlock)> {
+        let held = |kind: &str, object: Option<&str>, index: Option<&str>, holder: &str, waiter: &str| DeadlockResource {
+            id: format!("{kind}{object:?}{index:?}{holder}"),
+            kind: kind.into(),
+            object: object.map(str::to_string),
+            index: index.map(str::to_string),
+            holders: vec![LockHolder { process: holder.into(), mode: Some("X".into()) }],
+            waiters: vec![LockHolder { process: waiter.into(), mode: Some("X".into()) }],
+        };
+        let two = |victim: bool| vec![process("p1", "61", victim), process("p2", "64", false)];
+        let mut cases = vec![
+            (
+                "key lookup",
+                Deadlock::new(
+                    "pasted",
+                    None,
+                    two(true),
+                    vec![
+                        held("keylock", Some("shop.customers"), Some("ix_email"), "p1", "p2"),
+                        held("keylock", Some("shop.customers"), Some("PK_customers"), "p2", "p1"),
+                    ],
+                ),
+            ),
+            (
+                "key lookup, no secondary named, no victim",
+                Deadlock::new(
+                    "pasted",
+                    None,
+                    two(false),
+                    vec![
+                        held("keylock", Some("shop.customers"), Some("PK_customers"), "p1", "p2"),
+                        held("keylock", Some("shop.customers"), Some("ix_clustered"), "p2", "p1"),
+                    ],
+                ),
+            ),
+            (
+                "conversion",
+                Deadlock::new(
+                    "pasted",
+                    None,
+                    two(true),
+                    vec![DeadlockResource {
+                        id: "r".into(),
+                        kind: "keylock".into(),
+                        object: Some("shop.orders".into()),
+                        index: Some("PK_orders".into()),
+                        holders: vec![
+                            LockHolder { process: "p1".into(), mode: Some("S".into()) },
+                            LockHolder { process: "p2".into(), mode: Some("S".into()) },
+                        ],
+                        waiters: vec![
+                            LockHolder { process: "p1".into(), mode: Some("X".into()) },
+                            LockHolder { process: "p2".into(), mode: Some("X".into()) },
+                        ],
+                    }],
+                ),
+            ),
+            (
+                "opposite order, who held what",
+                Deadlock::new(
+                    "pasted",
+                    None,
+                    two(true),
+                    vec![
+                        held("keylock", Some("shop.orders"), Some("PK_orders"), "p1", "p2"),
+                        held("keylock", Some("shop.customers"), Some("PK_customers"), "p2", "p1"),
+                    ],
+                ),
+            ),
+            (
+                "opposite order, rows of one table",
+                Deadlock::new(
+                    "pasted",
+                    None,
+                    vec![
+                        DeadlockProcess { session: None, ..process("p1", "", true) },
+                        DeadlockProcess { session: None, ..process("p2", "", false) },
+                    ],
+                    vec![
+                        held("metadata", Some("shop.orders"), Some("ix_a"), "p1", "p2"),
+                        held("metadata", Some("shop.orders"), Some("ix_b"), "p2", "p1"),
+                    ],
+                ),
+            ),
+            (
+                "opposite order, who ran what",
+                Deadlock::new(
+                    "pasted",
+                    None,
+                    vec![
+                        DeadlockProcess {
+                            statement: Some("UPDATE customers SET name = $1 WHERE id = $2".into()),
+                            ..process("p1", "539", true)
+                        },
+                        DeadlockProcess {
+                            statement: Some(format!("UPDATE orders SET note = '{}' WHERE id = $1", "x".repeat(80))),
+                            ..process("p2", "545", false)
+                        },
+                    ],
+                    vec![held("transaction", None, None, "p1", "p2"), held("transaction", None, None, "p2", "p1")],
+                ),
+            ),
+            (
+                "opposite order, nothing named",
+                Deadlock::new(
+                    "pasted",
+                    None,
+                    two(false),
+                    vec![held("transaction", None, None, "p1", "p2"), held("transaction", None, None, "p2", "p1")],
+                ),
+            ),
+            (
+                "escalation",
+                Deadlock::new(
+                    "pasted",
+                    None,
+                    two(true),
+                    vec![held("objectlock", Some("shop.orders"), None, "p1", "p2")],
+                ),
+            ),
+            (
+                "parallelism",
+                Deadlock::new(
+                    "pasted",
+                    None,
+                    vec![process("p1", "70", false), process("p2", "70", false)],
+                    vec![DeadlockResource { id: "e".into(), kind: "exchangeEvent".into(), ..Default::default() }],
+                ),
+            ),
+            (
+                "cycle of three on three tables",
+                Deadlock::new(
+                    "pasted",
+                    None,
+                    vec![process("p1", "61", true), process("p2", "64", false), process("p3", "66", false)],
+                    vec![held("keylock", Some("shop.a"), Some("PK_a"), "p1", "p2")],
+                ),
+            ),
+        ];
+        let mut three = cases.last().unwrap().1.clone();
+        three.resources[0].object = None;
+        three.processes[0].victim = false;
+        cases.push(("cycle, nothing named", three));
+        let tables = Deadlock::new(
+            "pasted",
+            None,
+            vec![
+                process("p1", "61", true),
+                DeadlockProcess { session: None, ..process("p2", "", false) },
+                process("p3", "66", false),
+            ],
+            vec![
+                held("keylock", Some("shop.a"), Some("PK_a"), "p1", "p2"),
+                held("keylock", Some("shop.b"), Some("PK_b"), "p2", "p3"),
+                held("keylock", Some("shop.c"), Some("PK_c"), "p3", "p1"),
+            ],
+        );
+        cases.push(("three tables, a process with no session", tables));
+        cases
+    }
+
+    // What a deadlock says, word for word, for every pattern on every engine: its messages come from locales/en.json.
+    #[test]
+    fn every_pattern_says_what_happened_in_english() {
+        let mut out = Vec::new();
+        for pattern in [
+            DeadlockPattern::KeyLookup,
+            DeadlockPattern::LockConversion,
+            DeadlockPattern::OppositeOrder,
+            DeadlockPattern::LockEscalation,
+            DeadlockPattern::Parallelism,
+            DeadlockPattern::Cycle,
+        ] {
+            out.push(format!("{pattern:?}: {}", pattern.label()));
+        }
+        for engine in Engine::ALL {
+            // Every pattern on SQL Server; elsewhere the cases whose fixes are the engine's own.
+            for (name, case) in every_case()
+                .into_iter()
+                .filter(|(name, _)| engine == Engine::Mssql || matches!(*name, "key lookup" | "conversion"))
+            {
+                let mut d = case.clone();
+                classify(engine, &mut d);
+                out.push(format!("\n## {engine:?} {name}: {:?}\n{}\n{}", d.pattern, d.headline, d.explanation));
+                for fix in &d.fixes {
+                    out.push(format!(
+                        "- {} | {} | {} | {}",
+                        fix.title,
+                        fix.detail,
+                        fix.sql.as_deref().unwrap_or("-"),
+                        fix.finding.as_deref().unwrap_or("-")
+                    ));
+                }
+            }
+        }
+        let got = out.join("\n");
+        assert_eq!(got, r#"KeyLookup: key-lookup deadlock
+LockConversion: read-then-update
+OppositeOrder: opposite access order
+LockEscalation: lock escalation
+Parallelism: intra-query parallelism
+Cycle: lock cycle
+
+## Mssql key lookup: KeyLookup
+Key-lookup deadlock on shop.customers: a read through ix_email and a write to the same rows took their locks in opposite order; session 61's transaction was rolled back.
+The read finds rows through ix_email and then looks each one up in the table's main index; the write changes the main index first and then ix_email. Each ends up holding the lock the other needs next. It recurs whenever the two statements touch the same rows at the same time.
+- Make the read skip the lookup | Add the columns the read needs to ix_email (as INCLUDE columns) so it never touches the main index the write locks. The query's plan in Queries shows the Key Lookup and its output columns. | - | -
+- Let reads stop taking shared locks | With READ_COMMITTED_SNAPSHOT on, reads use row versions instead of shared locks, so a read can't be part of this cycle. It costs some tempdb space for the versions. | ALTER DATABASE [shop] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE; | config:read-committed-snapshot
+- Retry the victim | A deadlock victim can be retried safely; the application should catch error 1205 and run the transaction again. | - | -
+
+## Mssql key lookup, no secondary named, no victim: KeyLookup
+Key-lookup deadlock on shop.customers: a read through a secondary index and a write to the same rows took their locks in opposite order.
+The read finds rows through a secondary index and then looks each one up in the table's main index; the write changes the main index first and then the secondary index. Each ends up holding the lock the other needs next. It recurs whenever the two statements touch the same rows at the same time.
+- Make the read skip the lookup | Add the columns the read needs to the index it seeks (as INCLUDE columns) so it never touches the main index the write locks. The query's plan in Queries shows the Key Lookup and its output columns. | - | -
+- Let reads stop taking shared locks | With READ_COMMITTED_SNAPSHOT on, reads use row versions instead of shared locks, so a read can't be part of this cycle. It costs some tempdb space for the versions. | ALTER DATABASE [shop] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE; | config:read-committed-snapshot
+- Retry the victim | A deadlock victim can be retried safely; the application should catch error 1205 and run the transaction again. | - | -
+
+## Mssql conversion: LockConversion
+Two transactions read the same rows of shop.orders, then both tried to change them; session 61's transaction was rolled back.
+Both took a shared lock to read, then asked for an exclusive lock to write. A shared lock lets the other reader in, so neither can upgrade: whoever asks second deadlocks. Typical of 'read, check, then update' code.
+- Take the write lock when you read | Read the rows you are about to change with an update lock, or do the check and the change in one UPDATE … WHERE statement. | SELECT … FROM … WITH (UPDLOCK, ROWLOCK) WHERE …; | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch error 1205 and run the transaction again. | - | -
+
+## Mssql opposite order, who held what: OppositeOrder
+Two transactions locked shop.customers and shop.orders in opposite order and waited on each other; session 61's transaction was rolled back.
+Session 61 held shop.orders and wanted shop.customers; session 64 held shop.customers and wanted shop.orders. With the same order in both, the second would simply wait instead of deadlocking.
+- Touch tables and rows in the same order everywhere | Make every code path that changes shop.customers and shop.orders do it in one order (for example, always the parent row first, and rows sorted by key). Then the second transaction waits instead of deadlocking. | - | -
+- Keep transactions short | Do reads, validation and outside calls before the transaction starts; hold locks only for the writes. | - | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch error 1205 and run the transaction again. | - | -
+
+## Mssql opposite order, rows of one table: OppositeOrder
+Two transactions locked shop.orders in opposite order and waited on each other; process p1's transaction was rolled back.
+Process p1 held a row of shop.orders (ix_a) and wanted a row of shop.orders (ix_b); process p2 held a row of shop.orders (ix_b) and wanted a row of shop.orders (ix_a). With the same order in both, the second would simply wait instead of deadlocking.
+- Touch tables and rows in the same order everywhere | Make every code path that changes shop.orders do it in one order (for example, always the parent row first, and rows sorted by key). Then the second transaction waits instead of deadlocking. | - | -
+- Keep transactions short | Do reads, validation and outside calls before the transaction starts; hold locks only for the writes. | - | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch error 1205 and run the transaction again. | - | -
+
+## Mssql opposite order, who ran what: OppositeOrder
+Two transactions locked the same data in opposite order and waited on each other; session 539's transaction was rolled back.
+Each transaction had already changed rows the other one wanted next: session 539 was running “UPDATE customers SET name = $1 WHERE id = $2” and session 545 “UPDATE orders SET note = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…”. With the same order in both, the second would simply wait instead of deadlocking.
+- Touch tables and rows in the same order everywhere | Make every code path that changes the same data do it in one order (for example, always the parent row first, and rows sorted by key). Then the second transaction waits instead of deadlocking. | - | -
+- Keep transactions short | Do reads, validation and outside calls before the transaction starts; hold locks only for the writes. | - | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch error 1205 and run the transaction again. | - | -
+
+## Mssql opposite order, nothing named: OppositeOrder
+Two transactions locked the same data in opposite order and waited on each other.
+Each transaction locked one thing and then wanted what the other had already locked. With the same order in both, the second would simply wait instead of deadlocking.
+- Touch tables and rows in the same order everywhere | Make every code path that changes the same data do it in one order (for example, always the parent row first, and rows sorted by key). Then the second transaction waits instead of deadlocking. | - | -
+- Keep transactions short | Do reads, validation and outside calls before the transaction starts; hold locks only for the writes. | - | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch error 1205 and run the transaction again. | - | -
+
+## Mssql escalation: LockEscalation
+A table-wide lock on shop.orders (lock escalation) collided with another transaction; session 61's transaction was rolled back.
+SQL Server turned thousands of row locks into one lock on the whole table to save memory. That table lock blocks everyone touching the table, so an otherwise harmless overlap became a cycle.
+- Change fewer rows per statement | Modify in batches (for example 2,000 rows at a time) and index the WHERE columns, so SQL Server keeps row locks instead of locking the whole table. | - | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch error 1205 and run the transaction again. | - | -
+
+## Mssql parallelism: Parallelism
+A parallel query deadlocked with its own threads; SQL Server broke the cycle, but the query lost time.
+Threads of the same parallel plan exchange rows and waited on each other. These are usually a symptom of a plan that goes parallel when it shouldn't (a scan that an index would avoid).
+- Fix the plan that goes parallel | Find the query in Queries: usually a scan an index would avoid. As a stopgap, OPTION (MAXDOP 1) on that query, or raise cost threshold for parallelism if it is still 5. | - | config:cost-threshold-for-parallelism
+
+## Mssql cycle of three on three tables: Cycle
+3 transactions waited on each other in a cycle on shop.a; session 61's transaction was rolled back.
+Each transaction holds a lock the next one needs. Consistent access order and shorter transactions break most cycles.
+- Touch tables and rows in the same order everywhere | Make every code path that changes shop.a do it in one order (for example, always the parent row first, and rows sorted by key). Then the second transaction waits instead of deadlocking. | - | -
+- Keep transactions short | Do reads, validation and outside calls before the transaction starts; hold locks only for the writes. | - | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch error 1205 and run the transaction again. | - | -
+
+## Mssql cycle, nothing named: Cycle
+3 transactions waited on each other in a cycle on the same data.
+Each transaction holds a lock the next one needs. Consistent access order and shorter transactions break most cycles.
+- Touch tables and rows in the same order everywhere | Make every code path that changes the same data do it in one order (for example, always the parent row first, and rows sorted by key). Then the second transaction waits instead of deadlocking. | - | -
+- Keep transactions short | Do reads, validation and outside calls before the transaction starts; hold locks only for the writes. | - | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch error 1205 and run the transaction again. | - | -
+
+## Mssql three tables, a process with no session: OppositeOrder
+Two transactions locked shop.a, shop.b and shop.c in opposite order and waited on each other; session 61's transaction was rolled back.
+Session 61 held shop.a and wanted shop.c; process p2 held shop.b and wanted shop.a; session 66 held shop.c and wanted shop.b. With the same order in both, the second would simply wait instead of deadlocking.
+- Touch tables and rows in the same order everywhere | Make every code path that changes shop.a, shop.b and shop.c do it in one order (for example, always the parent row first, and rows sorted by key). Then the second transaction waits instead of deadlocking. | - | -
+- Keep transactions short | Do reads, validation and outside calls before the transaction starts; hold locks only for the writes. | - | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch error 1205 and run the transaction again. | - | -
+
+## Postgres key lookup: KeyLookup
+Key-lookup deadlock on shop.customers: a read through ix_email and a write to the same rows took their locks in opposite order; session 61's transaction was rolled back.
+The read finds rows through ix_email and then looks each one up in the table's main index; the write changes the main index first and then ix_email. Each ends up holding the lock the other needs next. It recurs whenever the two statements touch the same rows at the same time.
+- Change rows through the primary key | Look up the primary key values first, then update or lock by primary key, so both statements lock the main index in the same order. | - | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch SQLSTATE 40P01 and run the transaction again. | - | -
+
+## Postgres conversion: LockConversion
+Two transactions read the same rows of shop.orders, then both tried to change them; session 61's transaction was rolled back.
+Both took a shared lock to read, then asked for an exclusive lock to write. A shared lock lets the other reader in, so neither can upgrade: whoever asks second deadlocks. Typical of 'read, check, then update' code.
+- Take the write lock when you read | Read the rows you are about to change with an update lock, or do the check and the change in one UPDATE … WHERE statement. | SELECT … FROM … WHERE … FOR UPDATE; | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch SQLSTATE 40P01 and run the transaction again. | - | -
+
+## Yugabyte key lookup: KeyLookup
+Key-lookup deadlock on shop.customers: a read through ix_email and a write to the same rows took their locks in opposite order; session 61's transaction was rolled back.
+The read finds rows through ix_email and then looks each one up in the table's main index; the write changes the main index first and then ix_email. Each ends up holding the lock the other needs next. It recurs whenever the two statements touch the same rows at the same time.
+- Change rows through the primary key | Look up the primary key values first, then update or lock by primary key, so both statements lock the main index in the same order. | - | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch SQLSTATE 40P01 and run the transaction again. | - | -
+
+## Yugabyte conversion: LockConversion
+Two transactions read the same rows of shop.orders, then both tried to change them; session 61's transaction was rolled back.
+Both took a shared lock to read, then asked for an exclusive lock to write. A shared lock lets the other reader in, so neither can upgrade: whoever asks second deadlocks. Typical of 'read, check, then update' code.
+- Take the write lock when you read | Read the rows you are about to change with an update lock, or do the check and the change in one UPDATE … WHERE statement. | SELECT … FROM … WHERE … FOR UPDATE; | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch SQLSTATE 40P01 and run the transaction again. | - | -
+
+## Mysql key lookup: KeyLookup
+Key-lookup deadlock on shop.customers: a read through ix_email and a write to the same rows took their locks in opposite order; session 61's transaction was rolled back.
+The read finds rows through ix_email and then looks each one up in the table's main index; the write changes the main index first and then ix_email. Each ends up holding the lock the other needs next. It recurs whenever the two statements touch the same rows at the same time.
+- Change rows through the primary key | Look up the primary key values first, then update or lock by primary key, so both statements lock the main index in the same order. | - | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch error 1213 and run the transaction again. | - | -
+
+## Mysql conversion: LockConversion
+Two transactions read the same rows of shop.orders, then both tried to change them; session 61's transaction was rolled back.
+Both took a shared lock to read, then asked for an exclusive lock to write. A shared lock lets the other reader in, so neither can upgrade: whoever asks second deadlocks. Typical of 'read, check, then update' code.
+- Take the write lock when you read | Read the rows you are about to change with an update lock, or do the check and the change in one UPDATE … WHERE statement. | SELECT … FROM … WHERE … FOR UPDATE; | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch error 1213 and run the transaction again. | - | -
+
+## Sqlite key lookup: KeyLookup
+Key-lookup deadlock on shop.customers: a read through ix_email and a write to the same rows took their locks in opposite order; session 61's transaction was rolled back.
+The read finds rows through ix_email and then looks each one up in the table's main index; the write changes the main index first and then ix_email. Each ends up holding the lock the other needs next. It recurs whenever the two statements touch the same rows at the same time.
+- Change rows through the primary key | Look up the primary key values first, then update or lock by primary key, so both statements lock the main index in the same order. | - | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch SQLITE_BUSY and run the transaction again. | - | -
+
+## Sqlite conversion: LockConversion
+Two transactions read the same rows of shop.orders, then both tried to change them; session 61's transaction was rolled back.
+Both took a shared lock to read, then asked for an exclusive lock to write. A shared lock lets the other reader in, so neither can upgrade: whoever asks second deadlocks. Typical of 'read, check, then update' code.
+- Take the write lock when you read | Read the rows you are about to change with an update lock, or do the check and the change in one UPDATE … WHERE statement. | SELECT … FROM … WHERE … FOR UPDATE; | -
+- Retry the victim | A deadlock victim can be retried safely; the application should catch SQLITE_BUSY and run the transaction again. | - | -"#);
     }
 
     #[test]

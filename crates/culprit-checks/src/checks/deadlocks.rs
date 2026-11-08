@@ -204,7 +204,7 @@ fn pattern_finding(snapshot: &Snapshot, p: Pattern<'_>) -> Finding {
             "check.deadlocks.title.latest",
             who = who,
             when = latest.at.as_deref().map(crate::queries::when_phrase).unwrap_or_default(),
-            pattern = label,
+            pattern = &label,
             tables = &tables
         )
     } else if dated > 0 {
@@ -221,7 +221,7 @@ fn pattern_finding(snapshot: &Snapshot, p: Pattern<'_>) -> Finding {
                 count = dated.to_string(),
                 window = window,
                 undated = undated.to_string(),
-                pattern = label,
+                pattern = &label,
                 tables = &tables
             )
         } else {
@@ -231,12 +231,12 @@ fn pattern_finding(snapshot: &Snapshot, p: Pattern<'_>) -> Finding {
                 n = dated,
                 count = dated.to_string(),
                 window = window,
-                pattern = label,
+                pattern = &label,
                 tables = &tables
             )
         }
     } else {
-        t!("check.deadlocks.title.undated", who = who, pattern = label, tables = &tables)
+        t!("check.deadlocks.title.undated", who = who, pattern = &label, tables = &tables)
     };
     f.summary = [latest.headline.as_str(), latest.explanation.as_str()].join(" ");
     f.impact.score = base_score(f.severity) + (dated as f64).min(20.0);
@@ -259,7 +259,7 @@ fn pattern_finding(snapshot: &Snapshot, p: Pattern<'_>) -> Finding {
             all as f64,
             Unit::Count,
         ),
-        Metric::text(t!("check.deadlocks.metric.pattern"), label),
+        Metric::text(t!("check.deadlocks.metric.pattern"), &label),
     ];
     if let Some(who) = latest.victim().and_then(victim_text) {
         f.metrics.push(Metric::text(t!("check.deadlocks.metric.rolled_back"), who));
@@ -290,7 +290,7 @@ fn pattern_finding(snapshot: &Snapshot, p: Pattern<'_>) -> Finding {
         // A key-lookup deadlock is a deadlock already: not "key-lookup deadlock deadlocks".
         match pattern {
             DeadlockPattern::KeyLookup => t!("check.deadlocks.verify.no_new_key_lookup", tables = &tables),
-            _ => t!("check.deadlocks.verify.no_new", pattern = label, tables = &tables),
+            _ => t!("check.deadlocks.verify.no_new", pattern = &label, tables = &tables),
         },
         t!("check.deadlocks.verify.graph"),
     ];
