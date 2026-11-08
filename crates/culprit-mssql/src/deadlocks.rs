@@ -167,11 +167,7 @@ pub(crate) async fn recent(client: &mut MsClient, since_hours: f64) -> tiberius:
     report.deadlocks.retain(|d| involves(d, &database));
     report.deadlocks.sort_by(|a, b| b.at.cmp(&a.at));
     report.deadlocks.truncate(READ_LIMIT);
-    let (source, note) = origin(files, ring);
-    report.source = source;
-    if note.is_some() {
-        report.note = note;
-    }
+    (report.source, report.note) = origin(files, ring);
     Ok(report)
 }
 
