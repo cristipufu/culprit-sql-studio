@@ -33,24 +33,9 @@ pub(crate) async fn changes(client: &mut MsClient, since: &str) -> tiberius::Res
         let (created, modified) = (r.str("created"), r.str("modified"));
         let new = created.as_deref().and_then(epoch).filter(|t| *t > since);
         let altered = modified.as_deref().and_then(epoch).filter(|m| new.is_none_or(|c| *m > c + 2.0));
-        let what = match kind.as_str() {
-            "U" => "Table",
-            "V" => "View",
-            "P" => "Procedure",
-            "TR" => "Trigger",
-            _ => "Function",
-        };
         let parent = r.str("parent").map(|p| format!("{}.{p}", r.str("parent_schema").unwrap_or_default()));
         let event = |at: &str, action: EventAction| {
-            let verb = match (action, kind.as_str()) {
-                (EventAction::Created, _) => "was created".to_string(),
-                (_, "U") => "was altered (its columns, constraints or indexes)".to_string(),
-                _ => "was altered".to_string(),
-            };
-            let title = match (&parent, kind.as_str()) {
-                (Some(table), "TR") => format!("{what} {name} on {table} {verb}"),
-                _ => format!("{what} {qualified} {verb}"),
-            };
+            let title = title(&kind, action, &name, &qualified, parent.as_deref());
             let e = ChangeEvent::new(
                 if kind == "U" { EventKind::Table } else { EventKind::Code },
                 EventSource::Database,
@@ -77,4 +62,24 @@ pub(crate) async fn changes(client: &mut MsClient, since: &str) -> tiberius::Res
         }
     }
     Ok(out)
+}
+
+/// How a change to an object reads: `kind` is its sys.objects type, `parent` the table a trigger is on.
+pub(crate) fn title(kind: &str, action: EventAction, name: &str, qualified: &str, parent: Option<&str>) -> String {
+    let what = match kind {
+        "U" => "Table",
+        "V" => "View",
+        "P" => "Procedure",
+        "TR" => "Trigger",
+        _ => "Function",
+    };
+    let verb = match (action, kind) {
+        (EventAction::Created, _) => "was created".to_string(),
+        (_, "U") => "was altered (its columns, constraints or indexes)".to_string(),
+        _ => "was altered".to_string(),
+    };
+    match (parent, kind) {
+        (Some(table), "TR") => format!("{what} {name} on {table} {verb}"),
+        _ => format!("{what} {qualified} {verb}"),
+    }
 }

@@ -51,15 +51,14 @@ struct MiscPart {
     outcome: Outcome,
 }
 
-async fn collect_workload(client: &mut MsClient, probe: &Probe, options: &SnapshotOptions) -> WorkloadPart {
-    let mut part = WorkloadPart::default();
-    let dmv = probe.can_read_dmvs();
+/// What the probe already knows about Query Store: none here (an older server, a system database), or one that is off.
+pub(crate) fn query_store_account(outcome: &mut Outcome, probe: &Probe) {
     if probe.query_store.is_none() {
-        part.outcome.not_applicable(
+        outcome.not_applicable(
             &sources::QUERY_STORE,
             "Query Store requires SQL Server 2016 or later and a user database.",
         );
-        part.outcome.lacking(
+        outcome.lacking(
             Capability::QueryStore,
             "Query Store is not available here; it needs SQL Server 2016 or later and a user database.",
             None,
@@ -68,12 +67,12 @@ async fn collect_workload(client: &mut MsClient, probe: &Probe, options: &Snapsh
     if let Some(qs) = &probe.query_store
         && !qs.readable()
     {
-        part.outcome.recorded(
+        outcome.recorded(
             &sources::QUERY_STORE,
             culprit_core::SourceState::Unavailable,
             Some(format!("Query Store is {} on this database.", qs.actual)),
         );
-        part.outcome.lacking(
+        outcome.lacking(
             Capability::QueryStore,
             format!(
                 "Query Store is {} on this database, so workload history is limited to what is still in the plan cache.",
@@ -82,6 +81,47 @@ async fn collect_workload(client: &mut MsClient, probe: &Probe, options: &Snapsh
             Some("ALTER DATABASE CURRENT SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE);".into()),
         );
     }
+}
+
+/// Query Store plans whose XML couldn't be read.
+pub(crate) fn unparsed_plans(count: usize) -> String {
+    format!("{count} Query Store plans could not be parsed")
+}
+
+/// This login can't read the plan cache either.
+pub(crate) fn plan_cache_unreadable(outcome: &mut Outcome, probe: &Probe) {
+    outcome.recorded(
+        &sources::PLAN_CACHE,
+        culprit_core::SourceState::Unavailable,
+        Some("This login cannot read plan cache statistics.".into()),
+    );
+    outcome.lacking(Capability::PlanCache, "This login cannot read plan cache statistics.", Some(probe.grant_hint()));
+}
+
+/// Index usage counters this login can't read.
+pub(crate) fn index_usage_unreadable(outcome: &mut Outcome, probe: &Probe) {
+    outcome.lacking(
+        Capability::IndexUsage,
+        "Index usage counters are not readable with this login, so unused-index checks are off.",
+        Some(probe.grant_hint()),
+    );
+}
+
+/// What the server state views would have delivered, without the permission to read them.
+pub(crate) fn server_state_unreadable(outcome: &mut Outcome, probe: &Probe) {
+    for capability in [Capability::MissingIndexes, Capability::WaitStats] {
+        outcome.lacking(
+            capability,
+            "This login lacks VIEW DATABASE STATE / VIEW SERVER STATE.",
+            Some(probe.grant_hint()),
+        );
+    }
+}
+
+async fn collect_workload(client: &mut MsClient, probe: &Probe, options: &SnapshotOptions) -> WorkloadPart {
+    let mut part = WorkloadPart::default();
+    let dmv = probe.can_read_dmvs();
+    query_store_account(&mut part.outcome, probe);
 
     if probe.query_store_readable() {
         let grant = || probe.grant_hint();
@@ -98,7 +138,7 @@ async fn collect_workload(client: &mut MsClient, probe: &Probe, options: &Snapsh
                 part.outcome.delivered(Capability::QueryPlans);
             }
             if result.plan_errors > 0 {
-                part.outcome.note("plans", format!("{} Query Store plans could not be parsed", result.plan_errors));
+                part.outcome.note("plans", unparsed_plans(result.plan_errors));
             }
             if !result.waits.is_empty() {
                 part.outcome.delivered(Capability::WaitStats);
@@ -110,16 +150,7 @@ async fn collect_workload(client: &mut MsClient, probe: &Probe, options: &Snapsh
     }
 
     if !dmv {
-        part.outcome.recorded(
-            &sources::PLAN_CACHE,
-            culprit_core::SourceState::Unavailable,
-            Some("This login cannot read plan cache statistics.".into()),
-        );
-        part.outcome.lacking(
-            Capability::PlanCache,
-            "This login cannot read plan cache statistics.",
-            Some(probe.grant_hint()),
-        );
+        plan_cache_unreadable(&mut part.outcome, probe);
         return part;
     }
     let plan_cache = workload::from_plan_cache(client, options).await;
@@ -181,11 +212,7 @@ async fn collect_schema(client: &mut MsClient, probe: &Probe) -> SchemaPart {
             part.indexes.iter_mut().for_each(|i| i.counters_since = since.clone());
             out.delivered(Capability::IndexUsage);
         } else {
-            out.lacking(
-                Capability::IndexUsage,
-                "Index usage counters are not readable with this login, so unused-index checks are off.",
-                Some(probe.grant_hint()),
-            );
+            index_usage_unreadable(out, probe);
         }
     }
     part.columns = sources::read_rows(out, &sources::COLUMNS, schema::columns(client).await, grant).unwrap_or_default();
@@ -217,13 +244,7 @@ async fn collect_misc(client: &mut MsClient, probe: &Probe, options: &SnapshotOp
         part.outcome.merge(read);
         part.pressure = Some(pressure);
     } else {
-        for capability in [Capability::MissingIndexes, Capability::WaitStats] {
-            part.outcome.lacking(
-                capability,
-                "This login lacks VIEW DATABASE STATE / VIEW SERVER STATE.",
-                Some(probe.grant_hint()),
-            );
-        }
+        server_state_unreadable(&mut part.outcome, probe);
     }
     if probe.is_azure_sql_database() {
         let resources = schema::resources(client).await;

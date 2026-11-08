@@ -83,11 +83,7 @@ pub(crate) async fn collect(client: &mut MsClient) -> tiberius::Result<LiveState
 pub(crate) async fn interrupt(pool: &Pool, session: &str, action: SessionAction) -> Result<()> {
     let id = session_number(session)?;
     if action == SessionAction::Cancel {
-        return Err(Error::new(
-            ErrorCode::Unsupported,
-            "SQL Server can't stop another session's statement without ending the session",
-        )
-        .with_hint("End the session instead; its open transaction rolls back."));
+        return Err(cancel_unsupported());
     }
     let target = format!(
         "SELECT CAST(is_user_process AS int) AS user_process, program_name, CASE WHEN session_id = @@SPID THEN 1 ELSE 0 END AS own \
@@ -100,15 +96,33 @@ pub(crate) async fn interrupt(pool: &Pool, session: &str, action: SessionAction)
         })
         .await?;
     let Some(row) = rows.first() else {
-        return Err(Error::not_found(format!("Session {id} is gone")));
+        return Err(session_gone(id));
     };
     if row.f64("own") == Some(1.0) || row.str("program_name").is_some_and(|p| p.eq_ignore_ascii_case("culprit")) {
-        return Err(Error::invalid(format!("Session {id} is Culprit's own")));
+        return Err(own_session(id));
     }
     if row.f64("user_process") != Some(1.0) {
-        return Err(Error::invalid(format!("Session {id} is a SQL Server system session")));
+        return Err(system_session(id));
     }
     pool.with(|c| Box::pin(async move { execute(c, &format!("KILL {id}")).await })).await
+}
+
+/// Cancelling a statement, which SQL Server can only do by ending its session.
+pub(crate) fn cancel_unsupported() -> Error {
+    Error::new(ErrorCode::Unsupported, "SQL Server can't stop another session's statement without ending the session")
+        .with_hint("End the session instead; its open transaction rolls back.")
+}
+
+pub(crate) fn session_gone(id: u64) -> Error {
+    Error::not_found(format!("Session {id} is gone"))
+}
+
+pub(crate) fn own_session(id: u64) -> Error {
+    Error::invalid(format!("Session {id} is Culprit's own"))
+}
+
+pub(crate) fn system_session(id: u64) -> Error {
+    Error::invalid(format!("Session {id} is a SQL Server system session"))
 }
 
 fn session_of(r: &Rec) -> Session {

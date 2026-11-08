@@ -89,12 +89,15 @@ WHERE q.is_internal_query = 0 AND q.is_clouddb_internal_query = 0 AND t.query_sq
     let rows = query(client, sql).await?;
     let Some(r) = rows.first() else { return Ok(Vec::new()) };
     let (Some(compiles), Some(ms)) = (r.f64("compiles"), r.f64("compile_ms")) else { return Ok(Vec::new()) };
+    Ok(compile_signals(compiles, ms, &r.string("first_compile"), &r.string("last_compile")))
+}
+
+/// Compiles Query Store retains for this database's user queries, and their elapsed time, first compile to `last`.
+pub(crate) fn compile_signals(compiles: f64, ms: f64, first: &str, last: &str) -> Vec<Signal> {
     let context = format!(
-        "Only user queries retained by this database's Query Store; first compile {}, most recent {}. Counts cover those entries' history, not the selected runtime window. Compilation duration is elapsed time, not measured CPU usage.",
-        r.string("first_compile"),
-        r.string("last_compile")
+        "Only user queries retained by this database's Query Store; first compile {first}, most recent {last}. Counts cover those entries' history, not the selected runtime window. Compilation duration is elapsed time, not measured CPU usage.",
     );
-    Ok(vec![
+    vec![
         Signal {
             healthy: Some(context.clone()),
             ..Signal::new(
@@ -115,7 +118,7 @@ WHERE q.is_internal_query = 0 AND q.is_clouddb_internal_query = 0 AND t.query_sq
                 SignalScope::QueryHistory,
             )
         },
-    ])
+    ]
 }
 
 /// Aborted (3) and exception (4) runs, their log bytes, and compile time from Query Store.
@@ -482,7 +485,12 @@ WHERE pc.object_name LIKE '%General Statistics%' AND pc.counter_name IN ('Logins
 /// The login counters count every database on the instance. On Azure SQL Database that instance is the server
 /// process behind the database, shared by its elastic pool: shown for context, labelled as the whole server's and
 /// never graded, since another database's logins would turn this one red.
-fn login_signals(logins: Option<f64>, resets: Option<f64>, uptime_s: Option<f64>, shared: bool) -> Vec<Signal> {
+pub(crate) fn login_signals(
+    logins: Option<f64>,
+    resets: Option<f64>,
+    uptime_s: Option<f64>,
+    shared: bool,
+) -> Vec<Signal> {
     const SHARED: &str = "covers every database on the server behind this one (its elastic pool's, if it has one), so it isn't graded here";
     let label = |name: &str| if shared { format!("{name} (whole server)") } else { name.to_string() };
     let grade = |signal: Signal, healthy: &str, watch: f64, bad: f64, higher_is_worse: bool| {

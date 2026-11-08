@@ -21,6 +21,8 @@ mod spread;
 mod statement;
 mod timeline;
 mod value;
+#[cfg(test)]
+mod words;
 mod workload;
 
 use async_trait::async_trait;
@@ -117,11 +119,7 @@ impl Provider for MssqlProvider {
     async fn wait_sample(&self, seconds: u32) -> Result<culprit_core::WaitSample> {
         let probe = self.pool.with(|c| Box::pin(probe::run(c))).await?;
         if !probe.can_read_dmvs() {
-            return Err(culprit_core::Error::new(
-                culprit_core::ErrorCode::PermissionDenied,
-                "Sampling waits needs permission to read the server's wait statistics",
-            )
-            .with_hint(probe.grant_hint()));
+            return Err(waits_unreadable(probe.grant_hint()));
         }
         let azure = probe.is_azure_sql_database();
         self.pool.with(move |c| Box::pin(pressure::sample(c, azure, seconds))).await
@@ -147,7 +145,7 @@ impl Provider for MssqlProvider {
     async fn stored_plan(&self, query_id: &str, plan_id: &str) -> Result<Option<Plan>> {
         let numeric = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
         if !numeric(query_id) || !numeric(plan_id) {
-            return Err(culprit_core::Error::invalid("Query Store ids are numbers"));
+            return Err(actual::ids_are_numbers());
         }
         let sql = format!(
             "SELECT query_plan FROM sys.query_store_plan WHERE plan_id = {plan_id} AND query_id = {query_id} /* culprit */"
@@ -200,7 +198,7 @@ impl Provider for MssqlProvider {
                 }
             }
         });
-        let result = task.await.map_err(|_| culprit_core::Error::internal("The table preview worker stopped"))?;
+        let result = task.await.map_err(|_| preview_stopped())?;
         drop(owner);
         result
     }
@@ -219,17 +217,26 @@ impl Provider for MssqlProvider {
     /// sends statements here that the classifier proved read, or that the person confirmed.
     async fn execute(&self, sql: &str, limit: usize) -> Result<ResultSet> {
         let mut client = self.user_session().await?;
-        let mut result = if statement::returns_rows(sql) {
-            statement::run(&mut client, sql, limit).await
-        } else {
-            statement::run_changes(&mut client, sql).await
+        if !statement::returns_rows(sql) {
+            // "2 rows changed, committed." — the same words MySQL and PostgreSQL use.
+            return statement::run_changes(&mut client, sql).await.map_err(statement::parameter_error);
         }
-        .map_err(statement::parameter_error)?;
-        // "2 rows changed, committed." — the same words MySQL and PostgreSQL use.
-        match result.messages.last_mut() {
-            Some(last) if last.ends_with("changed") => last.push_str(", committed."),
-            _ => result.messages.push("Committed.".to_string()),
-        }
+        let mut result = statement::run(&mut client, sql, limit).await.map_err(statement::parameter_error)?;
+        result.messages.push(statement::committed());
         Ok(result)
     }
+}
+
+/// Sampling waits without permission to read them; `grant` gives it.
+pub(crate) fn waits_unreadable(grant: String) -> culprit_core::Error {
+    culprit_core::Error::new(
+        culprit_core::ErrorCode::PermissionDenied,
+        "Sampling waits needs permission to read the server's wait statistics",
+    )
+    .with_hint(grant)
+}
+
+/// The task running a table preview ended without an answer.
+pub(crate) fn preview_stopped() -> culprit_core::Error {
+    culprit_core::Error::internal("The table preview worker stopped")
 }

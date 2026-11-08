@@ -80,7 +80,45 @@ fn telemetry_sql(hours: u32) -> String {
 }
 
 const AZURE_SQL_DB: f64 = 5.0;
-const TELEMETRY: &str = "Azure SQL deadlock telemetry";
+
+/// Where Azure SQL Database's deadlocks come from, as a person reads it.
+pub(crate) fn telemetry() -> String {
+    "Azure SQL deadlock telemetry".to_string()
+}
+
+/// Azure SQL Database's deadlock telemetry couldn't be read (`error`): where else its deadlocks are.
+pub(crate) fn telemetry_unreadable(error: &dyn std::fmt::Display) -> String {
+    format!(
+        "Culprit couldn't read Azure SQL Database's deadlock telemetry ({error}). Deadlocks are also in Azure \
+         Monitor (diagnostic setting \"Deadlocks\"), or paste a deadlock graph (.xdl) to have it explained."
+    )
+}
+
+/// Where system_health's deadlocks were read from (its event files, its in-memory ring buffer, either or neither), and
+/// what the reader should know about that.
+pub(crate) fn origin(files: bool, ring: bool) -> (String, Option<String>) {
+    let mut sources: Vec<&str> = Vec::new();
+    if files {
+        sources.push("event files");
+    }
+    if ring {
+        sources.push("ring buffer");
+    }
+    let source =
+        if sources.is_empty() { "system_health".into() } else { format!("system_health {}", sources.join(" and ")) };
+    let note = if sources.is_empty() {
+        Some(
+            "Reading deadlocks needs VIEW SERVER STATE (VIEW SERVER PERFORMANCE STATE on SQL Server 2022). \
+             Paste a deadlock graph (.xdl) to have it explained."
+                .into(),
+        )
+    } else if !files {
+        Some("Read from system_health's in-memory buffer, which only keeps the most recent events.".into())
+    } else {
+        None
+    };
+    (source, note)
+}
 
 /// Deadlocks in the last `since_hours`. On SQL Server from system_health: its event files first (they keep days), the
 /// in-memory ring buffer when files can't be read. On Azure SQL Database from its deadlock telemetry. Permission
@@ -92,7 +130,7 @@ pub(crate) async fn recent(client: &mut MsClient, since_hours: f64) -> tiberius:
         query_one(client, "SELECT CAST(SERVERPROPERTY('EngineEdition') AS int) AS edition, DB_NAME() AS db").await?;
     let database = server.string("db");
     if server.f64("edition") == Some(AZURE_SQL_DB) {
-        report.source = TELEMETRY.into();
+        report.source = telemetry();
         match query(client, &telemetry_sql(hours)).await {
             Ok(rows) => {
                 for row in rows {
@@ -104,10 +142,7 @@ pub(crate) async fn recent(client: &mut MsClient, since_hours: f64) -> tiberius:
             }
             Err(e) => {
                 report.source = "Azure SQL Database".into();
-                report.note = Some(format!(
-                    "Culprit couldn't read Azure SQL Database's deadlock telemetry ({e}). Deadlocks are also in Azure \
-                     Monitor (diagnostic setting \"Deadlocks\"), or paste a deadlock graph (.xdl) to have it explained."
-                ));
+                report.note = Some(telemetry_unreadable(&e));
             }
         }
         return Ok(report);
@@ -115,9 +150,9 @@ pub(crate) async fn recent(client: &mut MsClient, since_hours: f64) -> tiberius:
     // Files keep days of history but are written with a delay; the ring buffer holds the latest events in memory.
     // Read both and merge, so a deadlock from a minute ago shows up too.
     let cutoff = chrono::Utc::now() - chrono::Duration::hours(hours as i64);
-    let mut sources: Vec<&str> = Vec::new();
+    let (mut files, mut ring) = (false, false);
     if let Ok(rows) = query(client, &file_sql(hours)).await {
-        sources.push("event files");
+        files = true;
         for row in rows {
             let at = row.str("at").map(|t| normalize_time(&t));
             if let Some(xml) = row.str("event_xml") {
@@ -126,7 +161,7 @@ pub(crate) async fn recent(client: &mut MsClient, since_hours: f64) -> tiberius:
         }
     }
     if let Ok(rows) = query(client, RING_SQL).await {
-        sources.push("ring buffer");
+        ring = true;
         for row in rows {
             let Some(xml) = row.str("target_xml") else { continue };
             for d in parse_deadlock_xml(&xml, "system_health").unwrap_or_default() {
@@ -144,17 +179,10 @@ pub(crate) async fn recent(client: &mut MsClient, since_hours: f64) -> tiberius:
     report.deadlocks.retain(|d| involves(d, &database));
     report.deadlocks.sort_by(|a, b| b.at.cmp(&a.at));
     report.deadlocks.truncate(READ_LIMIT);
-    report.source =
-        if sources.is_empty() { "system_health".into() } else { format!("system_health {}", sources.join(" and ")) };
-    if sources.is_empty() {
-        report.note = Some(
-            "Reading deadlocks needs VIEW SERVER STATE (VIEW SERVER PERFORMANCE STATE on SQL Server 2022). \
-             Paste a deadlock graph (.xdl) to have it explained."
-                .into(),
-        );
-    } else if !sources.contains(&"event files") {
-        report.note =
-            Some("Read from system_health's in-memory buffer, which only keeps the most recent events.".into());
+    let (source, note) = origin(files, ring);
+    report.source = source;
+    if note.is_some() {
+        report.note = note;
     }
     Ok(report)
 }
@@ -189,7 +217,7 @@ fn telemetry_event(doc: &Document, xml: &str, database: &str, at: Option<String>
     if other {
         return Vec::new();
     }
-    let mut found = parse_with_time(xml, TELEMETRY, at).unwrap_or_default();
+    let mut found = parse_with_time(xml, &telemetry(), at).unwrap_or_default();
     // A fix that names the database (ALTER DATABASE) needs the name people use.
     for p in found.iter_mut().flat_map(|d| d.processes.iter_mut()) {
         p.database = Some(database.to_string());
@@ -420,7 +448,7 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].pattern, DeadlockPattern::KeyLookup);
         assert_eq!(found[0].at.as_deref(), Some("2026-10-11T12:05:01Z"));
-        assert_eq!(found[0].source, TELEMETRY);
+        assert_eq!(found[0].source, "Azure SQL deadlock telemetry");
         assert_eq!(found[0].objects, vec!["shop.customers".to_string()]);
         assert!(found[0].processes.iter().all(|p| p.database.as_deref() == Some("Shop")));
         // Another database on the same logical server.

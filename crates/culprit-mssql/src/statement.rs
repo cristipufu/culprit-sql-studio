@@ -124,7 +124,7 @@ async fn collect_plans(client: &mut MsClient, sql: &str) -> Result<Vec<String>> 
     Ok(documents)
 }
 
-fn best_plan(documents: &[String]) -> Result<Plan> {
+pub(crate) fn best_plan(documents: &[String]) -> Result<Plan> {
     documents
         .iter()
         .filter_map(|xml| plan_xml::parse(xml).ok())
@@ -177,13 +177,7 @@ pub(crate) async fn run(client: &mut MsClient, sql: &str, limit: usize) -> Resul
             }
         }
     }
-    let mut messages = Vec::new();
-    if result_sets == 0 {
-        messages.push("The statement completed without returning rows.".to_string());
-    }
-    if result_sets > 1 {
-        messages.push(format!("The batch returned {result_sets} result sets; showing the first."));
-    }
+    let mut messages = result_messages(result_sets);
     messages.extend(budget.notice());
     Ok(ResultSet {
         columns,
@@ -194,8 +188,30 @@ pub(crate) async fn run(client: &mut MsClient, sql: &str, limit: usize) -> Resul
     })
 }
 
+/// What a batch's result sets say beside the rows shown: none returned, or more than the one shown.
+pub(crate) fn result_messages(result_sets: usize) -> Vec<String> {
+    let mut messages = Vec::new();
+    if result_sets == 0 {
+        messages.push("The statement completed without returning rows.".to_string());
+    }
+    if result_sets > 1 {
+        messages.push(format!("The batch returned {result_sets} result sets; showing the first."));
+    }
+    messages
+}
+
+/// A write that changed `affected` rows, committed (SQL Server runs it in autocommit).
+pub(crate) fn changed_committed(affected: u64) -> String {
+    format!("{affected} row{} changed, committed.", if affected == 1 { "" } else { "s" })
+}
+
+/// A statement that returned rows, committed.
+pub(crate) fn committed() -> String {
+    "Committed.".to_string()
+}
+
 /// A statement that changes data and returns no rows (INSERT/UPDATE/DELETE/MERGE without OUTPUT, DDL): run it through
-/// the RPC path, which reports how many rows each statement touched.
+/// the RPC path, which reports how many rows each statement touched. It runs in autocommit, so it is committed.
 pub(crate) async fn run_changes(client: &mut MsClient, sql: &str) -> Result<ResultSet> {
     let started = Instant::now();
     let done = client.execute(marked(sql), &[]).await.map_err(map_error)?;
@@ -205,7 +221,7 @@ pub(crate) async fn run_changes(client: &mut MsClient, sql: &str) -> Result<Resu
         rows: Vec::new(),
         truncated: false,
         elapsed_ms: started.elapsed().as_secs_f64() * 1_000.0,
-        messages: vec![format!("{affected} row{} changed", if affected == 1 { "" } else { "s" })],
+        messages: vec![changed_committed(affected)],
     })
 }
 

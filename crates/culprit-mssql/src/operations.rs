@@ -46,6 +46,29 @@ const SEQUENCES_SQL: &str = "SELECT s.name + '.' + q.name AS name, CAST(NULL AS 
  0, 1 FROM sys.identity_columns c JOIN sys.tables t ON t.object_id = c.object_id
  JOIN sys.schemas s ON s.schema_id = t.schema_id WHERE t.is_ms_shipped = 0 AND c.last_value IS NOT NULL";
 
+/// This database's transaction log, as a space.
+pub(crate) fn log_name(database: &str) -> String {
+    format!("{database} transaction log")
+}
+
+/// One of this database's filegroups, as a space.
+pub(crate) fn filegroup_name(database: &str, filegroup: &str) -> String {
+    format!("{database} data filegroup {filegroup}")
+}
+
+/// tempdb's data files, shared by every database on the instance.
+pub(crate) fn tempdb_name() -> String {
+    "tempdb data files (whole instance)".into()
+}
+
+/// What tempdb's space holds: user objects, internal objects and the version store, where the row says.
+pub(crate) fn tempdb_parts(r: &crate::value::Rec) -> Vec<SpacePart> {
+    [("User objects", "users"), ("Internal objects", "internals"), ("Version store", "versions")]
+        .into_iter()
+        .filter_map(|(name, col)| r.f64(col).map(|bytes| SpacePart { name: name.into(), bytes }))
+        .collect()
+}
+
 pub async fn collect(client: &mut MsClient, probe: &Probe, snapshot: &mut Snapshot) {
     let mut coverage = Coverage::default();
     if let Some(rows) =
@@ -55,7 +78,7 @@ pub async fn collect(client: &mut MsClient, probe: &Probe, snapshot: &mut Snapsh
             if let (Some(total), Some(used)) = (r.f64("total"), r.f64("used")) {
                 snapshot.operations.spaces.push(SpaceUsage {
                     parts: vec![],
-                    name: format!("{} transaction log", snapshot.server.database),
+                    name: log_name(&snapshot.server.database),
                     kind: FileKind::Log,
                     scope: FileScope::Database,
                     total_bytes: total,
@@ -76,7 +99,7 @@ pub async fn collect(client: &mut MsClient, probe: &Probe, snapshot: &mut Snapsh
             if let (Some(total), Some(used)) = (r.f64("total"), r.f64("used")) {
                 snapshot.operations.spaces.push(SpaceUsage {
                     parts: vec![],
-                    name: format!("{} data filegroup {}", snapshot.server.database, r.string("name")),
+                    name: filegroup_name(&snapshot.server.database, &r.string("name")),
                     kind: FileKind::Data,
                     scope: FileScope::Database,
                     total_bytes: total,
@@ -93,14 +116,9 @@ pub async fn collect(client: &mut MsClient, probe: &Probe, snapshot: &mut Snapsh
     {
         for r in rows {
             if let (Some(total), Some(used)) = (r.f64("total"), r.f64("used")) {
-                let parts =
-                    [("User objects", "users"), ("Internal objects", "internals"), ("Version store", "versions")]
-                        .into_iter()
-                        .filter_map(|(name, col)| r.f64(col).map(|bytes| SpacePart { name: name.into(), bytes }))
-                        .collect();
                 snapshot.operations.spaces.push(SpaceUsage {
-                    parts,
-                    name: "tempdb data files (whole instance)".into(),
+                    parts: tempdb_parts(&r),
+                    name: tempdb_name(),
                     kind: FileKind::Temp,
                     scope: FileScope::Server,
                     total_bytes: total,

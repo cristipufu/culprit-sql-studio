@@ -248,6 +248,16 @@ WHERE d.database_id = DB_ID()
 /// At most this many of them join the workload beyond its top queries, the most run first.
 const MAX_ASKERS: usize = 20;
 
+/// What a login that can't read Query Store's statement waits needs.
+pub(crate) fn waits_grant() -> String {
+    "Grant VIEW DATABASE STATE (VIEW DATABASE PERFORMANCE STATE on SQL Server 2022+).".into()
+}
+
+/// Query Store's statement waits read, without knowing they are captured: a missing category isn't a zero.
+pub(crate) fn waits_not_captured() -> String {
+    "Query Store wait capture is disabled or could not be established; missing wait categories are unknown.".into()
+}
+
 /// Workload from Query Store over the scan's window. Query Store keeps runtime stats per interval (often an
 /// hour), so the window reaches back to the start of the interval its edge falls in.
 pub(crate) async fn from_query_store(
@@ -333,7 +343,7 @@ GROUP BY ws.plan_id, ws.wait_category_desc
         &mut coverage,
         &crate::sources::QUERY_WAITS,
         query(client, &plan_waits_sql).await,
-        || "Grant VIEW DATABASE STATE (VIEW DATABASE PERFORMANCE STATE on SQL Server 2022+).".into(),
+        waits_grant,
     );
     // An empty category is zero only when the read succeeded and Query Store is capturing waits.
     // Older servers, disabled capture and failed reads must not manufacture zeroes.
@@ -344,10 +354,7 @@ GROUP BY ws.plan_id, ws.wait_category_desc
         == Some(1.0);
     let waits_complete = wait_rows.is_some() && capture_on;
     if wait_rows.is_some() && !capture_on {
-        coverage.partial(
-            &crate::sources::QUERY_WAITS,
-            "Query Store wait capture is disabled or could not be established; missing wait categories are unknown.",
-        );
+        coverage.partial(&crate::sources::QUERY_WAITS, waits_not_captured());
     }
     let mut plan_waits: HashMap<String, Vec<(String, f64)>> = HashMap::new();
     for r in wait_rows.into_iter().flatten() {

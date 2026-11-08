@@ -6,7 +6,7 @@ use culprit_core::{
     Engine, Error, ErrorCode, NodeProgress, NodeState, Plan, PlanKind, QueryProgress, Result, session_number,
 };
 
-use crate::conn::{PERMISSION_HINT, Pool, is_permission_error, query};
+use crate::conn::{Pool, is_permission_error, permission_hint, query};
 use crate::plan_xml;
 use crate::value::Rec;
 
@@ -15,12 +15,41 @@ const SETTING_SQL: &str =
 
 const TURN_ON: &str = "ALTER DATABASE SCOPED CONFIGURATION SET LAST_QUERY_PLAN_STATS = ON;";
 
+/// A Query Store id that isn't one.
+pub(crate) fn ids_are_numbers() -> Error {
+    Error::invalid("Query Store ids are numbers")
+}
+
 fn numeric(id: &str) -> Result<&str> {
     let id = id.trim();
     if id.is_empty() || id.len() > 19 || !id.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(Error::invalid("Query Store ids are numbers"));
+        return Err(ids_are_numbers());
     }
     Ok(id)
+}
+
+/// The plan cache can't be read with this login.
+pub(crate) fn cache_unreadable() -> Error {
+    Error::new(ErrorCode::PermissionDenied, "This login can't read the plan cache").with_hint(permission_hint())
+}
+
+/// The server predates sys.dm_exec_query_plan_stats.
+pub(crate) fn needs_2019() -> Error {
+    Error::new(ErrorCode::Unsupported, "Keeping the last actual plan needs SQL Server 2019 or newer")
+        .with_hint("Measure the query instead: open it in the editor with real values and use Analyze.")
+}
+
+/// LAST_QUERY_PLAN_STATS is off, or the cached plan holds no runtime counters.
+pub(crate) fn not_kept() -> Error {
+    Error::new(ErrorCode::Unsupported, "SQL Server isn't keeping actual plans for this database")
+        .with_hint(format!("Turn on LAST_QUERY_PLAN_STATS ({TURN_ON}), let the query run once, then look again."))
+}
+
+/// The query's plan left the cache, and its last actual plan with it.
+pub(crate) fn not_cached() -> Error {
+    Error::not_found("This query's plan isn't in the plan cache right now").with_hint(
+        "SQL Server keeps the last actual plan only while the plan is cached. It comes back the next time the query runs.",
+    )
 }
 
 /// The cached plan of a Query Store query, with the runtime counters of its last execution.
@@ -54,26 +83,19 @@ pub(crate) async fn last_actual_plan(pool: &Pool, query_id: &str, plan_id: Optio
     let (setting, rows) = rows;
     let rows = rows.map_err(|err| {
         if is_permission_error(&err) {
-            Error::new(ErrorCode::PermissionDenied, "This login can't read the plan cache").with_hint(PERMISSION_HINT)
+            cache_unreadable()
         } else if err.to_string().contains("dm_exec_query_plan_stats") {
-            Error::new(ErrorCode::Unsupported, "Keeping the last actual plan needs SQL Server 2019 or newer")
-                .with_hint("Measure the query instead: open it in the editor with real values and use Analyze.")
+            needs_2019()
         } else {
             crate::conn::map_error(err)
         }
     })?;
     let off = setting == Some(0.0);
-    let not_kept = || {
-        Error::new(ErrorCode::Unsupported, "SQL Server isn't keeping actual plans for this database")
-            .with_hint(format!("Turn on LAST_QUERY_PLAN_STATS ({TURN_ON}), let the query run once, then look again."))
-    };
     let Some(row) = rows.into_iter().next() else {
         if off {
             return Err(not_kept());
         }
-        return Err(Error::not_found("This query's plan isn't in the plan cache right now").with_hint(
-            "SQL Server keeps the last actual plan only while the plan is cached. It comes back the next time the query runs.",
-        ));
+        return Err(not_cached());
     };
     let xml = row.str("query_plan").ok_or_else(not_kept)?;
     let mut plan = plan_xml::parse_statement(&xml, row.str("query_hash").as_deref())?;
@@ -148,9 +170,18 @@ SELECT node_id, SUM(row_count) AS row_count, MAX(estimate_row_count) AS estimate
  GROUP BY node_id
 "#;
 
-const NO_PROFILING: &str = "Per-operator progress needs lightweight query profiling: on by default since SQL Server \
+/// Why a running statement shows no per-operator progress.
+pub(crate) fn no_profiling() -> String {
+    "Per-operator progress needs lightweight query profiling: on by default since SQL Server \
 2019 (LIGHTWEIGHT_QUERY_PROFILING), trace flag 7412 on 2016 SP1 and 2017. Culprit shows the estimated plan and how \
-long the statement has been running.";
+long the statement has been running."
+        .to_string()
+}
+
+/// What a command's own percentage (a backup, an index rebuild) is based on.
+pub(crate) fn own_estimate(command: &str) -> String {
+    format!("SQL Server's own estimate for {command}")
+}
 
 pub(crate) async fn query_progress(pool: &Pool, session: &str) -> Result<QueryProgress> {
     let id = session_number(session)?;
@@ -192,7 +223,7 @@ pub(crate) async fn query_progress(pool: &Pool, session: &str) -> Result<QueryPr
     match r.f64("percent_complete").filter(|p| *p > 0.0) {
         Some(pct) => {
             progress.percent = Some((pct / 100.0).clamp(0.0, 1.0));
-            progress.percent_basis = Some(format!("SQL Server's own estimate for {}", r.string("command").trim()));
+            progress.percent_basis = Some(own_estimate(r.string("command").trim()));
             if !progress.nodes.is_empty() {
                 let percent = progress.percent;
                 let basis = progress.percent_basis.clone();
@@ -204,7 +235,7 @@ pub(crate) async fn query_progress(pool: &Pool, session: &str) -> Result<QueryPr
         None => progress.summarize_nodes(),
     }
     if progress.nodes.is_empty() {
-        progress.note = Some(NO_PROFILING.to_string());
+        progress.note = Some(no_profiling());
     }
     Ok(progress)
 }

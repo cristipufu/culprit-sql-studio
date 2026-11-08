@@ -137,13 +137,23 @@ async fn open_tcp(config: Config, endpoint: Option<&ConnectionEndpoint>) -> tibe
     let addr = config.get_addr();
     let dial = endpoint.map_or_else(|| addr.clone(), |endpoint| endpoint.address.to_string());
     let tcp = tokio::time::timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(&dial)).await.map_err(|_| {
-        tiberius::error::Error::Io {
-            kind: std::io::ErrorKind::TimedOut,
-            message: format!("timed out connecting to {addr}"),
-        }
+        tiberius::error::Error::Io { kind: std::io::ErrorKind::TimedOut, message: connect_timed_out(&addr) }
     })??;
     tcp.set_nodelay(true)?;
     Client::connect(config, tcp.compat_write()).await
+}
+
+/// The TCP connection to `addr` didn't open in time: the message of the I/O error it becomes.
+pub(crate) fn connect_timed_out(addr: &str) -> String {
+    format!("timed out connecting to {addr}")
+}
+
+/// A gateway redirected the login outside Azure SQL, where it would carry the password or token to someone else.
+pub(crate) fn redirect_refused(host: &str) -> Error {
+    Error::new(
+        ErrorCode::ConnectionFailed,
+        format!("Refusing a redirect from an Azure SQL gateway to '{host}', outside Azure SQL"),
+    )
 }
 
 /// Connect, following one Azure SQL gateway redirect, and prepare the session.
@@ -156,10 +166,7 @@ pub(crate) async fn connect(
     let attempt = match open_tcp(config.clone(), endpoint.as_ref()).await {
         Err(tiberius::error::Error::Routing { host, port }) => {
             if !redirect_allowed(&config.get_addr(), &host) {
-                return Err(Error::new(
-                    ErrorCode::ConnectionFailed,
-                    format!("Refusing a redirect from an Azure SQL gateway to '{host}', outside Azure SQL"),
-                ));
+                return Err(redirect_refused(&host));
             }
             let mut routed = config.clone();
             routed.host(&host);
@@ -273,36 +280,42 @@ pub(crate) fn is_permission_error(err: &tiberius::error::Error) -> bool {
     matches!(server_code(err), Some(229 | 230 | 262 | 297 | 300 | 15151 | 15247))
 }
 
-pub(crate) const PERMISSION_HINT: &str = "Grant the monitoring permission: GRANT VIEW DATABASE STATE TO [<user>]; on Azure SQL Database, or GRANT VIEW SERVER STATE TO [<login>]; on SQL Server.";
+/// What a login without the monitoring permission is told to ask for.
+pub(crate) fn permission_hint() -> String {
+    "Grant the monitoring permission: GRANT VIEW DATABASE STATE TO [<user>]; on Azure SQL Database, or GRANT VIEW SERVER STATE TO [<login>]; on SQL Server.".to_string()
+}
+
+/// An error the server returned (`code`, its `message`), with what to do about it where Culprit knows.
+pub(crate) fn server_error(code: u32, message: String) -> Error {
+    match code {
+        18456 | 18452 | 18470 | 18486 | 18487 | 18488 => {
+            let hint = if message.contains("token-identified principal") {
+                "This Microsoft Entra identity has no user in the database. Ask an admin to run CREATE USER [you@company.com] FROM EXTERNAL PROVIDER;"
+            } else {
+                "Check the user name and password, and that SQL authentication is enabled on the server."
+            };
+            Error::new(ErrorCode::AuthFailed, message).with_hint(hint)
+        }
+        4060 => Error::new(ErrorCode::NotFound, message)
+            .with_hint("Check the database name and that this login has a user in it."),
+        40615 | 40914 => Error::new(ErrorCode::ConnectionFailed, message).with_hint(
+            "Your IP address is not allowed by the server firewall. Add it under the server's networking settings.",
+        ),
+        40613 | 40501 | 40197 | 49918 | 49919 | 49920 => Error::new(ErrorCode::ConnectionFailed, message)
+            .with_hint("The database is temporarily unavailable or throttled. Try again in a few seconds."),
+        1222 => Error::new(ErrorCode::Timeout, message)
+            .with_hint("A lock wait exceeded Culprit's 2 second limit; the server is busy or something is blocking."),
+        229 | 230 | 262 | 297 | 300 | 15151 | 15247 => {
+            Error::new(ErrorCode::PermissionDenied, message).with_hint(permission_hint())
+        }
+        _ => Error::new(ErrorCode::QueryFailed, message),
+    }
+}
 
 pub(crate) fn map_error(err: tiberius::error::Error) -> Error {
     use tiberius::error::Error as T;
     match &err {
-        T::Server(token) => {
-            let message = token.message().to_string();
-            match token.code() {
-                18456 | 18452 | 18470 | 18486 | 18487 | 18488 => {
-                    let hint = if message.contains("token-identified principal") {
-                        "This Microsoft Entra identity has no user in the database. Ask an admin to run CREATE USER [you@company.com] FROM EXTERNAL PROVIDER;"
-                    } else {
-                        "Check the user name and password, and that SQL authentication is enabled on the server."
-                    };
-                    Error::new(ErrorCode::AuthFailed, message).with_hint(hint)
-                }
-                4060 => Error::new(ErrorCode::NotFound, message)
-                    .with_hint("Check the database name and that this login has a user in it."),
-                40615 | 40914 => Error::new(ErrorCode::ConnectionFailed, message)
-                    .with_hint("Your IP address is not allowed by the server firewall. Add it under the server's networking settings."),
-                40613 | 40501 | 40197 | 49918 | 49919 | 49920 => Error::new(ErrorCode::ConnectionFailed, message)
-                    .with_hint("The database is temporarily unavailable or throttled. Try again in a few seconds."),
-                1222 => Error::new(ErrorCode::Timeout, message)
-                    .with_hint("A lock wait exceeded Culprit's 2 second limit; the server is busy or something is blocking."),
-                229 | 230 | 262 | 297 | 300 | 15151 | 15247 => {
-                    Error::new(ErrorCode::PermissionDenied, message).with_hint(PERMISSION_HINT)
-                }
-                _ => Error::new(ErrorCode::QueryFailed, message),
-            }
-        }
+        T::Server(token) => server_error(token.code(), token.message().to_string()),
         T::Io { kind, message } if *kind == std::io::ErrorKind::TimedOut => {
             Error::new(ErrorCode::Timeout, format!("SQL Server did not respond in time: {message}"))
                 .with_hint("Check the host, port and firewall, or whether the server is under heavy load.")

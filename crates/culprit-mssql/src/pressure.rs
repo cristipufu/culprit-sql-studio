@@ -189,7 +189,7 @@ fn uptime_hours(probe: &Probe) -> Option<f64> {
 /// What the server's performance counters say. On Azure SQL Database they describe the server process behind the
 /// database, which an elastic pool shares among all its databases: shown for context, labelled as the whole server's,
 /// and never graded, since another database's scans would turn this one red.
-fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azure: bool) -> Vec<Signal> {
+pub(crate) fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azure: bool) -> Vec<Signal> {
     const SHARED: &str = "covers every database on the server behind this one (its elastic pool's, if it has one), so it isn't graded here";
     let label = |name: &str| if azure { format!("{name} (whole server)") } else { name.to_string() };
     let mut signals = Vec::new();
@@ -260,7 +260,7 @@ fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azure: bool) -
 
 /// Azure SQL Database's own figures for this database over the last hour: storage I/O against its tier's limit,
 /// graded, and memory in use, for context (a full cache is normal).
-fn resource_signals(data_io: f64, data_io_peak: f64, memory: f64) -> Vec<Signal> {
+pub(crate) fn resource_signals(data_io: f64, data_io_peak: f64, memory: f64) -> Vec<Signal> {
     vec![
         Signal {
             healthy: Some(format!(
@@ -319,80 +319,18 @@ pub(crate) async fn collect(client: &mut MsClient, probe: &Probe) -> (Pressure, 
         })
     {
         let pending = rows.first().map(|r| r.f64_or_zero("pending")).unwrap_or(0.0);
-        p.signals.push(
-            Signal::new(
-                culprit_core::signal_id::MEMORY_GRANTS_PENDING,
-                "Waiting for memory",
-                pending,
-                SignalUnit::Count,
-                SignalScope::Now,
-            )
-            .graded("0 is healthy", 1.0, 5.0, true),
-        );
+        p.signals.push(pending_grants_signal(pending));
     }
     if let Some(totals) =
         sources::read(&mut coverage, &sources::WAIT_TOTALS, wait_totals(client, azure, None).await, || {
             probe.grant_hint()
         })
     {
-        let (wait, signal) = totals.values().fold((0.0, 0.0), |(w, s), (tw, ts, _)| (w + tw, s + ts));
-        if wait > 0.0 {
-            p.signals.push(scheduling_share(signal, wait, SignalScope::SinceStartup));
-        }
-        let threadpool = totals.get("THREADPOOL").map(|t| t.0).unwrap_or(0.0);
-        // Totals since the start: one bad hour days ago and a steady trickle average to the same rate, so checks
-        // say how much and since when instead of an hourly rate.
-        p.signals.push(Signal::new(
-            culprit_core::signal_id::THREADPOOL_WAIT_MS,
-            if azure { "Waiting for workers since start" } else { "Waiting for workers since start (whole instance)" },
-            threadpool,
-            SignalUnit::Milliseconds,
-            SignalScope::SinceStartup,
-        ));
-        // Memory grants alone; the Memory category also holds allocation waits (CMEMTHREAD) and compile memory.
-        let grants = totals.get("RESOURCE_SEMAPHORE").map(|t| t.0).unwrap_or(0.0);
-        p.signals.push(Signal::new(
-            culprit_core::signal_id::GRANT_WAIT_MS,
-            if azure {
-                "Waiting for memory grants since start"
-            } else {
-                "Waiting for memory grants since start (whole instance)"
-            },
-            grants,
-            SignalUnit::Milliseconds,
-            SignalScope::SinceStartup,
-        ));
-        if let Some(hours) = uptime {
-            p.signals.push(
-                Signal::new(
-                    culprit_core::signal_id::THREADPOOL_WAITS,
-                    if hours >= 1.0 { "Waiting for workers, per hour" } else { "Waiting for workers since start" },
-                    // Under an hour of uptime, report the total rather than extrapolate an hourly rate.
-                    threadpool / hours.max(1.0),
-                    SignalUnit::Milliseconds,
-                    SignalScope::SinceStartup,
-                )
-                .graded("under a second an hour is healthy", 1_000.0, 60_000.0, true),
-            );
-        }
+        p.signals.extend(wait_total_signals(&totals, azure, uptime));
     }
     if let Ok(rows) = query(client, THREADPOOL_NOW_SQL).await {
         let waiting = rows.first().map(|r| r.f64_or_zero("waiting")).unwrap_or(0.0);
-        p.signals.push(
-            Signal::new(
-                culprit_core::signal_id::THREADPOOL_WAITING,
-                "Requests in this database without a worker",
-                waiting,
-                SignalUnit::Count,
-                SignalScope::Now,
-            )
-            .graded(
-                "One observation; sample again to establish whether the queue persists",
-                1.0,
-                f64::INFINITY,
-                true,
-            ),
-        );
+        p.signals.push(threadpool_now_signal(waiting));
     }
     if let Ok(rows) = query(client, CPUS_SQL).await
         && let Some(r) = rows.first()
@@ -410,21 +348,7 @@ pub(crate) async fn collect(client: &mut MsClient, probe: &Probe) -> (Pressure, 
         Err(_) => None,
     };
     if let Some(bytes) = version_store {
-        p.signals.push(
-            Signal::new(
-                culprit_core::signal_id::VERSION_STORE,
-                "Version store",
-                bytes,
-                SignalUnit::Bytes,
-                SignalScope::Now,
-            )
-            .graded(
-                "small, and shrinking when transactions end",
-                1024.0 * 1024.0 * 1024.0,
-                10.0 * 1024.0 * 1024.0 * 1024.0,
-                true,
-            ),
-        );
+        p.signals.push(version_store_signal(bytes));
     }
     if let Some(rows) =
         sources::read(&mut coverage, &sources::OPEN_TRANSACTIONS, query(client, OLDEST_TRANSACTION_SQL).await, || {
@@ -448,19 +372,103 @@ pub(crate) async fn collect(client: &mut MsClient, probe: &Probe) -> (Pressure, 
             database: None,
         });
         if let Some(t) = &p.oldest_transaction {
-            p.signals.push(
-                Signal::new(
-                    culprit_core::signal_id::OLDEST_TRANSACTION,
-                    "Oldest open transaction",
-                    t.seconds,
-                    SignalUnit::Seconds,
-                    SignalScope::Now,
-                )
-                .graded("seconds or minutes, not hours", 600.0, 1800.0, true),
-            );
+            p.signals.push(oldest_transaction_signal(t.seconds));
         }
     }
     (p, coverage)
+}
+
+/// Queries waiting for a memory grant at the scan's instant.
+pub(crate) fn pending_grants_signal(pending: f64) -> Signal {
+    Signal::new(
+        culprit_core::signal_id::MEMORY_GRANTS_PENDING,
+        "Waiting for memory",
+        pending,
+        SignalUnit::Count,
+        SignalScope::Now,
+    )
+    .graded("0 is healthy", 1.0, 5.0, true)
+}
+
+/// What the wait totals since the start say: the scheduling share, and the waits for workers and memory grants.
+pub(crate) fn wait_total_signals(totals: &WaitTotals, azure: bool, uptime: Option<f64>) -> Vec<Signal> {
+    let mut out = Vec::new();
+    let (wait, signal) = totals.values().fold((0.0, 0.0), |(w, s), (tw, ts, _)| (w + tw, s + ts));
+    if wait > 0.0 {
+        out.push(scheduling_share(signal, wait, SignalScope::SinceStartup));
+    }
+    let threadpool = totals.get("THREADPOOL").map(|t| t.0).unwrap_or(0.0);
+    // Totals since the start: one bad hour days ago and a steady trickle average to the same rate, so checks
+    // say how much and since when instead of an hourly rate.
+    out.push(Signal::new(
+        culprit_core::signal_id::THREADPOOL_WAIT_MS,
+        if azure { "Waiting for workers since start" } else { "Waiting for workers since start (whole instance)" },
+        threadpool,
+        SignalUnit::Milliseconds,
+        SignalScope::SinceStartup,
+    ));
+    // Memory grants alone; the Memory category also holds allocation waits (CMEMTHREAD) and compile memory.
+    let grants = totals.get("RESOURCE_SEMAPHORE").map(|t| t.0).unwrap_or(0.0);
+    out.push(Signal::new(
+        culprit_core::signal_id::GRANT_WAIT_MS,
+        if azure {
+            "Waiting for memory grants since start"
+        } else {
+            "Waiting for memory grants since start (whole instance)"
+        },
+        grants,
+        SignalUnit::Milliseconds,
+        SignalScope::SinceStartup,
+    ));
+    if let Some(hours) = uptime {
+        out.push(
+            Signal::new(
+                culprit_core::signal_id::THREADPOOL_WAITS,
+                if hours >= 1.0 { "Waiting for workers, per hour" } else { "Waiting for workers since start" },
+                // Under an hour of uptime, report the total rather than extrapolate an hourly rate.
+                threadpool / hours.max(1.0),
+                SignalUnit::Milliseconds,
+                SignalScope::SinceStartup,
+            )
+            .graded("under a second an hour is healthy", 1_000.0, 60_000.0, true),
+        );
+    }
+    out
+}
+
+/// Requests in this database waiting for a worker at the scan's instant.
+pub(crate) fn threadpool_now_signal(waiting: f64) -> Signal {
+    Signal::new(
+        culprit_core::signal_id::THREADPOOL_WAITING,
+        "Requests in this database without a worker",
+        waiting,
+        SignalUnit::Count,
+        SignalScope::Now,
+    )
+    .graded("One observation; sample again to establish whether the queue persists", 1.0, f64::INFINITY, true)
+}
+
+/// tempdb's version store, which open snapshot transactions keep from shrinking.
+pub(crate) fn version_store_signal(bytes: f64) -> Signal {
+    Signal::new(culprit_core::signal_id::VERSION_STORE, "Version store", bytes, SignalUnit::Bytes, SignalScope::Now)
+        .graded(
+            "small, and shrinking when transactions end",
+            1024.0 * 1024.0 * 1024.0,
+            10.0 * 1024.0 * 1024.0 * 1024.0,
+            true,
+        )
+}
+
+/// How long the oldest open transaction has been open.
+pub(crate) fn oldest_transaction_signal(seconds: f64) -> Signal {
+    Signal::new(
+        culprit_core::signal_id::OLDEST_TRANSACTION,
+        "Oldest open transaction",
+        seconds,
+        SignalUnit::Seconds,
+        SignalScope::Now,
+    )
+    .graded("seconds or minutes, not hours", 600.0, 1800.0, true)
 }
 
 /// Two readings of wait totals and counters `seconds` apart; the difference is what happened in between.
@@ -507,6 +515,42 @@ pub(crate) async fn sample(client: &mut MsClient, azure: bool, seconds: u32) -> 
         let (a, b) = (counters_before.get(name)?, counters_after.get(name)?);
         (b >= a).then_some((b - a) / elapsed)
     };
+    let signals = sampled_signals(rate, signal_total, wait_total, azure);
+    let view = if azure { "sys.dm_db_wait_stats" } else { "sys.dm_os_wait_stats" };
+    Ok(WaitSample {
+        engine: Engine::Mssql,
+        taken_at,
+        seconds: elapsed,
+        method: sample_method(view, seconds),
+        total_ms: wait_total,
+        categories,
+        signals,
+        active_sessions: None,
+        notes: sample_notes(azure),
+    })
+}
+
+/// How a sample was taken: two readings of `view`, `seconds` apart.
+pub(crate) fn sample_method(view: &str, seconds: u32) -> String {
+    format!("Difference of two readings of {view} {seconds} s apart")
+}
+
+/// What a sample's reader should know: on SQL Server the wait counters are the whole instance's.
+pub(crate) fn sample_notes(azure: bool) -> Vec<String> {
+    if azure {
+        Vec::new()
+    } else {
+        vec!["These wait counters cover the whole SQL Server instance, including other databases; they do not establish pressure in the selected database.".into()]
+    }
+}
+
+/// The counters' rates over a sample (`rate` of a counter, per second), and the scheduling share of its waits.
+pub(crate) fn sampled_signals(
+    rate: impl Fn(&str) -> Option<f64>,
+    signal_total: f64,
+    wait_total: f64,
+    azure: bool,
+) -> Vec<Signal> {
     let mut signals = Vec::new();
     if let Some(batches) = rate("Batch Requests/sec") {
         signals.push(Signal::new(
@@ -539,22 +583,7 @@ pub(crate) async fn sample(client: &mut MsClient, azure: bool, seconds: u32) -> 
     if azure {
         signals.retain(|s| !matches!(s.key.as_str(), "batch-requests" | "compiles-per-batch" | "recompiles"));
     }
-    let view = if azure { "sys.dm_db_wait_stats" } else { "sys.dm_os_wait_stats" };
-    Ok(WaitSample {
-        engine: Engine::Mssql,
-        taken_at,
-        seconds: elapsed,
-        method: format!("Difference of two readings of {view} {seconds} s apart"),
-        total_ms: wait_total,
-        categories,
-        signals,
-        active_sessions: None,
-        notes: if azure {
-            Vec::new()
-        } else {
-            vec!["These wait counters cover the whole SQL Server instance, including other databases; they do not establish pressure in the selected database.".into()]
-        },
-    })
+    signals
 }
 
 /// A wait composition, never CPU utilization or a CPU-pressure verdict, even in a short live sample.
