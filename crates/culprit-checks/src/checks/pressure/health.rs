@@ -32,8 +32,7 @@ pub(crate) fn grade_findings(snapshot: &mut Snapshot, findings: &[Finding]) {
         let severity = findings.iter().filter(|f| f.check == check && f.is_actionable()).map(|f| f.severity).max();
         if s.value == 0.0 && s.key != "oldest-transaction" {
             s.status = SignalStatus::Good;
-            s.healthy =
-                Some("No requests in this queue when the scan ran. Historical waits are reported separately.".into());
+            s.healthy = Some(t!("health.queue_empty"));
             continue;
         }
         s.status = match severity {
@@ -45,7 +44,7 @@ pub(crate) fn grade_findings(snapshot: &mut Snapshot, findings: &[Finding]) {
         if let Some(f) = findings.iter().find(|f| f.check == check && f.is_actionable()) {
             s.healthy = Some(f.title.clone());
         } else if s.key == "oldest-transaction" {
-            s.healthy = Some("A cleanup holder observed at the scan's instant; no long-held-cleanup finding is supported by this scan.".into());
+            s.healthy = Some(t!("health.cleanup_holder"));
         }
     }
 }
@@ -116,72 +115,32 @@ pub(crate) fn grade_on_evidence(snapshot: &mut Snapshot) {
     for s in &mut p.signals {
         let explanation = match s.key.as_str() {
             "signal-wait" => {
-                s.label = "Scheduling share of recorded waits".into();
-                Some(
-                    "The share of recorded waiting spent ready to run, before a worker was scheduled. This is not CPU utilization and alone does not establish CPU pressure.",
-                )
+                s.label = t!("health.label.signal_wait");
+                Some(t!("health.explain.signal_wait"))
             }
-            "cache-hit" => Some(
-                "Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.",
-            ),
-            "buffer-pool-hit" => Some(
-                "The share of reads served by InnoDB's buffer pool across the whole server. A miss ratio alone does not establish a memory shortage in this database.",
-            ),
-            "page-life" => Some(
-                "A server cache counter at the scan's instant. There is no universal healthy number of seconds; cache size, workload and measured I/O matter.",
-            ),
-            "tmp-disk-tables" => Some(
-                "The share of internal temporary tables written to disk across the whole server. Table sizes and the statements' measured cost determine whether this needs work.",
-            ),
-            "temp-bytes" => Some(
-                "Temporary data written by this database over its statistics period. This amount alone does not establish a performance problem; the findings identify costly spills.",
-            ),
-            "deadlocks" => Some(
-                "A count over the statistics period, not deadlocks happening now. The deadlock finding uses the amount and period recorded.",
-            ),
-            "rollbacks" => Some(
-                "Rollbacks can be deliberate application behavior. This historical share alone does not establish failed requests.",
-            ),
-            "row-lock-avg" => Some(
-                "An average across the whole server's recorded row-lock waits, not a current wait. The lock findings use the amount of waiting too.",
-            ),
-            "max-used-connections" => Some(
-                "The busiest moment since these counters started, compared with today's limit. This does not establish a connection shortage now.",
-            ),
-            "checkpoints-requested" => Some(
-                "Requested checkpoints include WAL-triggered checkpoints, manual CHECKPOINT, backups and CREATE DATABASE. This shared historical ratio does not identify their cause or establish current write pressure.",
-            ),
-            "new-connections" => Some(
-                "The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.",
-            ),
-            "session-length" => Some(
-                "Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.",
-            ),
-            "sessions-abandoned" => Some(
-                "The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.",
-            ),
-            "pooled-reuse" => Some(
-                "SQL Server's recorded connection resets compared with new logins, across the server. Some pools reuse a connection without resetting it, so this does not prove whether the application pools connections.",
-            ),
-            "thread-cache-misses" => Some(
-                "The share of connections needing a new server thread across the whole server. This does not measure application connection pooling or its cost.",
-            ),
-            "version-store" => Some(
-                "Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.",
-            ),
-            "history-length" => Some(
-                "Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.",
-            ),
-            "threadpool-waits" => Some(
-                "Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.",
-            ),
-            "compiles-per-batch" => Some(
-                "New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.",
-            ),
+            "cache-hit" => Some(t!("health.explain.cache_hit")),
+            "buffer-pool-hit" => Some(t!("health.explain.buffer_pool_hit")),
+            "page-life" => Some(t!("health.explain.page_life")),
+            "tmp-disk-tables" => Some(t!("health.explain.tmp_disk_tables")),
+            "temp-bytes" => Some(t!("health.explain.temp_bytes")),
+            "deadlocks" => Some(t!("health.explain.deadlocks")),
+            "rollbacks" => Some(t!("health.explain.rollbacks")),
+            "row-lock-avg" => Some(t!("health.explain.row_lock_avg")),
+            "max-used-connections" => Some(t!("health.explain.max_used_connections")),
+            "checkpoints-requested" => Some(t!("health.explain.checkpoints_requested")),
+            "new-connections" => Some(t!("health.explain.new_connections")),
+            "session-length" => Some(t!("health.explain.session_length")),
+            "sessions-abandoned" => Some(t!("health.explain.sessions_abandoned")),
+            "pooled-reuse" => Some(t!("health.explain.pooled_reuse")),
+            "thread-cache-misses" => Some(t!("health.explain.thread_cache_misses")),
+            "version-store" => Some(t!("health.explain.version_store")),
+            "history-length" => Some(t!("health.explain.history_length")),
+            "threadpool-waits" => Some(t!("health.explain.threadpool_waits")),
+            "compiles-per-batch" => Some(t!("health.explain.compiles_per_batch")),
             _ => None,
         };
         if let Some(explanation) = explanation {
-            s.healthy = Some(explanation.into());
+            s.healthy = Some(explanation);
             s.status = SignalStatus::Info;
         }
         // These counters are shared even when the login connected to just one database.
@@ -206,8 +165,10 @@ pub(crate) fn grade_on_evidence(snapshot: &mut Snapshot) {
             Engine::Sqlite => false,
         };
         if shared {
+            // A label the provider already wrote as the whole server's (or instance's) keeps its words. That reads the
+            // label, written by the provider in the language of its scan: a field saying so belongs on `Signal`.
             if !s.label.contains("whole server") && !s.label.contains("whole instance") {
-                s.label.push_str(" (whole server)");
+                s.label = t!("health.label.whole_server", label = &s.label);
             }
             s.status = SignalStatus::Info;
         }
@@ -217,15 +178,15 @@ pub(crate) fn grade_on_evidence(snapshot: &mut Snapshot) {
         if matches!(s.key.as_str(), "threadpool-waiting" | "memory-grants-pending") && s.value > 0.0 {
             // One observed queue is worth a look, not proof of sustained starvation.
             s.status = SignalStatus::Watch;
-            s.healthy = Some("Requests waiting at the scan's instant. Sample again to establish whether the queue persists before changing settings.".into());
+            s.healthy = Some(t!("health.queue_now"));
         }
     }
-    let dimensions: [(&str, &str, ResourcePick); 5] = [
-        ("cpu-use", "CPU used against its limit", |s| s.cpu_pct),
-        ("data-io", "Storage I/O used against its limit", |s| s.data_io_pct),
-        ("log-write-use", "Log throughput used against its limit", |s| s.log_write_pct),
-        ("workers-use", "Worker slots used against their limit", |s| s.workers_pct),
-        ("memory-use", "Memory allocated against its limit", |s| s.memory_pct),
+    let dimensions: [(&str, String, ResourcePick); 5] = [
+        ("cpu-use", t!("health.resource.label.cpu_use"), |s| s.cpu_pct),
+        ("data-io", t!("health.resource.label.data_io"), |s| s.data_io_pct),
+        ("log-write-use", t!("health.resource.label.log_write_use"), |s| s.log_write_pct),
+        ("workers-use", t!("health.resource.label.workers_use"), |s| s.workers_pct),
+        ("memory-use", t!("health.resource.label.memory_use"), |s| s.memory_pct),
     ];
     for (key, label, pick) in dimensions {
         p.signals.retain(|s| s.key != key);
@@ -246,33 +207,27 @@ pub(crate) fn grade_on_evidence(snapshot: &mut Snapshot) {
             let last = snapshot.resources.iter().filter(|s| pick(s).is_some()).filter_map(|s| epoch(&s.at)).max();
             first.is_some_and(|t| t <= end - i64::from(minutes) * 60 + 30) && last.is_some_and(|t| t >= end - 30)
         });
-        let coverage = selected
-            .map(|m| {
-                format!(
-                    "{} selected; {} of resource samples available. ",
-                    culprit_core::window_label(m),
-                    culprit_core::span_words(u.hours)
-                )
-            })
-            .unwrap_or_default();
+        let span = culprit_core::span_words(u.hours);
+        let coverage = selected.map(|m| {
+            t!("health.resource.selected", window = culprit_core::window_label(m), span = &span)
+        });
+        let said = [
+            t!("health.resource.average", span = &span, peak = format::percent_value(u.peak)),
+            t!("health.resource.at_limit", limit = format::percent(0.95), share = format::percent(u.at_limit)),
+            if key == "memory-use" {
+                t!("health.resource.memory")
+            } else if u.measured {
+                t!("health.resource.warning", share = format::percent(0.1))
+            } else {
+                t!("health.resource.coverage", span = culprit_core::span_words(0.5))
+            },
+        ];
         let signal = Signal {
-            healthy: Some(format!(
-                "{coverage}Average over {} of recorded samples; peak {}. At or above 95% of this database's limit in {} of samples. {}",
-                culprit_core::span_words(u.hours),
-                format::percent_value(u.peak),
-                format::percent(u.at_limit),
-                if key == "memory-use" {
-                    "Allocated memory includes cache; a full cache is normal and is not graded as memory pressure."
-                } else if u.measured {
-                    "A warning needs at least 10% of samples near the limit."
-                } else {
-                    "Too little coverage to judge sustained pressure; at least 30 minutes of samples are needed."
-                }
-            )),
+            healthy: Some(coverage.into_iter().chain(said).collect::<Vec<_>>().join(" ")),
             status,
             ..Signal::new(
                 key,
-                label,
+                &label,
                 u.average,
                 SignalUnit::Percent,
                 if covers_selection { SignalScope::Window } else { SignalScope::LastHour },
