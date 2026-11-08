@@ -231,13 +231,13 @@ export function CommandPalette() {
         <div className="palette-foot" aria-hidden="true">
           <span>
             <span className="kbd">↑</span>
-            <span className="kbd">↓</span> {t("ui.palette.move")}
+            <span className="kbd">↓</span> {t("ui.common.keys.move")}
           </span>
           <span>
-            <span className="kbd">↵</span> {t("ui.palette.open")}
+            <span className="kbd">↵</span> {t("ui.common.keys.open")}
           </span>
           <span>
-            <span className="kbd">esc</span> {t("ui.palette.close")}
+            <span className="kbd">esc</span> {t("ui.common.keys.close")}
           </span>
         </div>
       </div>

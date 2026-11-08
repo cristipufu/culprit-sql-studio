@@ -10,6 +10,7 @@ import type { TableAdvice } from "../gen/TableAdvice";
 import { api, errorMessage, type ApiError } from "../lib/api";
 import { ago, bytes, count, percent, rowCount } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
+import { t } from "../lib/i18n";
 import { setState } from "../lib/store";
 import { Sql } from "./Sql";
 import { copyAndTell } from "../lib/clipboard";
@@ -24,25 +25,45 @@ type Item =
 /** Advice per report id: the advisor is pure over a report, so a re-open is instant. */
 const cache = new Map<string, IndexAdvice>();
 
-const SOURCE: Record<IndexCandidate["source"], string> = {
-  optimizer: "Asked for by the optimizer",
-  "plan-scan": "Seen in a query plan",
-  "foreign-key": "Foreign key",
-  "engine-built": "Built on every run",
-};
+/** Where a candidate index comes from, in words. */
+function sourceLabel(source: IndexCandidate["source"]): string {
+  switch (source) {
+    case "optimizer":
+      return t("ui.index_advisor.source.optimizer");
+    case "plan-scan":
+      return t("ui.index_advisor.source.plan_scan");
+    case "foreign-key":
+      return t("ui.index_advisor.source.foreign_key");
+    case "engine-built":
+      return t("ui.index_advisor.source.engine_built");
+  }
+}
 
-const CLEANUP: Record<CleanupKind, { label: string; tone: string; verb: string }> = {
-  duplicate: { label: "Duplicate", tone: "medium", verb: "Same keys as" },
-  prefix: { label: "Covered", tone: "low", verb: "Covered by" },
-  overlap: { label: "Overlaps", tone: "low", verb: "Overlaps" },
-  unused: { label: "Unused", tone: "medium", verb: "" },
-};
+/** A cleanup's badge: its kind in words, and its tone. */
+function cleanupKind(kind: CleanupKind): { label: string; tone: string } {
+  switch (kind) {
+    case "duplicate":
+      return { label: t("ui.index_advisor.cleanup.duplicate"), tone: "medium" };
+    case "prefix":
+      return { label: t("ui.index_advisor.cleanup.prefix"), tone: "low" };
+    case "overlap":
+      return { label: t("ui.index_advisor.cleanup.overlap"), tone: "low" };
+    case "unused":
+      return { label: t("ui.index_advisor.cleanup.unused"), tone: "medium" };
+  }
+}
 
-const TABLE_KIND: Record<TableAdvice["kind"], { label: string; icon: ReactNode }> = {
-  "scan-heavy": { label: "Read in full", icon: <Rows3 size={14} /> },
-  "forwarded-fetches": { label: "Heap with forwarded rows", icon: <Layers size={14} /> },
-  "over-indexed": { label: "Many indexes, many writes", icon: <Table2 size={14} /> },
-};
+/** What a table's shape costs, in words, with its icon. */
+function tableKind(kind: TableAdvice["kind"]): { label: string; icon: ReactNode } {
+  switch (kind) {
+    case "scan-heavy":
+      return { label: t("ui.index_advisor.table.scan_heavy"), icon: <Rows3 size={14} /> };
+    case "forwarded-fetches":
+      return { label: t("ui.index_advisor.table.forwarded_fetches"), icon: <Layers size={14} /> };
+    case "over-indexed":
+      return { label: t("ui.index_advisor.table.over_indexed"), icon: <Table2 size={14} /> };
+  }
+}
 
 function sqlOf(item: Item): string | null {
   if (item.kind === "add") return item.candidate.sql;
@@ -124,7 +145,7 @@ export default function IndexAdvisor({ report, onOpenTable }: { report: Report; 
     });
   const copy = async (sql: string | null) => {
     if (!sql) return;
-    await copyAndTell(sql, "Copied. Culprit never runs it; review it, then run it in your migration tooling.");
+    await copyAndTell(sql, t("ui.index_advisor.copied"));
   };
   const openFinding = (fid: string | null) => fid && setState({ view: "overview", finding: fid });
   const openQuery = (q: AdviceQuery) => setState({ view: "queries", query: q.id });
@@ -180,6 +201,9 @@ export default function IndexAdvisor({ report, onOpenTable }: { report: Report; 
   const freed = a.cleanups.reduce((sum, c) => sum + (c.size_bytes ?? 0), 0);
   const empty = a.candidates.length + a.cleanups.length + a.tables.length === 0;
   const indexCount = report.snapshot.indexes.length;
+  const checkedArgs = { indexes: count(indexCount), tables: count(report.snapshot.tables.length) };
+  const requests = a.engine === "mssql";
+  const usage = report.snapshot.server.capabilities.includes("index-usage");
 
   return (
     <div className="ia">
@@ -189,17 +213,22 @@ export default function IndexAdvisor({ report, onOpenTable }: { report: Report; 
           <span className="ia-empty-mark">
             <Check size={18} />
           </span>
-          <h3>Nothing to add or clean up</h3>
+          <h3>{t("ui.index_advisor.empty")}</h3>
           <p>
-            Culprit checked {count(indexCount)} indexes on {count(report.snapshot.tables.length)} tables: {a.engine === "mssql" ? "the optimizer's missing-index requests, " : ""}plans
-            that read whole tables, foreign keys, duplicates, overlaps{report.snapshot.server.capabilities.includes("index-usage") ? " and indexes nothing reads" : ""}.
+            {requests
+              ? usage
+                ? t("ui.index_advisor.checked_requests_unused", checkedArgs)
+                : t("ui.index_advisor.checked_requests", checkedArgs)
+              : usage
+                ? t("ui.index_advisor.checked_unused", checkedArgs)
+                : t("ui.index_advisor.checked", checkedArgs)}
           </p>
         </div>
       ) : (
-        <div className="ia-tiles" role="tablist" aria-label="Show">
-          <Tile on={filter === "add"} n={a.candidates.length} label="to add" sub={neededShare > 0 ? `needed by ${percent(Math.min(1, neededShare))} of DB time` : a.candidates.length ? "from plans and foreign keys" : "nothing missing"} onClick={() => (setFilter((f) => (f === "add" ? null : "add")), setFocus(0))} />
-          <Tile on={filter === "cleanup"} n={a.cleanups.length} label="to clean up" sub={freed > 0 ? `frees ${bytes(freed)}` : "nothing idle"} onClick={() => (setFilter((f) => (f === "cleanup" ? null : "cleanup")), setFocus(0))} />
-          <Tile on={filter === "tables"} n={a.tables.length} label={a.tables.length === 1 ? "table to look at" : "tables to look at"} sub={a.tables.length ? "shape costs reads or writes" : "all in shape"} onClick={() => (setFilter((f) => (f === "tables" ? null : "tables")), setFocus(0))} />
+        <div className="ia-tiles" role="tablist" aria-label={t("ui.index_advisor.show")}>
+          <Tile on={filter === "add"} n={a.candidates.length} label={t("ui.index_advisor.tile.add")} sub={neededShare > 0 ? t("ui.index_advisor.tile.needed_by", { share: percent(Math.min(1, neededShare)) }) : a.candidates.length ? t("ui.index_advisor.tile.from_plans") : t("ui.index_advisor.tile.nothing_missing")} onClick={() => (setFilter((f) => (f === "add" ? null : "add")), setFocus(0))} />
+          <Tile on={filter === "cleanup"} n={a.cleanups.length} label={t("ui.index_advisor.tile.cleanup")} sub={freed > 0 ? t("ui.index_advisor.tile.frees", { size: bytes(freed) }) : t("ui.index_advisor.tile.nothing_idle")} onClick={() => (setFilter((f) => (f === "cleanup" ? null : "cleanup")), setFocus(0))} />
+          <Tile on={filter === "tables"} n={a.tables.length} label={t("ui.index_advisor.tile.tables", { n: a.tables.length })} sub={a.tables.length ? t("ui.index_advisor.tile.shape_costs") : t("ui.index_advisor.tile.all_in_shape")} onClick={() => (setFilter((f) => (f === "tables" ? null : "tables")), setFocus(0))} />
         </div>
       )}
 
@@ -217,9 +246,9 @@ export default function IndexAdvisor({ report, onOpenTable }: { report: Report; 
           return (
             <section key={section} className="ia-section">
               <h3>
-                {section === "add" ? "Add" : section === "cleanup" ? "Clean up" : "Tables"}
+                {section === "add" ? t("ui.index_advisor.section.add") : section === "cleanup" ? t("ui.index_advisor.section.cleanup") : t("ui.index_advisor.section.tables")}
                 <span className="ia-count">{list.length}</span>
-                {section === "add" && <span className="ia-h-note">ordered by the database time of the queries that need each one</span>}
+                {section === "add" && <span className="ia-h-note">{t("ui.index_advisor.section.add_note")}</span>}
               </h3>
               {list.map((item) => {
                 const index = items.indexOf(item);
@@ -235,7 +264,7 @@ export default function IndexAdvisor({ report, onOpenTable }: { report: Report; 
                 };
                 if (item.kind === "add") return <CandidateRow key={item.key} c={item.candidate} rank={item.rank} {...props} />;
                 if (item.kind === "cleanup") return <CleanupRow key={item.key} c={item.cleanup} {...props} />;
-                return <TableRow key={item.key} t={item.table} {...props} />;
+                return <TableRow key={item.key} table={item.table} {...props} />;
               })}
             </section>
           );
@@ -244,7 +273,7 @@ export default function IndexAdvisor({ report, onOpenTable }: { report: Report; 
       {!empty && (
         <div className="ia-keys muted">
           <span className="kbd">j</span>
-          <span className="kbd">k</span> move · <span className="kbd">↵</span> open · <span className="kbd">c</span> copy SQL · <span className="kbd">o</span> finding · <span className="kbd">t</span> table
+          <span className="kbd">k</span> {t("ui.common.keys.move")} · <span className="kbd">↵</span> {t("ui.common.keys.open")} · <span className="kbd">c</span> {t("ui.index_advisor.keys.copy")} · <span className="kbd">o</span> {t("ui.index_advisor.keys.finding")} · <span className="kbd">t</span> {t("ui.index_advisor.keys.table")}
         </div>
       )}
     </div>
@@ -254,9 +283,12 @@ export default function IndexAdvisor({ report, onOpenTable }: { report: Report; 
 function Header({ advice, report }: { advice: IndexAdvice | null; report: Report }) {
   return (
     <header className="ia-head">
-      <h2>Index advisor</h2>
+      <h2>{t("ui.index_advisor.title")}</h2>
       <p className="ia-sub">
-        {advice ? (advice.counters ? `Usage counted ${advice.counters}` : "Index usage counters unavailable") : "Reading the selected scan…"} · scanned {ago(report.snapshot.taken_at)} · Culprit only suggests; it never changes indexes
+        {t("ui.index_advisor.sub", {
+          state: advice ? (advice.counters ? t("ui.index_advisor.usage_counted", { counters: advice.counters }) : t("ui.index_advisor.no_usage_counters")) : t("ui.index_advisor.loading"),
+          ago: ago(report.snapshot.taken_at),
+        })}
       </p>
     </header>
   );
@@ -291,7 +323,7 @@ function Keys({ keys, include, shared = 0 }: { keys: string[]; include?: string[
           {k}
         </span>
       ))}
-      {include && include.length > 0 && <span className="ia-chip include" title={`Included: ${include.join(", ")}`}>+ {include.length === 1 ? include[0] : `${include.length} included`}</span>}
+      {include && include.length > 0 && <span className="ia-chip include" title={t("ui.index_advisor.included_title", { columns: include.join(", ") })}>+ {include.length === 1 ? include[0] : t("ui.index_advisor.included", { n: include.length })}</span>}
     </span>
   );
 }
@@ -309,9 +341,9 @@ function SqlBlock({ sql, onCopy }: { sql: string | null; onCopy: () => void }) {
   return (
     <div className="ia-sql">
       <div className="ia-sql-bar">
-        <span className="muted">Copy and run it yourself</span>
+        <span className="muted">{t("ui.index_advisor.run_yourself")}</span>
         <button type="button" className="btn ghost" onClick={onCopy}>
-          <Copy size={12} /> Copy <span className="kbd">c</span>
+          <Copy size={12} /> {t("ui.common.copy")} <span className="kbd">c</span>
         </button>
       </div>
       <Sql text={sql} pretty={false} className="ia-sql-code" />
@@ -326,13 +358,13 @@ function Queries({ queries, onQuery, title }: { queries: AdviceQuery[]; onQuery:
     <div className="ia-block">
       <div className="ia-label">{title}</div>
       {queries.map((q) => (
-        <button type="button" key={q.id} className="ia-query" onClick={() => onQuery(q)} title="Open in Queries">
+        <button type="button" key={q.id} className="ia-query" onClick={() => onQuery(q)} title={t("ui.common.open_in_queries")}>
           <span className="ia-qbar" aria-hidden>
             <span style={{ width: `${Math.max(4, ((q.share ?? 0) / max) * 100)}%` }} />
           </span>
           <span className="ia-qshare">{q.share != null ? percent(q.share) : "—"}</span>
           <span className="ia-qtext">{q.text}</span>
-          {q.runs_per_day != null && <span className="ia-qruns">{count(q.runs_per_day)}/day</span>}
+          {q.runs_per_day != null && <span className="ia-qruns">{t("ui.index_advisor.per_day", { count: count(q.runs_per_day) })}</span>}
           <ArrowUpRight size={12} className="ia-go" />
         </button>
       ))}
@@ -344,7 +376,7 @@ function Verify({ steps }: { steps: string[] }) {
   if (!steps.length) return null;
   return (
     <div className="ia-block">
-      <div className="ia-label">How to verify</div>
+      <div className="ia-label">{t("ui.index_advisor.verify")}</div>
       <ol className="ia-verify">
         {steps.map((s) => (
           <li key={s}>{s}</li>
@@ -359,11 +391,11 @@ function Links({ onFinding, hasFinding, onTable }: { onFinding: () => void; hasF
     <div className="ia-links">
       {hasFinding && (
         <button type="button" className="btn ghost" onClick={onFinding}>
-          Open finding <span className="kbd">o</span>
+          {t("ui.index_advisor.open_finding")} <span className="kbd">o</span>
         </button>
       )}
       <button type="button" className="btn ghost" onClick={onTable}>
-        Open table <span className="kbd">t</span>
+        {t("ui.index_advisor.open_table")} <span className="kbd">t</span>
       </button>
     </div>
   );
@@ -371,10 +403,10 @@ function Links({ onFinding, hasFinding, onTable }: { onFinding: () => void; hasF
 
 function CandidateRow({ c, rank, focused, onFocus, expanded, onToggle, onCopy, onFinding, onTable, onQuery }: RowProps & { c: IndexCandidate; rank: number }) {
   const facts: string[] = [];
-  if (c.lookups != null) facts.push(`${count(c.lookups)} lookups`);
-  if (c.estimated_improvement != null) facts.push(`≈${percent(c.estimated_improvement)} cheaper`);
-  if (c.table_rows != null) facts.push(`${rowCount(c.table_rows)} in table`);
-  if (c.writes_per_day != null) facts.push(`${count(c.writes_per_day)} writes/day`);
+  if (c.lookups != null) facts.push(t("ui.index_advisor.lookups", { count: count(c.lookups) }));
+  if (c.estimated_improvement != null) facts.push(t("ui.index_advisor.cheaper", { share: percent(c.estimated_improvement) }));
+  if (c.table_rows != null) facts.push(t("ui.index_advisor.in_table", { rows: rowCount(c.table_rows) }));
+  if (c.writes_per_day != null) facts.push(t("ui.index_advisor.writes_per_day", { count: count(c.writes_per_day) }));
   return (
     <div className={`ia-item ${focused ? "focus" : ""} ${expanded ? "expanded" : ""}`}>
       <button type="button" className="ia-row" onClick={onToggle} onFocus={onFocus} aria-expanded={expanded}>
@@ -385,38 +417,38 @@ function CandidateRow({ c, rank, focused, onFocus, expanded, onToggle, onCopy, o
             <Keys keys={c.keys} include={c.include} />
           </span>
           <span className="ia-meta">
-            <span className={`ia-source ${c.source}`}>{SOURCE[c.source]}</span>
+            <span className={`ia-source ${c.source}`}>{sourceLabel(c.source)}</span>
             {facts.length > 0 && <span> · {facts.join(" · ")}</span>}
-            {c.widens && <span> · widens {c.widens}</span>}
+            {c.widens && <span> · {t("ui.index_advisor.widens", { index: c.widens })}</span>}
           </span>
         </span>
-        <span className="ia-impact" title="Share of database time of the queries that need this index">
+        <span className="ia-impact" title={t("ui.index_advisor.impact_hint")}>
           {c.db_time_share != null ? (
             <>
               <span className="ia-meter" aria-hidden>
                 <span style={{ width: `${Math.max(3, Math.sqrt(c.db_time_share) * 100)}%` }} />
               </span>
               <span className="ia-impact-n">{percent(c.db_time_share)}</span>
-              <span className="ia-impact-l">of DB time</span>
+              <span className="ia-impact-l">{t("ui.index_advisor.of_db_time")}</span>
             </>
           ) : (
-            <span className="ia-impact-l">{c.queries.length ? `${c.queries.length} quer${c.queries.length === 1 ? "y" : "ies"}` : "no captured queries"}</span>
+            <span className="ia-impact-l">{c.queries.length ? t("ui.index_advisor.queries", { n: c.queries.length }) : t("ui.index_advisor.no_queries")}</span>
           )}
         </span>
         <ChevronRight size={14} className="ia-chev" />
       </button>
       <Body expanded={expanded}>
         <p className="ia-reason">{c.reason}</p>
-        <Queries queries={c.queries} onQuery={onQuery} title={c.queries.length === 1 ? "The query that needs it" : "The queries that need it"} />
+        <Queries queries={c.queries} onQuery={onQuery} title={t("ui.index_advisor.queries_title", { n: c.queries.length })} />
         {c.requests.length > 1 && (
           <div className="ia-block">
-            <div className="ia-label">Merges {c.requests.length} optimizer requests</div>
+            <div className="ia-label">{t("ui.index_advisor.merges", { n: c.requests.length })}</div>
             <div className="ia-requests">
               {c.requests.map((r, i) => (
                 <div key={i} className="ia-request">
                   <Keys keys={[...r.equality, ...r.inequality]} include={r.include} />
                   <span className="muted">
-                    {count(r.lookups)} lookups · ≈{percent(r.improvement)} cheaper
+                    {t("ui.index_advisor.lookups", { count: count(r.lookups) })} · {t("ui.index_advisor.cheaper", { share: percent(r.improvement) })}
                   </span>
                 </div>
               ))}
@@ -424,7 +456,7 @@ function CandidateRow({ c, rank, focused, onFocus, expanded, onToggle, onCopy, o
           </div>
         )}
         <SqlBlock sql={c.sql} onCopy={onCopy} />
-        {!c.sql && c.widens && <p className="ia-reason muted">{c.widens} already starts with these columns; check the queries' predicates for type mismatches or functions on the column.</p>}
+        {!c.sql && c.widens && <p className="ia-reason muted">{t("ui.index_advisor.widens_note", { index: c.widens })}</p>}
         {c.write_cost && <p className="ia-cost">{c.write_cost}</p>}
         <Verify steps={c.verify} />
         <Links onFinding={onFinding} hasFinding={!!c.finding_id} onTable={onTable} />
@@ -434,21 +466,22 @@ function CandidateRow({ c, rank, focused, onFocus, expanded, onToggle, onCopy, o
 }
 
 function cleanupMeta(c: IndexCleanup): string {
-  const reads = c.reads != null ? ` · read ${count(c.reads)}×` : "";
+  const reads = c.reads != null ? t("ui.index_advisor.read_times", { count: count(c.reads) }) : null;
+  const other = c.other ?? "";
   switch (c.kind) {
     case "unused":
-      return ["never read", c.writes ? `${count(c.writes)} writes` : null, c.other ? `also covered by ${c.other}` : null].filter(Boolean).join(" · ");
+      return [t("ui.index_advisor.never_read"), c.writes ? t("ui.index_advisor.writes", { count: count(c.writes) }) : null, c.other ? t("ui.index_advisor.also_covered_by", { index: c.other }) : null].filter(Boolean).join(" · ");
     case "duplicate":
-      return `Same keys as ${c.other}${reads}`;
+      return [t("ui.index_advisor.same_keys_as", { index: other }), reads].filter(Boolean).join(" · ");
     case "prefix":
-      return `Covered by ${c.other}${reads}`;
+      return [t("ui.index_advisor.covered_by", { index: other }), reads].filter(Boolean).join(" · ");
     case "overlap":
-      return `Overlaps ${c.other}${reads}`;
+      return [t("ui.index_advisor.overlaps", { index: other }), reads].filter(Boolean).join(" · ");
   }
 }
 
 function CleanupRow({ c, focused, onFocus, expanded, onToggle, onCopy, onFinding, onTable }: RowProps & { c: IndexCleanup }) {
-  const kind = CLEANUP[c.kind];
+  const kind = cleanupKind(c.kind);
   const shared = c.other_keys.length ? c.keys.findIndex((k, i) => c.other_keys[i]?.toLowerCase() !== k.toLowerCase()) : 0;
   const prefix = shared === -1 ? c.keys.length : shared;
   return (
@@ -458,7 +491,7 @@ function CleanupRow({ c, focused, onFocus, expanded, onToggle, onCopy, onFinding
         <span className="ia-main">
           <span className="ia-title">
             <span className="ia-index">{c.index}</span>
-            <span className="ia-on">on {c.table}</span>
+            <span className="ia-on">{t("ui.index_advisor.on_table", { table: c.table })}</span>
           </span>
           <span className="ia-meta">{cleanupMeta(c)}</span>
         </span>
@@ -489,33 +522,33 @@ function CleanupRow({ c, focused, onFocus, expanded, onToggle, onCopy, onFinding
   );
 }
 
-function TableRow({ t, focused, onFocus, expanded, onToggle, onCopy, onFinding, onTable, onQuery }: RowProps & { t: TableAdvice }) {
-  const kind = TABLE_KIND[t.kind];
+function TableRow({ table, focused, onFocus, expanded, onToggle, onCopy, onFinding, onTable, onQuery }: RowProps & { table: TableAdvice }) {
+  const kind = tableKind(table.kind);
   const facts: string[] = [];
-  if (t.full_scans_per_day != null) facts.push(`${count(t.full_scans_per_day)} full reads/day`);
-  if (t.rows_scanned_per_day != null) facts.push(`${count(t.rows_scanned_per_day)} rows/day`);
-  if (t.forwarded_per_day != null) facts.push(`${count(t.forwarded_per_day)} forwarded reads/day`);
-  if (t.indexes != null && t.kind === "over-indexed") facts.push(`${count(t.indexes)} indexes`);
-  if (t.writes_per_day != null) facts.push(`${count(t.writes_per_day)} writes/day`);
+  if (table.full_scans_per_day != null) facts.push(t("ui.index_advisor.full_reads_per_day", { count: count(table.full_scans_per_day) }));
+  if (table.rows_scanned_per_day != null) facts.push(t("ui.index_advisor.rows_per_day", { count: count(table.rows_scanned_per_day) }));
+  if (table.forwarded_per_day != null) facts.push(t("ui.index_advisor.forwarded_per_day", { count: count(table.forwarded_per_day) }));
+  if (table.indexes != null && table.kind === "over-indexed") facts.push(t("ui.index_advisor.indexes", { count: count(table.indexes) }));
+  if (table.writes_per_day != null) facts.push(t("ui.index_advisor.writes_per_day", { count: count(table.writes_per_day) }));
   return (
     <div className={`ia-item ${focused ? "focus" : ""} ${expanded ? "expanded" : ""}`}>
       <button type="button" className="ia-row" onClick={onToggle} onFocus={onFocus} aria-expanded={expanded}>
         <span className="ia-kind-icon">{kind.icon}</span>
         <span className="ia-main">
           <span className="ia-title">
-            <span className="ia-table">{t.table}</span>
+            <span className="ia-table">{table.table}</span>
             <span className="ia-on">{kind.label}</span>
           </span>
           <span className="ia-meta">{facts.join(" · ")}</span>
         </span>
-        <span className="ia-impact">{t.rows != null && <span className="ia-impact-l">{rowCount(t.rows)}</span>}</span>
+        <span className="ia-impact">{table.rows != null && <span className="ia-impact-l">{rowCount(table.rows)}</span>}</span>
         <ChevronRight size={14} className="ia-chev" />
       </button>
       <Body expanded={expanded}>
-        <p className="ia-reason">{t.reason}</p>
-        <Queries queries={t.queries} onQuery={onQuery} title="Statements that read it" />
-        <SqlBlock sql={t.sql} onCopy={onCopy} />
-        <Links onFinding={onFinding} hasFinding={!!t.finding_id} onTable={onTable} />
+        <p className="ia-reason">{table.reason}</p>
+        <Queries queries={table.queries} onQuery={onQuery} title={t("ui.index_advisor.read_by")} />
+        <SqlBlock sql={table.sql} onCopy={onCopy} />
+        <Links onFinding={onFinding} hasFinding={!!table.finding_id} onTable={onTable} />
       </Body>
     </div>
   );
