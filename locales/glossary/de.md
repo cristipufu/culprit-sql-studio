@@ -155,6 +155,18 @@ Baseline, Dashboard, Live, Cache, Latch, Flush, Query Store, JIT, HOT, Tablet, S
 | parameter sensitivity | Parameterempfindlichkeit | |
 | hidden index (MySQL) | unsichtbar | |
 | cleanup holder | Bereinigungsblocker | |
+| query log (an app's) | Abfragelog | |
+| insights (plan insights) | Erkenntnisse | |
+| Right now (the waits tab), health | „Jetzt“, Zustand | |
+| average (in a column) | Ø | |
+| statement digests | Anweisungs-Digests | |
+| gap / insert-intention lock | Gap-Sperre / Insert-Intention-Sperre | |
+| shared / intent-exclusive / update / key-range lock | gemeinsame / beabsichtigte exklusive / Aktualisierungs- / Schlüsselbereichssperre | |
+| schema stability / modification, bulk update lock | Schemastabilitäts- / Schemaänderungssperre, Massenaktualisierungssperre | |
+| page life expectancy, version store | Seitenlebenserwartung, Versionsspeicher | |
+| tenant / subscription (Azure) | Mandant / Abonnement | |
+| burst balance, bastion host, continuation token | Burst-Guthaben, Bastion-Host, Fortsetzungstoken | |
+| reset epoch, retention budget, request trace | Reset-Epoche, Aufbewahrungsbudget, Request-Trace | |
 
 ## UI verbs
 
