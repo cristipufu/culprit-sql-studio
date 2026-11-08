@@ -11,8 +11,7 @@ use std::path::{Path, PathBuf};
 use culprit_core::{Report, VerifyStatus, compare_reports, plan_diff_named};
 use culprit_engine::export::{self, ExportNote, ExportOptions};
 
-#[path = "../examples/support/plan_samples.rs"]
-mod captured;
+use crate::plan_samples::captured;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")

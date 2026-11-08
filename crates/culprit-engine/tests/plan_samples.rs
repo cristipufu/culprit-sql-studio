@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use culprit_core::{Engine, plan_diff};
 
 #[path = "../examples/support/plan_samples.rs"]
-mod captured;
+pub(crate) mod captured;
 
 #[test]
 fn every_product_has_a_parseable_comparison_from_its_native_parser() {
