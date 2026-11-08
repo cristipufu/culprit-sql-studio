@@ -7,18 +7,20 @@ use crate::evidence::Requirement as Evidence;
 pub fn untrusted_constraint_info() -> CheckInfo {
     CheckInfo {
         id: "untrusted-constraint".into(),
-        title: "Unvalidated or disabled constraints".into(),
+        title: t!("check.untrusted_constraint.info.title"),
         category: Category::Maintenance,
         engines: vec![Engine::Mssql, Engine::Postgres, Engine::Yugabyte],
         requires: vec![],
-        description: "SQL Server foreign keys and check constraints added or re-enabled WITH NOCHECK (or switched off), PostgreSQL CHECK constraints added NOT VALID, and YugabyteDB CHECK or foreign-key constraints awaiting validation.".into(),
+        description: t!("check.untrusted_constraint.info.description"),
     }
 }
 
 check!(
     UntrustedConstraintCheck: untrusted_constraint_info,
-    untrusted_constraint,
-    &[Evidence::Source(culprit_core::source_id::CONSTRAINTS)]
+    decide = untrusted_tables,
+    render = untrusted_constraint_finding,
+    case<'s> = UntrustedTable<'s>,
+    evidence = &[Evidence::Source(culprit_core::source_id::CONSTRAINTS)],
 );
 
 /// Whether PostgreSQL's planner reads these CHECK constraints at all: constraint exclusion looks at inheritance
@@ -28,10 +30,31 @@ pub(super) fn planner_reads_checks(snapshot: &Snapshot, list: &[&ConstraintIssue
         || snapshot.setting("constraint_exclusion").is_some_and(|s| crate::config::is_on(&s.value))
 }
 
-pub fn untrusted_constraint(snapshot: &Snapshot) -> Vec<Finding> {
-    let mssql = snapshot.server.engine == Engine::Mssql;
-    let ysql = snapshot.server.engine == Engine::Yugabyte;
-    let engine = snapshot.server.engine;
+/// A table's constraints the engine doesn't vouch for the existing rows of.
+pub struct UntrustedTable<'s> {
+    schema: String,
+    table: String,
+    list: Vec<&'s ConstraintIssue>,
+    /// How many are switched off altogether (SQL Server).
+    disabled: usize,
+    engine: Unvalidated,
+}
+
+/// What an unvalidated constraint means on this engine.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Unvalidated {
+    /// SQL Server doesn't trust it: its optimizer skips nothing on its account.
+    Untrusted,
+    /// YugabyteDB checks new rows but not the old ones; nothing is said of its planner.
+    Deferred,
+    /// PostgreSQL's planner reads CHECK constraints here (constraint exclusion): on an inheritance child, or everywhere
+    /// with constraint_exclusion = on.
+    PlannerReads { inheritance_child: bool },
+    /// PostgreSQL's planner doesn't read them here: it is about the data, and often deliberate.
+    DataOnly,
+}
+
+fn untrusted_tables(snapshot: &Snapshot) -> Vec<UntrustedTable<'_>> {
     let mut by_table: BTreeMap<(String, String), Vec<&ConstraintIssue>> = BTreeMap::new();
     for c in &snapshot.constraints {
         by_table.entry((c.schema.clone(), c.table.clone())).or_default().push(c);
@@ -39,89 +62,111 @@ pub fn untrusted_constraint(snapshot: &Snapshot) -> Vec<Finding> {
     by_table
         .into_iter()
         .map(|((schema, table), list)| {
-            let name = format!("{schema}.{table}");
-            let mut f = finding("untrusted-constraint", &name, Category::Maintenance, subject(SubjectKind::Table, &name));
+            let engine = match snapshot.server.engine {
+                Engine::Mssql => Unvalidated::Untrusted,
+                Engine::Yugabyte => Unvalidated::Deferred,
+                _ if planner_reads_checks(snapshot, &list) => {
+                    Unvalidated::PlannerReads { inheritance_child: list.iter().any(|c| c.inheritance_child) }
+                }
+                _ => Unvalidated::DataOnly,
+            };
             let disabled = list.iter().filter(|c| c.disabled).count();
-            let kind = |c: &ConstraintIssue| match c.kind {
-                ConstraintKind::ForeignKey => "foreign key",
-                ConstraintKind::Check => "check constraint",
-            };
-            f.title = match (list.as_slice(), mssql) {
-                ([one], _) if one.disabled => format!("The {} {} on {table} is switched off", kind(one), one.name),
-                ([one], true) => format!("SQL Server doesn't trust the {} {} on {table}", kind(one), one.name),
-                ([one], false) if ysql => format!("The {} {} on {table} was never validated", kind(one), one.name),
-                ([one], false) => format!("The check constraint {} on {table} was never validated", one.name),
-                (_, true) => format!("SQL Server doesn't trust {} constraints on {table}", list.len()),
-                (_, false) if ysql => format!("{} constraints on {table} were never validated", list.len()),
-                (_, false) => format!("{} check constraints on {table} were never validated", list.len()),
-            };
-            let names = format::list(&list.iter().map(|c| c.name.clone()).collect::<Vec<_>>());
-            f.summary = if mssql {
-                format!(
-                    "{names} {} created or re-enabled WITH NOCHECK, so existing rows were never checked against {}. The optimizer only relies on trusted constraints: it can't remove a join to the referenced table when no columns from it are used, or rule out values a check constraint excludes, so it plans work it could skip.{}",
-                    if list.len() == 1 { "was" } else { "were" },
-                    if list.len() == 1 { "it" } else { "them" },
-                    if disabled > 0 { " A switched-off constraint doesn't check new rows either, so the data may already break it." } else { "" }
-                )
-            } else if ysql {
-                format!(
-                    "{names} {} added NOT VALID. YugabyteDB checks new and changed rows but has not checked the rows that existed when these constraints were added. Some old rows may violate them. Deferred validation can be deliberate during a migration; this catalog state does not establish a query-plan regression.",
-                    if list.len() == 1 { "was" } else { "were" }
-                )
-            } else if planner_reads_checks(snapshot, &list) {
-                format!(
-                    "{names} {} added NOT VALID, so rows that existed then were never checked. Until it is validated the planner can't use it to skip the table when a query's filter contradicts it (constraint exclusion{}).",
-                    if list.len() == 1 { "was" } else { "were" },
-                    if list.iter().any(|c| c.inheritance_child) { ", which it applies to this inheritance child" } else { ", which constraint_exclusion = on applies to every table" }
-                )
-            } else {
-                // The planner reads CHECK constraints only on inheritance children (constraint_exclusion = partition,
-                // the default): here a NOT VALID one is about the data, and often deliberate.
-                format!(
-                    "{names} {} added NOT VALID: PostgreSQL checks new and changed rows against {} but never checked the rows that existed then, so some may break {}. That is often deliberate: NOT VALID adds a constraint without a long scan under lock. The planner doesn't read it here either way (constraint exclusion looks at CHECK constraints only on inheritance children unless constraint_exclusion is on). Validating proves the old rows, and lets later steps skip their own full scan: SET NOT NULL (12+) and ATTACH PARTITION when the constraint implies them.",
-                    if list.len() == 1 { "was" } else { "were" },
-                    if list.len() == 1 { "it" } else { "them" },
-                    if list.len() == 1 { "it" } else { "them" }
-                )
-            };
-            f.severity = if disabled > 0 { Severity::Medium } else { Severity::Low };
-            severity_score(&mut f);
-            f.impact.label = format!("{} {}", list.len(), if ysql { "not validated" } else { "untrusted" });
-            f.confidence = Confidence::High;
-            f.metrics = vec![Metric::new("Constraints", list.len() as f64, Unit::Count)];
-            let target = qualified(engine, &schema, &table);
-            f.fix = Some(if mssql {
-                Fix {
-                    summary: format!(
-                        "Check the existing rows so SQL Server trusts {} again. It reads the whole table and locks it while it runs: schedule it off-peak. It fails if a row breaks the constraint; fix those rows first.",
-                        if list.len() == 1 { "it" } else { "them" }
-                    ),
-                    sql: Some(
-                        list.iter()
-                            .map(|c| format!("ALTER TABLE {target} WITH CHECK CHECK CONSTRAINT {};", quote(engine, &c.name)))
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    ),
-                    cost: Some("Reads the whole table".into()),
-                }
-            } else {
-                Fix {
-                    summary: if ysql {
-                        "Validate existing rows in a planned maintenance window after checking this YugabyteDB version's validation support. Validation can issue distributed scans and acquire locks. It fails if a row breaks a constraint; fix those rows first. Do not assume PostgreSQL lock or concurrent-write guarantees.".into()
-                    } else {
-                        "Validate it: PostgreSQL scans the table but takes only a SHARE UPDATE EXCLUSIVE lock, so reads and writes continue. It fails if a row breaks the constraint; fix those rows first.".into()
-                    },
-                    sql: Some(
-                        list.iter()
-                            .map(|c| format!("ALTER TABLE {target} VALIDATE CONSTRAINT {};", quote(engine, &c.name)))
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    ),
-                    cost: Some(if ysql { "Distributed table scans and validation locks" } else { "Reads the whole table" }.into()),
-                }
-            });
-            f.verify = vec!["Re-scan: the constraint should no longer be listed.".into()];
-            f
+            UntrustedTable { schema, table, list, disabled, engine }
         })
         .collect()
+}
+
+fn untrusted_constraint_finding(snapshot: &Snapshot, u: UntrustedTable<'_>) -> Finding {
+    let UntrustedTable { schema, table, list, disabled, engine } = u;
+    let name = format!("{schema}.{table}");
+    let mut f = finding("untrusted-constraint", &name, Category::Maintenance, subject(SubjectKind::Table, &name));
+    let kind = |c: &ConstraintIssue| match c.kind {
+        ConstraintKind::ForeignKey => "foreign_key",
+        ConstraintKind::Check => "check",
+    };
+    let count = list.len().to_string();
+    let mssql = engine == Unvalidated::Untrusted;
+    let ysql = engine == Unvalidated::Deferred;
+    f.title = match (list.as_slice(), mssql) {
+        ([one], _) if one.disabled => {
+            t!("check.untrusted_constraint.title.switched_off", kind = kind(one), name = &one.name, table = &table)
+        }
+        ([one], true) => {
+            t!("check.untrusted_constraint.title.untrusted", kind = kind(one), name = &one.name, table = &table)
+        }
+        ([one], false) if ysql => {
+            t!("check.untrusted_constraint.title.deferred", kind = kind(one), name = &one.name, table = &table)
+        }
+        ([one], false) => t!("check.untrusted_constraint.title.not_valid", name = &one.name, table = &table),
+        (_, true) => t!("check.untrusted_constraint.title.untrusted_many", count = &count, table = &table),
+        (_, false) if ysql => t!("check.untrusted_constraint.title.deferred_many", count = &count, table = &table),
+        (_, false) => t!("check.untrusted_constraint.title.not_valid_many", count = &count, table = &table),
+    };
+    let names = format::list(&list.iter().map(|c| c.name.clone()).collect::<Vec<_>>());
+    let n = list.len();
+    f.summary = match engine {
+        Unvalidated::Untrusted => {
+            let mut summary = vec![t!("check.untrusted_constraint.summary.nocheck", names = &names, n = n)];
+            if disabled > 0 {
+                summary.push(t!("check.untrusted_constraint.summary.switched_off"));
+            }
+            summary.join(" ")
+        }
+        Unvalidated::Deferred => t!("check.untrusted_constraint.summary.deferred", names = &names, n = n),
+        Unvalidated::PlannerReads { inheritance_child: true } => {
+            t!("check.untrusted_constraint.summary.planner_child", names = &names, n = n)
+        }
+        Unvalidated::PlannerReads { inheritance_child: false } => {
+            t!("check.untrusted_constraint.summary.planner_on", names = &names, n = n)
+        }
+        // The planner reads CHECK constraints only on inheritance children (constraint_exclusion = partition, the
+        // default): here a NOT VALID one is about the data, and often deliberate.
+        Unvalidated::DataOnly => t!("check.untrusted_constraint.summary.data_only", names = &names, n = n),
+    };
+    f.severity = if disabled > 0 { Severity::Medium } else { Severity::Low };
+    severity_score(&mut f);
+    f.impact.label = if ysql {
+        t!("check.untrusted_constraint.impact.not_validated", count = &count)
+    } else {
+        t!("check.untrusted_constraint.impact.untrusted", count = &count)
+    };
+    f.confidence = Confidence::High;
+    f.metrics = vec![Metric::new(t!("check.untrusted_constraint.metric.constraints"), n as f64, Unit::Count)];
+    let sql_engine = snapshot.server.engine;
+    let target = qualified(sql_engine, &schema, &table);
+    f.fix = Some(if mssql {
+        Fix {
+            summary: t!("check.untrusted_constraint.fix.check", n = n),
+            sql: Some(
+                list.iter()
+                    .map(|c| {
+                        format!("ALTER TABLE {target} WITH CHECK CHECK CONSTRAINT {};", quote(sql_engine, &c.name))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+            cost: Some(t!("check.untrusted_constraint.fix.cost_reads")),
+        }
+    } else {
+        Fix {
+            summary: if ysql {
+                t!("check.untrusted_constraint.fix.validate_ysql")
+            } else {
+                t!("check.untrusted_constraint.fix.validate")
+            },
+            sql: Some(
+                list.iter()
+                    .map(|c| format!("ALTER TABLE {target} VALIDATE CONSTRAINT {};", quote(sql_engine, &c.name)))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+            cost: Some(if ysql {
+                t!("check.untrusted_constraint.fix.cost_ysql")
+            } else {
+                t!("check.untrusted_constraint.fix.cost_reads")
+            }),
+        }
+    });
+    f.verify = vec![t!("check.untrusted_constraint.verify")];
+    f
 }

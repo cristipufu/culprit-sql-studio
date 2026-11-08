@@ -754,3 +754,155 @@ verify: Compare completed inserts per second and their time under comparable loa
 caveat: SQL Server counts latch waits from when it started, with no time for each, and this scan doesn't know when that was: they may come from one burst long ago. Culprit raises it only on a rate measured over an hour or more of counting."#,
     );
 }
+
+// ── untrusted-constraint ───────────────────────────────────────────────────────────────────────────
+
+fn constraint(table: &str, name: &str, kind: culprit_core::ConstraintKind) -> culprit_core::ConstraintIssue {
+    culprit_core::ConstraintIssue {
+        schema: "shop".into(),
+        table: table.into(),
+        name: name.into(),
+        kind,
+        disabled: false,
+        inheritance_child: false,
+    }
+}
+
+#[test]
+fn untrusted_constraints_on_sql_server() {
+    use culprit_core::ConstraintKind::{Check, ForeignKey};
+    let mut s = fixture("mssql-demo");
+    s.constraints = vec![
+        culprit_core::ConstraintIssue { disabled: true, ..constraint("orders", "fk_orders_customers", ForeignKey) },
+        constraint("products", "ck_products_price", Check),
+        constraint("customers", "ck_customers_email", Check),
+        constraint("customers", "fk_customers_region", ForeignKey),
+    ];
+    says(
+        &run("untrusted-constraint", &s),
+        r#"id: untrusted-constraint:shop.customers
+title: SQL Server doesn't trust 2 constraints on customers
+summary: ck_customers_email and fk_customers_region were created or re-enabled WITH NOCHECK, so existing rows were never checked against them. The optimizer only relies on trusted constraints: it can't remove a join to the referenced table when no columns from it are used, or rule out values a check constraint excludes, so it plans work it could skip.
+impact: 2 untrusted
+metric: Constraints
+fix: Check the existing rows so SQL Server trusts them again. It reads the whole table and locks it while it runs: schedule it off-peak. It fails if a row breaks the constraint; fix those rows first.
+cost: Reads the whole table
+sql: ALTER TABLE [shop].[customers] WITH CHECK CHECK CONSTRAINT [ck_customers_email];
+ALTER TABLE [shop].[customers] WITH CHECK CHECK CONSTRAINT [fk_customers_region];
+verify: Re-scan: the constraint should no longer be listed.
+
+id: untrusted-constraint:shop.orders
+title: The foreign key fk_orders_customers on orders is switched off
+summary: fk_orders_customers was created or re-enabled WITH NOCHECK, so existing rows were never checked against it. The optimizer only relies on trusted constraints: it can't remove a join to the referenced table when no columns from it are used, or rule out values a check constraint excludes, so it plans work it could skip. A switched-off constraint doesn't check new rows either, so the data may already break it.
+impact: 1 untrusted
+metric: Constraints
+fix: Check the existing rows so SQL Server trusts it again. It reads the whole table and locks it while it runs: schedule it off-peak. It fails if a row breaks the constraint; fix those rows first.
+cost: Reads the whole table
+sql: ALTER TABLE [shop].[orders] WITH CHECK CHECK CONSTRAINT [fk_orders_customers];
+verify: Re-scan: the constraint should no longer be listed.
+
+id: untrusted-constraint:shop.products
+title: SQL Server doesn't trust the check constraint ck_products_price on products
+summary: ck_products_price was created or re-enabled WITH NOCHECK, so existing rows were never checked against it. The optimizer only relies on trusted constraints: it can't remove a join to the referenced table when no columns from it are used, or rule out values a check constraint excludes, so it plans work it could skip.
+impact: 1 untrusted
+metric: Constraints
+fix: Check the existing rows so SQL Server trusts it again. It reads the whole table and locks it while it runs: schedule it off-peak. It fails if a row breaks the constraint; fix those rows first.
+cost: Reads the whole table
+sql: ALTER TABLE [shop].[products] WITH CHECK CHECK CONSTRAINT [ck_products_price];
+verify: Re-scan: the constraint should no longer be listed."#,
+    );
+}
+
+#[test]
+fn not_valid_checks_on_postgres() {
+    use culprit_core::ConstraintKind::Check;
+    let mut s = fixture("postgres-demo");
+    s.constraints = vec![
+        culprit_core::ConstraintIssue { inheritance_child: true, ..constraint("orders", "ck_orders_total", Check) },
+        constraint("products", "ck_products_price", Check),
+        constraint("customers", "ck_customers_email", Check),
+        constraint("customers", "ck_customers_name", Check),
+    ];
+    let mut findings = run("untrusted-constraint", &s);
+    set(&mut s, "constraint_exclusion", "on");
+    s.constraints.retain(|c| c.table == "customers");
+    findings.extend(run("untrusted-constraint", &s));
+    says(
+        &findings,
+        r#"id: untrusted-constraint:shop.customers
+title: 2 check constraints on customers were never validated
+summary: ck_customers_email and ck_customers_name were added NOT VALID: PostgreSQL checks new and changed rows against them but never checked the rows that existed then, so some may break them. That is often deliberate: NOT VALID adds a constraint without a long scan under lock. The planner doesn't read it here either way (constraint exclusion looks at CHECK constraints only on inheritance children unless constraint_exclusion is on). Validating proves the old rows, and lets later steps skip their own full scan: SET NOT NULL (12+) and ATTACH PARTITION when the constraint implies them.
+impact: 2 untrusted
+metric: Constraints
+fix: Validate it: PostgreSQL scans the table but takes only a SHARE UPDATE EXCLUSIVE lock, so reads and writes continue. It fails if a row breaks the constraint; fix those rows first.
+cost: Reads the whole table
+sql: ALTER TABLE shop.customers VALIDATE CONSTRAINT ck_customers_email;
+ALTER TABLE shop.customers VALIDATE CONSTRAINT ck_customers_name;
+verify: Re-scan: the constraint should no longer be listed.
+
+id: untrusted-constraint:shop.orders
+title: The check constraint ck_orders_total on orders was never validated
+summary: ck_orders_total was added NOT VALID, so rows that existed then were never checked. Until it is validated the planner can't use it to skip the table when a query's filter contradicts it (constraint exclusion, which it applies to this inheritance child).
+impact: 1 untrusted
+metric: Constraints
+fix: Validate it: PostgreSQL scans the table but takes only a SHARE UPDATE EXCLUSIVE lock, so reads and writes continue. It fails if a row breaks the constraint; fix those rows first.
+cost: Reads the whole table
+sql: ALTER TABLE shop.orders VALIDATE CONSTRAINT ck_orders_total;
+verify: Re-scan: the constraint should no longer be listed.
+
+id: untrusted-constraint:shop.products
+title: The check constraint ck_products_price on products was never validated
+summary: ck_products_price was added NOT VALID: PostgreSQL checks new and changed rows against it but never checked the rows that existed then, so some may break it. That is often deliberate: NOT VALID adds a constraint without a long scan under lock. The planner doesn't read it here either way (constraint exclusion looks at CHECK constraints only on inheritance children unless constraint_exclusion is on). Validating proves the old rows, and lets later steps skip their own full scan: SET NOT NULL (12+) and ATTACH PARTITION when the constraint implies them.
+impact: 1 untrusted
+metric: Constraints
+fix: Validate it: PostgreSQL scans the table but takes only a SHARE UPDATE EXCLUSIVE lock, so reads and writes continue. It fails if a row breaks the constraint; fix those rows first.
+cost: Reads the whole table
+sql: ALTER TABLE shop.products VALIDATE CONSTRAINT ck_products_price;
+verify: Re-scan: the constraint should no longer be listed.
+
+id: untrusted-constraint:shop.customers
+title: 2 check constraints on customers were never validated
+summary: ck_customers_email and ck_customers_name were added NOT VALID, so rows that existed then were never checked. Until it is validated the planner can't use it to skip the table when a query's filter contradicts it (constraint exclusion, which constraint_exclusion = on applies to every table).
+impact: 2 untrusted
+metric: Constraints
+fix: Validate it: PostgreSQL scans the table but takes only a SHARE UPDATE EXCLUSIVE lock, so reads and writes continue. It fails if a row breaks the constraint; fix those rows first.
+cost: Reads the whole table
+sql: ALTER TABLE shop.customers VALIDATE CONSTRAINT ck_customers_email;
+ALTER TABLE shop.customers VALIDATE CONSTRAINT ck_customers_name;
+verify: Re-scan: the constraint should no longer be listed."#,
+    );
+}
+
+#[test]
+fn constraints_awaiting_validation_on_yugabyte() {
+    use culprit_core::ConstraintKind::{Check, ForeignKey};
+    let mut s = fixture("yugabyte-demo");
+    s.constraints = vec![
+        constraint("orders", "fk_orders_customers", ForeignKey),
+        constraint("customers", "ck_customers_email", Check),
+        constraint("customers", "fk_customers_region", ForeignKey),
+    ];
+    says(
+        &run("untrusted-constraint", &s),
+        r#"id: untrusted-constraint:shop.customers
+title: 2 constraints on customers were never validated
+summary: ck_customers_email and fk_customers_region were added NOT VALID. YugabyteDB checks new and changed rows but has not checked the rows that existed when these constraints were added. Some old rows may violate them. Deferred validation can be deliberate during a migration; this catalog state does not establish a query-plan regression.
+impact: 2 not validated
+metric: Constraints
+fix: Validate existing rows in a planned maintenance window after checking this YugabyteDB version's validation support. Validation can issue distributed scans and acquire locks. It fails if a row breaks a constraint; fix those rows first. Do not assume PostgreSQL lock or concurrent-write guarantees.
+cost: Distributed table scans and validation locks
+sql: ALTER TABLE shop.customers VALIDATE CONSTRAINT ck_customers_email;
+ALTER TABLE shop.customers VALIDATE CONSTRAINT fk_customers_region;
+verify: Re-scan: the constraint should no longer be listed.
+
+id: untrusted-constraint:shop.orders
+title: The foreign key fk_orders_customers on orders was never validated
+summary: fk_orders_customers was added NOT VALID. YugabyteDB checks new and changed rows but has not checked the rows that existed when these constraints were added. Some old rows may violate them. Deferred validation can be deliberate during a migration; this catalog state does not establish a query-plan regression.
+impact: 1 not validated
+metric: Constraints
+fix: Validate existing rows in a planned maintenance window after checking this YugabyteDB version's validation support. Validation can issue distributed scans and acquire locks. It fails if a row breaks a constraint; fix those rows first. Do not assume PostgreSQL lock or concurrent-write guarantees.
+cost: Distributed table scans and validation locks
+sql: ALTER TABLE shop.orders VALIDATE CONSTRAINT fk_orders_customers;
+verify: Re-scan: the constraint should no longer be listed."#,
+    );
+}

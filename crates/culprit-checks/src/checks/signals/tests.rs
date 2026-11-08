@@ -583,21 +583,21 @@ fn untrusted_constraints_group_per_table() {
         inheritance_child: false,
     };
     s.constraints = vec![c("FK_orders_customers", ConstraintKind::ForeignKey, false)];
-    let f = untrusted_constraint(&s);
+    let f = UntrustedConstraintCheck.run(&s);
     assert_eq!(f[0].title, "SQL Server doesn't trust the foreign key FK_orders_customers on orders");
     assert_eq!(
         f[0].fix.as_ref().unwrap().sql.as_deref(),
         Some("ALTER TABLE [dbo].[orders] WITH CHECK CHECK CONSTRAINT [FK_orders_customers];")
     );
     s.constraints.push(c("CK_orders_total", ConstraintKind::Check, true));
-    let f = untrusted_constraint(&s);
+    let f = UntrustedConstraintCheck.run(&s);
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].severity, Severity::Medium);
     let mut pg = snapshot_with(Engine::Postgres);
     pg.constraints =
         vec![ConstraintIssue { schema: "public".into(), ..c("orders_total_check", ConstraintKind::Check, false) }];
     assert_eq!(
-        untrusted_constraint(&pg)[0].fix.as_ref().unwrap().sql.as_deref(),
+        UntrustedConstraintCheck.run(&pg)[0].fix.as_ref().unwrap().sql.as_deref(),
         Some("ALTER TABLE public.orders VALIDATE CONSTRAINT orders_total_check;")
     );
 }
@@ -619,7 +619,7 @@ fn ysql_deferred_constraints_name_foreign_keys_without_postgres_planner_or_lock_
         default_value: None,
         scope: "YSQL node".into(),
     });
-    let findings = untrusted_constraint(&s);
+    let findings = UntrustedConstraintCheck.run(&s);
     assert_eq!(findings.len(), 1);
     let f = &findings[0];
     assert_eq!(f.title, "The foreign key Customer FK on Orders was never validated");
@@ -641,11 +641,14 @@ fn ysql_deferred_constraints_name_foreign_keys_without_postgres_planner_or_lock_
         kind: ConstraintKind::Check,
         ..s.constraints[0].clone()
     });
-    assert_eq!(untrusted_constraint(&s)[0].title, "2 constraints on Orders were never validated");
+    assert_eq!(UntrustedConstraintCheck.run(&s)[0].title, "2 constraints on Orders were never validated");
     s.constraints.remove(0);
-    assert_eq!(untrusted_constraint(&s)[0].title, "The check constraint Positive amount on Orders was never validated");
+    assert_eq!(
+        UntrustedConstraintCheck.run(&s)[0].title,
+        "The check constraint Positive amount on Orders was never validated"
+    );
     s.constraints.clear();
-    assert!(untrusted_constraint(&s).is_empty());
+    assert!(UntrustedConstraintCheck.run(&s).is_empty());
 }
 
 #[test]
