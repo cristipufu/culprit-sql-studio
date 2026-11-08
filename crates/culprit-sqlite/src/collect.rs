@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use culprit_core::{
     Capability, ColumnInfo, Coverage, Engine, Environment, ForeignKey, IndexStat, MissingCapability, Result, ResultSet,
-    SNAPSHOT_FORMAT, ServerInfo, Setting, Snapshot, TableStat,
+    SNAPSHOT_FORMAT, ServerInfo, Setting, Snapshot, TableStat, format, t,
 };
 use rusqlite::Connection;
 use rusqlite::types::ValueRef;
@@ -49,54 +49,51 @@ pub fn whole_file_read(conn: &Connection) -> std::result::Result<Duration, Strin
 
 /// Why sizes can't be measured: the library has no dbstat table.
 pub(crate) fn no_dbstat() -> String {
-    "this SQLite library has no dbstat table to measure them".into()
+    t!("provider.sqlite.sizes.no_dbstat")
 }
 
 /// Why the file isn't read whole: it is `bytes` large, in WAL mode or with a rollback journal.
 pub(crate) fn too_large(bytes: f64, wal: bool) -> String {
     if wal {
-        format!("the file is {}: Culprit doesn't read that much of it to count", culprit_core::format::bytes(bytes))
+        t!("provider.sqlite.sizes.too_large", size = format::bytes(bytes))
     } else {
-        format!(
-            "the file is {} with a rollback journal, where reading it whole would make the application's writes wait",
-            culprit_core::format::bytes(bytes)
-        )
+        t!("provider.sqlite.sizes.too_large_rollback", size = format::bytes(bytes))
     }
 }
 
 /// Reading every page stopped with `error` (already worded, lowercased).
 pub(crate) fn reading_stopped(error: &str) -> String {
-    format!("reading every page stopped ({error})")
+    t!("provider.sqlite.sizes.reading_stopped", error = error)
 }
 
 /// Table and index sizes weren't measured, and `why`.
 pub(crate) fn sizes_unknown(why: &str) -> String {
-    format!("Table and index sizes are unknown: {why}.")
+    t!("provider.sqlite.sizes.unknown", why = why)
 }
 
 /// A virtual table whose module this library lacks: its columns can't be read.
 pub(crate) fn columns_unavailable(table: &str, error: &str) -> String {
-    format!("Columns of main.{table} are unavailable: {error}. The table's original definition is retained.")
+    t!("provider.sqlite.catalog.columns_unavailable", table = table, error = error)
 }
 
 /// Some of the file's settings the library couldn't report.
 pub(crate) fn pragmas_partial() -> String {
-    "Some file pragmas were not available from this SQLite library.".into()
+    t!("provider.sqlite.settings.partial")
 }
 
 /// The WAL file's size couldn't be read.
 pub(crate) fn wal_unreadable() -> String {
-    "WAL file size could not be read; no file contents were inspected.".into()
+    t!("provider.sqlite.wal.unreadable")
 }
 
 /// The journal mode couldn't be read, so whether a WAL file applies is unknown.
 pub(crate) fn journal_mode_unknown() -> String {
-    "The journal mode was unavailable, so WAL file health could not be assessed.".into()
+    t!("provider.sqlite.wal.journal_mode_unknown")
 }
 
 /// A blob in a result, by its size.
 pub(crate) fn blob(len: usize) -> String {
-    format!("<{len} bytes>")
+    t!("provider.sqlite.result.blob", n = len, count = format::digits(len.to_string()))
 }
 
 /// What a SQLite snapshot can hold, and what SQLite doesn't keep (`have`, `missing`). `rows`: why row counts are
@@ -112,25 +109,21 @@ pub fn capabilities(
     } else {
         coverage.lacking(
             Capability::Statistics,
-            "The file has no planner statistics (sqlite_stat1): the planner guesses how many rows each step reads.",
+            t!("provider.sqlite.capability.no_statistics"),
             Some("ANALYZE;".into()),
         );
     }
     match rows {
         Ok(()) => coverage.delivered(Capability::TableStats),
         Err(_) if stat1 => coverage.delivered(Capability::TableStats),
-        Err(why) => coverage.lacking(Capability::TableStats, format!("Row counts are unknown: {why}."), None),
+        Err(why) => {
+            coverage.lacking(Capability::TableStats, t!("provider.sqlite.capability.rows_unknown", why = why), None)
+        }
     }
-    coverage.lacking(
-        Capability::QueryLog,
-        "SQLite keeps no history of the statements it ran. Culprit can read them from the log Rails, Django, Entity \
-         Framework Core or Phoenix already writes: add it to the connection (`culprit conn set <name> --query-log <file>`, \
-         or Add query log in the app).",
-        None,
-    );
-    coverage.lacking(Capability::IndexUsage, "SQLite keeps no record of which indexes queries use.", None);
-    coverage.lacking(Capability::WaitStats, "SQLite has no server, so nothing records waits.", None);
-    coverage.lacking(Capability::Sessions, "SQLite has no server, so no sessions to list.", None);
+    coverage.lacking(Capability::QueryLog, t!("provider.sqlite.capability.no_query_log"), None);
+    coverage.lacking(Capability::IndexUsage, t!("provider.sqlite.capability.no_index_usage"), None);
+    coverage.lacking(Capability::WaitStats, t!("provider.sqlite.capability.no_waits"), None);
+    coverage.lacking(Capability::Sessions, t!("provider.sqlite.capability.no_sessions"), None);
     let (have, missing, _) = coverage.finish();
     (have, missing)
 }
@@ -230,10 +223,7 @@ pub fn snapshot(
             .map_err(|e| map_error(&e)),
         )
     } else {
-        coverage.not_applicable(
-            &crate::sources::PLANNER_STATISTICS,
-            "The file has no sqlite_stat1 table; ANALYZE has not recorded planner statistics.",
-        );
+        coverage.not_applicable(&crate::sources::PLANNER_STATISTICS, t!("provider.sqlite.statistics.not_analyzed"));
         Some(HashSet::new())
     };
     if has_statistics && let Some(statistics) = &statistics {
@@ -322,7 +312,7 @@ pub fn snapshot(
         let wal_bytes = coverage.read(&crate::sources::WAL_FILE, size);
         operations.sqlite = Some(culprit_core::operations::SqliteFileHealth { wal_bytes, before: None });
     } else if settings.iter().any(|s| s.name == "journal_mode") {
-        coverage.not_applicable(&crate::sources::WAL_FILE, "The database is not using WAL journal mode.");
+        coverage.not_applicable(&crate::sources::WAL_FILE, t!("provider.sqlite.wal.not_wal"));
     } else {
         coverage.source_failed(&crate::sources::WAL_FILE, &culprit_core::Error::internal(journal_mode_unknown()));
     }

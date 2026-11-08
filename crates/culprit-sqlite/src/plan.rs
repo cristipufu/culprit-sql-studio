@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use culprit_core::{Engine, Error, NodeKind, Plan, PlanKind, PlanNode, Result};
+use culprit_core::{Engine, Error, NodeKind, Plan, PlanKind, PlanNode, Result, format, t};
 use rusqlite::Connection;
 
 use crate::map_error;
@@ -27,9 +27,9 @@ pub fn explain(conn: &Connection, statement: &str) -> Result<Plan> {
         .map_err(|e| map_error(&e))?;
     let mut plan = plan_from_rows(statement, &rows)?;
     if parameters > 0 {
-        let reason = "Planned without parameter values: with statistics that hold value distributions, the chosen index can depend on them.";
-        plan.facts_mut().generic_plan_reason = Some(reason.into());
-        plan.props.insert("Generic Plan".into(), reason.into());
+        let reason = t!("provider.sqlite.plan.without_values");
+        plan.facts_mut().generic_plan_reason = Some(reason.clone());
+        plan.props.insert("Generic Plan".into(), reason);
     }
     Ok(plan)
 }
@@ -63,7 +63,7 @@ pub fn parse_text(text: &str) -> Result<Plan> {
                     .is_some_and(|l| l.trim() == "QUERY PLAN" || l.replace(' ', "") == "id|parent|notused|detail"),
             )
     {
-        return Err(Error::invalid(format!("The SQLite plan exceeds {MAX_NODES} steps")));
+        return Err(too_many_steps());
     }
     let rows: Vec<(i64, i64, String)> = if lines.first().is_some_and(|l| l.trim() == "QUERY PLAN") {
         // Each level indents three columns ("|  " or "   ") before its "|--" or "`--".
@@ -71,11 +71,18 @@ pub fn parse_text(text: &str) -> Result<Plan> {
         let mut rows = Vec::new();
         for (n, line) in lines[1..].iter().enumerate() {
             let Some(at) = line.find("|--").into_iter().chain(line.find("`--")).min() else {
-                return Err(culprit_core::Error::invalid(format!("Line {} isn't a plan step: {line}", n + 2)));
+                return Err(culprit_core::Error::invalid(t!(
+                    "provider.sqlite.plan.not_a_step",
+                    line = format::digits((n + 2).to_string()),
+                    text = *line
+                )));
             };
             let depth = at / 3;
             if depth >= parents.len() {
-                return Err(Error::invalid(format!("Line {} skips a parent level", n + 2)));
+                return Err(Error::invalid(t!(
+                    "provider.sqlite.plan.skips_a_level",
+                    line = format::digits((n + 2).to_string())
+                )));
             }
             let id = n as i64 + 1;
             parents.truncate(depth + 1);
@@ -88,11 +95,11 @@ pub fn parse_text(text: &str) -> Result<Plan> {
         lines
             .iter()
             .filter(|l| l.replace(' ', "") != "id|parent|notused|detail")
-            .map(|l| list_row(l).ok_or_else(|| Error::invalid("A SQLite plan row must be id|parent|notused|detail")))
+            .map(|l| list_row(l).ok_or_else(|| Error::invalid(t!("provider.sqlite.plan.not_a_row"))))
             .collect::<Result<_>>()?
     };
     if rows.is_empty() {
-        return Err(culprit_core::Error::invalid("The plan has no steps"));
+        return Err(culprit_core::Error::invalid(t!("provider.sqlite.plan.no_steps")));
     }
     let mut plan = plan_from_rows("", &rows)?;
     plan.statement = None;
@@ -158,34 +165,42 @@ const MAX_NODES: usize = 10_000;
 
 fn validate_rows(rows: &[(i64, i64, String)]) -> Result<HashMap<i64, Vec<usize>>> {
     if rows.len() > MAX_NODES {
-        return Err(Error::invalid(format!("The SQLite plan exceeds {MAX_NODES} steps")));
+        return Err(too_many_steps());
     }
     let mut ids = HashSet::new();
     let mut parents: HashMap<i64, Vec<usize>> = HashMap::new();
     for (at, (id, parent, _)) in rows.iter().enumerate() {
         if *id <= 0 || u32::try_from(*id).is_err() || !ids.insert(*id) {
-            return Err(Error::invalid("SQLite plan step IDs must be unique positive 32-bit integers"));
+            return Err(Error::invalid(t!("provider.sqlite.plan.bad_ids")));
         }
         parents.entry(*parent).or_default().push(at);
     }
     if rows.iter().any(|(_, parent, _)| *parent != 0 && !ids.contains(parent)) {
-        return Err(Error::invalid("The SQLite plan references a missing parent step"));
+        return Err(Error::invalid(t!("provider.sqlite.plan.missing_parent")));
     }
     let mut pending = vec![(0, 0)];
     let mut visited = 0;
     while let Some((parent, depth)) = pending.pop() {
         for &at in parents.get(&parent).into_iter().flatten() {
             if depth >= MAX_DEPTH {
-                return Err(Error::invalid(format!("The SQLite plan exceeds {MAX_DEPTH} nested steps")));
+                return Err(Error::invalid(t!(
+                    "provider.sqlite.plan.too_deep",
+                    depth = format::digits(MAX_DEPTH.to_string())
+                )));
             }
             visited += 1;
             pending.push((rows[at].0, depth + 1));
         }
     }
     if visited != rows.len() {
-        return Err(Error::invalid("The SQLite plan contains a cycle between steps"));
+        return Err(Error::invalid(t!("provider.sqlite.plan.cycle")));
     }
     Ok(parents)
+}
+
+/// A plan with more steps than Culprit reads.
+fn too_many_steps() -> Error {
+    Error::invalid(t!("provider.sqlite.plan.too_many_steps", steps = format::digits(MAX_NODES.to_string())))
 }
 
 fn children(parent: i64, rows: &[(i64, i64, String)], parents: &HashMap<i64, Vec<usize>>) -> Vec<PlanNode> {

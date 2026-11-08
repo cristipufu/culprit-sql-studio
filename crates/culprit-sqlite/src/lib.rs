@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use culprit_core::{
     Ability, ConnectionSpec, Engine, Error, ErrorCode, ExplainMode, LiveState, Plan, Provider, Result, ResultSet,
-    ServerInfo, Snapshot, SnapshotOptions,
+    ServerInfo, Snapshot, SnapshotOptions, t,
 };
 use rusqlite::{Connection, OpenFlags};
 
@@ -37,22 +37,25 @@ pub struct SqliteProvider {
 impl SqliteProvider {
     pub fn new(spec: &ConnectionSpec) -> Result<Self> {
         if spec.ssh.is_some() || spec.transport.is_some() {
-            return Err(Error::new(ErrorCode::Unsupported, "SQLite opens a local file and cannot use SSH forwarding"));
+            return Err(Error::new(ErrorCode::Unsupported, t!("provider.sqlite.open.no_ssh")));
         }
         let path = spec
             .database
             .as_deref()
             .map(str::trim)
             .filter(|p| !p.is_empty())
-            .ok_or_else(|| Error::invalid("A SQLite connection needs the database file's path"))?;
+            .ok_or_else(|| Error::invalid(t!("provider.sqlite.open.path_required")))?;
         Ok(SqliteProvider { path: culprit_core::expand_home(path), spec: spec.clone() })
     }
 }
 
 fn open(path: &PathBuf) -> Result<Connection> {
     if !path.exists() {
-        return Err(Error::new(ErrorCode::NotFound, format!("No SQLite file at {}", path.display()))
-            .with_hint("Check the path; Culprit opens existing files only, read-only."));
+        return Err(Error::new(
+            ErrorCode::NotFound,
+            t!("provider.sqlite.open.no_file", path = path.display().to_string()),
+        )
+        .with_hint(t!("provider.sqlite.open.no_file.hint")));
     }
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
         .map_err(|e| map_error(&e))?;
@@ -63,8 +66,8 @@ fn open(path: &PathBuf) -> Result<Connection> {
 
 pub(crate) fn map_error(e: &rusqlite::Error) -> Error {
     if e.sqlite_error_code() == Some(rusqlite::ErrorCode::OperationInterrupted) {
-        return Error::new(ErrorCode::Timeout, "The SQLite statement was cancelled or reached its execution deadline")
-            .with_hint("Add a more selective filter or simplify the query.");
+        return Error::new(ErrorCode::Timeout, t!("provider.sqlite.error.interrupted"))
+            .with_hint(t!("provider.sqlite.error.interrupted.hint"));
     }
     let message = e.to_string();
     let code = match e.sqlite_error_code() {
@@ -76,12 +79,8 @@ pub(crate) fn map_error(e: &rusqlite::Error) -> Error {
     };
     let error = Error::new(code, message);
     match code {
-        ErrorCode::Timeout => {
-            error.with_hint("SQLite reported a busy or locked file. Another connection or a conflicting transaction can cause this; the error does not measure how long it held the lock. Culprit's read waits at most two seconds where SQLite permits waiting.")
-        }
-        ErrorCode::PermissionDenied => {
-            error.with_hint("Culprit opens SQLite files read-only and never writes to them.")
-        }
+        ErrorCode::Timeout => error.with_hint(t!("provider.sqlite.error.busy.hint")),
+        ErrorCode::PermissionDenied => error.with_hint(t!("provider.sqlite.error.read_only.hint")),
         _ => error,
     }
 }
@@ -93,12 +92,12 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'sta
 
 /// The blocking task running SQLite's calls ended without an answer (`error`).
 pub(crate) fn task_stopped(error: &dyn std::fmt::Display) -> Error {
-    Error::internal(format!("The SQLite task stopped: {error}"))
+    Error::internal(t!("provider.sqlite.error.task_stopped", error = error.to_string()))
 }
 
 /// The pool of statement workers is closed.
 pub(crate) fn execution_unavailable() -> Error {
-    Error::internal("SQLite execution is unavailable")
+    Error::internal(t!("provider.sqlite.error.unavailable"))
 }
 
 const STATEMENT_TIMEOUT: Duration = culprit_core::limits::QUERY_TIMEOUT;
