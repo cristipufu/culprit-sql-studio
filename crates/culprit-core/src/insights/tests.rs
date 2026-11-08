@@ -644,6 +644,23 @@ fn a_plan_whose_ids_repeat_cannot_trap_the_walk_up_it() {
     assert!(insights(&p).iter().any(|i| i.rule == "misestimate"));
 }
 
+// The same damage on a MySQL scan: whether a join is above it (which keys count for its filter) is a walk up too.
+#[test]
+fn a_mysql_scan_whose_ids_repeat_cannot_trap_the_search_for_a_join_above_it() {
+    let mut scan = node(1, "Table scan", NodeKind::Scan);
+    scan.facts = Some(crate::PlanNodeFacts { possible_index_names: vec!["ix_status".into()], ..Default::default() });
+    let mut filter = node(1, "Filter", NodeKind::Other);
+    filter.children = vec![scan];
+    let p = plan(Engine::Mysql, filter);
+    // On its own thread, so a walk that never ends fails the test instead of hanging it.
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(predicates::possible_keys_for_filter(&Cx::new(&p), &p.root.children[0]));
+    });
+    let keys = finished.recv_timeout(std::time::Duration::from_secs(10)).expect("the walk up the plan stopped");
+    assert_eq!(keys, vec!["ix_status".to_string()], "no join above: every key comes from the filter");
+}
+
 #[test]
 fn spills_and_misestimates_explain_each_other() {
     let mut scan = node(2, "Seq Scan", NodeKind::Scan);

@@ -378,13 +378,7 @@ pub(super) fn blocker(cx: &Cx, n: &PlanNode, filter: &str) -> Option<Blocker> {
 pub(super) fn possible_keys_for_filter(cx: &Cx, n: &PlanNode) -> Vec<String> {
     let facts = n.facts();
     let keys = facts.possible_index_names.clone();
-    let mut up = cx.parent(n);
-    let mut joined = false;
-    while let Some(p) = up {
-        joined |= p.kind == NodeKind::Join;
-        up = cx.parent(p);
-    }
-    if !joined {
+    if !cx.ancestors(n).any(|p| p.kind == NodeKind::Join) {
         return keys;
     }
     let columns: Vec<String> =
