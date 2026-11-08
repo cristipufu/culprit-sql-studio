@@ -141,6 +141,14 @@
             "runtime": null,
             "warnings": [],
             "props": {},
+            "facts": {
+              "columns_without_statistics": [],
+              "conditions": [],
+              "conversions": [],
+              "expression_cache": false,
+              "possible_index_names": [],
+              "user_functions": []
+            },
             "children": [
               {
                 "id": 6,
@@ -163,6 +171,14 @@
                 "runtime": null,
                 "warnings": [],
                 "props": {},
+                "facts": {
+                  "columns_without_statistics": [],
+                  "conditions": [],
+                  "conversions": [],
+                  "expression_cache": false,
+                  "possible_index_names": [],
+                  "user_functions": []
+                },
                 "children": []
               },
               {
@@ -188,6 +204,14 @@
                 "props": {
                   "Temp B-Tree": "FOR ORDER BY"
                 },
+                "facts": {
+                  "columns_without_statistics": [],
+                  "conditions": [],
+                  "conversions": [],
+                  "expression_cache": false,
+                  "possible_index_names": [],
+                  "user_functions": []
+                },
                 "children": []
               }
             ]
@@ -196,6 +220,12 @@
           "index_hints": [],
           "props": {
             "Generic Plan": "Planned without parameter values: with statistics that hold value distributions, the chosen index can depend on them."
+          },
+          "facts": {
+            "changed_columns": [],
+            "conversions": [],
+            "generic_plan_reason": "Planned without parameter values: with statistics that hold value distributions, the chosen index can depend on them.",
+            "trigger_timings": []
           },
           "raw": "SCAN orders\nUSE TEMP B-TREE FOR ORDER BY"
         },
@@ -253,6 +283,14 @@
             "runtime": null,
             "warnings": [],
             "props": {},
+            "facts": {
+              "columns_without_statistics": [],
+              "conditions": [],
+              "conversions": [],
+              "expression_cache": false,
+              "possible_index_names": [],
+              "user_functions": []
+            },
             "children": [
               {
                 "id": 7,
@@ -276,6 +314,15 @@
                 "warnings": [],
                 "props": {
                   "Index Kind": "btree"
+                },
+                "facts": {
+                  "columns_without_statistics": [],
+                  "conditions": [],
+                  "conversions": [],
+                  "expression_cache": false,
+                  "index_method": "btree",
+                  "possible_index_names": [],
+                  "user_functions": []
                 },
                 "children": []
               },
@@ -302,6 +349,14 @@
                 "props": {
                   "Temp B-Tree": "FOR ORDER BY"
                 },
+                "facts": {
+                  "columns_without_statistics": [],
+                  "conditions": [],
+                  "conversions": [],
+                  "expression_cache": false,
+                  "possible_index_names": [],
+                  "user_functions": []
+                },
                 "children": []
               }
             ]
@@ -310,6 +365,12 @@
           "index_hints": [],
           "props": {
             "Generic Plan": "Planned without parameter values: with statistics that hold value distributions, the chosen index can depend on them."
+          },
+          "facts": {
+            "changed_columns": [],
+            "conversions": [],
+            "generic_plan_reason": "Planned without parameter values: with statistics that hold value distributions, the chosen index can depend on them.",
+            "trigger_timings": []
           },
           "raw": "SEARCH orders USING INDEX ix_orders_status_again (status=?)\nUSE TEMP B-TREE FOR ORDER BY"
         },
@@ -367,6 +428,14 @@
             "runtime": null,
             "warnings": [],
             "props": {},
+            "facts": {
+              "columns_without_statistics": [],
+              "conditions": [],
+              "conversions": [],
+              "expression_cache": false,
+              "possible_index_names": [],
+              "user_functions": []
+            },
             "children": [
               {
                 "id": 7,
@@ -389,6 +458,14 @@
                 "runtime": null,
                 "warnings": [],
                 "props": {},
+                "facts": {
+                  "columns_without_statistics": [],
+                  "conditions": [],
+                  "conversions": [],
+                  "expression_cache": false,
+                  "possible_index_names": [],
+                  "user_functions": []
+                },
                 "children": []
               },
               {
@@ -412,6 +489,14 @@
                 "runtime": null,
                 "warnings": [],
                 "props": {},
+                "facts": {
+                  "columns_without_statistics": [],
+                  "conditions": [],
+                  "conversions": [],
+                  "expression_cache": false,
+                  "possible_index_names": [],
+                  "user_functions": []
+                },
                 "children": []
               },
               {
@@ -438,6 +523,20 @@
                   "Automatic Index": "orders(customer_id)",
                   "Join": "left"
                 },
+                "facts": {
+                  "automatic_index": {
+                    "columns": [
+                      "customer_id"
+                    ],
+                    "table": "orders"
+                  },
+                  "columns_without_statistics": [],
+                  "conditions": [],
+                  "conversions": [],
+                  "expression_cache": false,
+                  "possible_index_names": [],
+                  "user_functions": []
+                },
                 "children": []
               }
             ]
@@ -446,6 +545,12 @@
           "index_hints": [],
           "props": {
             "Generic Plan": "Planned without parameter values: with statistics that hold value distributions, the chosen index can depend on them."
+          },
+          "facts": {
+            "changed_columns": [],
+            "conversions": [],
+            "generic_plan_reason": "Planned without parameter values: with statistics that hold value distributions, the chosen index can depend on them.",
+            "trigger_timings": []
           },
           "raw": "SCAN customers\nBLOOM FILTER ON orders (customer_id=?)\nSEARCH orders USING AUTOMATIC COVERING INDEX (customer_id=?) LEFT-JOIN"
         },
@@ -503,6 +608,14 @@
             "runtime": null,
             "warnings": [],
             "props": {},
+            "facts": {
+              "columns_without_statistics": [],
+              "conditions": [],
+              "conversions": [],
+              "expression_cache": false,
+              "possible_index_names": [],
+              "user_functions": []
+            },
             "children": [
               {
                 "id": 5,
@@ -525,6 +638,14 @@
                 "runtime": null,
                 "warnings": [],
                 "props": {},
+                "facts": {
+                  "columns_without_statistics": [],
+                  "conditions": [],
+                  "conversions": [],
+                  "expression_cache": false,
+                  "possible_index_names": [],
+                  "user_functions": []
+                },
                 "children": []
               }
             ]
@@ -533,6 +654,12 @@
           "index_hints": [],
           "props": {
             "Generic Plan": "Planned without parameter values: with statistics that hold value distributions, the chosen index can depend on them."
+          },
+          "facts": {
+            "changed_columns": [],
+            "conversions": [],
+            "generic_plan_reason": "Planned without parameter values: with statistics that hold value distributions, the chosen index can depend on them.",
+            "trigger_timings": []
           },
           "raw": "SEARCH customers USING INTEGER PRIMARY KEY (rowid=?)"
         },
@@ -590,6 +717,14 @@
             "runtime": null,
             "warnings": [],
             "props": {},
+            "facts": {
+              "columns_without_statistics": [],
+              "conditions": [],
+              "conversions": [],
+              "expression_cache": false,
+              "possible_index_names": [],
+              "user_functions": []
+            },
             "children": [
               {
                 "id": 33,
@@ -612,6 +747,14 @@
                 "runtime": null,
                 "warnings": [],
                 "props": {},
+                "facts": {
+                  "columns_without_statistics": [],
+                  "conditions": [],
+                  "conversions": [],
+                  "expression_cache": false,
+                  "possible_index_names": [],
+                  "user_functions": []
+                },
                 "children": []
               }
             ]
@@ -620,6 +763,12 @@
           "index_hints": [],
           "props": {
             "Generic Plan": "Planned without parameter values: with statistics that hold value distributions, the chosen index can depend on them."
+          },
+          "facts": {
+            "changed_columns": [],
+            "conversions": [],
+            "generic_plan_reason": "Planned without parameter values: with statistics that hold value distributions, the chosen index can depend on them.",
+            "trigger_timings": []
           },
           "raw": "SEARCH order_items USING PRIMARY KEY (order_id=?)"
         },

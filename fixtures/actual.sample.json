@@ -26,6 +26,24 @@
      "StatementOptmLevel": "FULL",
      "StatementSubTreeCost": "0.909931"
     },
+    "facts": {
+     "cardinality_estimator": 160,
+     "changed_columns": [],
+     "compile_cpu_ms": 2.0,
+     "compile_memory_kb": 192.0,
+     "compile_ms": 2.0,
+     "compiled_parameters": "@P1 = (5)",
+     "conversions": [],
+     "cpu_ms": 0.0,
+     "degree_of_parallelism": 1,
+     "elapsed_ms": 0.0,
+     "last_run_at": "2026-10-11T14:10:31.133",
+     "memory_desired_kb": 0.0,
+     "memory_granted_kb": 0.0,
+     "memory_max_used_kb": 0.0,
+     "query_hash": "0xFEBD637132E1276E",
+     "trigger_timings": []
+    },
     "raw": null,
     "root": {
      "act_executions": 1.0,
@@ -71,6 +89,25 @@
         "ScanDirection": "FORWARD",
         "Storage": "RowStore",
         "TableCardinality": "300000"
+       },
+       "facts": {
+        "actual_execution_mode": {
+         "kind": "row"
+        },
+        "columns_without_statistics": [],
+        "conditions": [],
+        "conversions": [],
+        "estimated_execution_mode": {
+         "kind": "row"
+        },
+        "estimated_row_bytes": 11.0,
+        "expression_cache": false,
+        "output_columns": [
+         "id"
+        ],
+        "possible_index_names": [],
+        "storage": "RowStore",
+        "user_functions": []
        },
        "rows_read": 287.868,
        "runtime": null,
@@ -121,6 +158,27 @@
         "Storage": "RowStore",
         "TableCardinality": "300000"
        },
+       "facts": {
+        "actual_execution_mode": {
+         "kind": "row"
+        },
+        "columns_without_statistics": [],
+        "conditions": [],
+        "conversions": [],
+        "estimated_execution_mode": {
+         "kind": "row"
+        },
+        "estimated_row_bytes": 229.0,
+        "expression_cache": false,
+        "output_columns": [
+         "status",
+         "subject",
+         "opened_at"
+        ],
+        "possible_index_names": [],
+        "storage": "RowStore",
+        "user_functions": []
+       },
        "rows_read": null,
        "runtime": null,
        "seek_predicate": "[id] = [culprit_demo].[shop].[support_tickets].[id]",
@@ -157,6 +215,27 @@
       "OutputList": "id, status, subject, opened_at",
       "Parallel": "0",
       "PhysicalOp": "Nested Loops"
+     },
+     "facts": {
+      "actual_execution_mode": {
+       "kind": "row"
+      },
+      "columns_without_statistics": [],
+      "conditions": [],
+      "conversions": [],
+      "estimated_execution_mode": {
+       "kind": "row"
+      },
+      "estimated_row_bytes": 233.0,
+      "expression_cache": false,
+      "output_columns": [
+       "id",
+       "status",
+       "subject",
+       "opened_at"
+      ],
+      "possible_index_names": [],
+      "user_functions": []
      },
      "rows_read": null,
      "runtime": null,
@@ -309,6 +388,25 @@
      "StatementOptmLevel": "FULL",
      "StatementSubTreeCost": "0.0165777"
     },
+    "facts": {
+     "cardinality_estimator": 160,
+     "changed_columns": [],
+     "compile_cpu_ms": 1.0,
+     "compile_memory_kb": 224.0,
+     "compile_ms": 1.0,
+     "compiled_parameters": "@P1 = (148608)",
+     "conversions": [],
+     "cpu_ms": 0.0,
+     "degree_of_parallelism": 1,
+     "elapsed_ms": 0.0,
+     "last_run_at": "2026-10-11T14:10:05.540",
+     "memory_desired_kb": 0.0,
+     "memory_granted_kb": 0.0,
+     "memory_max_used_kb": 0.0,
+     "optimization_early_abort": "GoodEnoughPlanFound",
+     "query_hash": "0x1C16A4743BB078B3",
+     "trigger_timings": []
+    },
     "raw": null,
     "root": {
      "act_executions": 1.0,
@@ -360,6 +458,26 @@
           "Storage": "RowStore",
           "TableCardinality": "1e+06"
          },
+         "facts": {
+          "actual_execution_mode": {
+           "kind": "row"
+          },
+          "columns_without_statistics": [],
+          "conditions": [],
+          "conversions": [],
+          "estimated_execution_mode": {
+           "kind": "row"
+          },
+          "estimated_row_bytes": 21.0,
+          "expression_cache": false,
+          "output_columns": [
+           "id",
+           "created_at"
+          ],
+          "possible_index_names": [],
+          "storage": "RowStore",
+          "user_functions": []
+         },
          "rows_read": 4.99417,
          "runtime": null,
          "seek_predicate": "[customer_id] = [@P1]",
@@ -407,6 +525,26 @@
           "Storage": "RowStore",
           "TableCardinality": "1e+06"
          },
+         "facts": {
+          "actual_execution_mode": {
+           "kind": "row"
+          },
+          "columns_without_statistics": [],
+          "conditions": [],
+          "conversions": [],
+          "estimated_execution_mode": {
+           "kind": "row"
+          },
+          "estimated_row_bytes": 30.0,
+          "expression_cache": false,
+          "output_columns": [
+           "status",
+           "total"
+          ],
+          "possible_index_names": [],
+          "storage": "RowStore",
+          "user_functions": []
+         },
          "rows_read": null,
          "runtime": null,
          "seek_predicate": "[id] = [culprit_demo].[shop].[orders].[id]",
@@ -442,6 +580,27 @@
         "Parallel": "0",
         "PhysicalOp": "Nested Loops"
        },
+       "facts": {
+        "actual_execution_mode": {
+         "kind": "row"
+        },
+        "columns_without_statistics": [],
+        "conditions": [],
+        "conversions": [],
+        "estimated_execution_mode": {
+         "kind": "row"
+        },
+        "estimated_row_bytes": 44.0,
+        "expression_cache": false,
+        "output_columns": [
+         "id",
+         "status",
+         "total",
+         "created_at"
+        ],
+        "possible_index_names": [],
+        "user_functions": []
+       },
        "rows_read": null,
        "runtime": null,
        "seek_predicate": null,
@@ -476,6 +635,27 @@
       "OutputList": "id, status, total, created_at",
       "Parallel": "0",
       "PhysicalOp": "Top"
+     },
+     "facts": {
+      "actual_execution_mode": {
+       "kind": "row"
+      },
+      "columns_without_statistics": [],
+      "conditions": [],
+      "conversions": [],
+      "estimated_execution_mode": {
+       "kind": "row"
+      },
+      "estimated_row_bytes": 44.0,
+      "expression_cache": false,
+      "output_columns": [
+       "id",
+       "status",
+       "total",
+       "created_at"
+      ],
+      "possible_index_names": [],
+      "user_functions": []
      },
      "rows_read": null,
      "runtime": null,
@@ -645,6 +825,24 @@
      "StatementOptmLevel": "TRIVIAL",
      "StatementSubTreeCost": "0.0032831"
     },
+    "facts": {
+     "cardinality_estimator": 160,
+     "changed_columns": [],
+     "compile_cpu_ms": 0.0,
+     "compile_memory_kb": 120.0,
+     "compile_ms": 0.0,
+     "compiled_parameters": "@P1 = (8264)",
+     "conversions": [],
+     "cpu_ms": 0.0,
+     "degree_of_parallelism": 1,
+     "elapsed_ms": 0.0,
+     "last_run_at": "2026-10-11T14:10:10.603",
+     "memory_desired_kb": 0.0,
+     "memory_granted_kb": 0.0,
+     "memory_max_used_kb": 0.0,
+     "query_hash": "0xBD30C1112C2A5560",
+     "trigger_timings": []
+    },
     "raw": null,
     "root": {
      "act_executions": 1.0,
@@ -685,6 +883,27 @@
       "ScanDirection": "FORWARD",
       "Storage": "RowStore",
       "TableCardinality": "20000"
+     },
+     "facts": {
+      "actual_execution_mode": {
+       "kind": "row"
+      },
+      "columns_without_statistics": [],
+      "conditions": [],
+      "conversions": [],
+      "estimated_execution_mode": {
+       "kind": "row"
+      },
+      "estimated_row_bytes": 224.0,
+      "expression_cache": false,
+      "output_columns": [
+       "id",
+       "name",
+       "price"
+      ],
+      "possible_index_names": [],
+      "storage": "RowStore",
+      "user_functions": []
      },
      "rows_read": 1.0,
      "runtime": null,
@@ -795,6 +1014,31 @@
      "StatementOptmLevel": "FULL",
      "StatementSubTreeCost": "0.991458"
     },
+    "facts": {
+     "cardinality_estimator": 160,
+     "changed_columns": [],
+     "compile_cpu_ms": 2.0,
+     "compile_memory_kb": 264.0,
+     "compile_ms": 2.0,
+     "compiled_parameters": "@P1 = N'user142296@example.com'",
+     "conversions": [
+      {
+       "expression": "CONVERT_IMPLICIT(nvarchar(200),[culprit_demo].[shop].[customers].[email],0)=[@P1]",
+       "issue": {
+        "kind": "seek-plan"
+       }
+      }
+     ],
+     "cpu_ms": 0.0,
+     "degree_of_parallelism": 1,
+     "elapsed_ms": 0.0,
+     "last_run_at": "2026-10-11T14:10:22.243",
+     "memory_desired_kb": 0.0,
+     "memory_granted_kb": 0.0,
+     "memory_max_used_kb": 0.0,
+     "query_hash": "0xE9B9B9AEF7209B51",
+     "trigger_timings": []
+    },
     "raw": null,
     "root": {
      "act_executions": 1.0,
@@ -839,6 +1083,25 @@
         "PhysicalOp": "Index Scan",
         "Storage": "RowStore",
         "TableCardinality": "200000"
+       },
+       "facts": {
+        "actual_execution_mode": {
+         "kind": "row"
+        },
+        "columns_without_statistics": [],
+        "conditions": [],
+        "conversions": [],
+        "estimated_execution_mode": {
+         "kind": "row"
+        },
+        "estimated_row_bytes": 36.0,
+        "expression_cache": false,
+        "output_columns": [
+         "id"
+        ],
+        "possible_index_names": [],
+        "storage": "RowStore",
+        "user_functions": []
        },
        "rows_read": 200000.0,
        "runtime": null,
@@ -889,6 +1152,26 @@
         "Storage": "RowStore",
         "TableCardinality": "200000"
        },
+       "facts": {
+        "actual_execution_mode": {
+         "kind": "row"
+        },
+        "columns_without_statistics": [],
+        "conditions": [],
+        "conversions": [],
+        "estimated_execution_mode": {
+         "kind": "row"
+        },
+        "estimated_row_bytes": 123.0,
+        "expression_cache": false,
+        "output_columns": [
+         "name",
+         "segment"
+        ],
+        "possible_index_names": [],
+        "storage": "RowStore",
+        "user_functions": []
+       },
        "rows_read": null,
        "runtime": null,
        "seek_predicate": "[id] = [culprit_demo].[shop].[customers].[id]",
@@ -923,6 +1206,26 @@
       "OutputList": "id, name, segment",
       "Parallel": "0",
       "PhysicalOp": "Nested Loops"
+     },
+     "facts": {
+      "actual_execution_mode": {
+       "kind": "row"
+      },
+      "columns_without_statistics": [],
+      "conditions": [],
+      "conversions": [],
+      "estimated_execution_mode": {
+       "kind": "row"
+      },
+      "estimated_row_bytes": 127.0,
+      "expression_cache": false,
+      "output_columns": [
+       "id",
+       "name",
+       "segment"
+      ],
+      "possible_index_names": [],
+      "user_functions": []
      },
      "rows_read": null,
      "runtime": null,
@@ -1086,6 +1389,24 @@
      "StatementOptmLevel": "FULL",
      "StatementSubTreeCost": "5.88492"
     },
+    "facts": {
+     "cardinality_estimator": 160,
+     "changed_columns": [],
+     "compile_cpu_ms": 2.0,
+     "compile_memory_kb": 216.0,
+     "compile_ms": 2.0,
+     "compiled_parameters": "@P2 = (1), @P1 = (0)",
+     "conversions": [],
+     "cpu_ms": 0.0,
+     "degree_of_parallelism": 14,
+     "elapsed_ms": 0.0,
+     "last_run_at": "2026-10-11T14:10:24.590",
+     "memory_desired_kb": 0.0,
+     "memory_granted_kb": 232.0,
+     "memory_max_used_kb": 232.0,
+     "query_hash": "0x11CC33E7EA9F4952",
+     "trigger_timings": []
+    },
     "raw": null,
     "root": {
      "act_executions": 1.0,
@@ -1129,6 +1450,26 @@
         "PhysicalOp": "Clustered Index Scan",
         "Storage": "RowStore",
         "TableCardinality": "1e+06"
+       },
+       "facts": {
+        "actual_execution_mode": {
+         "kind": "row"
+        },
+        "columns_without_statistics": [],
+        "conditions": [],
+        "conversions": [],
+        "estimated_execution_mode": {
+         "kind": "row"
+        },
+        "estimated_row_bytes": 30.0,
+        "expression_cache": false,
+        "output_columns": [
+         "id",
+         "total"
+        ],
+        "possible_index_names": [],
+        "storage": "RowStore",
+        "user_functions": []
        },
        "rows_read": 1000000.0,
        "runtime": {
@@ -1187,6 +1528,25 @@
       "OutputList": "id, total",
       "Parallel": "1",
       "PhysicalOp": "Parallelism"
+     },
+     "facts": {
+      "actual_execution_mode": {
+       "kind": "row"
+      },
+      "columns_without_statistics": [],
+      "conditions": [],
+      "conversions": [],
+      "estimated_execution_mode": {
+       "kind": "row"
+      },
+      "estimated_row_bytes": 24.0,
+      "expression_cache": false,
+      "output_columns": [
+       "id",
+       "total"
+      ],
+      "possible_index_names": [],
+      "user_functions": []
      },
      "rows_read": null,
      "runtime": null,
@@ -1326,6 +1686,24 @@
      "StatementOptmLevel": "FULL",
      "StatementSubTreeCost": "6.15689"
     },
+    "facts": {
+     "cardinality_estimator": 160,
+     "changed_columns": [],
+     "compile_cpu_ms": 1.0,
+     "compile_memory_kb": 192.0,
+     "compile_ms": 1.0,
+     "compiled_parameters": "@P1 = (439991)",
+     "conversions": [],
+     "cpu_ms": 0.0,
+     "degree_of_parallelism": 14,
+     "elapsed_ms": 0.0,
+     "last_run_at": "2026-10-11T14:10:28.040",
+     "memory_desired_kb": 0.0,
+     "memory_granted_kb": 232.0,
+     "memory_max_used_kb": 232.0,
+     "query_hash": "0xBBCBE1D0C08154BC",
+     "trigger_timings": []
+    },
     "raw": null,
     "root": {
      "act_executions": 1.0,
@@ -1369,6 +1747,27 @@
         "PhysicalOp": "Clustered Index Scan",
         "Storage": "RowStore",
         "TableCardinality": "1.5e+06"
+       },
+       "facts": {
+        "actual_execution_mode": {
+         "kind": "row"
+        },
+        "columns_without_statistics": [],
+        "conditions": [],
+        "conversions": [],
+        "estimated_execution_mode": {
+         "kind": "row"
+        },
+        "estimated_row_bytes": 32.0,
+        "expression_cache": false,
+        "output_columns": [
+         "product_id",
+         "quantity",
+         "unit_price"
+        ],
+        "possible_index_names": [],
+        "storage": "RowStore",
+        "user_functions": []
        },
        "rows_read": 1500000.0,
        "runtime": {
@@ -1427,6 +1826,26 @@
       "OutputList": "product_id, quantity, unit_price",
       "Parallel": "1",
       "PhysicalOp": "Parallelism"
+     },
+     "facts": {
+      "actual_execution_mode": {
+       "kind": "row"
+      },
+      "columns_without_statistics": [],
+      "conditions": [],
+      "conversions": [],
+      "estimated_execution_mode": {
+       "kind": "row"
+      },
+      "estimated_row_bytes": 24.0,
+      "expression_cache": false,
+      "output_columns": [
+       "product_id",
+       "quantity",
+       "unit_price"
+      ],
+      "possible_index_names": [],
+      "user_functions": []
      },
      "rows_read": null,
      "runtime": null,
@@ -1603,6 +2022,19 @@
       "StatementOptmLevel": "FULL",
       "StatementSubTreeCost": "7.02121"
      },
+     "facts": {
+      "cardinality_estimator": 160,
+      "changed_columns": [],
+      "compile_cpu_ms": 2.0,
+      "compile_memory_kb": 288.0,
+      "compile_ms": 2.0,
+      "conversions": [],
+      "memory_desired_kb": 98136.0,
+      "memory_granted_kb": 0.0,
+      "memory_max_used_kb": 0.0,
+      "query_hash": "0x00A9A3A5391D8C02",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -1655,6 +2087,23 @@
              "Storage": "RowStore",
              "TableCardinality": "1e+06"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_execution_mode": {
+              "kind": "batch"
+             },
+             "estimated_row_bytes": 20.0,
+             "expression_cache": false,
+             "output_columns": [
+              "customer_id",
+              "total"
+             ],
+             "possible_index_names": [],
+             "storage": "RowStore",
+             "user_functions": []
+            },
             "rows_read": 1000000.0,
             "runtime": null,
             "seek_predicate": null,
@@ -1686,6 +2135,22 @@
            "OutputList": "customer_id, Expr1002",
            "Parallel": "1",
            "PhysicalOp": "Hash Match"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_execution_mode": {
+            "kind": "batch"
+           },
+           "estimated_row_bytes": 28.0,
+           "expression_cache": false,
+           "output_columns": [
+            "customer_id",
+            "Expr1002"
+           ],
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -1719,6 +2184,22 @@
          "Parallel": "1",
          "PhysicalOp": "Sort"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_execution_mode": {
+          "kind": "batch"
+         },
+         "estimated_row_bytes": 28.0,
+         "expression_cache": false,
+         "output_columns": [
+          "customer_id",
+          "Expr1002"
+         ],
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -1750,6 +2231,22 @@
        "OutputList": "customer_id, Expr1002",
        "Parallel": "1",
        "PhysicalOp": "Parallelism"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_execution_mode": {
+        "kind": "row"
+       },
+       "estimated_row_bytes": 28.0,
+       "expression_cache": false,
+       "output_columns": [
+        "customer_id",
+        "Expr1002"
+       ],
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -1951,6 +2448,19 @@
       "StatementOptmLevel": "FULL",
       "StatementSubTreeCost": "7.02121"
      },
+     "facts": {
+      "cardinality_estimator": 160,
+      "changed_columns": [],
+      "compile_cpu_ms": 2.0,
+      "compile_memory_kb": 288.0,
+      "compile_ms": 2.0,
+      "conversions": [],
+      "memory_desired_kb": 98136.0,
+      "memory_granted_kb": 0.0,
+      "memory_max_used_kb": 0.0,
+      "query_hash": "0x00A9A3A5391D8C02",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -2003,6 +2513,23 @@
              "Storage": "RowStore",
              "TableCardinality": "1e+06"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_execution_mode": {
+              "kind": "batch"
+             },
+             "estimated_row_bytes": 20.0,
+             "expression_cache": false,
+             "output_columns": [
+              "customer_id",
+              "total"
+             ],
+             "possible_index_names": [],
+             "storage": "RowStore",
+             "user_functions": []
+            },
             "rows_read": 1000000.0,
             "runtime": null,
             "seek_predicate": null,
@@ -2034,6 +2561,22 @@
            "OutputList": "customer_id, Expr1002",
            "Parallel": "1",
            "PhysicalOp": "Hash Match"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_execution_mode": {
+            "kind": "batch"
+           },
+           "estimated_row_bytes": 28.0,
+           "expression_cache": false,
+           "output_columns": [
+            "customer_id",
+            "Expr1002"
+           ],
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -2067,6 +2610,22 @@
          "Parallel": "1",
          "PhysicalOp": "Sort"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_execution_mode": {
+          "kind": "batch"
+         },
+         "estimated_row_bytes": 28.0,
+         "expression_cache": false,
+         "output_columns": [
+          "customer_id",
+          "Expr1002"
+         ],
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -2098,6 +2657,22 @@
        "OutputList": "customer_id, Expr1002",
        "Parallel": "1",
        "PhysicalOp": "Parallelism"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_execution_mode": {
+        "kind": "row"
+       },
+       "estimated_row_bytes": 28.0,
+       "expression_cache": false,
+       "output_columns": [
+        "customer_id",
+        "Expr1002"
+       ],
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -2299,6 +2874,19 @@
       "StatementOptmLevel": "FULL",
       "StatementSubTreeCost": "7.02121"
      },
+     "facts": {
+      "cardinality_estimator": 160,
+      "changed_columns": [],
+      "compile_cpu_ms": 2.0,
+      "compile_memory_kb": 288.0,
+      "compile_ms": 2.0,
+      "conversions": [],
+      "memory_desired_kb": 98136.0,
+      "memory_granted_kb": 0.0,
+      "memory_max_used_kb": 0.0,
+      "query_hash": "0x00A9A3A5391D8C02",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -2351,6 +2939,23 @@
              "Storage": "RowStore",
              "TableCardinality": "1e+06"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_execution_mode": {
+              "kind": "batch"
+             },
+             "estimated_row_bytes": 20.0,
+             "expression_cache": false,
+             "output_columns": [
+              "customer_id",
+              "total"
+             ],
+             "possible_index_names": [],
+             "storage": "RowStore",
+             "user_functions": []
+            },
             "rows_read": 1000000.0,
             "runtime": null,
             "seek_predicate": null,
@@ -2382,6 +2987,22 @@
            "OutputList": "customer_id, Expr1002",
            "Parallel": "1",
            "PhysicalOp": "Hash Match"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_execution_mode": {
+            "kind": "batch"
+           },
+           "estimated_row_bytes": 28.0,
+           "expression_cache": false,
+           "output_columns": [
+            "customer_id",
+            "Expr1002"
+           ],
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -2415,6 +3036,22 @@
          "Parallel": "1",
          "PhysicalOp": "Sort"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_execution_mode": {
+          "kind": "batch"
+         },
+         "estimated_row_bytes": 28.0,
+         "expression_cache": false,
+         "output_columns": [
+          "customer_id",
+          "Expr1002"
+         ],
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -2446,6 +3083,22 @@
        "OutputList": "customer_id, Expr1002",
        "Parallel": "1",
        "PhysicalOp": "Parallelism"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_execution_mode": {
+        "kind": "row"
+       },
+       "estimated_row_bytes": 28.0,
+       "expression_cache": false,
+       "output_columns": [
+        "customer_id",
+        "Expr1002"
+       ],
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -2647,6 +3300,19 @@
       "StatementOptmLevel": "FULL",
       "StatementSubTreeCost": "7.02121"
      },
+     "facts": {
+      "cardinality_estimator": 160,
+      "changed_columns": [],
+      "compile_cpu_ms": 2.0,
+      "compile_memory_kb": 288.0,
+      "compile_ms": 2.0,
+      "conversions": [],
+      "memory_desired_kb": 98136.0,
+      "memory_granted_kb": 0.0,
+      "memory_max_used_kb": 0.0,
+      "query_hash": "0x00A9A3A5391D8C02",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -2699,6 +3365,23 @@
              "Storage": "RowStore",
              "TableCardinality": "1e+06"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_execution_mode": {
+              "kind": "batch"
+             },
+             "estimated_row_bytes": 20.0,
+             "expression_cache": false,
+             "output_columns": [
+              "customer_id",
+              "total"
+             ],
+             "possible_index_names": [],
+             "storage": "RowStore",
+             "user_functions": []
+            },
             "rows_read": 1000000.0,
             "runtime": null,
             "seek_predicate": null,
@@ -2730,6 +3413,22 @@
            "OutputList": "customer_id, Expr1002",
            "Parallel": "1",
            "PhysicalOp": "Hash Match"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_execution_mode": {
+            "kind": "batch"
+           },
+           "estimated_row_bytes": 28.0,
+           "expression_cache": false,
+           "output_columns": [
+            "customer_id",
+            "Expr1002"
+           ],
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -2763,6 +3462,22 @@
          "Parallel": "1",
          "PhysicalOp": "Sort"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_execution_mode": {
+          "kind": "batch"
+         },
+         "estimated_row_bytes": 28.0,
+         "expression_cache": false,
+         "output_columns": [
+          "customer_id",
+          "Expr1002"
+         ],
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -2794,6 +3509,22 @@
        "OutputList": "customer_id, Expr1002",
        "Parallel": "1",
        "PhysicalOp": "Parallelism"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_execution_mode": {
+        "kind": "row"
+       },
+       "estimated_row_bytes": 28.0,
+       "expression_cache": false,
+       "output_columns": [
+        "customer_id",
+        "Expr1002"
+       ],
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -2995,6 +3726,19 @@
       "StatementOptmLevel": "FULL",
       "StatementSubTreeCost": "7.02121"
      },
+     "facts": {
+      "cardinality_estimator": 160,
+      "changed_columns": [],
+      "compile_cpu_ms": 2.0,
+      "compile_memory_kb": 288.0,
+      "compile_ms": 2.0,
+      "conversions": [],
+      "memory_desired_kb": 98136.0,
+      "memory_granted_kb": 0.0,
+      "memory_max_used_kb": 0.0,
+      "query_hash": "0x00A9A3A5391D8C02",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -3047,6 +3791,23 @@
              "Storage": "RowStore",
              "TableCardinality": "1e+06"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_execution_mode": {
+              "kind": "batch"
+             },
+             "estimated_row_bytes": 20.0,
+             "expression_cache": false,
+             "output_columns": [
+              "customer_id",
+              "total"
+             ],
+             "possible_index_names": [],
+             "storage": "RowStore",
+             "user_functions": []
+            },
             "rows_read": 1000000.0,
             "runtime": null,
             "seek_predicate": null,
@@ -3078,6 +3839,22 @@
            "OutputList": "customer_id, Expr1002",
            "Parallel": "1",
            "PhysicalOp": "Hash Match"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_execution_mode": {
+            "kind": "batch"
+           },
+           "estimated_row_bytes": 28.0,
+           "expression_cache": false,
+           "output_columns": [
+            "customer_id",
+            "Expr1002"
+           ],
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -3111,6 +3888,22 @@
          "Parallel": "1",
          "PhysicalOp": "Sort"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_execution_mode": {
+          "kind": "batch"
+         },
+         "estimated_row_bytes": 28.0,
+         "expression_cache": false,
+         "output_columns": [
+          "customer_id",
+          "Expr1002"
+         ],
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -3142,6 +3935,22 @@
        "OutputList": "customer_id, Expr1002",
        "Parallel": "1",
        "PhysicalOp": "Parallelism"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_execution_mode": {
+        "kind": "row"
+       },
+       "estimated_row_bytes": 28.0,
+       "expression_cache": false,
+       "output_columns": [
+        "customer_id",
+        "Expr1002"
+       ],
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -3343,6 +4152,19 @@
       "StatementOptmLevel": "FULL",
       "StatementSubTreeCost": "7.02121"
      },
+     "facts": {
+      "cardinality_estimator": 160,
+      "changed_columns": [],
+      "compile_cpu_ms": 2.0,
+      "compile_memory_kb": 288.0,
+      "compile_ms": 2.0,
+      "conversions": [],
+      "memory_desired_kb": 98136.0,
+      "memory_granted_kb": 0.0,
+      "memory_max_used_kb": 0.0,
+      "query_hash": "0x00A9A3A5391D8C02",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -3395,6 +4217,23 @@
              "Storage": "RowStore",
              "TableCardinality": "1e+06"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_execution_mode": {
+              "kind": "batch"
+             },
+             "estimated_row_bytes": 20.0,
+             "expression_cache": false,
+             "output_columns": [
+              "customer_id",
+              "total"
+             ],
+             "possible_index_names": [],
+             "storage": "RowStore",
+             "user_functions": []
+            },
             "rows_read": 1000000.0,
             "runtime": null,
             "seek_predicate": null,
@@ -3426,6 +4265,22 @@
            "OutputList": "customer_id, Expr1002",
            "Parallel": "1",
            "PhysicalOp": "Hash Match"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_execution_mode": {
+            "kind": "batch"
+           },
+           "estimated_row_bytes": 28.0,
+           "expression_cache": false,
+           "output_columns": [
+            "customer_id",
+            "Expr1002"
+           ],
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -3459,6 +4314,22 @@
          "Parallel": "1",
          "PhysicalOp": "Sort"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_execution_mode": {
+          "kind": "batch"
+         },
+         "estimated_row_bytes": 28.0,
+         "expression_cache": false,
+         "output_columns": [
+          "customer_id",
+          "Expr1002"
+         ],
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -3490,6 +4361,22 @@
        "OutputList": "customer_id, Expr1002",
        "Parallel": "1",
        "PhysicalOp": "Parallelism"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_execution_mode": {
+        "kind": "row"
+       },
+       "estimated_row_bytes": 28.0,
+       "expression_cache": false,
+       "output_columns": [
+        "customer_id",
+        "Expr1002"
+       ],
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -3691,6 +4578,19 @@
       "StatementOptmLevel": "FULL",
       "StatementSubTreeCost": "7.02121"
      },
+     "facts": {
+      "cardinality_estimator": 160,
+      "changed_columns": [],
+      "compile_cpu_ms": 2.0,
+      "compile_memory_kb": 288.0,
+      "compile_ms": 2.0,
+      "conversions": [],
+      "memory_desired_kb": 98136.0,
+      "memory_granted_kb": 0.0,
+      "memory_max_used_kb": 0.0,
+      "query_hash": "0x00A9A3A5391D8C02",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -3743,6 +4643,23 @@
              "Storage": "RowStore",
              "TableCardinality": "1e+06"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_execution_mode": {
+              "kind": "batch"
+             },
+             "estimated_row_bytes": 20.0,
+             "expression_cache": false,
+             "output_columns": [
+              "customer_id",
+              "total"
+             ],
+             "possible_index_names": [],
+             "storage": "RowStore",
+             "user_functions": []
+            },
             "rows_read": 1000000.0,
             "runtime": null,
             "seek_predicate": null,
@@ -3774,6 +4691,22 @@
            "OutputList": "customer_id, Expr1002",
            "Parallel": "1",
            "PhysicalOp": "Hash Match"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_execution_mode": {
+            "kind": "batch"
+           },
+           "estimated_row_bytes": 28.0,
+           "expression_cache": false,
+           "output_columns": [
+            "customer_id",
+            "Expr1002"
+           ],
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -3807,6 +4740,22 @@
          "Parallel": "1",
          "PhysicalOp": "Sort"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_execution_mode": {
+          "kind": "batch"
+         },
+         "estimated_row_bytes": 28.0,
+         "expression_cache": false,
+         "output_columns": [
+          "customer_id",
+          "Expr1002"
+         ],
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -3838,6 +4787,22 @@
        "OutputList": "customer_id, Expr1002",
        "Parallel": "1",
        "PhysicalOp": "Parallelism"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_execution_mode": {
+        "kind": "row"
+       },
+       "estimated_row_bytes": 28.0,
+       "expression_cache": false,
+       "output_columns": [
+        "customer_id",
+        "Expr1002"
+       ],
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -4039,6 +5004,19 @@
       "StatementOptmLevel": "FULL",
       "StatementSubTreeCost": "7.02121"
      },
+     "facts": {
+      "cardinality_estimator": 160,
+      "changed_columns": [],
+      "compile_cpu_ms": 2.0,
+      "compile_memory_kb": 288.0,
+      "compile_ms": 2.0,
+      "conversions": [],
+      "memory_desired_kb": 98136.0,
+      "memory_granted_kb": 0.0,
+      "memory_max_used_kb": 0.0,
+      "query_hash": "0x00A9A3A5391D8C02",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -4091,6 +5069,23 @@
              "Storage": "RowStore",
              "TableCardinality": "1e+06"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_execution_mode": {
+              "kind": "batch"
+             },
+             "estimated_row_bytes": 20.0,
+             "expression_cache": false,
+             "output_columns": [
+              "customer_id",
+              "total"
+             ],
+             "possible_index_names": [],
+             "storage": "RowStore",
+             "user_functions": []
+            },
             "rows_read": 1000000.0,
             "runtime": null,
             "seek_predicate": null,
@@ -4122,6 +5117,22 @@
            "OutputList": "customer_id, Expr1002",
            "Parallel": "1",
            "PhysicalOp": "Hash Match"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_execution_mode": {
+            "kind": "batch"
+           },
+           "estimated_row_bytes": 28.0,
+           "expression_cache": false,
+           "output_columns": [
+            "customer_id",
+            "Expr1002"
+           ],
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -4155,6 +5166,22 @@
          "Parallel": "1",
          "PhysicalOp": "Sort"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_execution_mode": {
+          "kind": "batch"
+         },
+         "estimated_row_bytes": 28.0,
+         "expression_cache": false,
+         "output_columns": [
+          "customer_id",
+          "Expr1002"
+         ],
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -4186,6 +5213,22 @@
        "OutputList": "customer_id, Expr1002",
        "Parallel": "1",
        "PhysicalOp": "Parallelism"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_execution_mode": {
+        "kind": "row"
+       },
+       "estimated_row_bytes": 28.0,
+       "expression_cache": false,
+       "output_columns": [
+        "customer_id",
+        "Expr1002"
+       ],
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -4387,6 +5430,19 @@
       "StatementOptmLevel": "FULL",
       "StatementSubTreeCost": "7.02121"
      },
+     "facts": {
+      "cardinality_estimator": 160,
+      "changed_columns": [],
+      "compile_cpu_ms": 2.0,
+      "compile_memory_kb": 288.0,
+      "compile_ms": 2.0,
+      "conversions": [],
+      "memory_desired_kb": 98136.0,
+      "memory_granted_kb": 0.0,
+      "memory_max_used_kb": 0.0,
+      "query_hash": "0x00A9A3A5391D8C02",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -4439,6 +5495,23 @@
              "Storage": "RowStore",
              "TableCardinality": "1e+06"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_execution_mode": {
+              "kind": "batch"
+             },
+             "estimated_row_bytes": 20.0,
+             "expression_cache": false,
+             "output_columns": [
+              "customer_id",
+              "total"
+             ],
+             "possible_index_names": [],
+             "storage": "RowStore",
+             "user_functions": []
+            },
             "rows_read": 1000000.0,
             "runtime": null,
             "seek_predicate": null,
@@ -4470,6 +5543,22 @@
            "OutputList": "customer_id, Expr1002",
            "Parallel": "1",
            "PhysicalOp": "Hash Match"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_execution_mode": {
+            "kind": "batch"
+           },
+           "estimated_row_bytes": 28.0,
+           "expression_cache": false,
+           "output_columns": [
+            "customer_id",
+            "Expr1002"
+           ],
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -4503,6 +5592,22 @@
          "Parallel": "1",
          "PhysicalOp": "Sort"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_execution_mode": {
+          "kind": "batch"
+         },
+         "estimated_row_bytes": 28.0,
+         "expression_cache": false,
+         "output_columns": [
+          "customer_id",
+          "Expr1002"
+         ],
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -4534,6 +5639,22 @@
        "OutputList": "customer_id, Expr1002",
        "Parallel": "1",
        "PhysicalOp": "Parallelism"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_execution_mode": {
+        "kind": "row"
+       },
+       "estimated_row_bytes": 28.0,
+       "expression_cache": false,
+       "output_columns": [
+        "customer_id",
+        "Expr1002"
+       ],
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -4735,6 +5856,19 @@
       "StatementOptmLevel": "FULL",
       "StatementSubTreeCost": "7.02121"
      },
+     "facts": {
+      "cardinality_estimator": 160,
+      "changed_columns": [],
+      "compile_cpu_ms": 2.0,
+      "compile_memory_kb": 288.0,
+      "compile_ms": 2.0,
+      "conversions": [],
+      "memory_desired_kb": 98136.0,
+      "memory_granted_kb": 0.0,
+      "memory_max_used_kb": 0.0,
+      "query_hash": "0x00A9A3A5391D8C02",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -4787,6 +5921,23 @@
              "Storage": "RowStore",
              "TableCardinality": "1e+06"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_execution_mode": {
+              "kind": "batch"
+             },
+             "estimated_row_bytes": 20.0,
+             "expression_cache": false,
+             "output_columns": [
+              "customer_id",
+              "total"
+             ],
+             "possible_index_names": [],
+             "storage": "RowStore",
+             "user_functions": []
+            },
             "rows_read": 1000000.0,
             "runtime": null,
             "seek_predicate": null,
@@ -4818,6 +5969,22 @@
            "OutputList": "customer_id, Expr1002",
            "Parallel": "1",
            "PhysicalOp": "Hash Match"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_execution_mode": {
+            "kind": "batch"
+           },
+           "estimated_row_bytes": 28.0,
+           "expression_cache": false,
+           "output_columns": [
+            "customer_id",
+            "Expr1002"
+           ],
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -4851,6 +6018,22 @@
          "Parallel": "1",
          "PhysicalOp": "Sort"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_execution_mode": {
+          "kind": "batch"
+         },
+         "estimated_row_bytes": 28.0,
+         "expression_cache": false,
+         "output_columns": [
+          "customer_id",
+          "Expr1002"
+         ],
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -4882,6 +6065,22 @@
        "OutputList": "customer_id, Expr1002",
        "Parallel": "1",
        "PhysicalOp": "Parallelism"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_execution_mode": {
+        "kind": "row"
+       },
+       "estimated_row_bytes": 28.0,
+       "expression_cache": false,
+       "output_columns": [
+        "customer_id",
+        "Expr1002"
+       ],
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -5036,6 +6235,11 @@
      "props": {
       "query_cost": "51154.67"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -5079,6 +6283,21 @@
              "used_columns": "id, customer_id, total",
              "used_key_parts": "customer_id"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_filtered_percent": 100.0,
+             "expression_cache": false,
+             "possible_index_names": [
+              "fk_orders_customer"
+             ],
+             "rows_produced_per_join": 498573.0,
+             "used_key_parts": [
+              "customer_id"
+             ],
+             "user_functions": []
+            },
             "rows_read": 498573.0,
             "runtime": null,
             "seek_predicate": null,
@@ -5099,6 +6318,14 @@
           "predicate": null,
           "props": {
            "using_filesort": "false"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "expression_cache": false,
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -5122,6 +6349,14 @@
          "using_filesort": "true",
          "using_temporary_table": "true"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "expression_cache": false,
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -5142,6 +6377,14 @@
       "predicate": null,
       "props": {
        "select_id": "1"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -5294,6 +6537,11 @@
      "props": {
       "query_cost": "51154.67"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -5337,6 +6585,21 @@
              "used_columns": "id, customer_id, total",
              "used_key_parts": "customer_id"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_filtered_percent": 100.0,
+             "expression_cache": false,
+             "possible_index_names": [
+              "fk_orders_customer"
+             ],
+             "rows_produced_per_join": 498573.0,
+             "used_key_parts": [
+              "customer_id"
+             ],
+             "user_functions": []
+            },
             "rows_read": 498573.0,
             "runtime": null,
             "seek_predicate": null,
@@ -5357,6 +6620,14 @@
           "predicate": null,
           "props": {
            "using_filesort": "false"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "expression_cache": false,
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -5380,6 +6651,14 @@
          "using_filesort": "true",
          "using_temporary_table": "true"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "expression_cache": false,
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -5400,6 +6679,14 @@
       "predicate": null,
       "props": {
        "select_id": "1"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -5552,6 +6839,11 @@
      "props": {
       "query_cost": "51154.67"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -5595,6 +6887,21 @@
              "used_columns": "id, customer_id, total",
              "used_key_parts": "customer_id"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_filtered_percent": 100.0,
+             "expression_cache": false,
+             "possible_index_names": [
+              "fk_orders_customer"
+             ],
+             "rows_produced_per_join": 498573.0,
+             "used_key_parts": [
+              "customer_id"
+             ],
+             "user_functions": []
+            },
             "rows_read": 498573.0,
             "runtime": null,
             "seek_predicate": null,
@@ -5615,6 +6922,14 @@
           "predicate": null,
           "props": {
            "using_filesort": "false"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "expression_cache": false,
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -5638,6 +6953,14 @@
          "using_filesort": "true",
          "using_temporary_table": "true"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "expression_cache": false,
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -5658,6 +6981,14 @@
       "predicate": null,
       "props": {
        "select_id": "1"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -5810,6 +7141,11 @@
      "props": {
       "query_cost": "51154.67"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -5853,6 +7189,21 @@
              "used_columns": "id, customer_id, total",
              "used_key_parts": "customer_id"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_filtered_percent": 100.0,
+             "expression_cache": false,
+             "possible_index_names": [
+              "fk_orders_customer"
+             ],
+             "rows_produced_per_join": 498573.0,
+             "used_key_parts": [
+              "customer_id"
+             ],
+             "user_functions": []
+            },
             "rows_read": 498573.0,
             "runtime": null,
             "seek_predicate": null,
@@ -5873,6 +7224,14 @@
           "predicate": null,
           "props": {
            "using_filesort": "false"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "expression_cache": false,
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -5896,6 +7255,14 @@
          "using_filesort": "true",
          "using_temporary_table": "true"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "expression_cache": false,
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -5916,6 +7283,14 @@
       "predicate": null,
       "props": {
        "select_id": "1"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -6068,6 +7443,11 @@
      "props": {
       "query_cost": "51154.67"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -6111,6 +7491,21 @@
              "used_columns": "id, customer_id, total",
              "used_key_parts": "customer_id"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_filtered_percent": 100.0,
+             "expression_cache": false,
+             "possible_index_names": [
+              "fk_orders_customer"
+             ],
+             "rows_produced_per_join": 498573.0,
+             "used_key_parts": [
+              "customer_id"
+             ],
+             "user_functions": []
+            },
             "rows_read": 498573.0,
             "runtime": null,
             "seek_predicate": null,
@@ -6131,6 +7526,14 @@
           "predicate": null,
           "props": {
            "using_filesort": "false"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "expression_cache": false,
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -6154,6 +7557,14 @@
          "using_filesort": "true",
          "using_temporary_table": "true"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "expression_cache": false,
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -6174,6 +7585,14 @@
       "predicate": null,
       "props": {
        "select_id": "1"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -6326,6 +7745,11 @@
      "props": {
       "query_cost": "51154.67"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -6369,6 +7793,21 @@
              "used_columns": "id, customer_id, total",
              "used_key_parts": "customer_id"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_filtered_percent": 100.0,
+             "expression_cache": false,
+             "possible_index_names": [
+              "fk_orders_customer"
+             ],
+             "rows_produced_per_join": 498573.0,
+             "used_key_parts": [
+              "customer_id"
+             ],
+             "user_functions": []
+            },
             "rows_read": 498573.0,
             "runtime": null,
             "seek_predicate": null,
@@ -6389,6 +7828,14 @@
           "predicate": null,
           "props": {
            "using_filesort": "false"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "expression_cache": false,
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -6412,6 +7859,14 @@
          "using_filesort": "true",
          "using_temporary_table": "true"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "expression_cache": false,
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -6432,6 +7887,14 @@
       "predicate": null,
       "props": {
        "select_id": "1"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -6584,6 +8047,11 @@
      "props": {
       "query_cost": "51154.67"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -6627,6 +8095,21 @@
              "used_columns": "id, customer_id, total",
              "used_key_parts": "customer_id"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_filtered_percent": 100.0,
+             "expression_cache": false,
+             "possible_index_names": [
+              "fk_orders_customer"
+             ],
+             "rows_produced_per_join": 498573.0,
+             "used_key_parts": [
+              "customer_id"
+             ],
+             "user_functions": []
+            },
             "rows_read": 498573.0,
             "runtime": null,
             "seek_predicate": null,
@@ -6647,6 +8130,14 @@
           "predicate": null,
           "props": {
            "using_filesort": "false"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "expression_cache": false,
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -6670,6 +8161,14 @@
          "using_filesort": "true",
          "using_temporary_table": "true"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "expression_cache": false,
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -6690,6 +8189,14 @@
       "predicate": null,
       "props": {
        "select_id": "1"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -6842,6 +8349,11 @@
      "props": {
       "query_cost": "51154.67"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -6885,6 +8397,21 @@
              "used_columns": "id, customer_id, total",
              "used_key_parts": "customer_id"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_filtered_percent": 100.0,
+             "expression_cache": false,
+             "possible_index_names": [
+              "fk_orders_customer"
+             ],
+             "rows_produced_per_join": 498573.0,
+             "used_key_parts": [
+              "customer_id"
+             ],
+             "user_functions": []
+            },
             "rows_read": 498573.0,
             "runtime": null,
             "seek_predicate": null,
@@ -6905,6 +8432,14 @@
           "predicate": null,
           "props": {
            "using_filesort": "false"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "expression_cache": false,
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -6928,6 +8463,14 @@
          "using_filesort": "true",
          "using_temporary_table": "true"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "expression_cache": false,
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -6948,6 +8491,14 @@
       "predicate": null,
       "props": {
        "select_id": "1"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -7100,6 +8651,11 @@
      "props": {
       "query_cost": "51154.67"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -7143,6 +8699,21 @@
              "used_columns": "id, customer_id, total",
              "used_key_parts": "customer_id"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_filtered_percent": 100.0,
+             "expression_cache": false,
+             "possible_index_names": [
+              "fk_orders_customer"
+             ],
+             "rows_produced_per_join": 498573.0,
+             "used_key_parts": [
+              "customer_id"
+             ],
+             "user_functions": []
+            },
             "rows_read": 498573.0,
             "runtime": null,
             "seek_predicate": null,
@@ -7163,6 +8734,14 @@
           "predicate": null,
           "props": {
            "using_filesort": "false"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "expression_cache": false,
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -7186,6 +8765,14 @@
          "using_filesort": "true",
          "using_temporary_table": "true"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "expression_cache": false,
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -7206,6 +8793,14 @@
       "predicate": null,
       "props": {
        "select_id": "1"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -7358,6 +8953,11 @@
      "props": {
       "query_cost": "51154.67"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -7401,6 +9001,21 @@
              "used_columns": "id, customer_id, total",
              "used_key_parts": "customer_id"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_filtered_percent": 100.0,
+             "expression_cache": false,
+             "possible_index_names": [
+              "fk_orders_customer"
+             ],
+             "rows_produced_per_join": 498573.0,
+             "used_key_parts": [
+              "customer_id"
+             ],
+             "user_functions": []
+            },
             "rows_read": 498573.0,
             "runtime": null,
             "seek_predicate": null,
@@ -7421,6 +9036,14 @@
           "predicate": null,
           "props": {
            "using_filesort": "false"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "expression_cache": false,
+           "possible_index_names": [],
+           "user_functions": []
           },
           "rows_read": null,
           "runtime": null,
@@ -7444,6 +9067,14 @@
          "using_filesort": "true",
          "using_temporary_table": "true"
         },
+        "facts": {
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "expression_cache": false,
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -7464,6 +9095,14 @@
       "predicate": null,
       "props": {
        "select_id": "1"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -7619,6 +9258,12 @@
       "JIT": "{\"Functions\":7,\"Options\":{\"Deforming\":true,\"Expressions\":true,\"Inlining\":false,\"Optimization\":false}}",
       "Query Identifier": "-4658902355889218172"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "query_identifier": "-4658902355889218172",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -7668,6 +9313,19 @@
                  "Plan Width": "10",
                  "Startup Cost": "0.0"
                 },
+                "facts": {
+                 "columns_without_statistics": [],
+                 "conditions": [],
+                 "conversions": [],
+                 "estimated_row_bytes": 10.0,
+                 "expression_cache": false,
+                 "parent_relationship": {
+                  "kind": "outer"
+                 },
+                 "possible_index_names": [],
+                 "table_alias": "orders",
+                 "user_functions": []
+                },
                 "rows_read": null,
                 "runtime": null,
                 "seek_predicate": null,
@@ -7698,6 +9356,19 @@
                "Startup Cost": "94503.58",
                "Strategy": "Hashed"
               },
+              "facts": {
+               "aggregate_strategy": "Hashed",
+               "columns_without_statistics": [],
+               "conditions": [],
+               "conversions": [],
+               "estimated_row_bytes": 36.0,
+               "expression_cache": false,
+               "parent_relationship": {
+                "kind": "outer"
+               },
+               "possible_index_names": [],
+               "user_functions": []
+              },
               "rows_read": null,
               "runtime": null,
               "seek_predicate": null,
@@ -7725,6 +9396,18 @@
              "Sort Key": "orders.customer_id",
              "Startup Cost": "125895.54"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_row_bytes": 36.0,
+             "expression_cache": false,
+             "parent_relationship": {
+              "kind": "outer"
+             },
+             "possible_index_names": [],
+             "user_functions": []
+            },
             "rows_read": null,
             "runtime": null,
             "seek_predicate": null,
@@ -7751,6 +9434,19 @@
            "Plan Width": "36",
            "Startup Cost": "126895.56",
            "Workers Planned": "2"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_row_bytes": 36.0,
+           "expression_cache": false,
+           "parent_relationship": {
+            "kind": "outer"
+           },
+           "possible_index_names": [],
+           "user_functions": [],
+           "workers_planned": 2
           },
           "rows_read": null,
           "runtime": null,
@@ -7781,6 +9477,19 @@
          "Startup Cost": "126895.56",
          "Strategy": "Sorted"
         },
+        "facts": {
+         "aggregate_strategy": "Sorted",
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_row_bytes": 36.0,
+         "expression_cache": false,
+         "parent_relationship": {
+          "kind": "outer"
+         },
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -7806,6 +9515,15 @@
        "Plan Width": "36",
        "Sort Key": "(sum(orders.total)) DESC",
        "Startup Cost": "204520.35"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_row_bytes": 36.0,
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -7999,6 +9717,12 @@
       "JIT": "{\"Functions\":7,\"Options\":{\"Deforming\":true,\"Expressions\":true,\"Inlining\":false,\"Optimization\":false}}",
       "Query Identifier": "-4658902355889218172"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "query_identifier": "-4658902355889218172",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -8048,6 +9772,19 @@
                  "Plan Width": "10",
                  "Startup Cost": "0.0"
                 },
+                "facts": {
+                 "columns_without_statistics": [],
+                 "conditions": [],
+                 "conversions": [],
+                 "estimated_row_bytes": 10.0,
+                 "expression_cache": false,
+                 "parent_relationship": {
+                  "kind": "outer"
+                 },
+                 "possible_index_names": [],
+                 "table_alias": "orders",
+                 "user_functions": []
+                },
                 "rows_read": null,
                 "runtime": null,
                 "seek_predicate": null,
@@ -8078,6 +9815,19 @@
                "Startup Cost": "94503.58",
                "Strategy": "Hashed"
               },
+              "facts": {
+               "aggregate_strategy": "Hashed",
+               "columns_without_statistics": [],
+               "conditions": [],
+               "conversions": [],
+               "estimated_row_bytes": 36.0,
+               "expression_cache": false,
+               "parent_relationship": {
+                "kind": "outer"
+               },
+               "possible_index_names": [],
+               "user_functions": []
+              },
               "rows_read": null,
               "runtime": null,
               "seek_predicate": null,
@@ -8105,6 +9855,18 @@
              "Sort Key": "orders.customer_id",
              "Startup Cost": "125895.54"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_row_bytes": 36.0,
+             "expression_cache": false,
+             "parent_relationship": {
+              "kind": "outer"
+             },
+             "possible_index_names": [],
+             "user_functions": []
+            },
             "rows_read": null,
             "runtime": null,
             "seek_predicate": null,
@@ -8131,6 +9893,19 @@
            "Plan Width": "36",
            "Startup Cost": "126895.56",
            "Workers Planned": "2"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_row_bytes": 36.0,
+           "expression_cache": false,
+           "parent_relationship": {
+            "kind": "outer"
+           },
+           "possible_index_names": [],
+           "user_functions": [],
+           "workers_planned": 2
           },
           "rows_read": null,
           "runtime": null,
@@ -8161,6 +9936,19 @@
          "Startup Cost": "126895.56",
          "Strategy": "Sorted"
         },
+        "facts": {
+         "aggregate_strategy": "Sorted",
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_row_bytes": 36.0,
+         "expression_cache": false,
+         "parent_relationship": {
+          "kind": "outer"
+         },
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -8186,6 +9974,15 @@
        "Plan Width": "36",
        "Sort Key": "(sum(orders.total)) DESC",
        "Startup Cost": "204520.35"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_row_bytes": 36.0,
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -8379,6 +10176,12 @@
       "JIT": "{\"Functions\":7,\"Options\":{\"Deforming\":true,\"Expressions\":true,\"Inlining\":false,\"Optimization\":false}}",
       "Query Identifier": "-4658902355889218172"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "query_identifier": "-4658902355889218172",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -8428,6 +10231,19 @@
                  "Plan Width": "10",
                  "Startup Cost": "0.0"
                 },
+                "facts": {
+                 "columns_without_statistics": [],
+                 "conditions": [],
+                 "conversions": [],
+                 "estimated_row_bytes": 10.0,
+                 "expression_cache": false,
+                 "parent_relationship": {
+                  "kind": "outer"
+                 },
+                 "possible_index_names": [],
+                 "table_alias": "orders",
+                 "user_functions": []
+                },
                 "rows_read": null,
                 "runtime": null,
                 "seek_predicate": null,
@@ -8458,6 +10274,19 @@
                "Startup Cost": "94503.58",
                "Strategy": "Hashed"
               },
+              "facts": {
+               "aggregate_strategy": "Hashed",
+               "columns_without_statistics": [],
+               "conditions": [],
+               "conversions": [],
+               "estimated_row_bytes": 36.0,
+               "expression_cache": false,
+               "parent_relationship": {
+                "kind": "outer"
+               },
+               "possible_index_names": [],
+               "user_functions": []
+              },
               "rows_read": null,
               "runtime": null,
               "seek_predicate": null,
@@ -8485,6 +10314,18 @@
              "Sort Key": "orders.customer_id",
              "Startup Cost": "125895.54"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_row_bytes": 36.0,
+             "expression_cache": false,
+             "parent_relationship": {
+              "kind": "outer"
+             },
+             "possible_index_names": [],
+             "user_functions": []
+            },
             "rows_read": null,
             "runtime": null,
             "seek_predicate": null,
@@ -8511,6 +10352,19 @@
            "Plan Width": "36",
            "Startup Cost": "126895.56",
            "Workers Planned": "2"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_row_bytes": 36.0,
+           "expression_cache": false,
+           "parent_relationship": {
+            "kind": "outer"
+           },
+           "possible_index_names": [],
+           "user_functions": [],
+           "workers_planned": 2
           },
           "rows_read": null,
           "runtime": null,
@@ -8541,6 +10395,19 @@
          "Startup Cost": "126895.56",
          "Strategy": "Sorted"
         },
+        "facts": {
+         "aggregate_strategy": "Sorted",
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_row_bytes": 36.0,
+         "expression_cache": false,
+         "parent_relationship": {
+          "kind": "outer"
+         },
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -8566,6 +10433,15 @@
        "Plan Width": "36",
        "Sort Key": "(sum(orders.total)) DESC",
        "Startup Cost": "204520.35"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_row_bytes": 36.0,
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -8759,6 +10635,12 @@
       "JIT": "{\"Functions\":7,\"Options\":{\"Deforming\":true,\"Expressions\":true,\"Inlining\":false,\"Optimization\":false}}",
       "Query Identifier": "-4658902355889218172"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "query_identifier": "-4658902355889218172",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -8808,6 +10690,19 @@
                  "Plan Width": "10",
                  "Startup Cost": "0.0"
                 },
+                "facts": {
+                 "columns_without_statistics": [],
+                 "conditions": [],
+                 "conversions": [],
+                 "estimated_row_bytes": 10.0,
+                 "expression_cache": false,
+                 "parent_relationship": {
+                  "kind": "outer"
+                 },
+                 "possible_index_names": [],
+                 "table_alias": "orders",
+                 "user_functions": []
+                },
                 "rows_read": null,
                 "runtime": null,
                 "seek_predicate": null,
@@ -8838,6 +10733,19 @@
                "Startup Cost": "94503.58",
                "Strategy": "Hashed"
               },
+              "facts": {
+               "aggregate_strategy": "Hashed",
+               "columns_without_statistics": [],
+               "conditions": [],
+               "conversions": [],
+               "estimated_row_bytes": 36.0,
+               "expression_cache": false,
+               "parent_relationship": {
+                "kind": "outer"
+               },
+               "possible_index_names": [],
+               "user_functions": []
+              },
               "rows_read": null,
               "runtime": null,
               "seek_predicate": null,
@@ -8865,6 +10773,18 @@
              "Sort Key": "orders.customer_id",
              "Startup Cost": "125895.54"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_row_bytes": 36.0,
+             "expression_cache": false,
+             "parent_relationship": {
+              "kind": "outer"
+             },
+             "possible_index_names": [],
+             "user_functions": []
+            },
             "rows_read": null,
             "runtime": null,
             "seek_predicate": null,
@@ -8891,6 +10811,19 @@
            "Plan Width": "36",
            "Startup Cost": "126895.56",
            "Workers Planned": "2"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_row_bytes": 36.0,
+           "expression_cache": false,
+           "parent_relationship": {
+            "kind": "outer"
+           },
+           "possible_index_names": [],
+           "user_functions": [],
+           "workers_planned": 2
           },
           "rows_read": null,
           "runtime": null,
@@ -8921,6 +10854,19 @@
          "Startup Cost": "126895.56",
          "Strategy": "Sorted"
         },
+        "facts": {
+         "aggregate_strategy": "Sorted",
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_row_bytes": 36.0,
+         "expression_cache": false,
+         "parent_relationship": {
+          "kind": "outer"
+         },
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -8946,6 +10892,15 @@
        "Plan Width": "36",
        "Sort Key": "(sum(orders.total)) DESC",
        "Startup Cost": "204520.35"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_row_bytes": 36.0,
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -9139,6 +11094,12 @@
       "JIT": "{\"Functions\":7,\"Options\":{\"Deforming\":true,\"Expressions\":true,\"Inlining\":false,\"Optimization\":false}}",
       "Query Identifier": "-4658902355889218172"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "query_identifier": "-4658902355889218172",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -9188,6 +11149,19 @@
                  "Plan Width": "10",
                  "Startup Cost": "0.0"
                 },
+                "facts": {
+                 "columns_without_statistics": [],
+                 "conditions": [],
+                 "conversions": [],
+                 "estimated_row_bytes": 10.0,
+                 "expression_cache": false,
+                 "parent_relationship": {
+                  "kind": "outer"
+                 },
+                 "possible_index_names": [],
+                 "table_alias": "orders",
+                 "user_functions": []
+                },
                 "rows_read": null,
                 "runtime": null,
                 "seek_predicate": null,
@@ -9218,6 +11192,19 @@
                "Startup Cost": "94503.58",
                "Strategy": "Hashed"
               },
+              "facts": {
+               "aggregate_strategy": "Hashed",
+               "columns_without_statistics": [],
+               "conditions": [],
+               "conversions": [],
+               "estimated_row_bytes": 36.0,
+               "expression_cache": false,
+               "parent_relationship": {
+                "kind": "outer"
+               },
+               "possible_index_names": [],
+               "user_functions": []
+              },
               "rows_read": null,
               "runtime": null,
               "seek_predicate": null,
@@ -9245,6 +11232,18 @@
              "Sort Key": "orders.customer_id",
              "Startup Cost": "125895.54"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_row_bytes": 36.0,
+             "expression_cache": false,
+             "parent_relationship": {
+              "kind": "outer"
+             },
+             "possible_index_names": [],
+             "user_functions": []
+            },
             "rows_read": null,
             "runtime": null,
             "seek_predicate": null,
@@ -9271,6 +11270,19 @@
            "Plan Width": "36",
            "Startup Cost": "126895.56",
            "Workers Planned": "2"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_row_bytes": 36.0,
+           "expression_cache": false,
+           "parent_relationship": {
+            "kind": "outer"
+           },
+           "possible_index_names": [],
+           "user_functions": [],
+           "workers_planned": 2
           },
           "rows_read": null,
           "runtime": null,
@@ -9301,6 +11313,19 @@
          "Startup Cost": "126895.56",
          "Strategy": "Sorted"
         },
+        "facts": {
+         "aggregate_strategy": "Sorted",
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_row_bytes": 36.0,
+         "expression_cache": false,
+         "parent_relationship": {
+          "kind": "outer"
+         },
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -9326,6 +11351,15 @@
        "Plan Width": "36",
        "Sort Key": "(sum(orders.total)) DESC",
        "Startup Cost": "204520.35"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_row_bytes": 36.0,
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -9519,6 +11553,12 @@
       "JIT": "{\"Functions\":7,\"Options\":{\"Deforming\":true,\"Expressions\":true,\"Inlining\":false,\"Optimization\":false}}",
       "Query Identifier": "-4658902355889218172"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "query_identifier": "-4658902355889218172",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -9568,6 +11608,19 @@
                  "Plan Width": "10",
                  "Startup Cost": "0.0"
                 },
+                "facts": {
+                 "columns_without_statistics": [],
+                 "conditions": [],
+                 "conversions": [],
+                 "estimated_row_bytes": 10.0,
+                 "expression_cache": false,
+                 "parent_relationship": {
+                  "kind": "outer"
+                 },
+                 "possible_index_names": [],
+                 "table_alias": "orders",
+                 "user_functions": []
+                },
                 "rows_read": null,
                 "runtime": null,
                 "seek_predicate": null,
@@ -9598,6 +11651,19 @@
                "Startup Cost": "94503.58",
                "Strategy": "Hashed"
               },
+              "facts": {
+               "aggregate_strategy": "Hashed",
+               "columns_without_statistics": [],
+               "conditions": [],
+               "conversions": [],
+               "estimated_row_bytes": 36.0,
+               "expression_cache": false,
+               "parent_relationship": {
+                "kind": "outer"
+               },
+               "possible_index_names": [],
+               "user_functions": []
+              },
               "rows_read": null,
               "runtime": null,
               "seek_predicate": null,
@@ -9625,6 +11691,18 @@
              "Sort Key": "orders.customer_id",
              "Startup Cost": "125895.54"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_row_bytes": 36.0,
+             "expression_cache": false,
+             "parent_relationship": {
+              "kind": "outer"
+             },
+             "possible_index_names": [],
+             "user_functions": []
+            },
             "rows_read": null,
             "runtime": null,
             "seek_predicate": null,
@@ -9651,6 +11729,19 @@
            "Plan Width": "36",
            "Startup Cost": "126895.56",
            "Workers Planned": "2"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_row_bytes": 36.0,
+           "expression_cache": false,
+           "parent_relationship": {
+            "kind": "outer"
+           },
+           "possible_index_names": [],
+           "user_functions": [],
+           "workers_planned": 2
           },
           "rows_read": null,
           "runtime": null,
@@ -9681,6 +11772,19 @@
          "Startup Cost": "126895.56",
          "Strategy": "Sorted"
         },
+        "facts": {
+         "aggregate_strategy": "Sorted",
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_row_bytes": 36.0,
+         "expression_cache": false,
+         "parent_relationship": {
+          "kind": "outer"
+         },
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -9706,6 +11810,15 @@
        "Plan Width": "36",
        "Sort Key": "(sum(orders.total)) DESC",
        "Startup Cost": "204520.35"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_row_bytes": 36.0,
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -9899,6 +12012,12 @@
       "JIT": "{\"Functions\":7,\"Options\":{\"Deforming\":true,\"Expressions\":true,\"Inlining\":false,\"Optimization\":false}}",
       "Query Identifier": "-4658902355889218172"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "query_identifier": "-4658902355889218172",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -9948,6 +12067,19 @@
                  "Plan Width": "10",
                  "Startup Cost": "0.0"
                 },
+                "facts": {
+                 "columns_without_statistics": [],
+                 "conditions": [],
+                 "conversions": [],
+                 "estimated_row_bytes": 10.0,
+                 "expression_cache": false,
+                 "parent_relationship": {
+                  "kind": "outer"
+                 },
+                 "possible_index_names": [],
+                 "table_alias": "orders",
+                 "user_functions": []
+                },
                 "rows_read": null,
                 "runtime": null,
                 "seek_predicate": null,
@@ -9978,6 +12110,19 @@
                "Startup Cost": "94503.58",
                "Strategy": "Hashed"
               },
+              "facts": {
+               "aggregate_strategy": "Hashed",
+               "columns_without_statistics": [],
+               "conditions": [],
+               "conversions": [],
+               "estimated_row_bytes": 36.0,
+               "expression_cache": false,
+               "parent_relationship": {
+                "kind": "outer"
+               },
+               "possible_index_names": [],
+               "user_functions": []
+              },
               "rows_read": null,
               "runtime": null,
               "seek_predicate": null,
@@ -10005,6 +12150,18 @@
              "Sort Key": "orders.customer_id",
              "Startup Cost": "125895.54"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_row_bytes": 36.0,
+             "expression_cache": false,
+             "parent_relationship": {
+              "kind": "outer"
+             },
+             "possible_index_names": [],
+             "user_functions": []
+            },
             "rows_read": null,
             "runtime": null,
             "seek_predicate": null,
@@ -10031,6 +12188,19 @@
            "Plan Width": "36",
            "Startup Cost": "126895.56",
            "Workers Planned": "2"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_row_bytes": 36.0,
+           "expression_cache": false,
+           "parent_relationship": {
+            "kind": "outer"
+           },
+           "possible_index_names": [],
+           "user_functions": [],
+           "workers_planned": 2
           },
           "rows_read": null,
           "runtime": null,
@@ -10061,6 +12231,19 @@
          "Startup Cost": "126895.56",
          "Strategy": "Sorted"
         },
+        "facts": {
+         "aggregate_strategy": "Sorted",
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_row_bytes": 36.0,
+         "expression_cache": false,
+         "parent_relationship": {
+          "kind": "outer"
+         },
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -10086,6 +12269,15 @@
        "Plan Width": "36",
        "Sort Key": "(sum(orders.total)) DESC",
        "Startup Cost": "204520.35"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_row_bytes": 36.0,
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -10279,6 +12471,12 @@
       "JIT": "{\"Functions\":7,\"Options\":{\"Deforming\":true,\"Expressions\":true,\"Inlining\":false,\"Optimization\":false}}",
       "Query Identifier": "-4658902355889218172"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "query_identifier": "-4658902355889218172",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -10328,6 +12526,19 @@
                  "Plan Width": "10",
                  "Startup Cost": "0.0"
                 },
+                "facts": {
+                 "columns_without_statistics": [],
+                 "conditions": [],
+                 "conversions": [],
+                 "estimated_row_bytes": 10.0,
+                 "expression_cache": false,
+                 "parent_relationship": {
+                  "kind": "outer"
+                 },
+                 "possible_index_names": [],
+                 "table_alias": "orders",
+                 "user_functions": []
+                },
                 "rows_read": null,
                 "runtime": null,
                 "seek_predicate": null,
@@ -10358,6 +12569,19 @@
                "Startup Cost": "94503.58",
                "Strategy": "Hashed"
               },
+              "facts": {
+               "aggregate_strategy": "Hashed",
+               "columns_without_statistics": [],
+               "conditions": [],
+               "conversions": [],
+               "estimated_row_bytes": 36.0,
+               "expression_cache": false,
+               "parent_relationship": {
+                "kind": "outer"
+               },
+               "possible_index_names": [],
+               "user_functions": []
+              },
               "rows_read": null,
               "runtime": null,
               "seek_predicate": null,
@@ -10385,6 +12609,18 @@
              "Sort Key": "orders.customer_id",
              "Startup Cost": "125895.54"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_row_bytes": 36.0,
+             "expression_cache": false,
+             "parent_relationship": {
+              "kind": "outer"
+             },
+             "possible_index_names": [],
+             "user_functions": []
+            },
             "rows_read": null,
             "runtime": null,
             "seek_predicate": null,
@@ -10411,6 +12647,19 @@
            "Plan Width": "36",
            "Startup Cost": "126895.56",
            "Workers Planned": "2"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_row_bytes": 36.0,
+           "expression_cache": false,
+           "parent_relationship": {
+            "kind": "outer"
+           },
+           "possible_index_names": [],
+           "user_functions": [],
+           "workers_planned": 2
           },
           "rows_read": null,
           "runtime": null,
@@ -10441,6 +12690,19 @@
          "Startup Cost": "126895.56",
          "Strategy": "Sorted"
         },
+        "facts": {
+         "aggregate_strategy": "Sorted",
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_row_bytes": 36.0,
+         "expression_cache": false,
+         "parent_relationship": {
+          "kind": "outer"
+         },
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -10466,6 +12728,15 @@
        "Plan Width": "36",
        "Sort Key": "(sum(orders.total)) DESC",
        "Startup Cost": "204520.35"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_row_bytes": 36.0,
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -10659,6 +12930,12 @@
       "JIT": "{\"Functions\":7,\"Options\":{\"Deforming\":true,\"Expressions\":true,\"Inlining\":false,\"Optimization\":false}}",
       "Query Identifier": "-4658902355889218172"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "query_identifier": "-4658902355889218172",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -10708,6 +12985,19 @@
                  "Plan Width": "10",
                  "Startup Cost": "0.0"
                 },
+                "facts": {
+                 "columns_without_statistics": [],
+                 "conditions": [],
+                 "conversions": [],
+                 "estimated_row_bytes": 10.0,
+                 "expression_cache": false,
+                 "parent_relationship": {
+                  "kind": "outer"
+                 },
+                 "possible_index_names": [],
+                 "table_alias": "orders",
+                 "user_functions": []
+                },
                 "rows_read": null,
                 "runtime": null,
                 "seek_predicate": null,
@@ -10738,6 +13028,19 @@
                "Startup Cost": "94503.58",
                "Strategy": "Hashed"
               },
+              "facts": {
+               "aggregate_strategy": "Hashed",
+               "columns_without_statistics": [],
+               "conditions": [],
+               "conversions": [],
+               "estimated_row_bytes": 36.0,
+               "expression_cache": false,
+               "parent_relationship": {
+                "kind": "outer"
+               },
+               "possible_index_names": [],
+               "user_functions": []
+              },
               "rows_read": null,
               "runtime": null,
               "seek_predicate": null,
@@ -10765,6 +13068,18 @@
              "Sort Key": "orders.customer_id",
              "Startup Cost": "125895.54"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_row_bytes": 36.0,
+             "expression_cache": false,
+             "parent_relationship": {
+              "kind": "outer"
+             },
+             "possible_index_names": [],
+             "user_functions": []
+            },
             "rows_read": null,
             "runtime": null,
             "seek_predicate": null,
@@ -10791,6 +13106,19 @@
            "Plan Width": "36",
            "Startup Cost": "126895.56",
            "Workers Planned": "2"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_row_bytes": 36.0,
+           "expression_cache": false,
+           "parent_relationship": {
+            "kind": "outer"
+           },
+           "possible_index_names": [],
+           "user_functions": [],
+           "workers_planned": 2
           },
           "rows_read": null,
           "runtime": null,
@@ -10821,6 +13149,19 @@
          "Startup Cost": "126895.56",
          "Strategy": "Sorted"
         },
+        "facts": {
+         "aggregate_strategy": "Sorted",
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_row_bytes": 36.0,
+         "expression_cache": false,
+         "parent_relationship": {
+          "kind": "outer"
+         },
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -10846,6 +13187,15 @@
        "Plan Width": "36",
        "Sort Key": "(sum(orders.total)) DESC",
        "Startup Cost": "204520.35"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_row_bytes": 36.0,
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
@@ -11039,6 +13389,12 @@
       "JIT": "{\"Functions\":7,\"Options\":{\"Deforming\":true,\"Expressions\":true,\"Inlining\":false,\"Optimization\":false}}",
       "Query Identifier": "-4658902355889218172"
      },
+     "facts": {
+      "changed_columns": [],
+      "conversions": [],
+      "query_identifier": "-4658902355889218172",
+      "trigger_timings": []
+     },
      "raw": null,
      "root": {
       "act_executions": null,
@@ -11088,6 +13444,19 @@
                  "Plan Width": "10",
                  "Startup Cost": "0.0"
                 },
+                "facts": {
+                 "columns_without_statistics": [],
+                 "conditions": [],
+                 "conversions": [],
+                 "estimated_row_bytes": 10.0,
+                 "expression_cache": false,
+                 "parent_relationship": {
+                  "kind": "outer"
+                 },
+                 "possible_index_names": [],
+                 "table_alias": "orders",
+                 "user_functions": []
+                },
                 "rows_read": null,
                 "runtime": null,
                 "seek_predicate": null,
@@ -11118,6 +13487,19 @@
                "Startup Cost": "94503.58",
                "Strategy": "Hashed"
               },
+              "facts": {
+               "aggregate_strategy": "Hashed",
+               "columns_without_statistics": [],
+               "conditions": [],
+               "conversions": [],
+               "estimated_row_bytes": 36.0,
+               "expression_cache": false,
+               "parent_relationship": {
+                "kind": "outer"
+               },
+               "possible_index_names": [],
+               "user_functions": []
+              },
               "rows_read": null,
               "runtime": null,
               "seek_predicate": null,
@@ -11145,6 +13527,18 @@
              "Sort Key": "orders.customer_id",
              "Startup Cost": "125895.54"
             },
+            "facts": {
+             "columns_without_statistics": [],
+             "conditions": [],
+             "conversions": [],
+             "estimated_row_bytes": 36.0,
+             "expression_cache": false,
+             "parent_relationship": {
+              "kind": "outer"
+             },
+             "possible_index_names": [],
+             "user_functions": []
+            },
             "rows_read": null,
             "runtime": null,
             "seek_predicate": null,
@@ -11171,6 +13565,19 @@
            "Plan Width": "36",
            "Startup Cost": "126895.56",
            "Workers Planned": "2"
+          },
+          "facts": {
+           "columns_without_statistics": [],
+           "conditions": [],
+           "conversions": [],
+           "estimated_row_bytes": 36.0,
+           "expression_cache": false,
+           "parent_relationship": {
+            "kind": "outer"
+           },
+           "possible_index_names": [],
+           "user_functions": [],
+           "workers_planned": 2
           },
           "rows_read": null,
           "runtime": null,
@@ -11201,6 +13608,19 @@
          "Startup Cost": "126895.56",
          "Strategy": "Sorted"
         },
+        "facts": {
+         "aggregate_strategy": "Sorted",
+         "columns_without_statistics": [],
+         "conditions": [],
+         "conversions": [],
+         "estimated_row_bytes": 36.0,
+         "expression_cache": false,
+         "parent_relationship": {
+          "kind": "outer"
+         },
+         "possible_index_names": [],
+         "user_functions": []
+        },
         "rows_read": null,
         "runtime": null,
         "seek_predicate": null,
@@ -11226,6 +13646,15 @@
        "Plan Width": "36",
        "Sort Key": "(sum(orders.total)) DESC",
        "Startup Cost": "204520.35"
+      },
+      "facts": {
+       "columns_without_statistics": [],
+       "conditions": [],
+       "conversions": [],
+       "estimated_row_bytes": 36.0,
+       "expression_cache": false,
+       "possible_index_names": [],
+       "user_functions": []
       },
       "rows_read": null,
       "runtime": null,
