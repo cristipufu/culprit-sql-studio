@@ -4,19 +4,17 @@ use super::*;
 
 pub(super) fn not_read(s: &Snapshot) -> Tile {
     if !s.server.engine.has_server() {
-        let mut t = Tile::new(
+        let mut tile = Tile::new(
             TileKey::Now,
             TileStatus::Unavailable,
-            format!("{} has no server, so there are no sessions to show.", s.server.engine),
+            t!("view.dashboard.now.serverless", engine = s.server.engine.to_string()),
         );
-        t.detail = Some(
-            "A writer that has to wait for the lock gets SQLITE_BUSY in the application: its logs say when.".into(),
-        );
-        return t;
+        tile.detail = Some(t!("view.dashboard.now.serverless_detail"));
+        return tile;
     }
-    let mut t = Tile::new(TileKey::Now, TileStatus::Info, "Sessions weren't read for this dashboard.");
-    t.detail = Some("The app reads them every few seconds; `culprit live` reads them once.".into());
-    t
+    let mut tile = Tile::new(TileKey::Now, TileStatus::Info, t!("view.dashboard.now.not_read"));
+    tile.detail = Some(t!("view.dashboard.now.not_read_detail"));
+    tile
 }
 
 pub(super) fn idle_in_transaction(s: &culprit_core::Session) -> bool {
@@ -54,63 +52,75 @@ pub fn now(live: &LiveState) -> Tile {
                     .filter_map(|s| s.wait_ms)
                     .max_by(f64::total_cmp),
             ),
-            format!(
-                "{} waiting on another session's lock.",
-                capitalized(&plural(blocked, "session is", "sessions are"))
-            ),
+            t!("view.dashboard.now.blocked", n = blocked, count = blocked.to_string()),
         )
     } else if let Some(s) = oldest_idle.filter(|s| s.transaction_ms.unwrap_or(0.0) >= 600_000.0) {
         (
             TileStatus::Watch,
-            format!(
-                "Session {} is idle with a transaction opened {} ago.",
-                s.id,
-                format::duration(s.transaction_ms.unwrap_or(0.0))
+            t!(
+                "view.dashboard.now.idle_transaction",
+                session = &s.id,
+                duration = format::duration(s.transaction_ms.unwrap_or(0.0))
             ),
         )
     } else if live.blocking_incomplete() {
-        (TileStatus::Info, "No blocking chain was established; lock visibility is incomplete.".into())
+        (TileStatus::Info, t!("view.dashboard.now.incomplete"))
     } else if active.is_empty() {
-        (TileStatus::Good, "Nothing is running right now.".to_string())
+        (TileStatus::Good, t!("view.dashboard.now.quiet"))
     } else {
-        let tail = match longest.and_then(|s| s.elapsed_ms) {
-            Some(ms) if ms >= 1_000.0 => format!("; the longest has run {}", format::duration(ms)),
-            _ => String::new(),
+        let (n, count) = (active.len(), active.len().to_string());
+        let takeaway = match longest.and_then(|s| s.elapsed_ms) {
+            Some(ms) if ms >= 1_000.0 => {
+                t!("view.dashboard.now.running_longest", n = n, count = count, duration = format::duration(ms))
+            }
+            _ => t!("view.dashboard.now.running", n = n, count = count),
         };
-        (
-            TileStatus::Good,
-            format!("{} running, none blocked{tail}.", capitalized(&plural(active.len(), "session", "sessions"))),
-        )
+        (TileStatus::Good, takeaway)
     };
     let mut tile = Tile::new(TileKey::Now, status, takeaway);
+    let long_idle = idle_tx.iter().filter(|s| s.transaction_ms.is_some_and(|ms| ms >= 600_000.0)).count();
     tile.metrics = vec![
-        TileMetric::new("active", "Running", Some(active.len() as f64), active.len().to_string()),
+        TileMetric::new(
+            "active",
+            &t!("view.dashboard.now.metric.running"),
+            Some(active.len() as f64),
+            active.len().to_string(),
+        ),
         TileMetric::new(
             "blocked",
-            "Identified blocked sessions",
+            &t!("view.dashboard.now.metric.blocked"),
             (!live.blocking_incomplete()).then_some(blocked as f64),
-            if live.blocking_incomplete() { format!("at least {blocked}") } else { blocked.to_string() },
+            if live.blocking_incomplete() {
+                t!("view.dashboard.now.at_least", count = blocked.to_string())
+            } else {
+                blocked.to_string()
+            },
         ),
         TileMetric::new(
             "idle-in-transaction",
-            "Idle in transaction",
+            &t!("view.dashboard.now.metric.idle"),
             Some(idle_tx.len() as f64),
             idle_tx.len().to_string(),
         ),
         TileMetric::new(
             "long-idle-in-transaction",
-            "Long open idle transactions",
-            Some(idle_tx.iter().filter(|s| s.transaction_ms.is_some_and(|ms| ms >= 600_000.0)).count() as f64),
-            idle_tx.iter().filter(|s| s.transaction_ms.is_some_and(|ms| ms >= 600_000.0)).count().to_string(),
+            &t!("view.dashboard.now.metric.long_idle"),
+            Some(long_idle as f64),
+            long_idle.to_string(),
         ),
-        TileMetric::new("sessions", "Sessions", Some(live.sessions.len() as f64), live.sessions.len().to_string()),
+        TileMetric::new(
+            "sessions",
+            &t!("view.dashboard.now.metric.sessions"),
+            Some(live.sessions.len() as f64),
+            live.sessions.len().to_string(),
+        ),
     ];
     let mut items: Vec<TileItem> = chains
         .iter()
         .take(3)
         .map(|c| {
             let mut item = TileItem::new(ItemKind::Session, c.head.clone(), c.headline.clone());
-            item.value = Some(format!("{} waiting", c.waiters));
+            item.value = Some(t!("view.dashboard.now.waiting", count = c.waiters.to_string()));
             item.status = Some(blocking_status(c.waiters as usize, c.longest_wait_ms));
             item
         })
@@ -123,13 +133,19 @@ pub fn now(live: &LiveState) -> Tile {
             .as_deref()
             .map(statement_handle)
             .unwrap_or_else(|| s.command.clone().unwrap_or_else(|| s.state.clone()));
-        let mut item = TileItem::new(ItemKind::Session, s.id.clone(), format!("Session {} · {label}", s.id));
+        let mut item = TileItem::new(
+            ItemKind::Session,
+            s.id.clone(),
+            t!("view.dashboard.now.session", session = &s.id, label = label),
+        );
         item.value = s.elapsed_ms.map(format::duration);
         item.status = Some(if s.blocked_by.is_some() { blocking_status(1, s.wait_ms) } else { TileStatus::Good });
         item
     }));
     tile.items = items;
-    tile.detail = Some(format!("Read {}. {}", culprit_core::changes::short_time(&live.taken_at), live.notes.join(" ")));
+    // The time it was read, then what the read couldn't see (a space after it, as ever, when there is nothing).
+    let read = t!("view.dashboard.now.read_at", time = culprit_core::changes::short_time(&live.taken_at));
+    tile.detail = Some(format!("{read} {}", live.notes.join(" ")));
     tile
 }
 

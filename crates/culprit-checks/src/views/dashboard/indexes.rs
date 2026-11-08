@@ -18,30 +18,58 @@ pub(super) fn indexes(report: &Report) -> Tile {
     let adds = advice.candidates.len();
     let cleanups = advice.cleanups.len();
     let reclaim: f64 = advice.cleanups.iter().filter_map(|c| c.size_bytes).sum();
-    let free = if reclaim > 0.0 { format!(" ({})", format::bytes(reclaim)) } else { String::new() };
-    let new = |n: usize| if n == 1 { "One new index".to_string() } else { format!("{n} new indexes") };
-    let help = if share >= 0.01 {
-        format!("would help queries that take {} of database time", format::percent(share))
-    } else if !seen.is_empty() {
-        format!("would help {}", plural(seen.len(), "query", "queries"))
-    } else if adds == 1 {
-        "is worth a look".to_string()
-    } else {
-        "are worth a look".to_string()
-    };
+    let size = (reclaim > 0.0).then(|| format::bytes(reclaim));
     // New indexes come from what queries need: without query history, none can be suggested, which says nothing about
     // whether any is needed.
     let history = report.snapshot.workload.is_some();
+    let (a, c) = (adds.to_string(), cleanups.to_string());
     let takeaway = match (adds, cleanups) {
-        (0, 0) if !history => "No query history to suggest new indexes from, and nothing to clean up.".to_string(),
-        (0, c) if !history => format!(
-            "No query history to suggest new indexes from; {} can go{free}.",
-            plural(c, "existing index", "existing indexes")
-        ),
-        (0, 0) => "No index changes stand out.".to_string(),
-        (0, c) => format!("No new indexes needed; {} can go{free}.", plural(c, "existing index", "existing indexes")),
-        (a, 0) => format!("{} {help}.", new(a)),
-        (a, c) => format!("{} {help}; {} can go{free}.", new(a), plural(c, "index", "indexes")),
+        (0, 0) if !history => t!("view.dashboard.indexes.none_no_history"),
+        (0, n) if !history => match &size {
+            Some(size) => t!("view.dashboard.indexes.cleanup_no_history_sized", n = n, count = &c, size = size),
+            None => t!("view.dashboard.indexes.cleanup_no_history", n = n, count = &c),
+        },
+        (0, 0) => t!("view.dashboard.indexes.nothing"),
+        (0, n) => match &size {
+            Some(size) => t!("view.dashboard.indexes.cleanup_only_sized", n = n, count = &c, size = size),
+            None => t!("view.dashboard.indexes.cleanup_only", n = n, count = &c),
+        },
+        (n, cleanups) => {
+            // What can go, said at the end of the sentence about what to add: "2 indexes can go (27.1 MB)".
+            let can_go = match &size {
+                _ if cleanups == 0 => None,
+                Some(size) => Some(t!("view.dashboard.indexes.can_go_sized", n = cleanups, count = &c, size = size)),
+                None => Some(t!("view.dashboard.indexes.can_go", n = cleanups, count = &c)),
+            };
+            let queries = seen.len();
+            match can_go {
+                None if share >= 0.01 => {
+                    t!("view.dashboard.indexes.add_share", n = n, count = &a, share = format::percent(share))
+                }
+                None if queries > 0 => t!(
+                    "view.dashboard.indexes.add_queries",
+                    n = n,
+                    count = &a,
+                    queries = t!("view.dashboard.indexes.queries", n = queries, count = queries.to_string())
+                ),
+                None => t!("view.dashboard.indexes.add_worth", n = n, count = &a),
+                Some(can_go) if share >= 0.01 => t!(
+                    "view.dashboard.indexes.add_share_cleanup",
+                    n = n,
+                    count = &a,
+                    share = format::percent(share),
+                    cleanup = can_go
+                ),
+                Some(can_go) if queries > 0 => t!(
+                    "view.dashboard.indexes.add_queries_cleanup",
+                    n = n,
+                    count = &a,
+                    queries = t!("view.dashboard.indexes.queries", n = queries, count = queries.to_string()),
+                    cleanup = can_go
+                ),
+                Some(can_go) => t!("view.dashboard.indexes.add_worth_cleanup", n = n, count = &a, cleanup = can_go),
+            }
+        }
     };
     let status = if adds > 0 && share >= 0.1 {
         TileStatus::Watch
@@ -51,18 +79,21 @@ pub(super) fn indexes(report: &Report) -> Tile {
         TileStatus::Good
     };
     let mut tile = Tile::new(TileKey::Indexes, status, takeaway);
-    tile.detail = advice
-        .notes
-        .first()
-        .cloned()
-        .or_else(|| (!advice.counters.is_empty()).then(|| format!("Index usage counted {}.", advice.counters)));
+    tile.detail = advice.notes.first().cloned().or_else(|| {
+        (!advice.counters.is_empty()).then(|| t!("view.dashboard.indexes.counted", period = &advice.counters))
+    });
     tile.metrics = vec![
-        TileMetric::new("add", "To add", Some(adds as f64), adds.to_string()),
-        TileMetric::new("cleanup", "To clean up", Some(cleanups as f64), cleanups.to_string()),
-        TileMetric::new("reclaim", "Space back", Some(reclaim), format::bytes(reclaim)),
+        TileMetric::new("add", &t!("view.dashboard.indexes.metric.add"), Some(adds as f64), adds.to_string()),
+        TileMetric::new(
+            "cleanup",
+            &t!("view.dashboard.indexes.metric.cleanup"),
+            Some(cleanups as f64),
+            cleanups.to_string(),
+        ),
+        TileMetric::new("reclaim", &t!("view.dashboard.indexes.metric.reclaim"), Some(reclaim), format::bytes(reclaim)),
         TileMetric::new(
             "tables",
-            "Tables to look at",
+            &t!("view.dashboard.indexes.metric.tables"),
             Some(advice.tables.len() as f64),
             advice.tables.len().to_string(),
         ),
@@ -88,7 +119,7 @@ pub(super) fn indexes(report: &Report) -> Tile {
         let mut item = TileItem::new(
             ItemKind::IndexCleanup,
             format!("{}.{}.{}", c.schema, c.table, c.index),
-            format!("{} on {}", c.index, c.table),
+            t!("view.dashboard.indexes.cleanup_item", index = &c.index, table = &c.table),
         );
         item.value = c.size_bytes.map(format::bytes);
         item.finding_id = c.finding_id.clone();

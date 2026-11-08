@@ -3,7 +3,9 @@
 use super::*;
 
 pub(super) fn top_queries(s: &Snapshot) -> Tile {
-    let Some(w) = &s.workload else { return no_workload(TileKey::TopQueries, "there is no query list") };
+    let Some(w) = &s.workload else {
+        return no_workload(TileKey::TopQueries, t!("view.dashboard.no_workload.top_queries"));
+    };
     let total = w.total_time_ms;
     // Each one's share as every surface states it (over Culprit's scans where they measured it), and one whose cost is
     // behind it (stopped, or ran once) never takes the place of one that runs.
@@ -13,62 +15,77 @@ pub(super) fn top_queries(s: &Snapshot) -> Tile {
     queries.sort_by(|(a, a_history), (b, b_history)| a_history.cmp(b_history).then(share(b).total_cmp(&share(a))));
     let queries: Vec<&QueryStat> = queries.into_iter().map(|(q, _)| q).collect();
     if queries.is_empty() || total <= 0.0 {
-        let mut t = Tile::new(
+        let mut tile = Tile::new(
             TileKey::TopQueries,
             TileStatus::Info,
-            format!("No application queries ran over {}.", window_phrase(w)),
+            t!("view.dashboard.top_queries.none", window = window_phrase(w)),
         );
-        t.detail = Some(format!("{} recorded {} statements in all.", w.source, format::count(w.query_count)));
-        return t;
+        tile.detail =
+            Some(t!("view.dashboard.top_queries.recorded", source = &w.source, count = format::count(w.query_count)));
+        return tile;
     }
     let top = &queries[..queries.len().min(5)];
     let first = share(top[0]);
     let three: f64 = top.iter().take(3).map(|q| share(q)).sum();
     let five: f64 = top.iter().map(|q| share(q)).sum();
     let takeaway = if first >= 0.3 {
-        format!("One query is {} of database time: {}.", format::percent(first), query_handle(top[0]))
+        t!("view.dashboard.top_queries.one", share = format::percent(first), query = query_handle(top[0]))
     } else if three >= 0.6 && top.len() >= 3 {
-        format!("Three queries make up {} of database time.", format::percent(three))
+        t!("view.dashboard.top_queries.three", share = format::percent(three))
     } else if top.len() >= 5 {
-        format!("Time is spread out: the top five queries are {} of database time.", format::percent(five))
+        t!("view.dashboard.top_queries.spread", share = format::percent(five))
     } else {
-        format!(
-            "{} {} of database time.",
-            capitalized(&plural(top.len(), "query is", "queries are")),
-            format::percent(five)
+        t!(
+            "view.dashboard.top_queries.few",
+            n = top.len(),
+            count = top.len().to_string(),
+            share = format::percent(five)
         )
     };
     let mut tile = Tile::new(TileKey::TopQueries, TileStatus::Info, takeaway);
     let stopped = top.iter().filter(|q| crate::query_stopped(s, q).is_some()).count();
     // What the shares are over, where Culprit's scans measured every one of them.
     let scans: Option<Vec<culprit_core::ScanSpan>> = top.iter().map(|q| w.scans_of(q)).collect();
-    let over = scans
-        .and_then(|spans| spans.into_iter().max_by(|a, b| a.hours.total_cmp(&b.hours)))
-        .map(|s| format!("; their shares are over {}", s.phrase()))
-        .unwrap_or_default();
-    tile.detail = Some(format!(
-        "{} tracked over {}{over}.{}",
-        capitalized(&plural(w.query_count as usize, "query", "queries")),
-        window_phrase(w),
-        match stopped {
-            0 => String::new(),
-            n if n == top.len() =>
-                " All of these stopped running before the window ended: a deploy may have changed them.".into(),
-            n => format!(" {n} of these stopped running before the window ended: a deploy may have changed them."),
-        }
-    ));
+    let over = scans.and_then(|spans| spans.into_iter().max_by(|a, b| a.hours.total_cmp(&b.hours)));
+    let (n, count) = (w.query_count as usize, (w.query_count as usize).to_string());
+    let mut detail = vec![match over {
+        Some(scans) => t!(
+            "view.dashboard.top_queries.tracked_over_scans",
+            n = n,
+            count = count,
+            window = window_phrase(w),
+            scans = scans.phrase()
+        ),
+        None => t!("view.dashboard.top_queries.tracked", n = n, count = count, window = window_phrase(w)),
+    }];
+    match stopped {
+        0 => {}
+        n if n == top.len() => detail.push(t!("view.dashboard.top_queries.all_stopped")),
+        n => detail.push(t!("view.dashboard.top_queries.some_stopped", count = n.to_string())),
+    }
+    tile.detail = Some(detail.join(" "));
     tile.metrics = vec![
-        TileMetric::new("top-share", "Top query", Some(first), format::percent(first)),
-        TileMetric::new("top5-share", "Top five", Some(five.min(1.0)), format::percent(five.min(1.0))),
-        TileMetric::new("queries", "Queries", Some(w.query_count), format::count(w.query_count)),
+        TileMetric::new("top-share", &t!("view.dashboard.top_queries.metric.top"), Some(first), format::percent(first)),
+        TileMetric::new(
+            "top5-share",
+            &t!("view.dashboard.top_queries.metric.top_five"),
+            Some(five.min(1.0)),
+            format::percent(five.min(1.0)),
+        ),
+        TileMetric::new(
+            "queries",
+            &t!("view.dashboard.metric.queries"),
+            Some(w.query_count),
+            format::count(w.query_count),
+        ),
     ];
     tile.items = top
         .iter()
         .map(|q| {
             let label = if crate::ran_once(q) {
-                format!("{} (ran once)", query_handle(q))
+                t!("view.dashboard.top_queries.ran_once", query = query_handle(q))
             } else if crate::query_stopped(s, q).is_some() {
-                format!("{} (stopped running)", query_handle(q))
+                t!("view.dashboard.top_queries.stopped", query = query_handle(q))
             } else {
                 query_handle(q)
             };

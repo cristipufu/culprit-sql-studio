@@ -21,43 +21,57 @@ pub(super) fn findings(report: &Report) -> Tile {
     let top: Vec<&Finding> = active.iter().take(3).copied().collect();
     // The same number the findings summary states: the top three's distinct queries, each counted once.
     let touched = top_findings_share(&report.snapshot, active.iter().copied()).unwrap_or(0.0);
+    let (n, count) = (active.len(), active.len().to_string());
     let takeaway = if active.is_empty() {
         match &span {
-            Some(span) => format!("Nothing stands out over {span}."),
-            None => "Nothing stands out.".into(),
+            Some(span) => t!("view.dashboard.findings.nothing_over", span = span),
+            None => t!("view.dashboard.findings.nothing"),
         }
     } else if let Some(cost) =
         crate::support::top_findings_cost(&report.snapshot, active.iter().copied()).filter(|_| touched >= 0.05)
     {
-        format!("{}; the top ones touch {cost}.", capitalized(&plural(active.len(), "opportunity", "opportunities")))
+        t!("view.dashboard.findings.top_cost", n = n, count = &count, cost = cost)
+    } else if touched >= 0.05 && top.len() == 1 {
+        t!("view.dashboard.findings.top_one_share", n = n, count = &count, share = format::percent(touched))
     } else if touched >= 0.05 {
-        format!(
-            "{}; the top {} touch {} of database time.",
-            capitalized(&plural(active.len(), "opportunity", "opportunities")),
-            if top.len() == 1 { "one".to_string() } else { top.len().to_string() },
-            format::percent(touched)
+        t!(
+            "view.dashboard.findings.top_share",
+            n = n,
+            count = &count,
+            top = top.len().to_string(),
+            share = format::percent(touched)
         )
     } else if high > 0 {
-        format!("{}, {high} of them high.", capitalized(&plural(active.len(), "opportunity", "opportunities")))
+        t!("view.dashboard.findings.high", n = n, count = &count, high = high.to_string())
     } else {
-        format!("{}, none of them high.", capitalized(&plural(active.len(), "opportunity", "opportunities")))
+        t!("view.dashboard.findings.none_high", n = n, count = &count)
     };
     let mut tile = Tile::new(TileKey::Findings, status, takeaway);
     tile.metrics = vec![
-        TileMetric::new("high", "High", Some(high as f64), high.to_string()),
-        TileMetric::new("medium", "Medium", Some(medium as f64), medium.to_string()),
-        TileMetric::new("low", "Low", Some(low as f64), low.to_string()),
+        TileMetric::new("high", &t!("view.dashboard.findings.metric.high"), Some(high as f64), high.to_string()),
+        TileMetric::new(
+            "medium",
+            &t!("view.dashboard.findings.metric.medium"),
+            Some(medium as f64),
+            medium.to_string(),
+        ),
+        TileMetric::new("low", &t!("view.dashboard.findings.metric.low"), Some(low as f64), low.to_string()),
     ];
     if context > 0 {
         tile.metrics.push(TileMetric::new(
             "context",
-            "Information and history",
+            &t!("view.dashboard.findings.metric.context"),
             Some(context as f64),
             context.to_string(),
         ));
     }
     if stopped > 0 {
-        tile.metrics.push(TileMetric::new("stopped", "Stopped running", Some(stopped as f64), stopped.to_string()));
+        tile.metrics.push(TileMetric::new(
+            "stopped",
+            &t!("view.dashboard.findings.metric.stopped"),
+            Some(stopped as f64),
+            stopped.to_string(),
+        ));
         // Unchanged since Culprit's first scan, that scan is only the latest they can have run: they may have stopped
         // long before it, and the deploy that changed them may be an earlier one.
         let by_first_scan = report.snapshot.workload.as_ref().is_some_and(|w| {
@@ -70,20 +84,13 @@ pub(super) fn findings(report: &Report) -> Tile {
         // One statement behind them all is "a query … it", however many findings rest on it.
         let behind = crate::summary::Stopped::of(&report.findings);
         let one = behind.statements + behind.unnamed == 1;
-        let (queries, it) = if one { ("a query that", "it") } else { ("queries that", "them") };
-        tile.detail = Some(format!(
-            "{} about {queries} {}.",
-            capitalized(&plural(stopped, "more is", "more are")),
-            if by_first_scan {
-                format!(
-                    "{} run since Culprit's first scan and may have stopped before it: a deploy before that scan may \
-                     have changed {it}",
-                    if one { "hasn't" } else { "haven't" }
-                )
-            } else {
-                format!("stopped running: a deploy may have changed {it}")
-            }
-        ));
+        let count = stopped.to_string();
+        tile.detail = Some(match (one, by_first_scan) {
+            (true, true) => t!("view.dashboard.findings.stopped.one_by_first_scan", n = stopped, count = count),
+            (false, true) => t!("view.dashboard.findings.stopped.many_by_first_scan", n = stopped, count = count),
+            (true, false) => t!("view.dashboard.findings.stopped.one", n = stopped, count = count),
+            (false, false) => t!("view.dashboard.findings.stopped.many", n = stopped, count = count),
+        });
     }
     tile.items = top
         .iter()

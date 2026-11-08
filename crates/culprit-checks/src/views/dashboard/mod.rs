@@ -10,6 +10,7 @@ use culprit_core::signals::{FileIo, FileKind, Replica, ReplicaRole, merge_logs};
 use culprit_core::{
     Capability, Dashboard, Engine, Finding, ItemKind, LiveState, QueryStat, Report, ServerInfo, Severity, Signal,
     SignalStatus, SignalUnit, Snapshot, Tile, TileItem, TileKey, TileMetric, TileStatus, WaitScope, Workload, format,
+    t,
 };
 
 use crate::support::{app_queries, query_handle, statement_handle, top_findings_share, window_phrase};
@@ -100,7 +101,10 @@ pub fn dashboard(report: &Report) -> Dashboard {
         environment: s.environment,
         report_id: s.id.clone(),
         taken_at: s.taken_at.clone(),
-        coverage: s.workload.as_ref().map(|w| format!("{}, {}", w.source, window_phrase(w))),
+        coverage: s
+            .workload
+            .as_ref()
+            .map(|w| t!("view.dashboard.coverage", source = &w.source, window = window_phrase(w))),
         headline: String::new(),
         attention: Vec::new(),
         tiles,
@@ -121,9 +125,12 @@ pub fn with_now(d: &mut Dashboard, live: &LiveState) {
 
 /// Sessions couldn't be read: the tile says why and the rest of the dashboard stands.
 pub fn without_now(d: &mut Dashboard, reason: &str) {
-    let mut tile =
-        Tile::new(TileKey::Now, TileStatus::Unavailable, format!("Couldn't read sessions: {}", sentence(reason)));
-    tile.detail = Some("Everything else here comes from the latest scan.".into());
+    let mut tile = Tile::new(
+        TileKey::Now,
+        TileStatus::Unavailable,
+        t!("view.dashboard.now.unreadable", reason = sentence(reason)),
+    );
+    tile.detail = Some(t!("view.dashboard.now.unreadable_detail"));
     match d.tiles.iter_mut().find(|t| t.key == TileKey::Now) {
         Some(slot) => *slot = tile,
         None => d.tiles.push(tile),
@@ -163,9 +170,8 @@ fn summarize(d: &mut Dashboard) {
         None => {
             let missing = d.tiles.iter().filter(|t| t.status == TileStatus::Unavailable).count();
             match missing {
-                0 => "Nothing needs a look right now.".into(),
-                1 => "Nothing needs a look in what this scan can see; one tile has no data here.".into(),
-                n => format!("Nothing needs a look in what this scan can see; {n} tiles have no data here."),
+                0 => t!("view.dashboard.headline.nothing"),
+                n => t!("view.dashboard.headline.nothing_unavailable", n = n, count = n.to_string()),
             }
         }
     };
@@ -176,24 +182,49 @@ pub fn family(server: &ServerInfo) -> &'static str {
     server.name()
 }
 
-fn last(hours: f64) -> String {
-    if (hours - 24.0).abs() < 0.5 { "the last day".into() } else { format!("the last {}", span(hours)) }
+/// A stretch of time as the dashboard says it: whole days from 47 hours, whole hours from an hour and a half, minutes
+/// (at least one) below that.
+enum Span {
+    Days(f64),
+    Hours(f64),
+    Minutes(f64),
 }
 
-fn span(hours: f64) -> String {
+fn span_of(hours: f64) -> Span {
     if hours >= 47.0 {
-        return format!("{} days", (hours / 24.0).round());
+        Span::Days((hours / 24.0).round())
+    } else if hours >= 1.5 {
+        Span::Hours(hours.round())
+    } else {
+        Span::Minutes((hours * 60.0).round().max(1.0))
     }
-    if hours >= 1.5 {
-        return format!("{} hours", hours.round());
-    }
-    let minutes = (hours * 60.0).round().max(1.0);
-    if minutes == 1.0 { "1 minute".into() } else { format!("{minutes} minutes") }
 }
 
-fn no_workload(key: TileKey, what: &str) -> Tile {
-    let mut t = Tile::new(key, TileStatus::Unavailable, format!("No query history, so {what}."));
-    t.detail = Some("Query statistics shows how to get them.".into());
+/// "the last day", "the last 6 hours".
+fn last(hours: f64) -> String {
+    if (hours - 24.0).abs() < 0.5 {
+        return t!("view.dashboard.last.day");
+    }
+    match span_of(hours) {
+        Span::Days(n) => t!("view.dashboard.last.days", n = n, count = n.to_string()),
+        Span::Hours(n) => t!("view.dashboard.last.hours", n = n, count = n.to_string()),
+        Span::Minutes(n) => t!("view.dashboard.last.minutes", n = n, count = n.to_string()),
+    }
+}
+
+/// "2 days", "7 hours", "1 minute".
+fn span(hours: f64) -> String {
+    match span_of(hours) {
+        Span::Days(n) => t!("view.dashboard.span.days", n = n, count = n.to_string()),
+        Span::Hours(n) => t!("view.dashboard.span.hours", n = n, count = n.to_string()),
+        Span::Minutes(n) => t!("view.dashboard.span.minutes", n = n, count = n.to_string()),
+    }
+}
+
+/// A tile with nothing to show without query history: `takeaway` says what that leaves out.
+fn no_workload(key: TileKey, takeaway: String) -> Tile {
+    let mut t = Tile::new(key, TileStatus::Unavailable, takeaway);
+    t.detail = Some(t!("view.dashboard.no_workload.detail"));
     t
 }
 
@@ -211,10 +242,6 @@ fn severity_status(s: Severity) -> TileStatus {
         Severity::Medium => TileStatus::Watch,
         Severity::Low => TileStatus::Info,
     }
-}
-
-fn plural(n: usize, one: &str, many: &str) -> String {
-    if n == 1 { format!("1 {one}") } else { format!("{n} {many}") }
 }
 
 fn missing_reason(s: &Snapshot, capability: Capability) -> Option<&culprit_core::MissingCapability> {
@@ -247,8 +274,8 @@ fn sentence(text: &str) -> String {
 pub fn signal_value(s: &Signal) -> String {
     match s.unit {
         SignalUnit::Percent => format::percent_value(s.value),
-        SignalUnit::PerSecond => format!("{}/s", format::count(s.value)),
-        SignalUnit::PerHour => format!("{}/h", format::count(s.value)),
+        SignalUnit::PerSecond => t!("view.dashboard.signal.per_second", value = format::count(s.value)),
+        SignalUnit::PerHour => t!("view.dashboard.signal.per_hour", value = format::count(s.value)),
         SignalUnit::Count => format::count(s.value),
         SignalUnit::Bytes => format::bytes(s.value),
         SignalUnit::Milliseconds => format::duration(s.value),

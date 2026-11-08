@@ -127,94 +127,121 @@ pub(super) fn plan_changes<'a>(s: &'a Snapshot, w: &Workload) -> Vec<PlanChange<
 }
 
 pub(super) fn db_time(s: &Snapshot) -> Tile {
-    let Some(w) = &s.workload else { return no_workload(TileKey::DbTime, "database time isn't measured") };
+    let Some(w) = &s.workload else { return no_workload(TileKey::DbTime, t!("view.dashboard.no_workload.db_time")) };
     let per_day = w.measurement_hours() >= PER_DAY_MIN_HOURS;
     let window = window_phrase(w);
     let mut metrics = Vec::new();
     if per_day {
         let day = w.per_day(w.total_time_ms);
-        metrics.push(TileMetric::new("per-day", "Database time per day", Some(day), format::duration(day)));
+        metrics.push(TileMetric::new(
+            "per-day",
+            &t!("view.dashboard.db_time.metric.per_day"),
+            Some(day),
+            format::duration(day),
+        ));
         let runs = w.per_day(w.total_executions);
-        metrics.push(TileMetric::new("runs-per-day", "Runs per day", Some(runs), format::count(runs)));
+        metrics.push(TileMetric::new(
+            "runs-per-day",
+            &t!("common.metric.runs_per_day"),
+            Some(runs),
+            format::count(runs),
+        ));
     } else {
         metrics.push(TileMetric::new(
             "total",
-            "Database time",
+            &t!("view.dashboard.db_time.metric.total"),
             Some(w.total_time_ms),
             format::duration(w.total_time_ms),
         ));
-        metrics.push(TileMetric::new("runs", "Runs", Some(w.total_executions), format::count(w.total_executions)));
+        metrics.push(TileMetric::new(
+            "runs",
+            &t!("common.metric.runs"),
+            Some(w.total_executions),
+            format::count(w.total_executions),
+        ));
     }
     if let Some(cpu) = w.total_cpu_ms.filter(|_| w.total_time_ms > 0.0) {
         let share = (cpu / w.total_time_ms).min(1.0);
-        metrics.push(TileMetric::new("cpu-share", "On CPU", Some(share), format::percent(share)));
+        metrics.push(TileMetric::new(
+            "cpu-share",
+            &t!("view.dashboard.db_time.metric.cpu_share"),
+            Some(share),
+            format::percent(share),
+        ));
     }
-    metrics.push(TileMetric::new("window-hours", "Covers", Some(w.measurement_hours()), span(w.measurement_hours())));
+    metrics.push(TileMetric::new(
+        "window-hours",
+        &t!("view.dashboard.metric.covers"),
+        Some(w.measurement_hours()),
+        span(w.measurement_hours()),
+    ));
 
     let changes = plan_changes(s, w);
+    let total = format::duration(w.total_time_ms);
+    let factor = |t: &Trend| t!("common.factor", n = format::digits(format!("{:.1}", t.ratio)));
     let (status, takeaway) = match trend(w) {
-        Some(t) if t.ratio >= 1.5 && t.material() => (
-            if t.ratio >= 3.0 { TileStatus::Bad } else { TileStatus::Watch },
-            format!(
-                "Database time is up {:.1}× in {} compared with the {} before.",
-                t.ratio,
-                trend_spans(&t).0,
-                trend_spans(&t).1
-            ),
-        ),
+        Some(trend) if trend.ratio >= 1.5 && trend.material() => {
+            let (recent, baseline) = trend_spans(&trend);
+            (
+                if trend.ratio >= 3.0 { TileStatus::Bad } else { TileStatus::Watch },
+                t!("view.dashboard.db_time.up", factor = factor(&trend), recent = recent, baseline = baseline),
+            )
+        }
         // Up, but from almost nothing: said as it is, not as steady and not as a warning.
-        Some(t) if t.ratio >= 1.5 => (
+        Some(trend) if trend.ratio >= 1.5 => (
             TileStatus::Info,
-            format!(
-                "Database time is up {:.1}× in {}, but small: {} over {window}.",
-                t.ratio,
-                trend_spans(&t).0,
-                format::duration(w.total_time_ms)
+            t!(
+                "view.dashboard.db_time.up_small",
+                factor = factor(&trend),
+                recent = trend_spans(&trend).0,
+                total = &total,
+                window = &window
             ),
         ),
-        Some(t) if t.ratio <= 1.0 / 1.5 => (
-            TileStatus::Good,
-            format!(
-                "Database time is down {} in {} compared with the {} before.",
-                format::percent(1.0 - t.ratio),
-                trend_spans(&t).0,
-                trend_spans(&t).1
-            ),
-        ),
+        Some(trend) if trend.ratio <= 1.0 / 1.5 => {
+            let (recent, baseline) = trend_spans(&trend);
+            (
+                TileStatus::Good,
+                t!(
+                    "view.dashboard.db_time.down",
+                    percent = format::percent(1.0 - trend.ratio),
+                    recent = recent,
+                    baseline = baseline
+                ),
+            )
+        }
         Some(_) if per_day => (
             TileStatus::Good,
-            format!("Database time is steady at about {} a day.", format::duration(w.per_day(w.total_time_ms))),
+            t!("view.dashboard.db_time.steady_per_day", per_day = format::duration(w.per_day(w.total_time_ms))),
         ),
-        Some(_) => {
-            (TileStatus::Good, format!("Database time is steady: {} over {window}.", format::duration(w.total_time_ms)))
-        }
+        Some(_) => (TileStatus::Good, t!("view.dashboard.db_time.steady", total = &total, window = &window)),
         None if per_day => (
             TileStatus::Info,
-            format!("About {} of database time a day over {window}.", format::duration(w.per_day(w.total_time_ms))),
+            t!(
+                "view.dashboard.db_time.per_day",
+                per_day = format::duration(w.per_day(w.total_time_ms)),
+                window = &window
+            ),
         ),
-        None => (
-            TileStatus::Info,
-            format!("{} of database time over {window}.", capitalized(&format::duration(w.total_time_ms))),
-        ),
+        None => (TileStatus::Info, t!("view.dashboard.db_time.total", total = &total, window = &window)),
     };
     let mut tile = Tile::new(TileKey::DbTime, status, takeaway);
     tile.metrics = metrics;
     tile.detail = match changes.first() {
-        Some(c) if changes.len() == 1 => Some(format!(
-            "{} switched plans in this window ({} of database time).",
-            capitalized(&query_handle(c.query)),
-            format::percent(c.share)
+        Some(c) if changes.len() == 1 => Some(t!(
+            "view.dashboard.db_time.plan_change",
+            query = capitalized(&query_handle(c.query)),
+            share = format::percent(c.share)
         )),
-        Some(c) => Some(format!(
-            "{} queries switched plans in this window; the busiest is {} ({} of database time).",
-            changes.len(),
-            query_handle(c.query),
-            format::percent(c.share)
+        Some(c) => Some(t!(
+            "view.dashboard.db_time.plan_changes",
+            count = changes.len().to_string(),
+            query = query_handle(c.query),
+            share = format::percent(c.share)
         )),
-        None if !w.is_windowed() && w.timeline.as_ref().is_none_or(|t| t.starts.len() < 2) => Some(format!(
-            "{} keeps running totals only, so the trend comes from Culprit's own scans; it appears after the next scan.",
-            w.source
-        )),
+        None if !w.is_windowed() && w.timeline.as_ref().is_none_or(|t| t.starts.len() < 2) => {
+            Some(t!("view.dashboard.db_time.running_totals", source = &w.source))
+        }
         None => None,
     };
     tile.items = changes

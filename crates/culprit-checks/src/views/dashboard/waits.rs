@@ -18,28 +18,33 @@ pub(super) fn waits(s: &Snapshot) -> Tile {
     if let Some(activity) = report.as_ref().and_then(|r| r.activity.as_ref()) {
         let p = &activity.period;
         let takeaway = activity.categories.first().map_or_else(
-            || "Recorded activity has no retained observations in this period.".into(),
-            |c| format!("{} account for {} of retained active-task sample weight.", c.label, format::percent(c.share)),
+            || t!("view.dashboard.waits.activity_none"),
+            |c| t!("view.dashboard.waits.activity_share", category = &c.label, share = format::percent(c.share)),
         );
         let mut tile = Tile::new(TileKey::Waits, TileStatus::Info, takeaway);
-        tile.title = "Recorded activity".into();
-        tile.detail = Some(format!(
-            "{} · observations {} to {}. {}Sampling describes active tasks, not elapsed query time or CPU utilization.",
-            p.source,
-            p.first_sample.as_deref().unwrap_or("unavailable"),
-            p.last_sample.as_deref().unwrap_or("unavailable"),
-            if p.partial { "This read was partial. " } else { "" }
-        ));
+        tile.title = t!("view.dashboard.waits.activity_title");
+        let sample = |at: Option<&str>| at.map_or_else(|| t!("view.dashboard.unavailable"), str::to_string);
+        let mut detail = vec![t!(
+            "view.dashboard.waits.activity_period",
+            source = &p.source,
+            first = sample(p.first_sample.as_deref()),
+            last = sample(p.last_sample.as_deref())
+        )];
+        if p.partial {
+            detail.push(t!("view.dashboard.waits.partial"));
+        }
+        detail.push(t!("view.dashboard.waits.activity_scope"));
+        tile.detail = Some(detail.join(" "));
         tile.metrics = vec![
             TileMetric::new(
                 "observations",
-                "Retained observations",
+                &t!("view.dashboard.waits.metric.observations"),
                 Some(p.observations),
                 format::count(p.observations),
             ),
             TileMetric::new(
                 "sample-weight",
-                "Sample weight",
+                &t!("view.dashboard.waits.metric.sample_weight"),
                 Some(p.weighted_observations),
                 format::count(p.weighted_observations),
             ),
@@ -51,7 +56,7 @@ pub(super) fn waits(s: &Snapshot) -> Tile {
             .map(|c| {
                 let mut item = TileItem::new(ItemKind::Wait, c.key.clone(), c.label.clone());
                 item.share = Some(c.share);
-                item.value = Some(format!("{} of sample weight", format::percent(c.share)));
+                item.value = Some(t!("view.dashboard.waits.of_sample_weight", share = format::percent(c.share)));
                 item
             })
             .collect();
@@ -67,16 +72,21 @@ pub(super) fn waits(s: &Snapshot) -> Tile {
         let database_ms = s.workload.as_ref().map(|w| w.total_time_ms).unwrap_or(0.0);
         let total_ms = r.total_ms.unwrap_or(0.0);
         let share = if database_ms > 0.0 { total_ms / database_ms } else { 0.0 };
-        let takeaway = format!(
-            "{} times no waits without performance_schema; logged statements waited {} on locks ({} of their time).",
-            family(&s.server),
-            format::duration(total_ms),
-            format::percent(share)
+        let takeaway = t!(
+            "view.dashboard.waits.mysql_lock_time",
+            family = family(&s.server),
+            duration = format::duration(total_ms),
+            share = format::percent(share)
         );
         let watch = share >= 0.25 && material(s, r.scope, total_ms);
         let mut tile = Tile::new(TileKey::Waits, if watch { TileStatus::Watch } else { TileStatus::Info }, takeaway);
         tile.detail = top.detail.clone();
-        tile.metrics = vec![TileMetric::new("total", "Lock time", r.total_ms, format::duration(total_ms))];
+        tile.metrics = vec![TileMetric::new(
+            "total",
+            &t!("view.dashboard.waits.metric.lock_time"),
+            r.total_ms,
+            format::duration(total_ms),
+        )];
         tile.items = r
             .categories
             .iter()
@@ -93,25 +103,27 @@ pub(super) fn waits(s: &Snapshot) -> Tile {
     let takeaway = if top.key == "other" {
         // "Everything else" leading says nothing; say what is known and how much isn't.
         match named {
-            Some(c) => format!(
-                "{} take {}; the other {} isn't broken down by {}.",
-                c.label,
-                format::percent(c.share),
-                format::percent(top.share),
-                family(&s.server)
+            Some(c) => t!(
+                "view.dashboard.waits.partly_named",
+                category = &c.label,
+                share = format::percent(c.share),
+                other = format::percent(top.share),
+                family = family(&s.server)
             ),
-            None => format!("{} doesn't break this waiting down by kind.", family(&s.server)),
+            None => t!("view.dashboard.waits.unnamed", family = family(&s.server)),
         }
     } else {
         match r.categories.get(1).filter(|c| c.share >= 0.05) {
-            Some(next) => format!(
-                "Most time goes to {} ({}), then {} ({}).",
-                lower_label(&top.label),
-                format::percent(top.share),
-                lower_label(&next.label),
-                format::percent(next.share)
+            Some(next) => t!(
+                "view.dashboard.waits.most_then",
+                top = lower_label(&top.label),
+                top_share = format::percent(top.share),
+                next = lower_label(&next.label),
+                next_share = format::percent(next.share)
             ),
-            None => format!("Most time goes to {} ({}).", lower_label(&top.label), format::percent(top.share)),
+            None => {
+                t!("view.dashboard.waits.most", top = lower_label(&top.label), top_share = format::percent(top.share))
+            }
         }
     };
     let contended: f64 =
@@ -128,27 +140,24 @@ pub(super) fn waits(s: &Snapshot) -> Tile {
     // Totals since startup cover a different stretch than database time: say which, rather than set them side by side.
     let since_start = r.scope == WaitScope::SinceStartup;
     tile.detail = if s.server.engine == Engine::Postgres {
-        Some(format!(
-            "{}. This is recorded statement execution time, including CPU and unclassified time; it is not a measurement of time spent waiting.",
-            r.source
-        ))
+        Some(t!("view.dashboard.waits.postgres_detail", source = &r.source))
     } else if since_start {
         Some(format!("{}.", r.source.trim_end_matches('.')))
     } else {
         lead.detail.clone().or_else(|| first_sentence(&lead.meaning))
     };
     let label = if s.server.engine == Engine::Postgres {
-        "Statement execution time"
+        t!("view.dashboard.waits.metric.statement_time")
     } else if since_start {
-        "Waiting since start"
+        t!("view.dashboard.waits.metric.since_start")
     } else {
-        "Waiting"
+        t!("view.dashboard.waits.metric.waiting")
     };
     tile.metrics = vec![TileMetric::new(
         "total",
-        label,
+        &label,
         r.total_ms,
-        r.total_ms.map(format::duration).unwrap_or_else(|| "unavailable".into()),
+        r.total_ms.map(format::duration).unwrap_or_else(|| t!("view.dashboard.unavailable")),
     )];
     tile.items = r
         .categories
@@ -191,69 +200,56 @@ pub(super) fn first_sentence(text: &str) -> Option<String> {
 pub(super) fn waits_missing(s: &Snapshot) -> Tile {
     let family = family(&s.server);
     let mut tile = match s.server.engine {
-        Engine::Yugabyte => Tile::new(
-            TileKey::Waits,
-            TileStatus::Unavailable,
-            "No exclusive historical wait mix was collected. DocDB RPC timings can overlap; sample active YSQL sessions or inspect native storage metrics.",
-        ),
-        Engine::Sqlite => Tile::new(
-            TileKey::Waits,
-            TileStatus::Unavailable,
-            "SQLite keeps no record of waits: it has no server, and a writer that has to wait gets SQLITE_BUSY in the application.",
-        ),
+        Engine::Yugabyte => Tile::new(TileKey::Waits, TileStatus::Unavailable, t!("view.dashboard.waits.yugabyte")),
+        Engine::Sqlite => Tile::new(TileKey::Waits, TileStatus::Unavailable, t!("view.dashboard.waits.sqlite")),
         Engine::Postgres => {
-            let mut t = Tile::new(
-                TileKey::Waits,
-                TileStatus::Unavailable,
-                "PostgreSQL keeps no history of what sessions wait on.",
-            );
+            let mut tile = Tile::new(TileKey::Waits, TileStatus::Unavailable, t!("view.dashboard.waits.postgres"));
             if is_off(setting(s, "track_io_timing")) {
                 // Where it is set: ALTER SYSTEM on a server of one's own, the platform's settings on a managed one.
                 let change = crate::support::setting_change(&s.server, "track_io_timing", "on");
-                t.detail = Some(format!(
-                    "Turn on track_io_timing to measure disk time per statement, or sample what it waits on right now. {}",
-                    change.how
-                ));
-                t.fix_sql = change.sql;
+                tile.detail = Some([t!("view.dashboard.waits.postgres_io_timing"), change.how].join(" "));
+                tile.fix_sql = change.sql;
             } else {
-                t.detail = Some("Sample what it waits on right now to see where time goes.".into());
+                tile.detail = Some(t!("view.dashboard.waits.postgres_sample"));
             }
-            t
+            tile
         }
         Engine::Mysql => match missing_reason(s, Capability::PerformanceSchema)
             .or_else(|| missing_reason(s, Capability::WaitStats))
         {
             Some(m) => {
-                let mut t = Tile::new(
+                let mut tile = Tile::new(
                     TileKey::Waits,
                     TileStatus::Unavailable,
-                    format!("{family} isn't counting waits: {}", sentence(&m.reason)),
+                    t!("view.dashboard.waits.not_counting", family = family, reason = sentence(&m.reason)),
                 );
-                t.detail = m.fix.clone();
-                t
+                tile.detail = m.fix.clone();
+                tile
             }
-            None => {
-                Tile::new(TileKey::Waits, TileStatus::Unavailable, format!("{family} recorded no waits in this scan."))
-            }
+            None => Tile::new(
+                TileKey::Waits,
+                TileStatus::Unavailable,
+                t!("view.dashboard.waits.none_recorded", family = family),
+            ),
         },
         Engine::Mssql => match missing_reason(s, Capability::WaitStats) {
             Some(m) => {
-                let mut t = Tile::new(
+                let mut tile = Tile::new(
                     TileKey::Waits,
                     TileStatus::Unavailable,
-                    format!("Waits aren't readable here: {}", sentence(&m.reason)),
+                    t!("view.dashboard.waits.unreadable", reason = sentence(&m.reason)),
                 );
-                t.detail = m.fix.clone();
-                t
+                tile.detail = m.fix.clone();
+                tile
             }
-            None => Tile::new(TileKey::Waits, TileStatus::Unavailable, "This scan recorded no waits."),
+            None => Tile::new(TileKey::Waits, TileStatus::Unavailable, t!("view.dashboard.waits.none")),
         },
     };
     if s.server.engine == Engine::Yugabyte {
         tile.detail = s.source_problem(&[culprit_core::source_id::DOCDB_ACTIVITY_HISTORY]);
     }
     if tile.detail.is_none() && s.server.engine.has_server() {
-        tile.detail = Some("Sample what it waits on right now instead.".into());
+        tile.detail = Some(t!("view.dashboard.waits.sample_instead"));
     }
     tile
 }

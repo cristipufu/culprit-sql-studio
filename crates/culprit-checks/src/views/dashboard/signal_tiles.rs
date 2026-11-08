@@ -19,11 +19,11 @@ pub(super) fn collector_note(s: &Snapshot, names: &[&str]) -> Option<String> {
 
 pub(super) fn file_name(s: &Snapshot, f: &FileIo) -> String {
     match (s.server.engine, f.kind, f.database.as_deref()) {
-        (Engine::Mssql, FileKind::Log, Some(db)) => format!("{db} log"),
+        (Engine::Mssql, FileKind::Log, Some(db)) => t!("view.dashboard.storage.file.log", database = db),
         (Engine::Mssql, _, Some(db)) if db.eq_ignore_ascii_case("tempdb") => "tempdb".into(),
-        (Engine::Postgres, FileKind::Log, _) => "WAL".into(),
-        (Engine::Postgres, FileKind::Temp, _) => "temporary files".into(),
-        (Engine::Postgres, _, _) => "tables and indexes".into(),
+        (Engine::Postgres, FileKind::Log, _) => t!("view.dashboard.storage.file.wal"),
+        (Engine::Postgres, FileKind::Temp, _) => t!("view.dashboard.storage.file.temp"),
+        (Engine::Postgres, _, _) => t!("view.dashboard.storage.file.data"),
         (Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite, _, _) => f.name.clone(),
     }
 }
@@ -32,15 +32,33 @@ pub(super) fn file_name(s: &Snapshot, f: &FileIo) -> String {
 /// Storage latency in one unit family: microseconds below a millisecond ("40 µs", "630 µs"), so SQL Server's 0.04 ms
 /// and MySQL's 8 µs read alike.
 pub(super) fn latency(ms: f64) -> String {
-    if ms < 1.0 { format!("{} µs", (ms * 1000.0).round().max(1.0)) } else { format::duration(ms) }
+    if ms < 1.0 {
+        t!("common.duration.us", n = (ms * 1000.0).round().max(1.0).to_string())
+    } else {
+        format::duration(ms)
+    }
+}
+
+/// What a file is waited on for: reads of data, writes or flushes of the log.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Waited {
+    Read,
+    Write,
+    Flush,
+}
+
+/// Whether the log's writes are flushes (`fsync`) rather than writes: the engine says which it timed.
+fn flushes(f: &FileIo) -> bool {
+    f.write_operation == Some(culprit_core::signals::FileWriteOperation::Flush)
 }
 
 /// The latency a file is waited on for (reads of data, writes of the log) and how many operations it averages.
-pub(super) fn waited_latency(f: &FileIo) -> Option<(f64, f64, &'static str)> {
+pub(super) fn waited_latency(f: &FileIo) -> Option<(f64, f64, Waited)> {
     if f.kind == FileKind::Log {
-        f.avg_write_ms().map(|avg| (avg, f.writes, f.write_label()))
+        let op = if flushes(f) { Waited::Flush } else { Waited::Write };
+        f.avg_write_ms().map(|avg| (avg, f.writes, op))
     } else {
-        f.avg_read_ms().map(|avg| (avg, f.reads, "read"))
+        f.avg_read_ms().map(|avg| (avg, f.reads, Waited::Read))
     }
 }
 
@@ -55,14 +73,12 @@ pub(super) fn storage(report: &Report) -> Tile {
         // An engine fact only when the scan proves it; otherwise just what this scan lacks (a login that can't read
         // the views, a source that failed).
         let why = match s.server.engine {
-            Engine::Postgres if is_off(setting(s, "track_io_timing")) => {
-                "PostgreSQL times reads and writes only with track_io_timing on.".to_string()
-            }
+            Engine::Postgres if is_off(setting(s, "track_io_timing")) => t!("view.dashboard.storage.postgres_untimed"),
             Engine::Mysql if !s.server.has(Capability::PerformanceSchema) => {
-                format!("{family} times no file I/O while performance_schema is off.")
+                t!("view.dashboard.storage.no_performance_schema", family = family)
             }
             Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite => {
-                "This scan has no storage timings.".to_string()
+                t!("view.dashboard.storage.none")
             }
         };
         let mut t = Tile::new(TileKey::Storage, TileStatus::Unavailable, why);
@@ -78,46 +94,31 @@ pub(super) fn storage(report: &Report) -> Tile {
             .max_by(f64::total_cmp)
     };
     let (read, log) = (worst(false), worst(true));
+    // The log's operation as the engine timed it: a flush on any log file says flushes.
+    let flush = files.iter().any(|f| f.kind == FileKind::Log && flushes(f));
+    let op = if flush { "flush" } else { "write" };
     let (status, takeaway) = match worst_finding(report, "slow-storage") {
         Some(f) => (severity_status(f.severity), format!("{}.", f.title.trim_end_matches('.'))),
-        None => {
-            let mut parts = Vec::new();
-            if let Some(avg) = read {
-                parts.push(format!("reads average {}", latency(avg)));
+        None => match (read.map(latency), log.map(latency)) {
+            (None, None) => (TileStatus::Info, t!("view.dashboard.storage.too_little")),
+            (Some(read), None) => (TileStatus::Info, t!("view.dashboard.storage.averages_read", read = read)),
+            (None, Some(log)) => (TileStatus::Info, t!("view.dashboard.storage.averages_log", op = op, log = log)),
+            (Some(read), Some(log)) => {
+                (TileStatus::Info, t!("view.dashboard.storage.averages_both", read = read, op = op, log = log))
             }
-            if let Some(avg) = log {
-                parts.push(format!(
-                    "log {} {}",
-                    if files.iter().any(|f| f.kind == FileKind::Log && f.write_label() == "flush") {
-                        "flushes"
-                    } else {
-                        "writes"
-                    },
-                    latency(avg)
-                ));
-            }
-            if parts.is_empty() {
-                (TileStatus::Info, "Too little I/O since startup to judge storage speed.".to_string())
-            } else {
-                (TileStatus::Info, format!("Recorded storage averages: {}.", parts.join(", ")))
-            }
-        }
+        },
     };
     let mut t = Tile::new(TileKey::Storage, status, takeaway);
     if let Some(avg) = read {
-        t.metrics.push(TileMetric::new("read-ms", "Avg read", Some(avg), latency(avg)));
+        t.metrics.push(TileMetric::new("read-ms", &t!("view.dashboard.storage.metric.read"), Some(avg), latency(avg)));
     }
     if let Some(avg) = log {
-        t.metrics.push(TileMetric::new(
-            "log-write-ms",
-            if files.iter().any(|f| f.kind == FileKind::Log && f.write_label() == "flush") {
-                "Avg log flush"
-            } else {
-                "Avg log write"
-            },
-            Some(avg),
-            latency(avg),
-        ));
+        let label = if flush {
+            t!("view.dashboard.storage.metric.log_flush")
+        } else {
+            t!("view.dashboard.storage.metric.log_write")
+        };
+        t.metrics.push(TileMetric::new("log-write-ms", &label, Some(avg), latency(avg)));
     }
     // The slowest files, each by what it's waited on for.
     let mut rows: Vec<(f64, TileItem)> = files
@@ -126,25 +127,34 @@ pub(super) fn storage(report: &Report) -> Tile {
             let (avg, ops, what) = waited_latency(f)?;
             (ops >= 1_000.0).then(|| {
                 let id = format!("{}:{}", f.database.as_deref().unwrap_or(""), f.name);
-                let mut item = TileItem::new(ItemKind::Signal, id, file_name(s, f));
-                item.value = Some(format!("{} per {what}", latency(avg)));
-                if f.scope == Some(culprit_core::FileScope::Server) {
-                    item.label.push_str(" (whole server)");
-                }
-                if f.scope == Some(culprit_core::FileScope::Database)
+                let name = file_name(s, f);
+                let label = if f.scope == Some(culprit_core::FileScope::Server) {
+                    t!("view.dashboard.storage.whole_server", file = name)
+                } else if f.scope == Some(culprit_core::FileScope::Database)
                     && f.database.as_deref().is_none_or(|db| db == s.server.database)
                 {
-                    item.label.push_str(" (this database)");
-                }
+                    t!("view.dashboard.storage.this_database", file = name)
+                } else {
+                    name
+                };
+                let mut item = TileItem::new(ItemKind::Signal, id, label);
+                let average = latency(avg);
+                item.value = Some(match what {
+                    Waited::Read => t!("view.dashboard.storage.per_read", latency = average),
+                    Waited::Write => t!("view.dashboard.storage.per_write", latency = average),
+                    Waited::Flush => t!("view.dashboard.storage.per_flush", latency = average),
+                });
                 let prefix = format!("slow-storage:{}:", f.database.as_deref().unwrap_or(""));
                 item.status = Some(
                     report
                         .findings
                         .iter()
                         .filter(|g| g.is_actionable() && g.id.starts_with(&prefix))
+                        // The finding names its files in its one text metric (its label is words, in the reader's
+                        // language): the names, comma-separated.
                         .filter(|g| {
                             g.metrics.iter().any(|m| {
-                                matches!(m.label.as_str(), "File" | "Files")
+                                m.unit == culprit_core::Unit::Text
                                     && m.text
                                         .as_ref()
                                         .is_some_and(|names| names == &f.name || names.split(", ").any(|n| n == f.name))
@@ -184,15 +194,15 @@ pub(super) fn connections(report: &Report) -> Tile {
     if rate.is_none() && used.is_none() {
         let why = match s.server.engine {
             Engine::Postgres if !culprit_core::version_at_least(&s.server.version, [14, 0, 0]) => {
-                "PostgreSQL counts sessions from version 14; this server doesn't.".to_string()
+                t!("view.dashboard.connections.postgres_old")
             }
             engine @ (Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite)
                 if !engine.has_server() =>
             {
-                format!("{engine} has no server, so no connections to count.")
+                t!("view.dashboard.connections.serverless", engine = engine.to_string())
             }
             Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite => {
-                "This scan has no connection counters.".to_string()
+                t!("view.dashboard.connections.none")
             }
         };
         let mut t = Tile::new(TileKey::Connections, TileStatus::Unavailable, why);
@@ -205,30 +215,34 @@ pub(super) fn connections(report: &Report) -> Tile {
     let (status, takeaway) = match worst_finding(report, "connection-churn") {
         Some(f) => (severity_status(f.severity), format!("{}.", f.title.trim_end_matches('.'))),
         None => match rate {
-            Some(r) if r.value >= 1.0 => (
-                TileStatus::Info,
-                format!("{} new connections a second over the recorded counter history.", format::count(r.value)),
-            ),
+            Some(r) if r.value >= 1.0 => {
+                (TileStatus::Info, t!("view.dashboard.connections.per_second", count = format::count(r.value)))
+            }
             Some(r) => (
                 TileStatus::Info,
-                format!(
-                    "{} new connections a minute over the recorded counter history.",
-                    format::count((r.value * 60.0).round())
-                ),
+                t!("view.dashboard.connections.per_minute", count = format::count((r.value * 60.0).round())),
             ),
-            None => {
-                (TileStatus::Info, "This scan has no count of new connections; the ones in use are below.".to_string())
-            }
+            None => (TileStatus::Info, t!("view.dashboard.connections.no_rate")),
         },
     };
     let mut t = Tile::new(TileKey::Connections, status, takeaway);
     // Under one a second, a per-minute count reads better than "0.0".
     if let Some(r) = rate {
         t.metrics.push(if r.value >= 1.0 {
-            TileMetric::new("per-second", "New per second", Some(r.value), format::count(r.value))
+            TileMetric::new(
+                "per-second",
+                &t!("view.dashboard.connections.metric.per_second"),
+                Some(r.value),
+                format::count(r.value),
+            )
         } else {
             let per_minute = (r.value * 60.0).round();
-            TileMetric::new("per-minute", "New per minute", Some(per_minute), format::count(per_minute))
+            TileMetric::new(
+                "per-minute",
+                &t!("view.dashboard.connections.metric.per_minute"),
+                Some(per_minute),
+                format::count(per_minute),
+            )
         });
     }
     if let Some(u) = used {
@@ -255,10 +269,10 @@ pub(super) fn connections(report: &Report) -> Tile {
 
 pub(super) fn lag_text(r: &Replica) -> String {
     r.lag_seconds
-        .map(|sec| format!("{} behind", format::duration(sec * 1000.0)))
-        .or_else(|| r.lag_bytes.map(|b| format!("{} of log", format::bytes(b))))
+        .map(|sec| t!("view.dashboard.replication.behind", duration = format::duration(sec * 1000.0)))
+        .or_else(|| r.lag_bytes.map(|b| t!("view.dashboard.replication.log", size = format::bytes(b))))
         .or_else(|| r.state.clone())
-        .unwrap_or_else(|| "in sync".into())
+        .unwrap_or_else(|| t!("view.dashboard.replication.in_sync"))
 }
 
 /// How far replicas and replication slots are behind, worst first.
@@ -271,7 +285,7 @@ pub(super) fn replication(report: &Report) -> Tile {
             let mut t = Tile::new(
                 TileKey::Replication,
                 TileStatus::Unavailable,
-                format!("Couldn't read {family}'s replication state."),
+                t!("view.dashboard.replication.unreadable", family = family),
             );
             t.detail = Some(note);
             return t;
@@ -281,23 +295,22 @@ pub(super) fn replication(report: &Report) -> Tile {
                 return Tile::new(
                     TileKey::Replication,
                     TileStatus::Unavailable,
-                    "Raft replica lag was not measured; an empty PostgreSQL replication view cannot establish DocDB replication health.",
+                    t!("view.dashboard.replication.yugabyte"),
                 );
             }
-            Engine::Postgres => {
-                "No replicas or replication slots: nothing can fall behind or hold WAL back.".to_string()
-            }
-            Engine::Mssql => "No availability group or geo-replica: nothing can fall behind.".to_string(),
-            Engine::Mysql => format!("{family} isn't a replica here and reports none: nothing can fall behind."),
-            Engine::Sqlite => "A SQLite file has no replicas: nothing can fall behind.".to_string(),
+            Engine::Postgres => t!("view.dashboard.replication.none_postgres"),
+            Engine::Mssql => t!("view.dashboard.replication.none_mssql"),
+            Engine::Mysql => t!("view.dashboard.replication.none_mysql", family = family),
+            Engine::Sqlite => t!("view.dashboard.replication.none_sqlite"),
         };
         return Tile::new(TileKey::Replication, TileStatus::Good, none);
     }
     let (status, takeaway) = match worst_finding(report, "replica-lag") {
         Some(f) => (severity_status(f.severity), format!("{}.", f.title.trim_end_matches('.'))),
-        None => {
-            (TileStatus::Info, format!("Replication state recorded for {}.", plural(replicas.len(), "copy", "copies")))
-        }
+        None => (
+            TileStatus::Info,
+            t!("view.dashboard.replication.recorded", n = replicas.len(), count = replicas.len().to_string()),
+        ),
     };
     let mut t = Tile::new(TileKey::Replication, status, takeaway);
     let mut rows: Vec<&Replica> = replicas.iter().collect();
@@ -311,12 +324,12 @@ pub(super) fn replication(report: &Report) -> Tile {
         .into_iter()
         .take(4)
         .map(|r| {
-            let role = match r.role {
-                ReplicaRole::Replica => "replica",
-                ReplicaRole::ThisServer => "this server",
-                ReplicaRole::Slot => "slot",
+            let label = match r.role {
+                ReplicaRole::Replica => t!("view.dashboard.replication.replica", name = &r.name),
+                ReplicaRole::ThisServer => t!("view.dashboard.replication.this_server", name = &r.name),
+                ReplicaRole::Slot => t!("view.dashboard.replication.slot", name = &r.name),
             };
-            let mut item = TileItem::new(ItemKind::Signal, r.name.clone(), format!("{} ({role})", r.name));
+            let mut item = TileItem::new(ItemKind::Signal, r.name.clone(), label);
             item.value = Some(lag_text(r));
             item.status = Some(
                 report
@@ -342,24 +355,30 @@ pub(super) fn failures(report: &Report) -> Tile {
             TileKey::Failures,
             TileStatus::Info,
             if count == 0 {
-                "No unexpected termination records were retained in this read; ordinary SQL errors are not counted here.".into()
+                t!("view.dashboard.failures.terminations_none")
             } else {
-                format!(
-                    "{} in the native buffer; this is not a failure rate.",
-                    plural(count, "unexpected termination record remains", "unexpected termination records remain")
-                )
+                t!("view.dashboard.failures.terminations", n = count, count = count.to_string())
             },
         );
-        tile.title = "Recorded terminations".into();
-        tile.detail = Some(format!(
-            "{} · {} to {} · {}. {}The evictable buffer is independent of statement statistics and does not include all SQL errors, cancellations or deadlocks.",
-            history.source,
-            history.requested_start,
-            history.requested_end,
-            history.visibility,
-            if history.partial { "Partial read. " } else { "" }
+        tile.title = t!("view.dashboard.failures.terminations_title");
+        let mut detail = vec![t!(
+            "view.dashboard.failures.terminations_period",
+            source = &history.source,
+            start = &history.requested_start,
+            end = &history.requested_end,
+            visibility = &history.visibility
+        )];
+        if history.partial {
+            detail.push(t!("view.dashboard.partial_read"));
+        }
+        detail.push(t!("view.dashboard.failures.terminations_scope"));
+        tile.detail = Some(detail.join(" "));
+        tile.metrics.push(TileMetric::new(
+            "records",
+            &t!("view.dashboard.failures.metric.retained"),
+            Some(count as f64),
+            count.to_string(),
         ));
-        tile.metrics.push(TileMetric::new("records", "Retained records", Some(count as f64), count.to_string()));
         tile.items = history
             .events
             .iter()
@@ -374,8 +393,11 @@ pub(super) fn failures(report: &Report) -> Tile {
         return tile;
     }
     if let Some(reason) = s.source_problem(&[culprit_core::source_id::DOCDB_TERMINATIONS]) {
-        let mut tile =
-            Tile::new(TileKey::Failures, TileStatus::Unavailable, "Native termination history was unavailable.");
+        let mut tile = Tile::new(
+            TileKey::Failures,
+            TileStatus::Unavailable,
+            t!("view.dashboard.failures.terminations_unavailable"),
+        );
         tile.detail = Some(reason);
         return tile;
     }
@@ -387,12 +409,17 @@ pub(super) fn failures(report: &Report) -> Tile {
             TileKey::Failures,
             worst.map_or(TileStatus::Info, |f| severity_status(f.severity)),
             worst.map_or_else(
-                || format!("{} SQL error records in the supplied application log.", format::count(total)),
+                || t!("view.dashboard.failures.log_errors", count = format::count(total)),
                 |f| f.title.clone(),
             ),
         );
-        tile.detail=Some("Counts are logged records, including possible retries and duplicates. Dates cover only records with a recorded time zone; missing durations are excluded from performance totals.".into());
-        tile.metrics.push(TileMetric::new("records", "Error log records", Some(total), format::count(total)));
+        tile.detail = Some(t!("view.dashboard.failures.log_detail"));
+        tile.metrics.push(TileMetric::new(
+            "records",
+            &t!("view.dashboard.failures.metric.log_records"),
+            Some(total),
+            format::count(total),
+        ));
         tile.items = found
             .iter()
             .take(4)
@@ -406,28 +433,24 @@ pub(super) fn failures(report: &Report) -> Tile {
         return tile;
     }
     let family = family(&s.server);
-    let Some(w) = &s.workload else { return no_workload(TileKey::Failures, "failed runs aren't counted") };
+    let Some(w) = &s.workload else {
+        return no_workload(TileKey::Failures, t!("view.dashboard.no_workload.failures"));
+    };
     let counted: Vec<(&QueryStat, f64)> =
         app_queries(s).filter_map(|q| q.costs.as_ref()?.unfinished().map(|u| (q, u))).collect();
     if counted.is_empty() {
         let why = match s.server.engine {
-            Engine::Postgres => {
-                "PostgreSQL doesn't count failed runs per statement; its log does (log_min_error_statement)."
-                    .to_string()
-            }
+            Engine::Postgres => t!("view.dashboard.failures.postgres"),
             Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite
                 if w.kind() == Some(culprit_core::WorkloadKind::SlowLog) =>
             {
-                format!(
-                    "The slow query log keeps runs that finished; {family} counts errors per statement only in performance_schema."
-                )
+                t!("view.dashboard.failures.slow_log", family = family)
             }
-            Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite if w.log.is_some() => format!(
-                "The {} log records how long statements took, not whether they failed.",
-                w.log.as_deref().unwrap_or_default()
-            ),
+            Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite if w.log.is_some() => {
+                t!("view.dashboard.failures.app_log", log = w.log.as_deref().unwrap_or_default())
+            }
             Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite => {
-                format!("{family} reported no failed or cancelled runs per statement in this scan.")
+                t!("view.dashboard.failures.none_reported", family = family)
             }
         };
         return Tile::new(TileKey::Failures, TileStatus::Unavailable, why);
@@ -442,18 +465,28 @@ pub(super) fn failures(report: &Report) -> Tile {
     let window = window_phrase(w);
     let (status, takeaway) = match worst_finding(report, "failing-query") {
         Some(f) => (severity_status(f.severity), format!("{}.", f.title.trim_end_matches('.'))),
-        None if failing.is_empty() => (TileStatus::Good, format!("No statement failed or timed out over {window}.")),
-        None => (
-            TileStatus::Info,
-            format!(
-                "{} didn't finish over {window}; the recorded counts do not establish a current error-rate problem.",
-                capitalized(&plural(total.round() as usize, "run", "runs"))
-            ),
-        ),
+        None if failing.is_empty() => (TileStatus::Good, t!("view.dashboard.failures.none", window = &window)),
+        None => {
+            let runs = total.round() as usize;
+            (
+                TileStatus::Info,
+                t!("view.dashboard.failures.unfinished", n = runs, count = runs.to_string(), window = &window),
+            )
+        }
     };
     let mut t = Tile::new(TileKey::Failures, status, takeaway);
-    t.metrics.push(TileMetric::new("statements", "Statements", Some(failing.len() as f64), failing.len().to_string()));
-    t.metrics.push(TileMetric::new("runs", "Unfinished runs", Some(total), format::count(total)));
+    t.metrics.push(TileMetric::new(
+        "statements",
+        &t!("view.dashboard.failures.metric.statements"),
+        Some(failing.len() as f64),
+        failing.len().to_string(),
+    ));
+    t.metrics.push(TileMetric::new(
+        "runs",
+        &t!("view.dashboard.failures.metric.unfinished"),
+        Some(total),
+        format::count(total),
+    ));
     t.items = failing
         .iter()
         .take(4)
@@ -462,11 +495,15 @@ pub(super) fn failures(report: &Report) -> Tile {
             item.query_id = Some(q.id.clone());
             // Fewer than five unfinished runs is too few to grade (a grey dot), so the value says how few.
             item.value = Some(if *unfinished < 5.0 {
-                format!("{} of {} runs", format::count(*unfinished), format::count(q.executions.max(*unfinished)))
+                t!(
+                    "view.dashboard.failures.runs_of",
+                    failed = format::count(*unfinished),
+                    runs = format::count(q.executions.max(*unfinished))
+                )
             } else if *rate >= 0.999 {
-                "every run".into()
+                t!("view.dashboard.failures.every_run")
             } else {
-                format!("{} of runs", format::percent(*rate))
+                t!("view.dashboard.failures.of_runs", share = format::percent(*rate))
             });
             item.share = Some(*rate);
             let id = format!("failing-query:{}", q.id);
@@ -500,15 +537,14 @@ pub(super) fn statistics(report: &Report) -> Tile {
                 TileKey::Statistics,
                 if turn_on.is_some() { TileStatus::Bad } else { TileStatus::Unavailable },
                 match missing {
-                    Some(m) => format!("No query history: {}", sentence(&m.reason)),
-                    None => format!("{} keeps no query history.", family(&s.server)),
+                    Some(m) => t!("view.dashboard.statistics.no_history_because", reason = sentence(&m.reason)),
+                    None => t!("view.dashboard.statistics.no_history", family = family(&s.server)),
                 },
             );
             t.detail = Some(if turn_on.is_some() {
-                "Until they're on, Culprit checks tables, indexes and settings only: no query list, plans or trends."
-                    .into()
+                t!("view.dashboard.statistics.turn_on_detail")
             } else {
-                "Culprit checks its tables, indexes and settings, and plans any statement you give it.".into()
+                t!("view.dashboard.statistics.no_history_detail")
             });
             t.fix_sql = turn_on.and_then(|m| m.fix.as_deref()).and_then(fix_statement);
             t.items = s
@@ -518,7 +554,7 @@ pub(super) fn statistics(report: &Report) -> Tile {
                 .filter(|m| m.capability.is_workload_source() && m.capability != Capability::QueryLog)
                 .map(|m| {
                     let mut item = TileItem::new(ItemKind::Capability, m.capability.id(), m.capability.label());
-                    item.value = Some("off".into());
+                    item.value = Some(t!("view.dashboard.statistics.off"));
                     item.status = Some(TileStatus::Bad);
                     item
                 })
@@ -529,14 +565,25 @@ pub(super) fn statistics(report: &Report) -> Tile {
             let planned = app_queries(s).filter(|q| q.plan.is_some()).count();
             let window = window_phrase(w);
             let mut status = TileStatus::Good;
+            let (n, count, with_plans) =
+                (w.query_count as usize, (w.query_count as usize).to_string(), planned.to_string());
             let mut takeaway = if w.log.is_some() {
                 // The phrase already names the log: "the 48 minutes the Rails log covers".
-                format!("Over {window}: {}, {planned} with plans.", plural(w.query_count as usize, "query", "queries"))
+                t!(
+                    "view.dashboard.statistics.log_covers",
+                    n = n,
+                    window = &window,
+                    count = &count,
+                    planned = &with_plans
+                )
             } else {
-                format!(
-                    "{} covers {window}: {}, {planned} with plans.",
-                    w.source,
-                    plural(w.query_count as usize, "query", "queries")
+                t!(
+                    "view.dashboard.statistics.source_covers",
+                    n = n,
+                    source = &w.source,
+                    window = &window,
+                    count = &count,
+                    planned = &with_plans
                 )
             };
             if let (Some(used), Some(max)) = (
@@ -549,17 +596,16 @@ pub(super) fn statistics(report: &Report) -> Tile {
                     .is_some_and(|v| v.eq_ignore_ascii_case("AUTO"))
             {
                 status = TileStatus::Watch;
-                takeaway =
-                    format!("Query Store is {} full; it stops recording when it fills.", format::percent(used / max));
+                takeaway = t!("view.dashboard.statistics.query_store_full", share = format::percent(used / max));
             }
             // A log without timestamps covers a period nobody can say: not "thin", unknown.
             let short = if w.log.is_some() { !w.window_unknown() } else { !w.is_windowed() };
             if short && w.measurement_hours() < 1.0 {
                 status = status.max(TileStatus::Watch);
                 takeaway = if w.log.is_some() {
-                    format!("Only {window}, so the numbers are thin: a longer log tells more.")
+                    t!("view.dashboard.statistics.thin_log", window = &window)
                 } else {
-                    format!("{} covers only {window}, so the numbers are thin until it has seen more.", w.source)
+                    t!("view.dashboard.statistics.thin", source = &w.source, window = &window)
                 };
             }
             if let Some(worst) = stats_findings.iter().rev().max_by_key(|f| f.severity) {
@@ -575,9 +621,19 @@ pub(super) fn statistics(report: &Report) -> Tile {
                 t.detail = collector_note(s, &[culprit_core::source_id::WORKLOAD]);
             }
             t.metrics = vec![
-                TileMetric::new("queries", "Queries", Some(w.query_count), format::count(w.query_count)),
-                TileMetric::new("plans", "All queries with plans", Some(planned as f64), planned.to_string()),
-                TileMetric::new("window-hours", "Covers", Some(w.measurement_hours()), span(w.measurement_hours())),
+                TileMetric::new(
+                    "queries",
+                    &t!("view.dashboard.metric.queries"),
+                    Some(w.query_count),
+                    format::count(w.query_count),
+                ),
+                TileMetric::new("plans", &t!("view.dashboard.metric.with_plans"), Some(planned as f64), with_plans),
+                TileMetric::new(
+                    "window-hours",
+                    &t!("view.dashboard.metric.covers"),
+                    Some(w.measurement_hours()),
+                    span(w.measurement_hours()),
+                ),
             ];
             t.items = stats_findings
                 .iter()
@@ -592,7 +648,12 @@ pub(super) fn statistics(report: &Report) -> Tile {
             t
         }
     };
-    tile.metrics.push(TileMetric::new("locked", "Locked checks", Some(locked as f64), locked.to_string()));
+    tile.metrics.push(TileMetric::new(
+        "locked",
+        &t!("view.dashboard.statistics.metric.locked"),
+        Some(locked as f64),
+        locked.to_string(),
+    ));
     if locked > 0 && tile.detail.is_none() {
         let needs: Vec<String> = {
             let mut caps: Vec<String> =
@@ -601,12 +662,12 @@ pub(super) fn statistics(report: &Report) -> Tile {
             caps.dedup();
             caps
         };
-        tile.detail = Some(format!(
-            "{} locked: {} need{} {}.",
-            capitalized(&plural(locked, "check is", "checks are")),
-            format::list(&report.locked.iter().map(|l| l.check.title.clone()).take(3).collect::<Vec<_>>()),
-            if locked == 1 { "s" } else { "" },
-            format::list(&needs)
+        tile.detail = Some(t!(
+            "view.dashboard.statistics.locked",
+            n = locked,
+            count = locked.to_string(),
+            checks = format::list(&report.locked.iter().map(|l| l.check.title.clone()).take(3).collect::<Vec<_>>()),
+            capabilities = format::list(&needs)
         ));
     }
     tile

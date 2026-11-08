@@ -11,41 +11,39 @@ pub(super) fn health(report: &Report) -> Tile {
                 TileKey::Health,
                 if available > 0 { TileStatus::Info } else { TileStatus::Unavailable },
                 if available > 0 {
-                    format!(
-                        "Shared resource measurements from {}. They do not grade this database's pressure.",
-                        plural(available, "node", "nodes")
-                    )
+                    t!("view.dashboard.health.nodes", n = available, count = available.to_string())
                 } else {
-                    "No node returned usable resource measurements.".into()
+                    t!("view.dashboard.health.no_nodes")
                 },
             );
-            tile.detail = Some(format!(
-                "{} · observed {} to {}. {}Host CPU and memory include other databases and processes; tracked allocations keep their native process scope.",
-                resources.source,
-                resources.observed_from,
-                resources.observed_until,
-                if resources.partial { "Partial read. " } else { "" }
-            ));
+            let mut detail = vec![t!(
+                "view.dashboard.health.nodes_observed",
+                source = &resources.source,
+                from = &resources.observed_from,
+                until = &resources.observed_until
+            )];
+            if resources.partial {
+                detail.push(t!("view.dashboard.partial_read"));
+            }
+            detail.push(t!("view.dashboard.health.nodes_scope"));
+            tile.detail = Some(detail.join(" "));
             tile.metrics.push(TileMetric::new(
                 "available-nodes",
-                "Nodes with measurements",
+                &t!("view.dashboard.health.metric.nodes_available"),
                 Some(available as f64),
                 available.to_string(),
             ));
             tile.metrics.push(TileMetric::new(
                 "expected-nodes",
-                "Nodes expected",
+                &t!("view.dashboard.health.metric.nodes_expected"),
                 resources.nodes_expected.map(|n| n as f64),
-                resources.nodes_expected.map_or_else(|| "unknown".into(), |n| n.to_string()),
+                resources.nodes_expected.map_or_else(|| t!("view.dashboard.unknown"), |n| n.to_string()),
             ));
             return operational(report, tile);
         }
         if let Some(reason) = s.source_problem(&[culprit_core::source_id::DOCDB_NODE_RESOURCES]) {
-            let mut tile = Tile::new(
-                TileKey::Health,
-                TileStatus::Unavailable,
-                "Shared node resource measurements were unavailable.",
-            );
+            let mut tile =
+                Tile::new(TileKey::Health, TileStatus::Unavailable, t!("view.dashboard.health.nodes_unavailable"));
             tile.detail = Some(reason);
             return operational(report, tile);
         }
@@ -61,28 +59,22 @@ pub(super) fn health(report: &Report) -> Tile {
         {
             return operational(
                 report,
-                Tile::new(
-                    TileKey::Health,
-                    TileStatus::Info,
-                    "Operational measurements were recorded; each retains its source scope and period.",
-                ),
+                Tile::new(TileKey::Health, TileStatus::Info, t!("view.dashboard.health.operational")),
             );
         }
+        let engine = s.server.engine.to_string();
         let headline = if s.server.engine.has_server() {
-            "This scan recorded no health counters.".to_string()
+            t!("view.dashboard.health.none")
         } else {
-            format!("{} has no server counters.", s.server.engine)
+            t!("view.dashboard.health.serverless", engine = &engine)
         };
-        let mut t = Tile::new(TileKey::Health, TileStatus::Unavailable, headline);
-        t.detail = Some(match s.notes.iter().find(|n| n.collector.contains("pressure")) {
+        let mut tile = Tile::new(TileKey::Health, TileStatus::Unavailable, headline);
+        tile.detail = Some(match s.notes.iter().find(|n| n.collector.contains("pressure")) {
             Some(note) => note.message.clone(),
-            None if !s.server.engine.has_server() => format!(
-                "{} has no server, so there are no compiles, memory, cache or connection counters to read.",
-                s.server.engine
-            ),
-            None => "Scan again to read compiles, memory, cache and connection counters.".into(),
+            None if !s.server.engine.has_server() => t!("view.dashboard.health.serverless_detail", engine = &engine),
+            None => t!("view.dashboard.health.scan_again"),
         });
-        return t;
+        return tile;
     };
     let mut signals: Vec<&Signal> = p.signals.iter().collect();
     // Worst first, then the healthy ones, then the ones shown without a verdict: an ungraded counter must never push a
@@ -107,28 +99,33 @@ pub(super) fn health(report: &Report) -> Tile {
     };
     let mut takeaway = match signals.first().filter(|s| matches!(s.status, SignalStatus::Bad | SignalStatus::Watch)) {
         Some(worst) => match &worst.healthy {
-            Some(healthy) => format!("{}: {}; {}.", worst.label, signal_value(worst), healthy.trim_end_matches('.')),
-            None => format!("{}: {}.", worst.label, signal_value(worst)),
+            Some(healthy) => t!(
+                "view.dashboard.health.worst_healthy",
+                signal = &worst.label,
+                value = signal_value(worst),
+                healthy = healthy.trim_end_matches('.')
+            ),
+            None => t!("view.dashboard.health.worst", signal = &worst.label, value = signal_value(worst)),
         },
-        None if graded == 1 => "The one graded signal looks healthy.".to_string(),
-        None if graded > 0 => format!("All {graded} graded signals look healthy."),
-        None => format!(
-            "{} recorded; none has a threshold to grade.",
-            capitalized(&plural(signals.len(), "signal", "signals"))
-        ),
+        None if graded == 1 => t!("view.dashboard.health.one_healthy"),
+        None if graded > 0 => t!("view.dashboard.health.all_healthy", count = graded.to_string()),
+        None => t!("view.dashboard.health.ungraded", n = signals.len(), count = signals.len().to_string()),
     };
     let mut items: Vec<TileItem> = Vec::new();
     // An old open transaction holds back cleanup on every engine; it earns a row of its own.
     if let Some(tx) = p.oldest_transaction.as_ref() {
         let assessed = report.findings.iter().find(|f| f.check == "held-cleanup" && f.is_actionable());
         let tx_status = assessed.map(|f| severity_status(f.severity)).unwrap_or(TileStatus::Info);
-        let mut item =
-            TileItem::new(ItemKind::Signal, culprit_core::signal_id::OLDEST_TRANSACTION, "Oldest open transaction");
-        item.value = Some(format!(
-            "{}{}",
-            format::duration(tx.seconds * 1000.0),
-            tx.state.as_deref().map(|s| format!(" · {s}")).unwrap_or_default()
-        ));
+        let mut item = TileItem::new(
+            ItemKind::Signal,
+            culprit_core::signal_id::OLDEST_TRANSACTION,
+            t!("view.dashboard.health.oldest_transaction"),
+        );
+        let open = format::duration(tx.seconds * 1000.0);
+        item.value = Some(match tx.state.as_deref() {
+            Some(state) => t!("view.dashboard.health.oldest_transaction_state", duration = open, state = state),
+            None => open,
+        });
         item.status = Some(tx_status);
         if let Some(assessed) = assessed
             && tx_status >= TileStatus::Watch
@@ -148,18 +145,20 @@ pub(super) fn health(report: &Report) -> Tile {
     let mut tile = Tile::new(TileKey::Health, status, takeaway);
     let more = (bad + watch).saturating_sub(1);
     tile.detail = if more > 0 {
-        Some(format!(
-            "{} also {} a look.",
-            capitalized(&plural(more, "more signal", "more signals")),
-            if more == 1 { "needs" } else { "need" }
-        ))
+        Some(t!("view.dashboard.health.more", n = more, count = more.to_string()))
     } else {
-        Some("Each signal states the period it measures.".into())
+        Some(t!("view.dashboard.health.periods"))
     };
+    let healthy = graded - bad - watch;
     tile.metrics = vec![
-        TileMetric::new("bad", "Bad", Some(bad as f64), bad.to_string()),
-        TileMetric::new("watch", "Watch", Some(watch as f64), watch.to_string()),
-        TileMetric::new("healthy", "Healthy", Some((graded - bad - watch) as f64), (graded - bad - watch).to_string()),
+        TileMetric::new("bad", &t!("view.dashboard.health.metric.bad"), Some(bad as f64), bad.to_string()),
+        TileMetric::new("watch", &t!("view.dashboard.health.metric.watch"), Some(watch as f64), watch.to_string()),
+        TileMetric::new(
+            "healthy",
+            &t!("view.dashboard.health.metric.healthy"),
+            Some(healthy as f64),
+            healthy.to_string(),
+        ),
     ];
     tile.items = items;
     operational(report, tile)

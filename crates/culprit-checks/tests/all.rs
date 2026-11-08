@@ -10,6 +10,7 @@ mod chatty;
 mod config_words;
 mod counter_age;
 mod dashboard;
+mod dashboard_words;
 mod deadlock_words;
 mod evidence_contracts;
 mod heap_tables;

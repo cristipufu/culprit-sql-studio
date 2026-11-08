@@ -3,7 +3,7 @@
 use super::*;
 
 pub(super) fn plans(s: &Snapshot) -> Tile {
-    let Some(w) = &s.workload else { return no_workload(TileKey::Plans, "there are no plans to read") };
+    let Some(w) = &s.workload else { return no_workload(TileKey::Plans, t!("view.dashboard.no_workload.plans")) };
     // Plans of queries that stopped running (most likely changed by a deploy) would describe code that is gone, and a
     // statement that ran once isn't what the application runs.
     let with_plans: Vec<&QueryStat> =
@@ -14,15 +14,13 @@ pub(super) fn plans(s: &Snapshot) -> Tile {
             let mut tile = Tile::new(
                 TileKey::Plans,
                 TileStatus::Info,
-                format!(
-                    "{total} application queries have plans, all historical or once-only; there is no current plan assessment."
-                ),
+                t!("view.dashboard.plans.all_history", count = total.to_string()),
             );
             tile.metrics = vec![
-                TileMetric::new("captured", "Current plans", Some(0.0), "0"),
-                TileMetric::new("all", "All queries with plans", Some(total as f64), total.to_string()),
+                TileMetric::new("captured", &t!("view.dashboard.plans.metric.current"), Some(0.0), "0"),
+                TileMetric::new("all", &t!("view.dashboard.metric.with_plans"), Some(total as f64), total.to_string()),
             ];
-            tile.detail = Some("Historical plans remain available under Queries; recheck their structural observations if the workload returns.".into());
+            tile.detail = Some(t!("view.dashboard.plans.history_detail"));
             return tile;
         }
         let reason = [Capability::QueryPlans, Capability::Showplan, Capability::GenericPlans]
@@ -33,11 +31,11 @@ pub(super) fn plans(s: &Snapshot) -> Tile {
             TileKey::Plans,
             TileStatus::Unavailable,
             match reason {
-                Some(reason) => format!("No plans were captured: {reason}"),
-                None => "No plans were captured in this scan.".to_string(),
+                Some(reason) => t!("view.dashboard.plans.none_captured_because", reason = reason),
+                None => t!("view.dashboard.plans.none_captured"),
             },
         );
-        t.detail = Some("Open a query to plan it on demand, or paste a plan into Plans.".into());
+        t.detail = Some(t!("view.dashboard.plans.none_detail"));
         return t;
     }
     struct Group<'a> {
@@ -88,19 +86,9 @@ pub(super) fn plans(s: &Snapshot) -> Tile {
     let (status, takeaway) = match ranked.first() {
         None if observations > 0 => (
             TileStatus::Info,
-            format!(
-                "No urgent plan change is established in this workload; {} {} structural observations to review as the data or workload changes.",
-                plural(observations, "current query plan", "current query plans"),
-                if observations == 1 { "retains" } else { "retain" }
-            ),
+            t!("view.dashboard.plans.observations", n = observations, count = observations.to_string()),
         ),
-        None => (
-            TileStatus::Good,
-            format!(
-                "None of the {} shows a known problem.",
-                plural(captured, "current query plan", "current query plans")
-            ),
-        ),
+        None => (TileStatus::Good, t!("view.dashboard.plans.clean", n = captured, count = captured.to_string())),
         Some((rule, g)) => {
             // Worth watching where the plan-insights check would raise it: a share of database time behind it.
             let status = if (g.severity == Severity::High && g.share >= crate::queries::MIN_SHARE)
@@ -112,19 +100,26 @@ pub(super) fn plans(s: &Snapshot) -> Tile {
             };
             let what = short_rule(rule);
             let share = format::percent(g.share.min(1.0));
+            let (flagged_count, captured_count) = (flagged.to_string(), captured.to_string());
             let takeaway = if flagged == 1 {
-                format!(
-                    "One of the {} has something to fix: {what} ({share} of database time).",
-                    plural(captured, "current query plan", "current query plans")
-                )
+                t!("view.dashboard.plans.one_flagged", n = captured, count = captured_count, rule = what, share = share)
             } else if g.plans == 1 {
-                format!(
-                    "{flagged} of {captured} current query plans have something to fix; the costliest is {what} ({share} of database time)."
+                t!(
+                    "view.dashboard.plans.costliest",
+                    flagged = flagged_count,
+                    captured = captured_count,
+                    rule = what,
+                    share = share
                 )
             } else {
-                format!(
-                    "{flagged} of {captured} current query plans have something to fix; {what} shows up in {} ({share} of database time).",
-                    plural(g.plans, "plan", "plans")
+                t!(
+                    "view.dashboard.plans.shows_up",
+                    n = g.plans,
+                    flagged = flagged_count,
+                    captured = captured_count,
+                    rule = what,
+                    count = g.plans.to_string(),
+                    share = share
                 )
             };
             (status, takeaway)
@@ -133,23 +128,36 @@ pub(super) fn plans(s: &Snapshot) -> Tile {
     let mut tile = Tile::new(TileKey::Plans, status, takeaway);
     let total = app_queries(s).filter(|q| q.plan.is_some()).count();
     let excluded = total - captured;
-    let coverage = format!(
-        "{captured} current application queries have plans; {total} application queries have plans in all. {excluded} historical or once-only queries are excluded from the current assessment."
+    let coverage = t!(
+        "view.dashboard.plans.coverage",
+        captured = captured.to_string(),
+        total = total.to_string(),
+        excluded = excluded.to_string()
     );
     tile.detail = Some(match note {
-        Some(note) => format!("{coverage} {note}"),
+        Some(note) => [coverage, note].join(" "),
         None => coverage,
     });
     tile.metrics = vec![
-        TileMetric::new("captured", "Current plans", Some(captured as f64), captured.to_string()),
-        TileMetric::new("flagged", "With problems", Some(flagged as f64), flagged.to_string()),
+        TileMetric::new(
+            "captured",
+            &t!("view.dashboard.plans.metric.current"),
+            Some(captured as f64),
+            captured.to_string(),
+        ),
+        TileMetric::new(
+            "flagged",
+            &t!("view.dashboard.plans.metric.flagged"),
+            Some(flagged as f64),
+            flagged.to_string(),
+        ),
     ];
     tile.items = ranked
         .iter()
         .take(4)
         .map(|(rule, g)| {
             let mut item = TileItem::new(ItemKind::Rule, rule.clone(), capitalized(&short_rule(rule)));
-            item.value = Some(plural(g.plans, "plan", "plans"));
+            item.value = Some(t!("view.dashboard.plans.count", n = g.plans, count = g.plans.to_string()));
             item.share = Some(g.share.min(1.0));
             item.status = Some(severity_status(g.severity));
             item.query_id = Some(g.top.id.clone());
@@ -162,40 +170,40 @@ pub(super) fn plans(s: &Snapshot) -> Tile {
 /// A rule as a few words for a sentence: "a large sort", "key lookups".
 pub(super) fn short_rule(rule: &str) -> String {
     match rule {
-        "cross-table-or" => "a filter across tables after a scan",
-        "key-lookups" => "key lookups",
-        "scan-filter" => "a scan reading far more rows than it keeps",
-        "missing-index-hint" => "a missing index",
-        "implicit-conversion" => "an implicit conversion",
-        "non-sargable" => "a function around a filtered column",
-        "leading-wildcard" => "a leading wildcard",
-        "not-in" => "a NOT IN",
-        "scalar-udf" => "a scalar function called per row",
-        "table-variable" => "a table variable",
-        "parallelism-blocked" => "a plan that can't go parallel",
-        "parallel-skew" => "uneven parallel threads",
-        "eager-spool" => "an eager spool",
-        "spill" => "a spill to disk",
-        "memory-grant" => "an oversized memory grant",
-        "misestimate" => "a row misestimate",
-        "nested-loops" => "a nested loop repeating thousands of times",
-        "big-sort" => "a large sort",
-        "no-join-predicate" => "a join without a condition",
-        "missing-statistics" => "missing statistics",
-        "optimizer-timeout" => "an optimizer timeout",
-        "legacy-ce" => "the legacy cardinality estimator",
-        "slow-compile" => "slow planning",
-        "many-to-many" => "a many-to-many merge join",
-        "remote-query" => "a remote query",
-        "heap-fetches" => "heap fetches",
-        "lossy-bitmap" => "a lossy bitmap scan",
-        "workers-short" => "missing parallel workers",
-        "jit" => "JIT compilation",
-        "correlated-subquery" => "a correlated subquery",
-        "join-buffer" => "a join without an index",
-        "temp-table-sort" => "a temporary table and filesort",
-        "index-ignored" => "an ignored index",
-        other => return other.replace('-', " "),
+        "cross-table-or" => t!("view.dashboard.plans.rule.cross_table_or"),
+        "key-lookups" => t!("view.dashboard.plans.rule.key_lookups"),
+        "scan-filter" => t!("view.dashboard.plans.rule.scan_filter"),
+        "missing-index-hint" => t!("view.dashboard.plans.rule.missing_index_hint"),
+        "implicit-conversion" => t!("view.dashboard.plans.rule.implicit_conversion"),
+        "non-sargable" => t!("view.dashboard.plans.rule.non_sargable"),
+        "leading-wildcard" => t!("view.dashboard.plans.rule.leading_wildcard"),
+        "not-in" => t!("view.dashboard.plans.rule.not_in"),
+        "scalar-udf" => t!("view.dashboard.plans.rule.scalar_udf"),
+        "table-variable" => t!("view.dashboard.plans.rule.table_variable"),
+        "parallelism-blocked" => t!("view.dashboard.plans.rule.parallelism_blocked"),
+        "parallel-skew" => t!("view.dashboard.plans.rule.parallel_skew"),
+        "eager-spool" => t!("view.dashboard.plans.rule.eager_spool"),
+        "spill" => t!("view.dashboard.plans.rule.spill"),
+        "memory-grant" => t!("view.dashboard.plans.rule.memory_grant"),
+        "misestimate" => t!("view.dashboard.plans.rule.misestimate"),
+        "nested-loops" => t!("view.dashboard.plans.rule.nested_loops"),
+        "big-sort" => t!("view.dashboard.plans.rule.big_sort"),
+        "no-join-predicate" => t!("view.dashboard.plans.rule.no_join_predicate"),
+        "missing-statistics" => t!("view.dashboard.plans.rule.missing_statistics"),
+        "optimizer-timeout" => t!("view.dashboard.plans.rule.optimizer_timeout"),
+        "legacy-ce" => t!("view.dashboard.plans.rule.legacy_ce"),
+        "slow-compile" => t!("view.dashboard.plans.rule.slow_compile"),
+        "many-to-many" => t!("view.dashboard.plans.rule.many_to_many"),
+        "remote-query" => t!("view.dashboard.plans.rule.remote_query"),
+        "heap-fetches" => t!("view.dashboard.plans.rule.heap_fetches"),
+        "lossy-bitmap" => t!("view.dashboard.plans.rule.lossy_bitmap"),
+        "workers-short" => t!("view.dashboard.plans.rule.workers_short"),
+        "jit" => t!("view.dashboard.plans.rule.jit"),
+        "correlated-subquery" => t!("view.dashboard.plans.rule.correlated_subquery"),
+        "join-buffer" => t!("view.dashboard.plans.rule.join_buffer"),
+        "temp-table-sort" => t!("view.dashboard.plans.rule.temp_table_sort"),
+        "index-ignored" => t!("view.dashboard.plans.rule.index_ignored"),
+        // A rule this list doesn't know yet: its id, as words.
+        other => other.replace('-', " "),
     }
-    .to_string()
 }
