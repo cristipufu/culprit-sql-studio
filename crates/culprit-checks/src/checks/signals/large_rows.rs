@@ -6,15 +6,21 @@ use crate::evidence::Requirement as Evidence;
 pub fn large_rows_info() -> CheckInfo {
     CheckInfo {
         id: "large-rows".into(),
-        title: "Tables whose rows are mostly large values".into(),
+        title: t!("check.large_rows.info.title"),
         category: Category::Maintenance,
         engines: vec![Engine::Mssql, Engine::Postgres],
         requires: vec![],
-        description: "Tables whose rows average many kilobytes, most of it in large values kept apart from the rows (SQL Server's LOB pages, PostgreSQL's TOAST): every statement that reads whole rows pulls them in, every write that sets them writes them again. From the catalog's page counts; no data is read.".into(),
+        description: t!("check.large_rows.info.description"),
     }
 }
 
-check!(LargeRowsCheck: large_rows_info, large_rows, &[Evidence::Tables(crate::evidence::TableMeasure::RowSize)]);
+check!(
+    LargeRowsCheck: large_rows_info,
+    decide = large_rows,
+    render = large_rows_finding,
+    case<'s> = LargeRows<'s>,
+    evidence = &[Evidence::Tables(crate::evidence::TableMeasure::RowSize)],
+);
 
 /// A row this big on average is mostly a payload, not a record.
 pub(super) const LARGE_ROW_BYTES: f64 = 16.0 * 1024.0;
@@ -91,37 +97,6 @@ pub(super) fn whole_row_statements<'a>(
     found
 }
 
-/// The sentence about the statements a large-rows finding lists, with a space in front ("The 3 statements below read
-/// or write them 696 times in 2 hours, going through about 294 pages (2.3 MB) a run."), or nothing without one. The
-/// pages a run are said only when every statement counted its reads. Refine says it again once a writer joins them.
-pub(crate) fn statements_below(snapshot: &Snapshot, statements: &[&QueryStat]) -> String {
-    if statements.is_empty() {
-        return String::new();
-    }
-    let runs: f64 = statements.iter().map(|q| q.executions).sum();
-    let reads: Vec<f64> = statements.iter().filter_map(|q| q.logical_reads).collect();
-    let writes = statements.iter().filter(|q| writes_rows(&q.text)).count();
-    let one = statements.len() == 1;
-    let verb = match (writes, one) {
-        (0, true) => "reads them",
-        (0, false) => "read them",
-        (1, true) => "writes them",
-        (w, false) if w == statements.len() => "write them",
-        _ => "read or write them",
-    };
-    let pages = (reads.len() == statements.len()).then(|| (reads.iter().sum::<f64>() / runs.max(1.0)).round());
-    format!(
-        " {} below {verb} {}{}",
-        if one { "The statement".to_string() } else { format!("The {} statements", statements.len()) },
-        runs_of_all(snapshot, statements),
-        match pages {
-            Some(p) =>
-                format!(", going through about {} pages ({}) a run.", format::count(p), format::bytes(p * 8192.0)),
-            None => ".".into(),
-        }
-    )
-}
-
 /// Whether a statement writes rows rather than reads them: its first statement keyword, past any parameter
 /// declarations and comments the engine kept with the text.
 pub(super) fn writes_rows(text: &str) -> bool {
@@ -163,8 +138,80 @@ pub(super) fn table_rows(t: &TableStat) -> Option<f64> {
     .filter(|r| *r >= 1.0)
 }
 
-pub fn large_rows(snapshot: &Snapshot) -> Vec<Finding> {
-    let mut findings: Vec<Finding> = snapshot
+/// The statements a large-rows finding lists, as their sentence says them: how many, whether they read or write, how
+/// often, and the pages a run when every one counted its reads.
+pub struct StatementsBelow {
+    count: usize,
+    /// As the sentence's `select` reads it: reads, read, writes, write, or both.
+    verb: &'static str,
+    how_often: String,
+    pages: Option<f64>,
+}
+
+/// [`StatementsBelow`] for `statements`, `None` without one. Refine says it again once a writer joins them.
+fn statements_below(snapshot: &Snapshot, statements: &[&QueryStat]) -> Option<StatementsBelow> {
+    if statements.is_empty() {
+        return None;
+    }
+    let runs: f64 = statements.iter().map(|q| q.executions).sum();
+    let reads: Vec<f64> = statements.iter().filter_map(|q| q.logical_reads).collect();
+    let writes = statements.iter().filter(|q| writes_rows(&q.text)).count();
+    let one = statements.len() == 1;
+    let verb = match (writes, one) {
+        (0, true) => "reads",
+        (0, false) => "read",
+        (1, true) => "writes",
+        (w, false) if w == statements.len() => "write",
+        _ => "both",
+    };
+    Some(StatementsBelow {
+        count: statements.len(),
+        verb,
+        how_often: runs_of_all(snapshot, statements),
+        pages: (reads.len() == statements.len()).then(|| (reads.iter().sum::<f64>() / runs.max(1.0)).round()),
+    })
+}
+
+/// A table of large rows, or a large table's columns of legacy json.
+pub enum LargeRows<'s> {
+    Table(LargeTable<'s>),
+    Json(JsonColumns<'s>),
+}
+
+/// A table whose rows average many kilobytes, most of it in large values.
+pub struct LargeTable<'s> {
+    table: &'s TableStat,
+    rows: f64,
+    size: f64,
+    large: f64,
+    /// The columns whose type can hold large values, in their order.
+    columns: Vec<String>,
+    /// The share of its row versions that are dead, when a fifth or more.
+    dead: Option<f64>,
+    statements: Vec<&'s QueryStat>,
+    below: Option<StatementsBelow>,
+    /// Whole-row statements a day, where every one's runs came a day at a time.
+    runs_a_day: Option<f64>,
+    growth: Option<Growth>,
+    severity: Severity,
+}
+
+/// How the table's size changed since the newest scan at least an hour back: its time and the change.
+pub struct Growth {
+    taken_at: String,
+    delta: f64,
+    days: f64,
+}
+
+/// A large PostgreSQL table with columns of the legacy text-backed `json` type.
+pub struct JsonColumns<'s> {
+    table: &'s TableStat,
+    rows: f64,
+    columns: Vec<&'s str>,
+}
+
+fn large_rows(snapshot: &Snapshot) -> Vec<LargeRows<'_>> {
+    let mut cases: Vec<(LargeRows<'_>, Severity)> = snapshot
         .tables
         .iter()
         .filter_map(|t| {
@@ -174,124 +221,58 @@ pub fn large_rows(snapshot: &Snapshot) -> Vec<Finding> {
             // wait for VACUUM isn't a table of large rows. Per version, they must still be large.
             let versions = rows + t.dead_rows.unwrap_or(0.0).max(0.0);
             (size >= LARGE_ROWS_TABLE_BYTES && size / versions >= LARGE_ROW_BYTES && large / size >= LARGE_VALUE_SHARE)
-                .then(|| large_rows_finding(snapshot, t, rows, size, large))
+                .then(|| large_table(snapshot, t, rows, size, large, None))
+        })
+        .map(|table| {
+            let severity = table.severity;
+            (LargeRows::Table(table), severity)
         })
         .collect();
-    findings.extend(json_columns(snapshot));
-    findings.sort_by(|a, b| b.impact.score.total_cmp(&a.impact.score));
-    findings.truncate(5);
-    findings
+    cases.extend(json_columns(snapshot).into_iter().map(|json| (LargeRows::Json(json), Severity::Low)));
+    // Ranked by severity alone, keeping their order within one.
+    cases.sort_by(|a, b| base_score(b.1).total_cmp(&base_score(a.1)));
+    cases.truncate(5);
+    cases.into_iter().map(|(case, _)| case).collect()
 }
 
 /// Large PostgreSQL tables (`>= 100k` rows) that use the legacy text-backed `json` type instead of binary `jsonb`.
-fn json_columns(snapshot: &Snapshot) -> Vec<Finding> {
+fn json_columns(snapshot: &Snapshot) -> Vec<JsonColumns<'_>> {
     if snapshot.server.engine != Engine::Postgres || snapshot.columns.is_empty() {
         return Vec::new();
     }
-    let mut out = Vec::new();
-    for t in &snapshot.tables {
-        if t.partition_of.is_some() {
-            continue;
-        }
-        let Some(rows) = table_rows(t).filter(|r| *r >= 100_000.0) else {
-            continue;
-        };
-        let cols: Vec<&culprit_core::ColumnInfo> = snapshot
-            .columns
-            .iter()
-            .filter(|c| {
-                c.schema.eq_ignore_ascii_case(&t.schema)
-                    && c.table.eq_ignore_ascii_case(&t.name)
-                    && c.data_type.trim().eq_ignore_ascii_case("json")
-            })
-            .collect();
-        if cols.is_empty() {
-            continue;
-        }
-        let qual = t.qualified();
-        let col_names: Vec<&str> = cols.iter().map(|c| c.name.as_str()).collect();
-        let first_col = col_names[0];
-        let mut f = finding(
-            "large-rows",
-            &format!("json-column:{qual}.{}", col_names.join(",")),
-            Category::Maintenance,
-            subject(SubjectKind::Table, &qual),
-        );
-        f.actionability = culprit_core::Actionability::OptionalImprovement;
-        f.severity = Severity::Low;
-        f.impact.score = base_score(Severity::Low);
-        f.impact.label = "json -> jsonb".into();
-        f.confidence = Confidence::High;
-        f.title = format!(
-            "{}.{} uses legacy json instead of jsonb ({} rows)",
-            t.name,
-            col_names.join(", "),
-            format::count(rows)
-        );
-        f.summary = format!(
-            "{qual} ({} rows) declares `{}` as `json` rather than `jsonb`. PostgreSQL's `json` type stores raw \
-             unparsed text, re-parses the document on every field access, preserves duplicate keys and whitespace, and \
-             supports neither GIN indexing nor direct equality/containment operators (`@>`, `=`).",
-            format::count(rows),
-            col_names.join("`, `")
-        );
-        f.metrics.push(Metric::new("Rows in table", rows, Unit::Rows));
-        f.metrics.push(Metric::text("Column", format!("{}.{first_col} (json)", t.name)));
-        let target = qualified(Engine::Postgres, &t.schema, &t.name);
-        let col_ident = quote(Engine::Postgres, first_col);
-        f.fix = Some(Fix {
-            summary: format!(
-                "Convert `{}` on {qual} from `json` to `jsonb` during a maintenance window if exact whitespace/key-order preservation is not required.",
-                col_names.join("`, `")
-            ),
-            sql: Some(format!("ALTER TABLE {target} ALTER COLUMN {col_ident} TYPE jsonb USING {col_ident}::jsonb;")),
-            cost: Some(
-                "Changing a column from json to jsonb rewrites the table while holding an ACCESS EXCLUSIVE lock."
-                    .into(),
-            ),
-        });
-        f.verify = vec![format!(
-            "Re-scan after converting {qual}.{first_col} to `jsonb`: the column type is `jsonb` and this finding is gone."
-        )];
-        out.push(f);
-    }
-    out
+    snapshot
+        .tables
+        .iter()
+        .filter(|t| t.partition_of.is_none())
+        .filter_map(|t| {
+            let rows = table_rows(t).filter(|r| *r >= 100_000.0)?;
+            let columns: Vec<&str> = snapshot
+                .columns
+                .iter()
+                .filter(|c| {
+                    c.schema.eq_ignore_ascii_case(&t.schema)
+                        && c.table.eq_ignore_ascii_case(&t.name)
+                        && c.data_type.trim().eq_ignore_ascii_case("json")
+                })
+                .map(|c| c.name.as_str())
+                .collect();
+            (!columns.is_empty()).then_some(JsonColumns { table: t, rows, columns })
+        })
+        .collect()
 }
 
-pub(super) fn large_rows_finding(snapshot: &Snapshot, t: &TableStat, rows: f64, size: f64, large: f64) -> Finding {
-    large_rows_with_statements(snapshot, t, rows, size, large, None)
-}
-
-/// Render the original table evidence with the complete list retained after refinement. No sentence matching.
-pub(crate) fn restate_large_rows(snapshot: &Snapshot, f: &Finding, listed: &[&QueryStat]) -> Option<String> {
-    let facts = f.facts.large_rows.as_ref()?;
-    let table = snapshot.tables.iter().find(|t| t.qualified().eq_ignore_ascii_case(&f.subject.name))?;
-    Some(large_rows_with_statements(snapshot, table, facts.rows, facts.size, facts.large, Some(listed)).summary)
-}
-
-fn large_rows_with_statements(
-    snapshot: &Snapshot,
-    t: &TableStat,
+/// What a table of large rows establishes, with the statements refine listed (`listed`) or those that read whole rows.
+fn large_table<'s>(
+    snapshot: &'s Snapshot,
+    t: &'s TableStat,
     rows: f64,
     size: f64,
     large: f64,
-    listed: Option<&[&QueryStat]>,
-) -> Finding {
+    listed: Option<&[&'s QueryStat]>,
+) -> LargeTable<'s> {
     let engine = snapshot.server.engine;
-    let name = t.qualified();
-    let average = size / rows;
-    let share = large / size;
-    let mut f = finding("large-rows", &name, Category::Maintenance, subject(SubjectKind::Table, &name));
-    f.facts.large_rows = Some(culprit_core::FindingLargeRows { rows, size, large });
-    f.title = format!(
-        "{} holds {} in {} rows: {} a row, mostly large values",
-        t.name,
-        format::bytes(size),
-        format::count(rows),
-        format::bytes(average)
-    );
-
-    // The columns that can hold them, from the catalog: nothing is sampled.
+    // The columns that can hold them, from the catalog: nothing is sampled. Which of them hold the bytes isn't known
+    // without reading the data: these are the columns that can.
     let mut columns: Vec<_> = snapshot
         .columns
         .iter()
@@ -302,36 +283,6 @@ fn large_rows_with_statements(
         })
         .collect();
     columns.sort_by_key(|c| c.ordinal);
-    let column_names: Vec<String> = columns.iter().take(6).map(|c| c.name.clone()).collect();
-    // Which of them hold the bytes isn't known without reading the data: these are the columns that can.
-    let held_in = match (column_names.as_slice(), columns.len()) {
-        ([], _) => String::new(),
-        ([one], 1) => format!(" (the column that can hold them: {one})"),
-        (names, n) if n > names.len() => {
-            format!(" (columns that can hold them: {} and {} more)", names.join(", "), n - names.len())
-        }
-        (names, _) => format!(" (columns that can hold them: {})", format::list(names)),
-    };
-    let mut summary = format!(
-        "The {} rows of {} take {}: {} each on average, and {} of that is large values kept apart from the rows{held_in}. Every statement that reads whole rows pulls them in, every insert or update that sets them writes them again, and they keep their space until the rows are deleted and purged.",
-        format::count(rows),
-        t.name,
-        format::bytes(size),
-        format::bytes(average),
-        share_words(share)
-    );
-    if engine == Engine::Postgres {
-        summary.push_str(" PostgreSQL has already compressed them: these are the sizes on disk.");
-    }
-
-    // Dead versions hold their values until VACUUM: say how much of the table they are.
-    if let Some(dead) = dead_share(t).filter(|d| *d >= 0.2) {
-        summary.push_str(&format!(
-            " {} of its row versions are dead rows not yet vacuumed, and their large values still take space until VACUUM clears them.",
-            format::percent(dead)
-        ));
-    }
-
     // Statements reading whole rows: what makes the size cost on every run, not just on disk.
     let statements =
         listed.map(|queries| queries.to_vec()).unwrap_or_else(|| whole_row_statements(snapshot, t, size, large));
@@ -342,89 +293,232 @@ fn large_rows_with_statements(
         .workload
         .as_ref()
         .filter(|w| statements.iter().all(|q| w.runs_per_day_of(q).is_some()))
-        .and_then(|w| w.per_day_measured(runs));
-    summary.push_str(&statements_below(snapshot, &statements));
-
-    // Growth since the newest scan at least 20 hours back, when there is one: named by its time, since it is not
+        .and_then(|w| w.per_day_measured(runs))
+        .filter(|_| !statements.is_empty());
+    // Growth since the newest scan at least an hour back, when there is one: named by its time, since it is not
     // always the scan just before.
+    let name = t.qualified();
     let growth = snapshot.sizes_before.as_ref().and_then(|b| {
         let then = b.bytes(&name)?;
         let days = days_between(&b.taken_at, &snapshot.taken_at).filter(|d| *d >= 1.0 / 24.0)?;
-        Some((b, size - then, days))
+        Some(Growth { taken_at: b.taken_at.clone(), delta: size - then, days })
     });
-    let mut fast = false;
-    if let Some((before, delta, days)) = growth {
-        let when = crate::queries::when_phrase(&before.taken_at);
-        let a_day = delta / days;
-        fast = a_day >= FAST_GROWTH_BYTES && a_day >= FAST_GROWTH_SHARE * size;
-        summary.push(' ');
-        summary.push_str(&if delta >= MB && days >= 20.0 / 24.0 {
-            format!("It grew by {} since the scan {when}, about {} a day.", format::bytes(delta), format::bytes(a_day))
-        } else if delta >= MB {
-            format!(
-                "It grew by {} in the {} since the scan {when}.",
-                format::bytes(delta),
-                culprit_core::span_words(days * 24.0)
-            )
-        } else if delta <= -MB {
-            format!("It's {} smaller than at the scan {when}.", format::bytes(-delta))
-        } else {
-            format!("It hasn't grown since the scan {when}.")
-        });
-        if delta >= MB && days >= 20.0 / 24.0 {
-            f.metrics.push(Metric::new("Growth a day", a_day, Unit::Bytes));
-        }
-    }
-    f.summary = summary;
-
+    let fast = growth.as_ref().is_some_and(|g| {
+        let a_day = g.delta / g.days;
+        a_day >= FAST_GROWTH_BYTES && a_day >= FAST_GROWTH_SHARE * size
+    });
     let weight = usize::from(hot) + usize::from(fast) + usize::from(size >= BIG_TABLE_BYTES);
-    f.severity = match weight {
-        0 => Severity::Low,
-        1 => Severity::Medium,
-        _ => Severity::High,
-    };
+    LargeTable {
+        table: t,
+        rows,
+        size,
+        large,
+        columns: columns.iter().map(|c| c.name.clone()).collect(),
+        // Dead versions hold their values until VACUUM: said how much of the table they are.
+        dead: dead_share(t).filter(|d| *d >= 0.2),
+        below: statements_below(snapshot, &statements),
+        statements,
+        runs_a_day,
+        growth,
+        severity: match weight {
+            0 => Severity::Low,
+            1 => Severity::Medium,
+            _ => Severity::High,
+        },
+    }
+}
+
+/// Render the original table evidence with the complete list retained after refinement. No sentence matching.
+pub(crate) fn restate_large_rows(snapshot: &Snapshot, f: &Finding, listed: &[&QueryStat]) -> Option<String> {
+    let facts = f.facts.large_rows.as_ref()?;
+    let table = snapshot.tables.iter().find(|t| t.qualified().eq_ignore_ascii_case(&f.subject.name))?;
+    let case = large_table(snapshot, table, facts.rows, facts.size, facts.large, Some(listed));
+    Some(large_table_finding(snapshot, case).summary)
+}
+
+fn large_rows_finding(snapshot: &Snapshot, case: LargeRows<'_>) -> Finding {
+    match case {
+        LargeRows::Table(table) => large_table_finding(snapshot, table),
+        LargeRows::Json(json) => json_finding(json),
+    }
+}
+
+fn json_finding(json: JsonColumns<'_>) -> Finding {
+    let JsonColumns { table: t, rows, columns } = json;
+    let qual = t.qualified();
+    let first_col = columns[0];
+    let mut f = finding(
+        "large-rows",
+        &format!("json-column:{qual}.{}", columns.join(",")),
+        Category::Maintenance,
+        subject(SubjectKind::Table, &qual),
+    );
+    f.actionability = culprit_core::Actionability::OptionalImprovement;
+    f.severity = Severity::Low;
+    f.impact.score = base_score(Severity::Low);
+    f.impact.label = t!("check.large_rows.json.impact");
     f.confidence = Confidence::High;
+    f.title =
+        t!("check.large_rows.json.title", table = &t.name, columns = columns.join(", "), rows = format::count(rows));
+    f.summary =
+        t!("check.large_rows.json.summary", table = &qual, rows = format::count(rows), columns = columns.join("`, `"));
+    f.metrics.push(Metric::new(t!("check.large_rows.json.metric.rows"), rows, Unit::Rows));
+    f.metrics.push(Metric::text(t!("check.large_rows.json.metric.column"), format!("{}.{first_col} (json)", t.name)));
+    let target = qualified(Engine::Postgres, &t.schema, &t.name);
+    let col_ident = quote(Engine::Postgres, first_col);
+    f.fix = Some(Fix {
+        summary: t!("check.large_rows.json.fix", columns = columns.join("`, `"), table = &qual),
+        sql: Some(format!("ALTER TABLE {target} ALTER COLUMN {col_ident} TYPE jsonb USING {col_ident}::jsonb;")),
+        cost: Some(t!("check.large_rows.json.fix_cost")),
+    });
+    f.verify = vec![t!("check.large_rows.json.verify", table = &qual, column = first_col)];
+    f
+}
+
+fn large_table_finding(snapshot: &Snapshot, large: LargeTable<'_>) -> Finding {
+    let LargeTable { table: t, rows, size, large: large_bytes, .. } = large;
+    let engine = snapshot.server.engine;
+    let name = t.qualified();
+    let average = size / rows;
+    let share = large_bytes / size;
+    let mut f = finding("large-rows", &name, Category::Maintenance, subject(SubjectKind::Table, &name));
+    f.facts.large_rows = Some(culprit_core::FindingLargeRows { rows, size, large: large_bytes });
+    let (rows_said, size_said, average_said) = (format::count(rows), format::bytes(size), format::bytes(average));
+    f.title =
+        t!("check.large_rows.title", table = &t.name, size = &size_said, rows = &rows_said, average = &average_said);
+    let shown: Vec<String> = large.columns.iter().take(6).cloned().collect();
+    let mut summary = vec![match (shown.as_slice(), large.columns.len()) {
+        ([], _) => t!(
+            "check.large_rows.summary.size",
+            rows = &rows_said,
+            table = &t.name,
+            size = &size_said,
+            average = &average_said,
+            share = share_words(share)
+        ),
+        ([one], 1) => t!(
+            "check.large_rows.summary.size_column",
+            rows = &rows_said,
+            table = &t.name,
+            size = &size_said,
+            average = &average_said,
+            share = share_words(share),
+            column = one
+        ),
+        (names, n) if n > names.len() => t!(
+            "check.large_rows.summary.size_columns_more",
+            rows = &rows_said,
+            table = &t.name,
+            size = &size_said,
+            average = &average_said,
+            share = share_words(share),
+            columns = names.join(", "),
+            more = (n - names.len()).to_string()
+        ),
+        (names, _) => t!(
+            "check.large_rows.summary.size_columns",
+            rows = &rows_said,
+            table = &t.name,
+            size = &size_said,
+            average = &average_said,
+            share = share_words(share),
+            columns = format::list(names)
+        ),
+    }];
+    if engine == Engine::Postgres {
+        summary.push(t!("check.large_rows.summary.compressed"));
+    }
+    if let Some(dead) = large.dead {
+        summary.push(t!("check.large_rows.summary.dead", share = format::percent(dead)));
+    }
+    if let Some(below) = &large.below {
+        summary.push(match below.pages {
+            Some(p) => t!(
+                "check.large_rows.summary.statements_pages",
+                n = below.count,
+                verb = below.verb,
+                how_often = &below.how_often,
+                pages = format::count(p),
+                bytes = format::bytes(p * 8192.0)
+            ),
+            None => t!(
+                "check.large_rows.summary.statements",
+                n = below.count,
+                verb = below.verb,
+                how_often = &below.how_often
+            ),
+        });
+    }
+    if let Some(g) = &large.growth {
+        let when = crate::queries::when_phrase(&g.taken_at);
+        let a_day = g.delta / g.days;
+        summary.push(if g.delta >= MB && g.days >= 20.0 / 24.0 {
+            f.metrics.push(Metric::new(t!("check.large_rows.metric.growth"), a_day, Unit::Bytes));
+            t!(
+                "check.large_rows.summary.grew_a_day",
+                delta = format::bytes(g.delta),
+                when = &when,
+                a_day = format::bytes(a_day)
+            )
+        } else if g.delta >= MB {
+            t!(
+                "check.large_rows.summary.grew",
+                delta = format::bytes(g.delta),
+                span = culprit_core::span_words(g.days * 24.0),
+                when = &when
+            )
+        } else if g.delta <= -MB {
+            t!("check.large_rows.summary.smaller", delta = format::bytes(-g.delta), when = &when)
+        } else {
+            t!("check.large_rows.summary.not_grown", when = &when)
+        });
+    }
+    f.summary = summary.join(" ");
+    f.severity = large.severity;
+    f.confidence = Confidence::High;
+    let statements = large.statements;
     if let Some(impact) = query_impact(snapshot, &statements) {
         f.impact.db_time_share = Some(impact.share);
         f.impact.time_ms_per_day = impact.per_day_ms;
     }
     severity_score(&mut f);
-    f.impact.label = format!("{}, {} a row", format::bytes(size), format::bytes(average));
+    f.impact.label = t!("check.large_rows.impact", size = &size_said, average = &average_said);
     let mut metrics = vec![
-        Metric::new("Table data", size, Unit::Bytes),
-        Metric::new("Rows", rows, Unit::Rows),
-        Metric::new("Average row", average, Unit::Bytes),
-        Metric::new("In large-value pages", share, Unit::Ratio),
+        Metric::new(t!("check.large_rows.metric.table_data"), size, Unit::Bytes),
+        Metric::new(t!("common.metric.rows"), rows, Unit::Rows),
+        Metric::new(t!("check.large_rows.metric.average_row"), average, Unit::Bytes),
+        Metric::new(t!("check.large_rows.metric.large_pages"), share, Unit::Ratio),
     ];
-    if let Some(runs_a_day) = runs_a_day.filter(|_| !statements.is_empty()) {
-        metrics.push(Metric::new("Whole-row statements a day", runs_a_day, Unit::Count));
+    if let Some(runs_a_day) = large.runs_a_day {
+        metrics.push(Metric::new(t!("check.large_rows.metric.whole_row_a_day"), runs_a_day, Unit::Count));
     }
     metrics.append(&mut f.metrics);
     f.metrics = metrics;
     f.queries = query_refs(&statements);
     f.last_seen = statements.iter().filter_map(|q| q.last_seen.clone()).max();
-
-    let compress = compress_advice(engine);
     f.fix = Some(Fix {
-        summary: format!(
-            "Read only the columns a statement needs: a SELECT * or an ORM loading whole rows pulls every large value. Keep a value that many rows repeat in one place and point to it. Clear values a row no longer needs once its work is done. Check how long deleted rows are kept before they're purged: until then they keep their values. For values that must stay, {compress}."
-        ),
+        summary: [
+            t!("check.large_rows.fix.read_columns"),
+            t!("check.large_rows.fix.compress", engine = culprit_core::wire_name(&engine)),
+        ]
+        .join(" "),
         sql: None,
         cost: None,
     });
     let compare_time = if statements.is_empty() {
-        "Record representative runs of the changed statement in the workload, then compare its time per run."
-            .to_string()
+        t!("check.large_rows.verify.record_runs")
     } else {
-        crate::queries::what_changed_between_scans(snapshot, "the changed statements", "compare their time per run")
-            .unwrap_or_else(|| "Compare the changed statements' time per run in windows before and after the change, for the same rows and representative values.".into())
+        crate::queries::what_changed_between_scans(
+            snapshot,
+            &t!("check.large_rows.verify.changed_statements"),
+            &t!("check.large_rows.verify.compare_time_per_run"),
+        )
+        .unwrap_or_else(|| t!("check.large_rows.verify.compare_windows"))
     };
     f.verify = vec![
-        format!(
-            "If you read fewer columns, measure how much data the application receives for the same rows before and after. {compare_time} A rewritten statement has a new entry. Reading fewer columns need not change the table's stored size or the number of in-row pages read."
-        ),
-        "If you make stored values smaller, compare bytes per live row in later scans; if you remove rows or values, compare total large-value bytes and subsequent growth. Catalog page counts can lag until freed space is reclaimed, and the percentage in large values need not fall.".into(),
+        [t!("check.large_rows.verify.read_fewer"), compare_time, t!("check.large_rows.verify.rewritten")].join(" "),
+        t!("check.large_rows.verify.smaller_values"),
     ];
-    f.caveats = vec!["Sizes are the pages the table has reserved, from the catalog: they include space allocated but not yet filled.".into()];
+    f.caveats = vec![t!("check.large_rows.caveat.reserved")];
     f
 }

@@ -2458,3 +2458,184 @@ sql: SELECT pg_drop_replication_slot('old_server_slot');
 verify: Re-scan: the slot should be gone, or active again."#,
     );
 }
+
+// ── large-rows ─────────────────────────────────────────────────────────────────────────────────────
+
+const MB: f64 = 1024.0 * 1024.0;
+
+/// `fixture` with `table`'s rows made 2.9 GB of large values in 9,728 rows, its columns `columns`, and no statements.
+fn large(name: &str, table: &str, columns: &[(&str, &str)]) -> Snapshot {
+    let mut s = fixture(name);
+    s.taken_at = "2026-10-13T09:00:00Z".into();
+    let t = s.tables.iter_mut().find(|t| t.name == table).expect("a table");
+    (t.rows, t.in_row_bytes, t.lob_bytes, t.overflow_bytes, t.data_bytes) =
+        (Some(9_728.0), Some(31.0 * MB), Some(2_900.0 * MB), Some(0.0), Some(2_931.0 * MB));
+    t.dead_rows = None;
+    let (schema, table) = (t.schema.clone(), t.name.clone());
+    s.columns.retain(|c| c.table != table);
+    for (ordinal, (name, data_type)) in columns.iter().enumerate() {
+        s.columns.push(culprit_core::ColumnInfo {
+            schema: schema.clone(),
+            table: table.clone(),
+            name: (*name).into(),
+            data_type: (*data_type).into(),
+            nullable: true,
+            default: None,
+            generated: false,
+            ordinal: 100 + ordinal as u32,
+        });
+    }
+    let w = s.workload.as_mut().expect("workload");
+    w.window_hours = 24.0;
+    let mut template = w.queries[0].clone();
+    (template.plan, template.costs, template.first_seen, template.last_seen) = (None, None, None, None);
+    (template.object_name, template.resolved_write_target, template.query_hash) = (None, None, None);
+    template.waits.clear();
+    w.queries = vec![template];
+    s
+}
+
+/// A statement on `s` like its template: `runs` runs returning `rows` rows a run, reading `reads` pages a run.
+fn statement(s: &mut Snapshot, id: &str, text: &str, runs: f64, rows: f64, reads: f64) {
+    let w = s.workload.as_mut().expect("workload");
+    let mut q = w.queries[0].clone();
+    (q.id, q.text, q.executions, q.rows, q.logical_reads) =
+        (id.into(), text.into(), runs, Some(rows * runs), Some(reads * runs));
+    w.queries.push(q);
+}
+
+fn grown_since(s: &mut Snapshot, key: &str, taken_at: &str, mb: f64) {
+    let tables = std::collections::BTreeMap::from([(key.to_string(), mb * MB)]);
+    s.sizes_before = Some(culprit_core::SizeBaseline { taken_at: taken_at.into(), tables, reference: None });
+}
+
+#[test]
+fn large_rows_read_whole_and_growing_on_sql_server() {
+    let columns = [("id", "int"), ("body", "nvarchar(max)"), ("attachments", "varbinary(max)")];
+    let mut s = large("mssql-demo", "support_tickets", &columns);
+    statement(&mut s, "201", "SELECT * FROM shop.support_tickets WHERE id = @P1", 12_700.0, 1.0, 280.0);
+    grown_since(&mut s, "shop.support_tickets", "2026-10-12T09:00:00Z", 2_331.0);
+    let mut findings = run("large-rows", &s);
+    let wide: Vec<(String, String)> = (0..8).map(|i| (format!("note_{i}"), "nvarchar(max)".to_string())).collect();
+    let wide: Vec<(&str, &str)> = wide.iter().map(|(n, t)| (n.as_str(), t.as_str())).collect();
+    let mut s = large("mssql-demo", "support_tickets", &wide);
+    statement(&mut s, "201", "SELECT * FROM shop.support_tickets WHERE id = @P1", 300.0, 1.0, 280.0);
+    statement(&mut s, "202", "UPDATE shop.support_tickets SET body = @P1 WHERE id = @P2", 200.0, 1.0, 300.0);
+    grown_since(&mut s, "shop.support_tickets", "2026-10-13T03:00:00Z", 2_331.0);
+    findings.extend(run("large-rows", &s));
+    let mut s = large("mssql-demo", "support_tickets", &[("id", "int")]);
+    grown_since(&mut s, "shop.support_tickets", "2026-10-12T09:00:00Z", 3_500.0);
+    findings.extend(run("large-rows", &s));
+    says(
+        &findings,
+        r#"id: large-rows:shop.support_tickets
+title: support_tickets holds 2.9 GB in 9.7K rows: 309 KB a row, mostly large values
+summary: The 9.7K rows of support_tickets take 2.9 GB: 309 KB each on average, and almost all of that is large values kept apart from the rows (columns that can hold them: body and attachments). Every statement that reads whole rows pulls them in, every insert or update that sets them writes them again, and they keep their space until the rows are deleted and purged. The statement below reads them about 13K times a day, going through about 280 pages (2.2 MB) a run. It grew by 600 MB since the scan on Oct 12 at 09:00 UTC, about 600 MB a day.
+impact: 2.9 GB, 309 KB a row
+metric: Table data
+metric: Rows
+metric: Average row
+metric: In large-value pages
+metric: Whole-row statements a day
+metric: Growth a day
+fix: Read only the columns a statement needs: a SELECT * or an ORM loading whole rows pulls every large value. Keep a value that many rows repeat in one place and point to it. Clear values a row no longer needs once its work is done. Check how long deleted rows are kept before they're purged: until then they keep their values. For values that must stay, COMPRESS() them as they're written (GZip; DECOMPRESS() reads them back), or keep them in object storage and store a reference.
+verify: If you read fewer columns, measure how much data the application receives for the same rows before and after. Compare the changed statements' time per run in windows before and after the change, for the same rows and representative values. A rewritten statement has a new entry. Reading fewer columns need not change the table's stored size or the number of in-row pages read.
+verify: If you make stored values smaller, compare bytes per live row in later scans; if you remove rows or values, compare total large-value bytes and subsequent growth. Catalog page counts can lag until freed space is reclaimed, and the percentage in large values need not fall.
+caveat: Sizes are the pages the table has reserved, from the catalog: they include space allocated but not yet filled.
+
+id: large-rows:shop.support_tickets
+title: support_tickets holds 2.9 GB in 9.7K rows: 309 KB a row, mostly large values
+summary: The 9.7K rows of support_tickets take 2.9 GB: 309 KB each on average, and almost all of that is large values kept apart from the rows (columns that can hold them: note_0, note_1, note_2, note_3, note_4, note_5 and 2 more). Every statement that reads whole rows pulls them in, every insert or update that sets them writes them again, and they keep their space until the rows are deleted and purged. The 2 statements below read or write them about 500 times a day, going through about 288 pages (2.2 MB) a run. It grew by 600 MB in the 6 hours since the scan on Oct 13 at 03:00 UTC.
+impact: 2.9 GB, 309 KB a row
+metric: Table data
+metric: Rows
+metric: Average row
+metric: In large-value pages
+metric: Whole-row statements a day
+fix: Read only the columns a statement needs: a SELECT * or an ORM loading whole rows pulls every large value. Keep a value that many rows repeat in one place and point to it. Clear values a row no longer needs once its work is done. Check how long deleted rows are kept before they're purged: until then they keep their values. For values that must stay, COMPRESS() them as they're written (GZip; DECOMPRESS() reads them back), or keep them in object storage and store a reference.
+verify: If you read fewer columns, measure how much data the application receives for the same rows before and after. Compare the changed statements' time per run in windows before and after the change, for the same rows and representative values. A rewritten statement has a new entry. Reading fewer columns need not change the table's stored size or the number of in-row pages read.
+verify: If you make stored values smaller, compare bytes per live row in later scans; if you remove rows or values, compare total large-value bytes and subsequent growth. Catalog page counts can lag until freed space is reclaimed, and the percentage in large values need not fall.
+caveat: Sizes are the pages the table has reserved, from the catalog: they include space allocated but not yet filled.
+
+id: large-rows:shop.support_tickets
+title: support_tickets holds 2.9 GB in 9.7K rows: 309 KB a row, mostly large values
+summary: The 9.7K rows of support_tickets take 2.9 GB: 309 KB each on average, and almost all of that is large values kept apart from the rows. Every statement that reads whole rows pulls them in, every insert or update that sets them writes them again, and they keep their space until the rows are deleted and purged. It's 569 MB smaller than at the scan on Oct 12 at 09:00 UTC.
+impact: 2.9 GB, 309 KB a row
+metric: Table data
+metric: Rows
+metric: Average row
+metric: In large-value pages
+fix: Read only the columns a statement needs: a SELECT * or an ORM loading whole rows pulls every large value. Keep a value that many rows repeat in one place and point to it. Clear values a row no longer needs once its work is done. Check how long deleted rows are kept before they're purged: until then they keep their values. For values that must stay, COMPRESS() them as they're written (GZip; DECOMPRESS() reads them back), or keep them in object storage and store a reference.
+verify: If you read fewer columns, measure how much data the application receives for the same rows before and after. Record representative runs of the changed statement in the workload, then compare its time per run. A rewritten statement has a new entry. Reading fewer columns need not change the table's stored size or the number of in-row pages read.
+verify: If you make stored values smaller, compare bytes per live row in later scans; if you remove rows or values, compare total large-value bytes and subsequent growth. Catalog page counts can lag until freed space is reclaimed, and the percentage in large values need not fall.
+caveat: Sizes are the pages the table has reserved, from the catalog: they include space allocated but not yet filled."#,
+    );
+}
+
+#[test]
+fn large_rows_on_postgres_with_dead_versions() {
+    let mut s = large("postgres-demo", "events", &[("id", "bigint"), ("body", "text")]);
+    s.tables.iter_mut().find(|t| t.name == "events").unwrap().dead_rows = Some(4_000.0);
+    grown_since(&mut s, "public.events", "2026-10-12T09:00:00Z", 2_931.0);
+    says(
+        &run("large-rows", &s),
+        r#"id: large-rows:public.events
+title: events holds 2.9 GB in 9.7K rows: 309 KB a row, mostly large values
+summary: The 9.7K rows of events take 2.9 GB: 309 KB each on average, and almost all of that is large values kept apart from the rows (the column that can hold them: body). Every statement that reads whole rows pulls them in, every insert or update that sets them writes them again, and they keep their space until the rows are deleted and purged. PostgreSQL has already compressed them: these are the sizes on disk. 29% of its row versions are dead rows not yet vacuumed, and their large values still take space until VACUUM clears them. It hasn't grown since the scan on Oct 12 at 09:00 UTC.
+impact: 2.9 GB, 309 KB a row
+metric: Table data
+metric: Rows
+metric: Average row
+metric: In large-value pages
+fix: Read only the columns a statement needs: a SELECT * or an ORM loading whole rows pulls every large value. Keep a value that many rows repeat in one place and point to it. Clear values a row no longer needs once its work is done. Check how long deleted rows are kept before they're purged: until then they keep their values. For values that must stay, LZ4 compresses them faster than the default (ALTER TABLE … ALTER COLUMN … SET COMPRESSION lz4, PostgreSQL 14+), or keep them in object storage and store a reference.
+verify: If you read fewer columns, measure how much data the application receives for the same rows before and after. Record representative runs of the changed statement in the workload, then compare its time per run. A rewritten statement has a new entry. Reading fewer columns need not change the table's stored size or the number of in-row pages read.
+verify: If you make stored values smaller, compare bytes per live row in later scans; if you remove rows or values, compare total large-value bytes and subsequent growth. Catalog page counts can lag until freed space is reclaimed, and the percentage in large values need not fall.
+caveat: Sizes are the pages the table has reserved, from the catalog: they include space allocated but not yet filled."#,
+    );
+}
+
+#[test]
+fn json_columns_on_large_postgres_tables() {
+    let mut s = fixture("postgres-demo");
+    for (table, rows, columns) in
+        [("orders", 200_000.0, vec!["payload"]), ("customers", 150_000.0, vec!["prefs", "tags"])]
+    {
+        s.tables.iter_mut().find(|t| t.name == table).unwrap().rows = Some(rows);
+        for (i, column) in columns.into_iter().enumerate() {
+            s.columns.push(culprit_core::ColumnInfo {
+                schema: "public".into(),
+                table: table.into(),
+                name: column.into(),
+                data_type: "json".into(),
+                nullable: true,
+                default: None,
+                generated: false,
+                ordinal: 300 + i as u32,
+            });
+        }
+    }
+    says(
+        &run("large-rows", &s),
+        r#"id: large-rows:json-column:public.orders.payload
+title: orders.payload uses legacy json instead of jsonb (200K rows)
+summary: public.orders (200K rows) declares `payload` as `json` rather than `jsonb`. PostgreSQL's `json` type stores raw unparsed text, re-parses the document on every field access, preserves duplicate keys and whitespace, and supports neither GIN indexing nor direct equality/containment operators (`@>`, `=`).
+impact: json -> jsonb
+metric: Rows in table
+metric: Column = orders.payload (json)
+fix: Convert `payload` on public.orders from `json` to `jsonb` during a maintenance window if exact whitespace/key-order preservation is not required.
+cost: Changing a column from json to jsonb rewrites the table while holding an ACCESS EXCLUSIVE lock.
+sql: ALTER TABLE public.orders ALTER COLUMN payload TYPE jsonb USING payload::jsonb;
+verify: Re-scan after converting public.orders.payload to `jsonb`: the column type is `jsonb` and this finding is gone.
+
+id: large-rows:json-column:public.customers.prefs,tags
+title: customers.prefs, tags uses legacy json instead of jsonb (150K rows)
+summary: public.customers (150K rows) declares `prefs`, `tags` as `json` rather than `jsonb`. PostgreSQL's `json` type stores raw unparsed text, re-parses the document on every field access, preserves duplicate keys and whitespace, and supports neither GIN indexing nor direct equality/containment operators (`@>`, `=`).
+impact: json -> jsonb
+metric: Rows in table
+metric: Column = customers.prefs (json)
+fix: Convert `prefs`, `tags` on public.customers from `json` to `jsonb` during a maintenance window if exact whitespace/key-order preservation is not required.
+cost: Changing a column from json to jsonb rewrites the table while holding an ACCESS EXCLUSIVE lock.
+sql: ALTER TABLE public.customers ALTER COLUMN prefs TYPE jsonb USING prefs::jsonb;
+verify: Re-scan after converting public.customers.prefs to `jsonb`: the column type is `jsonb` and this finding is gone."#,
+    );
+}

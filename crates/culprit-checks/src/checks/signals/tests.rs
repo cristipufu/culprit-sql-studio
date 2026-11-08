@@ -803,7 +803,7 @@ fn large_rows_snapshot(engine: Engine) -> Snapshot {
 
 fn large_rows_of(s: &Snapshot) -> Option<Finding> {
     let name = if s.server.engine == Engine::Postgres { "public.events" } else { "shop.support_tickets" };
-    large_rows(s).into_iter().find(|f| f.id == format!("large-rows:{name}"))
+    LargeRowsCheck.run(s).into_iter().find(|f| f.id == format!("large-rows:{name}"))
 }
 
 /// A statement loading one whole support ticket by id, `runs` times over a 24-hour window, 280 pages a run.
@@ -832,15 +832,15 @@ fn large_rows_stay_quiet_for_small_tables_small_rows_or_rows_kept_in_row() {
     // A small table: 110 MB.
     let t = s.tables.iter_mut().find(|t| t.name == "support_tickets").unwrap();
     (t.rows, t.in_row_bytes, t.lob_bytes) = (Some(1_000.0), Some(10.0 * MB), Some(100.0 * MB));
-    assert!(large_rows(&s).is_empty());
+    assert!(LargeRowsCheck.run(&s).is_empty());
     // Large rows kept in the rows' own pages: wide, but not large values.
     let t = s.tables.iter_mut().find(|t| t.name == "support_tickets").unwrap();
     (t.rows, t.in_row_bytes, t.lob_bytes) = (Some(10_000.0), Some(300.0 * MB), Some(100.0 * MB));
-    assert!(large_rows(&s).is_empty());
+    assert!(LargeRowsCheck.run(&s).is_empty());
     // An engine that doesn't split its pages says nothing.
     let t = s.tables.iter_mut().find(|t| t.name == "support_tickets").unwrap();
     (t.in_row_bytes, t.lob_bytes) = (None, None);
-    assert!(large_rows(&s).is_empty());
+    assert!(LargeRowsCheck.run(&s).is_empty());
 }
 
 #[test]
@@ -934,6 +934,34 @@ fn large_rows_say_how_fast_they_grow_since_the_previous_scan() {
     assert_eq!(baseline.bytes("shop.support_tickets"), culprit_core::signals::rows_bytes(now));
 }
 
+// What a large-rows finding says once refine lists its statements (a writer joined), word for word: one read, several,
+// one write, several, both, and a statement that counted no reads.
+#[test]
+fn large_rows_restated_with_the_statements_refine_lists() {
+    let mut s = large_rows_snapshot(Engine::Mssql);
+    let id = load_ticket(&mut s, 12_700.0);
+    let f = large_rows_of(&s).expect("finding");
+    let base = s.workload.as_ref().unwrap().queries.iter().find(|q| q.id == id).unwrap().clone();
+    let with = |id: &str, text: &str, reads: Option<f64>| {
+        let mut q = base.clone();
+        (q.id, q.text, q.logical_reads) = (id.into(), text.into(), reads);
+        q
+    };
+    let read = with("r1", "SELECT * FROM shop.support_tickets WHERE id = @P1", Some(280.0 * 12_700.0));
+    let read2 = with("r2", "SELECT body FROM shop.support_tickets WHERE id = @P1", Some(100.0 * 12_700.0));
+    let write = with("w1", "UPDATE shop.support_tickets SET body = @P1 WHERE id = @P2", None);
+    let write2 = with("w2", "DELETE FROM shop.support_tickets WHERE id = @P1", Some(10.0 * 12_700.0));
+    let lists: [Vec<&QueryStat>; 5] =
+        [vec![&read], vec![&read, &read2], vec![&write], vec![&write, &write2], vec![&read, &write2]];
+    let actual = lists.iter().map(|l| restate_large_rows(&s, &f, l).expect("table")).collect::<Vec<_>>().join("\n");
+    let expected = r#"The 9.7K rows of support_tickets take 2.9 GB: 309 KB each on average, and almost all of that is large values kept apart from the rows (columns that can hold them: body and attachments). Every statement that reads whole rows pulls them in, every insert or update that sets them writes them again, and they keep their space until the rows are deleted and purged. The statement below reads them about 13K times a day, going through about 280 pages (2.2 MB) a run.
+The 9.7K rows of support_tickets take 2.9 GB: 309 KB each on average, and almost all of that is large values kept apart from the rows (columns that can hold them: body and attachments). Every statement that reads whole rows pulls them in, every insert or update that sets them writes them again, and they keep their space until the rows are deleted and purged. The 2 statements below read them about 25K times a day, going through about 190 pages (1.5 MB) a run.
+The 9.7K rows of support_tickets take 2.9 GB: 309 KB each on average, and almost all of that is large values kept apart from the rows (columns that can hold them: body and attachments). Every statement that reads whole rows pulls them in, every insert or update that sets them writes them again, and they keep their space until the rows are deleted and purged. The statement below writes them about 13K times a day.
+The 9.7K rows of support_tickets take 2.9 GB: 309 KB each on average, and almost all of that is large values kept apart from the rows (columns that can hold them: body and attachments). Every statement that reads whole rows pulls them in, every insert or update that sets them writes them again, and they keep their space until the rows are deleted and purged. The 2 statements below write them about 25K times a day.
+The 9.7K rows of support_tickets take 2.9 GB: 309 KB each on average, and almost all of that is large values kept apart from the rows (columns that can hold them: body and attachments). Every statement that reads whole rows pulls them in, every insert or update that sets them writes them again, and they keep their space until the rows are deleted and purged. The 2 statements below read or write them about 25K times a day, going through about 145 pages (1.1 MB) a run."#;
+    assert!(actual == expected, "what it says changed; it now says:\n---\n{actual}\n---");
+}
+
 #[test]
 fn large_rows_on_postgres_count_toast() {
     let s = large_rows_snapshot(Engine::Postgres);
@@ -945,7 +973,7 @@ fn large_rows_on_postgres_count_toast() {
     // MySQL doesn't report the split.
     let mut m = snapshot_with(Engine::Mysql);
     m.tables.iter_mut().for_each(|t| (t.rows, t.data_bytes) = (Some(9_728.0), Some(2_931.0 * MB)));
-    assert!(large_rows(&m).is_empty());
+    assert!(LargeRowsCheck.run(&m).is_empty());
 }
 
 #[test]
@@ -1060,7 +1088,7 @@ fn large_rows_flags_json_column_on_large_postgres_tables() {
         generated: false,
         ordinal: 77,
     });
-    let out = large_rows(&s);
+    let out = LargeRowsCheck.run(&s);
     let f = out
         .iter()
         .find(|f| f.id == format!("large-rows:json-column:{schema}.{table}.raw_event"))
