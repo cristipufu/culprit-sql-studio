@@ -448,3 +448,58 @@ fn a_snapshot_saved_in_another_format_is_refused_not_half_read() {
     let refused = serde_json::from_value::<Snapshot>(saved).unwrap_err().to_string();
     assert!(refused.contains("saved by another version of Culprit (format 1)"), "{refused}");
 }
+
+// Every phrase the workload says, word for word, as English has always read it: the catalog must say them the same.
+#[test]
+fn the_workload_s_phrases_read_as_english_writes_them() {
+    assert_eq!(span_words(0.01), "1 minute");
+    assert_eq!(span_words(0.5), "30 minutes");
+    assert_eq!(span_words(10.0), "10 hours");
+    assert_eq!(span_words(168.0), "7 days");
+    let mut w = six_days();
+    assert_eq!(w.window_phrase(), "the last 6 days");
+    w.window_hours = 0.0;
+    assert_eq!(w.window_phrase(), "the recorded workload window");
+    // Days the statement ran on, past three: how many, from the first to the last (in a window of ten days, of which
+    // they are few).
+    let mut w = six_days_in_buckets();
+    (w.window_start, w.window_hours) = (Some("2026-10-07T06:00:00Z".into()), 240.0);
+    let four =
+        in_buckets(&[(0, 10.0), (24, 10.0), (36, 10.0), (60, 10.0)], "2026-10-11T06:10:00Z", "2026-10-16T07:00:00Z");
+    assert_eq!(w.how_often_of(&four), "40 runs on 4 days between Oct 11 and Oct 16");
+    let w = six_days_in_buckets();
+    assert_eq!(w.how_often_of(&four), "about 7 runs a day");
+    // One run across midnight.
+    let w = six_days();
+    let late = statement(1.0, Some("2026-10-11T23:10:00Z"), Some("2026-10-12T00:40:00Z"));
+    assert_eq!(w.how_often_of(&late), "1 run, sometime between Oct 11, 23:10 and Oct 12, 00:40 UTC");
+    // Fewer runs than days.
+    assert_eq!(w.how_often(2.0), "2 runs in the last 6 days");
+    // Every figure that differs from the totals, said beside the scans'.
+    let (w, q) = running_totals(800.0, 300.0);
+    assert_eq!(
+        w.cost_of(&q).totals.as_deref(),
+        Some(
+            "33% of database time, about 388 runs a day and 5 ms on average over the 284 days since statistics were \
+             reset"
+        )
+    );
+    assert_eq!(w.over_scans(&q).unwrap().phrase(), "36 hours of Culprit's scans");
+    // Days of scans, to a tenth.
+    let mut s = w.over_scans(&q).unwrap();
+    s.hours = 108.0;
+    assert_eq!(s.length(), "4.5 days");
+    s.runs = 2.0;
+    assert_eq!(s.runs_phrase(), "2 runs over 4.5 days of Culprit's scans");
+    // Observed calls, complete and not.
+    let (mut w, q) = running_totals(800.0, 3000.0);
+    w.timeline.as_mut().unwrap().unknown = Some(vec![false, false, true]);
+    let cost = w.cost_of(&q);
+    assert_eq!(cost.runs, "at least 800 runs observed over 12 hours of Culprit's scans on Oct 11, 00:00–12:00 UTC");
+    assert_eq!(cost.over.as_deref(), Some("24 hours of Culprit's scans between Oct 10, 00:00 and Oct 11, 00:00 UTC"));
+    let mut activity = cost.activity.unwrap();
+    activity.incomplete = false;
+    activity.runs = 1.0;
+    assert_eq!(activity.runs_phrase(), "1 run observed over 12 hours of Culprit's scans on Oct 11, 00:00–12:00 UTC");
+    assert_eq!(span_when("then", "now"), "between then and now");
+}

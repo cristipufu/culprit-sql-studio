@@ -3,7 +3,9 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::format::{self, digits};
 use crate::plan::Plan;
+use crate::t;
 
 use super::WaitStat;
 
@@ -102,14 +104,46 @@ impl CounterSet {
 
 /// "7 days", "10 hours", "35 minutes": a window's length in words.
 pub fn span_words(hours: f64) -> String {
+    match span_length(hours) {
+        SpanLength::Days(n) => span_days(n, digits(format!("{n}"))),
+        SpanLength::Hours(n) => span_hours(n),
+        SpanLength::Minutes(n) => t!("model.span.minutes", n = n, count = digits(format!("{n}"))),
+    }
+}
+
+/// A window's length as [`span_words`] says it: whole days from 47 hours, whole hours from an hour and a half, whole
+/// minutes (at least one) under that.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SpanLength {
+    Days(f64),
+    Hours(f64),
+    Minutes(f64),
+}
+
+/// The unit and number [`span_words`] says `hours` in.
+pub fn span_length(hours: f64) -> SpanLength {
     if hours >= 47.0 {
-        return format!("{} days", (hours / 24.0).round());
+        SpanLength::Days((hours / 24.0).round())
+    } else if hours >= 1.5 {
+        SpanLength::Hours(hours.round())
+    } else {
+        SpanLength::Minutes((hours * 60.0).round().max(1.0))
     }
-    if hours >= 1.5 {
-        return format!("{} hours", hours.round());
-    }
-    let minutes = (hours * 60.0).round().max(1.0);
-    if minutes == 1.0 { "1 minute".into() } else { format!("{minutes} minutes") }
+}
+
+/// `n` days, written `count`.
+fn span_days(n: f64, count: String) -> String {
+    t!("model.span.days", n = n, count = count)
+}
+
+/// `n` whole hours.
+fn span_hours(n: f64) -> String {
+    t!("model.span.hours", n = n, count = digits(format!("{n}")))
+}
+
+/// `runs` for a plural: exactly 1 where it is within rounding of one (`runs_noun` said "run" so).
+fn plural_runs(runs: f64) -> f64 {
+    if (runs - 1.0).abs() < f64::EPSILON { 1.0 } else { runs }
 }
 
 /// Under this many hours of data, a per-day rate would be an extrapolation: say what was measured instead.
@@ -176,21 +210,21 @@ impl Workload {
     pub fn window_phrase(&self) -> String {
         if let Some(log) = &self.log {
             return if self.window_unknown() {
-                format!("the period the {log} log covers")
+                t!("model.window.log_period", log = log)
             } else {
-                format!("the {} the {log} log covers", span_words(self.measurement_hours()))
+                t!("model.window.log", span = span_words(self.measurement_hours()), log = log)
             };
         }
         if self.is_windowed() {
             if self.window_unknown() {
-                "the recorded workload window".into()
+                t!("model.window.recorded")
             } else {
-                format!("the last {}", span_words(self.measurement_hours()))
+                t!("model.window.last", span = span_words(self.measurement_hours()))
             }
         } else if self.window_unknown() {
-            "the time since statistics were last reset".to_string()
+            t!("model.window.since_reset_unknown")
         } else {
-            format!("the {} since statistics were reset", span_words(self.measurement_hours()))
+            t!("model.window.since_reset", span = span_words(self.measurement_hours()))
         }
     }
 
@@ -199,11 +233,11 @@ impl Workload {
     /// are ("1 run in the last 6 days", not "0.2 runs a day"). [`Workload::how_often_of`] says it for one statement.
     pub fn how_often(&self, runs: f64) -> String {
         match self.per_day_measured(runs) {
-            Some(per_day) if per_day >= 1.0 => {
-                format!("about {} {} a day", crate::format::count(per_day.round()), runs_noun(per_day.round()))
+            Some(per_day) if per_day >= 1.0 => runs_a_day(per_day),
+            Some(_) => {
+                t!("model.runs.in", n = plural_runs(runs), count = format::count(runs), window = self.window_phrase())
             }
-            Some(_) => format!("{} {} in {}", crate::format::count(runs), runs_noun(runs), self.window_phrase()),
-            None => format!("{} {} over {}", crate::format::count(runs), runs_noun(runs), self.window_phrase()),
+            None => runs_over(runs, self.window_phrase()),
         }
     }
 
@@ -222,32 +256,25 @@ impl Workload {
         if let Some(s) = self.scans_of(q).filter(|_| !matches!(cadence, Cadence::Burst { .. })) {
             let now = s.runs_phrase();
             return match self.totals_runs(q, false).filter(|_| !s.is_recent(q) && s.runs_differ(self, q)) {
-                Some(all) => format!("{now} ({all} over {})", self.window_phrase()),
+                Some(all) => t!("model.runs.beside_totals", now = now, totals = all, window = self.window_phrase()),
                 None => now,
             };
         }
         match cadence {
             Cadence::Counted(runs) => self.how_often(runs),
-            burst @ Cadence::Burst { runs, .. } => {
-                let comma = if runs == 1.0 { "," } else { "" };
-                format!(
-                    "{} {}{comma} {}",
-                    crate::format::count(runs),
-                    runs_noun(runs),
-                    burst.when().unwrap_or_default()
-                )
-            }
-            Cadence::DailyWithin { per_day, from, to } => {
-                format!(
-                    "about {} {} a day {}",
-                    crate::format::count(per_day.round()),
-                    runs_noun(per_day.round()),
-                    days_when(&from, to.as_deref())
-                )
-            }
-            Cadence::Daily(per_day) => {
-                format!("about {} {} a day", crate::format::count(per_day.round()), runs_noun(per_day.round()))
-            }
+            burst @ Cadence::Burst { runs, .. } => t!(
+                "model.runs.burst",
+                n = plural_runs(runs),
+                count = format::count(runs),
+                when = burst.when().unwrap_or_default()
+            ),
+            Cadence::DailyWithin { per_day, from, to } => t!(
+                "model.runs.per_day_when",
+                n = plural_runs(per_day.round()),
+                count = format::count(per_day.round()),
+                when = days_when(&from, to.as_deref())
+            ),
+            Cadence::Daily(per_day) => runs_a_day(per_day),
         }
     }
 
@@ -256,15 +283,13 @@ impl Workload {
     fn totals_runs(&self, q: &QueryStat, noun: bool) -> Option<String> {
         let per_day = self.per_day_measured(q.executions).filter(|_| !self.window_unknown())?;
         Some(if per_day >= 1.0 {
-            let n = crate::format::count(per_day.round());
-            let runs = match (noun, n == "1") {
-                (false, _) => "",
-                (true, true) => " run",
-                (true, false) => " runs",
-            };
-            format!("about {n}{runs} a day")
+            if noun {
+                runs_a_day(per_day)
+            } else {
+                t!("model.runs.per_day_bare", count = format::count(per_day.round()))
+            }
         } else {
-            format!("{} {}", crate::format::count(q.executions), runs_noun(q.executions))
+            t!("model.runs.count", n = plural_runs(q.executions), count = format::count(q.executions))
         })
     }
 
@@ -470,7 +495,7 @@ impl Workload {
             runs,
             time_ms,
             incomplete: t.is_unknown(i),
-            over: format!("{} of Culprit's scans {}", span_words(hours), span_when(from, to)),
+            over: t!("model.scans.over_when", span = span_words(hours), when = span_when(from, to)),
         })
     }
 
@@ -549,7 +574,7 @@ impl Workload {
         }
         let mut parts = Vec::new();
         if s.share_differs(self, q) {
-            parts.push(format!("{} of database time", crate::format::percent(self.share_of(q.total_time_ms, q))));
+            parts.push(t!("model.totals.share", share = format::percent(self.share_of(q.total_time_ms, q))));
         }
         // A burst's runs are when it ran, never a rate a day, on either side.
         if s.runs_differ(self, q)
@@ -559,9 +584,10 @@ impl Workload {
             parts.push(runs);
         }
         if s.mean_differs(q) {
-            parts.push(format!("{} on average", crate::format::duration(q.mean_time_ms)));
+            parts.push(t!("model.totals.mean", mean = format::duration(q.mean_time_ms)));
         }
-        (!parts.is_empty()).then(|| format!("{} over {}", crate::format::list(&parts), self.window_phrase()))
+        (!parts.is_empty())
+            .then(|| t!("model.totals.over", figures = format::list(&parts), window = self.window_phrase()))
     }
 
     /// Whether nobody can say how long the workload's numbers cover (`window_hours` is 0, and no rate is derived from
@@ -584,9 +610,15 @@ impl Workload {
     }
 }
 
-/// "run" or "runs", for a count.
-fn runs_noun(runs: f64) -> &'static str {
-    if (runs - 1.0).abs() < f64::EPSILON { "run" } else { "runs" }
+/// "about 4.2K runs a day": `per_day`, rounded.
+fn runs_a_day(per_day: f64) -> String {
+    let per_day = per_day.round();
+    t!("model.runs.per_day", n = plural_runs(per_day), count = format::count(per_day))
+}
+
+/// "4 runs over the last 10 hours".
+fn runs_over(runs: f64, window: String) -> String {
+    t!("model.runs.over", n = plural_runs(runs), count = format::count(runs), window = window)
 }
 
 /// How a statement's runs spread over its workload's window ([`Workload::cadence`]): what decides whether "a day" may
@@ -647,14 +679,13 @@ fn days_in(ran: &[(f64, f64)], first: f64, last: f64) -> Vec<String> {
 /// The days runs came on (UTC dates, `YYYY-MM-DD`): "on Oct 11 and Oct 17", "on Oct 11, Oct 13 and Oct 17", and past
 /// three "on 4 days between Oct 11 and Oct 17".
 fn on_days(days: &[String]) -> String {
-    let day = |iso: &str| crate::format::friendly_date(iso, iso);
+    let day = |iso: &str| format::friendly_date(iso, iso);
     match days {
         [] => String::new(),
-        [one] => format!("on {}", day(one)),
-        [first @ .., last] if days.len() <= 3 => {
-            format!("on {} and {}", first.iter().map(|d| day(d)).collect::<Vec<_>>().join(", "), day(last))
+        [first, .., last] if days.len() > 3 => {
+            t!("model.when.on_days_between", count = days.len().to_string(), first = day(first), last = day(last))
         }
-        [first, .., last] => format!("on {} days between {} and {}", days.len(), day(first), day(last)),
+        _ => t!("model.when.on_days", days = format::list(&days.iter().map(|d| day(d)).collect::<Vec<_>>())),
     }
 }
 
@@ -691,22 +722,24 @@ impl ScanSpan {
 
     /// "72 hours of Culprit's scans": the steps, as sentences name them (they need not be every scan's).
     pub fn phrase(&self) -> String {
-        let dates = self
-            .period
-            .map(|(from, to)| {
-                format!(" {}", span_when(&crate::format::iso_from_epoch(from), &crate::format::iso_from_epoch(to)))
-            })
-            .unwrap_or_default();
-        format!("{} of Culprit's scans{dates}", self.length())
+        match self.period {
+            Some((from, to)) => t!(
+                "model.scans.over_when",
+                span = self.length(),
+                when = span_when(&format::iso_from_epoch(from), &format::iso_from_epoch(to))
+            ),
+            None => t!("model.scans.over", span = self.length()),
+        }
     }
 
     /// How long the steps cover: hours under four days (89 hours are not "4 days"), days to a tenth after.
     pub fn length(&self) -> String {
         if self.hours < 96.0 {
-            return format!("{} hours", self.hours.round());
+            return span_hours(self.hours.round());
         }
-        let tenths = format!("{:.1}", (self.hours / 2.4).floor() / 10.0);
-        format!("{} days", tenths.strip_suffix(".0").unwrap_or(&tenths))
+        let days = (self.hours / 2.4).floor() / 10.0;
+        let tenths = format!("{days:.1}");
+        span_days(days, digits(tenths.strip_suffix(".0").unwrap_or(&tenths).to_string()))
     }
 
     /// The statement's average run in these steps. `None` without a run.
@@ -719,14 +752,14 @@ impl ScanSpan {
     pub fn runs_phrase(&self) -> String {
         let per_day = self.per_day(self.runs);
         if per_day >= 1.0 {
-            format!(
-                "about {} {} a day over {}",
-                crate::format::count(per_day.round()),
-                runs_noun(per_day.round()),
-                self.phrase()
+            t!(
+                "model.runs.per_day_over",
+                n = plural_runs(per_day.round()),
+                count = format::count(per_day.round()),
+                span = self.phrase()
             )
         } else {
-            format!("{} {} over {}", crate::format::count(self.runs), runs_noun(self.runs), self.phrase())
+            runs_over(self.runs, self.phrase())
         }
     }
 
@@ -806,58 +839,59 @@ pub struct StatementActivity {
 
 impl StatementActivity {
     pub fn runs_phrase(&self) -> String {
-        format!(
-            "{}{} {} observed over {}",
-            if self.incomplete { "at least " } else { "" },
-            crate::format::count(self.runs),
-            runs_noun(self.runs),
-            self.over
-        )
+        let (n, count) = (plural_runs(self.runs), format::count(self.runs));
+        if self.incomplete {
+            t!("model.runs.observed_at_least", n = n, count = count, over = &self.over)
+        } else {
+            t!("model.runs.observed", n = n, count = count, over = &self.over)
+        }
     }
+}
+
+/// Two moments (ISO 8601) as UTC dates and times: (day, time) of each, "Oct 11" and "13:58".
+fn moments(from: &str, to: &str) -> Option<((String, String), (String, String))> {
+    let (a, b) = (format::epoch_seconds(from)?, format::epoch_seconds(to)?);
+    let (a, b) = (format::iso_from_epoch(a), format::iso_from_epoch(b));
+    let at = |iso: &str| (format::friendly_date(iso, iso), iso.get(11..16).unwrap_or_default().to_string());
+    Some((at(&a), at(&b)))
 }
 
 /// When runs came, from `from` to `to` (ISO 8601): "on Oct 11 at 13:58 UTC" for one moment, "on Oct 11, 15:51–15:55
 /// UTC" within a day, "between Oct 11, 22:10 and Oct 12, 03:10 UTC" across midnight.
 pub fn span_when(from: &str, to: &str) -> String {
-    let (Some(a), Some(b)) = (crate::format::epoch_seconds(from), crate::format::epoch_seconds(to)) else {
-        return format!("between {from} and {to}");
+    let Some(((day_a, time_a), (day_b, time_b))) = moments(from, to) else {
+        return t!("model.when.between", from = from, to = to);
     };
-    let (a, b) = (crate::format::iso_from_epoch(a), crate::format::iso_from_epoch(b));
-    let day = |iso: &str| crate::format::friendly_date(iso, iso);
-    let time = |iso: &str| iso.get(11..16).unwrap_or_default().to_string();
-    if time(&a) == time(&b) && day(&a) == day(&b) {
-        format!("on {} at {} UTC", day(&a), time(&a))
-    } else if day(&a) == day(&b) {
-        format!("on {}, {}–{} UTC", day(&a), time(&a), time(&b))
+    if time_a == time_b && day_a == day_b {
+        t!("model.when.at", day = day_a, time = time_a)
+    } else if day_a == day_b {
+        t!("model.when.within_day", day = day_a, from = time_a, to = time_b)
     } else {
-        format!("between {}, {} and {}, {} UTC", day(&a), time(&a), day(&b), time(&b))
+        t!("model.when.across_days", from_day = day_a, from = time_a, to_day = day_b, to = time_b)
     }
 }
 
 /// When one run came, from the bounds that hold it: "on Oct 11 at 13:58 UTC" where they meet, else "sometime between
 /// 08:41 and 09:28 UTC on Oct 11" ("sometime between Oct 11, 23:10 and Oct 12, 00:40 UTC" across midnight).
 fn one_run_when(from: &str, to: &str) -> String {
-    let (Some(a), Some(b)) = (crate::format::epoch_seconds(from), crate::format::epoch_seconds(to)) else {
-        return format!("sometime between {from} and {to}");
+    let Some(((day_a, time_a), (day_b, time_b))) = moments(from, to) else {
+        return t!("model.when.sometime_between", from = from, to = to);
     };
-    let (a, b) = (crate::format::iso_from_epoch(a), crate::format::iso_from_epoch(b));
-    let day = |iso: &str| crate::format::friendly_date(iso, iso);
-    let time = |iso: &str| iso.get(11..16).unwrap_or_default().to_string();
-    if time(&a) == time(&b) && day(&a) == day(&b) {
-        format!("on {} at {} UTC", day(&a), time(&a))
-    } else if day(&a) == day(&b) {
-        format!("sometime between {} and {} UTC on {}", time(&a), time(&b), day(&a))
+    if time_a == time_b && day_a == day_b {
+        t!("model.when.at", day = day_a, time = time_a)
+    } else if day_a == day_b {
+        t!("model.when.sometime_within_day", day = day_a, from = time_a, to = time_b)
     } else {
-        format!("sometime between {}, {} and {}, {} UTC", day(&a), time(&a), day(&b), time(&b))
+        t!("model.when.sometime_across_days", from_day = day_a, from = time_a, to_day = day_b, to = time_b)
     }
 }
 
 /// "since Oct 13" for runs to the window's end, "from Oct 11 to Oct 13" otherwise.
 fn days_when(from: &str, to: Option<&str>) -> String {
-    let day = |iso: &str| crate::format::friendly_date(iso, iso);
+    let day = |iso: &str| format::friendly_date(iso, iso);
     match to {
-        Some(to) => format!("from {} to {}", day(from), day(to)),
-        None => format!("since {}", day(from)),
+        Some(to) => t!("model.when.from_to", from = day(from), to = day(to)),
+        None => t!("model.when.since", day = day(from)),
     }
 }
 
@@ -1042,7 +1076,7 @@ impl QueryStat {
     /// s" for one run, "10.5 s and 0.3 ms" for two.
     pub fn few_runs_took(&self) -> Option<String> {
         let runs = self.few_runs()?;
-        Some(runs.iter().map(|ms| crate::format::duration(*ms)).collect::<Vec<_>>().join(" and "))
+        Some(format::list(&runs.iter().map(|ms| format::duration(*ms)).collect::<Vec<_>>()))
     }
 
     pub fn rows_per_execution(&self) -> Option<f64> {

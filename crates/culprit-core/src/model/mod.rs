@@ -12,8 +12,8 @@ mod workload;
 
 pub use workload::{
     Cadence, CounterScope, CounterSet, PER_DAY_MIN_HOURS, PlanHistory, PlanHistoryKind, PlanVariant, QueryStat,
-    QueryTrend, RATE_MIN_HOURS, ScanSpan, Spread, StatementActivity, StatementCost, Timeline, TimelineSource, Workload,
-    WorkloadKind, span_when, span_words,
+    QueryTrend, RATE_MIN_HOURS, ScanSpan, SpanLength, Spread, StatementActivity, StatementCost, Timeline,
+    TimelineSource, Workload, WorkloadKind, span_length, span_when, span_words,
 };
 
 /// The format a snapshot is saved in. One saved in another (by an older Culprit) isn't read: its fields may be missing
@@ -686,7 +686,7 @@ impl Snapshot {
                 .iter()
                 .find(|m| m.capability.is_workload_source())
                 .map(|m| m.reason.clone())
-                .unwrap_or_else(|| "This scan has no query history.".into()),
+                .unwrap_or_else(|| crate::t!("model.no_query_history")),
         )
     }
 
