@@ -5,6 +5,7 @@ import { EngineBadge } from "./EngineBadge";
 import { groupByEnvironment } from "../lib/environments";
 import { currentReport, openConnection, scan, setState, useStore, type View } from "../lib/store";
 import { can } from "../lib/engines";
+import { languages, setLanguage, t, useLanguage } from "../lib/i18n";
 import { useTheme } from "../lib/theme";
 import { keys } from "../lib/keys";
 import { installUpdate, restartToUpdate, useUpdate } from "../lib/updates";
@@ -90,6 +91,7 @@ export function Sidebar() {
   const report = useStore(currentReport);
   const scanning = useStore((s) => (s.report.status === "ready" && s.report.scanning) || s.report.status === "loading");
   const [theme, , setTheme] = useTheme();
+  const language = useLanguage();
 
   return (
     <aside className="sidebar">
@@ -158,6 +160,16 @@ export function Sidebar() {
             ))}
           </span>
         </div>
+        <label className="theme-row">
+          {t("ui.sidebar.language")}
+          <select className="language-select" value={language} onChange={(e) => setLanguage(e.target.value)}>
+            {languages().map((l) => (
+              <option key={l.code} value={l.code} lang={l.code}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
     </aside>
   );

@@ -1,9 +1,10 @@
-import { Activity, Bookmark, Camera, CircleArrowUp, CircleDot, Database, Gauge, GitCompareArrows, ListOrdered, Moon, Plus, RefreshCw, RotateCw, Skull, SquareTerminal, Sun, Table2, TextSearch } from "lucide-react";
+import { Activity, Bookmark, Camera, CircleArrowUp, CircleDot, Database, Gauge, GitCompareArrows, Languages, ListOrdered, Moon, Plus, RefreshCw, RotateCw, Skull, SquareTerminal, Sun, Table2, TextSearch } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { can } from "../lib/engines";
 import { useFocusTrap } from "../lib/focus";
 import { rowCount } from "../lib/format";
 import { openLive } from "../views/Live";
+import { languages, setLanguage, t, useLanguage } from "../lib/i18n";
 import { useTheme } from "../lib/theme";
 import { EngineBadge } from "./EngineBadge";
 import { useHotkeys } from "../lib/hotkeys";
@@ -70,6 +71,7 @@ export function CommandPalette() {
   }, [saved]);
   const [index, setIndex] = useState(0);
   const [theme, , setTheme] = useTheme();
+  const language = useLanguage();
   const update = useUpdate();
   const autoCheck = useAutoCheck();
   const panel = useRef<HTMLDivElement>(null);
@@ -94,6 +96,9 @@ export function CommandPalette() {
       icon: icon(dark ? <Sun size={13} /> : <Moon size={13} />),
       run: () => (setTheme(dark ? "light" : "dark"), close()),
     });
+    for (const l of languages().filter((l) => l.code !== language)) {
+      list.push({ id: `language-${l.code}`, section: "Actions", title: t("ui.palette.show_in", { language: l.name }), hint: l.englishName, icon: icon(<Languages size={13} />), run: () => (setLanguage(l.code), close()) });
+    }
     if (update.status === "available" || update.status === "failed") {
       list.push({ id: "update-install", section: "Actions", title: `Update to Culprit ${update.info.version}`, icon: icon(<CircleArrowUp size={13} />), run: () => (close(), void installUpdate()) });
     } else if (update.status === "ready") {
@@ -142,7 +147,7 @@ export function CommandPalette() {
     );
     list.push({ id: "new", section: "Actions", title: "Add a connection", icon: icon(<Plus size={13} />), run: () => setState({ view: "connections", palette: false }) });
     return list;
-  }, [connections, report, active, saved, theme, setTheme, update, autoCheck]);
+  }, [connections, report, active, saved, theme, setTheme, update, autoCheck, language]);
 
   const results = useMemo(() => {
     const scored = items

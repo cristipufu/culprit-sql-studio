@@ -30,5 +30,7 @@
   "common.noun.row_written": "{n, plural, one {row written} other {rows written}}",
   "common.noun.time": "{n, plural, one {time} other {times}}",
   "common.noun.write": "{n, plural, one {write} other {writes}}",
-  "common.noun.write_statement": "{n, plural, one {write statement} other {write statements}}"
+  "common.noun.write_statement": "{n, plural, one {write statement} other {write statements}}",
+  "ui.palette.show_in": "Show Culprit in {language}",
+  "ui.sidebar.language": "Language"
 }
