@@ -210,8 +210,12 @@ fn each_side_of_a_union_names_the_index_it_has_or_the_one_it_needs() {
     assert!(fix.sql.is_none(), "measure branch selectivity after a rewrite before proposing DDL");
     assert!(fix.summary.contains("Preserve the original joins, permission checks"));
     let mut unavailable = snapshot.clone();
-    unavailable.server.capabilities.retain(|c| *c != Capability::IndexUsage);
-    unavailable.notes.push(culprit_core::CollectorNote { collector: "indexes".into(), message: "unavailable".into() });
+    unavailable.sources.retain(|o| o.source != culprit_core::source_id::INDEXES);
+    unavailable.sources.push(culprit_core::SourceOutcome {
+        source: culprit_core::source_id::INDEXES.into(),
+        state: culprit_core::SourceState::Unavailable,
+        reason: Some("permission denied for pg_index".into()),
+    });
     let unknown = scan_fix_on(&unavailable, 2.0);
     assert!(!unknown.summary.contains("has no index"), "unavailable definitions do not prove absence");
     // With an index on email too, each side names its own and there is nothing to create.

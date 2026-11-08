@@ -65,7 +65,7 @@ fn or_rewrite_fix(snapshot: &Snapshot, plan: &Plan, condition: &str, start: &str
 /// Existing index coverage for each branch. Returned rows after joins do not establish a branch's selectivity,
 /// so a rewrite must be evaluated before recommending any new index.
 fn union_sides(snapshot: &Snapshot, plan: &Plan, condition: &str) -> Option<Vec<String>> {
-    if snapshot.notes.iter().any(|n| n.collector == "indexes") && !snapshot.server.has(Capability::IndexUsage) {
+    if crate::evidence::index_catalog(snapshot).is_some() {
         return None;
     }
     let mut sides = Vec::new();

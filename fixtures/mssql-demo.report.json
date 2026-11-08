@@ -4003,6 +4003,15 @@
           "value": 1.7635830724973312
         },
         {
+          "healthy": null,
+          "key": "threadpool-wait-ms",
+          "label": "Waiting for workers since start (whole instance)",
+          "scope": "since-startup",
+          "status": "info",
+          "unit": "milliseconds",
+          "value": 1090.0
+        },
+        {
           "healthy": "Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.",
           "key": "threadpool-waits",
           "label": "Waiting for workers, per hour (whole server)",

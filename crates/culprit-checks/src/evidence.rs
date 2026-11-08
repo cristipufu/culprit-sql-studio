@@ -14,8 +14,6 @@ pub enum Observation {
     OperationalCounters,
     Cluster,
     WalSize,
-    MissingIndexes,
-    Tuning,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -145,8 +143,6 @@ impl Requirement<'_> {
                     Observation::OperationalCounters => !s.operations.counters.is_empty(),
                     Observation::Cluster => s.operations.cluster.is_some(),
                     Observation::WalSize => s.operations.sqlite.as_ref().is_some_and(|w| w.wal_bytes.is_some()),
-                    Observation::MissingIndexes => !s.missing_indexes.is_empty(),
-                    Observation::Tuning => s.tuning.is_some(),
                 };
                 if let Some(reason) = source_failed(s, sources) {
                     return if known { Insufficient(reason) } else { Unavailable(reason) };
@@ -182,9 +178,7 @@ impl Requirement<'_> {
                         o.reason.clone().unwrap_or_else(|| format!("{name} does not apply to this database.")),
                     ),
                 },
-                None => source_failed(s, &[*name]).map(Unavailable).unwrap_or_else(|| {
-                    insufficient("This scan did not record the required source's collection outcome.")
-                }),
+                None => insufficient("This scan did not record the required source's collection outcome."),
             },
             Self::IndexCatalog => index_catalog(s)
                 .map(|reason| Unavailable(format!("Current schema evidence was incomplete: {reason}")))

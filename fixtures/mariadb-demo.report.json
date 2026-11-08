@@ -2101,6 +2101,15 @@
           "value": 17.291066282420747
         },
         {
+          "healthy": null,
+          "key": "row-lock-time",
+          "label": "Time waiting for row locks since start (whole server)",
+          "scope": "since-startup",
+          "status": "info",
+          "unit": "milliseconds",
+          "value": 152020.0
+        },
+        {
           "healthy": "An average across the whole server's recorded row-lock waits, not a current wait. The lock findings use the amount of waiting too.",
           "key": "row-lock-avg",
           "label": "Average row-lock wait (whole server)",

@@ -318,6 +318,17 @@
           {
             "at": null,
             "finding_id": null,
+            "id": "row-lock-time",
+            "kind": "signal",
+            "label": "Time waiting for row locks since start (whole server)",
+            "query_id": null,
+            "share": null,
+            "status": "info",
+            "value": "3 min"
+          },
+          {
+            "at": null,
+            "finding_id": null,
             "id": "row-lock-avg",
             "kind": "signal",
             "label": "Average row-lock wait (whole server)",
@@ -336,17 +347,6 @@
             "share": null,
             "status": "info",
             "value": "2.65%"
-          },
-          {
-            "at": null,
-            "finding_id": null,
-            "id": "max-used-connections",
-            "kind": "signal",
-            "label": "Busiest moment (whole server)",
-            "query_id": null,
-            "share": null,
-            "status": "info",
-            "value": "3.97%"
           }
         ],
         "key": "health",
@@ -372,7 +372,7 @@
         ],
         "next": "culprit waits mariadb-demo",
         "status": "info",
-        "takeaway": "12 signals recorded; none has a threshold to grade.",
+        "takeaway": "13 signals recorded; none has a threshold to grade.",
         "title": "Health"
       },
       {
@@ -986,6 +986,17 @@
           {
             "at": null,
             "finding_id": null,
+            "id": "threadpool-wait-ms",
+            "kind": "signal",
+            "label": "Waiting for workers since start (whole instance)",
+            "query_id": null,
+            "share": null,
+            "status": "info",
+            "value": "1.1 s"
+          },
+          {
+            "at": null,
+            "finding_id": null,
             "id": "threadpool-waits",
             "kind": "signal",
             "label": "Waiting for workers, per hour (whole server)",
@@ -1004,17 +1015,6 @@
             "share": null,
             "status": "info",
             "value": "0 B"
-          },
-          {
-            "at": null,
-            "finding_id": null,
-            "id": "new-connections",
-            "kind": "signal",
-            "label": "New connections (whole server)",
-            "query_id": null,
-            "share": null,
-            "status": "info",
-            "value": "0.0/s"
           }
         ],
         "key": "health",
@@ -2210,6 +2210,17 @@
           {
             "at": null,
             "finding_id": null,
+            "id": "row-lock-time",
+            "kind": "signal",
+            "label": "Time waiting for row locks since start (whole server)",
+            "query_id": null,
+            "share": null,
+            "status": "info",
+            "value": "1 min"
+          },
+          {
+            "at": null,
+            "finding_id": null,
             "id": "row-lock-avg",
             "kind": "signal",
             "label": "Average row-lock wait (whole server)",
@@ -2224,17 +2235,6 @@
             "id": "connections",
             "kind": "signal",
             "label": "Connections in use (whole server)",
-            "query_id": null,
-            "share": null,
-            "status": "info",
-            "value": "4.64%"
-          },
-          {
-            "at": null,
-            "finding_id": null,
-            "id": "max-used-connections",
-            "kind": "signal",
-            "label": "Busiest moment (whole server)",
             "query_id": null,
             "share": null,
             "status": "info",
@@ -2264,7 +2264,7 @@
         ],
         "next": "culprit waits mysql-demo",
         "status": "info",
-        "takeaway": "13 signals recorded; none has a threshold to grade.",
+        "takeaway": "14 signals recorded; none has a threshold to grade.",
         "title": "Health"
       },
       {

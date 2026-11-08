@@ -27,8 +27,7 @@ pub fn row_lock_waits(snapshot: &Snapshot) -> Vec<Finding> {
         return Vec::new();
     };
     let count = if waits.unit == SignalUnit::PerHour { waits.value * hours } else { waits.value };
-    // The total wait time; scans before Culprit kept it are rebuilt from the count and the average.
-    let total_ms = signal(snapshot, culprit_core::signal_id::ROW_LOCK_TIME).unwrap_or(count * avg_ms);
+    let Some(total_ms) = signal(snapshot, culprit_core::signal_id::ROW_LOCK_TIME) else { return Vec::new() };
     let per_hour_ms = total_ms / hours;
     // What it costs is time, not how many waits: 61 waits of half a second an hour is half a minute.
     if per_hour_ms < MINUTE_MS {

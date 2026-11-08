@@ -26,16 +26,11 @@ pub fn worker_pressure(snapshot: &Snapshot) -> Vec<Finding> {
         Engine::Mssql => {
             let waiting = pressure(snapshot)
                 .and_then(|p| p.signal(culprit_core::signal_id::THREADPOOL_WAITING))
-                .filter(|s| s.label.contains("in this database"))
                 .map(|s| s.value)
                 .unwrap_or(0.0);
             let hours = counter_hours(snapshot);
-            // The total since the start; scans before Culprit kept it stored an hourly average instead.
-            let total = signal(snapshot, culprit_core::signal_id::THREADPOOL_WAIT_MS).or_else(|| {
-                let p = pressure(snapshot)?;
-                let s = p.signal(culprit_core::signal_id::THREADPOOL_WAITS)?;
-                Some(s.value * p.uptime_hours.unwrap_or(1.0).max(1.0))
-            });
+            // The total since the start.
+            let total = signal(snapshot, culprit_core::signal_id::THREADPOOL_WAIT_MS);
             // An average since the start says how much, not when: one bad hour days ago averages the same as a
             // steady trickle. Only over at least an hour of counters.
             let per_hour = total.zip(hours).map(|(t, h)| t / h);
