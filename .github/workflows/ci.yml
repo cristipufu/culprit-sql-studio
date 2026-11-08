@@ -56,6 +56,19 @@ jobs:
         run: cargo clippy --locked -p culprit-engine --no-default-features -- -D warnings
       - name: Test
         run: cargo test --locked --workspace --exclude culprit-app
+      # The tests above regenerate app/src/gen from the Rust model: a difference means the committed contracts are stale,
+      # even when the old TypeScript still compiles. Once is enough: the generated text doesn't depend on the OS.
+      - name: Generated UI contracts match the Rust model
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          git diff --exit-code -- app/src/gen
+          untracked=$(git ls-files --others --exclude-standard -- app/src/gen)
+          if [ -n "$untracked" ]; then
+            echo "Generated but not committed:"
+            echo "$untracked"
+            exit 1
+          fi
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - name: Typecheck, test and lint the UI
         working-directory: app
