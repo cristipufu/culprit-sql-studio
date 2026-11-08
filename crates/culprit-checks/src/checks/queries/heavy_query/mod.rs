@@ -842,10 +842,9 @@ pub(super) fn calls(squeezed: &str, function: &str) -> bool {
 /// engine's row count means for a write. MySQL counts no rows sent for a write.
 pub(super) fn rows_labels(engine: Engine, kind: StatementKind) -> Option<(String, String)> {
     if kind == StatementKind::Write {
-        // The engine's label is a run's ("Rows changed per run"); in all, it is the same without "per run".
-        let label = engine.spec().statement_metrics().write_rows_label?;
-        let total = label.trim_end_matches(" per run").to_string();
-        Some((label.into_owned(), total))
+        // What the engine's row count means for a write: a run's ("Rows changed per run") and all runs' ("Rows changed").
+        let rows = engine.spec().statement_metrics().write_rows?;
+        Some((culprit_core::i18n::t(rows.per_run_key(), &[]), culprit_core::i18n::t(rows.total_key(), &[])))
     } else {
         Some((t!("common.metric.rows_returned_per_run"), t!("common.metric.rows_returned")))
     }

@@ -326,6 +326,14 @@ fn write_row_labels_use_the_declared_counter_meaning() {
         assert_eq!(label(StatementKind::Write).as_deref(), expected);
         assert_eq!(label(StatementKind::Read).as_deref(), Some("Rows returned per run"));
     }
+    // All runs' rows are the engine's own words in every language, not a run's with English's "per run" cut off.
+    let totals = |engine| rows_labels(engine, StatementKind::Write).map(|(_, total)| total);
+    assert_eq!(totals(Engine::Postgres).as_deref(), Some("Rows changed"));
+    assert_eq!(totals(Engine::Mssql).as_deref(), Some("Rows"));
+    culprit_core::i18n::scope("de", || {
+        assert_eq!(totals(Engine::Postgres).as_deref(), Some("Geänderte Zeilen"));
+        assert_ne!(totals(Engine::Mssql), rows_labels(Engine::Mssql, StatementKind::Write).map(|(per_run, _)| per_run));
+    });
 }
 
 // The decision a finding is worded from, without its words.

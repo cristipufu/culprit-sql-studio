@@ -1,6 +1,7 @@
 use super::*;
+use culprit_core::engines::ReadUnit;
 use culprit_core::insights::PlanInsight;
-use culprit_core::t;
+use culprit_core::{t, wire_name};
 
 /// The advice a heavy statement's evidence permits: chosen with the rest of its finding ([`decide`]), worded by
 /// [`Remedy::fix`].
@@ -401,6 +402,7 @@ pub(super) fn write_cost(snapshot: &Snapshot, q: &QueryStat) -> String {
     };
     let rows = q.rows_handled_per_execution();
     let postgres = snapshot.server.engine == Engine::Postgres;
+    let log_kind = snapshot.server.engine.spec().statement_metrics().log;
     let costs = q.costs.as_ref();
     let log = costs.and_then(|c| c.log_bytes).filter(|b| *b > 0.0 && q.executions > 0.0);
     // What a run changes, and in brackets what its rows don't show: that a get-or-create rewrites the row it finds, and
@@ -445,7 +447,7 @@ pub(super) fn write_cost(snapshot: &Snapshot, q: &QueryStat) -> String {
         "check.heavy_query.write_cost.log",
         tense = tense,
         size = format::bytes(log / q.executions),
-        log = if postgres { "wal" } else { "transaction_log" },
+        log = wire_name(&log_kind),
         shared = if share.is_some() { "yes" } else { "no" },
         share = share.map(format::percent).unwrap_or_default()
     );
@@ -647,11 +649,10 @@ fn finds_nothing_mostly(q: &QueryStat, kind: StatementKind) -> bool {
 fn storage_fix(snapshot: &Snapshot, q: &QueryStat, cheap_plan: bool, finds_nothing_mostly: bool) -> String {
     let mut fix = match q.reads_per_execution().map(|r| format::count(r.round().max(1.0))) {
         Some(reads) => {
-            // MySQL counts the rows a statement examined, the other engines the pages it read.
-            let mut opening = vec![if snapshot.server.engine == Engine::Mysql {
-                t!("check.heavy_query.fix.storage.reads_rows_examined", reads = reads)
-            } else {
-                t!("check.heavy_query.fix.storage.reads_pages", reads = reads)
+            // What the engine counts a statement's reads in: rows examined (MySQL) or pages.
+            let mut opening = vec![match snapshot.server.engine.spec().statement_metrics().reads {
+                ReadUnit::RowsExamined => t!("check.heavy_query.fix.storage.reads_rows_examined", reads = reads),
+                ReadUnit::Pages => t!("check.heavy_query.fix.storage.reads_pages", reads = reads),
             }];
             // A plan measured cheap reads no more than it needs.
             if !cheap_plan {
@@ -757,12 +758,13 @@ impl ResidualRead<'_> {
                 checked = checked
             )
         };
-        // MySQL counts the rows a statement examined, the other engines the pages it read.
+        // What the engine counts a statement's reads in: rows examined (MySQL) or pages.
         let (reads, returns) = (format::count(self.reads), self.returns.select());
-        let runs = if self.engine == Engine::Mysql {
-            t!("check.heavy_query.lookups.runs_rows_examined", reads = reads, returns = returns)
-        } else {
-            t!("check.heavy_query.lookups.runs_pages", reads = reads, returns = returns)
+        let runs = match self.engine.spec().statement_metrics().reads {
+            ReadUnit::RowsExamined => {
+                t!("check.heavy_query.lookups.runs_rows_examined", reads = reads, returns = returns)
+            }
+            ReadUnit::Pages => t!("check.heavy_query.lookups.runs_pages", reads = reads, returns = returns),
         };
         [shape, runs].join(" ")
     }

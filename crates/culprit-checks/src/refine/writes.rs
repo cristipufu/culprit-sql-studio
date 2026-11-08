@@ -208,8 +208,8 @@ impl Refine for Rule {
 
 /// What the engine calls its log, as a sentence names it: "WAL", "transaction log".
 fn log_name(snapshot: &Snapshot) -> String {
-    let log = if snapshot.server.engine == Engine::Postgres { "wal" } else { "transaction" };
-    t!("refine.writes.log_name", log = log)
+    let log = snapshot.server.engine.spec().statement_metrics().log;
+    t!("refine.writes.log_name", log = culprit_core::wire_name(&log))
 }
 
 /// Log a statement wrote for each row it changed, when it counted them.
