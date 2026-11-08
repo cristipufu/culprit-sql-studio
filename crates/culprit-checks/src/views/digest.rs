@@ -318,7 +318,7 @@ fn deadlocks(report: &Report, previous_at: Option<&str>, top: usize) -> DigestDe
         }
         groups.push(DigestDeadlockPattern {
             pattern: name.into(),
-            label: dl.pattern.label().into(),
+            label: dl.pattern.label(),
             count: 1,
             latest_at: dl.at.clone(),
             tables,

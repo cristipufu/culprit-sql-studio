@@ -152,7 +152,7 @@ fn activity(snapshot: &Snapshot) -> Option<ActivityReport> {
         let key = category_key(&event.category);
         let category = categories.entry(key.into()).or_insert_with(|| ActivityCategory {
             key: key.into(),
-            label: category_info(key, snapshot.server.engine).0.into(),
+            label: category_info(key, snapshot.server.engine).0,
             observations: 0.0,
             weighted_observations: 0.0,
             share: 0.0,
