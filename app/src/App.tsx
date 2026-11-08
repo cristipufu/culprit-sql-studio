@@ -1,3 +1,4 @@
+import { useLanguage } from "./lib/i18n";
 import { AlertCircle } from "lucide-react";
 import { lazy, Suspense, useEffect } from "react";
 import { CommandPalette } from "./components/CommandPalette";
@@ -46,6 +47,8 @@ const TITLES: Record<View, string> = {
 const VIEW_KEYS: View[] = ["dashboard", "overview", "queries", "live", "schema", "editor", "plans"];
 
 export function App() {
+  // A new language re-renders the whole app: every component words itself with t() as it renders.
+  useLanguage();
   const view = useStore((s) => s.view);
   const active = useStore((s) => s.active);
   const environment = useStore((s) => s.connections.find((c) => c.name === s.active)?.environment);
