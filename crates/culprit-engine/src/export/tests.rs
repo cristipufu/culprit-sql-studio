@@ -270,7 +270,11 @@ fn a_total_wait_reads_to_the_second_as_its_title_says_it() {
     let mut finding = report.findings[0].clone();
     finding.id = "row-lock-waits:test".into();
     finding.metrics = vec![
-        culprit_core::Metric::new("Time waiting since start", 152_000.0, culprit_core::Unit::Ms),
+        culprit_core::Metric::said(
+            culprit_core::key!("check.row_lock_waits.metric.time"),
+            152_000.0,
+            culprit_core::Unit::Ms,
+        ),
         culprit_core::Metric::new("Average wait", 2_500.0, culprit_core::Unit::Ms),
     ];
     let options = ExportOptions { redact: false, ..Default::default() };

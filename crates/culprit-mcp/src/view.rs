@@ -730,7 +730,7 @@ pub fn changes(c: &Changes) -> Value {
         "summary": c.summary,
         "min_runs": c.min_executions,
         "threshold": c.threshold,
-        "notes": c.notes,
+        "notes": c.periods_from_scans.iter().chain(&c.notes).collect::<Vec<_>>(),
         "unchanged": c.unchanged,
         "queries": c
             .queries

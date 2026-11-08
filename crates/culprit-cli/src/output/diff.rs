@@ -106,7 +106,8 @@ impl Out {
         println!("{}", self.paint(DIM, &periods));
         println!("{}\n", c.summary);
         // A note the summary already says (why there's nothing to compare) isn't repeated.
-        let notes: Vec<&String> = c.notes.iter().filter(|n| !c.summary.contains(n.as_str())).collect();
+        let notes: Vec<&String> =
+            c.periods_from_scans.iter().chain(c.notes.iter().filter(|n| !c.summary.contains(n.as_str()))).collect();
         for note in &notes {
             println!("{}", self.paint(DIM, note));
         }

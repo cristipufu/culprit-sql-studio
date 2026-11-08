@@ -215,7 +215,7 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
                   <code key="to">STATEMENT</code>,
                 ])}
               </p>
-              {load.status === "ready" && load.report.note?.includes("log_lock_waits") && (
+              {load.status === "ready" && load.report.lock_waits_logged === false && (
                 <p className="muted">{t("ui.deadlocks.log_lock_waits_tip")}</p>
               )}
             </>

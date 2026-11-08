@@ -1058,6 +1058,7 @@ fn storage_connections_replication_failures_and_statistics_say_what_they_said() 
     s.notes.push(culprit_core::CollectorNote {
         collector: culprit_core::source_id::REPLICATION.into(),
         message: "The login can't read pg_stat_replication.".into(),
+        table: None,
     });
     out.push(said(s, TileKey::Replication));
     for name in

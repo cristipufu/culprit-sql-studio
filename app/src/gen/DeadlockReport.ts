@@ -21,4 +21,13 @@ counted_since: string | null,
 /**
  * Why there are no graphs, or what unlocks more.
  */
-note: string | null, };
+note: string | null, 
+/**
+ * The source keeps only its most recent deadlocks (InnoDB its latest one, system_health's in-memory buffer its
+ * latest events), as the note says: a pattern it shows happened at least once, never how many times.
+ */
+recent_only?: boolean, 
+/**
+ * Whether PostgreSQL also logs lock waits longer than deadlock_timeout (`log_lock_waits`), where the source says.
+ */
+lock_waits_logged?: boolean, };

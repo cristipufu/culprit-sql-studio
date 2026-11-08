@@ -274,7 +274,7 @@ pub fn from_scans(history: &[Counters], baseline: &Period, recent: &Period) -> P
     let wanted = (r0 - b0).max(1.0);
     data.baseline_coverage = ((points[mid].0 - points[start].0) / wanted).clamp(0.0, 1.0);
     let scans = end - start + 1;
-    data.notes.push(t!(
+    data.periods_from_scans = Some(t!(
         "engine.changes.periods_follow_scans",
         n = scans,
         count = scans.to_string(),
@@ -599,7 +599,7 @@ mod tests {
         let (baseline, recent) = default_scan_periods(&history).unwrap();
         let data = from_scans(&history, &baseline, &recent);
         assert_eq!(
-            data.notes,
+            data.periods_from_scans.iter().chain(&data.notes).collect::<Vec<_>>(),
             [
                 "Periods follow Culprit's scans: 3 scans between Sun 00:00 UTC and Sun 12:00 UTC.",
                 "Between some of these scans the source's totals shrank without a reset (entries evicted or plans \

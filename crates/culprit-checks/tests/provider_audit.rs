@@ -361,7 +361,11 @@ fn native_terminations_keep_their_own_dates_and_never_become_workload_failure_ra
 fn logs_with_observations_are_not_disabled_by_their_success_note() {
     let mut s = snapshot(Engine::Sqlite);
     s.server.capabilities.push(culprit_core::Capability::QueryLog);
-    s.notes.push(CollectorNote { collector: "query log".into(), message: "Read structured error records".into() });
+    s.notes.push(CollectorNote {
+        collector: "query log".into(),
+        message: "Read structured error records".into(),
+        table: None,
+    });
     s.operations.log_failures.push(LoggedFailure {
         query_id: "shape".into(),
         statement: "INSERT INTO items VALUES (?)".into(),

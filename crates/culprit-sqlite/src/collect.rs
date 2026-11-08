@@ -241,7 +241,11 @@ pub fn snapshot(
             Err(error) if virtual_table => {
                 // The application can load a virtual-table module that Culprit's SQLite library doesn't include.
                 // Its CREATE statement remains useful; missing columns must not lose the rest of the database.
-                coverage.partial(&crate::sources::CATALOG, columns_unavailable(&t.name, &map_error(&error).message));
+                coverage.partial_table(
+                    &crate::sources::CATALOG,
+                    &format!("main.{}", t.name),
+                    columns_unavailable(&t.name, &map_error(&error).message),
+                );
                 Vec::new()
             }
             Err(error) => return Err(map_error(&error)),
@@ -880,6 +884,10 @@ mod tests {
         assert!(s.tables.iter().any(|t| t.name == "ordinary" && t.rows == Some(0.0)));
         assert!(s.tables.iter().any(|t| t.name == "vectors" && t.is_virtual() && t.definition.is_some()));
         assert!(s.notes.iter().any(|n| n.collector == "catalog" && n.message.contains("module_not_installed")));
+        // The note names the table it is about, so its view finds it whatever language it is said in.
+        let vectors = s.tables.iter().find(|t| t.name == "vectors").unwrap();
+        let about = format!("{}.{}", vectors.schema, vectors.name);
+        assert!(s.notes.iter().any(|n| n.table.as_deref() == Some(about.as_str())), "{:?}", s.notes);
     }
 
     #[test]

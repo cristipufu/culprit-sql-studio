@@ -24,7 +24,11 @@ fn later(mut s: Snapshot) -> Snapshot {
 fn typed_success_is_not_reinterpreted_as_failure_by_informational_notes() {
     let mut s = snapshot();
     crate::record(&mut s, "indexes", SourceState::Collected, None);
-    s.notes.push(CollectorNote { collector: "indexes".into(), message: "Counters cover only this database.".into() });
+    s.notes.push(CollectorNote {
+        collector: "indexes".into(),
+        message: "Counters cover only this database.".into(),
+        table: None,
+    });
     assert!(matches!(assess(&[Requirement::IndexCatalog], &s), CheckEvidence::Available));
 }
 
@@ -566,7 +570,7 @@ fn a_read_is_established_by_its_recorded_outcome_never_by_a_payload_or_a_note() 
     assert!(matches!(assess(&[tuning], &s), CheckEvidence::Insufficient(_)));
     // A payload doesn't say it was read in full, and a note is prose, not a failure.
     s.tuning = Some(Default::default());
-    s.notes.push(CollectorNote { collector: "tuning".into(), message: "Read 3 recommendations.".into() });
+    s.notes.push(CollectorNote { collector: "tuning".into(), message: "Read 3 recommendations.".into(), table: None });
     assert!(matches!(assess(&[tuning], &s), CheckEvidence::Insufficient(_)));
     let outcome = |state, reason: Option<&str>| SourceOutcome {
         source: "missing_indexes".into(),

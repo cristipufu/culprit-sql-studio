@@ -805,6 +805,7 @@ mod tests {
         r.snapshot.notes.push(culprit_core::CollectorNote {
             collector: "deadlocks".into(),
             message: "Reading deadlocks needs VIEW SERVER STATE.".into(),
+            table: None,
         });
         let d = digest(&r, None, 5, 5).deadlocks.expect("deadlocks");
         assert_eq!((d.count, d.note.as_deref()), (None, Some("Reading deadlocks needs VIEW SERVER STATE.")));

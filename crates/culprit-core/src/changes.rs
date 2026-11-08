@@ -112,6 +112,9 @@ pub struct PeriodData {
     /// Why the source can't compare these periods at all (too few scans, no data inside them), when it can't.
     #[serde(default)]
     pub unavailable: Option<String>,
+    /// How the periods follow Culprit's own scans ([`Changes::periods_from_scans`]), where they do.
+    #[serde(default)]
+    pub periods_from_scans: Option<String>,
 }
 
 /// How Culprit judges one query between the periods.
@@ -204,6 +207,11 @@ pub struct Changes {
     /// Queries that ran about the same in both periods (the heaviest few are listed in `queries`).
     pub unchanged: usize,
     pub notes: Vec<String>,
+    /// How the periods follow Culprit's own scans ("Periods follow Culprit's scans: 3 scans between …"), where they
+    /// do: a note for the surfaces that don't show the periods' scans themselves, said before the others.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub periods_from_scans: Option<String>,
     /// What changed around the two periods (marks, schema, settings, restarts, throttling), oldest first.
     #[serde(default)]
     pub events: Vec<crate::events::ChangeEvent>,
@@ -278,6 +286,7 @@ pub fn compare(connection: &str, engine: Engine, data: PeriodData, options: &Com
         queries: judged,
         unchanged,
         notes,
+        periods_from_scans: data.periods_from_scans,
         events: Vec::new(),
     }
 }
@@ -716,6 +725,7 @@ mod tests {
             queries,
             notes: vec![],
             unavailable: None,
+            periods_from_scans: None,
         }
     }
 

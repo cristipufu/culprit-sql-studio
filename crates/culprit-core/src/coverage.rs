@@ -344,7 +344,19 @@ impl Coverage {
 
     /// Something the reader of the report should know about what `source` read, without a capability at stake.
     pub fn note(&mut self, source: &str, message: impl Into<String>) {
-        self.notes.push(CollectorNote { collector: source.into(), message: message.into() });
+        self.notes.push(CollectorNote { collector: source.into(), message: message.into(), table: None });
+    }
+
+    /// `source` read part of what it should about one table (`schema.table`): a note about that table, and the
+    /// source partial.
+    pub fn partial_table(&mut self, source: &Source, table: &str, reason: impl Into<String>) {
+        let reason = reason.into();
+        self.notes.push(CollectorNote {
+            collector: source.name.into(),
+            message: reason.clone(),
+            table: Some(table.into()),
+        });
+        self.recorded(source, SourceState::Partial, Some(reason));
     }
 
     /// Reading `source` failed: a note with the error, and `capability` locked with why. A permission error says the

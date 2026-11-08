@@ -21,7 +21,7 @@ export function Columns({
 }) {
   const columns = report.snapshot.columns.filter((c) => c.schema === table.schema && c.table === table.name).sort((a, b) => a.ordinal - b.ordinal);
   if (columns.length === 0) {
-    const note = report.snapshot.notes.find((n) => n.collector === "catalog" && n.message.startsWith(`Columns of ${tableKey(table)} are unavailable:`));
+    const note = report.snapshot.notes.find((n) => n.collector === "catalog" && n.table === tableKey(table));
     return <div className="notice">{note?.message ?? t("ui.columns.no_metadata")}</div>;
   }
   return (

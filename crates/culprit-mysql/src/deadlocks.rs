@@ -176,6 +176,7 @@ pub(crate) async fn recent(conn: &mut Conn, since_hours: f64) -> Result<Deadlock
     let undated = found.iter().any(|d| d.at.is_none());
     report.deadlocks = found;
     report.note = Some(only_the_latest(undated));
+    report.recent_only = true;
     Ok(report)
 }
 

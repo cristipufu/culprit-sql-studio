@@ -611,6 +611,10 @@ pub struct ResourceSample {
 pub struct CollectorNote {
     pub collector: String,
     pub message: String,
+    /// The table it is about (`schema.table`), where it is about one: what its view shows it under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub table: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]

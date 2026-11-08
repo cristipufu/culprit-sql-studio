@@ -115,8 +115,9 @@ pub(crate) fn deadlock_severity(n: usize, hours: f64) -> Severity {
 fn deadlock_cases(snapshot: &Snapshot) -> Vec<DeadlockCase<'_>> {
     let Some(report) = snapshot.deadlocks.as_ref() else { return Vec::new() };
     let mut out = Vec::new();
-    // The note says the server keeps only its most recent deadlock: a caveat on each pattern.
-    let only_latest_kept = report.note.as_deref().filter(|n| n.contains("only keeps") || n.contains("most recent"));
+    // The source keeps only its most recent deadlocks (InnoDB always), as its note says: a caveat on each pattern.
+    let only_latest_kept =
+        report.note.as_deref().filter(|_| report.recent_only || snapshot.server.engine == Engine::Mysql);
 
     let mut groups: BTreeMap<(DeadlockPattern, Vec<String>), Vec<&Deadlock>> = BTreeMap::new();
     for d in report.deadlocks.iter().filter(|d| in_this_database(d, snapshot)) {
@@ -499,6 +500,26 @@ mod tests {
         assert!(f.title.contains("at an unknown time"), "{}", f.title);
         assert_eq!(f.severity, Severity::Low);
         assert!(f.caveats.iter().any(|c| c.contains("may be from long ago")));
+    }
+
+    // A source that keeps only its latest deadlocks says so on each pattern by that fact, whatever language its note is
+    // in; another note (a permission it lacks) is no such caveat.
+    #[test]
+    fn a_source_that_keeps_only_its_latest_deadlocks_is_a_caveat_in_any_language() {
+        let mut snapshot: Snapshot =
+            serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
+        let caveats = |snapshot: &Snapshot| deadlocks(snapshot)[0].caveats.clone();
+        let note = "Lu depuis la mémoire tampon de system_health.";
+        snapshot.deadlocks = Some(DeadlockReport {
+            deadlocks: vec![deadlock("2026-10-11T11:00:00Z")],
+            since_hours: 24.0,
+            note: Some(note.into()),
+            recent_only: true,
+            ..Default::default()
+        });
+        assert!(caveats(&snapshot).iter().any(|c| c == note));
+        snapshot.deadlocks.as_mut().unwrap().recent_only = false;
+        assert!(!caveats(&snapshot).iter().any(|c| c == note));
     }
 
     // C14: with no statistics reset on record, PostgreSQL's counter has no window: a total, Low.

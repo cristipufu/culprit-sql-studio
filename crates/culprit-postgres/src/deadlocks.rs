@@ -66,6 +66,8 @@ pub(crate) async fn recent(client: &Client, since_hours: f64) -> Result<Deadlock
         counted,
         counted_since: since,
         note: Some(note),
+        recent_only: false,
+        lock_waits_logged: Some(log_waits),
     })
 }
 

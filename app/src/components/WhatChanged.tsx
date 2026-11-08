@@ -348,12 +348,10 @@ export default function WhatChanged({ report, request, onClose }: { report: Repo
             <span>
               {t("ui.what_changed.method", { runs: count(changes.min_executions), threshold: String(changes.threshold) })}
             </span>
-            {changes.notes
-              // The period chips already say which scans the periods follow, in local time.
-              .filter((n) => !n.startsWith("Periods follow Culprit's scans"))
-              .map((n) => (
-                <span key={n}>{n}</span>
-              ))}
+            {/* The period chips already say which scans the periods follow (periods_from_scans), in local time. */}
+            {changes.notes.map((n) => (
+              <span key={n}>{n}</span>
+            ))}
             <span className="muted">{t("ui.what_changed.keys")}</span>
           </footer>
         </div>

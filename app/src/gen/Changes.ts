@@ -24,6 +24,11 @@ queries: Array<QueryChange>,
  */
 unchanged: number, notes: Array<string>, 
 /**
+ * How the periods follow Culprit's own scans ("Periods follow Culprit's scans: 3 scans between …"), where they
+ * do: a note for the surfaces that don't show the periods' scans themselves, said before the others.
+ */
+periods_from_scans?: string, 
+/**
  * What changed around the two periods (marks, schema, settings, restarts, throttling), oldest first.
  */
 events: Array<ChangeEvent>, };

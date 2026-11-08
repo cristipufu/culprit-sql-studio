@@ -118,7 +118,7 @@ fn measurement_context(snapshot: &mut Snapshot) {
     };
     if let Some(message) = reason {
         snapshot.workload = None;
-        snapshot.notes.push(CollectorNote { collector: "workload".into(), message });
+        snapshot.notes.push(CollectorNote { collector: "workload".into(), message, table: None });
         return;
     }
     if let Some(workload) = &mut snapshot.workload {
@@ -154,6 +154,7 @@ fn lock_time_that_counts_the_run(snapshot: &mut Snapshot) {
     snapshot.notes.push(CollectorNote {
         collector: "workload".into(),
         message: t!("pipeline.note.mariadb_lock_time", n = inflated.len(), count = inflated.len().to_string()),
+        table: None,
     });
 }
 
@@ -173,9 +174,11 @@ fn io_within_statement_time(snapshot: &mut Snapshot) {
     if snapshot.workload.as_ref().is_some_and(|w| io > w.total_time_ms) {
         snapshot.waits.clear();
         snapshot.server.capabilities.retain(|c| *c != culprit_core::Capability::WaitStats);
-        snapshot
-            .notes
-            .push(CollectorNote { collector: "waits".into(), message: t!("pipeline.note.io_exceeds_statement_time") });
+        snapshot.notes.push(CollectorNote {
+            collector: "waits".into(),
+            message: t!("pipeline.note.io_exceeds_statement_time"),
+            table: None,
+        });
     }
 }
 

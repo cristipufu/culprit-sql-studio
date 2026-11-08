@@ -127,6 +127,14 @@ pub struct DeadlockReport {
     pub counted_since: Option<String>,
     /// Why there are no graphs, or what unlocks more.
     pub note: Option<String>,
+    /// The source keeps only its most recent deadlocks (InnoDB its latest one, system_health's in-memory buffer its
+    /// latest events), as the note says: a pattern it shows happened at least once, never how many times.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub recent_only: bool,
+    /// Whether PostgreSQL also logs lock waits longer than deadlock_timeout (`log_lock_waits`), where the source says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lock_waits_logged: Option<bool>,
 }
 
 impl Deadlock {

@@ -136,6 +136,7 @@ impl Provider for ParserProvider {
             queries: Vec::new(),
             notes: Vec::new(),
             unavailable: None,
+            periods_from_scans: None,
         }))
     }
     async fn recorded_changes(&self, _: &str) -> Result<Vec<culprit_core::ChangeEvent>> {

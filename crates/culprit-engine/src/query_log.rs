@@ -225,7 +225,7 @@ pub async fn attach(
 }
 
 fn note(message: String) -> CollectorNote {
-    CollectorNote { collector: "query log".into(), message }
+    CollectorNote { collector: "query log".into(), message, table: None }
 }
 
 /// The file, line by line: its format told from the first lines, every statement fingerprinted. A line that isn't

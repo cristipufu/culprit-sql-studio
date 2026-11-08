@@ -415,6 +415,7 @@ mod tests {
             queries,
             notes: vec![],
             unavailable: None,
+            periods_from_scans: None,
         };
         compare("shop", Engine::Postgres, data, &CompareOptions::default())
     }

@@ -20,9 +20,13 @@ fn prepare(dir: &Path, count: usize) -> Result<(), Box<dyn std::error::Error>> {
     workload.total_executions = workload.queries.iter().map(|q| q.executions).sum();
     workload.total_time_ms = workload.queries.iter().map(|q| q.total_time_ms).sum();
     let mut input = report.snapshot.clone();
-    input.notes.push(CollectorNote { collector: "profile".into(), message: "Retained input".into() });
+    input.notes.push(CollectorNote { collector: "profile".into(), message: "Retained input".into(), table: None });
     let mut collected = input.clone();
-    collected.notes.push(CollectorNote { collector: "profile".into(), message: "Original collection".into() });
+    collected.notes.push(CollectorNote {
+        collector: "profile".into(),
+        message: "Original collection".into(),
+        table: None,
+    });
     report.evidence = Some(ReportEvidence {
         input: Box::new(input),
         collected: Some(Box::new(collected)),

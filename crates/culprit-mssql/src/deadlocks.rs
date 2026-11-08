@@ -168,6 +168,8 @@ pub(crate) async fn recent(client: &mut MsClient, since_hours: f64) -> tiberius:
     report.deadlocks.sort_by(|a, b| b.at.cmp(&a.at));
     report.deadlocks.truncate(READ_LIMIT);
     (report.source, report.note) = origin(files, ring);
+    // The in-memory buffer alone keeps only the latest events.
+    report.recent_only = !files && ring;
     Ok(report)
 }
 
