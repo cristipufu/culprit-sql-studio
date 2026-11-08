@@ -334,6 +334,28 @@ fn decide<'a>(snapshot: &'a Snapshot, q: &'a QueryStat) -> HeavyCase<'a> {
     }
 }
 
+/// A heavy statement's title with what it cost (`cost`, "4.1 s of database time over the last 2 hours (9%)") where its
+/// title states its `share` of the time: the presentation stage leads with the absolute cost once it knows one.
+/// `None` where its title says something else (the pages it reads), or another share.
+pub(crate) fn title_with_cost(snapshot: &Snapshot, q: &QueryStat, share: f64, cost: &str) -> Option<String> {
+    let case = decide(snapshot, q);
+    if case.title != TitleForm::Share || (case.impact.share - share).abs() >= 1e-9 {
+        return None;
+    }
+    let handle = capitalize(&query_handle(q));
+    let tense = if case.stopped { "past" } else { "present" };
+    Some(match &case.lead {
+        Lead::Idle(idle) => t!(
+            "check.heavy_query.title.cost_idle",
+            handle = &handle,
+            tense = tense,
+            cost = cost,
+            idle = idle.title_tail()
+        ),
+        _ => t!("check.heavy_query.title.cost", handle = &handle, tense = tense, cost = cost),
+    })
+}
+
 /// A heavy statement's finding, worded from what [`decide`] concluded. Only phrasing is chosen here: the tense of a
 /// statement that stopped, what the engine counts (MySQL's rows examined, the others' pages), the source's names.
 fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {

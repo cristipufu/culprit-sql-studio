@@ -48,7 +48,7 @@ impl<'a> From<&'a mut Finding> for Prose<'a> {
 }
 
 enum Change {
-    Cost { cost: String, title_share: Option<String>, direct: bool },
+    Cost { cost: String, title: Option<String>, direct: bool },
     Activity { runs: String, incomplete: bool },
     Names { database: String },
     Caveats { replacement: Vec<String> },
@@ -68,9 +68,9 @@ impl Change {
     }
     fn render(&self, prose: Prose<'_>) {
         match self {
-            Self::Cost { cost, title_share, direct } => {
-                if let Some(share) = title_share {
-                    *prose.title = prose.title.replace(share, cost);
+            Self::Cost { cost, title, direct } => {
+                if let Some(title) = title {
+                    *prose.title = title.clone();
                 }
                 let lead = if *direct {
                     t!("refine.presentation.cost", cost = cost)
@@ -124,14 +124,16 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Vec<Decision> {
                     .zip(f.impact.db_time_share)
                     .is_some_and(|(impact, share)| (impact.share - share).abs() < 1e-9);
                 if same_share && let Some(cost) = support::query_cost_context(s, &queries) {
-                    let title_share = f.impact.db_time_share.filter(|_| f.check == "heavy-query").map(|share| {
-                        // The share as heavy-query's title says it, to put the cost in its place.
-                        let of = if crate::queries::slow_log_only(s) { "slow_log" } else { "database" };
-                        t!("refine.presentation.share_of_time", share = format::percent(share), of = of)
-                    });
+                    // Heavy-query's title says the cost in place of its share.
+                    let title = f
+                        .impact
+                        .db_time_share
+                        .filter(|_| f.check == "heavy-query")
+                        .zip(queries.iter().find(|q| q.id == f.subject.name))
+                        .and_then(|(share, q)| crate::queries::title_with_cost(s, q, share, &cost));
                     let direct =
                         matches!(f.check.as_str(), "heavy-query" | "chatty-query" | "missing-index" | "filtered-scan");
-                    out.push(Decision { at, change: Change::Cost { cost, title_share, direct } });
+                    out.push(Decision { at, change: Change::Cost { cost, title, direct } });
                 }
                 if f.subject.kind == SubjectKind::Query
                     && let [q] = queries.as_slice()

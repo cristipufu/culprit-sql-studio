@@ -595,6 +595,7 @@ fn filtered_scan_finding(snapshot: &Snapshot, s: FilteredScan<'_>) -> Finding {
         ),
     });
     f.verify = if s.gone {
+        f.facts.nothing_to_check = Some(culprit_core::NothingToCheck::Gone);
         vec![t!("check.filtered_scan.verify.gone", table = &table_name)]
     } else {
         vec![

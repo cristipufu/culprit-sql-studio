@@ -1,6 +1,8 @@
 //! Decide finding lifecycle and fix eligibility from evidence before changing state or composing prose.
 use super::*;
-use culprit_core::{Actionability, FixWithholdingBasis, HistoryBasis, RefinementDecision, RefinementOutcome};
+use culprit_core::{
+    Actionability, FixWithholdingBasis, HistoryBasis, NothingToCheck, RefinementDecision, RefinementOutcome,
+};
 
 #[derive(Clone, Copy)]
 pub(super) enum Policy {
@@ -310,6 +312,7 @@ impl Decision {
                 };
                 f.caveats.insert(0, caveat);
                 f.verify.insert(0, t!("refine.lifecycle.ran_once_verify"));
+                f.facts.nothing_to_check = None;
             }
             Change::Quiet { seconds, last, one, by_first_scan } => {
                 let (span, when) = (format::duration(seconds * 1000.0), crate::queries::short_when(last));
@@ -347,6 +350,7 @@ impl Decision {
                         t!("refine.lifecycle.gone_fix", n = self.tables.len(), tables = format::list(&self.tables));
                 }
                 f.verify = vec![t!("refine.lifecycle.gone_verify")];
+                f.facts.nothing_to_check = Some(NothingToCheck::Gone);
             }
             Change::Creation { one, successor: next } => {
                 if let Some(fix) = f.fix.as_mut() {
@@ -359,17 +363,15 @@ impl Decision {
                     fix.summary = t!("refine.lifecycle.index_candidate", candidate = std::mem::take(&mut fix.summary));
                 }
                 f.verify = vec![t!("refine.lifecycle.index_candidate_verify")];
+                f.facts.nothing_to_check = None;
             }
             Change::Verification => {
                 // Preserve a detector's more specific historical sentence. This only avoids redundant rendering;
-                // eligibility has already been settled from inactive state, never from these words. The tables-gone
-                // step is this rule's own; a check's are recognised by their English.
-                let gone = t!("refine.lifecycle.gone_verify");
-                if f.verify.first().is_some_and(|v| {
-                    *v == gone || (v.starts_with("Nothing to check") && (v.contains("unless") || v.contains(" gone")))
-                }) {
+                // eligibility has already been settled from inactive state, never from these words.
+                if matches!(f.facts.nothing_to_check, Some(NothingToCheck::Gone | NothingToCheck::UntilItReturns)) {
                     return;
                 }
+                f.facts.nothing_to_check = Some(NothingToCheck::UntilItReturns);
                 f.verify = vec![if f.queries.is_empty() && f.check == "missing-index" {
                     t!("refine.lifecycle.verify_if_asked_again")
                 } else if f.queries.len() <= 1 {
@@ -459,6 +461,28 @@ mod tests {
             rewritten.fix.as_mut().unwrap().summary = "Another explanation of the same SQL".into();
             assert_eq!(expected, decide(policy, &s, &[rewritten]));
         }
+    }
+
+    // A check's own "nothing to check" step is kept by what it says, whatever language it is said in.
+    #[test]
+    fn a_checks_nothing_to_check_step_is_kept_in_another_language() {
+        let (s, mut f) = scenario();
+        f.inactive = true;
+        culprit_core::i18n::scope("fr", || {
+            let step = t!("check.missing_index.verify.stopped");
+            assert!(!step.starts_with("Nothing to check"), "{step}");
+            let mut kept = f.clone();
+            kept.verify = vec![step.clone()];
+            kept.facts.nothing_to_check = Some(NothingToCheck::UntilItReturns);
+            let mut replaced = f.clone();
+            replaced.verify = vec![t!("check.missing_index.verify.too_small", table = "orders", rows = "1M")];
+            replaced.facts.nothing_to_check = Some(NothingToCheck::WhileSmall);
+            let mut findings = vec![kept, replaced];
+            Rule(Policy::Verification).refine(&s, &mut findings);
+            assert_eq!(findings[0].verify, [step]);
+            assert_eq!(findings[1].verify, [t!("refine.lifecycle.verify_if_it_runs_again")]);
+            assert_eq!(findings[1].facts.nothing_to_check, Some(NothingToCheck::UntilItReturns));
+        });
     }
 
     #[test]

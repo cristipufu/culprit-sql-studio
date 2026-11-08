@@ -101,6 +101,16 @@ pub struct PlanInsight {
     pub index_hint: Option<crate::plan::PlanIndexHint>,
 }
 
+/// The table an index insight is about, where it is gone from the database: there is nothing to create, whatever the
+/// plan read, and nothing to check while it is gone.
+pub fn table_gone(plan: &Plan, insight: &PlanInsight) -> Option<String> {
+    if insight.area != InsightArea::Index {
+        return None;
+    }
+    let nodes = plan.nodes();
+    insight.nodes.iter().find_map(|id| nodes.iter().find(|n| n.id == *id)?.facts().table_missing.clone())
+}
+
 /// Insights for one plan plus what this plan can't tell (an estimated plan has no actual rows; MySQL keeps no memory
 /// grants), shown next to an empty list so "nothing found" is honest.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Default)]
@@ -300,9 +310,7 @@ pub fn insights(plan: &Plan) -> Vec<PlanInsight> {
             }
             let mut insight = d.finish(&cx);
             // An index for a table that is gone: nothing to create, whatever the plan read.
-            if insight.area == InsightArea::Index
-                && let Some(table) = insight.nodes.iter().find_map(|id| cx.node(*id)?.facts().table_missing.clone())
-            {
+            if let Some(table) = table_gone(cx.plan, &insight) {
                 insight.fix = t!("insight.table_gone.fix", table = table_leaf(&table));
                 insight.fix_sql = None;
                 insight.verify = t!("insight.table_gone.verify");

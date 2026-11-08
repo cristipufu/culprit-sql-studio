@@ -653,6 +653,7 @@ pub(super) fn too_small_finding(
     });
     f.fix = Some(Fix { summary: summary.join(" "), sql: None, cost: None });
     f.verify = vec![t!("check.missing_index.verify.too_small", table = &table_name, rows = &rows)];
+    f.facts.nothing_to_check = Some(culprit_core::NothingToCheck::WhileSmall);
     f.caveats.push(t!("check.missing_index.caveat.per_query"));
 }
 

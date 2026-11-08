@@ -125,14 +125,14 @@ fn add_metrics(target: &mut Finding, source: &Finding, skip_runs: bool) {
         }
     }
 }
-fn timeline(source: &Finding) -> String {
-    let first =
-        source.summary.split_once(". ").map_or(source.summary.as_str(), |(first, _)| first).trim_end_matches('.');
-    // The regression's own first sentence, as its check worded it ("Until Oct 11, 10:44 UTC, …"): English's is said as
-    // Query Store's timeline. Another language's is kept as it is.
-    match first.strip_prefix("Until ") {
-        Some(rest) => t!("refine.queries.timeline_until", rest = rest),
-        None => format!("{first}."),
+/// The step in the runs a regression finding (`source`) tells, as the finding that takes it in says it ("Query Store's
+/// timeline: until …"): naming the statement where that finding is about several (`named`).
+fn timeline(s: &Snapshot, source: &Finding, named: bool) -> Option<String> {
+    let query = single(source)?;
+    match source.check.as_str() {
+        "regression" => crate::queries::regression_timeline(s, query),
+        "plan-regression" => crate::queries::plan_regression_timeline(s, query, named),
+        _ => None,
     }
 }
 fn recommendation_caveat(rec: &Finding, sensitive: &Finding) -> String {
@@ -187,7 +187,9 @@ impl Refine for Rule {
                     add_metrics(target, &source, true);
                 }
                 Action::Timeline => {
-                    target.summary = format!("{} {}", target.summary.trim_end(), timeline(&source));
+                    if let Some(sentence) = timeline(s, &source, false) {
+                        target.summary = format!("{} {sentence}", target.summary.trim_end());
+                    }
                     add_metrics(target, &source, false);
                     for line in source.verify {
                         if !target.verify.contains(&line) {
@@ -205,14 +207,13 @@ impl Refine for Rule {
                     let Some(q) = source.queries.first().and_then(|r| s.workload.as_ref()?.query(&r.id)) else {
                         continue;
                     };
-                    let sentence = timeline(&source);
-                    let sentence = if target.queries.len() > 1 {
-                        sentence.replacen("this query", &format!("query {}", q.id), 1)
-                    } else {
-                        sentence
-                    };
-                    target.summary =
-                        [target.summary.trim_end(), &sentence, &reads.render(query_is_history(s, q))].join(" ");
+                    let sentence = timeline(s, &source, target.queries.len() > 1);
+                    target.summary = [target.summary.trim_end()]
+                        .into_iter()
+                        .chain(sentence.as_deref())
+                        .chain([reads.render(query_is_history(s, q)).as_str()])
+                        .collect::<Vec<_>>()
+                        .join(" ");
                     add_metrics(target, &source, false);
                 }
             }

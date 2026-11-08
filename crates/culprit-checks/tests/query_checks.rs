@@ -460,6 +460,28 @@ fn sql_servers_recommendation_carries_the_regression_of_its_query() {
     assert_eq!(f.severity, regression.severity, "the regression's severity carries over");
 }
 
+// The recommendation tells the regression's timeline from its facts, whatever language the report is said in.
+#[test]
+fn sql_servers_recommendation_tells_the_regression_in_another_language() {
+    let mut s = snapshot("mssql-demo.json");
+    s.tuning = Some(recommend("8", "8", "47"));
+    let report = culprit_core::i18n::scope("fr", || analyze(s));
+    let f = find(&report.findings, "tuning-advice:force:8").unwrap();
+    assert!(f.summary.contains("Chronologie de Query Store : jusqu’au "), "{}", f.summary);
+}
+
+// A heavy statement's title says what it cost in place of its share, whatever language the report is said in.
+#[test]
+fn a_heavy_statements_title_says_its_cost_in_another_language() {
+    let english = analyze(snapshot("postgres-demo.json"));
+    let french = culprit_core::i18n::scope("fr", || analyze(snapshot("postgres-demo.json")));
+    let titled = |r: &culprit_core::Report, words: &str| {
+        r.findings.iter().filter(|f| f.check == "heavy-query" && f.title.contains(words)).count()
+    };
+    assert!(titled(&english, " of database time over ") > 0);
+    assert_eq!(titled(&french, " de temps de base de données sur "), titled(&english, " of database time over "));
+}
+
 #[test]
 fn sql_servers_recommendation_is_a_caveat_on_plans_used_side_by_side() {
     let mut s = with_plans(vec![

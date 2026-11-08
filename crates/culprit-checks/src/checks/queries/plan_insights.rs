@@ -193,6 +193,9 @@ fn plan_insight_finding(_: &Snapshot, case: PlanInsightCase<'_>) -> Finding {
     f.metrics.push(Metric::new(t!("common.metric.average_duration"), q.mean_time_ms, Unit::Ms));
     f.fix = Some(Fix { summary: i.fix.clone(), sql: i.fix_sql.clone(), cost: None });
     f.verify = vec![i.verify.clone(), t!("check.plan_insights.verify.rescan")];
+    if culprit_core::insights::table_gone(plan, &i).is_some() {
+        f.facts.nothing_to_check = Some(culprit_core::NothingToCheck::Gone);
+    }
     if !actual && plan.weighed() {
         f.caveats.push(t!("check.plan_insights.caveat.estimated"));
     }

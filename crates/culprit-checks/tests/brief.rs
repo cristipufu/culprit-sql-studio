@@ -326,6 +326,7 @@ fn statements_that_stopped_running_may_need_nothing() {
         "Nothing to check unless it runs again: a later scan that sees it run lists this finding as current again."
             .into(),
     ];
+    f.facts.nothing_to_check = Some(culprit_core::NothingToCheck::UntilItReturns);
     let stopped = codebase(&agent_brief(&report, &f));
     assert!(!stopped.to_lowercase().contains("nothing to check"), "{stopped}");
     assert!(stopped.trim_end().ends_with("there is nothing to do."), "{stopped}");
@@ -766,6 +767,7 @@ fn slow_runs_that_waited_change_no_statement() {
         "Nothing to check unless it runs again: a later scan that sees it run lists this finding as current again."
             .into(),
     ];
+    waited.facts.nothing_to_check = Some(culprit_core::NothingToCheck::UntilItReturns);
     let section = codebase(&agent_brief(&postgres, &waited));
     assert!(!section.to_lowercase().contains("nothing to check"), "{section}");
     assert!(section.contains("If it runs again, even a later `culprit scan pg-demo` can't show a change"), "{section}");

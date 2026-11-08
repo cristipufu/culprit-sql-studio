@@ -212,7 +212,6 @@ fn regression_finding(snapshot: &Snapshot, regression: Regression<'_>) -> Findin
     if let Some(impact) = &regression.impact {
         apply_impact(snapshot, &mut f, impact);
     }
-    let time = time_noun(snapshot);
     let extra_per_day = s.extra_ms() * 24.0 / after_hours;
     // A day's worth only when the slow period covers most of one; under that it would be an extrapolation.
     f.impact.time_ms_per_day = (after_hours >= culprit_core::PER_DAY_MIN_HOURS).then_some(extra_per_day);
@@ -233,30 +232,8 @@ fn regression_finding(snapshot: &Snapshot, regression: Regression<'_>) -> Findin
         Some(_) => t!("check.regression.title.plan_changed", query = query, factor = factor, when = when.clone()),
         None => t!("check.regression.title", query = query, factor = factor, when = when.clone()),
     };
-    let (until, before, after, runs) =
-        (short_when(since), format::duration(s.before_ms), format::duration(s.after_ms), format::count(s.after_runs));
-    let mut summary = vec![if after_hours >= 20.0 {
-        t!(
-            "check.regression.summary.per_day",
-            until = until,
-            before = before.clone(),
-            after = after,
-            runs = runs,
-            extra = format::duration(extra_per_day),
-            time = &time
-        )
-    } else {
-        t!(
-            "check.regression.summary.total",
-            until = until,
-            before = before.clone(),
-            after = after,
-            runs = runs,
-            extra = format::duration(s.extra_ms()),
-            time = time,
-            span = hours_phrase(after_hours)
-        )
-    }];
+    let before = format::duration(s.before_ms);
+    let mut summary = vec![step_sentence(snapshot, &regression, false)];
     summary.push(match &regression.plan {
         Some(change) => t!(
             "check.regression.summary.plan_change",
@@ -309,6 +286,64 @@ fn regression_finding(snapshot: &Snapshot, regression: Regression<'_>) -> Findin
         f.caveats.push(t!("check.regression.caveat.scans"));
     }
     f
+}
+
+/// The step in a regression's runs, as its own finding says it ("Until Oct 11, 10:44 UTC it averaged …"), or
+/// (`told_elsewhere`) as a finding that takes it in says it ("Query Store's timeline: until …").
+fn step_sentence(snapshot: &Snapshot, regression: &Regression<'_>, told_elsewhere: bool) -> String {
+    let Regression { shift: s, since, after_hours, .. } = regression;
+    let time = time_noun(snapshot);
+    let (until, before, after, runs) =
+        (short_when(since), format::duration(s.before_ms), format::duration(s.after_ms), format::count(s.after_runs));
+    // A day's worth over most of a day of slow runs; under that, their total over the span.
+    let (per_day, total) = (format::duration(s.extra_ms() * 24.0 / after_hours), format::duration(s.extra_ms()));
+    let span = hours_phrase(*after_hours);
+    match (*after_hours >= 20.0, told_elsewhere) {
+        (true, false) => t!(
+            "check.regression.summary.per_day",
+            until = until,
+            before = before,
+            after = after,
+            runs = runs,
+            extra = per_day,
+            time = time
+        ),
+        (true, true) => t!(
+            "check.regression.timeline.per_day",
+            until = until,
+            before = before,
+            after = after,
+            runs = runs,
+            extra = per_day,
+            time = time
+        ),
+        (false, false) => t!(
+            "check.regression.summary.total",
+            until = until,
+            before = before,
+            after = after,
+            runs = runs,
+            extra = total,
+            time = time,
+            span = span
+        ),
+        (false, true) => t!(
+            "check.regression.timeline.total",
+            until = until,
+            before = before,
+            after = after,
+            runs = runs,
+            extra = total,
+            time = time,
+            span = span
+        ),
+    }
+}
+
+/// The step in `query`'s runs as a finding that takes its regression in says it, where this scan shows one.
+pub(crate) fn regression_timeline(snapshot: &Snapshot, query: &str) -> Option<String> {
+    let regression = regressions(snapshot).into_iter().find(|r| r.query.id == query)?;
+    Some(step_sentence(snapshot, &regression, true))
 }
 
 struct PlanChange<'a> {

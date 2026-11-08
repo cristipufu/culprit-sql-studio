@@ -22,6 +22,24 @@ pub struct FindingFacts {
     /// The files a storage finding is about, by their names in the snapshot (a log said as one: each of its files).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub storage_files: Vec<String>,
+    /// Its first verify step says there is nothing to check for now, and why: refine keeps a check's own such step,
+    /// and the brief adds no step of its own to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub nothing_to_check: Option<NothingToCheck>,
+}
+
+/// Why a finding's verify step says there is nothing to check for now ([`FindingFacts::nothing_to_check`]).
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum NothingToCheck {
+    /// The tables it is about are gone.
+    Gone,
+    /// Its statements stopped, or the optimizer stopped asking: nothing until they come back.
+    UntilItReturns,
+    /// The table is too small for the change to matter yet.
+    WhileSmall,
 }
 impl FindingFacts {
     pub fn is_empty(&self) -> bool {

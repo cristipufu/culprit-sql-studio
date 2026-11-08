@@ -447,7 +447,7 @@ fn verify_line(
         // A statement that no longer runs has nothing to catch (its *How to verify* says so): the fix says what runs
         // in its place, if anything.
         if finding.inactive {
-            return if finding.verify.first().is_some_and(|v| v.starts_with("Nothing to check")) {
+            return if finding.facts.nothing_to_check.is_some() {
                 format!("If it runs again, even a later {scan} can't show a change: {kept}.")
             } else {
                 format!(
@@ -464,7 +464,7 @@ fn verify_line(
         );
     }
     // Statements that stopped: their *How to verify* says there is nothing to check unless they run again, once.
-    if finding.inactive && finding.verify.first().is_some_and(|v| v.starts_with("Nothing to check")) {
+    if finding.inactive && finding.facts.nothing_to_check.is_some() {
         return String::new();
     }
     if finding.inactive {

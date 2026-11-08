@@ -347,6 +347,7 @@ fn request_finding(snapshot: &Snapshot, r: Request<'_>) -> Finding {
                 cost: None,
             });
             f.verify = vec![t!("check.missing_index.verify.stopped")];
+            f.facts.nothing_to_check = Some(culprit_core::NothingToCheck::UntilItReturns);
         }
         Shape::Advice { large, wide, remedy } => {
             if let Some(large) = large {

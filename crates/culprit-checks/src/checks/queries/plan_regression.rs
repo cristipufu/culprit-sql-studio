@@ -178,32 +178,7 @@ fn plan_regression_finding(snapshot: &Snapshot, regression: PlanRegression<'_>) 
     f.severity = regression.severity;
     f.confidence = Confidence::High;
     f.title = t!("check.plan_regression.title", query = capitalize(&query_handle(q)), factor = factor);
-    let when = |at: Option<&str>| at.map(crate::queries::short_when).unwrap_or_default();
-    let (fast, fast_ms, until) = (&best.id, format::duration(best.mean_time_ms), when(best.last_seen.as_deref()));
-    let (slow, slow_ms, runs) = (&latest.id, format::duration(latest.mean_time_ms), format::count(latest.executions));
-    f.summary = match (regression.stopped, latest.first_seen.as_deref(), latest.last_seen.as_deref()) {
-        // A statement that stopped ran the slow plan for a while, not "since".
-        (true, Some(first), Some(last)) => t!(
-            "check.plan_regression.summary.stopped",
-            fast = fast,
-            fast_ms = fast_ms,
-            until = until,
-            slow = slow,
-            slow_ms = slow_ms,
-            span = culprit_core::span_when(first, last),
-            runs = runs
-        ),
-        _ => t!(
-            "check.plan_regression.summary.running",
-            fast = fast,
-            fast_ms = fast_ms,
-            until = until,
-            slow = slow,
-            slow_ms = slow_ms,
-            since = when(latest.first_seen.as_deref()),
-            runs = runs
-        ),
-    };
+    f.summary = plan_change_sentence(&regression, None);
     f.queries = query_refs(&[q]);
     f.metrics.push(Metric::new(t!("common.metric.fast_plan"), best.mean_time_ms, Unit::Ms));
     // A statement that stopped has no current plan: the slow one is the last it ran with.
@@ -226,6 +201,7 @@ fn plan_regression_finding(snapshot: &Snapshot, regression: PlanRegression<'_>) 
             cost: None,
         });
         f.verify = vec![t!("check.plan_regression.verify.table_gone")];
+        f.facts.nothing_to_check = Some(culprit_core::NothingToCheck::UntilItReturns);
         return f;
     }
     // Where SQL Server corrects regressions itself, the fix says what it does and what forcing by hand adds.
@@ -242,6 +218,80 @@ fn plan_regression_finding(snapshot: &Snapshot, regression: PlanRegression<'_>) 
     f.verify = vec![t!("check.plan_regression.verify.force")];
     f.caveats.push(t!("check.plan_regression.caveat.force_failure"));
     f
+}
+
+/// The plan change, as its own finding says it, or (`told_elsewhere`) as a finding that takes it in says it: of "this
+/// query", or (`Some(named)`) naming it where that finding is about several.
+fn plan_change_sentence(regression: &PlanRegression<'_>, told_elsewhere: Option<bool>) -> String {
+    let PlanRegression { query: q, best, latest, .. } = regression;
+    let when = |at: Option<&str>| at.map(crate::queries::short_when).unwrap_or_default();
+    let (fast, fast_ms, until) = (&best.id, format::duration(best.mean_time_ms), when(best.last_seen.as_deref()));
+    let (slow, slow_ms, runs) = (&latest.id, format::duration(latest.mean_time_ms), format::count(latest.executions));
+    let named = if told_elsewhere == Some(true) { "yes" } else { "no" };
+    match (regression.stopped, latest.first_seen.as_deref(), latest.last_seen.as_deref()) {
+        // A statement that stopped ran the slow plan for a while, not "since".
+        (true, Some(first), Some(last)) => {
+            let span = culprit_core::span_when(first, last);
+            match told_elsewhere {
+                None => t!(
+                    "check.plan_regression.summary.stopped",
+                    fast = fast,
+                    fast_ms = fast_ms,
+                    until = until,
+                    slow = slow,
+                    slow_ms = slow_ms,
+                    span = span,
+                    runs = runs
+                ),
+                Some(_) => t!(
+                    "check.plan_regression.timeline.stopped",
+                    named = named,
+                    query = &q.id,
+                    fast = fast,
+                    fast_ms = fast_ms,
+                    until = until,
+                    slow = slow,
+                    slow_ms = slow_ms,
+                    span = span,
+                    runs = runs
+                ),
+            }
+        }
+        _ => {
+            let since = when(latest.first_seen.as_deref());
+            match told_elsewhere {
+                None => t!(
+                    "check.plan_regression.summary.running",
+                    fast = fast,
+                    fast_ms = fast_ms,
+                    until = until,
+                    slow = slow,
+                    slow_ms = slow_ms,
+                    since = since,
+                    runs = runs
+                ),
+                Some(_) => t!(
+                    "check.plan_regression.timeline.running",
+                    named = named,
+                    query = &q.id,
+                    fast = fast,
+                    fast_ms = fast_ms,
+                    until = until,
+                    slow = slow,
+                    slow_ms = slow_ms,
+                    since = since,
+                    runs = runs
+                ),
+            }
+        }
+    }
+}
+
+/// The plan change of `query` as a finding that takes it in says it, naming the statement where that finding is about
+/// several (`named`), where this scan shows one.
+pub(crate) fn plan_regression_timeline(snapshot: &Snapshot, query: &str, named: bool) -> Option<String> {
+    let regression = plan_regressions(snapshot).into_iter().find(|r| r.query.id == query)?;
+    Some(plan_change_sentence(&regression, Some(named)))
 }
 
 /// A table the statement's plan reads that the catalog no longer has (dropped or renamed since), by its name as the
@@ -264,4 +314,48 @@ fn table_gone(snapshot: &Snapshot, q: &QueryStat) -> Option<String> {
             }
             snapshot.table(&schema, &table).is_none().then(|| format!("{schema}.{table}"))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The SQL Server demo's query 8, its plan 8 replaced by a 6.7× slower plan 47, and no timeline.
+    fn replaced() -> Snapshot {
+        let mut s: Snapshot = serde_json::from_str(include_str!("../../../../../fixtures/mssql-demo.json")).unwrap();
+        let w = s.workload.as_mut().unwrap();
+        let q = w.queries.iter_mut().find(|q| q.id == "8").unwrap();
+        q.plans = [
+            ("8", 200.0, 9.0, "2026-10-11T07:44:00Z", "2026-10-11T10:44:00Z"),
+            ("47", 100.0, 60.0, "2026-10-11T10:46:00Z", "2026-10-11T12:13:00Z"),
+        ]
+        .map(|(id, runs, mean, first, last)| {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "executions": runs, "total_time_ms": runs * mean, "mean_time_ms": mean,
+                "first_seen": first, "last_seen": last, "is_forced": false
+            }))
+            .unwrap()
+        })
+        .to_vec();
+        q.executions = 300.0;
+        q.total_time_ms = 200.0 * 9.0 + 100.0 * 60.0;
+        q.mean_time_ms = q.total_time_ms / q.executions;
+        q.trend = None;
+        w.total_time_ms = w.queries.iter().map(|q| q.total_time_ms).sum();
+        s
+    }
+
+    // Another finding tells the plan change from its facts: of this query, or naming it among several.
+    #[test]
+    fn another_finding_tells_the_plan_change_from_its_facts() {
+        let report = crate::analyze(replaced());
+        let f = report.findings.iter().find(|f| f.id == "plan-regression:8").expect("plan 47 replaced plan 8");
+        let this = plan_regression_timeline(&report.snapshot, "8", false).unwrap();
+        assert!(this.starts_with("Query Store saw this query run with plan 8 at 9 ms"), "{this}");
+        assert!(f.summary.contains(&this), "{}", f.summary);
+        let named = plan_regression_timeline(&report.snapshot, "8", true).unwrap();
+        assert_eq!(named, this.replacen("this query", "query 8", 1));
+        let french = culprit_core::i18n::scope("fr", || plan_regression_timeline(&report.snapshot, "8", true)).unwrap();
+        assert!(french.starts_with("Query Store a vu la requête 8 s’exécuter avec le plan 8"), "{french}");
+    }
 }
