@@ -1646,3 +1646,168 @@ verify: Re-scan after the change: runs that fail or are cancelled should drop to
 caveat: MySQL counts errors from when each statement's entry began counting, so old failures stay in its total until the counters are reset or the server restarts."#,
     );
 }
+
+// ── hot-rows ───────────────────────────────────────────────────────────────────────────────────────
+
+/// The SQL Server demo with lock waits on its indexes (by position): (waits, ms) at an earlier scan `before_hours` ago
+/// and now, and escalations now.
+fn hot(before_hours: Option<f64>, rcsi: &str, counts: &[(usize, (f64, f64), (f64, f64), f64)]) -> Vec<Finding> {
+    use culprit_core::format::{epoch_seconds, iso_from_epoch};
+    let mut s = fixture("mssql-demo");
+    s.indexes.iter_mut().for_each(|i| i.contention = None);
+    set(&mut s, "is_read_committed_snapshot_on", rcsi);
+    let mut before = s.clone();
+    for &(i, then, now, escalations) in counts {
+        before.indexes[i].contention = Some(culprit_core::IndexContention {
+            row_lock_waits: then.0,
+            row_lock_wait_ms: then.1,
+            ..Default::default()
+        });
+        s.indexes[i].contention = Some(culprit_core::IndexContention {
+            row_lock_waits: now.0,
+            row_lock_wait_ms: now.1,
+            lock_escalations: escalations,
+            ..Default::default()
+        });
+    }
+    if let Some(hours) = before_hours {
+        before.taken_at = iso_from_epoch(epoch_seconds(&s.taken_at).expect("a time") - hours * 3600.0);
+        s.contention_before = culprit_core::signals::ContentionBaseline::from_scan(&before, &s);
+        assert!(s.contention_before.is_some(), "a comparable earlier scan");
+    }
+    run("hot-rows", &s)
+}
+
+#[test]
+fn hot_rows_without_an_earlier_scan() {
+    let mut findings = hot(None, "0", &[(0, (0.0, 0.0), (1.0, 20_000.0), 0.0)]);
+    findings.extend(hot(None, "1", &[(5, (0.0, 0.0), (40.0, 90_000.0), 3.0), (6, (0.0, 0.0), (10.0, 30_000.0), 0.0)]));
+    says(
+        &findings,
+        r#"id: hot-rows:shop.customers
+title: One historical lock wait on customers took 20.0 s
+summary: Since its index pk_customers was loaded into memory, sessions waited 1 times for locks on the rows and pages of customers, 20.0 s in all, 20.0 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change. No comparable earlier counters place these waits in the selected window or establish that contention continues.
+impact: 20.0 s waiting on locks
+metric: Historical lock waits
+metric: Historical time waiting
+metric: Historical average wait
+fix: These counters alone justify no change. If the application experiences blocking, capture the current blocked statement and its blocker under representative load before changing transactions or indexes.
+verify: Compare new lock waits and their time between scans under comparable load on customers. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
+caveat: Counted since the indexes' metadata was loaded into memory, usually since SQL Server started.
+
+id: hot-rows:shop.orders
+title: orders has 50 recorded historical lock waits
+summary: Since its indexes were loaded into memory, sessions waited on pk_orders and ix_orders_customer_id 50 times for locks on the rows and pages of orders, 2 min in all, 2.4 s each on average. 3 times SQL Server escalated many row locks to a lock on the whole table, which can block sessions needing incompatible locks. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change. No comparable earlier counters place these waits in the selected window or establish that contention continues.
+impact: 2 min waiting on locks
+metric: Historical lock waits
+metric: Historical time waiting
+metric: Historical average wait
+metric: Escalations since SQL Server started
+fix: These counters alone justify no change. If the application experiences blocking, capture the current blocked statement and its blocker under representative load before changing transactions or indexes.
+verify: Compare new lock waits and their time between scans under comparable load on orders. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
+caveat: Counted since the indexes' metadata was loaded into memory, usually since SQL Server started."#,
+    );
+}
+
+#[test]
+fn hot_rows_since_an_earlier_scan() {
+    let mut findings = hot(Some(2.0), "0", &[(0, (10.0, 5_000.0), (15.0, 25_000.0), 0.0)]);
+    findings.extend(hot(Some(30.0), "1", &[(0, (10.0, 5_000.0), (11.0, 10_000.0), 2.0)]));
+    findings.extend(hot(Some(150.0), "1", &[(0, (10.0, 20_000.0), (10.0, 20_000.0), 0.0)]));
+    findings.extend(hot(Some(30.0), "1", &[(0, (10.0, 20_000.0), (10.0, 35_000.0), 0.0)]));
+    findings.extend(hot(Some(300.0), "1", &[(0, (10.0, 5_000.0), (20.0, 25_000.0), 0.0)]));
+    findings.extend(hot(Some(0.5), "1", &[(0, (10.0, 5_000.0), (20.0, 25_000.0), 0.0)]));
+    says(
+        &findings,
+        r#"id: hot-rows:shop.customers
+title: 5 lock waits on customers averaged 4.0 s since Oct 11, 10:13 UTC
+summary: Between on Oct 11 at 10:13 UTC and this scan, 5 lock waits totaling 20.0 s were recorded on customers. Since its index pk_customers was loaded into memory, sessions waited 15 times for locks on the rows and pages of customers, 25.0 s in all, 1.7 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change.
+impact: 20.0 s waiting on locks
+metric: Historical lock waits
+metric: Historical time waiting
+metric: Historical average wait
+metric: Lock waits since earlier scan
+metric: Time waiting since earlier scan
+metric: Counter interval
+fix: Keep the transactions that change customers short and commit before slow work; make their WHERE use an index so they lock only the rows they change. If readers are the ones waiting, READ_COMMITTED_SNAPSHOT lets them read the last committed version instead: it changes what readers see and uses tempdb, so test it first.
+sql: -- Readers stop waiting for writers; test first
+ALTER DATABASE CURRENT SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
+verify: Compare new lock waits and their time between scans under comparable load on customers. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
+caveat: Counted since the indexes' metadata was loaded into memory, usually since SQL Server started.
+
+id: hot-rows:shop.customers
+title: One lock wait on customers took 5.0 s since Oct 10, 06:13 UTC
+summary: Between on Oct 10 at 06:13 UTC and this scan, 1 lock waits totaling 5.0 s were recorded on customers. Since its index pk_customers was loaded into memory, sessions waited 11 times for locks on the rows and pages of customers, 10.0 s in all, 909 ms each on average. 2 times SQL Server escalated many row locks to a lock on the whole table, which can block sessions needing incompatible locks. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change.
+impact: 5.0 s waiting on locks
+metric: Historical lock waits
+metric: Historical time waiting
+metric: Historical average wait
+metric: Lock waits since earlier scan
+metric: Time waiting since earlier scan
+metric: Counter interval
+metric: Waiting a day
+metric: Escalations since SQL Server started
+fix: Keep the transactions that change customers short and commit before slow work; make their WHERE use an index so they lock only the rows they change.
+verify: Compare new lock waits and their time between scans under comparable load on customers. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
+caveat: Counted since the indexes' metadata was loaded into memory, usually since SQL Server started.
+
+id: hot-rows:shop.customers
+title: No new lock waits on customers since Oct 5, 06:13 UTC
+summary: Between on Oct 5 at 06:13 UTC and this scan, 0 lock waits totaling 0 ms were recorded on customers. The earlier waits do not establish contention in the selected window. Since its index pk_customers was loaded into memory, sessions waited 10 times for locks on the rows and pages of customers, 20.0 s in all, 2.0 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change.
+impact: No new lock waits
+metric: Historical lock waits
+metric: Historical time waiting
+metric: Historical average wait
+metric: Lock waits since earlier scan
+metric: Time waiting since earlier scan
+metric: Counter interval
+metric: Waiting a day
+fix: These counters alone justify no change. If the application experiences blocking, capture the current blocked statement and its blocker under representative load before changing transactions or indexes.
+verify: Compare new lock waits and their time between scans under comparable load on customers. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
+caveat: Counted since the indexes' metadata was loaded into memory, usually since SQL Server started.
+
+id: hot-rows:shop.customers
+title: Recorded lock wait time on customers grew by 15.0 s since Oct 10, 06:13 UTC
+summary: Between on Oct 10 at 06:13 UTC and this scan, 0 lock waits totaling 15.0 s were recorded on customers. Since its index pk_customers was loaded into memory, sessions waited 10 times for locks on the rows and pages of customers, 35.0 s in all, 3.5 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change.
+impact: 15.0 s waiting on locks
+metric: Historical lock waits
+metric: Historical time waiting
+metric: Historical average wait
+metric: Lock waits since earlier scan
+metric: Time waiting since earlier scan
+metric: Counter interval
+metric: Waiting a day
+fix: Keep the transactions that change customers short and commit before slow work; make their WHERE use an index so they lock only the rows they change.
+verify: Compare new lock waits and their time between scans under comparable load on customers. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
+caveat: Counted since the indexes' metadata was loaded into memory, usually since SQL Server started.
+
+id: hot-rows:shop.customers
+title: 10 lock waits on customers averaged 2.0 s since Sep 29, 00:13 UTC
+summary: Between on Sep 29 at 00:13 UTC and this scan, 10 lock waits totaling 20.0 s were recorded on customers. Since its index pk_customers was loaded into memory, sessions waited 20 times for locks on the rows and pages of customers, 25.0 s in all, 1.2 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change. This counter interval extends beyond the selected window, so the scan cannot place these waits inside that window.
+impact: 20.0 s waiting on locks
+metric: Historical lock waits
+metric: Historical time waiting
+metric: Historical average wait
+metric: Lock waits since earlier scan
+metric: Time waiting since earlier scan
+metric: Counter interval
+fix: These counters alone justify no change. If the application experiences blocking, capture the current blocked statement and its blocker under representative load before changing transactions or indexes.
+verify: Compare new lock waits and their time between scans under comparable load on customers. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
+caveat: Counted since the indexes' metadata was loaded into memory, usually since SQL Server started.
+
+id: hot-rows:shop.customers
+title: 10 lock waits on customers averaged 2.0 s since Oct 11, 11:43 UTC
+summary: Between on Oct 11 at 11:43 UTC and this scan, 10 lock waits totaling 20.0 s were recorded on customers. Since its index pk_customers was loaded into memory, sessions waited 20 times for locks on the rows and pages of customers, 25.0 s in all, 1.2 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change.
+impact: 20.0 s waiting on locks
+metric: Historical lock waits
+metric: Historical time waiting
+metric: Historical average wait
+metric: Lock waits since earlier scan
+metric: Time waiting since earlier scan
+metric: Counter interval
+fix: Keep the transactions that change customers short and commit before slow work; make their WHERE use an index so they lock only the rows they change.
+verify: Compare new lock waits and their time between scans under comparable load on customers. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
+caveat: Counted since the indexes' metadata was loaded into memory, usually since SQL Server started.
+caveat: The comparison covers less than an hour: only its measured total is graded, without extrapolating a daily rate."#,
+    );
+}

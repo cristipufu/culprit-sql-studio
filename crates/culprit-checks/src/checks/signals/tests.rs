@@ -283,7 +283,7 @@ fn hot_rows_and_last_page() {
         optimize_for_sequential_key: Some(false),
         ..Default::default()
     });
-    let hot = hot_rows(&s);
+    let hot = HotRowsCheck.run(&s);
     assert_eq!(hot[0].title, format!("{table} has 40 recorded historical lock waits"));
     assert_eq!(hot[0].actionability, culprit_core::Actionability::Information);
     assert!(hot[0].summary.contains("escalated"));
