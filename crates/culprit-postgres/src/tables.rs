@@ -473,4 +473,44 @@ mod tests {
         apply(&mut plan.root, &sizes(&[("public.orders", 2_000_000.0, false)]), false);
         assert!(!rules(&plan).contains(&"big-sort".to_string()), "{:?}", rules(&plan));
     }
+
+    // What a generic plan's scans say instead of rows read, word for word.
+    #[test]
+    fn scan_notes_in_english() {
+        let guess = "Planned with a default selectivity for its parameter (a fixed share of the rows for a range or a \
+                     pattern, 10 values for ANY): ";
+        let step = format!(
+            "{guess}the rows it expects, and the cost of the steps above it, rest on that guess, not on the column's \
+             statistics."
+        );
+        let index = format!("{guess}with a real value the planner may well use an index instead.");
+        let json = r#"[{"Plan": {"Node Type": "Seq Scan", "Relation Name": "orders", "Schema": "public",
+            "Plan Rows": 10000, "Total Cost": 45000.0, "Filter": "((o.note)::text ~~ $1)"}}]"#;
+        let saved = crate::plan_json::parse(json, PlanKind::Generic, Some("SELECT 1")).unwrap();
+        assert_eq!(parameter_guess(&saved.root).map(|s| s.to_string()), Some(step.clone()));
+        let said = |indexed: Option<&[&str]>, partition: bool, under_append: bool| {
+            let mut plan = saved.clone();
+            let size = Size {
+                rows: Some(2_000_000.0),
+                partition,
+                indexed: indexed.map(|columns| columns.iter().map(|c| c.to_string()).collect()),
+            };
+            apply(&mut plan.root, &HashMap::from([("public.orders".to_string(), size)]), under_append);
+            let facts = plan.root.facts();
+            (facts.selectivity_guess.clone(), facts.partition_pruning.clone())
+        };
+        assert_eq!(said(Some(&["note"]), false, false), (Some(index), None));
+        assert_eq!(said(None, false, false), (Some(step.clone()), None));
+        assert_eq!(
+            said(None, true, true),
+            (
+                Some(step),
+                Some(
+                    "Listed because the plan has no parameter values: partitions are pruned only when it runs, so this \
+                     one may never be read."
+                        .into()
+                )
+            )
+        );
+    }
 }

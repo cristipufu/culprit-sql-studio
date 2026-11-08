@@ -809,6 +809,27 @@ mod tests {
         assert_eq!(known[0].value, 2.0);
     }
 
+    // What the session signals are called and what healthy looks like, word for word.
+    #[test]
+    fn session_signals_in_english() {
+        let said: Vec<(String, Option<String>)> = session_signals(400_000.0, Some(200_000.0), Some(4.0e8), Some(4.0))
+            .into_iter()
+            .map(|s| (s.label, s.healthy))
+            .collect();
+        let pair = |label: &str, healthy: &str| (label.to_string(), Some(healthy.to_string()));
+        assert_eq!(
+            said,
+            [
+                pair("New connections", "under 1 a second: pooled connections are opened once"),
+                pair(
+                    "Average session length",
+                    "minutes: a session that lasts under a second pays more to connect than to work"
+                ),
+                pair("Sessions the client abandoned", "under 1%: clients close their connections"),
+            ]
+        );
+    }
+
     #[test]
     fn slot_columns_follow_the_version() {
         assert!(!slots_sql(120_000).contains("wal_status"));

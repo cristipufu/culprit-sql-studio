@@ -477,6 +477,15 @@ mod tests {
         assert!(breakdown(100.0, 150.0).is_empty(), "overlapping I/O time is not a partition of execution time");
     }
 
+    // What the statement-time breakdown calls its parts, word for word.
+    #[test]
+    fn breakdown_in_english() {
+        let waits = breakdown(100.0, 40.0);
+        let named: Vec<(&str, &str)> =
+            waits.iter().map(|w| (w.category.as_str(), w.wait_type.as_deref().unwrap())).collect();
+        assert_eq!(named, [("Other", "CPU, locks and untimed waits"), ("IO", "data file reads and writes")]);
+    }
+
     #[test]
     fn the_holder_furthest_behind_holds_the_horizon() {
         let holder = |session: &str, kind, age| OpenTransaction {

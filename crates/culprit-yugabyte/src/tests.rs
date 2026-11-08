@@ -675,6 +675,44 @@ fn provider_rejects_foreign_engines_and_cloud_bearer_credentials() {
     assert!(YugabyteProvider::new(&spec).is_err());
 }
 
+// What the provider says when it refuses before connecting, word for word.
+#[tokio::test]
+async fn refusals_before_connecting_in_english() {
+    let mut spec =
+        ConnectionSpec { host: "invalid.example".into(), engine: Some(Engine::Postgres), ..Default::default() };
+    assert_eq!(YugabyteProvider::new(&spec).err().unwrap().message, "This connection does not select YugabyteDB");
+    spec.engine = Some(Engine::Yugabyte);
+    spec.auth = AuthKind::Entra;
+    assert_eq!(
+        YugabyteProvider::new(&spec).err().unwrap().message,
+        "Culprit supports password or trust authentication for YSQL; cloud bearer tokens are not sent to YugabyteDB"
+    );
+    spec.auth = AuthKind::Password;
+    let local = YugabyteProvider::new(&spec).unwrap();
+    assert_eq!(
+        local.stored_plan("1", "x").await.unwrap_err().message,
+        "YSQL query and plan identifiers must be signed 64-bit integers"
+    );
+    assert_eq!(
+        local.run("DELETE FROM orders", 10).await.unwrap_err().message,
+        "This YSQL statement is not proven read-only; choose an explicit write action to run it"
+    );
+    assert_eq!(
+        local.preview("DELETE FROM orders", 10).await.unwrap_err().message,
+        "This YSQL preview is not proven read-only"
+    );
+    spec.environment = culprit_core::Environment::Production;
+    let production = YugabyteProvider::new(&spec).unwrap();
+    assert_eq!(
+        production.explain("UPDATE orders SET total=0", ExplainMode::Analyze).await.unwrap_err().message,
+        "Production measurements require a proven read-only YSQL statement"
+    );
+    assert_eq!(
+        production.interrupt_session("x", culprit_core::SessionAction::Cancel).await.unwrap_err().message,
+        "Culprit does not cancel or end sessions on a production connection"
+    );
+}
+
 #[tokio::test]
 async fn production_measurements_reject_native_mutations_before_connecting() {
     let provider = YugabyteProvider::new(&ConnectionSpec {

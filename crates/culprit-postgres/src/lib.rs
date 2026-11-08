@@ -620,6 +620,8 @@ mod tests {
     #[test]
     fn rejects_other_engines() {
         let spec = ConnectionSpec { engine: Some(Engine::Mssql), host: "h".into(), ..Default::default() };
-        assert_eq!(PostgresProvider::new(&spec).err().unwrap().code, ErrorCode::InvalidInput);
+        let error = PostgresProvider::new(&spec).err().unwrap();
+        assert_eq!(error.code, ErrorCode::InvalidInput);
+        assert_eq!(error.message, "This connection is for SQL Server, not PostgreSQL");
     }
 }

@@ -746,4 +746,33 @@ mod tests {
         assert!(!note.contains("default selectivities"), "{note}");
         assert!(!plan.props.contains_key("search_path"));
     }
+
+    // What a plan says it can't know, and why one can't be read, word for word.
+    #[test]
+    fn plan_words_in_english() {
+        let json = r#"[{"Plan": {"Node Type": "Seq Scan", "Relation Name": "orders", "Schema": "public",
+            "Plan Rows": 5, "Total Cost": 4500.0}, "Query Identifier": 42}]"#;
+        let mut plan = parse(json, PlanKind::Generic, Some("SELECT 1")).unwrap();
+        mark_generic(&mut plan);
+        let generic = "Planned without parameter values: = $n is estimated from statistics as an average value of the \
+                       column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions \
+                       are pruned only when it runs.";
+        assert_eq!(plan.props["Generic Plan"], generic);
+        assert_eq!(plan.facts().generic_plan_reason.as_deref(), Some(generic));
+        mark_planned_text(&mut plan, "7");
+        assert_eq!(
+            plan.props[PLANNED_TEXT],
+            "Planned from the text pg_stat_statements keeps, in which the application's constants are $n placeholders \
+             like its parameters, each typed as PostgreSQL infers it: PostgreSQL identifies what it planned as query \
+             42, not as this statement (7). Constants the application wrote into the statement are unknown values \
+             here, so its own runs, which have them, can be planned differently."
+        );
+        let unread = parse("not json", PlanKind::Estimated, None).unwrap_err().message;
+        assert!(unread.starts_with("PostgreSQL returned a plan Culprit cannot read: "), "{unread}");
+        assert_eq!(parse("[]", PlanKind::Estimated, None).unwrap_err().message, "PostgreSQL returned an empty plan");
+        assert_eq!(
+            parse(r#"[{"Planning Time": 1}]"#, PlanKind::Estimated, None).unwrap_err().message,
+            "PostgreSQL plan has no root node"
+        );
+    }
 }

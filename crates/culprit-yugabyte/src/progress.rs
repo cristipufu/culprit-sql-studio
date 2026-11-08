@@ -43,49 +43,77 @@ impl Command {
     fn describe(self, row: &Row) -> Option<(String, &'static str)> {
         let count = |key| row.number(key).filter(|n| *n >= 0.0 && n.fract() == 0.0);
         match self {
-            Self::Index => {
-                let phase = row.text("phase")?;
-                let mut text = format!("{}: {phase}", row.text("command")?);
-                if phase == "backfilling" {
-                    if let Some(done) = count("tuples_done") {
-                        text.push_str(&format!(" · {} table rows processed", format::count(done)));
-                    }
-                    if let Some(total) = count("tuples_total").filter(|n| *n > 0.0) {
-                        text.push_str(&format!(" · about {} table rows estimated", format::count(total)));
-                    }
-                }
-                Some((
-                    text,
-                    "Index backfill counts describe table rows, including for partial indexes. The total comes from an estimate; it is not a measured completion percentage.",
-                ))
-            }
-            Self::Analyze => Some((
-                format!("ANALYZE: {}", row.text("phase")?),
-                "ANALYZE reports its current native phase. PostgreSQL heap-block counters do not measure DocDB progress.",
+            Self::Index => Some(index_step(
+                row.text("command")?,
+                row.text("phase")?,
+                count("tuples_done"),
+                count("tuples_total").filter(|n| *n > 0.0),
             )),
+            Self::Analyze => Some(analyze_step(row.text("phase")?)),
             Self::Copy => {
                 // YugabyteDB retains the last COPY result on this backend after SUCCESS or ERROR.
                 if row.text("yb_status").as_deref() != Some("IN PROGRESS") {
                     return None;
                 }
-                let command = row.text("command")?;
-                let mut text = format!("{command} {}: IN PROGRESS", row.text("type").unwrap_or_default());
-                if let Some(rows) = count("tuples_processed") {
-                    text.push_str(&format!(" · {} rows reported processed", format::count(rows)));
-                }
-                if let Some(bytes) = count("bytes_processed") {
-                    text.push_str(&format!(" · {} processed", format::bytes(bytes)));
-                }
-                if let Some(total) = count("bytes_total").filter(|n| *n > 0.0) {
-                    text.push_str(&format!(" · {} source file", format::bytes(total)));
-                }
-                Some((
-                    text,
-                    "Native row counters follow the source's transaction mode. Batched COPY FROM can leave completed transactions persisted after a later error. A zero or missing file size is unknown; counters do not prove whole-command completion or commit.",
+                Some(copy_step(
+                    row.text("command")?,
+                    row.text("type").unwrap_or_default(),
+                    count("tuples_processed"),
+                    count("bytes_processed"),
+                    count("bytes_total").filter(|n| *n > 0.0),
                 ))
             }
         }
     }
+}
+
+/// An index build's phase, with the table rows its backfill has processed and expects, and what those counts are.
+fn index_step(command: String, phase: String, done: Option<f64>, total: Option<f64>) -> (String, &'static str) {
+    let mut text = format!("{command}: {phase}");
+    if phase == "backfilling" {
+        if let Some(done) = done {
+            text.push_str(&format!(" · {} table rows processed", format::count(done)));
+        }
+        if let Some(total) = total {
+            text.push_str(&format!(" · about {} table rows estimated", format::count(total)));
+        }
+    }
+    (
+        text,
+        "Index backfill counts describe table rows, including for partial indexes. The total comes from an estimate; it is not a measured completion percentage.",
+    )
+}
+
+/// ANALYZE's phase, and what it doesn't measure.
+fn analyze_step(phase: String) -> (String, &'static str) {
+    (
+        format!("ANALYZE: {phase}"),
+        "ANALYZE reports its current native phase. PostgreSQL heap-block counters do not measure DocDB progress.",
+    )
+}
+
+/// A COPY in progress: the rows and bytes it reports processed, its source file's size, and what those counts are.
+fn copy_step(
+    command: String,
+    kind: String,
+    rows: Option<f64>,
+    bytes: Option<f64>,
+    total: Option<f64>,
+) -> (String, &'static str) {
+    let mut text = format!("{command} {kind}: IN PROGRESS");
+    if let Some(rows) = rows {
+        text.push_str(&format!(" · {} rows reported processed", format::count(rows)));
+    }
+    if let Some(bytes) = bytes {
+        text.push_str(&format!(" · {} processed", format::bytes(bytes)));
+    }
+    if let Some(total) = total {
+        text.push_str(&format!(" · {} source file", format::bytes(total)));
+    }
+    (
+        text,
+        "Native row counters follow the source's transaction mode. Batched COPY FROM can leave completed transactions persisted after a later error. A zero or missing file size is unknown; counters do not prove whole-command completion or commit.",
+    )
 }
 
 pub(crate) async fn read(connector: &Connector, id: &str, with_plan: bool) -> Result<(QueryProgress, bool)> {
@@ -200,7 +228,42 @@ pub(crate) async fn read_session(
 
 #[cfg(test)]
 mod tests {
-    use super::Command;
+    use super::{Command, analyze_step, copy_step, index_step};
+
+    // What a command's progress says, word for word.
+    #[test]
+    fn progress_steps_in_english() {
+        assert_eq!(
+            index_step("CREATE INDEX".into(), "backfilling".into(), Some(1500.0), Some(2_400_000.0)),
+            (
+                "CREATE INDEX: backfilling · 1.5K table rows processed · about 2.4M table rows estimated".to_string(),
+                "Index backfill counts describe table rows, including for partial indexes. The total comes from an \
+                 estimate; it is not a measured completion percentage."
+            )
+        );
+        assert_eq!(
+            index_step("CREATE INDEX".into(), "initializing".into(), Some(5.0), None).0,
+            "CREATE INDEX: initializing"
+        );
+        assert_eq!(
+            analyze_step("acquiring sample rows".into()),
+            (
+                "ANALYZE: acquiring sample rows".to_string(),
+                "ANALYZE reports its current native phase. PostgreSQL heap-block counters do not measure DocDB progress."
+            )
+        );
+        assert_eq!(
+            copy_step("COPY FROM".into(), "FILE".into(), Some(20.0), Some(2048.0), Some(1_048_576.0)),
+            (
+                "COPY FROM FILE: IN PROGRESS · 20 rows reported processed · 2.0 KB processed · 1.0 MB source file"
+                    .to_string(),
+                "Native row counters follow the source's transaction mode. Batched COPY FROM can leave completed \
+                 transactions persisted after a later error. A zero or missing file size is unknown; counters do not \
+                 prove whole-command completion or commit."
+            )
+        );
+        assert_eq!(copy_step("COPY FROM".into(), String::new(), None, None, None).0, "COPY FROM : IN PROGRESS");
+    }
 
     #[test]
     fn native_progress_requires_an_unambiguous_current_command() {

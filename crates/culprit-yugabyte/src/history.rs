@@ -247,3 +247,51 @@ pub(crate) async fn stored(session: &ObservedSession, probe: &Probe, query: &str
     };
     decode_stored(&raw).map(Some)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Why retained plans can't be read, word for word.
+    #[test]
+    fn refusals_in_english() {
+        let error = decode_stored("{\"Plan\":").unwrap_err();
+        assert_eq!(
+            (error.message.as_str(), error.hint.as_deref()),
+            (
+                "The retained YSQL plan is truncated, hidden, or not JSON",
+                Some(
+                    "QPM must already retain complete JSON plans. Review yb_pg_stat_plans_plan_format; Culprit does \
+                     not change it during collection."
+                )
+            )
+        );
+        let probe = Probe {
+            now: "2026-11-08T10:00:00.000000Z".into(),
+            started: None,
+            version: "2025.2.0.0".into(),
+            compatibility: 150_002,
+            database: "shop".into(),
+            oid: 16384,
+            node: None,
+            cluster: false,
+            global: false,
+            statements: true,
+            statement_schema: None,
+            metrics: false,
+            rpc_metrics: false,
+            statement_role: Some(16385),
+        };
+        let error = authorize(&probe).unwrap_err();
+        assert_eq!(
+            (error.message.as_str(), error.hint.as_deref()),
+            (
+                "Retained YSQL plan history requires pg_read_all_stats; the native cache cannot be read safely without it",
+                Some(
+                    "An administrator can grant pg_read_all_stats to the monitoring login. Culprit skips this source \
+                     without that grant."
+                )
+            )
+        );
+    }
+}

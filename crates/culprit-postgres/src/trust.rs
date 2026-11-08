@@ -211,3 +211,30 @@ pub async fn end(client: &Client) {
     let _ = client.batch_execute(&tagged("ROLLBACK")).await;
     let _ = client.batch_execute(&tagged("SELECT pg_catalog.pg_advisory_unlock_all()")).await;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Why a login doesn't plan, word for word.
+    #[test]
+    fn refusals_in_english() {
+        let hint =
+            Some("Connect with a login that has only pg_monitor, and SELECT on the tables: it plans every statement.");
+        let error = withheld(&["app_owner".into(), "etl".into()]);
+        assert_eq!(error.code, ErrorCode::PermissionDenied);
+        assert_eq!(
+            error.message,
+            "Not planned: functions or operators in this database belong to other roles (app_owner, etl), and the \
+             planner runs the ones a statement reaches with this login's privileges, which go beyond reading statistics."
+        );
+        assert_eq!(error.hint.as_deref(), hint);
+        let error = not_its_own();
+        assert_eq!(
+            error.message,
+            "Not planned: another role ran this statement, and planning it runs the functions it reaches with this \
+             login's privileges, which go beyond reading statistics."
+        );
+        assert_eq!(error.hint.as_deref(), hint);
+    }
+}

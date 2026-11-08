@@ -521,4 +521,54 @@ mod tests {
         s.host = "shop.postgres.database.azure.com".into();
         assert!(matches!(tls_for(&s).unwrap().0, SslMode::Require));
     }
+
+    fn refused(spec: &ConnectionSpec) -> (String, Option<String>) {
+        let error = Connector::new(spec).err().unwrap();
+        (error.message, error.hint)
+    }
+
+    // Why a connection can't be opened, word for word.
+    #[test]
+    fn connection_errors_in_english() {
+        assert_eq!(
+            refused(&ConnectionSpec { host: " ".into(), ..Default::default() }),
+            ("A database connection needs a host".into(), None)
+        );
+        let mut s = spec(None);
+        s.auth = AuthKind::Entra;
+        assert_eq!(
+            refused(&s),
+            ("Microsoft Entra ID tokens are only sent to Azure Database for PostgreSQL hosts".into(), None)
+        );
+        s.host = "shop.postgres.database.azure.com".into();
+        assert_eq!(
+            refused(&s),
+            (
+                "No Microsoft Entra token was resolved for this connection".into(),
+                Some("Sign in with `az login`, then try again.".into())
+            )
+        );
+        s.auth = AuthKind::AwsIam;
+        assert_eq!(refused(&s), ("AWS IAM authentication tokens are only sent to Amazon RDS hosts".into(), None));
+        s.host = "shop.abc123.us-east-1.rds.amazonaws.com".into();
+        assert_eq!(
+            refused(&s),
+            (
+                "No AWS IAM token was resolved for this connection".into(),
+                Some("Sign in with `aws login`, then try again.".into())
+            )
+        );
+        assert_eq!(
+            refused(&spec(Some("bogus"))),
+            (
+                "Unknown sslmode `bogus`".into(),
+                Some("Use one of disable, prefer, require, verify-ca, verify-full.".into())
+            )
+        );
+        let mut s = spec(Some("verify-full"));
+        s.options.insert("sslrootcert".into(), "/nonexistent/culprit-ca.pem".into());
+        let (message, hint) = refused(&s);
+        assert!(message.starts_with("Cannot read sslrootcert `/nonexistent/culprit-ca.pem`: "), "{message}");
+        assert_eq!(hint, None);
+    }
 }

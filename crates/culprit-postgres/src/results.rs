@@ -137,4 +137,21 @@ mod tests {
         assert!(result.messages[0].contains("8 MiB"));
         server.await.unwrap();
     }
+
+    // How many rows a result has, word for word.
+    #[tokio::test]
+    async fn row_counts_in_english() {
+        for (values, limit, said) in [
+            (1, 100, "1 row"),
+            (3, 100, "3 rows"),
+            (0, 100, "0 rows"),
+            (3, 2, "2 rows (stopped at 2)"),
+            (3, 1, "1 row (stopped at 1)"),
+        ] {
+            let (client, server) = peer((0..values).map(|i| i.to_string()).collect(), false).await;
+            let result = collect(&client, "SELECT v", vec!["v".into()], &[Type::INT8], limit).await.unwrap();
+            assert_eq!(result.messages, [said]);
+            server.await.unwrap();
+        }
+    }
 }

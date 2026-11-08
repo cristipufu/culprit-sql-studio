@@ -55,17 +55,7 @@ pub(crate) async fn recent(client: &Client, since_hours: f64) -> Result<Deadlock
     let counted = row.as_ref().and_then(|r| r.number("deadlocks"));
     let since = row.as_ref().and_then(|r| r.text("since"));
     let log_waits = row.as_ref().and_then(|r| r.text("log_lock_waits")).is_some_and(|v| v == "on");
-    let when = since
-        .as_deref()
-        .map(|s| format!(" since statistics were reset on {}", culprit_core::format::friendly_date_today(s)))
-        .unwrap_or_default();
-    let note = format!(
-        "PostgreSQL counted {} deadlock{} in this database{when}. It writes the details (who waited for whom, and the \
-         statements) only to the server log, which SQL can't read: paste those log lines here to have them explained.{}",
-        counted.map(|c| format!("{c:.0}")).unwrap_or_else(|| "no".into()),
-        if counted == Some(1.0) { "" } else { "s" },
-        if log_waits { "" } else { " Turning on log_lock_waits also logs any lock wait longer than deadlock_timeout." }
-    );
+    let note = counted_note(counted, since.as_deref(), log_waits);
     Ok(DeadlockReport {
         deadlocks: Vec::new(),
         source: "pg_stat_database".into(),
@@ -74,6 +64,20 @@ pub(crate) async fn recent(client: &Client, since_hours: f64) -> Result<Deadlock
         counted_since: since,
         note: Some(note),
     })
+}
+
+/// What the deadlock counter says, where the details are, and (with `log_lock_waits` off) how to log waits too.
+fn counted_note(counted: Option<f64>, since: Option<&str>, log_waits: bool) -> String {
+    let when = since
+        .map(|s| format!(" since statistics were reset on {}", culprit_core::format::friendly_date_today(s)))
+        .unwrap_or_default();
+    format!(
+        "PostgreSQL counted {} deadlock{} in this database{when}. It writes the details (who waited for whom, and the \
+         statements) only to the server log, which SQL can't read: paste those log lines here to have them explained.{}",
+        counted.map(|c| format!("{c:.0}")).unwrap_or_else(|| "no".into()),
+        if counted == Some(1.0) { "" } else { "s" },
+        if log_waits { "" } else { " Turning on log_lock_waits also logs any lock wait longer than deadlock_timeout." }
+    )
 }
 
 /// Deadlocks in pasted Postgres server log text (`ERROR: deadlock detected` with its DETAIL and CONTEXT lines).
@@ -193,5 +197,39 @@ mod tests {
         assert_eq!(d.objects, vec!["customers".to_string()]);
         assert!(d.fixes.iter().any(|f| f.detail.contains("40P01")));
         assert!(parse_deadlock_log("nothing here").is_empty());
+    }
+
+    // What the counter's note says, word for word.
+    #[test]
+    fn the_counter_note_in_english() {
+        let details = "It writes the details (who waited for whom, and the statements) only to the server log, which \
+                       SQL can't read: paste those log lines here to have them explained.";
+        let log = "Turning on log_lock_waits also logs any lock wait longer than deadlock_timeout.";
+        assert_eq!(
+            counted_note(Some(3.0), None, true),
+            format!("PostgreSQL counted 3 deadlocks in this database. {details}")
+        );
+        assert_eq!(
+            counted_note(Some(1.0), Some("2024-10-01T00:00:00Z"), false),
+            format!(
+                "PostgreSQL counted 1 deadlock in this database since statistics were reset on Oct 1, 2024. {details} {log}"
+            )
+        );
+        assert_eq!(
+            counted_note(Some(0.0), Some("2024-10-01T00:00:00Z"), true),
+            format!(
+                "PostgreSQL counted 0 deadlocks in this database since statistics were reset on Oct 1, 2024. {details}"
+            )
+        );
+        assert_eq!(
+            counted_note(None, None, false),
+            format!("PostgreSQL counted no deadlocks in this database. {details} {log}")
+        );
+        assert_eq!(
+            counted_note(None, Some("2024-10-01T00:00:00Z"), true),
+            format!(
+                "PostgreSQL counted no deadlocks in this database since statistics were reset on Oct 1, 2024. {details}"
+            )
+        );
     }
 }

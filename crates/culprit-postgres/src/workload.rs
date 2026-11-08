@@ -394,6 +394,11 @@ async fn attach_plans(
             planned += 1;
         }
     }
+    Ok(plan_notes(planned, attempted, others))
+}
+
+/// What a scan says about the heavy statements it didn't plan: those it tried and couldn't, and other roles' it left.
+fn plan_notes(planned: u32, attempted: u32, others: u32) -> Option<String> {
     let mut notes = Vec::new();
     if planned < attempted {
         notes.push(format!(
@@ -405,7 +410,7 @@ async fn attach_plans(
             "{others} heavy statements other roles ran were left unplanned: this login can do more than read statistics, and planning a statement runs the functions it reaches with this login's privileges. A login with only pg_monitor, and SELECT on the tables, plans them."
         ));
     }
-    Ok((!notes.is_empty()).then(|| notes.join(" ")))
+    (!notes.is_empty()).then(|| notes.join(" "))
 }
 
 async fn generic_plan_json(client: &Client, statement: &str, probe: &Probe) -> Option<String> {
@@ -550,5 +555,19 @@ mod tests {
         let sql = families_sql("SELECT 1");
         assert!(sql.contains("count(DISTINCT shape) AS variants"), "{sql}");
         assert!(sql.contains("HAVING count(DISTINCT shape) >= 5"));
+    }
+
+    // What a scan says about the statements it didn't plan, word for word.
+    #[test]
+    fn plan_notes_in_english() {
+        let failed = "Planned 3 of 5 heavy statements. The rest could not be planned: their recorded text is truncated, \
+                      is not valid SQL once constants are replaced by placeholders, or uses objects this login cannot see.";
+        let others = "2 heavy statements other roles ran were left unplanned: this login can do more than read \
+                      statistics, and planning a statement runs the functions it reaches with this login's privileges. \
+                      A login with only pg_monitor, and SELECT on the tables, plans them.";
+        assert_eq!(plan_notes(5, 5, 0), None);
+        assert_eq!(plan_notes(3, 5, 0).as_deref(), Some(failed));
+        assert_eq!(plan_notes(5, 5, 2).as_deref(), Some(others));
+        assert_eq!(plan_notes(3, 5, 2), Some(format!("{failed} {others}")));
     }
 }

@@ -284,4 +284,110 @@ mod tests {
         assert_eq!(detect_platform("", false, "ep-cool-1.eu-central-1.aws.neon.tech"), Some(Platform::Neon));
         assert_eq!(detect_platform("", false, "localhost"), None);
     }
+
+    fn probe(statements: StatementsAccess) -> Probe {
+        Probe {
+            version_num: 160_000,
+            version: "16.2 (Debian 16.2-1)".into(),
+            timescale_version: None,
+            timescale_schema: None,
+            database: "shop".into(),
+            size_bytes: None,
+            started_at: None,
+            now: "2026-11-08T10:00:00Z".into(),
+            user: "Monitor".into(),
+            privileged: true,
+            platform: None,
+            statements,
+            preloaded: Some(false),
+            can_create_extension: true,
+            standby: false,
+            elevated: false,
+        }
+    }
+
+    fn missing(probe: &Probe, capability: Capability) -> (String, Option<String>) {
+        let info = probe.server_info();
+        let m = info.missing.iter().find(|m| m.capability == capability).unwrap();
+        (m.reason.clone(), m.fix.clone())
+    }
+
+    // Why each capability is locked and how to unlock it, word for word.
+    #[test]
+    fn locked_capabilities_in_english() {
+        let restart = "Add pg_stat_statements to shared_preload_libraries, restart, then run CREATE EXTENSION \
+                       pg_stat_statements; in this database.";
+        let not_installed = probe(StatementsAccess::NotInstalled);
+        assert_eq!(
+            missing(&not_installed, Capability::PgStatStatements),
+            (
+                "The pg_stat_statements extension is not installed in this database, so Culprit cannot see which \
+                 queries use the most time."
+                    .into(),
+                Some(restart.into())
+            )
+        );
+        assert_eq!(
+            missing(&not_installed, Capability::QueryPlans),
+            (
+                "Plans for the heaviest queries come from pg_stat_statements, which is not available.".into(),
+                Some(restart.into())
+            )
+        );
+        let preloaded = "The server already loads it, so no restart is needed and the statistics it has been recording \
+                         since the last restart appear right away.";
+        let mut p = probe(StatementsAccess::NotInstalled);
+        p.preloaded = Some(true);
+        assert_eq!(
+            missing(&p, Capability::PgStatStatements).1.unwrap(),
+            format!("Run CREATE EXTENSION pg_stat_statements; in this database. {preloaded}")
+        );
+        p.can_create_extension = false;
+        assert_eq!(
+            missing(&p, Capability::PgStatStatements).1.unwrap(),
+            format!(
+                "Run CREATE EXTENSION pg_stat_statements; in this database as a user who can create extensions (an \
+                 admin role, or the database owner). {preloaded}"
+            )
+        );
+        p.preloaded = None;
+        assert_eq!(
+            missing(&p, Capability::PgStatStatements).1.unwrap(),
+            "This login cannot read shared_preload_libraries. Ask an administrator to verify whether \
+             pg_stat_statements is already loaded. If loaded, creating its extension in this database exposes its \
+             statistics without a restart; otherwise configure the preload and restart first."
+        );
+        let not_loaded = probe(StatementsAccess::NotLoaded("it must be loaded via shared_preload_libraries".into()));
+        assert_eq!(
+            missing(&not_loaded, Capability::PgStatStatements).0,
+            "pg_stat_statements is installed but not loaded by the server (it must be loaded via \
+             shared_preload_libraries)."
+        );
+        let failed = probe(StatementsAccess::Failed("permission denied for view pg_stat_statements".into()));
+        assert_eq!(
+            missing(&failed, Capability::PgStatStatements),
+            (
+                "Reading pg_stat_statements failed: permission denied for view pg_stat_statements".into(),
+                Some("GRANT pg_read_all_stats TO \"Monitor\";".into())
+            )
+        );
+        let mut old = probe(StatementsAccess::Usable { relation: "public.pg_stat_statements".into(), info: None });
+        old.version_num = 110_022;
+        old.version = "11.22".into();
+        let upgrade = (
+            "Planning the heaviest queries without running them needs PostgreSQL 12 or newer. This server runs 11.22."
+                .to_string(),
+            Some("Upgrade to PostgreSQL 12 or newer, or explain a query with sample values in the editor.".to_string()),
+        );
+        assert_eq!(missing(&old, Capability::GenericPlans), upgrade);
+        assert_eq!(missing(&old, Capability::QueryPlans), upgrade);
+        old.privileged = false;
+        assert_eq!(
+            missing(&old, Capability::WaitStats),
+            (
+                "Other sessions' state and waits are hidden from this login.".into(),
+                Some("GRANT pg_monitor TO \"Monitor\";".into())
+            )
+        );
+    }
 }

@@ -184,4 +184,23 @@ mod tests {
             assert!(!plan.root.facts().selectivity_guess.as_deref().unwrap().contains("may well use an index"));
         }
     }
+
+    // What a plan says it can't know, and why one can't be read, word for word.
+    #[test]
+    fn plan_words_in_english() {
+        let mut plan = parse(include_str!("../tests/data/qpm.json"), PlanKind::Estimated, None).unwrap();
+        redacted_constants(&mut plan);
+        assert_eq!(
+            plan.root.facts().selectivity_guess.as_deref(),
+            Some("This retained YSQL plan redacts constants; the original values cannot establish filter selectivity.")
+        );
+        let huge = " ".repeat(culprit_core::limits::MAX_RESULT_BYTES + 1);
+        assert_eq!(
+            parse(&huge, PlanKind::Estimated, None).unwrap_err().message,
+            "The native YSQL plan exceeds the 8 MiB capture budget"
+        );
+        assert_eq!(parse("[", PlanKind::Estimated, None).unwrap_err().message, "YSQL returned malformed plan JSON");
+        plan.raw = None;
+        assert_eq!(native(plan).unwrap_err().message, "YSQL returned no native plan text");
+    }
 }

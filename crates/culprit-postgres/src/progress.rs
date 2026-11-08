@@ -70,16 +70,20 @@ const PHASES: &[Phase] = &[
         view: "pg_stat_progress_copy",
         sql: "SELECT command, type, bytes_processed, bytes_total, tuples_processed FROM pg_stat_progress_copy WHERE pid = {pid}",
         describe: |r| {
-            let what = format!(
-                "{} {}",
-                r.text("command").unwrap_or_else(|| "COPY".into()),
-                r.text("type").unwrap_or_default()
-            );
-            let rows = r.number("tuples_processed").map(|t| format!(" · {} rows so far", t as u64)).unwrap_or_default();
-            (format!("{}{rows}", what.trim()), ratio(r.number("bytes_processed"), r.number("bytes_total")))
+            (
+                copy_text(r.text("command"), r.text("type"), r.number("tuples_processed")),
+                ratio(r.number("bytes_processed"), r.number("bytes_total")),
+            )
         },
     },
 ];
+
+/// A COPY's step: its command and kind ("COPY FROM FILE"), and the rows it has processed so far.
+fn copy_text(command: Option<String>, kind: Option<String>, rows: Option<f64>) -> String {
+    let what = format!("{} {}", command.unwrap_or_else(|| "COPY".into()), kind.unwrap_or_default());
+    let rows = rows.map(|t| format!(" · {} rows so far", t as u64)).unwrap_or_default();
+    format!("{}{rows}", what.trim())
+}
 
 /// State, waits, elapsed time and command progress. The caller adds the estimated plan when asked for it.
 pub(crate) async fn query_progress(connector: &Connector, session: &str) -> Result<QueryProgress> {
@@ -131,4 +135,37 @@ pub(crate) async fn query_progress(connector: &Connector, session: &str) -> Resu
         progress.note = Some(NO_OPERATOR_PROGRESS.to_string());
     }
     Ok(progress)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use culprit_core::{ConnectionSpec, SessionAction};
+
+    // What a running statement's progress says, word for word.
+    #[test]
+    fn progress_in_english() {
+        assert_eq!(
+            copy_text(Some("COPY FROM".into()), Some("FILE".into()), Some(1200.0)),
+            "COPY FROM FILE · 1200 rows so far"
+        );
+        assert_eq!(copy_text(None, None, None), "COPY");
+        assert_eq!(copy_text(Some("COPY TO".into()), None, Some(0.0)), "COPY TO · 0 rows so far");
+        assert_eq!(
+            NO_OPERATOR_PROGRESS,
+            "PostgreSQL doesn't report how far a running query has got, operator by operator. Culprit shows the plan \
+             PostgreSQL estimated for it and how long it has been running. CREATE INDEX, VACUUM, ANALYZE, CLUSTER and \
+             COPY report their own progress."
+        );
+    }
+
+    // A session that can't be a backend's pid is refused before anything connects.
+    #[tokio::test]
+    async fn a_session_that_is_no_pid_in_english() {
+        let connector = Connector::new(&ConnectionSpec { host: "localhost".into(), ..Default::default() }).unwrap();
+        let error = query_progress(&connector, "99999999999").await.err().unwrap();
+        assert_eq!(error.message, "'99999999999' is not a pid");
+        let error = crate::sessions::interrupt(&connector, "99999999999", SessionAction::Cancel).await.err().unwrap();
+        assert_eq!(error.message, "'99999999999' is not a pid");
+    }
 }
