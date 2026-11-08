@@ -5,3 +5,6 @@
 *.ico binary
 *.icns binary
 *.sqlplan text eol=lf
+
+# Language catalogs merge key by key (docs/localization.md, "Merging catalogs").
+locales/*.json merge=catalog
