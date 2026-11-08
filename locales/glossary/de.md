@@ -93,7 +93,7 @@ Baseline, Dashboard, Live, Cache, Latch, Flush, Query Store, JIT, HOT, Tablet, S
 | snapshot | Snapshot | |
 | connection | Verbindung | |
 | session | Sitzung | end a session: Sitzung beenden |
-| transaction | Transaktion | roll back: zurücksetzen (zurückgesetzt); commit: committen (committet) |
+| transaction | Transaktion | roll back: zurücksetzen (zurückgesetzt); commit: committen (committet); as nouns in compact labels: Rollback, Commit |
 | idle in transaction | im Leerlauf in einer Transaktion | |
 | server / database / instance | Server / Datenbank / Instanz | |
 | engine | Engine (die) / Datenbank-Engine | |
@@ -139,6 +139,11 @@ Baseline, Dashboard, Live, Cache, Latch, Flush, Query Store, JIT, HOT, Tablet, S
 | capability locked | nicht verfügbar | never „gesperrt“: that is a lock |
 | provider | Provider | |
 | cloud | Cloud | |
+| (service) tier | Dienstebene | Microsoft Learn |
+| coding agent | Coding-Agent | |
+| keychain | Schlüsselbund des Betriebssystems | |
+| connection string | Verbindungszeichenfolge | Microsoft Learn |
+| it / its (a query, a table) | name the noun again („Die Abfrage …“, „Die Tabelle …“) | a bare „Sie“/„Ihr“ reads as the reader |
 | uptime | Betriebszeit | |
 
 ## UI verbs
