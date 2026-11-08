@@ -4,6 +4,7 @@ import type { DashboardLive } from "../../gen/DashboardLive";
 import type { LiveState } from "../../gen/LiveState";
 import type { Tile } from "../../gen/Tile";
 import { api, errorMessage, type ApiError } from "../../lib/api";
+import { dateLocale } from "../../lib/format";
 import { t } from "../../lib/i18n";
 import { openLive } from "../Live";
 import { Frame, metricText, metricValue } from "./Tiles";
@@ -97,7 +98,7 @@ export function NowTile({ tile, live, sessions }: { tile: Tile; live: LiveNow; s
           : t("ui.common.updated_seconds_ago", { seconds: String(live.age) });
   const blocking = tile.items.filter((i) => i.status === "bad");
   const foot = (
-    <p className={`dash-live ${live.hidden || (live.error && !live.state) ? "paused" : ""}`} title={live.state ? t("ui.dashboard.now_tile.read_at", { time: new Date(live.state.taken_at).toLocaleTimeString() }) : undefined}>
+    <p className={`dash-live ${live.hidden || (live.error && !live.state) ? "paused" : ""}`} title={live.state ? t("ui.dashboard.now_tile.read_at", { time: new Date(live.state.taken_at).toLocaleTimeString(dateLocale()) }) : undefined}>
       <span className="live-dot" aria-hidden /> {t("ui.common.live_freshness", { freshness })}
     </p>
   );

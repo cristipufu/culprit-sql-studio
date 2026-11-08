@@ -13,6 +13,7 @@ import { t } from "../lib/i18n";
 import { currentReport, setState, toast, useStore } from "../lib/store";
 import { keys } from "../lib/keys";
 import { copyAndTell } from "../lib/clipboard";
+import { dateLocale, digits } from "../lib/format";
 import { slot, withElements } from "./message-parts";
 
 function patternLabel(pattern: DeadlockPattern): string {
@@ -45,9 +46,10 @@ function when(iso: string | null): { short: string; full: string } {
   const d = new Date(iso);
   const today = new Date();
   const sameDay = d.toDateString() === today.toDateString();
-  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  const short = sameDay ? t("ui.deadlocks.today", { time }) : `${d.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
-  return { short, full: d.toLocaleString() };
+  const locale = dateLocale();
+  const time = d.toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" });
+  const short = sameDay ? t("ui.deadlocks.today", { time }) : t("ui.format.when.this_year", { date: d.toLocaleDateString(locale, { month: "short", day: "numeric" }), time });
+  return { short, full: d.toLocaleString(locale) };
 }
 
 /** Whose transaction was rolled back, said as Rust's `deadlocks::victim_text` says it: "session 202 (login root)",
@@ -200,7 +202,7 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
           {counted != null && counted > 0 ? (
             <>
               <div className="dl-counter">
-                <span className="dl-counter-value">{counted.toLocaleString()}</span>
+                <span className="dl-counter-value">{digits(counted.toLocaleString("en-US"))}</span>
                 <span className="dl-counter-label">
                   {load.status === "ready" && load.report.counted_since
                     ? t("ui.deadlocks.counted_since", { n: counted, time: when(load.report.counted_since).short })

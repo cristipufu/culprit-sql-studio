@@ -7,7 +7,7 @@ import { SignInDialog } from "./components/SignInDialog";
 import { Sidebar } from "./components/Sidebar";
 import { WindowPicker } from "./components/WindowPicker";
 import { editorScope } from "./lib/editor-tabs";
-import { when, windowLabel } from "./lib/format";
+import { when, windowSpan } from "./lib/format";
 import { useHotkeys } from "./lib/hotkeys";
 import { installPlanPaste } from "./lib/plans";
 import { getState, lastConnection, loadConnections, openConnection, scan, setState, useStore, type View } from "./lib/store";
@@ -166,7 +166,7 @@ function TopBar() {
         >
           {windowUnknown(w)
             ? t("ui.app.log_no_timestamps", { source: w.source })
-            : t("ui.app.log_window", { source: w.source, window: windowLabel(w.window_hours).replace(/^last /, "") })}
+            : t("ui.app.log_window", { source: w.source, window: windowSpan(w.window_hours) })}
         </span>
       )}
       {showsWorkload && report && !w && (

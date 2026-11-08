@@ -6,7 +6,7 @@ import type { Session } from "../gen/Session";
 import type { SessionAction } from "../gen/SessionAction";
 import { api, errorMessage, type ApiError } from "../lib/api";
 import { can, serverName } from "../lib/engines";
-import { count, duration, oneLine } from "../lib/format";
+import { count, dateLocale, duration, oneLine } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
 import { t } from "../lib/i18n";
 import { currentReport, setState, toast, useStore } from "../lib/store";
@@ -159,7 +159,7 @@ function LiveSessions({ connection }: { connection: string }) {
   return (
     <div className="view live-view" style={{ overflow: "hidden" }}>
       <div className="live-top">
-        <span className={`live-status ${paused || hidden || tab === "deadlocks" ? "paused" : ""}`} title={state ? t("ui.live.last_read", { time: new Date(state.taken_at).toLocaleTimeString() }) : undefined}>
+        <span className={`live-status ${paused || hidden || tab === "deadlocks" ? "paused" : ""}`} title={state ? t("ui.live.last_read", { time: new Date(state.taken_at).toLocaleTimeString(dateLocale()) }) : undefined}>
           <span className="live-dot" aria-hidden /> {withElements(t("ui.common.live_freshness", { freshness: slot(0) }), [<span key="age" className="live-age">{freshness}</span>])}
         </span>
         {tab === "sessions" && <Sparkline samples={history} />}

@@ -7,7 +7,7 @@ import type { TileStatus } from "../../gen/TileStatus";
 import { copyAndTell } from "../../lib/clipboard";
 import { STATUS_LABEL } from "../../lib/dashboard";
 import { canOpenFixInEditor } from "../../lib/editor-sql";
-import { percent, when } from "../../lib/format";
+import { dateLocale, percent, when } from "../../lib/format";
 import { t } from "../../lib/i18n";
 import { keys } from "../../lib/keys";
 import { querySummary } from "../../lib/query-summary";
@@ -213,7 +213,7 @@ export function DeadlocksTile({ tile, report }: { tile: Tile; report: Report }) 
           const at = dl.at ? Date.parse(dl.at) : NaN;
           if (!Number.isFinite(at)) return null;
           const left = Math.min(100, Math.max(0, ((at - start) / (end - start)) * 100));
-          return <span key={dl.id} style={{ left: `${left}%` }} title={`${dl.headline}${dl.at ? ` · ${new Date(dl.at).toLocaleString()}` : ""}`} />;
+          return <span key={dl.id} style={{ left: `${left}%` }} title={`${dl.headline}${dl.at ? ` · ${new Date(dl.at).toLocaleString(dateLocale())}` : ""}`} />;
         })}
         <em>{t("ui.dashboard.hours_ago", { hours: String(d.since_hours >= 23.5 ? 24 : Math.round(d.since_hours)) })}</em>
         <em className="end">{t("ui.dashboard.now")}</em>
