@@ -7,6 +7,7 @@ mod actual_words;
 mod brief;
 mod bursts;
 mod chatty;
+mod config_words;
 mod counter_age;
 mod dashboard;
 mod deadlock_words;

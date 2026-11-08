@@ -2,84 +2,97 @@
 
 use super::*;
 
-pub(super) fn check(snapshot: &Snapshot) -> Vec<Finding> {
+/// What SQL Server's settings establish, one finding each.
+pub enum Case<'s> {
+    QueryStoreOff,
+    /// Query Store turned read-only for `reason` (its codes, added up), which decides the fix.
+    QueryStoreReadOnly {
+        reason: u64,
+        fix: ReadOnlyFix,
+        max: Option<f64>,
+    },
+    ReadCommittedSnapshot(Rcsi<'s>),
+    /// AUTO_CREATE_STATISTICS (`create`) or AUTO_UPDATE_STATISTICS off.
+    AutoStatistics {
+        create: bool,
+    },
+    /// The database's compatibility level, two or more behind the newest the server (or the service: `cloud`) offers.
+    CompatibilityLevel {
+        level: u32,
+        latest: u32,
+        cloud: Option<&'s str>,
+    },
+    CostThreshold,
+    /// Query Store 90% full or more, without size-based cleanup.
+    QueryStoreSize {
+        used: f64,
+        max: f64,
+    },
+    /// Query Store capturing every statement: `busy` with 5,000 statements or more in the window.
+    QueryStoreCapture {
+        busy: bool,
+        statements: Option<f64>,
+    },
+    QueryStoreWaits,
+    LegacyCardinalityEstimation,
+    /// MAXDOP 0 on more than 8 processors: the cap to set, and whether it can be set for this database alone.
+    Maxdop {
+        cpus: f64,
+        nodes: f64,
+        per_node: Option<f64>,
+        cap: f64,
+        scoped: bool,
+    },
+}
+
+/// What brings a read-only Query Store back to recording, by why it stopped.
+#[derive(Clone, Copy)]
+pub enum ReadOnlyFix {
+    /// It reached its size limit: more room, and cleanup.
+    Room,
+    /// It holds as many statements as its memory allows: automatic capture.
+    Capture,
+    /// The database is out of disk space.
+    Disk,
+    /// It usually returns to recording by itself.
+    Wait,
+}
+
+pub(super) fn decide(snapshot: &Snapshot) -> Vec<Case<'_>> {
     let mut out = settings(snapshot);
     out.extend(health(snapshot));
     out
 }
 
-fn settings(snapshot: &Snapshot) -> Vec<Finding> {
+fn settings(snapshot: &Snapshot) -> Vec<Case<'_>> {
     let mut out = Vec::new();
-    let db = quote(Engine::Mssql, &snapshot.server.database);
-
     let qs_actual = value(snapshot, &["query_store_options.actual_state_desc"]);
     let qs_reason =
         value(snapshot, &["query_store_options.readonly_reason"]).and_then(|r| r.trim().parse::<u64>().ok());
     match qs_actual.map(|v| v.to_ascii_uppercase()) {
-        Some(state) if state.contains("OFF") => out.push(setting_finding(
-            "query-store",
-            Severity::Medium,
-            "Query Store is off, so query history is lost on every restart".into(),
-            "Without Query Store, Culprit (and you) only see what is still in the plan cache: no history, no plan regressions, no per-query waits. It costs little and is on by default in Azure SQL and SQL Server 2022.".into(),
-            Fix {
-                summary: "Turn it on with automatic capture so ad-hoc noise isn't recorded.".into(),
-                sql: Some(format!("ALTER DATABASE {db} SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE, QUERY_CAPTURE_MODE = AUTO);")),
-                cost: Some("Uses some space in the database (default cap 1 GB) and a little CPU.".into()),
-            },
-        )),
+        Some(state) if state.contains("OFF") => out.push(Case::QueryStoreOff),
         Some(state) if state.contains("READ_ONLY") => {
-            if let Some(f) = query_store_read_only(snapshot, &db, qs_reason.unwrap_or(0)) {
-                out.push(f);
-            }
+            out.extend(query_store_read_only(snapshot, qs_reason.unwrap_or(0)));
         }
         _ => {}
     }
 
     if read_committed_snapshot_off(snapshot) {
-        out.push(read_committed_snapshot(snapshot, &db));
+        out.push(Case::ReadCommittedSnapshot(read_committed_snapshot(snapshot)));
     }
 
-    for (name, label) in
-        [("is_auto_create_stats_on", "AUTO_CREATE_STATISTICS"), ("is_auto_update_stats_on", "AUTO_UPDATE_STATISTICS")]
-    {
+    for (name, create) in [("is_auto_create_stats_on", true), ("is_auto_update_stats_on", false)] {
         if value(snapshot, &[name]).is_some_and(|v| !is_on(v)) {
-            // Some products require statistics they create themselves: SharePoint's content databases run with
-            // AUTO_CREATE_STATISTICS off by design.
-            let create = label == "AUTO_CREATE_STATISTICS";
-            let mut f = setting_finding(
-                &label.to_ascii_lowercase(),
-                if create { Severity::Medium } else { Severity::High },
-                format!("{label} is off"),
-                "The optimizer relies on statistics to estimate row counts. With this off, estimates go stale or missing and plans degrade over time.".into(),
-                Fix { summary: "Turn it back on.".into(), sql: Some(format!("ALTER DATABASE {db} SET {label} ON;")), cost: None },
-            );
-            if create {
-                f.caveats.push("Some products require it off and maintain statistics themselves (SharePoint content databases do): check the vendor's guidance before turning it on.".into());
-            }
-            out.push(f);
+            out.push(Case::AutoStatistics { create });
         }
     }
 
     if let Some(level) = value(snapshot, &["compatibility_level"]).and_then(|v| v.parse::<u32>().ok()) {
         let latest = latest_compat(&snapshot.server);
         if level + 20 <= latest {
-            let mut f = setting_finding(
-                "compatibility-level",
-                Severity::Low,
-                format!("The database runs at compatibility level {level}"),
-                format!(
-                    "{} supports level {latest}, but the optimizer behaves as it did at {level}. Newer levels bring adaptive joins, memory grant feedback and parameter-sensitive plans.",
-                    snapshot.server.cloud.as_deref().filter(|_| snapshot.server.platform().is_some_and(|p| p.is_azure())).unwrap_or("The server")
-                ),
-                Fix {
-                    summary: "Raise it after testing; Query Store makes this safe because you can force the old plans for any query that regresses.".into(),
-                    sql: Some(format!("ALTER DATABASE {db} SET COMPATIBILITY_LEVEL = {latest};")),
-                    cost: None,
-                },
-            );
-            f.confidence = Confidence::Low;
-            f.metrics.push(Metric::text("Current level", level.to_string()));
-            out.push(f);
+            let cloud =
+                snapshot.server.cloud.as_deref().filter(|_| snapshot.server.platform().is_some_and(|p| p.is_azure()));
+            out.push(Case::CompatibilityLevel { level, latest, cloud });
         }
     }
 
@@ -87,25 +100,13 @@ fn settings(snapshot: &Snapshot) -> Vec<Finding> {
     // parallel, so where nothing can (MAXDOP 1, one processor) it changes nothing.
     let ctfp = value(snapshot, &["cost threshold for parallelism"]).and_then(|v| v.parse::<f64>().ok());
     if ctfp.is_some_and(|v| v <= 5.0) && !serial_only(snapshot) {
-        let change = server_option(&snapshot.server, "cost threshold for parallelism", "50");
-        out.push(setting_finding(
-            "cost-threshold-for-parallelism",
-            Severity::Low,
-            "Cost threshold for parallelism is still the 1990s default of 5".into(),
-            "Even cheap queries go parallel, which wastes CPU on coordination and shows up as CXPACKET/CXCONSUMER waits.".into(),
-            Fix {
-                summary: format!("A common starting point is 50; adjust with your workload. {}", change.how),
-                sql: change.sql,
-                cost: None,
-            },
-        ));
+        out.push(Case::CostThreshold);
     }
     out
 }
 
-fn health(snapshot: &Snapshot) -> Vec<Finding> {
+fn health(snapshot: &Snapshot) -> Vec<Case<'_>> {
     let mut out = Vec::new();
-    let db = quote(Engine::Mssql, &snapshot.server.database);
     let qs_on = value(snapshot, &["query_store_options.actual_state_desc"])
         .is_some_and(|v| matches!(v.to_ascii_uppercase().as_str(), "READ_WRITE" | "READ_ONLY"));
 
@@ -124,110 +125,30 @@ fn health(snapshot: &Snapshot) -> Vec<Finding> {
         && value(snapshot, &["query_store_options.actual_state_desc"])
             .is_some_and(|v| v.eq_ignore_ascii_case("READ_WRITE"))
     {
-        let mut f = setting_finding(
-            "query-store-size",
-            Severity::Medium,
-            format!("Query Store is {} full and stops recording when it fills", format::percent(used / max)),
-            format!(
-                "It holds {} MB of its {} MB limit. At the limit it turns read-only: new queries, plan changes and \
-                 regressions stop being captured until someone makes room.",
-                used.round(),
-                max.round()
-            ),
-            Fix {
-                summary: "Raise the limit and let it clean up old data on its own.".into(),
-                sql: Some(format!(
-                    "ALTER DATABASE {db} SET QUERY_STORE (MAX_STORAGE_SIZE_MB = {}, SIZE_BASED_CLEANUP_MODE = AUTO);",
-                    ((max * 2.0) / 1024.0).ceil() * 1024.0
-                )),
-                cost: Some("Space in the database itself.".into()),
-            },
-        );
-        f.confidence = Confidence::High;
-        f.metrics.push(Metric::new("Used", used / max, Unit::Ratio));
-        out.push(f);
+        out.push(Case::QueryStoreSize { used, max });
     }
 
     if qs_on
         && value(snapshot, &["query_store_options.query_capture_mode_desc"])
             .is_some_and(|v| v.eq_ignore_ascii_case("ALL"))
     {
-        let busy = snapshot.workload.as_ref().is_some_and(|w| w.query_count >= 5000.0);
         // The statements the scan read are those of its window, not everything the store holds: said as what ran in
         // it. A handful crowds nothing, so the cost is said as what ALL would do once one-off statements arrive.
-        let effect = match snapshot.workload.as_ref().filter(|w| w.query_count > 0.0) {
-            Some(w) if busy => format!(
-                " ({} statements in {}). They crowd the store, shorten how far back it can look and add overhead; \
-                 AUTO keeps what matters.",
-                format::count(w.query_count),
-                w.window_phrase()
-            ),
-            Some(w) => format!(
-                ". With {} {} in {} it costs little now; once one-off statements arrive (ad-hoc queries, generated \
-                 SQL), they crowd the store, shorten how far back it can look and add overhead. AUTO keeps what \
-                 matters.",
-                format::count(w.query_count),
-                if w.query_count == 1.0 { "statement" } else { "statements" },
-                w.window_phrase()
-            ),
-            None => {
-                ". On a busy database they crowd the store, shorten how far back it can look and add overhead; AUTO \
-                     keeps what matters."
-                    .into()
-            }
-        };
-        let mut f = setting_finding(
-            "query-store-capture",
-            if busy { Severity::Medium } else { Severity::Low },
-            "Query Store records every statement, including one-off ones".into(),
-            format!("Capture mode ALL keeps statements that ran once or cost nothing{effect}"),
-            Fix {
-                summary: "Switch to automatic capture.".into(),
-                sql: Some(format!("ALTER DATABASE {db} SET QUERY_STORE (QUERY_CAPTURE_MODE = AUTO);")),
-                cost: None,
-            },
-        );
-        f.confidence = Confidence::Medium;
-        out.push(f);
+        out.push(Case::QueryStoreCapture {
+            busy: snapshot.workload.as_ref().is_some_and(|w| w.query_count >= 5000.0),
+            statements: snapshot.workload.as_ref().map(|w| w.query_count).filter(|n| *n > 0.0),
+        });
     }
 
     if qs_on
         && value(snapshot, &["query_store_options.wait_stats_capture_mode_desc"])
             .is_some_and(|v| v.eq_ignore_ascii_case("OFF"))
     {
-        out.push(setting_finding(
-            "query-store-waits",
-            Severity::Low,
-            "Query Store isn't recording waits, so waits can't be tied to queries".into(),
-            "With wait capture off, Culprit can say the server waits on locks or disk but not which queries do the \
-             waiting."
-                .into(),
-            Fix {
-                summary: "Turn wait capture on; the overhead is small.".into(),
-                sql: Some(format!("ALTER DATABASE {db} SET QUERY_STORE (WAIT_STATS_CAPTURE_MODE = ON);")),
-                cost: None,
-            },
-        ));
+        out.push(Case::QueryStoreWaits);
     }
 
     if value(snapshot, &["LEGACY_CARDINALITY_ESTIMATION"]).is_some_and(is_on) {
-        let mut f = setting_finding(
-            "legacy-cardinality-estimation",
-            Severity::Low,
-            "The database estimates row counts the pre-2014 way".into(),
-            "LEGACY_CARDINALITY_ESTIMATION is on, so the optimizer uses the old estimator regardless of the \
-             compatibility level. It was often set as a quick fix after an upgrade and then forgotten."
-                .into(),
-            Fix {
-                summary: "Turn it off after testing, and use Query Store to force the old plan for any query that \
-                    regresses (or a per-query hint)."
-                    .into(),
-                sql: Some("ALTER DATABASE SCOPED CONFIGURATION SET LEGACY_CARDINALITY_ESTIMATION = OFF;".into()),
-                cost: None,
-            },
-        );
-        f.confidence = Confidence::Low;
-        out.push(f);
+        out.push(Case::LegacyCardinalityEstimation);
     }
 
     // MAXDOP 0 lets a query use every processor. Up to 8 per NUMA node that is what Microsoft recommends anyway, so it
@@ -241,49 +162,207 @@ fn health(snapshot: &Snapshot) -> Vec<Finding> {
         && db_maxdop.is_none_or(|v| v == 0.0)
         && let Some(cpus) = cpus.filter(|c| *c > 8.0)
     {
-        let cap = per_node.unwrap_or(8.0).clamp(1.0, 8.0);
-        let mut f = setting_finding(
-            "maxdop",
-            Severity::Low,
-            format!("One query may use all {} processors (MAXDOP 0)", format::count(cpus)),
-            format!(
-                "With no limit on parallelism, a single large query can occupy all {} schedulers and make everything \
-                 else queue behind it. Microsoft's guidance is at most 8, and no more than the processors in one NUMA \
-                 node{}.",
-                format::count(cpus),
-                if nodes > 1.0 {
-                    format!(" ({} here)", format::count(per_node.unwrap_or(cpus)))
-                } else {
-                    String::new()
-                }
-            ),
+        out.push(Case::Maxdop {
+            cpus,
+            nodes,
+            per_node,
+            cap: per_node.unwrap_or(8.0).clamp(1.0, 8.0),
             // Database-scoped configuration came with SQL Server 2016 (Azure SQL has it whatever version it reports);
             // before that the cap is the server's.
-            if snapshot.server.platform().is_some_and(|p| p.is_azure_sql())
-                || culprit_core::version_at_least(&snapshot.server.version, [13, 0, 0])
-            {
+            scoped: snapshot.server.platform().is_some_and(|p| p.is_azure_sql())
+                || culprit_core::version_at_least(&snapshot.server.version, [13, 0, 0]),
+        });
+    }
+    out
+}
+
+pub(super) fn render(snapshot: &Snapshot, case: Case<'_>) -> Finding {
+    let db = quote(Engine::Mssql, &snapshot.server.database);
+    match case {
+        Case::QueryStoreOff => setting_finding(
+            "query-store",
+            Severity::Medium,
+            t!("check.config.query_store.title"),
+            t!("check.config.query_store.summary"),
+            Fix {
+                summary: t!("check.config.query_store.fix"),
+                sql: Some(format!(
+                    "ALTER DATABASE {db} SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE, QUERY_CAPTURE_MODE = AUTO);"
+                )),
+                cost: Some(t!("check.config.query_store.fix_cost")),
+            },
+        ),
+        Case::QueryStoreReadOnly { reason, fix, max } => query_store_read_only_finding(&db, reason, fix, max),
+        Case::ReadCommittedSnapshot(rcsi) => read_committed_snapshot_finding(snapshot, &db, rcsi),
+        Case::AutoStatistics { create } => {
+            // Some products require statistics they create themselves: SharePoint's content databases run with
+            // AUTO_CREATE_STATISTICS off by design.
+            let label = if create { "AUTO_CREATE_STATISTICS" } else { "AUTO_UPDATE_STATISTICS" };
+            let mut f = setting_finding(
+                &label.to_ascii_lowercase(),
+                if create { Severity::Medium } else { Severity::High },
+                t!("check.config.auto_statistics.title", setting = label),
+                t!("check.config.auto_statistics.summary"),
                 Fix {
-                    summary: "Cap it for this database (or for the whole server).".into(),
+                    summary: t!("check.config.auto_statistics.fix"),
+                    sql: Some(format!("ALTER DATABASE {db} SET {label} ON;")),
+                    cost: None,
+                },
+            );
+            if create {
+                f.caveats.push(t!("check.config.auto_statistics.caveat.vendor"));
+            }
+            f
+        }
+        Case::CompatibilityLevel { level, latest, cloud } => {
+            let (level, latest) = (level.to_string(), latest.to_string());
+            let mut f = setting_finding(
+                "compatibility-level",
+                Severity::Low,
+                t!("check.config.compatibility_level.title", level = &level),
+                match cloud {
+                    Some(cloud) => t!(
+                        "check.config.compatibility_level.summary_service",
+                        service = cloud,
+                        latest = &latest,
+                        level = &level
+                    ),
+                    None => t!("check.config.compatibility_level.summary", latest = &latest, level = &level),
+                },
+                Fix {
+                    summary: t!("check.config.compatibility_level.fix"),
+                    sql: Some(format!("ALTER DATABASE {db} SET COMPATIBILITY_LEVEL = {latest};")),
+                    cost: None,
+                },
+            );
+            f.confidence = Confidence::Low;
+            f.metrics.push(Metric::text(t!("check.config.compatibility_level.metric.current"), level));
+            f
+        }
+        Case::CostThreshold => {
+            let change = server_option(&snapshot.server, "cost threshold for parallelism", "50");
+            setting_finding(
+                "cost-threshold-for-parallelism",
+                Severity::Low,
+                t!("check.config.cost_threshold.title"),
+                t!("check.config.cost_threshold.summary"),
+                Fix {
+                    summary: [t!("check.config.cost_threshold.fix"), change.how].join(" "),
+                    sql: change.sql,
+                    cost: None,
+                },
+            )
+        }
+        Case::QueryStoreSize { used, max } => {
+            let mut f = setting_finding(
+                "query-store-size",
+                Severity::Medium,
+                t!("check.config.query_store_size.title", share = format::percent(used / max)),
+                t!(
+                    "check.config.query_store_size.summary",
+                    used = used.round().to_string(),
+                    max = max.round().to_string()
+                ),
+                Fix {
+                    summary: t!("check.config.query_store_size.fix"),
+                    sql: Some(format!(
+                        "ALTER DATABASE {db} SET QUERY_STORE (MAX_STORAGE_SIZE_MB = {}, SIZE_BASED_CLEANUP_MODE = AUTO);",
+                        ((max * 2.0) / 1024.0).ceil() * 1024.0
+                    )),
+                    cost: Some(t!("check.config.query_store_size.fix_cost")),
+                },
+            );
+            f.confidence = Confidence::High;
+            f.metrics.push(Metric::new(t!("check.config.query_store_size.metric.used"), used / max, Unit::Ratio));
+            f
+        }
+        Case::QueryStoreCapture { busy, statements } => {
+            let window = snapshot.workload.as_ref().map(|w| w.window_phrase()).unwrap_or_default();
+            let summary = match statements {
+                Some(n) if busy => {
+                    t!("check.config.query_store_capture.summary.busy", count = format::count(n), window = &window)
+                }
+                Some(n) => t!(
+                    "check.config.query_store_capture.summary.quiet",
+                    n = n,
+                    count = format::count(n),
+                    window = &window
+                ),
+                None => t!("check.config.query_store_capture.summary.unknown"),
+            };
+            let mut f = setting_finding(
+                "query-store-capture",
+                if busy { Severity::Medium } else { Severity::Low },
+                t!("check.config.query_store_capture.title"),
+                summary,
+                Fix {
+                    summary: t!("check.config.query_store_capture.fix"),
+                    sql: Some(format!("ALTER DATABASE {db} SET QUERY_STORE (QUERY_CAPTURE_MODE = AUTO);")),
+                    cost: None,
+                },
+            );
+            f.confidence = Confidence::Medium;
+            f
+        }
+        Case::QueryStoreWaits => setting_finding(
+            "query-store-waits",
+            Severity::Low,
+            t!("check.config.query_store_waits.title"),
+            t!("check.config.query_store_waits.summary"),
+            Fix {
+                summary: t!("check.config.query_store_waits.fix"),
+                sql: Some(format!("ALTER DATABASE {db} SET QUERY_STORE (WAIT_STATS_CAPTURE_MODE = ON);")),
+                cost: None,
+            },
+        ),
+        Case::LegacyCardinalityEstimation => {
+            let mut f = setting_finding(
+                "legacy-cardinality-estimation",
+                Severity::Low,
+                t!("check.config.legacy_cardinality_estimation.title"),
+                t!("check.config.legacy_cardinality_estimation.summary"),
+                Fix {
+                    summary: t!("check.config.legacy_cardinality_estimation.fix"),
+                    sql: Some("ALTER DATABASE SCOPED CONFIGURATION SET LEGACY_CARDINALITY_ESTIMATION = OFF;".into()),
+                    cost: None,
+                },
+            );
+            f.confidence = Confidence::Low;
+            f
+        }
+        Case::Maxdop { cpus, nodes, per_node, cap, scoped } => {
+            let processors = format::count(cpus);
+            let fix = if scoped {
+                Fix {
+                    summary: t!("check.config.maxdop.fix_database"),
                     sql: Some(format!("ALTER DATABASE SCOPED CONFIGURATION SET MAXDOP = {cap:.0};")),
                     cost: None,
                 }
             } else {
                 let change = setting_change(&snapshot.server, "max degree of parallelism", &format!("{cap:.0}"));
                 Fix {
-                    summary: format!(
-                        "Cap it for the server: this version has no per-database setting (SQL Server 2016 added it). {}",
-                        change.how
-                    ),
+                    summary: [t!("check.config.maxdop.fix_server"), change.how].join(" "),
                     sql: change.sql,
                     cost: None,
                 }
-            },
-        );
-        f.confidence = Confidence::Low;
-        f.metrics.push(Metric::new("Processors", cpus, Unit::Count));
-        out.push(f);
+            };
+            let mut f = setting_finding(
+                "maxdop",
+                Severity::Low,
+                t!("check.config.maxdop.title", count = &processors),
+                t!(
+                    "check.config.maxdop.summary",
+                    count = &processors,
+                    nodes = if nodes > 1.0 { "many" } else { "one" },
+                    per_node = format::count(per_node.unwrap_or(cpus))
+                ),
+                fix,
+            );
+            f.confidence = Confidence::Low;
+            f.metrics.push(Metric::new(t!("check.config.maxdop.metric.processors"), cpus, Unit::Count));
+            f
+        }
     }
-    out
 }
 
 /// Whether nothing in this database can run in parallel: its own MAXDOP is 1, or it defers (0) to a server MAXDOP of
@@ -295,65 +374,84 @@ fn serial_only(snapshot: &Snapshot) -> bool {
     db_maxdop == Some(1.0) || (db_maxdop.is_none_or(|d| d == 0.0) && server_maxdop == Some(1.0)) || cpus == Some(1.0)
 }
 
-/// Query Store's `readonly_reason` codes (they add up when several apply).
+/// Query Store's `readonly_reason` codes (they add up when several apply), and the message that says each.
 const READ_ONLY_REASONS: [(u64, &str); 8] = [
-    (1, "the database is read-only"),
-    (2, "the database is in single-user mode"),
-    (4, "the database is in emergency mode"),
-    (8, "this is a secondary replica"),
-    (65_536, "it reached its size limit (MAX_STORAGE_SIZE_MB)"),
-    (131_072, "it holds as many different statements as its memory allows"),
-    (262_144, "data waiting to be written to disk reached its memory limit"),
-    (524_288, "the database is out of disk space"),
+    (1, culprit_core::key!("check.config.query_store_read_only.reason.database_read_only")),
+    (2, culprit_core::key!("check.config.query_store_read_only.reason.single_user")),
+    (4, culprit_core::key!("check.config.query_store_read_only.reason.emergency")),
+    (8, culprit_core::key!("check.config.query_store_read_only.reason.secondary")),
+    (65_536, culprit_core::key!("check.config.query_store_read_only.reason.size_limit")),
+    (131_072, culprit_core::key!("check.config.query_store_read_only.reason.statements")),
+    (262_144, culprit_core::key!("check.config.query_store_read_only.reason.flush_memory")),
+    (524_288, culprit_core::key!("check.config.query_store_read_only.reason.disk_full")),
 ];
 
 /// A read-only Query Store, by why. A read-only database, single-user or emergency mode, or a secondary replica keep
 /// it read-only by design: nothing to fix in Query Store. The rest each have their own fix.
-fn query_store_read_only(snapshot: &Snapshot, db: &str, reason: u64) -> Option<Finding> {
+fn query_store_read_only(snapshot: &Snapshot, reason: u64) -> Option<Case<'_>> {
     const BY_DESIGN: u64 = 1 | 2 | 4 | 8;
     if reason == 0 || reason & BY_DESIGN != 0 {
         return None;
     }
-    let reasons: Vec<String> =
-        READ_ONLY_REASONS.iter().filter(|(code, _)| reason & code != 0).map(|(_, why)| why.to_string()).collect();
-    let why = if reasons.is_empty() { format!("reason code {reason}") } else { format::list(&reasons) };
     let max = value(snapshot, &["query_store_options.max_storage_size_mb"]).and_then(|v| v.trim().parse::<f64>().ok());
-    let (summary, sql, severity) = if reason & 65_536 != 0 {
-        // Never less room than it has now.
-        let room = max.map_or(2048.0, |m| (m * 2.0).max(2048.0));
-        (
-            "Give it more room and let it clean up old data by itself, then turn recording back on.",
-            format!(
-                "ALTER DATABASE {db} SET QUERY_STORE (MAX_STORAGE_SIZE_MB = {room:.0}, SIZE_BASED_CLEANUP_MODE = AUTO, OPERATION_MODE = READ_WRITE);"
-            ),
-            Severity::Medium,
-        )
+    let fix = if reason & 65_536 != 0 {
+        ReadOnlyFix::Room
     } else if reason & 131_072 != 0 {
-        (
-            "Record only statements that matter (automatic capture), then turn recording back on.",
+        ReadOnlyFix::Capture
+    } else if reason & 524_288 != 0 {
+        ReadOnlyFix::Disk
+    } else {
+        ReadOnlyFix::Wait
+    };
+    Some(Case::QueryStoreReadOnly { reason, fix, max })
+}
+
+fn query_store_read_only_finding(db: &str, reason: u64, fix: ReadOnlyFix, max: Option<f64>) -> Finding {
+    let reasons: Vec<String> = READ_ONLY_REASONS
+        .iter()
+        .filter(|(code, _)| reason & code != 0)
+        .map(|(_, why)| culprit_core::i18n::t(why, &[]))
+        .collect();
+    let why = if reasons.is_empty() {
+        t!("check.config.query_store_read_only.reason.code", code = reason.to_string())
+    } else {
+        format::list(&reasons)
+    };
+    let (summary, sql, severity) = match fix {
+        ReadOnlyFix::Room => {
+            // Never less room than it has now.
+            let room = max.map_or(2048.0, |m| (m * 2.0).max(2048.0));
+            (
+                t!("check.config.query_store_read_only.fix.room"),
+                format!(
+                    "ALTER DATABASE {db} SET QUERY_STORE (MAX_STORAGE_SIZE_MB = {room:.0}, SIZE_BASED_CLEANUP_MODE = AUTO, OPERATION_MODE = READ_WRITE);"
+                ),
+                Severity::Medium,
+            )
+        }
+        ReadOnlyFix::Capture => (
+            t!("check.config.query_store_read_only.fix.capture"),
             format!("ALTER DATABASE {db} SET QUERY_STORE (QUERY_CAPTURE_MODE = AUTO, OPERATION_MODE = READ_WRITE);"),
             Severity::Medium,
-        )
-    } else if reason & 524_288 != 0 {
-        (
-            "Free or add space in the database's data files, then turn recording back on.",
+        ),
+        ReadOnlyFix::Disk => (
+            t!("check.config.query_store_read_only.fix.disk"),
             format!("ALTER DATABASE {db} SET QUERY_STORE (OPERATION_MODE = READ_WRITE);"),
             Severity::Medium,
-        )
-    } else {
-        (
-            "It usually returns to recording once the data is written; if it stays read-only, turn recording back on.",
+        ),
+        ReadOnlyFix::Wait => (
+            t!("check.config.query_store_read_only.fix.wait"),
             format!("ALTER DATABASE {db} SET QUERY_STORE (OPERATION_MODE = READ_WRITE);"),
             Severity::Low,
-        )
+        ),
     };
-    Some(setting_finding(
+    setting_finding(
         "query-store",
         severity,
-        "Query Store stopped recording".into(),
-        format!("Query Store is read-only because {why}. New queries and plan changes aren't being captured."),
-        Fix { summary: summary.into(), sql: Some(sql), cost: None },
-    ))
+        t!("check.config.query_store_read_only.title"),
+        t!("check.config.query_store_read_only.summary", why = why),
+        Fix { summary, sql: Some(sql), cost: None },
+    )
 }
 
 /// Whether READ_COMMITTED_SNAPSHOT is known to be off for this database (SQL Server): reads under read committed then
@@ -373,12 +471,12 @@ pub(crate) fn versioning_spares_read(q: &culprit_core::QueryStat) -> bool {
 
 /// Time reads spent waiting on locks in the workload's window, how many deadlocks in this database had a read in them,
 /// and the read that waited longest (with its wait): what row versioning for read committed would remove.
-fn readers_blocked(snapshot: &Snapshot) -> (f64, usize, Option<(String, f64)>) {
-    let waited: Vec<(String, f64)> = app_queries(snapshot)
+fn readers_blocked(snapshot: &Snapshot) -> (f64, usize, Option<(&culprit_core::QueryStat, f64)>) {
+    let waited: Vec<(&culprit_core::QueryStat, f64)> = app_queries(snapshot)
         .filter(|q| versioning_spares_read(q))
         .map(|q| {
             let ms = q.waits.iter().filter(|w| category_key(&w.category) == "lock").map(|w| w.wait_ms).sum::<f64>();
-            (query_handle(q), ms)
+            (q, ms)
         })
         .filter(|(_, ms)| *ms > 0.0)
         .collect();
@@ -399,7 +497,7 @@ fn readers_blocked(snapshot: &Snapshot) -> (f64, usize, Option<(String, f64)>) {
 
 /// The reads that waited on locks (see [`readers_blocked`]), as their runs came: whether any ran steadily enough for a
 /// rate a day, when they ran where they came in bursts ("on Oct 11, 13:56–14:19 UTC", for one read or several in one
-/// stretch), and whether all of them stopped running (history: their waits are behind them).
+/// stretch, as the workload words it), and whether all of them stopped running (history: their waits are behind them).
 struct WaitingReads<'a> {
     reads: Vec<&'a culprit_core::QueryStat>,
     steady: bool,
@@ -441,7 +539,26 @@ fn waiting_reads(snapshot: &Snapshot) -> WaitingReads<'_> {
     WaitingReads { reads, steady, when, stopped }
 }
 
-fn read_committed_snapshot(snapshot: &Snapshot, db: &str) -> Finding {
+/// READ_COMMITTED_SNAPSHOT off, and what the reads' lock waits establish.
+pub struct Rcsi<'s> {
+    lock_ms: f64,
+    share: f64,
+    /// Deadlocks in this database a read was part of.
+    deadlocks: usize,
+    /// The read that waited longest, and how long.
+    longest: Option<(&'s culprit_core::QueryStat, f64)>,
+    waiting: WaitingReads<'s>,
+    /// Reads blocked for a real amount of time, or a deadlock a read was part of: what the setting removes.
+    blocking: bool,
+    /// Query Store recorded waits for some statement: without any, nothing says the reads didn't wait.
+    waits_recorded: bool,
+    /// The wait a day, where the reads ran steadily enough to say so.
+    per_day: Option<f64>,
+    /// ALLOW_SNAPSHOT_ISOLATION is on: SQL Server keeps row versions already.
+    snapshot_isolation: bool,
+}
+
+fn read_committed_snapshot(snapshot: &Snapshot) -> Rcsi<'_> {
     let (lock_ms, deadlocks, longest) = readers_blocked(snapshot);
     let share = snapshot.workload.as_ref().map(|w| w.share(lock_ms)).unwrap_or(0.0);
     let waiting = waiting_reads(snapshot);
@@ -451,108 +568,128 @@ fn read_committed_snapshot(snapshot: &Snapshot, db: &str) -> Finding {
     // Without either it is advice for later.
     let real_amount = severity_for_time_of(snapshot, &waiting.reads, lock_ms, share) >= Severity::Medium;
     let blocking = (lock_ms >= 60_000.0 && share >= 0.03 && real_amount && !waiting.stopped) || deadlocks > 0;
+    // A rate a day only where the reads ran that way; reads that came in bursts are said by when they did.
+    let per_day = snapshot.workload.as_ref().filter(|_| waiting.steady).and_then(|w| w.per_day_measured(lock_ms));
+    Rcsi {
+        lock_ms,
+        share,
+        deadlocks,
+        longest,
+        blocking,
+        // Statements' waits come from Query Store's wait capture: a history with none at all recorded can't say reads
+        // didn't wait.
+        waits_recorded: app_queries(snapshot).any(|q| !q.waits.is_empty()),
+        per_day,
+        snapshot_isolation: value(snapshot, &["snapshot_isolation_state_desc"])
+            .is_some_and(|v| v.eq_ignore_ascii_case("ON")),
+        waiting,
+    }
+}
+
+fn read_committed_snapshot_finding(snapshot: &Snapshot, db: &str, r: Rcsi<'_>) -> Finding {
+    let Rcsi { lock_ms, share, deadlocks, waiting, .. } = &r;
     // When the waits came, where the reads came in bursts, and that they're over where the reads stopped.
-    let reads_now = if waiting.reads.len() == 1 { "that read hasn't" } else { "those reads haven't" };
     let came = match (&waiting.when, waiting.stopped) {
-        (Some(when), true) => format!(", all of it {when}, and {reads_now} run since"),
-        (Some(when), false) => format!(", all of it {when}"),
-        (None, true) => format!(", and {reads_now} run since"),
-        (None, false) => String::new(),
+        (Some(_), true) => "when_stopped",
+        (Some(_), false) => "when",
+        (None, true) => "stopped",
+        (None, false) => "none",
     };
-    let window = snapshot.workload.as_ref().map(|w| w.window_phrase()).unwrap_or_else(|| "this scan".into());
-    let (severity, title, evidence) = if blocking {
-        let mut parts = Vec::new();
-        if lock_ms > 0.0 {
-            parts.push(format!(
-                "In {window}, reads waited {} on locks held by writes ({} of database time){came}.",
-                format::duration(lock_ms),
-                format::percent(share)
+    let when = waiting.when.clone().unwrap_or_default();
+    let reads = waiting.reads.len();
+    let window = snapshot
+        .workload
+        .as_ref()
+        .map(|w| w.window_phrase())
+        .unwrap_or_else(|| t!("check.config.read_committed_snapshot.window.this_scan"));
+    let (duration, share_said) = (format::duration(*lock_ms), format::percent(*share));
+    let mut summary = vec![t!("check.config.read_committed_snapshot.summary.lead")];
+    let (severity, title) = if r.blocking {
+        if *lock_ms > 0.0 {
+            summary.push(t!(
+                "check.config.read_committed_snapshot.summary.blocking",
+                window = &window,
+                duration = &duration,
+                share = &share_said,
+                came = came,
+                when = &when,
+                reads = reads
             ));
         }
-        if deadlocks > 0 {
-            parts.push(format!(
-                "{} deadlock{} in this database had a read in {}.",
-                deadlocks,
-                if deadlocks == 1 { "" } else { "s" },
-                if deadlocks == 1 { "it" } else { "them" }
+        if *deadlocks > 0 {
+            summary.push(t!(
+                "check.config.read_committed_snapshot.summary.deadlocks",
+                n = *deadlocks,
+                count = deadlocks.to_string()
             ));
         }
-        (
-            Severity::Medium,
-            "Readers and writers block each other (READ_COMMITTED_SNAPSHOT is off)".to_string(),
-            format!(" {}", parts.join(" ")),
-        )
+        (Severity::Medium, t!("check.config.read_committed_snapshot.title.blocking"))
     } else {
         // Said by its share of database time as well as its amount: a minute that is a fifth of a quiet database's
         // time is little in time, not little of what the database does.
-        // Statements' waits come from Query Store's wait capture: a history with none at all recorded can't say reads
-        // didn't wait.
-        let waits_recorded = app_queries(snapshot).any(|q| !q.waits.is_empty());
-        let cost = if lock_ms <= 0.0 && !waits_recorded {
-            " Whether reads wait on locks here isn't known: the query history records no waits.".to_string()
-        } else if lock_ms <= 0.0 {
-            format!(" In {window} no read waited on locks, so it costs nothing now.")
-        } else if share < 0.03 {
-            format!(
-                " In {window} reads waited {} on locks ({} of database time){came}, so it costs little now.",
-                format::duration(lock_ms),
-                format::percent(share)
+        summary.push(if *lock_ms <= 0.0 && !r.waits_recorded {
+            t!("check.config.read_committed_snapshot.summary.waits_unknown")
+        } else if *lock_ms <= 0.0 {
+            t!("check.config.read_committed_snapshot.summary.no_read_waited", window = &window)
+        } else if *share < 0.03 {
+            t!(
+                "check.config.read_committed_snapshot.summary.costs_little",
+                window = &window,
+                duration = &duration,
+                share = &share_said,
+                came = came,
+                when = &when,
+                reads = reads
             )
         } else {
-            // A rate a day only where the reads ran that way; reads that came in bursts are said by when they did.
-            let amount = snapshot
-                .workload
-                .as_ref()
-                .filter(|_| waiting.steady)
-                .and_then(|w| w.per_day_measured(lock_ms))
-                .map(|d| format!("only about {} a day", format::duration(d)))
-                .or_else(|| (!came.is_empty()).then(|| came.trim_start_matches(", ").to_string()))
-                .unwrap_or_else(|| "little time in all".into());
-            let which = match &longest {
-                Some((handle, ms)) if *ms >= lock_ms * 0.9 => format!(" (nearly all of it {handle})"),
-                Some((handle, ms)) if *ms >= lock_ms * 0.5 => {
-                    format!(" (most of it {handle}, {})", format::duration(*ms))
-                }
-                _ => String::new(),
+            let (which, statement, statement_wait) = match &r.longest {
+                Some((q, ms)) if *ms >= lock_ms * 0.9 => ("nearly_all", query_handle(q), String::new()),
+                Some((q, ms)) if *ms >= lock_ms * 0.5 => ("most", query_handle(q), format::duration(*ms)),
+                _ => ("none", String::new(), String::new()),
             };
-            format!(
-                " In {window} reads waited {} on locks held by writes{which}: {} of database time, but {amount}. With \
-                 row versioning on, those reads would read the last committed version of the rows instead of waiting.",
-                format::duration(lock_ms),
-                format::percent(share)
+            t!(
+                "check.config.read_committed_snapshot.summary.share",
+                window = &window,
+                duration = &duration,
+                which = which,
+                statement = statement,
+                statement_wait = statement_wait,
+                share = &share_said,
+                amount = if r.per_day.is_some() { "per_day" } else { came },
+                per_day = r.per_day.map(format::duration).unwrap_or_default(),
+                when = &when,
+                reads = reads
             )
-        };
-        (
-            Severity::Low,
-            "READ_COMMITTED_SNAPSHOT is off: reads would wait for writes on the same rows".to_string(),
-            format!("{cost} It matters more as reads and writes meet on the same rows more often."),
-        )
+        });
+        summary.push(t!("check.config.read_committed_snapshot.summary.matters_more"));
+        (Severity::Low, t!("check.config.read_committed_snapshot.title.advice"))
     };
-    let snapshot_isolation =
-        value(snapshot, &["snapshot_isolation_state_desc"]).is_some_and(|v| v.eq_ignore_ascii_case("ON"));
+    summary.push(t!("check.config.read_committed_snapshot.summary.most_apps"));
     let mut f = setting_finding(
         "read-committed-snapshot",
         severity,
         title,
-        format!(
-            "With row versioning off for read committed, a SELECT waits for any write holding a lock on the rows it reads, and vice versa.{evidence} Most OLTP applications run with it on; Azure SQL Database enables it by default."
-        ),
+        summary.join(" "),
         Fix {
-            summary: "Turn on row versioning for read committed. It needs a moment with no other connections, so schedule it.".into(),
+            summary: t!("check.config.read_committed_snapshot.fix"),
             sql: Some(format!("ALTER DATABASE {db} SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;")),
-            cost: Some(if snapshot_isolation {
-                "ALLOW_SNAPSHOT_ISOLATION is already on, so SQL Server already keeps row versions for this database: little extra overhead.".into()
+            cost: Some(if r.snapshot_isolation {
+                t!("check.config.read_committed_snapshot.fix_cost.versions_kept")
             } else {
-                "Row versions live in tempdb (or the database with ADR), which adds some write overhead.".into()
+                t!("check.config.read_committed_snapshot.fix_cost.tempdb")
             }),
         },
     );
-    if blocking && lock_ms > 0.0 {
-        f.metrics.push(Metric::new("Reads waiting on locks", lock_ms, Unit::Ms));
+    if r.blocking && *lock_ms > 0.0 {
+        f.metrics.push(Metric::new(
+            t!("check.config.read_committed_snapshot.metric.reads_waiting"),
+            *lock_ms,
+            Unit::Ms,
+        ));
     }
-    f.caveats.push("Readers then see the last committed version instead of waiting. Code that relies on blocking reads for correctness (rare) must use locking hints.".into());
-    if snapshot_isolation {
-        f.caveats.push("ALLOW_SNAPSHOT_ISOLATION is on: code can already opt into SNAPSHOT isolation per transaction; RCSI makes every read-committed read use versions.".into());
+    f.caveats.push(t!("check.config.read_committed_snapshot.caveat.readers"));
+    if r.snapshot_isolation {
+        f.caveats.push(t!("check.config.read_committed_snapshot.caveat.snapshot_isolation"));
     }
     f
 }
@@ -565,4 +702,10 @@ fn latest_compat(server: &ServerInfo) -> u32 {
     }
     let major: u32 = server.version.split('.').next().and_then(|v| v.parse().ok()).unwrap_or(16);
     (major * 10).clamp(100, 170)
+}
+
+/// The findings this file makes of `snapshot`.
+#[cfg(test)]
+pub(super) fn check(snapshot: &Snapshot) -> Vec<Finding> {
+    decide(snapshot).into_iter().map(|case| render(snapshot, case)).collect()
 }

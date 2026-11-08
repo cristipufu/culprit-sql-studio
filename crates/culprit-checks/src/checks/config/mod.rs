@@ -5,7 +5,7 @@ use crate::evidence::Requirement as Evidence;
 use culprit_core::waits::category_key;
 use culprit_core::{
     Capability, Category, Check, CheckInfo, Confidence, Engine, Finding, Fix, Metric, ServerInfo, Severity, Snapshot,
-    SubjectKind, Unit, format,
+    SubjectKind, Unit, format, t,
 };
 
 use crate::support::*;
@@ -26,24 +26,43 @@ pub(crate) const CHECKS: &[&dyn Check] = &[&ConfigCheck];
 pub fn config_info() -> CheckInfo {
     CheckInfo {
         id: "config".into(),
-        title: "Configuration".into(),
+        title: t!("check.config.info.title"),
         category: Category::Configuration,
         engines: vec![Engine::Mssql, Engine::Postgres, Engine::Mysql, Engine::Sqlite],
         requires: vec![],
-        description:
-            "Database and server settings that commonly hurt performance or hide the data needed to diagnose it.".into(),
+        description: t!("check.config.info.description"),
     }
 }
 
-check!(ConfigCheck: config_info, config, &[Evidence::Settings]);
+check!(
+    ConfigCheck: config_info,
+    decide = config_cases,
+    render = config_finding,
+    case<'s> = ConfigCase<'s>,
+    evidence = &[Evidence::Settings],
+);
 
-pub fn config(snapshot: &Snapshot) -> Vec<Finding> {
+/// What a setting establishes, by the engine whose setting it is.
+pub enum ConfigCase<'s> {
+    Mssql(mssql::Case<'s>),
+    /// A finding an engine's file still words as it decides it.
+    Worded(Finding),
+}
+
+fn config_cases(snapshot: &Snapshot) -> Vec<ConfigCase<'_>> {
     match snapshot.server.engine {
-        Engine::Mssql => mssql::check(snapshot),
-        Engine::Postgres => postgres::check(snapshot),
+        Engine::Mssql => mssql::decide(snapshot).into_iter().map(ConfigCase::Mssql).collect(),
+        Engine::Postgres => postgres::check(snapshot).into_iter().map(ConfigCase::Worded).collect(),
         Engine::Yugabyte => Vec::new(),
-        Engine::Mysql => mysql::check(snapshot),
-        Engine::Sqlite => sqlite::check(snapshot),
+        Engine::Mysql => mysql::check(snapshot).into_iter().map(ConfigCase::Worded).collect(),
+        Engine::Sqlite => sqlite::check(snapshot).into_iter().map(ConfigCase::Worded).collect(),
+    }
+}
+
+fn config_finding(snapshot: &Snapshot, case: ConfigCase<'_>) -> Finding {
+    match case {
+        ConfigCase::Mssql(case) => mssql::render(snapshot, case),
+        ConfigCase::Worded(f) => f,
     }
 }
 
@@ -63,21 +82,21 @@ pub(crate) fn setting_finding(key: &str, severity: Severity, title: String, summ
     let mut f = finding("config", key, Category::Configuration, subject(SubjectKind::Setting, key));
     f.severity = severity;
     f.impact.score = base_score(severity) * 0.8;
-    f.impact.label = "Setting".into();
+    f.impact.label = t!("common.impact.setting");
     f.confidence = Confidence::Medium;
     f.title = title;
     f.summary = summary;
     f.fix = Some(fix);
     // A setting's finding reads the setting: once the change is in effect, it no longer fires. A setting read only at
     // startup says so ([`after_restart`]); a finding that reads a count or a share as well says its own way.
-    f.verify = vec!["Re-scan once the change has taken effect: this finding is gone.".into()];
+    f.verify = vec![t!("check.config.verify.in_effect")];
     f
 }
 
 /// The way to verify a setting the server reads only when it starts: the next scan after the restart (a reboot, on a
 /// managed service) reads it.
 pub(crate) fn after_restart(f: &mut Finding) {
-    f.verify = vec!["Re-scan after the server has restarted with the change: this finding is gone.".into()];
+    f.verify = vec![t!("check.config.verify.after_restart")];
 }
 
 /// Several settings changed together, worded the way [`setting_change`] words one: one sentence naming them all, and
@@ -96,11 +115,11 @@ pub(crate) fn settings_change(server: &ServerInfo, changes: &[(&str, &str)]) -> 
         let how: Vec<String> = each.into_iter().map(|c| c.how).collect();
         return SettingChange { how: how.join(" "), sql: (!sql.is_empty()).then(|| sql.join("\n")) };
     }
-    let name = match lead {
-        [] => last.to_string(),
-        _ => format!("{} and {last}", lead.iter().map(|(n, v)| format!("{n} to {v}")).collect::<Vec<_>>().join(", ")),
-    };
-    let mut change = setting_change(server, &name, last_value);
+    // "a to 1, b to 2 and c": every setting but the last with its value, the last one's said by `setting_change`.
+    let mut names: Vec<String> =
+        lead.iter().map(|(n, v)| t!("check.config.setting_to", setting = *n, value = *v)).collect();
+    names.push(last.to_string());
+    let mut change = setting_change(server, &format::list(&names), last_value);
     change.sql = (!sql.is_empty()).then(|| sql.join("\n"));
     change
 }
