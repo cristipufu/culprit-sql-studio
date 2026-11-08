@@ -146,3 +146,10 @@ the choice and the reason are given.
 | node, cluster | nodo, clúster | |
 | throttling (cloud) | limitación (f) | |
 | tier | nivel (m) | |
+| join | combinación (f) | Microsoft; JOIN in SQL stays |
+| checkpoint, full-page image | punto de control, imagen de página completa | Microsoft and the PostgreSQL translation |
+| slow query log | registro de consultas lentas | |
+| connection pool, driver | pool de conexiones, driver | |
+| insight (plan insights) | observación (f) | *Observaciones del plan*; never *hallazgo*, which is a finding |
+| health (the view, the tab) | estado (m) | *Estado de la base de datos*; a healthy signal is *en buen estado* |
+| upsert, get-or-create | upsert, «obtener o crear» | |
