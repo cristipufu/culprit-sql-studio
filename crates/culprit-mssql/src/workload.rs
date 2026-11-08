@@ -8,7 +8,12 @@ use crate::value::Rec;
 
 /// Converts a datetimeoffset expression to second-precision UTC ISO 8601 that every JS engine parses.
 pub(crate) fn utc_offset_iso(expr: &str) -> String {
-    format!("CONVERT(varchar(19), CAST(SWITCHOFFSET({expr}, '+00:00') AS datetime2(0)), 126) + 'Z'")
+    format!("CONVERT(varchar(19), {}, 126) + 'Z'", utc_second(expr))
+}
+
+/// A datetimeoffset expression in UTC, rounded to the second (as a cast to `datetime2(0)` rounds).
+fn utc_second(expr: &str) -> String {
+    format!("CAST(SWITCHOFFSET({expr}, '+00:00') AS datetime2(0))")
 }
 
 /// Converts a server-local datetime expression to second-precision UTC ISO 8601.
@@ -193,18 +198,22 @@ GROUP BY p.query_id, rs.plan_id
 const CAPPED_END: &str =
     "CASE WHEN MAX(end_time) > SYSDATETIMEOFFSET() THEN SYSDATETIMEOFFSET() ELSE MAX(end_time) END";
 
+/// The window's bounds, and its length measured between those same bounds: DATEDIFF counts the second boundaries
+/// crossed while the bounds round to the second, so a length taken from the unrounded end can be a second short of
+/// them, and a length its bounds contradict is read as unknown.
 fn window_sql(window_minutes: u32) -> String {
     format!(
         r#"
 DECLARE @since datetimeoffset = DATEADD(minute, -{window_minutes}, SYSDATETIMEOFFSET());
 SELECT {start} AS window_start, {end} AS window_end,
-  DATEDIFF(second, MIN(start_time), {capped}) / 3600.0 AS window_hours
+  DATEDIFF(second, {start_second}, {end_second}) / 3600.0 AS window_hours
 FROM sys.query_store_runtime_stats_interval
 WHERE end_time >= @since
 "#,
         start = utc_offset_iso("MIN(start_time)"),
         end = utc_offset_iso(CAPPED_END),
-        capped = CAPPED_END,
+        start_second = utc_second("MIN(start_time)"),
+        end_second = utc_second(CAPPED_END),
     )
 }
 
@@ -860,10 +869,15 @@ mod tests {
     #[test]
     fn the_open_interval_ends_now() {
         let sql = window_sql(60);
-        assert!(
-            sql.contains(&format!("DATEDIFF(second, MIN(start_time), {CAPPED_END}) / 3600.0 AS window_hours")),
-            "{sql}"
+        assert!(sql.contains(&utc_offset_iso(CAPPED_END)), "{sql}");
+        // The length is measured between the bounds the scan states, both rounded to the second alike.
+        let length = format!(
+            "DATEDIFF(second, {}, {}) / 3600.0 AS window_hours",
+            utc_second("MIN(start_time)"),
+            utc_second(CAPPED_END)
         );
+        assert!(sql.contains(&length), "{sql}");
+        assert!(sql.contains(&format!("{} AS window_start", utc_offset_iso("MIN(start_time)"))), "{sql}");
     }
 
     #[test]
