@@ -4,6 +4,7 @@
     python3 dev/catalog.py todo <code> [prefix]     the messages <code> lacks, as JSON {key: English}, to translate
     python3 dev/catalog.py add <code> <file.json>   put the translated {key: message} pairs in <file.json> into the catalog
     python3 dev/catalog.py status                   how much of English each language says
+    python3 dev/catalog.py prune <code>             drop messages English no longer has (after a key is renamed)
 
 `add` refuses a key English doesn't have, so a typo can't slip in; `app/src/lib/catalogs.test.ts` and the Rust catalog
 test then check that every message reads and keeps English's arguments. See docs/localization.md.
@@ -45,6 +46,15 @@ def add(code, path):
     print(f"{code}: {len(found)} messages added or replaced, {len(own) - 1} of {len(english) - 1}")
 
 
+def prune(code):
+    english, own = load("en"), load(code)
+    gone = sorted(k for k in own if k != "_meta" and k not in english)
+    for k in gone:
+        del own[k]
+    save(code, own)
+    print(f"{code}: {len(gone)} messages English no longer has removed" + (": " + ", ".join(gone) if gone else ""))
+
+
 def status():
     english = load("en")
     total = len(english) - 1
@@ -60,6 +70,8 @@ if __name__ == "__main__":
         todo(*args[1:])
     elif args[:1] == ["add"] and len(args) == 3:
         add(*args[1:])
+    elif args[:1] == ["prune"] and len(args) == 2:
+        prune(args[1])
     elif args == ["status"]:
         status()
     else:

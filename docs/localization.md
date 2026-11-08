@@ -24,6 +24,7 @@ To translate in batches, or to catch up after English gains messages, `dev/catal
 python3 dev/catalog.py status                 # how much of English each language says
 python3 dev/catalog.py todo it ui.editor. > todo.json   # what Italian lacks (optionally under a prefix), as {key: English}
 python3 dev/catalog.py add it todo.json       # after translating the values in place: into locales/it.json, sorted
+python3 dev/catalog.py prune it               # drop messages English no longer has (a key was renamed or removed)
 ```
 
 A language's terminology (how it says "index", "wait", "scan", "finding"; formal or informal address) is kept in
@@ -70,6 +71,8 @@ f.title = t!("check.heap_table.title.no_clustered_index", table = &t.name, rows 
   paragraph is sentences joined with a space.
 - **Arguments** are names, numbers, SQL, or phrases that are themselves messages. Numbers, sizes, durations and
   percentages are written through `format::` (Rust) or `lib/format.ts` (app), which follow the language.
+- **A phrase about a period** ("the last 7 days") is a whole message per unit with the number as a plural, chosen by
+  `byPeriod` (`app/src/lib/format.ts`), never "the last" + a worded span: the words around a number agree with it.
 - **A counted noun** is a plural message (`common.noun.time`: `{n, plural, one {time} other {times}}`), handed to helpers
   by key with `key!("common.noun.time")` and said with `support::counted`.
 - **Engine vocabulary** (MySQL's "rows examined" against "pages") comes from the engine's facts, not ad-hoc strings.

@@ -3,8 +3,8 @@ import type { StatementActivity } from "../gen/StatementActivity";
 import type { Report } from "../gen/Report";
 import type { Workload } from "../gen/Workload";
 import type { WorkloadKind } from "../gen/WorkloadKind";
-import { windowSpan } from "./format";
-import { t } from "./i18n";
+import { byPeriod } from "./format";
+import { key, t } from "./i18n";
 
 /** What a workload was read from, as its provider said. */
 export function workloadKind(w: Workload): WorkloadKind | null {
@@ -33,10 +33,17 @@ export function windowUnknown(w: Workload): boolean {
 /** "the last 7 days", "the 35 minutes since statistics were reset", "the 50 minutes the Rails log covers": the core's phrase. */
 export function windowPhrase(w: Workload): string {
   const unknown = windowUnknown(w);
-  const span = unknown ? "" : windowSpan(w.window_hours);
-  if (w.log != null) return unknown ? t("ui.rates.window.log_period", { log: w.log }) : t("ui.rates.window.log_span", { span, log: w.log });
-  if (w.windowed) return unknown ? t("ui.rates.window.recorded") : t("ui.rates.window.last", { span });
-  return unknown ? t("ui.rates.window.since_last_reset") : t("ui.rates.window.since_reset", { span });
+  const hours = w.window_hours;
+  if (w.log != null) {
+    if (unknown) return t("ui.rates.window.log_period", { log: w.log });
+    return byPeriod(hours, { day: key("ui.rates.window.log_days"), hour: key("ui.rates.window.log_hours"), minute: key("ui.rates.window.log_minutes") }, { log: w.log });
+  }
+  if (w.windowed) {
+    if (unknown) return t("ui.rates.window.recorded");
+    return byPeriod(hours, { day: key("ui.rates.window.last_days"), hour: key("ui.rates.window.last_hours"), minute: key("ui.rates.window.last_minutes") });
+  }
+  if (unknown) return t("ui.rates.window.since_last_reset");
+  return byPeriod(hours, { day: key("ui.rates.window.since_reset_days"), hour: key("ui.rates.window.since_reset_hours"), minute: key("ui.rates.window.since_reset_minutes") });
 }
 
 /** How the runs of statements a rate a day would misstate are said, by query id: those that came in bursts ("750 runs

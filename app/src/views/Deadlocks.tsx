@@ -228,7 +228,9 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
                   ? load.status === "ready" && load.report.counted_since
                     ? t("ui.deadlocks.none_since_reset_at", { time: when(load.report.counted_since).short })
                     : t("ui.deadlocks.none_since_reset")
-                  : t("ui.deadlocks.none_in_range", { range: rangeLabel(hours) })}
+                  : hours === 168
+                    ? t("ui.deadlocks.none_in_week")
+                    : t("ui.deadlocks.none_in_day")}
               </h3>
               <p className="muted">{load.status === "ready" && load.report.note ? load.report.note : sourceLine(engine)}</p>
             </>

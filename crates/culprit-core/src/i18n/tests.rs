@@ -90,7 +90,8 @@ fn a_scope_speaks_its_language_and_restores_the_one_before() {
     assert_eq!(t("no.such.key", &[]), "no.such.key");
 }
 
-/// Every message key the code uses: `t!("..")` and `key!("..")` in Rust, and `t("..")` in the app's TypeScript.
+/// Every message key the code uses: `t!("..")` and `key!("..")` in Rust, and `t("..")`, `tx("..")` and `key("..")` in
+/// the app's TypeScript.
 fn keys_used() -> BTreeSet<String> {
     fn scan(dir: &Path, out: &mut BTreeSet<String>) {
         let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -116,7 +117,7 @@ fn keys_used() -> BTreeSet<String> {
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            for marker in ["t!(", "t(", "key!("] {
+            for marker in ["t!(", "t(", "tx(", "key!(", "key("] {
                 let mut from = 0;
                 while let Some(at) = code[from..].find(marker).map(|at| at + from) {
                     from = at + marker.len();

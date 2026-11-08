@@ -4,10 +4,10 @@ import type { Category } from "../gen/Category";
 import type { ChangeRequest } from "../gen/ChangeRequest";
 import type { Finding } from "../gen/Finding";
 import type { Report } from "../gen/Report";
-import { ago, bytes, count, duration, percent } from "../lib/format";
+import { ago, byPeriod, bytes, count, duration, percent } from "../lib/format";
 import { windowPhrase, windowUnknown } from "../lib/rates";
 import { useHotkeys } from "../lib/hotkeys";
-import { t } from "../lib/i18n";
+import { key, t } from "../lib/i18n";
 import { changeRequest, setState, useStore } from "../lib/store";
 import { planFlags, trendNote, WorkloadTrend } from "../components/Trends";
 import { chartEvents } from "../components/ChangeTimeline";
@@ -234,7 +234,7 @@ function Header({
         ? t("ui.overview.span.log", { log: w.log })
         : t("ui.overview.span.log_over", { log: w.log, span: compactSpan(w.window_hours) })
       : w.windowed
-        ? t("ui.overview.span.last", { span: compactSpan(w.window_hours) })
+        ? byPeriod(w.window_hours, { day: key("ui.overview.span.last_days"), hour: key("ui.overview.span.last_hours"), minute: key("ui.overview.span.last_minutes") })
         : t("ui.overview.span.since_reset", { span: compactSpan(w.window_hours) });
   return (
     <div className="ov-head">

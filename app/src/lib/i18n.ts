@@ -71,6 +71,11 @@ export function t(key: string, args: Args = {}): string {
   return formatMessage(message, args, meta);
 }
 
+/** A message key handed on to be said later with t(): marked so the catalog test sees it used. */
+export function key<K extends string>(k: K): K {
+  return k;
+}
+
 /** The app's language, re-rendering the component when it changes. */
 export function useLanguage(): string {
   return useSyncExternalStore(subscribe, language, language);

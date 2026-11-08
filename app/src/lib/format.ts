@@ -1,5 +1,6 @@
 import type { Unit } from "../gen/Unit";
 import { language, locale, t } from "./i18n";
+import type { Args } from "./message-format";
 
 // Every number here reads as culprit_core::format writes it in findings and briefs, so a value reads the same on
 // every surface. `bun run test` compares them on the cases Rust writes to gen/format-cases.json (format.test.ts).
@@ -244,6 +245,20 @@ function periodLength(hours: number): { unit: "day" | "hour" | "minute"; args: {
     : hours >= 1.5 ? (["hour", Math.round(hours)] as const)
     : (["minute", Math.max(1, Math.round(hours * 60))] as const);
   return { unit, args: { n, count: String(n) } };
+}
+
+/** Three whole messages about a period, one for each unit it is counted in; each takes `n` (for its plural) and
+ * `count` (the number's digits). */
+export type PeriodMessages = { day: string; hour: string; minute: string };
+
+/**
+ * The one of `messages` for a period of `hours`, rounded as `windowLabel` rounds it. A phrase about a period is a
+ * whole message per unit, never "the last" + a span, so a language can make every word agree with the number
+ * ("der letzte Tag", "die letzten 7 Tage").
+ */
+export function byPeriod(hours: number, messages: PeriodMessages, args: Args = {}): string {
+  const { unit, args: length } = periodLength(hours);
+  return t(messages[unit], { ...args, ...length });
 }
 
 /** A recent period by its length: "last 7 days", "last 5 hours", "last 35 minutes". */
