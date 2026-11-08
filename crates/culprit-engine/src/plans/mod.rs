@@ -421,7 +421,17 @@ fn mysql_tree(text: &str) -> Result<Plan> {
 
 /// A plan Culprit exported earlier. Node ids are renumbered so a hand-edited file can't confuse the UI.
 fn culprit_json(text: &str) -> Result<Plan> {
-    let mut plan: Plan = serde_json::from_str(text).map_err(|e| Error::invalid(e.to_string()))?;
+    let mut plan: Plan = serde_json::from_str(text).map_err(|e| {
+        // A plan Culprit saved lacks a field this version writes (its facts, say): another version saved it, and this
+        // one doesn't read what others save. The engine's own plan text always reads.
+        if e.to_string().starts_with("missing field") {
+            Error::invalid(format!(
+                "it was saved by another version of Culprit ({e}); open the engine's own plan text (XML, JSON or text) instead"
+            ))
+        } else {
+            Error::invalid(e.to_string())
+        }
+    })?;
     fn renumber(node: &mut PlanNode, next: &mut u32) {
         node.id = *next;
         *next += 1;

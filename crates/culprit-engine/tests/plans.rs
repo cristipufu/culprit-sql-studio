@@ -19,6 +19,20 @@ fn native_docdb_plans_are_imported_as_yugabyte_with_total_rows_and_native_metric
     assert_eq!(imported.facts().docdb, plan.facts().docdb);
 }
 
+// A plan another version of Culprit saved isn't read: what's missing from it says so, and where to go instead.
+#[test]
+fn a_plan_another_version_saved_says_so() {
+    let plan = parse_plan(&fixture("mssql-seek.sqlplan")).unwrap();
+    let mut older = serde_json::to_value(&plan).unwrap();
+    older["root"].as_object_mut().unwrap().remove("facts");
+    let text = serde_json::to_string(&older).unwrap();
+    assert_eq!(detect(&text), Some(PlanFormat::Culprit));
+    let refused = parse_plan(&text).unwrap_err();
+    assert_eq!(refused.code, ErrorCode::InvalidInput);
+    assert!(refused.message.contains("saved by another version of Culprit"), "{}", refused.message);
+    assert!(refused.message.contains("engine's own plan text"), "{}", refused.message);
+}
+
 fn fixture(name: &str) -> String {
     std::fs::read_to_string(format!("{}/tests/plans/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
 }
