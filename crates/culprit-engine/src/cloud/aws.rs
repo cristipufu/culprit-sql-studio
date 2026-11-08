@@ -293,7 +293,11 @@ pub(super) fn rds_judge(
         let s = CloudSeries::new(metric, &culprit_core::i18n::t(label, &[]), CloudUnit::Percent, points).floor();
         let title = t!("engine.cloud.rds.episode.ebs_burst");
         let said = t!("engine.cloud.rds.episode_said.ebs_burst");
-        found.extend(episodes(&s, period, &rule(metric, ThrottleKind::IoCredits, 0.0, true, 2, (&title, &said), &detail)));
+        found.extend(episodes(
+            &s,
+            period,
+            &rule(metric, ThrottleKind::IoCredits, 0.0, true, 2, (&title, &said), &detail),
+        ));
         series.push(s);
     }
 

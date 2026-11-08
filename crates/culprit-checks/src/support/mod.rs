@@ -495,9 +495,18 @@ pub fn parse_epoch_seconds(text: &str) -> Option<f64> {
 enum Counted {
     /// Only since what ("since the server last restarted"), with no span.
     Since(String),
-    Days { days: String, since: String },
-    Hours { n: f64, since: String },
-    Minutes { n: f64, since: String },
+    Days {
+        days: String,
+        since: String,
+    },
+    Hours {
+        n: f64,
+        since: String,
+    },
+    Minutes {
+        n: f64,
+        since: String,
+    },
 }
 
 fn counted_since(snapshot: &Snapshot) -> Counted {
