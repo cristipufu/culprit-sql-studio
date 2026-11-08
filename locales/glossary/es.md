@@ -36,7 +36,12 @@ sentence: «Abrir en Planes».
 - Percent: `{value} %` with a no-break space before %, as the Spanish norm and CLDR write it. Units keep their symbol:
   *B, KB, MB, GB, TB, ms, s, min, h, µs*.
 - Compact counts: *mil* (thousand), *M* (million), *mil M* (thousand million: Spanish *billón* is 10¹², never use it).
-- Dates read *hoy, 14:30* / *ayer, 9:02*: a comma, never *a las* (it would be *a la 1:05*).
+- Dates read *hoy, 14:30* / *ayer, 9:02*: a comma, never *a las* (it would be *a la 1:05*). UTC times from the core are
+  always two-digit (*13:58*), so they may take *a las*: *el 11 oct a las 13:58 UTC*.
+- Day before month, months as lowercase abbreviations: *11 oct*, *11 oct 2026*; *ene, feb, mar, abr, may, jun, jul,
+  ago, sept, oct, nov, dic*.
+- A period with its length (*the last {span}*, where *{span}* may be days, hours or minutes) is *el último periodo de
+  {span}*, since *los últimos* / *las últimas* would have to agree with a noun the message doesn't know.
 - Ordinals: *1.ª*, *2.ª* (they count keys: *la clave*).
 
 ## Kept in English
@@ -153,3 +158,7 @@ the choice and the reason are given.
 | insight (plan insights) | observación (f) | *Observaciones del plan*; never *hallazgo*, which is a finding |
 | health (the view, the tab) | estado (m) | *Estado de la base de datos*; a healthy signal is *en buen estado* |
 | upsert, get-or-create | upsert, «obtener o crear» | |
+| explain (a statement) | obtener el plan (EXPLAIN) | the *Explicar* button keeps the verb |
+| insert, update, delete, merge (a write) | inserción, actualización, eliminación, MERGE | *una lectura de {table}*, *una eliminación en {table}* |
+| backfill | relleno de datos | |
+| hot pages, hot rows | páginas muy disputadas, filas muy disputadas | |
