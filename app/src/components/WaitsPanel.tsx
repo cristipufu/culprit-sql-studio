@@ -14,13 +14,15 @@ import { HealthTab, SignalTile } from "./Health";
 import type { WaitsTab } from "./Waits";
 import type { Engine } from "../gen/Engine";
 import { can, isMariadb, serverName, waitSampling } from "../lib/engines";
+import { t } from "../lib/i18n";
+import { Rich, slot } from "./Prose";
 
 type Loaded = { status: "loading" } | { status: "ready"; report: WaitsReport | null } | { status: "error"; error: ApiError };
 
-const TABS: { key: WaitsTab; label: string }[] = [
-  { key: "waits", label: "Where time goes" },
-  { key: "now", label: "Right now" },
-  { key: "health", label: "Health" },
+const TABS: { key: WaitsTab; label: () => string }[] = [
+  { key: "waits", label: () => t("ui.waits_panel.tab.waits") },
+  { key: "now", label: () => t("ui.waits_panel.tab.now") },
+  { key: "health", label: () => t("ui.waits_panel.tab.health") },
 ];
 
 /** Where database time goes, explained: categories with their queries, a live sample, and the health signals. */
@@ -39,7 +41,7 @@ export default function WaitsPanel({
   const windowMinutes = useStore((s) => s.windowMinutes);
   // Sampling right now needs a server to ask (not SQLite).
   const sampling = can(report.snapshot.server.engine, "wait_sample");
-  const tabs = TABS.filter((t) => t.key !== "now" || sampling);
+  const tabs = TABS.filter((item) => item.key !== "now" || sampling);
   const [tab, setTab] = useState<WaitsTab>(initialTab === "now" && !sampling ? "waits" : initialTab);
   const [loaded, setLoaded] = useState<Loaded>({ status: "loading" });
   const [selected, setSelected] = useState<string | undefined>(initialCategory);
@@ -63,7 +65,7 @@ export default function WaitsPanel({
 
   const categories = loaded.status === "ready" ? (loaded.report?.categories ?? []) : [];
   const activity = loaded.status === "ready" ? loaded.report?.activity : undefined;
-  const title = tab === "health" ? "Database health" : tab === "now" ? "Live database activity" : activity ? "Recorded database activity" : "Where database time goes";
+  const title = tab === "health" ? t("ui.waits_panel.title.health") : tab === "now" ? t("ui.waits_panel.title.now") : activity ? t("ui.waits_panel.title.activity") : t("ui.waits_panel.title.waits");
   const navigation = activity?.categories ?? categories;
   const current = categories.find((c) => c.key === selected) ?? categories[0];
 
@@ -72,7 +74,7 @@ export default function WaitsPanel({
     e.stopPropagation();
     if (e.key === "Escape") return onClose();
     if (e.target instanceof HTMLInputElement) return;
-    const index = tabs.findIndex((t) => t.key === tab);
+    const index = tabs.findIndex((item) => item.key === tab);
     if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
       e.preventDefault();
       setTab(tabs[(index + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length]!.key);
@@ -99,14 +101,14 @@ export default function WaitsPanel({
               {tab === "waits" && loaded.status === "ready" && loaded.report ? ` · ${activity?.period.source ?? loaded.report.source}` : ""}
             </div>
           </div>
-          <button type="button" className="icon-btn" onClick={onClose} title="Close (Esc)" aria-label="Close">
+          <button type="button" className="icon-btn" onClick={onClose} title={t("ui.common.close_esc")} aria-label={t("ui.common.close")}>
             <X size={16} />
           </button>
         </header>
         <div className="waits-tabs" role="tablist">
-          {tabs.map((t, i) => (
-            <button type="button" key={t.key} role="tab" aria-selected={tab === t.key} className={tab === t.key ? "on" : ""} onClick={() => setTab(t.key)}>
-              {t.key === "waits" && activity ? "Recorded activity" : t.label}
+          {tabs.map((item, i) => (
+            <button type="button" key={item.key} role="tab" aria-selected={tab === item.key} className={tab === item.key ? "on" : ""} onClick={() => setTab(item.key)}>
+              {item.key === "waits" && activity ? t("ui.waits_panel.tab.activity") : item.label()}
               <span className="kbd">{i + 1}</span>
             </button>
           ))}
@@ -164,23 +166,23 @@ function WaitsSkeleton() {
 }
 
 /** Why a scan has no waits, in the engine's own terms. */
-const NO_WAIT_HISTORY: Record<Engine, string> = {
-  mssql: "The login may not be allowed to read wait statistics, or Query Store isn't capturing waits. A live sample still works.",
-  postgres: "PostgreSQL keeps no wait history. Turn on track_io_timing to time disk reads per statement, and sample what sessions wait on right now.",
-  yugabyte: "DocDB RPC timings may overlap and do not provide an exclusive historical wait mix. Inspect native storage metrics or sample active YSQL sessions.",
-  mysql: "performance_schema isn't timing the waits (its wait instruments and consumers are off), or the login can't read them. A live sample still works.",
-  sqlite: "SQLite has no server, so nothing records what it waits on. Waiting for the write lock shows up in the application, as SQLITE_BUSY or slow commits.",
+const NO_WAIT_HISTORY: Record<Engine, () => string> = {
+  mssql: () => t("ui.waits_panel.no_history.mssql"),
+  postgres: () => t("ui.waits_panel.no_history.postgres"),
+  yugabyte: () => t("ui.waits_panel.no_history.yugabyte"),
+  mysql: () => t("ui.waits_panel.no_history.mysql"),
+  sqlite: () => t("ui.waits_panel.no_history.sqlite"),
 };
 
 function NoHistory({ engine, product, reason, onSample }: { engine: Engine; product: string; reason?: string | null; onSample?: () => void }) {
   return (
     <div className="waits-empty">
-      <h3>This scan has no record of what queries waited on</h3>
-      <p>{isMariadb(engine, product) ? NO_WAIT_HISTORY.mysql.replace("performance_schema", "MariaDB's performance_schema") : NO_WAIT_HISTORY[engine]}</p>
+      <h3>{t("ui.waits_panel.no_history_title")}</h3>
+      <p>{isMariadb(engine, product) ? t("ui.waits_panel.no_history.mariadb") : NO_WAIT_HISTORY[engine]()}</p>
       {reason && <p className="muted">{reason}</p>}
       {onSample && (
         <button type="button" className="btn primary" onClick={onSample}>
-          <Radio size={13} /> Sample right now
+          <Radio size={13} /> {t("ui.waits_panel.sample_right_now")}
         </button>
       )}
     </div>
@@ -216,7 +218,7 @@ function WaitsView({
   };
   return (
     <div className="waits-grid">
-      <div className="waits-list" role="listbox" aria-label="Wait categories">
+      <div className="waits-list" role="listbox" aria-label={t("ui.waits_panel.categories_label")}>
         <Bar items={report.categories} />
         {report.categories.map((c) => (
           <button type="button"
@@ -239,15 +241,25 @@ function WaitsView({
           </button>
         ))}
         <div className="waits-keys">
-          <span className="kbd">↑</span>
-          <span className="kbd">↓</span> categories · <span className="kbd">Esc</span> close
+          <Rich
+            text={t("ui.waits_panel.keys", { arrows: slot("arrows"), escape: slot("escape") })}
+            parts={{
+              arrows: (
+                <>
+                  <span className="kbd">↑</span>
+                  <span className="kbd">↓</span>
+                </>
+              ),
+              escape: <span className="kbd">Esc</span>,
+            }}
+          />
         </div>
       </div>
       <div className="waits-detail" key={current.key}>
         <div className="detail-head">
           <i className="swatch big" style={{ background: waitColor(current.key) }} />
           <h3>{current.label}</h3>
-          <span className="pill">{percent(current.share)} of recorded time</span>
+          <span className="pill">{t("ui.waits_panel.of_recorded_time", { share: percent(current.share) })}</span>
           <span className="muted mono small">{current.top_wait}</span>
         </div>
         <p className="meaning">{current.meaning}</p>
@@ -258,12 +270,12 @@ function WaitsView({
           </div>
         )}
         <h4 className="section-title">
-          Queries behind it <span className="muted">{current.queries.length ? `${current.queries.length} shown` : ""}</span>
+          {t("ui.waits_panel.queries_behind")} <span className="muted">{current.queries.length ? t("ui.waits_panel.shown", { count: String(current.queries.length) }) : ""}</span>
         </h4>
         {current.queries.length ? (
           <div className="wq-list">
             {current.queries.map((q) => (
-              <button type="button" key={q.id} className="wq-row" onClick={() => openQuery(q.id)} title="Open in Queries">
+              <button type="button" key={q.id} className="wq-row" onClick={() => openQuery(q.id)} title={t("ui.common.open_in_queries")}>
                 <span className="wq-share">
                   <span className="wq-track">
                     <span style={{ width: `${Math.max(2, q.share_of_category * 100)}%`, background: waitColor(current.key) }} />
@@ -273,9 +285,12 @@ function WaitsView({
                 <span className="wq-text mono">{q.text}</span>
                 <span className="wq-meta">
                   {/* Waits of a parallel query's threads add up, so they can exceed its elapsed time: per run is always true. */}
-                  {report.engine === "postgres" && current.key === "other" ? "recorded time" : "waits"} {duration(q.executions > 0 ? q.wait_ms / q.executions : q.wait_ms)} per run
-                  {q.share_of_query < 0.95 ? ` (${percent(q.share_of_query)} of its time)` : ""} · {count(q.executions)} {q.executions === 1 ? "run" : "runs"}
-                  {q.rows_per_run != null ? ` · ${count(q.rows_per_run)} ${q.rows_per_run === 1 ? "row" : "rows"} per run` : ""}
+                  {q.share_of_query < 0.95
+                    ? t("ui.waits_panel.per_run_share", { kind: report.engine === "postgres" && current.key === "other" ? "recorded" : "waits", time: duration(q.executions > 0 ? q.wait_ms / q.executions : q.wait_ms), share: percent(q.share_of_query) })
+                    : t("ui.waits_panel.per_run", { kind: report.engine === "postgres" && current.key === "other" ? "recorded" : "waits", time: duration(q.executions > 0 ? q.wait_ms / q.executions : q.wait_ms) })}
+                  {" · "}
+                  {t("ui.waits_panel.runs", { n: q.executions, runs: count(q.executions) })}
+                  {q.rows_per_run != null ? ` · ${t("ui.waits_panel.rows_per_run", { n: q.rows_per_run, rows: count(q.rows_per_run) })}` : ""}
                 </span>
                 <ArrowUpRight className="wq-go" size={13} />
               </button>
@@ -285,9 +300,9 @@ function WaitsView({
           <div className="calm-note">
             <Info size={14} />
             <span>
-              {current.attribution ?? "No query recorded this wait."}{" "}
+              {current.attribution ?? t("ui.waits_panel.no_query")}{" "}
               <button type="button" className="link" onClick={onSample}>
-                Sample right now
+                {t("ui.waits_panel.sample_right_now")}
               </button>
             </span>
           </div>
@@ -327,14 +342,14 @@ function RightNow({ connection, history, engine }: { connection: string; history
     return (
       <div className="now-running" aria-live="polite">
         <div className="now-ring" style={{ "--p": done } as React.CSSProperties}>
-          <span>{left}s</span>
+          <span>{t("ui.waits_panel.seconds_left", { seconds: String(left) })}</span>
         </div>
-        <h3>Sampling what {connection} waits on…</h3>
+        <h3>{t("ui.waits_panel.sampling", { connection })}</h3>
         <p className="muted">
           {sessionSamples
-            ? `Looking at every busy session once a second for ${state.seconds} seconds.`
-            : `Reading the server's wait counters at the start and end of ${state.seconds} seconds.`}{" "}
-          You can close this panel; the sample keeps running and appears here when it's done.
+            ? t("ui.waits_panel.sampling_sessions", { seconds: String(state.seconds) })
+            : t("ui.waits_panel.sampling_counters", { seconds: String(state.seconds) })}{" "}
+          {t("ui.waits_panel.sampling_close")}
         </p>
       </div>
     );
@@ -344,23 +359,21 @@ function RightNow({ connection, history, engine }: { connection: string; history
     <div className="now-tab">
       <div className="now-controls">
         <div>
-          <h3>{state.status === "done" ? "What it waited on just now" : "What is it waiting on right now?"}</h3>
+          <h3>{state.status === "done" ? t("ui.waits_panel.waited_just_now") : t("ui.waits_panel.waiting_right_now")}</h3>
           <p className="muted">
-            {sessionSamples
-              ? "Culprit looks at every busy session once a second and counts what each one waits on. Read-only and safe on production."
-              : "Culprit reads the server's wait counters twice and shows the difference. Read-only and safe on production."}
+            {sessionSamples ? t("ui.waits_panel.how_sessions") : t("ui.waits_panel.how_counters")}
           </p>
         </div>
         <div className="now-actions">
-          <span className="seg" role="radiogroup" aria-label="Sample length">
+          <span className="seg" role="radiogroup" aria-label={t("ui.waits_panel.sample_length")}>
             {LENGTHS.map((s) => (
               <button type="button" key={s} role="radio" aria-checked={seconds === s} className={seconds === s ? "on" : ""} onClick={() => setSeconds(s)}>
-                {s} s
+                {t("ui.waits_panel.length", { seconds: String(s) })}
               </button>
             ))}
           </span>
           <button type="button" className="btn primary" onClick={start}>
-            {state.status === "done" ? <RotateCw size={13} /> : <Radio size={13} />} {state.status === "done" ? "Sample again" : `Sample for ${seconds} s`} <span className="kbd">R</span>
+            {state.status === "done" ? <RotateCw size={13} /> : <Radio size={13} />} {state.status === "done" ? t("ui.waits_panel.sample_again") : t("ui.waits_panel.sample_for", { seconds: String(seconds) })} <span className="kbd">R</span>
           </button>
         </div>
       </div>
@@ -383,7 +396,7 @@ function Usual({ history }: { history: WaitsReport }) {
   return (
     <div className="usual">
       <div className="usual-head">
-        <span className="usual-title">Usual mix</span>
+        <span className="usual-title">{t("ui.waits_panel.usual_mix")}</span>
         <span className="muted">{history.source}</span>
       </div>
       <Bar items={history.categories} />
@@ -396,7 +409,7 @@ function Usual({ history }: { history: WaitsReport }) {
         ))}
       </div>
       <p className="muted usual-why">
-        Sample while users report slowness, during a deploy, or after a fix: the result shows which kinds of waiting grew or shrank against this mix.
+        {t("ui.waits_panel.usual_why")}
       </p>
     </div>
   );
@@ -409,21 +422,21 @@ function SampleView({ sample, history }: { sample: WaitSample; history: WaitsRep
   return (
     <div className="sample-view">
       <div className="sample-meta">
-        {Math.round(sample.seconds)} s ending {Number.isNaN(taken.getTime()) ? "" : taken.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}
-        {sample.active_sessions != null ? ` · ${count(sample.active_sessions)} busy sessions on average` : ""}
+        {t("ui.waits_panel.sample_meta", { seconds: String(Math.round(sample.seconds)), time: Number.isNaN(taken.getTime()) ? "" : taken.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }) })}
+        {sample.active_sessions != null ? ` · ${t("ui.waits_panel.busy_sessions", { sessions: count(sample.active_sessions) })}` : ""}
       </div>
       {history && history.categories.length > 0 && folded.length > 0 && (
         <div className="compare-bars">
-          <span className="compare-label">Now</span>
+          <span className="compare-label">{t("ui.waits_panel.now")}</span>
           <Bar items={folded} />
-          <span className="compare-label muted">Usual</span>
+          <span className="compare-label muted">{t("ui.waits_panel.usual")}</span>
           <Bar items={history.categories} />
         </div>
       )}
       {folded.length === 0 ? (
         <div className="calm-note">
           <Info size={14} />
-          <span>Nothing waited during the sample: the server was idle, or nothing ran long enough to register.</span>
+          <span>{t("ui.waits_panel.nothing_waited")}</span>
         </div>
       ) : (
         <>
@@ -441,7 +454,7 @@ function SampleView({ sample, history }: { sample: WaitSample; history: WaitsRep
                     <b>{percent(c.share)}</b> {duration(c.ms)}
                   </span>
                   <span className={`delta ${delta == null ? "new" : Math.abs(delta) < 5 ? "flat" : delta > 0 ? "up" : "down"}`}>
-                    {delta == null ? "not in history" : Math.abs(delta) < 5 ? "as usual" : `${delta > 0 ? "+" : "−"}${Math.round(Math.abs(delta))} pts vs history`}
+                    {delta == null ? t("ui.waits_panel.not_in_history") : Math.abs(delta) < 5 ? t("ui.waits_panel.as_usual") : t("ui.waits_panel.vs_history", { delta: `${delta > 0 ? "+" : "−"}${Math.round(Math.abs(delta))}` })}
                   </span>
                 </div>
               );
@@ -457,7 +470,7 @@ function SampleView({ sample, history }: { sample: WaitSample; history: WaitsRep
         </div>
       )}
       <div className="sample-method muted">
-        <Info size={12} /> {sample.method}. Shares above are of waiting during the sample; “vs history” compares them with the scan.
+        <Info size={12} /> {sample.method}. {t("ui.waits_panel.method_note")}
       </div>
       {sample.notes.map((n) => (
         <div key={n} className="calm-note">

@@ -10,6 +10,7 @@ import { api, errorMessage, type ApiError } from "../lib/api";
 import { canOpenQueryInEditor, prepareQueryForEditor, prepareRawQueryTextForEditor } from "../lib/editor-sql";
 import { count, duration, percent } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
+import { t } from "../lib/i18n";
 import { querySummary } from "../lib/query-summary";
 import { eventTime, useEventsVersion } from "../lib/events";
 import { changeRequest, setState } from "../lib/store";
@@ -20,20 +21,20 @@ import { rangeLabel, when } from "./TimeChart";
 
 type State = { status: "loading" } | { status: "ready"; changes: Changes } | { status: "error"; error: ApiError };
 
-const GROUPS: { status: ChangeStatus; label: string; hint: string; tone: string }[] = [
-  { status: "regressed", label: "Got slower", hint: "Average time per run rose past the threshold, with enough runs in both periods.", tone: "high" },
-  { status: "new", label: "New", hint: "Ran in the recent period and not in the baseline, which the source fully covers.", tone: "medium" },
-  { status: "improved", label: "Got faster", hint: "Average time per run fell past the threshold.", tone: "good" },
-  { status: "stopped", label: "Stopped running", hint: "Ran in the baseline and not since.", tone: "low" },
-  { status: "not-comparable", label: "Not comparable", hint: "One period has no data the source can vouch for, so Culprit doesn't guess.", tone: "muted" },
-  { status: "low-sample", label: "Too few runs", hint: "Not enough runs in one of the periods for a fair average.", tone: "muted" },
-  { status: "unchanged", label: "About the same", hint: "Within the threshold.", tone: "muted" },
+const GROUPS: { status: ChangeStatus; label: () => string; hint: () => string; tone: string }[] = [
+  { status: "regressed", label: () => t("ui.what_changed.group.regressed"), hint: () => t("ui.what_changed.group.regressed_hint"), tone: "high" },
+  { status: "new", label: () => t("ui.what_changed.group.new"), hint: () => t("ui.what_changed.group.new_hint"), tone: "medium" },
+  { status: "improved", label: () => t("ui.what_changed.group.improved"), hint: () => t("ui.what_changed.group.improved_hint"), tone: "good" },
+  { status: "stopped", label: () => t("ui.what_changed.group.stopped"), hint: () => t("ui.what_changed.group.stopped_hint"), tone: "low" },
+  { status: "not-comparable", label: () => t("ui.what_changed.group.not_comparable"), hint: () => t("ui.what_changed.group.not_comparable_hint"), tone: "muted" },
+  { status: "low-sample", label: () => t("ui.what_changed.group.low_sample"), hint: () => t("ui.what_changed.group.low_sample_hint"), tone: "muted" },
+  { status: "unchanged", label: () => t("ui.what_changed.group.unchanged"), hint: () => t("ui.what_changed.group.unchanged_hint"), tone: "muted" },
 ];
 
-const PRESETS: { label: string; hours: number }[] = [
-  { label: "Last hour", hours: 1 },
-  { label: "Last 6 h", hours: 6 },
-  { label: "Last 24 h", hours: 24 },
+const PRESETS: { label: () => string; hours: number }[] = [
+  { label: () => t("ui.what_changed.last_hour"), hours: 1 },
+  { label: () => t("ui.what_changed.last_6_h"), hours: 6 },
+  { label: () => t("ui.what_changed.last_24_h"), hours: 24 },
 ];
 
 function hoursOf(p: { start: string; end: string }): number {
@@ -41,10 +42,10 @@ function hoursOf(p: { start: string; end: string }): number {
 }
 
 function spanWords(hours: number): string {
-  if (hours < 1 / 60) return `${Math.max(1, Math.round(hours * 3600))} s`;
-  if (hours < 1.5) return `${Math.round(hours * 60)} min`;
-  if (hours < 48) return `${Math.round(hours)} h`;
-  return `${Math.round(hours / 24)} days`;
+  if (hours < 1 / 60) return t("ui.what_changed.span_seconds", { n: String(Math.max(1, Math.round(hours * 3600))) });
+  if (hours < 1.5) return t("ui.what_changed.span_minutes", { n: String(Math.round(hours * 60)) });
+  if (hours < 48) return t("ui.what_changed.span_hours", { n: String(Math.round(hours)) });
+  return t("ui.what_changed.span_days", { n: Math.round(hours / 24) });
 }
 
 /** One run's time with enough precision to compare two: "7.0 ms", not "7 ms". */
@@ -65,27 +66,36 @@ function namedPlans(changes: Changes): boolean {
 
 /** The sentence for a row, in local time; the CLI and agents get the same facts in UTC. */
 function sentence(c: QueryChange, changes: Changes): string {
-  const ratio = ratioWords(c);
+  // `String`: a change without a ratio reads as it always has.
+  const ratio = String(ratioWords(c));
   const s = c.plan_switch;
   const named = namedPlans(changes);
-  const switched = s
-    ? `${s.at ? ` at ${when(Date.parse(s.at))}` : ""}, when ${named ? `SQL Server switched from plan ${s.from} to plan ${s.to}` : "the plan Culprit captured changed"}`
-    : "";
+  const moved = (direction: "slower" | "faster"): string => {
+    if (!s) return t("ui.what_changed.sentence.changed", { direction, ratio });
+    const at = s.at ? when(Date.parse(s.at)) : null;
+    if (named) {
+      return at != null
+        ? t("ui.what_changed.sentence.switched_named_at", { direction, ratio, at, from: s.from, to: s.to })
+        : t("ui.what_changed.sentence.switched_named", { direction, ratio, from: s.from, to: s.to });
+    }
+    return at != null ? t("ui.what_changed.sentence.switched_at", { direction, ratio, at }) : t("ui.what_changed.sentence.switched", { direction, ratio });
+  };
   switch (c.status) {
     case "regressed":
-      return `Got ${ratio} slower${switched}${!s && c.same_plan ? `, with the same ${named ? "" : "estimated "}plan` : ""}.`;
+      if (!s && c.same_plan) return named ? t("ui.what_changed.sentence.same_plan", { ratio }) : t("ui.what_changed.sentence.same_estimated_plan", { ratio });
+      return moved("slower");
     case "improved":
-      return `Got ${ratio} faster${switched}.`;
+      return moved("faster");
     case "new":
-      return `Started running: ${percent(c.recent_share)} of recent database time.`;
+      return t("ui.what_changed.sentence.new", { share: percent(c.recent_share) });
     case "stopped":
-      return "Stopped running after the baseline.";
+      return t("ui.what_changed.sentence.stopped");
     case "not-comparable":
-      return c.reason ? `Can't compare: ${c.reason}.` : "Can't compare the periods.";
+      return c.reason ? t("ui.what_changed.sentence.not_comparable_reason", { reason: c.reason }) : t("ui.what_changed.sentence.not_comparable");
     case "low-sample":
-      return `Too few runs: ${count(c.baseline?.executions ?? 0)} before, ${count(c.recent?.executions ?? 0)} after.`;
+      return t("ui.what_changed.sentence.low_sample", { before: count(c.baseline?.executions ?? 0), after: count(c.recent?.executions ?? 0) });
     default:
-      return "About the same.";
+      return t("ui.what_changed.sentence.unchanged");
   }
 }
 
@@ -176,9 +186,9 @@ export default function WhatChanged({ report, request, onClose }: { report: Repo
       <div className="wc-head">
         <div className="wc-title">
           <GitCompareArrows size={15} />
-          <h2>What changed</h2>
+          <h2>{t("ui.what_changed.title")}</h2>
           <span className="spacer" />
-          <button type="button" className="icon-btn" title="Close (Esc)" onClick={onClose}>
+          <button type="button" className="icon-btn" title={t("ui.common.close_esc")} onClick={onClose}>
             <X size={15} />
           </button>
         </div>
@@ -186,15 +196,15 @@ export default function WhatChanged({ report, request, onClose }: { report: Repo
           {changes ? (
             <>
               <span className="wc-period recent">
-                <b>Recent</b> {rangeLabel(Date.parse(changes.recent.start), Date.parse(changes.recent.end))} <span className="muted">· {spanWords(hoursOf(changes.recent))}</span>
+                <b>{t("ui.what_changed.recent")}</b> {rangeLabel(Date.parse(changes.recent.start), Date.parse(changes.recent.end))} <span className="muted">· {spanWords(hoursOf(changes.recent))}</span>
               </span>
-              <span className="muted">vs</span>
+              <span className="muted">{t("ui.what_changed.vs")}</span>
               <span className="wc-period">
-                <b>Baseline</b> {rangeLabel(Date.parse(changes.baseline.start), Date.parse(changes.baseline.end))} <span className="muted">· {spanWords(hoursOf(changes.baseline))}</span>
+                <b>{t("ui.what_changed.baseline")}</b> {rangeLabel(Date.parse(changes.baseline.start), Date.parse(changes.baseline.end))} <span className="muted">· {spanWords(hoursOf(changes.baseline))}</span>
               </span>
             </>
           ) : (
-            <span className="muted">Comparing two periods…</span>
+            <span className="muted">{t("ui.what_changed.comparing")}</span>
           )}
         </div>
         {changes && changes.events.length > 0 && (
@@ -212,14 +222,14 @@ export default function WhatChanged({ report, request, onClose }: { report: Repo
         <div className="wc-controls">
           <span className="seg">
             {PRESETS.map((p) => (
-              <button type="button" key={p.label} className={request.recent_hours === p.hours && !request.since ? "on" : ""} onClick={() => setRequest({ recent_hours: p.hours })}>
-                {p.label}
+              <button type="button" key={p.hours} className={request.recent_hours === p.hours && !request.since ? "on" : ""} onClick={() => setRequest({ recent_hours: p.hours })}>
+                {p.label()}
               </button>
             ))}
           </span>
           <MarkButton connection={connection} />
           <label className="wc-since">
-            Since
+            {t("ui.what_changed.since")}
             <input
               type="datetime-local"
               value={toInputLocal(request.since ?? null)}
@@ -267,9 +277,9 @@ export default function WhatChanged({ report, request, onClose }: { report: Repo
             if (!group.length) return null;
             return (
               <section key={g.status} className="wc-group">
-                <h3 title={g.hint}>
+                <h3 title={g.hint()}>
                   <span className={`wc-dot ${g.tone}`} />
-                  {g.label} <span className="muted">{group.length}</span>
+                  {g.label()} <span className="muted">{group.length}</span>
                 </h3>
                 {group.map((q) => {
                   const index = rows.indexOf(q);
@@ -308,7 +318,7 @@ export default function WhatChanged({ report, request, onClose }: { report: Repo
                           {ratioWords(q) && <span className={`wc-ratio ${g.tone}`}>{ratioWords(q)}</span>}
                           {q.plan_switch && (
                             <span className="wc-plan" title={switchTitle}>
-                              {namedPlans(changes) ? `plan ${q.plan_switch.from} → ${q.plan_switch.to}` : "plan changed"}
+                              {namedPlans(changes) ? t("ui.what_changed.plan_switch", { from: q.plan_switch.from, to: q.plan_switch.to }) : t("ui.what_changed.plan_changed")}
                             </span>
                           )}
                         </span>
@@ -323,18 +333,20 @@ export default function WhatChanged({ report, request, onClose }: { report: Repo
           })}
           {changes.unchanged > 0 && (
             <button type="button" className="btn ghost wc-more" onClick={() => setShowUnchanged((v) => !v)}>
-              {showUnchanged ? "Hide" : "Show"} {changes.unchanged} {changes.unchanged === 1 ? "query" : "queries"} that ran about the same
+              {showUnchanged
+                ? t("ui.what_changed.hide_unchanged", { n: changes.unchanged, count: String(changes.unchanged) })
+                : t("ui.what_changed.show_unchanged", { n: changes.unchanged, count: String(changes.unchanged) })}
             </button>
           )}
           {rows.length === 0 && changes.unchanged === 0 && (
             <div className="empty" style={{ padding: 28 }}>
-              <h3>Nothing to compare</h3>
-              <p>No query ran in either period with enough runs.</p>
+              <h3>{t("ui.what_changed.nothing")}</h3>
+              <p>{t("ui.what_changed.nothing_why")}</p>
             </div>
           )}
           <footer className="wc-foot">
             <span>
-              Averages are weighted by runs; a query needs {count(changes.min_executions)} runs in each period, and changes count from {changes.threshold}×.
+              {t("ui.what_changed.method", { runs: count(changes.min_executions), threshold: String(changes.threshold) })}
             </span>
             {changes.notes
               // The period chips already say which scans the periods follow, in local time.
@@ -342,7 +354,7 @@ export default function WhatChanged({ report, request, onClose }: { report: Repo
               .map((n) => (
                 <span key={n}>{n}</span>
               ))}
-            <span className="muted">j/k to move · Enter to open · Esc to close</span>
+            <span className="muted">{t("ui.what_changed.keys")}</span>
           </footer>
         </div>
       )}
@@ -361,21 +373,21 @@ function Summary({ changes }: { changes: Changes }) {
   return (
     <div className="wc-summary">
       <div className="wc-stat">
-        <span className="label">{short ? "Database time" : "Database time per hour"}</span>
+        <span className="label">{short ? t("ui.what_changed.database_time") : t("ui.what_changed.database_time_per_hour")}</span>
         <span className="value">
           {short ? duration(changes.baseline_total.total_ms) : duration(before)}
           <ArrowRight size={13} />
           <b>{short ? duration(changes.recent_total.total_ms) : duration(after)}</b>
-          {ratio != null && Number.isFinite(ratio) && <span className={`wc-ratio ${tone}`}>{ratio >= 10 ? Math.round(ratio) : ratio.toFixed(1)}× rate</span>}
+          {ratio != null && Number.isFinite(ratio) && <span className={`wc-ratio ${tone}`}>{t("ui.what_changed.rate", { ratio: String(ratio >= 10 ? Math.round(ratio) : ratio.toFixed(1)) })}</span>}
         </span>
         {short && (
           <span className="hint">
-            over {spanWords(hoursOf(changes.baseline))} before and {spanWords(hoursOf(changes.recent))} since
+            {t("ui.what_changed.over_spans", { before: spanWords(hoursOf(changes.baseline)), since: spanWords(hoursOf(changes.recent)) })}
           </span>
         )}
       </div>
       <div className="wc-stat">
-        <span className="label">Runs</span>
+        <span className="label">{t("ui.what_changed.runs")}</span>
         <span className="value">
           {count(changes.baseline_total.executions)}
           <ArrowRight size={13} />
@@ -383,16 +395,16 @@ function Summary({ changes }: { changes: Changes }) {
         </span>
       </div>
       <div className="wc-stat">
-        <span className="label">Queries</span>
+        <span className="label">{t("ui.what_changed.queries")}</span>
         <span className="value wc-counts">
-          <span className="high">{counts("regressed")} slower</span>
-          <span className="medium">{counts("new")} new</span>
-          <span className="good">{counts("improved")} faster</span>
+          <span className="high">{t("ui.what_changed.count_slower", { count: String(counts("regressed")) })}</span>
+          <span className="medium">{t("ui.what_changed.count_new", { count: String(counts("new")) })}</span>
+          <span className="good">{t("ui.what_changed.count_faster", { count: String(counts("improved")) })}</span>
         </span>
       </div>
       <p className="wc-source">
-        {changes.source === "query-store" ? "From Query Store's intervals" : changes.source === "slow-log" ? "From the slow query log's runs" : "From Culprit's own scans"}
-        {changes.baseline_coverage < 0.99 && <span className="medium"> · the source covers {percent(changes.baseline_coverage)} of the baseline</span>}
+        {changes.source === "query-store" ? t("ui.what_changed.source_query_store") : changes.source === "slow-log" ? t("ui.what_changed.source_slow_log") : t("ui.what_changed.source_scans")}
+        {changes.baseline_coverage < 0.99 && <span className="medium"> · {t("ui.what_changed.coverage", { share: percent(changes.baseline_coverage) })}</span>}
       </p>
     </div>
   );
@@ -414,21 +426,21 @@ function Detail({ q, changes, report, inReport }: { q: QueryChange; changes: Cha
         <thead>
           <tr>
             <th />
-            <th>Baseline</th>
-            <th>Recent</th>
+            <th>{t("ui.what_changed.baseline")}</th>
+            <th>{t("ui.what_changed.recent")}</th>
           </tr>
         </thead>
         <tbody>
-          {row("Runs", (s) => count(s.executions))}
-          {row("Average", (s) => runTime(s.mean_ms))}
-          {(q.baseline?.min_ms != null || q.recent?.min_ms != null) && row("Fastest", (s) => (s.min_ms != null ? runTime(s.min_ms) : "—"))}
-          {(q.baseline?.max_ms != null || q.recent?.max_ms != null) && row("Slowest", (s) => (s.max_ms != null ? runTime(s.max_ms) : "—"))}
-          {row("Database time", (s) => duration(s.total_ms))}
+          {row(t("ui.what_changed.runs"), (s) => count(s.executions))}
+          {row(t("ui.what_changed.average"), (s) => runTime(s.mean_ms))}
+          {(q.baseline?.min_ms != null || q.recent?.min_ms != null) && row(t("ui.what_changed.fastest"), (s) => (s.min_ms != null ? runTime(s.min_ms) : "—"))}
+          {(q.baseline?.max_ms != null || q.recent?.max_ms != null) && row(t("ui.what_changed.slowest"), (s) => (s.max_ms != null ? runTime(s.max_ms) : "—"))}
+          {row(t("ui.what_changed.database_time"), (s) => duration(s.total_ms))}
         </tbody>
       </table>
       {q.plan_switch && (
         <div className="wc-switch">
-          <b>{namedPlans(changes) ? `Plan ${q.plan_switch.from} → plan ${q.plan_switch.to}` : "The captured plan changed"}</b>
+          <b>{namedPlans(changes) ? t("ui.what_changed.plan_switch_detail", { from: q.plan_switch.from, to: q.plan_switch.to }) : t("ui.what_changed.captured_plan_changed")}</b>
           {q.plan_switch.what && <span>{q.plan_switch.what}</span>}
           {!q.plan_switch.what && (q.plan_switch.from_label || q.plan_switch.to_label) && (
             <span>
@@ -439,7 +451,7 @@ function Detail({ q, changes, report, inReport }: { q: QueryChange; changes: Cha
       )}
       {q.context.length > 0 && (
         <div className="wc-related">
-          <span className="label">What changed around it</span>
+          <span className="label">{t("ui.what_changed.around_it")}</span>
           {q.context.map((l) => {
             const e = changes.events.find((x) => x.id === l.event);
             if (!e) return null;
@@ -458,16 +470,16 @@ function Detail({ q, changes, report, inReport }: { q: QueryChange; changes: Cha
       )}
       <pre className="wc-sql">{q.text}</pre>
       <div className="wc-actions">
-        <span className="muted">query {q.query_id}</span>
+        <span className="muted">{t("ui.what_changed.query_id", { id: q.query_id })}</span>
         <span className="spacer" />
         {inReport && (
           <button type="button" className="btn small" onClick={() => setState({ view: "queries", query: q.query_id })}>
-            Open in Queries
+            {t("ui.common.open_in_queries")}
           </button>
         )}
         {canOpenQueryInEditor(q.text, editorSql) && (
           <button type="button" className="btn small" onClick={() => setState({ view: "editor", editorSql })}>
-            <SquarePen size={12} /> Open in editor
+            <SquarePen size={12} /> {t("ui.common.open_in_editor")}
           </button>
         )}
       </div>
@@ -486,7 +498,7 @@ function Context({ q, changes }: { q: QueryChange; changes: Changes }) {
         <EventIcon kind={e.kind} size={10} />
       </span>
       <span className="row-context-text">
-        <span className="muted">Around then:</span> <b>{e.title}</b> <span className="muted">· {eventTime(e)}</span>
+        <span className="muted">{t("ui.what_changed.around_then")}</span> <b>{e.title}</b> <span className="muted">· {eventTime(e)}</span>
       </span>
     </span>
   );

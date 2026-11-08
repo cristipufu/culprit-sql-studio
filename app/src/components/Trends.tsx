@@ -3,6 +3,8 @@ import type { QueryStat } from "../gen/QueryStat";
 import type { Timeline } from "../gen/Timeline";
 import type { Workload } from "../gen/Workload";
 import { count, duration } from "../lib/format";
+import { t } from "../lib/i18n";
+import { Rich, slot } from "./Prose";
 import { isPartial, TimeChart, VH, VW, when, type Bucket, type ChartEvent, type Flag, type Range } from "./TimeChart";
 
 /** Colors that tell plans apart, the same in chips, flags and lanes. */
@@ -25,10 +27,10 @@ function bucketsOf(t: Timeline, windowStart?: string | null): Bucket[] {
 }
 
 /** Per hour when buckets are at least an hour wide, per minute otherwise: a rate never stretches a sliver into an hour. */
-function rateUnit(b: Bucket[]): { ms: number; label: string } {
+function rateUnit(b: Bucket[]): { ms: number; unit: "hour" | "minute" } {
   const widths = b.map((x) => x.end - x.start).sort((a, c) => a - c);
   const median = widths[Math.floor(widths.length / 2)] ?? 0;
-  return median >= 3_600_000 ? { ms: 3_600_000, label: "hour" } : { ms: 60_000, label: "minute" };
+  return median >= 3_600_000 ? { ms: 3_600_000, unit: "hour" } : { ms: 60_000, unit: "minute" };
 }
 
 function coveredMs(b: Bucket): number {
@@ -39,7 +41,7 @@ function coveredMs(b: Bucket): number {
 export function trendNote(workload: Workload): string | null {
   if (workload.timeline && workload.timeline.starts.length >= 2) return null;
   if (workload.windowed) return null;
-  return `${workload.source} keeps running totals only, so Culprit draws trends from its own scans. Scan again later to see one.`;
+  return t("ui.trends.running_totals", { source: workload.source });
 }
 
 /** Plan changes worth a flag on the workload chart: new plans of the queries that matter most. */
@@ -51,7 +53,7 @@ export function planFlags(workload: Workload, onSince?: (at: number) => void): F
       const first = Math.min(...q.plans.map((p) => (p.first_seen ? Date.parse(p.first_seen) : Infinity)));
       return q.plans
         .filter((p) => p.first_seen && Date.parse(p.first_seen) > first)
-        .map((p) => ({ at: Date.parse(p.first_seen!), label: `Plan ${p.id}`, share: q.total_time_ms / total }));
+        .map((p) => ({ at: Date.parse(p.first_seen!), label: t("ui.trends.plan", { id: p.id }), share: q.total_time_ms / total }));
     })
     .sort((a, b) => b.share - a.share)
     .slice(0, 5)
@@ -93,14 +95,14 @@ export function WorkloadTrend({ timeline, windowStart, flags, onSelect, selectio
   return (
     <div className="trend">
       <div className="trend-head">
-        <span className="label">Database time per {unit.label}</span>
+        <span className="label">{t("ui.trends.database_time_per", { unit: unit.unit })}</span>
         {(onCompare || actions) && (
           <span className="trend-actions">
-            {onCompare && <span className="muted trend-hint">drag to compare</span>}
+            {onCompare && <span className="muted trend-hint">{t("ui.trends.drag_to_compare")}</span>}
             {actions}
             {onCompare && (
-              <button type="button" className="btn small" onClick={onCompare} title="Compare two periods (V)">
-                What changed?
+              <button type="button" className="btn small" onClick={onCompare} title={t("ui.trends.compare_title")}>
+                {t("ui.trends.what_changed")}
               </button>
             )}
           </span>
@@ -116,26 +118,26 @@ export function WorkloadTrend({ timeline, windowStart, flags, onSelect, selectio
         events={events}
         onSelect={onSelect}
         selection={selection}
-        ariaLabel={`Database time per ${unit.label}; use arrow keys to move, Shift+arrows to select a period, Enter to compare it`}
+        ariaLabel={t("ui.trends.database_time_label", { unit: unit.unit })}
         footnote={
           timeline.source === "scans"
-            ? `Between ${buckets.length + 1} of Culprit's scans: each step covers the time between two scans.`
+            ? t("ui.trends.between_scans", { count: String(buckets.length + 1) })
             : timeline.source === "slow-log"
-              ? "From the slow query log: statements faster than long_query_time aren't in it."
+              ? t("ui.trends.slow_log_faster")
               : undefined
         }
         readout={(i) =>
           buckets[i]?.unknown ? (
             <>
-              <b>not known in full</b>
-              <span className="muted"> · entries left the source between these scans and took their totals with them</span>
+              <b>{t("ui.trends.not_known")}</b>
+              <span className="muted"> · {t("ui.trends.not_known_why")}</span>
             </>
           ) : (
             <>
-              <b>{duration(rate[i] ?? 0)}</b> per {unit.label}
+              <Rich text={t("ui.trends.time_per", { unit: unit.unit, time: slot("time") })} parts={{ time: <b>{duration(rate[i] ?? 0)}</b> }} />
               <span className="muted">
                 {" "}
-                · {count(timeline.executions[i] ?? 0)} runs{buckets[i] && isPartial(buckets[i]!) ? " · partial" : ""}
+                · {t("ui.trends.runs", { runs: count(timeline.executions[i] ?? 0) })}{buckets[i] && isPartial(buckets[i]!) ? ` · ${t("ui.trends.partial")}` : ""}
               </span>
             </>
           )
@@ -231,7 +233,7 @@ export function Sparkline({ query, timeline, alert }: { query: QueryStat; timeli
   const x = (t: number) => ((t - from) / (to - from)) * VW;
   const y = (v: number) => VH - 8 - (v / max) * (VH - 16);
   return (
-    <svg className={`spark ${alert ? "alert" : ""}`} viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none" aria-label="Average duration over time">
+    <svg className={`spark ${alert ? "alert" : ""}`} viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="none" aria-label={t("ui.trends.sparkline_label")}>
       <path d={linePath(points, b, x, y)} />
     </svg>
   );
@@ -254,7 +256,7 @@ export function QueryTrend({ query, timeline, onSince }: { query: QueryStat; tim
     .filter(({ p }) => p.first_seen && Date.parse(p.first_seen) > firstPlan)
     .map(({ p, color }) => ({
       at: Date.parse(p.first_seen!),
-      label: `Plan ${p.id}`,
+      label: t("ui.trends.plan", { id: p.id }),
       tone: "plan" as const,
       color,
       onClick: onSince ? () => onSince(Date.parse(p.first_seen!)) : undefined,
@@ -262,21 +264,21 @@ export function QueryTrend({ query, timeline, onSince }: { query: QueryStat; tim
   const peak = points.indexOf(maxMean);
   return (
     <section>
-      <h3>Over time</h3>
+      <h3>{t("ui.trends.over_time")}</h3>
       {query.plan_history?.kind !== "cache" && query.plans.length > 1 && (
         <div className="plan-keys">
           {query.plans.map((p, i) => (
             <span key={p.id} className="plan-key">
               <i style={{ background: planColor(i) }} />
-              Plan {p.id}
-              {p.first_seen && <span className="muted"> · from {when(Date.parse(p.first_seen))}</span>}
+              {t("ui.trends.plan", { id: p.id })}
+              {p.first_seen && <span className="muted"> · {t("ui.trends.plan_from", { when: when(Date.parse(p.first_seen)) })}</span>}
             </span>
           ))}
         </div>
       )}
       <div className="trend stacked">
         <div className="trend-head">
-          <span className="label">Time per run</span>
+          <span className="label">{t("ui.trends.time_per_run")}</span>
         </div>
         <TimeChart
           buckets={b}
@@ -286,35 +288,35 @@ export function QueryTrend({ query, timeline, onSince }: { query: QueryStat; tim
           peak={peak >= 0 ? { index: peak, value: maxMean } : null}
           flags={flags}
           showTimeAxis={false}
-          ariaLabel="Average time per run over the window"
+          ariaLabel={t("ui.trends.time_per_run_label")}
           readout={(i) => (
             <>
-              <b>{points[i] != null ? duration(points[i]!) : "—"}</b> per run
-              <span className="muted"> · {runs[i] != null ? `${count(runs[i]!)} runs` : b[i]?.unknown ? "not known in full" : "not tracked"}</span>
+              <Rich text={t("ui.trends.per_run", { time: slot("time") })} parts={{ time: <b>{points[i] != null ? duration(points[i]!) : "—"}</b> }} />
+              <span className="muted"> · {runs[i] != null ? t("ui.trends.runs", { runs: count(runs[i]!) }) : b[i]?.unknown ? t("ui.trends.not_known") : t("ui.trends.not_tracked")}</span>
             </>
           )}
         >
           {({ x, y }) => <path className="trend-line" d={linePath(points, b, x, y)} />}
         </TimeChart>
         <div className="trend-head">
-          <span className="label">Runs</span>
+          <span className="label">{t("ui.trends.runs_label")}</span>
         </div>
         <TimeChart
           buckets={b}
           max={maxRuns}
           format={(v) => count(v)}
           height={40}
-          ariaLabel="Runs per bucket over the window"
+          ariaLabel={t("ui.trends.runs_chart_label")}
           footnote={
             timeline.source === "scans"
-              ? "From Culprit's scans: each bar covers the time between two scans."
+              ? t("ui.trends.runs_from_scans")
               : timeline.source === "slow-log"
-                ? "From the slow query log: each run as it was logged."
-                : "From Query Store."
+                ? t("ui.trends.runs_from_slow_log")
+                : t("ui.trends.runs_from_query_store")
           }
           readout={(i) => (
             <>
-              <b>{runs[i] != null ? count(runs[i]!) : "—"}</b> runs
+              <Rich text={t("ui.trends.runs", { runs: slot("runs") })} parts={{ runs: <b>{runs[i] != null ? count(runs[i]!) : "—"}</b> }} />
             </>
           )}
         >

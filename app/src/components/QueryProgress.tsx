@@ -6,23 +6,25 @@ import type { PlanNode } from "../gen/PlanNode";
 import type { QueryProgress } from "../gen/QueryProgress";
 import { api, errorMessage, type ApiError } from "../lib/api";
 import { count, duration, percent, rowCount } from "../lib/format";
+import { t } from "../lib/i18n";
 import { PlanDiagram } from "./PlanDiagram";
+import { Rich, slot } from "./Prose";
 
 const REFRESH_MS = 1000;
 
 /** Plain-language reading of the waits a running statement most often shows. */
-const WAIT_WORDS: [RegExp, string][] = [
-  [/^CXPACKET|^CXCONSUMER|^CXSYNC/i, "parallel workers waiting on each other"],
-  [/^PAGEIOLATCH|^IO:|DataFileRead/i, "reading pages from disk"],
-  [/^LCK_|^Lock:|lock/i, "waiting for another session's lock"],
-  [/^ASYNC_NETWORK_IO|^Client:/i, "waiting for the app to read the results"],
-  [/^RESOURCE_SEMAPHORE/i, "queued for memory"],
-  [/^SOS_SCHEDULER_YIELD/i, "busy on CPU, taking turns"],
-  [/^WRITELOG|WALWrite/i, "writing the transaction log"],
+const WAIT_WORDS: [RegExp, () => string][] = [
+  [/^CXPACKET|^CXCONSUMER|^CXSYNC/i, () => t("ui.query_progress.wait.parallel")],
+  [/^PAGEIOLATCH|^IO:|DataFileRead/i, () => t("ui.query_progress.wait.disk")],
+  [/^LCK_|^Lock:|lock/i, () => t("ui.query_progress.wait.lock")],
+  [/^ASYNC_NETWORK_IO|^Client:/i, () => t("ui.query_progress.wait.client")],
+  [/^RESOURCE_SEMAPHORE/i, () => t("ui.query_progress.wait.memory")],
+  [/^SOS_SCHEDULER_YIELD/i, () => t("ui.query_progress.wait.cpu")],
+  [/^WRITELOG|WALWrite/i, () => t("ui.query_progress.wait.log")],
 ];
 
 function waitWords(wait: string): string | null {
-  return WAIT_WORDS.find(([re]) => re.test(wait))?.[1] ?? null;
+  return WAIT_WORDS.find(([re]) => re.test(wait))?.[1]() ?? null;
 }
 
 function nodesOf(n: PlanNode, out: PlanNode[] = []): PlanNode[] {
@@ -47,14 +49,14 @@ function ProgressOverlay({ p, hot, box }: { p: NodeProgress | undefined; hot: bo
       <span className="po-badge">
         {p.state === "done" ? (
           <>
-            <Check size={11} /> done
+            <Check size={11} /> {t("ui.query_progress.step_done")}
           </>
         ) : p.state === "pending" ? (
-          "waiting"
+          t("ui.query_progress.step_waiting")
         ) : over ? (
-          `${count(p.rows / p.est_rows)}× est.`
+          t("ui.query_progress.step_over", { times: count(p.rows / p.est_rows) })
         ) : p.rows === 0 ? (
-          "working"
+          t("ui.query_progress.step_working")
         ) : f != null ? (
           percent(f)
         ) : (
@@ -159,21 +161,21 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
   const live = !paused && visible && progress?.running !== false && load.status !== "error";
 
   return (
-    <section className="qprog" ref={panel} aria-label={`Progress of session ${session}`}>
+    <section className="qprog" ref={panel} aria-label={t("ui.query_progress.label", { session })}>
       <header className="qp-head">
         <span className="qp-title">
-          Session <b className="mono">{session}</b>
-          {progress && <span className={`qp-state ${progress.running ? "running" : "finished"}`}>{progress.running ? progress.state ?? "running" : "not running"}</span>}
+          <Rich text={t("ui.query_progress.session", { session: slot("session") })} parts={{ session: <b className="mono">{session}</b> }} />
+          {progress && <span className={`qp-state ${progress.running ? "running" : "finished"}`}>{progress.running ? progress.state ?? t("ui.query_progress.running") : t("ui.query_progress.not_running")}</span>}
         </span>
         <span className="spacer" />
-        <span className={`freshness ${live ? "live" : ""}`} title="Refreshes every second while this panel is visible">
+        <span className={`freshness ${live ? "live" : ""}`} title={t("ui.query_progress.refresh_title")}>
           <span className="dot" />
-          {paused ? "Paused" : !visible ? "Paused while hidden" : load.status === "error" ? "Can't refresh" : progress && !progress.running ? "Stopped" : age != null ? `Live · ${age < 1 ? "just now" : `${age.toFixed(0)} s ago`}` : "Connecting…"}
+          {paused ? t("ui.query_progress.paused") : !visible ? t("ui.query_progress.paused_hidden") : load.status === "error" ? t("ui.query_progress.cant_refresh") : progress && !progress.running ? t("ui.query_progress.stopped") : age != null ? age < 1 ? t("ui.query_progress.live_now") : t("ui.query_progress.live_ago", { seconds: age.toFixed(0) }) : t("ui.query_progress.connecting")}
         </span>
-        <button type="button" className="btn ghost small" onClick={() => setPaused((p) => !p)} title={paused ? "Resume" : "Pause"}>
+        <button type="button" className="btn ghost small" onClick={() => setPaused((p) => !p)} title={paused ? t("ui.query_progress.resume") : t("ui.query_progress.pause")}>
           {paused ? <Play size={12} /> : <Pause size={12} />}
         </button>
-        <button type="button" className="btn ghost small" onClick={onClose} title="Close (Esc)">
+        <button type="button" className="btn ghost small" onClick={onClose} title={t("ui.common.close_esc")}>
           <X size={13} />
         </button>
       </header>
@@ -197,7 +199,7 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
       )}
       {progress && !progress.running && (
         <div className="qp-note calm">
-          <Check size={13} /> Session {session} isn't running a statement right now: it finished, was cancelled, or is idle.
+          <Check size={13} /> {t("ui.query_progress.idle", { session })}
         </div>
       )}
       {progress?.running && (
@@ -212,28 +214,28 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
               {progress.elapsed_ms != null && (
                 <span className="qp-big">
                   {duration(progress.elapsed_ms)}
-                  <small>running</small>
+                  <small>{t("ui.query_progress.running")}</small>
                 </span>
               )}
               {progress.cpu_ms != null && (
                 <span>
-                  <b>{duration(progress.cpu_ms)}</b> CPU
+                  <Rich text={t("ui.query_progress.cpu", { time: slot("time") })} parts={{ time: <b>{duration(progress.cpu_ms)}</b> }} />
                 </span>
               )}
               {progress.logical_reads != null && (
                 <span>
-                  <b>{count(progress.logical_reads)}</b> reads
+                  <Rich text={t("ui.query_progress.reads", { reads: slot("reads") })} parts={{ reads: <b>{count(progress.logical_reads)}</b> }} />
                 </span>
               )}
               {progress.rows_examined != null && (
                 <span>
-                  <b>{count(progress.rows_examined)}</b> rows examined
+                  <Rich text={t("ui.query_progress.rows_examined", { rows: slot("rows") })} parts={{ rows: <b>{count(progress.rows_examined)}</b> }} />
                 </span>
               )}
             </div>
             {progress.wait && (
               <div className="qp-wait" title={progress.wait}>
-                {waitWords(progress.wait) ?? `Waiting on ${progress.wait}`}
+                {waitWords(progress.wait) ?? t("ui.query_progress.waiting_on", { wait: progress.wait })}
                 {progress.wait_ms != null && progress.wait_ms >= 1000 ? ` · ${duration(progress.wait_ms)}` : ""}
               </div>
             )}
@@ -250,7 +252,7 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
                 )}
                 {progress.percent != null && (
                   <div className="qp-basis" title={progress.percent_basis ?? undefined}>
-                    {progress.nodes.length > 0 ? "About this far, judged by the rows each step has produced against its estimate." : "How far through this step, as the database reports it."}
+                    {progress.nodes.length > 0 ? t("ui.query_progress.basis_rows") : t("ui.query_progress.basis_engine")}
                   </div>
                 )}
               </div>
@@ -259,12 +261,12 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
               <div className="qp-hot">
                 <Flame size={13} />
                 <span>
-                  Working on <b>{hotNode.op}</b>
+                  <Rich text={t("ui.query_progress.working_on", { operator: slot("operator") })} parts={{ operator: <b>{hotNode.op}</b> }} />
                   {hotNode.object && <span className="mono"> {hotNode.object.split(".").pop()}</span>}
                   {byId.get(hotNode.id) && (
                     <span className="muted">
                       {" · "}
-                      {byId.get(hotNode.id)!.rows > 0 ? `${rowCount(byId.get(hotNode.id)!.rows)} out so far` : "still reading its input before it returns rows"}
+                      {byId.get(hotNode.id)!.rows > 0 ? t("ui.query_progress.out_so_far", { rows: rowCount(byId.get(hotNode.id)!.rows) }) : t("ui.query_progress.still_reading")}
                     </span>
                   )}
                 </span>
@@ -276,13 +278,13 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
             {livePlan ? (
               <PlanDiagram
                 plan={livePlan}
-                kindLabel={byId.size > 0 ? "Running now" : "The plan it is running"}
+                kindLabel={byId.size > 0 ? t("ui.query_progress.running_now") : t("ui.query_progress.plan_running")}
                 focus={progress.hot_node}
                 initialZoom={0.8}
                 overlay={byId.size > 0 ? (node, box) => <ProgressOverlay p={byId.get(node.id)} hot={node.id === progress.hot_node} box={box} /> : undefined}
               />
             ) : (
-              <div className="qp-noplan">No plan to show yet: the statement hasn't been planned, or its text was cut short.</div>
+              <div className="qp-noplan">{t("ui.query_progress.no_plan")}</div>
             )}
           </div>
         </div>

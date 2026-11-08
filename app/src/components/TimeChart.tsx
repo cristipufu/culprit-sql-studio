@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import type { EventKind } from "../gen/EventKind";
+import { t } from "../lib/i18n";
 import { EventIcon, eventTone } from "./EventIcon";
 import "./timeline.css";
 
@@ -239,10 +240,10 @@ export function TimeChart({ buckets, max, format, height, children, readout, pea
               style={{ left: pct(b.start), width: `calc(${pct(b.end)} - ${pct(b.start)})` }}
               title={
                 b.unknown
-                  ? "Not known in full: the source can't account for everything that ran in this period (entries left it between two scans and took their totals with them)"
+                  ? t("ui.time_chart.unknown")
                   : b.covered != null
-                    ? `Partial: the data covers ${Math.round(b.covered * 100)}% of this period`
-                    : "Partial: the data starts during this period"
+                    ? t("ui.time_chart.partial_covered", { percent: Math.round(b.covered * 100) })
+                    : t("ui.time_chart.partial_start")
               }
             />
           ) : null,
@@ -270,7 +271,7 @@ export function TimeChart({ buckets, max, format, height, children, readout, pea
               style={{ left: pct(f.at), ...(f.color ? { ["--flag" as string]: f.color } : {}) }}
               onPointerDown={(e) => e.stopPropagation()}
               onClick={f.onClick}
-              title={f.onClick ? `${f.label}: compare before and after` : f.label}
+              title={f.onClick ? t("ui.time_chart.flag_compare", { label: f.label }) : f.label}
             >
               <span>{f.label}</span>
             </button>
@@ -283,7 +284,7 @@ export function TimeChart({ buckets, max, format, height, children, readout, pea
             style={{ left: pct(peakAt), top: `${(y(peak.value) / VH) * 100}%` }}
           >
             <i />
-            <span>peak {format(peak.value)}</span>
+            <span>{t("ui.time_chart.peak", { value: format(peak.value) })}</span>
           </div>
         )}
         {hoverBucket && (
@@ -340,7 +341,7 @@ function EventLane({ events, from, to }: { events: ChartEvent[]; from: number; t
         const first = g.events[0]!;
         const tone = g.events.some((e) => e.kind === "throttle") ? "throttle" : g.events.some((e) => e.kind === "mark") ? "mark" : eventTone(first.kind);
         const spanned = g.events.every((e) => !e.exact) && pct(g.at) - pct(g.start) > 1.5;
-        const label = g.events.length === 1 ? `${first.title}, ${first.when}` : `${g.events.length} changes: ${g.events.map((e) => e.title).join("; ")}`;
+        const label = g.events.length === 1 ? t("ui.time_chart.event_label", { title: first.title, when: first.when }) : t("ui.time_chart.events_label", { count: g.events.length, titles: g.events.map((e) => e.title).join("; ") });
         return (
           <div key={`${g.at}-${i}`} className={`tc-ev-group ${tone}`}>
             {spanned && <div className="tc-ev-span" style={{ left: `${pct(g.start)}%`, width: `${pct(g.at) - pct(g.start)}%` }} />}
@@ -370,8 +371,8 @@ function EventLane({ events, from, to }: { events: ChartEvent[]; from: number; t
                     </span>
                   </div>
                 ))}
-                {g.events.length > 5 && <div className="muted tc-ev-more">+{g.events.length - 5} more</div>}
-                {first.onClick && <div className="tc-ev-hint">Click to compare before and after</div>}
+                {g.events.length > 5 && <div className="muted tc-ev-more">{t("ui.time_chart.more", { count: String(g.events.length - 5) })}</div>}
+                {first.onClick && <div className="tc-ev-hint">{t("ui.time_chart.click_to_compare")}</div>}
               </div>
             )}
           </div>
