@@ -257,13 +257,14 @@ fn scope_and_source(snapshot: &Snapshot) -> (WaitScope, String) {
         Engine::Postgres => (
             WaitScope::Statements,
             match hours {
-                Some(hours) => t!("view.waits.source.pg_stat_statements_window", window = since_reset_span(hours)),
+                Some(hours) => t!("view.waits.source.pg_stat_statements_since_reset", window = since_reset_span(hours)),
                 None => t!("view.waits.source.pg_stat_statements"),
             },
         ),
-        Engine::Mysql if !snapshot.server.has(Capability::PerformanceSchema) => {
-            (WaitScope::Statements, t!("view.waits.source.slow_log", window = last_span(hours.unwrap_or_default())))
-        }
+        Engine::Mysql if !snapshot.server.has(Capability::PerformanceSchema) => (
+            WaitScope::Statements,
+            t!("view.waits.source.slow_log_last", window = last_span(hours.unwrap_or_default())),
+        ),
         Engine::Mysql => {
             let name = snapshot.server.name();
             (

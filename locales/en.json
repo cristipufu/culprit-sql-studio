@@ -7715,7 +7715,7 @@
   "view.waits.source.performance_schema_hours_ago": "performance_schema totals since {server} started {n, plural, one {{count} hour} other {{count} hours}} ago",
   "view.waits.source.performance_schema_minutes_ago": "performance_schema totals since {server} started {n, plural, one {{count} minute} other {{count} minutes}} ago",
   "view.waits.source.pg_stat_statements": "Statement timing from pg_stat_statements",
-  "view.waits.source.pg_stat_statements_window": "Statement timing from pg_stat_statements, {window}",
+  "view.waits.source.pg_stat_statements_since_reset": "Statement timing from pg_stat_statements, {window}",
   "view.waits.source.query_store_days": "Query Store, last {n, plural, one {{count} day} other {{count} days}}",
   "view.waits.source.query_store_hours": "Query Store, last {n, plural, one {{count} hour} other {{count} hours}}",
   "view.waits.source.query_store_minutes": "Query Store, last {n, plural, one {{count} minute} other {{count} minutes}}",
@@ -7724,7 +7724,7 @@
   "view.waits.source.server_totals_days_ago": "Server totals since SQL Server started {n, plural, one {{count} day} other {{count} days}} ago",
   "view.waits.source.server_totals_hours_ago": "Server totals since SQL Server started {n, plural, one {{count} hour} other {{count} hours}} ago",
   "view.waits.source.server_totals_minutes_ago": "Server totals since SQL Server started {n, plural, one {{count} minute} other {{count} minutes}} ago",
-  "view.waits.source.slow_log": "Lock time per statement from the slow query log, {window}",
+  "view.waits.source.slow_log_last": "Lock time per statement from the slow query log, {window}",
   "view.waits.source.sqlite": "SQLite keeps no waits",
   "view.waits.source.unavailable": "unavailable",
   "view.waits.source.yugabyte": "YSQL native metrics in their recorded node/cluster scope"
