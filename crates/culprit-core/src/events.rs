@@ -535,8 +535,11 @@ mod tests {
         let tables = vec!["public.orders".to_string()];
         for kind in kinds {
             for status in [ChangeStatus::Regressed, ChangeStatus::Improved, ChangeStatus::New, ChangeStatus::Stopped] {
-                for action in [None, Some(EventAction::Created), Some(EventAction::Dropped), Some(EventAction::Changed)] {
-                    for (table, object) in [(Some("public.orders"), None), (None, Some("dbo.p")), (None, Some("orders"))] {
+                for action in [None, Some(EventAction::Created), Some(EventAction::Dropped), Some(EventAction::Changed)]
+                {
+                    for (table, object) in
+                        [(Some("public.orders"), None), (None, Some("dbo.p")), (None, Some("orders"))]
+                    {
                         for switched in [false, true] {
                             let mut e = ChangeEvent::new(kind, EventSource::Database, "s", at, "t");
                             e.action = action;
@@ -593,7 +596,9 @@ mod tests {
         out.push(c.queries[0].headline.clone());
         out.push(c.summary.clone());
         let got = out.join("\n");
-        assert_eq!(got, r#"at Sun 12:00 UTC
+        assert_eq!(
+            got,
+            r#"at Sun 12:00 UTC
 between the Sun 11:00 UTC and 12:00 UTC scans
 from Sun 12:00 UTC to 14:10 UTC
 a new version can plan queries differently (true)
@@ -632,7 +637,8 @@ a mark ("a mark whose title goes on and on well past the sixty chara…")
 a mark ("x"), an index change, a table change, a procedure or view change, a setting change, an upgrade, a restart, a statistics reset, a statistics update and cloud throttling
 an index change and a restart
 Got 4.5× slower (2.0 ms → 9.0 ms per run). Around then: Index ix was dropped from public.orders between the Sun 11:00 UTC and 12:00 UTC scans (this query uses public.orders).
-Database time per hour rose 4.5×: 50 ms → 225 ms. 1 query got slower. Around then: an index change."#);
+Database time per hour rose 4.5×: 50 ms → 225 ms. 1 query got slower. Around then: an index change."#
+        );
     }
 
     #[test]

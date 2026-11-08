@@ -545,7 +545,12 @@ fn summarize(
                 )
             }
         } else if rose {
-            t!("core.changes.workload.per_hour_rose", factor = times(ratio), before = duration(before), after = duration(after))
+            t!(
+                "core.changes.workload.per_hour_rose",
+                factor = times(ratio),
+                before = duration(before),
+                after = duration(after)
+            )
         } else if fell {
             t!(
                 "core.changes.workload.per_hour_fell",
@@ -899,7 +904,9 @@ mod tests {
         }
         out.push(format!("{} {} {}", times(4.13), times(41.3), times(1.0)));
         let got = out.join("\n");
-        assert_eq!(got, r#"Regressed: Got slower
+        assert_eq!(
+            got,
+            r#"Regressed: Got slower
 New: New
 Improved: Got faster
 Stopped: Stopped running
@@ -988,7 +995,8 @@ Database time fell to <1% for the time covered: 100 ms over 2.0 s before, 300 ms
 2026-10-13T14:05:00Z: Tue 14:05 UTC | Tue Oct 13 14:05 UTC
 2026-01-04T08:00:00+02:00: Sun 06:00 UTC | Sun Jan 4 06:00 UTC
 not a time: not a time | not a time
-4.1× 41× 1.0×"#);
+4.1× 41× 1.0×"#
+        );
     }
 
     #[test]

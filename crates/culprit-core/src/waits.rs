@@ -393,7 +393,9 @@ pub fn category_info(key: &str, engine: Engine) -> (String, String) {
                 Engine::Sqlite => t!("core.waits.category.log.meaning.sqlite"),
             },
         ),
-        "network" => (t!("core.waits.category.network.label"), t!("core.waits.category.network.meaning", engine = name)),
+        "network" => {
+            (t!("core.waits.category.network.label"), t!("core.waits.category.network.meaning", engine = name))
+        }
         "parallelism" => (t!("core.waits.category.parallelism.label"), t!("core.waits.category.parallelism.meaning")),
         "memory" => (t!("core.waits.category.memory.label"), t!("core.waits.category.memory.meaning")),
         "compilation" => (t!("core.waits.category.compilation.label"), t!("core.waits.category.compilation.meaning")),
@@ -471,7 +473,9 @@ mod tests {
             }
         }
         let got = out.join("\n");
-        assert_eq!(got, r#"Mssql rpc: Distributed RPCs | Waiting for remote DocDB operations or catalog requests. Native session events identify these waits; statement RPC timings can overlap and are not exclusive wait shares.
+        assert_eq!(
+            got,
+            r#"Mssql rpc: Distributed RPCs | Waiting for remote DocDB operations or catalog requests. Native session events identify these waits; statement RPC timings can overlap and are not exclusive wait shares.
 Mssql storage: Storage I/O | Waiting for native storage reads or writes, including RocksDB operations. These are session observations, not PostgreSQL heap-page or buffer measurements.
 Mssql cpu: CPU | Running on a processor, queued for one, or (THREADPOOL) waiting for a worker thread before the request could start at all. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row. Worker waits instead point at blocking chains or heavy parallelism holding the workers.
 Mssql io: Disk reads | Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.
@@ -535,7 +539,8 @@ Sqlite network: Sending results | SQLite has results ready but the application r
 Sqlite parallelism: Parallel queries | Threads of a parallel query waiting for each other. Often a big scan that an index would avoid, or work split unevenly across threads.
 Sqlite memory: Memory | Waiting for memory: a grant to sort or hash before a query can start (RESOURCE_SEMAPHORE), or an allocation inside the server (CMEMTHREAD, MEMORY_ALLOCATION_EXT). Grant waits usually mean a few queries reserve far more than they use; allocation waits mean many sessions contend for one of the server's memory objects.
 Sqlite compilation: Compiling plans | Building query plans. A lot of it means the application sends one-off statements instead of parameterized ones.
-Sqlite other: Everything else | Everything SQLite doesn't break down further."#);
+Sqlite other: Everything else | Everything SQLite doesn't break down further."#
+        );
     }
 
     #[test]

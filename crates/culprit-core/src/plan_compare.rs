@@ -127,7 +127,13 @@ pub(crate) fn scenarios(
     {
         out.push(Scenario {
             kind: ScenarioKind::Estimator,
-            title: t!("core.plan_compare.estimator.title", version = x, plan = name_a, other_version = y, other = name_b),
+            title: t!(
+                "core.plan_compare.estimator.title",
+                version = x,
+                plan = name_a,
+                other_version = y,
+                other = name_b
+            ),
             detail: Some(t!("core.plan_compare.estimator.detail")),
             a: None,
             b: None,
@@ -141,7 +147,13 @@ pub(crate) fn scenarios(
     {
         out.push(Scenario {
             kind: ScenarioKind::Parameters,
-            title: t!("core.plan_compare.parameters.title", plan = name_a, values = x, other = name_b, other_values = y),
+            title: t!(
+                "core.plan_compare.parameters.title",
+                plan = name_a,
+                values = x,
+                other = name_b,
+                other_values = y
+            ),
             detail: Some(t!("core.plan_compare.parameters.detail")),
             a: None,
             b: None,
@@ -156,7 +168,8 @@ pub(crate) fn scenarios(
         if in_a == in_b {
             continue;
         }
-        let uses = |list: &[String]| if list.is_empty() { t!("core.plan_compare.index.none") } else { format::list(list) };
+        let uses =
+            |list: &[String]| if list.is_empty() { t!("core.plan_compare.index.none") } else { format::list(list) };
         lines.push((
             table_name.clone(),
             t!(
@@ -225,7 +238,12 @@ pub(crate) fn scenarios(
         out.push(Scenario {
             kind: ScenarioKind::Parallelism,
             title: if dop > 1 {
-                t!("core.plan_compare.parallelism.title_threads", plan = cap(yes), threads = dop.to_string(), other = no)
+                t!(
+                    "core.plan_compare.parallelism.title_threads",
+                    plan = cap(yes),
+                    threads = dop.to_string(),
+                    other = no
+                )
             } else {
                 t!("core.plan_compare.parallelism.title", plan = cap(yes), other = no)
             },
@@ -658,7 +676,8 @@ mod tests {
     #[test]
     fn scenarios_say_why_plans_differ_in_english() {
         let seek = || node("Index Seek", NodeKind::Seek, Some("dbo.orders"), Some("ix_status"), 12.0, vec![]);
-        let scan = || node("Clustered Index Scan", NodeKind::Scan, Some("dbo.orders"), Some("pk_orders"), 140_000.0, vec![]);
+        let scan =
+            || node("Clustered Index Scan", NodeKind::Scan, Some("dbo.orders"), Some("pk_orders"), 140_000.0, vec![]);
         let facts = crate::PlanFacts::default;
         let stats = |taken_at: Option<&str>| CompareContext {
             statistics: vec![StatisticsInfo {
@@ -700,7 +719,12 @@ mod tests {
             ("statements", plan(seek(), facts()), other_statement, ctx.clone()),
             ("actual and estimated", kind(plan(seek(), facts()), PlanKind::Actual), plan(seek(), facts()), ctx.clone()),
             ("estimated and actual", plan(seek(), facts()), kind(plan(seek(), facts()), PlanKind::Actual), ctx.clone()),
-            ("estimated and generic", plan(seek(), facts()), kind(plan(seek(), facts()), PlanKind::Generic), ctx.clone()),
+            (
+                "estimated and generic",
+                plan(seek(), facts()),
+                kind(plan(seek(), facts()), PlanKind::Generic),
+                ctx.clone(),
+            ),
             (
                 "estimator and parameters",
                 plan(
@@ -728,7 +752,12 @@ mod tests {
             ("misestimate, stale", misestimated(12.0), misestimated(40_000.0), stats(Some("2026-10-11T00:00:00Z"))),
             ("converts", plan(seek(), facts()), converts.clone(), ctx.clone()),
             ("converts no more", converts, plan(seek(), facts()), ctx.clone()),
-            ("parallel", parallel(Some(8), None), parallel(Some(1), Some("CouldNotGenerateValidParallelPlan")), ctx.clone()),
+            (
+                "parallel",
+                parallel(Some(8), None),
+                parallel(Some(1), Some("CouldNotGenerateValidParallelPlan")),
+                ctx.clone(),
+            ),
             ("serial", parallel(None, None), gathered, ctx.clone()),
             ("memory", granted(40_000.0), granted(1_024.0), ctx.clone()),
             ("memory, less", granted(1_024.0), granted(40_000.0), ctx.clone()),
@@ -741,7 +770,9 @@ mod tests {
             }
         }
         let got = out.join("\n");
-        assert_eq!(got, r#"## statements
+        assert_eq!(
+            got,
+            r#"## statements
 Statement: These plans are for different statements. | Some differences may come from the SQL itself (another filter, join or column), not from the optimizer.
 ## actual and estimated
 PlanKind: Plan A is an actual plan and Plan 2 isn't. | Compare estimates with estimates; actual rows and times only exist on the executed plan.
@@ -778,7 +809,8 @@ Parallelism: Plan 2 runs in parallel; plan A runs on one thread. | Parallelism h
 ## memory
 Memory: Plan A reserves 39.1 MB of memory per run; Plan 2 1.0 MB. | Sorts and hashes get memory sized from the row estimates. A large grant on a busy server makes other queries wait for memory; a small one spills to tempdb.
 ## memory, less
-Memory: Plan 2 reserves 39.1 MB of memory per run; plan A 1.0 MB. | Sorts and hashes get memory sized from the row estimates. A large grant on a busy server makes other queries wait for memory; a small one spills to tempdb."#);
+Memory: Plan 2 reserves 39.1 MB of memory per run; plan A 1.0 MB. | Sorts and hashes get memory sized from the row estimates. A large grant on a busy server makes other queries wait for memory; a small one spills to tempdb."#
+        );
     }
 
     fn estimate_titles(a: &Plan, b: &Plan) -> Vec<String> {

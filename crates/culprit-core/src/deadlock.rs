@@ -530,14 +530,15 @@ mod tests {
 
     /// Every pattern, with and without a victim, a session or tables, as each engine words it.
     fn every_case() -> Vec<(&'static str, Deadlock)> {
-        let held = |kind: &str, object: Option<&str>, index: Option<&str>, holder: &str, waiter: &str| DeadlockResource {
-            id: format!("{kind}{object:?}{index:?}{holder}"),
-            kind: kind.into(),
-            object: object.map(str::to_string),
-            index: index.map(str::to_string),
-            holders: vec![LockHolder { process: holder.into(), mode: Some("X".into()) }],
-            waiters: vec![LockHolder { process: waiter.into(), mode: Some("X".into()) }],
-        };
+        let held =
+            |kind: &str, object: Option<&str>, index: Option<&str>, holder: &str, waiter: &str| DeadlockResource {
+                id: format!("{kind}{object:?}{index:?}{holder}"),
+                kind: kind.into(),
+                object: object.map(str::to_string),
+                index: index.map(str::to_string),
+                holders: vec![LockHolder { process: holder.into(), mode: Some("X".into()) }],
+                waiters: vec![LockHolder { process: waiter.into(), mode: Some("X".into()) }],
+            };
         let two = |victim: bool| vec![process("p1", "61", victim), process("p2", "64", false)];
         let mut cases = vec![
             (
@@ -725,7 +726,9 @@ mod tests {
             }
         }
         let got = out.join("\n");
-        assert_eq!(got, r#"KeyLookup: key-lookup deadlock
+        assert_eq!(
+            got,
+            r#"KeyLookup: key-lookup deadlock
 LockConversion: read-then-update
 OppositeOrder: opposite access order
 LockEscalation: lock escalation
@@ -858,7 +861,8 @@ The read finds rows through ix_email and then looks each one up in the table's m
 Two transactions read the same rows of shop.orders, then both tried to change them; session 61's transaction was rolled back.
 Both took a shared lock to read, then asked for an exclusive lock to write. A shared lock lets the other reader in, so neither can upgrade: whoever asks second deadlocks. Typical of 'read, check, then update' code.
 - Take the write lock when you read | Read the rows you are about to change with an update lock, or do the check and the change in one UPDATE … WHERE statement. | SELECT … FROM … WHERE … FOR UPDATE; | -
-- Retry the victim | A deadlock victim can be retried safely; the application should catch SQLITE_BUSY and run the transaction again. | - | -"#);
+- Retry the victim | A deadlock victim can be retried safely; the application should catch SQLITE_BUSY and run the transaction again. | - | -"#
+        );
     }
 
     #[test]

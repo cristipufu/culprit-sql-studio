@@ -18,11 +18,11 @@ pub use inspect::{
     isolated_counter_update, limit_count, mssql_statistics_target, offset_count, resolve_write_targets, table_aliases,
     tables_in,
 };
-pub(crate) use lexer::{balanced_parens, split_top_level_and, strip_outer_parens};
 pub use lexer::{
     LexError, block_comment_end, clean_identifier, dollar_quoted_end, dollar_tag, identifier_parts, line_end,
     quoted_end, skip_quoted_bytes, unquote_identifier,
 };
+pub(crate) use lexer::{balanced_parens, split_top_level_and, strip_outer_parens};
 pub use preview::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions, table_preview_sql};
 pub use safety::{
     check, is_session_statement, mark_mssql_statements, reads_only, single_statement, without_parameter_list,

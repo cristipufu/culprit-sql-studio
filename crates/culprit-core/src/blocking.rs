@@ -249,7 +249,10 @@ pub fn lock_kind(wait_type: Option<&str>, lock: Option<&LockWait>) -> Option<Str
         "gap"
     } else if has("REC_NOT_GAP") {
         "row"
-    } else if lock.resource.as_deref().is_some_and(|r| r.eq_ignore_ascii_case("TABLE") || r.eq_ignore_ascii_case("OBJECT"))
+    } else if lock
+        .resource
+        .as_deref()
+        .is_some_and(|r| r.eq_ignore_ascii_case("TABLE") || r.eq_ignore_ascii_case("OBJECT"))
     {
         "table"
     } else {
@@ -533,7 +536,9 @@ mod tests {
         out.push(format!("object only: {}", lock_phrase(None, Some(&on)).unwrap()));
         for engine in Engine::ALL {
             for state in ["sleeping", "idle in transaction", "running", "dormant"] {
-                for (elapsed, waiters, wait) in [(Some(48_000.0), 1, "LCK_M_S"), (None, 2, "LCK_M_X"), (None, 1, "PAGELATCH")] {
+                for (elapsed, waiters, wait) in
+                    [(Some(48_000.0), 1, "LCK_M_S"), (None, 2, "LCK_M_X"), (None, 1, "PAGELATCH")]
+                {
                     let mut head = session("57", state, None);
                     head.elapsed_ms = elapsed;
                     if state == "dormant" {
@@ -548,14 +553,19 @@ mod tests {
                     }
                     let locks = if wait == "PAGELATCH" { vec![] } else { vec![lock("60")] };
                     let c = &analyze(engine, &sessions, &locks).unwrap().chains[0];
-                    out.push(format!("\n{engine:?} {state} {elapsed:?} {waiters} {wait}\n{}\n{}", c.headline, c.advice));
+                    out.push(format!(
+                        "\n{engine:?} {state} {elapsed:?} {waiters} {wait}\n{}\n{}",
+                        c.headline, c.advice
+                    ));
                 }
             }
             let c = &analyze(engine, &[session("61", "active", Some("99"))], &[]).unwrap().chains[0];
             out.push(format!("\n{engine:?} unseen\n{}\n{}", c.headline, c.advice));
         }
         let got = out.join("\n");
-        assert_eq!(got, r#"LCK_M_S: a shared lock
+        assert_eq!(
+            got,
+            r#"LCK_M_S: a shared lock
 LCK_M_U: an update lock
 LCK_M_X: an exclusive lock
 LCK_M_IS: an intent-shared lock
@@ -923,7 +933,8 @@ Session 57 isn't running anything but still holds locks, typically from a transa
 
 Sqlite unseen
 Session 99, which this login can't see, holds the locks; 1 session waits behind it (an update lock).
-The blocker belongs to another database or a login Culprit can't see; ask someone with VIEW SERVER STATE (or pg_read_all_stats / PROCESS) to look."#);
+The blocker belongs to another database or a login Culprit can't see; ask someone with VIEW SERVER STATE (or pg_read_all_stats / PROCESS) to look."#
+        );
     }
 
     #[test]

@@ -1112,7 +1112,14 @@ mod tests {
                     None,
                     2.0,
                     vec![
-                        node("Index Seek", NodeKind::Seek, Some("shop.orders"), Some("ix_orders_customer"), 0.2, vec![]),
+                        node(
+                            "Index Seek",
+                            NodeKind::Seek,
+                            Some("shop.orders"),
+                            Some("ix_orders_customer"),
+                            0.2,
+                            vec![],
+                        ),
                         node("Key Lookup", NodeKind::Lookup, Some("shop.orders"), Some("pk_orders"), 0.3, vec![]),
                     ],
                 ),
@@ -1170,13 +1177,24 @@ mod tests {
         let sort = |engine: Engine, op: &str, scan: &str| {
             plan(
                 engine,
-                node(op, NodeKind::Sort, None, None, 2.0, vec![node(scan, NodeKind::Scan, Some("dbo.orders"), None, 5.0, vec![])]),
+                node(
+                    op,
+                    NodeKind::Sort,
+                    None,
+                    None,
+                    2.0,
+                    vec![node(scan, NodeKind::Scan, Some("dbo.orders"), None, 5.0, vec![])],
+                ),
             )
         };
         for (name, a, b) in [
             ("added, timed", timed(seek_plan(), 10.0), timed(sorted.clone(), 400.0)),
             ("removed, timed", timed(sorted.clone(), 400.0), timed(seek_plan(), 10.0)),
-            ("operators", sort(Engine::Mssql, "Sort", "Table Scan"), sort(Engine::Postgres, "Incremental Sort", "Seq Scan")),
+            (
+                "operators",
+                sort(Engine::Mssql, "Sort", "Table Scan"),
+                sort(Engine::Postgres, "Incremental Sort", "Seq Scan"),
+            ),
             ("same", seek_plan(), seek_plan()),
             ("seek to scan", seek_plan(), scan()),
             ("scan to seek", scan(), seek_plan()),
@@ -1217,7 +1235,9 @@ mod tests {
             out.push(verb(&node(op, kind, Some("dbo.orders"), index, 1.0, vec![]), &[]));
         }
         let got = out.join("\n");
-        assert_eq!(got, r#"## added, timed
+        assert_eq!(
+            got,
+            r#"## added, timed
 Plan B took 40× longer than plan A (10 ms → 400 ms).
 Plan B adds a Sort and Compute Scalar (81% of its cost).
   Added: Only in B: Sort and Compute Scalar | 81% of that plan's cost
@@ -1354,7 +1374,8 @@ With virtual index is estimated 6.7× cheaper because it seeks ix_orders_custome
 Plan B differs from plan A only in minor steps.
 seeks into orders
 looks up rows in orders
-uses Bitmap Heap Scan on orders"#);
+uses Bitmap Heap Scan on orders"#
+        );
     }
 
     #[test]

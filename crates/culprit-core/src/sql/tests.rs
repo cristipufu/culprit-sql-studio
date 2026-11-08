@@ -823,7 +823,10 @@ fn refusals_and_warnings_read_in_english() {
         (Engine::Postgres, "SELECT\u{200B}1"),
         (Engine::Postgres, "SELECT 1 -- note\u{2028}"),
     ] {
-        out.push(format!("{engine:?} {sql:?}: {}", single_statement(sql, engine).map_err(error).err().unwrap_or_default()));
+        out.push(format!(
+            "{engine:?} {sql:?}: {}",
+            single_statement(sql, engine).map_err(error).err().unwrap_or_default()
+        ));
         let c = check(sql, engine);
         out.push(format!("  check: {:?} | {:?}", c.problem, c.warning));
     }
@@ -854,7 +857,9 @@ fn refusals_and_warnings_read_in_english() {
         out.push(table_preview_sql(Engine::Postgres, &options).map_err(error).err().unwrap_or_default());
     }
     let got = out.join("\n");
-    assert_eq!(got, r#"Postgres "SELECT 1; SELECT 2": This text holds more than one statement | Run or explain one statement at a time: select it in the editor first.
+    assert_eq!(
+        got,
+        r#"Postgres "SELECT 1; SELECT 2": This text holds more than one statement | Run or explain one statement at a time: select it in the editor first.
   check: Some("This text holds more than one statement") | None
 Postgres "   ;": There is no statement to run | 
   check: Some("There is no statement to run") | None
@@ -882,5 +887,6 @@ INSERT INTO t VALUES (1): None
 Choose a schema and table to preview | 
 The quick filter is too long | Use the SQL editor for larger queries
 Enter a WHERE expression, without query clauses or statements | For example: status = 'open' AND amount > 100. Use the column headers to sort.
-A quoted string or name is never closed | "#);
+A quoted string or name is never closed | "#
+    );
 }
