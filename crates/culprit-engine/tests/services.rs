@@ -303,6 +303,8 @@ fn failed_auxiliary_sessions_leave_checks_unassessed_even_without_a_capability_l
     ];
     for (fixture, sources, check) in groups {
         let mut snapshot: Snapshot = serde_json::from_str(fixture).unwrap();
+        // The session that would have read them was lost: none of its sources was recorded before it failed.
+        snapshot.sources.retain(|o| !sources.iter().any(|s| culprit_core::same_source(&o.source, s.name)));
         let mut coverage = culprit_core::Coverage::default();
         coverage.sources_failed(sources, &Error::internal("auxiliary session was lost"));
         coverage.append_to(&mut snapshot);

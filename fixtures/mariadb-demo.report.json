@@ -1,8 +1,15 @@
 {
   "assessments": [
     {
+      "assessed_queries": [
+        "375c64398248650e",
+        "decf59629e790076",
+        "258e3c9b580f1ecc",
+        "46db559fdff712fd",
+        "d1f45c9664edccf9"
+      ],
       "check": "filtered-scan",
-      "reason": "MariaDB counts the whole run of a statement the slow query log writes to its table as lock time, so the lock time of 2 statements is left out as unknown rather than read as waiting.",
+      "reason": "Some statements lack the measurements this check needs; only measured statements were assessed.",
       "status": "insufficient-evidence",
       "title": "Scans an index would avoid"
     },
@@ -50,13 +57,13 @@
     },
     {
       "check": "heavy-query",
-      "reason": "MariaDB counts the whole run of a statement the slow query log writes to its table as lock time, so the lock time of 2 statements is left out as unknown rather than read as waiting.",
+      "reason": null,
       "status": "findings",
       "title": "Queries that dominate database time"
     },
     {
       "check": "chatty-query",
-      "reason": "MariaDB counts the whole run of a statement the slow query log writes to its table as lock time, so the lock time of 2 statements is left out as unknown rather than read as waiting.",
+      "reason": null,
       "status": "findings",
       "title": "Chatty queries"
     },
@@ -74,32 +81,48 @@
     },
     {
       "check": "regression",
-      "reason": "MariaDB counts the whole run of a statement the slow query log writes to its table as lock time, so the lock time of 2 statements is left out as unknown rather than read as waiting.",
-      "status": "insufficient-evidence",
+      "reason": null,
+      "status": "assessed",
       "title": "Queries that got slower"
     },
     {
       "check": "unstable-query",
-      "reason": "MariaDB counts the whole run of a statement the slow query log writes to its table as lock time, so the lock time of 2 statements is left out as unknown rather than read as waiting.",
+      "reason": "This scan did not record the measurements this check needs.",
       "status": "insufficient-evidence",
       "title": "Unstable queries"
     },
     {
+      "assessed_queries": [
+        "375c64398248650e",
+        "decf59629e790076",
+        "258e3c9b580f1ecc",
+        "a92bb0be330ac53a",
+        "46db559fdff712fd",
+        "d1f45c9664edccf9"
+      ],
       "check": "parameter-sensitive",
-      "reason": "MariaDB counts the whole run of a statement the slow query log writes to its table as lock time, so the lock time of 2 statements is left out as unknown rather than read as waiting.",
-      "status": "insufficient-evidence",
+      "reason": null,
+      "status": "assessed",
       "title": "Queries that are fast for most calls and slow for some"
     },
     {
+      "assessed_queries": [
+        "375c64398248650e",
+        "decf59629e790076",
+        "258e3c9b580f1ecc",
+        "a92bb0be330ac53a",
+        "46db559fdff712fd",
+        "d1f45c9664edccf9"
+      ],
       "check": "temp-spill",
-      "reason": "MariaDB counts the whole run of a statement the slow query log writes to its table as lock time, so the lock time of 2 statements is left out as unknown rather than read as waiting.",
+      "reason": null,
       "status": "findings",
       "title": "Queries writing temp files"
     },
     {
       "check": "config",
-      "reason": "MariaDB counts the whole run of a statement the slow query log writes to its table as lock time, so the lock time of 2 statements is left out as unknown rather than read as waiting.",
-      "status": "insufficient-evidence",
+      "reason": null,
+      "status": "assessed",
       "title": "Configuration"
     },
     {
@@ -146,25 +169,39 @@
     },
     {
       "check": "failing-query",
-      "reason": "MariaDB counts the whole run of a statement the slow query log writes to its table as lock time, so the lock time of 2 statements is left out as unknown rather than read as waiting.",
+      "reason": "This scan did not record the measurements this check needs.",
       "status": "insufficient-evidence",
       "title": "Queries that fail or time out"
     },
     {
+      "assessed_queries": [
+        "decf59629e790076",
+        "a92bb0be330ac53a",
+        "46db559fdff712fd",
+        "d1f45c9664edccf9"
+      ],
       "check": "lock-time",
-      "reason": "MariaDB counts the whole run of a statement the slow query log writes to its table as lock time, so the lock time of 2 statements is left out as unknown rather than read as waiting.",
+      "reason": "Some statements lack the measurements this check needs; only measured statements were assessed.",
       "status": "insufficient-evidence",
       "title": "Queries that spend their time waiting for locks"
     },
     {
+      "assessed_queries": [
+        "375c64398248650e",
+        "decf59629e790076",
+        "258e3c9b580f1ecc",
+        "a92bb0be330ac53a",
+        "46db559fdff712fd",
+        "d1f45c9664edccf9"
+      ],
       "check": "big-result",
-      "reason": "MariaDB counts the whole run of a statement the slow query log writes to its table as lock time, so the lock time of 2 statements is left out as unknown rather than read as waiting.",
-      "status": "insufficient-evidence",
+      "reason": null,
+      "status": "assessed",
       "title": "Queries that return huge results"
     },
     {
       "check": "missing-histogram",
-      "reason": "MariaDB counts the whole run of a statement the slow query log writes to its table as lock time, so the lock time of 2 statements is left out as unknown rather than read as waiting.",
+      "reason": "This scan did not record the measurements this check needs.",
       "status": "insufficient-evidence",
       "title": "Filter columns the optimizer has to guess about"
     },
@@ -2300,6 +2337,48 @@
       }
     ],
     "sizes_before": null,
+    "sources": [
+      {
+        "reason": null,
+        "source": "workload",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "indexes",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "tables",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "columns",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "foreign_keys",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "waits",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "settings",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "file latency",
+        "state": "collected"
+      }
+    ],
     "statistics": [],
     "tables": [
       {

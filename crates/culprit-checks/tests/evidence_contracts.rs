@@ -23,12 +23,9 @@ fn later(mut s: Snapshot) -> Snapshot {
 #[test]
 fn typed_success_is_not_reinterpreted_as_failure_by_informational_notes() {
     let mut s = snapshot();
-    s.sources.push(SourceOutcome { source: "indexes".into(), state: SourceState::Collected, reason: None });
+    crate::record(&mut s, "indexes", SourceState::Collected, None);
     s.notes.push(CollectorNote { collector: "indexes".into(), message: "Counters cover only this database.".into() });
     assert!(matches!(assess(&[Requirement::IndexCatalog], &s), CheckEvidence::Available));
-    // An old saved scan with only a note retains the conservative legacy reading.
-    s.sources.clear();
-    assert!(matches!(assess(&[Requirement::IndexCatalog], &s), CheckEvidence::Unavailable(_)));
 }
 
 #[test]
@@ -110,11 +107,7 @@ fn external_checks_declare_requirements_without_a_central_id_registry() {
 #[test]
 fn requirements_compose_and_missing_measurements_remain_unknown() {
     let mut s = snapshot();
-    s.sources.push(SourceOutcome {
-        source: "indexes".into(),
-        state: SourceState::Partial,
-        reason: Some("One catalog part timed out".into()),
-    });
+    crate::record(&mut s, "indexes", SourceState::Partial, Some("One catalog part timed out"));
     assert!(matches!(
         assess(&[Requirement::IndexCatalog, Requirement::Query(QueryMeasure::Work)], &s),
         CheckEvidence::Unavailable(_)
@@ -126,7 +119,7 @@ fn requirements_compose_and_missing_measurements_remain_unknown() {
         ),
         "a missing mandatory source wins regardless of declaration order"
     );
-    s.sources.clear();
+    s.sources = snapshot().sources;
     s.workload.as_mut().unwrap().queries.iter_mut().for_each(|q| q.costs = None);
     assert!(matches!(assess(&[Requirement::Query(QueryMeasure::Planning)], &s), CheckEvidence::Insufficient(_)));
     s.workload = None;
@@ -136,11 +129,7 @@ fn requirements_compose_and_missing_measurements_remain_unknown() {
 #[test]
 fn partial_workload_keeps_positive_evidence_without_claiming_complete_assessment() {
     let mut s = snapshot();
-    s.sources.push(SourceOutcome {
-        source: "workload".into(),
-        state: SourceState::Partial,
-        reason: Some("Other roles are not visible".into()),
-    });
+    crate::record(&mut s, "workload", SourceState::Partial, Some("Other roles are not visible"));
     assert!(matches!(assess(&[Requirement::Query(QueryMeasure::Work)], &s), CheckEvidence::Insufficient(_)));
     assert!(culprit_checks::analyze(s).findings.iter().any(|f| f.check == "heavy-query"));
 }
@@ -164,16 +153,17 @@ fn successful_fallback_is_not_blocked_by_an_unused_source_failure() {
 fn an_unrecorded_empty_catalog_is_not_proof_that_foreign_keys_do_not_exist() {
     let mut s = snapshot();
     s.foreign_keys.clear();
+    s.sources.retain(|o| o.source != "foreign_keys");
     assert!(matches!(
         assess(&[Requirement::IndexCatalog, Requirement::ForeignKeys], &s),
         CheckEvidence::Insufficient(_)
     ));
-    s.sources.push(SourceOutcome { source: "foreign_keys".into(), state: SourceState::Empty, reason: None });
+    crate::record(&mut s, "foreign_keys", SourceState::Empty, None);
     assert!(matches!(
         assess(&[Requirement::IndexCatalog, Requirement::ForeignKeys], &s),
         CheckEvidence::NotApplicable(_)
     ));
-    s.sources[0].state = SourceState::Unavailable;
+    crate::record(&mut s, "foreign_keys", SourceState::Unavailable, Some("Catalog read failed"));
     assert!(matches!(
         assess(&[Requirement::ForeignKeys, Requirement::IndexCatalog], &s),
         CheckEvidence::Unavailable(_)
@@ -204,11 +194,7 @@ fn ungraded_or_invalid_pressure_is_not_a_healthy_negative_assessment() {
 fn every_failed_schema_source_blocks_advice_that_needs_a_complete_catalog() {
     for source in ["tables", "indexes", "columns", "foreign_keys", "catalog"] {
         let mut s = snapshot();
-        s.sources.push(SourceOutcome {
-            source: source.into(),
-            state: SourceState::Unavailable,
-            reason: Some("Catalog read failed".into()),
-        });
+        crate::record(&mut s, source, SourceState::Unavailable, Some("Catalog read failed"));
         assert!(matches!(assess(&[Requirement::IndexCatalog], &s), CheckEvidence::Unavailable(_)));
         let report = culprit_checks::analyze(s);
         assert!(
@@ -241,11 +227,7 @@ fn an_unavailable_catalog_cannot_turn_a_disappearing_finding_into_a_verified_fix
     let previous = culprit_checks::digest(&before, None, 100, 0);
     let mut s = snapshot();
     // Columns carry no capability lock, but the index checks require this source to be complete.
-    s.sources.push(SourceOutcome {
-        source: "columns".into(),
-        state: SourceState::Unavailable,
-        reason: Some("Catalog request timed out.".into()),
-    });
+    crate::record(&mut s, "columns", SourceState::Unavailable, Some("Catalog request timed out."));
     let after = culprit_checks::analyze(later(s));
     assert!(!after.locked.iter().any(|l| l.check.id == finding.check));
     assert!(!after.findings.iter().any(|f| f.id == finding.id));
@@ -361,20 +343,16 @@ fn a_measured_query_can_be_verified_without_borrowing_evidence_from_other_querie
             .any(|f| f.id == finding.id)
     );
     s.workload.as_mut().unwrap().queries[0].stddev_time_ms = Some(1.0);
-    s.sources.push(SourceOutcome {
-        source: "workload".into(),
-        state: SourceState::Partial,
-        reason: Some("Not every role was visible".into()),
-    });
+    crate::record(&mut s, "workload", SourceState::Partial, Some("Not every role was visible"));
     assert_eq!(verify(&culprit_checks::analyze(s)), culprit_core::VerifyStatus::Unknown);
 }
 
 #[test]
 fn complete_settings_and_catalogs_are_assessed_without_overriding_the_report() {
     let mut s = snapshot();
-    s.sources.push(SourceOutcome { source: "settings".into(), state: SourceState::Collected, reason: None });
+    crate::record(&mut s, "settings", SourceState::Collected, None);
     assert!(matches!(assess(&[Requirement::Settings], &s), CheckEvidence::Available));
-    s.sources[0].state = SourceState::Partial;
+    crate::record(&mut s, "settings", SourceState::Partial, Some("Some settings were not visible"));
     assert!(!matches!(assess(&[Requirement::Settings], &s), CheckEvidence::Available));
     let report = culprit_checks::analyze(snapshot());
     for check in ["duplicate-index", "unindexed-fk", "overlapping-index"] {
@@ -516,11 +494,7 @@ fn zero_waits_verify_only_the_category_actually_measured() {
         s.workload.as_mut().unwrap().queries[0].waits[0].category = "IO".into();
         assert_eq!(verify(&culprit_checks::analyze(s.clone())), culprit_core::VerifyStatus::Unknown);
         s.workload.as_mut().unwrap().queries[0].waits[0].category = category.into();
-        s.sources.push(SourceOutcome {
-            source: "query_waits".into(),
-            state: SourceState::Partial,
-            reason: Some("Capture was disabled".into()),
-        });
+        crate::record(&mut s, "query_waits", SourceState::Partial, Some("Capture was disabled"));
         assert_eq!(verify(&culprit_checks::analyze(s)), culprit_core::VerifyStatus::Unknown);
     }
 }
@@ -584,27 +558,31 @@ fn zero_grants_verify_but_leaving_the_sample_or_cache_does_not() {
 }
 
 #[test]
-fn legacy_payloads_establish_their_read_but_empty_or_failed_sources_do_not() {
-    use culprit_checks::evidence::Observation;
+fn a_read_is_established_by_its_recorded_outcome_never_by_a_payload_or_a_note() {
     let mut s: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
-    let missing = Requirement::SourceWithLegacy("missing_indexes", Observation::MissingIndexes);
-    let tuning = Requirement::SourceWithLegacy("tuning", Observation::Tuning);
+    let (missing, tuning) = (Requirement::Source("missing_indexes"), Requirement::Source("tuning"));
+    // The demo read its missing-index suggestions; it recorded no tuning read.
     assert!(matches!(assess(&[missing], &s), CheckEvidence::Available));
     assert!(matches!(assess(&[tuning], &s), CheckEvidence::Insufficient(_)));
+    // A payload doesn't say it was read in full, and a note is prose, not a failure.
     s.tuning = Some(Default::default());
-    assert!(matches!(assess(&[tuning], &s), CheckEvidence::Available));
-    s.notes.push(CollectorNote { collector: "tuning".into(), message: "Subread failed".into() });
-    assert!(matches!(assess(&[tuning], &s), CheckEvidence::Unavailable(_)));
-    s.sources.push(SourceOutcome {
+    s.notes.push(CollectorNote { collector: "tuning".into(), message: "Read 3 recommendations.".into() });
+    assert!(matches!(assess(&[tuning], &s), CheckEvidence::Insufficient(_)));
+    let outcome = |state, reason: Option<&str>| SourceOutcome {
         source: "missing_indexes".into(),
-        state: SourceState::Partial,
-        reason: Some("Some requests could not be read".into()),
-    });
+        state,
+        reason: reason.map(str::to_string),
+    };
+    s.sources.retain(|o| o.source != "missing_indexes");
+    s.sources.push(outcome(SourceState::Partial, Some("Some requests could not be read")));
     assert!(matches!(assess(&[missing], &s), CheckEvidence::Insufficient(_)));
-    s.sources.clear();
+    s.sources.retain(|o| o.source != "missing_indexes");
+    s.sources.push(outcome(SourceState::Unavailable, Some("VIEW SERVER STATE was denied")));
+    assert!(matches!(assess(&[missing], &s), CheckEvidence::Unavailable(_)));
+    // Read and empty: nothing to suggest is a clean result.
     s.missing_indexes.clear();
-    assert!(matches!(assess(&[missing], &s), CheckEvidence::Insufficient(_)));
-    s.sources.push(SourceOutcome { source: "missing_indexes".into(), state: SourceState::Empty, reason: None });
+    s.sources.retain(|o| o.source != "missing_indexes");
+    s.sources.push(outcome(SourceState::Empty, None));
     assert!(matches!(assess(&[missing], &s), CheckEvidence::Available));
 }
 

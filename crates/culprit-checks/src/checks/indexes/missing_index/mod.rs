@@ -1,7 +1,7 @@
 //! The `missing-index` check: Index suggestions recorded by SQL Server's optimizer, merged with each other and checked against existing indexes.
 
 use super::*;
-use crate::evidence::{Observation, Requirement as Evidence};
+use crate::evidence::Requirement as Evidence;
 #[cfg(test)]
 pub(crate) use culprit_core::index_filter::same_literal;
 pub(crate) use culprit_core::index_filter::{compared_to, filter_equalities, is_literal};
@@ -34,7 +34,7 @@ pub fn missing_index_info() -> CheckInfo {
 check!(
     MissingIndexCheck: missing_index_info,
     missing_index,
-    &[Evidence::IndexCatalog, Evidence::SourceWithLegacy(culprit_core::source_id::MISSING_INDEXES, Observation::MissingIndexes)]
+    &[Evidence::IndexCatalog, Evidence::Source(culprit_core::source_id::MISSING_INDEXES)]
 );
 
 pub fn missing_index(snapshot: &Snapshot) -> Vec<Finding> {

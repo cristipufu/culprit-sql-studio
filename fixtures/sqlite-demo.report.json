@@ -26,8 +26,8 @@
     },
     {
       "check": "heavy-query",
-      "reason": "Read 3.5K statements from development.log (Rails): 7 shapes, the 5 heaviest kept, 5 planned.",
-      "status": "insufficient-evidence",
+      "reason": null,
+      "status": "assessed",
       "title": "Queries that dominate database time"
     },
     {
@@ -37,8 +37,14 @@
       "title": "Plan insights"
     },
     {
+      "assessed_queries": [
+        "c1b0de997fac4faa",
+        "3c81e035bd6f73fa",
+        "500217f7b40055be",
+        "4971a2de8aecdcc6"
+      ],
       "check": "unstable-query",
-      "reason": "Read 3.5K statements from development.log (Rails): 7 shapes, the 5 heaviest kept, 5 planned.",
+      "reason": "Some statements lack the measurements this check needs; only measured statements were assessed.",
       "status": "insufficient-evidence",
       "title": "Unstable queries"
     },
@@ -993,6 +999,33 @@
       }
     ],
     "sizes_before": null,
+    "sources": [
+      {
+        "reason": null,
+        "source": "catalog",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "sizes",
+        "state": "collected"
+      },
+      {
+        "reason": "The file has no sqlite_stat1 table; ANALYZE has not recorded planner statistics.",
+        "source": "statistics",
+        "state": "not-applicable"
+      },
+      {
+        "reason": null,
+        "source": "settings",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "query log",
+        "state": "collected"
+      }
+    ],
     "statistics": [],
     "tables": [
       {

@@ -8,6 +8,33 @@
     "sqlite": null,
     "cluster": null
   },
+  "sources": [
+    {
+      "source": "catalog",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "sizes",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "statistics",
+      "state": "not-applicable",
+      "reason": "The file has no sqlite_stat1 table; ANALYZE has not recorded planner statistics."
+    },
+    {
+      "source": "settings",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "query log",
+      "state": "collected",
+      "reason": null
+    }
+  ],
   "format": 2,
   "id": "20261016T210115.862Z",
   "connection": "sqlite-demo",

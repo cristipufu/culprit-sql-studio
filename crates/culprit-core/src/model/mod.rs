@@ -665,7 +665,8 @@ pub struct Snapshot {
     /// How big each table's data was at an earlier scan of the same database, set from the scans Culprit keeps: what
     /// tells how fast a table grows. `None` without an earlier scan.
     pub sizes_before: Option<crate::signals::SizeBaseline>,
-    // Collection outcomes, separate from informational notes. Missing on scans saved by older versions.
+    // What became of each source the scan read, separate from informational notes. A source not listed wasn't
+    // recorded: nothing is concluded from it, neither a problem nor a clean result.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<crate::coverage::SourceOutcome>,
     // Endpoint identity captured with the scan, never borrowed from today's connection.

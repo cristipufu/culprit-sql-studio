@@ -1887,7 +1887,7 @@ fn frequent_empty_results_do_not_establish_a_timer_or_multiple_pollers() {
 
 #[test]
 fn a_single_recovered_plan_verifies_against_the_retained_baseline() {
-    use culprit_core::{SourceOutcome, SourceState, VerifyStatus};
+    use culprit_core::{SourceState, VerifyStatus};
     let before = analyze(with_plans(vec![
         plan("8", 200.0, 9.0, "2026-10-11T07:44:00Z", "2026-10-11T10:44:00Z"),
         plan("47", 100.0, 60.0, "2026-10-11T10:46:00Z", "2026-10-11T12:13:00Z"),
@@ -1943,11 +1943,12 @@ fn a_single_recovered_plan_verifies_against_the_retained_baseline() {
         query(&mut historical, "8").plans[0].first_seen = Some("2026-10-11T07:44:00Z".into());
         assert_unknown(historical);
         let mut failed = s.clone();
-        failed.sources.push(SourceOutcome {
-            source: "query_store".into(),
-            state: SourceState::Partial,
-            reason: Some("Some runtime intervals could not be read".into()),
-        });
+        crate::record(
+            &mut failed,
+            "query_store",
+            SourceState::Partial,
+            Some("Some runtime intervals could not be read"),
+        );
         assert_unknown(failed);
         let mut future = s.clone();
         query(&mut future, "8").plans[0].last_seen = Some("2026-10-12T12:30:00Z".into());

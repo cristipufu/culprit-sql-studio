@@ -326,12 +326,10 @@ fn indexes(
 }
 
 fn source_recorded(s: &Snapshot, names: &[&str]) -> bool {
-    s.sources.is_empty()
-        || names.iter().any(|name| {
-            s.source_outcome(name).is_some_and(|o| {
-                matches!(o.state, culprit_core::SourceState::Collected | culprit_core::SourceState::Empty)
-            })
-        })
+    names.iter().any(|name| {
+        s.source_outcome(name)
+            .is_some_and(|o| matches!(o.state, culprit_core::SourceState::Collected | culprit_core::SourceState::Empty))
+    })
 }
 
 fn describe_fk(fk: &culprit_core::ForeignKey) -> String {

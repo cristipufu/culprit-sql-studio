@@ -163,8 +163,8 @@ catalog from a failed read. Composite readers call `completed` after decoding, `
 be read, and `not_applicable` only after establishing that a source does not apply. Concurrent parts merge
 conservatively: one successful part cannot erase a failure. Detail collectors use `Coverage::append_to`; top-level
 collectors retain `outcomes()` before consuming the original `finish()` tuple. Informational `note`s do not change
-outcomes. Scans saved before outcomes existed retain their conservative note interpretation in one legacy adapter,
-`Snapshot::source_problem`.
+outcomes, and are never read as one. A source a scan didn't record has neither a problem nor a clean result: the checks
+that need it stay unassessed.
 
 Each source either delivers a `Capability` or doesn't. A provider keeps that account in a `culprit_core::Coverage`,
 starting from what its probe found: `delivered`, `lacking` (with the reason and the fix), `lost` (the probe expected it,
@@ -443,8 +443,7 @@ A plan regression retains a typed fast-plan baseline in the finding and digest. 
 forced or naturally selected, only with fresh, sufficiently sampled runs inside the new window that no longer meet
 the regression threshold. Losing an earlier variant alone never verifies recovery. Source failures, incompatible
 measurements, locked checks and refinement into another cause still prevent a fixed verdict.
-Legacy source contracts may explicitly accept their retained payload when outcomes did not yet exist. A missing
-payload remains unknown, and recorded partial or failed outcomes always win over that fallback.
+A source's recorded outcome decides whether it was read; a retained payload alone never establishes that.
 
 Cumulative findings declare `VerificationBasis::CounterChange`: losing their counters is unknown, not proof of a fix, and exports ask for comparisons under representative load. This contract applies to built-in and embedded checks alike.
 
@@ -537,7 +536,7 @@ same `StatementCost` rather than dividing a new entry's calls by years since the
 
 Storage counters carry their own `FileIo::scope`, `stats_reset` and `write_operation`. PostgreSQL before 16 measures
 data reads per database, while `pg_stat_io` and WAL are shared server sources. WAL syncs are flushes, not writes.
-Older scans can recover scope and operation from their provider/version, but an unknown source reset remains unknown.
+An unknown source reset remains unknown.
 A reset of database, background-writer or archiver statistics never supplies the WAL source's period.
 
 Health counters follow these rules in `checks/pressure/health.rs`: preparation corrects saved and fresh counters, honors `Snapshot::options` for dated samples, and keeps shared or descriptive ratios ungraded. Azure CPU/I/O/log/worker assessments require 30 minutes of actual 15-second samples with at least 80% coverage per dimension; allocated cache memory is contextual. After refinement, queue and cleanup colors come from final findings. The app's query/table/storage/replica colors also use those findings instead of independent thresholds. Query Store compilation history is exact and separate (`QueryCosts::compile_history`); an old prorated compilation estimate is withdrawn on reread. Cloud episode assessments require contiguous timestamps, preserve the actual fetch period, and are cached per database and period.

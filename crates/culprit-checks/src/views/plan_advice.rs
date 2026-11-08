@@ -442,9 +442,11 @@ mod tests {
     fn a_failed_index_source_is_unknown_not_evidence_that_no_index_exists() {
         let mut s = workload(Engine::Mssql, 24.0, 500.0);
         s.server.capabilities.retain(|c| *c != culprit_core::Capability::IndexUsage);
-        s.notes.push(culprit_core::CollectorNote {
-            collector: "indexes".into(),
-            message: "Index definitions unavailable".into(),
+        s.sources.retain(|o| o.source != "indexes");
+        s.sources.push(culprit_core::SourceOutcome {
+            source: "indexes".into(),
+            state: culprit_core::SourceState::Unavailable,
+            reason: Some("Index definitions unavailable".into()),
         });
         let q = &s.queries()[0];
         let found = query_plan_insights(&s, q, q.plan.as_ref().unwrap());

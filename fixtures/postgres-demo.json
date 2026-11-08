@@ -8,6 +8,38 @@
     "sqlite": null,
     "cluster": null
   },
+  "sources": [
+    {
+      "source": "workload",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "tables",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "indexes",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "foreign_keys",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "columns",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "settings",
+      "state": "collected",
+      "reason": null
+    }
+  ],
   "format": 2,
   "id": "20261011T115421.485Z",
   "connection": "pg-demo",

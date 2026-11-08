@@ -8,6 +8,58 @@
     "sqlite": null,
     "cluster": null
   },
+  "sources": [
+    {
+      "source": "query_store",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "query_waits",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "tables",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "indexes",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "columns",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "foreign_keys",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "statistics",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "missing_indexes",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "waits",
+      "state": "collected",
+      "reason": null
+    },
+    {
+      "source": "settings",
+      "state": "collected",
+      "reason": null
+    }
+  ],
   "format": 2,
   "id": "20261011T121347.162Z",
   "connection": "mssql-demo",

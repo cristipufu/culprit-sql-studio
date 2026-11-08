@@ -449,15 +449,13 @@ impl crate::Snapshot {
         self.sources.iter().find(|s| same_source(&s.source, name))
     }
 
-    /// Read typed outcomes first. Old scans have only notes; their conservative interpretation stays in this adapter.
+    /// Why one of these sources didn't deliver in full: its recorded outcome, partial or unavailable. Notes are prose,
+    /// never read as a failure; a source the scan didn't record has no problem to report (and no clean result either).
     pub fn source_problem(&self, names: &[&str]) -> Option<String> {
         names.iter().find_map(|name| {
-            if let Some(outcome) = self.source_outcome(name) {
-                return matches!(outcome.state, SourceState::Partial | SourceState::Unavailable).then(|| {
-                    outcome.reason.clone().unwrap_or_else(|| format!("{name} was not completely collected."))
-                });
-            }
-            self.notes.iter().find(|n| same_source(&n.collector, name)).map(|n| n.message.clone())
+            let outcome = self.source_outcome(name)?;
+            matches!(outcome.state, SourceState::Partial | SourceState::Unavailable)
+                .then(|| outcome.reason.clone().unwrap_or_else(|| format!("{name} was not completely collected.")))
         })
     }
 }
@@ -518,11 +516,10 @@ mod tests {
     }
 
     #[test]
-    fn old_snapshots_load_and_detail_collectors_retain_their_source_account() {
+    fn detail_collectors_retain_their_source_account() {
         let mut s: crate::Snapshot =
             serde_json::from_str(include_str!("../../../fixtures/postgres-demo.json")).unwrap();
-        assert!(s.sources.is_empty());
-        assert!(serde_json::to_value(&s).unwrap().get("sources").is_none());
+        s.sources.retain(|o| o.source != "indexes");
         let mut main = Coverage::default();
         main.read_rows(&INDEXES, Ok(vec![1]));
         main.append_to(&mut s);

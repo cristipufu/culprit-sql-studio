@@ -27,6 +27,12 @@ mod registry;
 mod signal_false_flags;
 mod sqlite;
 
+/// Record `source`'s outcome in `s`, in place of any the scan recorded for it.
+pub fn record(s: &mut culprit_core::Snapshot, source: &str, state: culprit_core::SourceState, reason: Option<&str>) {
+    s.sources.retain(|o| o.source != source);
+    s.sources.push(culprit_core::SourceOutcome { source: source.into(), state, reason: reason.map(str::to_string) });
+}
+
 /// Make `w` a window of the last `hours`: its length, and a start that agrees with its end (a window whose bounds and
 /// length disagree has no length Culprit stands behind).
 pub fn last_hours(w: &mut culprit_core::Workload, hours: f64) {

@@ -44,10 +44,12 @@ fn ysql_foreign_keys_normalize_compatible_text_aliases() {
 fn unavailable_indexes_do_not_prove_missing_foreign_key_indexes() {
     let mut s = snapshot(Engine::Postgres);
     s.indexes.clear();
-    s.notes.push(CollectorNote {
-        collector: "indexes".into(),
-        message: "Reading indexes failed: permission denied".into(),
-    });
+    crate::record(
+        &mut s,
+        "indexes",
+        culprit_core::SourceState::Unavailable,
+        Some("Reading indexes failed: permission denied"),
+    );
     let r = culprit_checks::analyze(s);
     assert!(!r.findings.iter().any(|f| f.check == "unindexed-fk"));
     assert_eq!(r.assessments.iter().find(|c| c.check == "unindexed-fk").unwrap().status, CheckStatus::Unavailable);

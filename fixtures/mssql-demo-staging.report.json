@@ -2,8 +2,8 @@
   "assessments": [
     {
       "check": "missing-index",
-      "reason": "This scan did not record the required source's collection outcome.",
-      "status": "insufficient-evidence",
+      "reason": null,
+      "status": "assessed",
       "title": "Missing indexes"
     },
     {
@@ -4331,6 +4331,58 @@
       }
     ],
     "sizes_before": null,
+    "sources": [
+      {
+        "reason": "Query Store is OFF on this database.",
+        "source": "query_store",
+        "state": "unavailable"
+      },
+      {
+        "reason": null,
+        "source": "tables",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "indexes",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "columns",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "foreign_keys",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "statistics",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "missing_indexes",
+        "state": "empty"
+      },
+      {
+        "reason": null,
+        "source": "waits",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "settings",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "resources",
+        "state": "collected"
+      }
+    ],
     "statistics": [
       {
         "auto_created": false,

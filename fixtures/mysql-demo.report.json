@@ -2385,6 +2385,43 @@
       }
     ],
     "sizes_before": null,
+    "sources": [
+      {
+        "reason": null,
+        "source": "workload",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "indexes",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "tables",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "columns",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "foreign_keys",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "waits",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "settings",
+        "state": "collected"
+      }
+    ],
     "statistics": [],
     "tables": [
       {

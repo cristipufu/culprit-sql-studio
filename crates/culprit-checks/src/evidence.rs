@@ -55,19 +55,13 @@ pub enum TableMeasure {
 pub enum Requirement<'a> {
     Observed(Observation, &'a [&'a str]),
     Source(&'a str),
-    /// Explicit outcomes win. Older scans may establish this read through its retained payload.
-    SourceWithLegacy(&'a str, Observation),
     IndexCatalog,
     ForeignKeys,
     IndexHistory,
     Query(QueryMeasure),
     Tables(TableMeasure),
     Statistics,
-    Pressure {
-        signal: Option<&'a str>,
-        timed_files: bool,
-        complete: bool,
-    },
+    Pressure { signal: Option<&'a str>, timed_files: bool, complete: bool },
     Settings,
     Deadlocks,
     Unknown,
@@ -174,11 +168,6 @@ impl Requirement<'_> {
                 insufficient(
                     "This source was not recorded, was not applicable, or did not expose visible objects. No clean result can be established from its absence.",
                 )
-            }
-            Self::SourceWithLegacy(name, observation) => {
-                if s.sources.is_empty() && source_failed(s, &[*name]).is_none()
-                    && matches!(Self::Observed(*observation, &[]).assess(s), Available)
-                { Available } else { Self::Source(name).assess(s) }
             }
             Self::Source(name) => match s.source_outcome(name) {
                 Some(o) => match o.state {
