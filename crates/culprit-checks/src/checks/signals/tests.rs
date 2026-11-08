@@ -22,14 +22,14 @@ fn failing_runs_name_the_timeout() {
         aborted_mean_ms: Some(30_050.0),
         ..Default::default()
     });
-    let f = failing_query(&s);
+    let f = FailingQueryCheck.run(&s);
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].title, "A read from orders times out 6% of the time, at about 30 s");
     assert_eq!(f[0].severity, Severity::Medium);
     assert!(f[0].fix.as_ref().unwrap().summary.contains("command timeout"));
     // A handful of failures is noise.
     first_query(&mut s).costs = Some(QueryCosts { failed: Some(3.0), ..Default::default() });
-    assert!(failing_query(&s).is_empty());
+    assert!(FailingQueryCheck.run(&s).is_empty());
 }
 
 #[test]
@@ -41,7 +41,7 @@ fn mysql_errors_carry_the_code_not_the_message() {
     q.query_hash = Some("abc123".into());
     q.costs =
         Some(QueryCosts { failed: Some(30.0), top_error: Some("1205 lock wait timeout".into()), ..Default::default() });
-    let f = failing_query(&s);
+    let f = FailingQueryCheck.run(&s);
     assert_eq!(f[0].title, "An update of orders fails 15% of the time (1205 lock wait timeout)");
     assert_eq!(f[0].severity, Severity::High);
     let fix = f[0].fix.as_ref().unwrap();

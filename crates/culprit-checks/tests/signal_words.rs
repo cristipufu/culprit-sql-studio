@@ -1336,3 +1336,313 @@ fix: It no longer runs, so there is no wait to catch now; if it comes back, find
 verify: Re-scan: lock waits should be a small part of its time."#,
     );
 }
+
+// ── failing-query ──────────────────────────────────────────────────────────────────────────────────
+
+fn failing(name: &str, text: &str, runs: f64, costs: culprit_core::QueryCosts) -> Snapshot {
+    let mut s = fixture(name);
+    let q = only(&mut s, text);
+    q.executions = runs;
+    q.query_hash = Some("abc123".into());
+    q.costs = Some(costs);
+    s
+}
+
+#[test]
+fn failing_runs_on_sql_server() {
+    use culprit_core::QueryCosts;
+    let read = "SELECT id FROM dbo.orders WHERE customer_id = @P1";
+    let mut findings = run(
+        "failing-query",
+        &failing(
+            "mssql-demo",
+            read,
+            1_000.0,
+            QueryCosts { aborted: Some(60.0), aborted_mean_ms: Some(30_050.0), ..Default::default() },
+        ),
+    );
+    findings.extend(run(
+        "failing-query",
+        &failing(
+            "mssql-demo",
+            read,
+            500.0,
+            QueryCosts {
+                aborted: Some(50.0),
+                failed: Some(30.0),
+                aborted_mean_ms: Some(5_000.0),
+                ..Default::default()
+            },
+        ),
+    ));
+    findings.extend(run(
+        "failing-query",
+        &failing("mssql-demo", read, 200.0, QueryCosts { failed: Some(50.0), ..Default::default() }),
+    ));
+    let mut s = failing("mssql-demo", read, 10.0, QueryCosts { aborted: Some(10.0), ..Default::default() });
+    stopped(&mut s);
+    findings.extend(run("failing-query", &s));
+    let mut s = failing("mssql-demo", read, 200.0, QueryCosts { failed: Some(50.0), ..Default::default() });
+    s.server.set_platform(Some(culprit_core::Platform::AzureSqlDatabase));
+    findings.extend(run("failing-query", &s));
+    says(
+        &findings,
+        r#"id: failing-query:7
+title: A read from orders times out 6% of the time, at about 30 s
+summary: 60 of its 1.0K runs in the last 5 hours didn't finish. 60 were cancelled by the client after 30.1 s on average, which is what a command timeout looks like. A run that doesn't finish still costs the time it ran, and the application retries it or shows an error.
+impact: 6% of runs fail
+metric: Runs
+metric: Didn't finish
+metric: Cancelled
+metric: Cancelled after
+fix: Cancelled runs are almost always the application's command timeout (here about 30 s; 30 s is the default in ADO.NET and most drivers). Make the statement faster first: open its plan. If it legitimately runs long, raise the timeout for this call only.
+verify: Re-scan after the change: runs that fail or are cancelled should drop to near zero.
+
+id: failing-query:7
+title: A read from orders fails or times out 16% of the time
+summary: 80 of its 500 runs in the last 5 hours didn't finish. 50 were cancelled by the client after 5.0 s on average. 30 ended in an error. A run that doesn't finish still costs the time it ran, and the application retries it or shows an error.
+impact: 16% of runs fail
+metric: Runs
+metric: Didn't finish
+metric: Cancelled
+metric: Errors
+metric: Cancelled after
+fix: Cancelled runs are almost always the application's command timeout (30 s is the default in ADO.NET and most drivers). Make the statement faster first: open its plan. If it legitimately runs long, raise the timeout for this call only.
+verify: Re-scan after the change: runs that fail or are cancelled should drop to near zero.
+
+id: failing-query:7
+title: A read from orders fails 25% of the time
+summary: 50 of its 200 runs in the last 5 hours didn't finish. 50 ended in an error. A run that doesn't finish still costs the time it ran, and the application retries it or shows an error.
+impact: 25% of runs fail
+metric: Runs
+metric: Didn't finish
+metric: Errors
+fix: Query Store counts the errors but doesn't keep them. Capture them for a while with an Extended Events session on error_reported for this database, read the ring buffer, then drop the session.
+sql: -- Capture errors raised in this database (one session for every failing statement: once is enough)
+IF NOT EXISTS (SELECT 1 FROM sys.server_event_sessions WHERE name = N'culprit_errors')
+    CREATE EVENT SESSION culprit_errors ON SERVER
+    ADD EVENT sqlserver.error_reported (
+      ACTION (sqlserver.client_app_name, sqlserver.sql_text)
+      WHERE severity >= 11 AND sqlserver.database_name = N'culprit_demo')
+    ADD TARGET package0.ring_buffer;
+IF NOT EXISTS (SELECT 1 FROM sys.dm_xe_sessions WHERE name = N'culprit_errors')
+    ALTER EVENT SESSION culprit_errors ON SERVER STATE = START;
+-- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_errors ON SERVER;
+verify: Re-scan after the change: runs that fail or are cancelled should drop to near zero.
+
+id: failing-query:7
+title: A read from orders is cancelled on every run
+summary: None of its 10 runs in the last 3 days finished. 10 were cancelled by the client. A run that doesn't finish still costs the time it ran, and the application retries it or shows an error.
+impact: 100% of runs fail
+metric: Runs
+metric: Didn't finish
+metric: Cancelled
+fix: Cancelled runs are almost always the application's command timeout (30 s is the default in ADO.NET and most drivers). Make the statement faster first: open its plan. If it legitimately runs long, raise the timeout for this call only.
+verify: Re-scan after the change: runs that fail or are cancelled should drop to near zero.
+
+id: failing-query:7
+title: A read from orders fails 25% of the time
+summary: 50 of its 200 runs in the last 5 hours didn't finish. 50 ended in an error. A run that doesn't finish still costs the time it ran, and the application retries it or shows an error.
+impact: 25% of runs fail
+metric: Runs
+metric: Didn't finish
+metric: Errors
+fix: Query Store counts the errors but doesn't keep them. Capture them for a while with an Extended Events session on error_reported for this database, read the ring buffer, then drop the session.
+sql: -- Capture errors raised in this database (one session for every failing statement: once is enough)
+IF NOT EXISTS (SELECT 1 FROM sys.database_event_sessions WHERE name = N'culprit_errors')
+    CREATE EVENT SESSION culprit_errors ON DATABASE
+    ADD EVENT sqlserver.error_reported (
+      ACTION (sqlserver.client_app_name, sqlserver.sql_text)
+      WHERE severity >= 11 AND sqlserver.database_name = N'culprit_demo')
+    ADD TARGET package0.ring_buffer;
+IF NOT EXISTS (SELECT 1 FROM sys.dm_xe_database_sessions WHERE name = N'culprit_errors')
+    ALTER EVENT SESSION culprit_errors ON DATABASE STATE = START;
+-- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_errors ON DATABASE;
+verify: Re-scan after the change: runs that fail or are cancelled should drop to near zero."#,
+    );
+}
+
+#[test]
+fn failing_runs_on_mysql() {
+    use culprit_core::QueryCosts;
+    let update = "UPDATE `orders` SET `status` = ? WHERE `id` = ?";
+    let error = |e: &str| QueryCosts { failed: Some(30.0), top_error: Some(e.into()), ..Default::default() };
+    let mut findings = Vec::new();
+    for e in ["1205 lock wait timeout", "1213 deadlock", "3024 statement timeout", "1062 duplicate entry", "1048 null"]
+    {
+        findings.extend(run("failing-query", &failing("mysql-demo", update, 200.0, error(e))));
+    }
+    let old = QueryCosts { failed: Some(20.0), ..Default::default() };
+    findings.extend(run("failing-query", &failing("mysql-demo", update, 200.0, old)));
+    says(
+        &findings,
+        r#"id: failing-query:04cd7be9c366fadc
+title: An update of orders fails 15% of the time (1205 lock wait timeout)
+summary: 30 of its 200 runs since its statistics began 2 minutes ago didn't finish. 30 ended in an error; the recent ones were 1205 lock wait timeout. A run that doesn't finish still costs the time it ran, and the application retries it or shows an error.
+impact: 15% of runs fail
+metric: Runs
+metric: Didn't finish
+metric: Errors
+metric: Recent error = 1205 lock wait timeout
+fix: Another transaction holds the rows it needs for longer than innodb_lock_wait_timeout. Find what holds the locks while it waits (Live shows the blocking chain). Keep transactions short. The recent errors and their messages are in performance_schema.
+sql: SELECT MYSQL_ERRNO, RETURNED_SQLSTATE, MESSAGE_TEXT
+  FROM performance_schema.events_statements_history
+ WHERE DIGEST = 'abc123' AND MYSQL_ERRNO <> 0;
+verify: Between two scans, runs that fail or are cancelled should drop to near zero: performance_schema keeps running totals, so compare its failed runs and runs in a scan taken once the change is live and one a day or more later (30 of 200 runs in this scan).
+caveat: MySQL counts errors from when each statement's entry began counting, so old failures stay in its total until the counters are reset or the server restarts.
+
+id: failing-query:04cd7be9c366fadc
+title: An update of orders fails 15% of the time (1213 deadlock)
+summary: 30 of its 200 runs since its statistics began 2 minutes ago didn't finish. 30 ended in an error; the recent ones were 1213 deadlock. A run that doesn't finish still costs the time it ran, and the application retries it or shows an error.
+impact: 15% of runs fail
+metric: Runs
+metric: Didn't finish
+metric: Errors
+metric: Recent error = 1213 deadlock
+fix: It loses deadlocks: see Deadlocks for the other statement and the order to take locks in. The recent errors and their messages are in performance_schema.
+sql: SELECT MYSQL_ERRNO, RETURNED_SQLSTATE, MESSAGE_TEXT
+  FROM performance_schema.events_statements_history
+ WHERE DIGEST = 'abc123' AND MYSQL_ERRNO <> 0;
+verify: Between two scans, runs that fail or are cancelled should drop to near zero: performance_schema keeps running totals, so compare its failed runs and runs in a scan taken once the change is live and one a day or more later (30 of 200 runs in this scan).
+caveat: MySQL counts errors from when each statement's entry began counting, so old failures stay in its total until the counters are reset or the server restarts.
+
+id: failing-query:04cd7be9c366fadc
+title: An update of orders fails 15% of the time (3024 statement timeout)
+summary: 30 of its 200 runs since its statistics began 2 minutes ago didn't finish. 30 ended in an error; the recent ones were 3024 statement timeout. A run that doesn't finish still costs the time it ran, and the application retries it or shows an error.
+impact: 15% of runs fail
+metric: Runs
+metric: Didn't finish
+metric: Errors
+metric: Recent error = 3024 statement timeout
+fix: It hits the statement time limit: make it faster (open its plan), or raise the limit for this statement only. The recent errors and their messages are in performance_schema.
+sql: SELECT MYSQL_ERRNO, RETURNED_SQLSTATE, MESSAGE_TEXT
+  FROM performance_schema.events_statements_history
+ WHERE DIGEST = 'abc123' AND MYSQL_ERRNO <> 0;
+verify: Between two scans, runs that fail or are cancelled should drop to near zero: performance_schema keeps running totals, so compare its failed runs and runs in a scan taken once the change is live and one a day or more later (30 of 200 runs in this scan).
+caveat: MySQL counts errors from when each statement's entry began counting, so old failures stay in its total until the counters are reset or the server restarts.
+
+id: failing-query:04cd7be9c366fadc
+title: An update of orders fails 15% of the time (1062 duplicate entry)
+summary: 30 of its 200 runs since its statistics began 2 minutes ago didn't finish. 30 ended in an error; the recent ones were 1062 duplicate entry. A run that doesn't finish still costs the time it ran, and the application retries it or shows an error.
+impact: 15% of runs fail
+metric: Runs
+metric: Didn't finish
+metric: Errors
+metric: Recent error = 1062 duplicate entry
+fix: It inserts rows that already exist: use INSERT … ON DUPLICATE KEY UPDATE, or check first. The recent errors and their messages are in performance_schema.
+sql: SELECT MYSQL_ERRNO, RETURNED_SQLSTATE, MESSAGE_TEXT
+  FROM performance_schema.events_statements_history
+ WHERE DIGEST = 'abc123' AND MYSQL_ERRNO <> 0;
+verify: Between two scans, runs that fail or are cancelled should drop to near zero: performance_schema keeps running totals, so compare its failed runs and runs in a scan taken once the change is live and one a day or more later (30 of 200 runs in this scan).
+caveat: MySQL counts errors from when each statement's entry began counting, so old failures stay in its total until the counters are reset or the server restarts.
+
+id: failing-query:04cd7be9c366fadc
+title: An update of orders fails 15% of the time (1048 null)
+summary: 30 of its 200 runs since its statistics began 2 minutes ago didn't finish. 30 ended in an error; the recent ones were 1048 null. A run that doesn't finish still costs the time it ran, and the application retries it or shows an error.
+impact: 15% of runs fail
+metric: Runs
+metric: Didn't finish
+metric: Errors
+metric: Recent error = 1048 null
+fix: Read the recent errors with the statement below, then fix the cause in the application or the statement. The recent errors and their messages are in performance_schema.
+sql: SELECT MYSQL_ERRNO, RETURNED_SQLSTATE, MESSAGE_TEXT
+  FROM performance_schema.events_statements_history
+ WHERE DIGEST = 'abc123' AND MYSQL_ERRNO <> 0;
+verify: Between two scans, runs that fail or are cancelled should drop to near zero: performance_schema keeps running totals, so compare its failed runs and runs in a scan taken once the change is live and one a day or more later (30 of 200 runs in this scan).
+caveat: MySQL counts errors from when each statement's entry began counting, so old failures stay in its total until the counters are reset or the server restarts.
+
+id: failing-query:04cd7be9c366fadc
+title: An update of orders fails 10% of the time
+summary: 20 of its 200 runs since its statistics began 2 minutes ago didn't finish. 20 ended in an error. A run that doesn't finish still costs the time it ran, and the application retries it or shows an error.
+impact: 10% of runs fail
+metric: Runs
+metric: Didn't finish
+metric: Errors
+fix: Read the recent errors with the statement below, then fix the cause in the application or the statement. The recent errors and their messages are in performance_schema.
+sql: SELECT MYSQL_ERRNO, RETURNED_SQLSTATE, MESSAGE_TEXT
+  FROM performance_schema.events_statements_history
+ WHERE DIGEST = 'abc123' AND MYSQL_ERRNO <> 0;
+verify: Between two scans, runs that fail or are cancelled should drop to near zero: performance_schema keeps running totals, so compare its failed runs and runs in a scan taken once the change is live and one a day or more later (20 of 200 runs in this scan).
+caveat: MySQL counts errors per statement from when it first saw the statement, with no time for each, and none of its runs in the recent statement history performance_schema keeps failed: these failures may be old. Culprit raises it once a recent run fails too."#,
+    );
+}
+
+#[test]
+fn failing_runs_told_in_the_past() {
+    use culprit_core::QueryCosts;
+    let read = "SELECT id FROM dbo.orders WHERE customer_id = @P1";
+    let shapes = [
+        ("mssql-demo", QueryCosts { aborted: Some(60.0), aborted_mean_ms: Some(30_050.0), ..Default::default() }),
+        ("mssql-demo", QueryCosts { aborted: Some(50.0), failed: Some(30.0), ..Default::default() }),
+        ("mssql-demo", QueryCosts { failed: Some(50.0), ..Default::default() }),
+        (
+            "mysql-demo",
+            QueryCosts { failed: Some(50.0), top_error: Some("1062 duplicate entry".into()), ..Default::default() },
+        ),
+    ];
+    let mut findings = Vec::new();
+    for (name, costs) in shapes {
+        let mut s = failing(name, read, 500.0, costs);
+        stopped(&mut s);
+        findings.extend(run("failing-query", &s));
+    }
+    says(
+        &findings,
+        r#"id: failing-query:7
+title: A read from orders timed out 12% of the time, at about 30 s
+summary: 60 of its 500 runs in the last 3 days didn't finish. 60 were cancelled by the client after 30.1 s on average, which is what a command timeout looks like. A run that doesn't finish still costs the time it ran, and the application retries it or shows an error.
+impact: 12% of runs fail
+metric: Runs
+metric: Didn't finish
+metric: Cancelled
+metric: Cancelled after
+fix: Cancelled runs are almost always the application's command timeout (here about 30 s; 30 s is the default in ADO.NET and most drivers). Make the statement faster first: open its plan. If it legitimately runs long, raise the timeout for this call only.
+verify: Re-scan after the change: runs that fail or are cancelled should drop to near zero.
+
+id: failing-query:7
+title: A read from orders failed or timed out 16% of the time
+summary: 80 of its 500 runs in the last 3 days didn't finish. 50 were cancelled by the client. 30 ended in an error. A run that doesn't finish still costs the time it ran, and the application retries it or shows an error.
+impact: 16% of runs fail
+metric: Runs
+metric: Didn't finish
+metric: Cancelled
+metric: Errors
+fix: Cancelled runs are almost always the application's command timeout (30 s is the default in ADO.NET and most drivers). Make the statement faster first: open its plan. If it legitimately runs long, raise the timeout for this call only.
+verify: Re-scan after the change: runs that fail or are cancelled should drop to near zero.
+
+id: failing-query:7
+title: A read from orders failed 10% of the time
+summary: 50 of its 500 runs in the last 3 days didn't finish. 50 ended in an error. A run that doesn't finish still costs the time it ran, and the application retries it or shows an error.
+impact: 10% of runs fail
+metric: Runs
+metric: Didn't finish
+metric: Errors
+fix: Query Store counts the errors but doesn't keep them. Capture them for a while with an Extended Events session on error_reported for this database, read the ring buffer, then drop the session.
+sql: -- Capture errors raised in this database (one session for every failing statement: once is enough)
+IF NOT EXISTS (SELECT 1 FROM sys.server_event_sessions WHERE name = N'culprit_errors')
+    CREATE EVENT SESSION culprit_errors ON SERVER
+    ADD EVENT sqlserver.error_reported (
+      ACTION (sqlserver.client_app_name, sqlserver.sql_text)
+      WHERE severity >= 11 AND sqlserver.database_name = N'culprit_demo')
+    ADD TARGET package0.ring_buffer;
+IF NOT EXISTS (SELECT 1 FROM sys.dm_xe_sessions WHERE name = N'culprit_errors')
+    ALTER EVENT SESSION culprit_errors ON SERVER STATE = START;
+-- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_errors ON SERVER;
+verify: Re-scan after the change: runs that fail or are cancelled should drop to near zero.
+
+id: failing-query:04cd7be9c366fadc
+title: A read from orders failed 10% of the time (1062 duplicate entry)
+summary: 50 of its 500 runs in the last 3 days didn't finish. 50 ended in an error; the recent ones were 1062 duplicate entry. A run that doesn't finish still costs the time it ran, and the application retries it or shows an error.
+impact: 10% of runs fail
+metric: Runs
+metric: Didn't finish
+metric: Errors
+metric: Recent error = 1062 duplicate entry
+fix: It inserts rows that already exist: use INSERT … ON DUPLICATE KEY UPDATE, or check first. The recent errors and their messages are in performance_schema.
+sql: SELECT MYSQL_ERRNO, RETURNED_SQLSTATE, MESSAGE_TEXT
+  FROM performance_schema.events_statements_history
+ WHERE DIGEST = 'abc123' AND MYSQL_ERRNO <> 0;
+verify: Re-scan after the change: runs that fail or are cancelled should drop to near zero.
+caveat: MySQL counts errors from when each statement's entry began counting, so old failures stay in its total until the counters are reset or the server restarts."#,
+    );
+}
