@@ -148,13 +148,7 @@ pub(crate) async fn collect_workload(
     let queries = kept.into_iter().map(|d| d.stat).collect();
     let untracked_time_ms = untracked_ms(conn).await;
     if let Some(ms) = untracked_time_ms {
-        notes.push((
-            "workload",
-            format!(
-                "performance_schema's digest table is full (performance_schema_digests_size), so {} of statement time across the server went into one catch-all row and isn't in these totals: shares are of the time it could attribute.",
-                culprit_core::format::duration(ms)
-            ),
-        ));
+        notes.push(("workload", digests_full(ms)));
     }
     Ok(Some(CollectedWorkload {
         waits: Vec::new(),
@@ -181,6 +175,14 @@ pub(crate) async fn collect_workload(
         notes,
         no_plans,
     }))
+}
+
+/// The note on statement time (`ms`) performance_schema couldn't keep per digest.
+fn digests_full(ms: f64) -> String {
+    format!(
+        "performance_schema's digest table is full (performance_schema_digests_size), so {} of statement time across the server went into one catch-all row and isn't in these totals: shares are of the time it could attribute.",
+        culprit_core::format::duration(ms)
+    )
 }
 
 /// Statement time performance_schema couldn't keep per digest once its table was full: the row with no digest. It is
@@ -233,7 +235,7 @@ async fn slow_log_workload(
             notes.push(("plans", message));
         }
         if outcome.planned == 0 {
-            no_plans = Some(("No logged statement could be planned.".to_string(), None));
+            no_plans = Some((no_logged_plans(), None));
         }
     }
     let mut workload = collected.workload;
@@ -605,11 +607,21 @@ async fn no_plans_reason(conn: &mut Conn, probe: &Probe, sample_text: bool) -> (
     .into_iter()
     .map(|r| r.string("name"))
     .collect();
-    if !sample_text && !off.is_empty() {
+    no_plans_words(probe.flavor, sample_text, !off.is_empty())
+}
+
+/// Why no logged statement could be planned.
+fn no_logged_plans() -> String {
+    "No logged statement could be planned.".to_string()
+}
+
+/// [`no_plans_reason`] in words: `consumers_off`, the consumers that keep the latest statements are off.
+fn no_plans_words(flavor: Flavor, sample_text: bool, consumers_off: bool) -> (String, Option<String>) {
+    if !sample_text && consumers_off {
         let names = ["events_statements_current", "events_statements_history_long"];
         let config =
             names.iter().map(|n| format!("performance_schema_consumer_{n} = ON")).collect::<Vec<_>>().join(" and ");
-        let why = match probe.flavor {
+        let why = match flavor {
             Flavor::Mariadb => "MariaDB keeps statement digests but not the statements themselves",
             Flavor::Mysql => {
                 "This MySQL keeps statement digests but no sample statement for each (MySQL 8.0 added one)"
@@ -630,7 +642,7 @@ async fn no_plans_reason(conn: &mut Conn, probe: &Probe, sample_text: bool) -> (
             format!(
                 "{}'s statement history keeps only the latest statements (performance_schema_events_statements_history_long_size). \
                  Logging slow statements to the mysql.slow_log table gives Culprit lasting samples: SET GLOBAL slow_query_log = ON, GLOBAL log_output = 'FILE,TABLE';",
-                probe.flavor.name()
+                flavor.name()
             )
         }),
     )
@@ -703,6 +715,98 @@ mod tests {
         assert!(SampleFrom::Digest.sentence().contains("slowest recent run"));
         assert!(SampleFrom::SlowLog.sentence().contains("a slow run"));
         assert!(!SampleFrom::History.sentence().contains("outlier"));
+    }
+
+    // What the workload's notes and plans say, word for word: their messages come from locales/en.json.
+    #[test]
+    fn workload_notes_say_what_was_planned_in_english() {
+        assert_eq!(
+            SampleFrom::Digest.sentence(),
+            "Planned from the sample performance_schema keeps for this statement: its slowest recent run, so the values \
+             may be an outlier's rather than a typical run's."
+        );
+        assert_eq!(
+            SampleFrom::History.sentence(),
+            "Planned from the latest run in performance_schema's statement history."
+        );
+        assert_eq!(
+            SampleFrom::SlowLog.sentence(),
+            "Planned from a run in the slow query log: a slow run, so the values may be an outlier's rather than a \
+             typical run's."
+        );
+        let note = |outcome: PlanOutcome| outcome.note();
+        assert_eq!(
+            note(PlanOutcome { error: Some("Nothing is listening on db:3306".into()), ..Default::default() })
+                .as_deref(),
+            Some("Could not open a session to plan statements: Nothing is listening on db:3306")
+        );
+        assert_eq!(
+            note(PlanOutcome { planned: 1, unusable: 1, ..Default::default() }).as_deref(),
+            Some("Planned 1 query; 1 had only truncated or server-side prepared text.")
+        );
+        assert_eq!(
+            note(PlanOutcome { planned: 0, empty: 1, ..Default::default() }).as_deref(),
+            Some("Planned 0 queries; 1 was sampled for values that matched no rows, so the server showed no plan.")
+        );
+        assert_eq!(
+            note(PlanOutcome { planned: 4, no_text: 1, unusable: 2, empty: 3, failed: 5, not_reads: 6, error: None })
+                .as_deref(),
+            Some(
+                "Planned 4 queries; 1 had no recorded statement text, 2 had only truncated or server-side prepared \
+                 text, 3 were sampled for values that matched no rows, so the server showed no plan, 5 could not be \
+                 explained."
+            )
+        );
+        assert_eq!(
+            note(PlanOutcome { planned: 2, failed: 1, ..Default::default() }).as_deref(),
+            Some("Planned 2 queries; 1 could not be explained.")
+        );
+        assert_eq!(
+            digests_full(1_500.0),
+            "performance_schema's digest table is full (performance_schema_digests_size), so 1.5 s of statement time \
+             across the server went into one catch-all row and isn't in these totals: shares are of the time it could \
+             attribute."
+        );
+        assert_eq!(no_logged_plans(), "No logged statement could be planned.");
+        let consumers = "Run UPDATE performance_schema.setup_consumers SET ENABLED = 'YES' WHERE NAME IN \
+                         ('events_statements_current', 'events_statements_history_long'); to keep the latest \
+                         statements (no restart needed; add performance_schema_consumer_events_statements_current = ON \
+                         and performance_schema_consumer_events_statements_history_long = ON to the server \
+                         configuration to keep them after a restart). Or open a statement in the editor and Explain it \
+                         there.";
+        assert_eq!(
+            no_plans_words(Flavor::Mariadb, false, true),
+            (
+                "MariaDB keeps statement digests but not the statements themselves, so there is no text to plan."
+                    .into(),
+                Some(consumers.into())
+            )
+        );
+        assert_eq!(
+            no_plans_words(Flavor::Mysql, false, true),
+            (
+                "This MySQL keeps statement digests but no sample statement for each (MySQL 8.0 added one), so there is \
+                 no text to plan."
+                    .into(),
+                Some(consumers.into())
+            )
+        );
+        let none = "None of the recorded statements could be planned: their text was truncated, prepared with \
+                    placeholders, or no longer in the statement history.";
+        assert_eq!(
+            no_plans_words(Flavor::Mariadb, false, false),
+            (
+                none.into(),
+                Some(
+                    "MariaDB's statement history keeps only the latest statements \
+                     (performance_schema_events_statements_history_long_size). Logging slow statements to the \
+                     mysql.slow_log table gives Culprit lasting samples: SET GLOBAL slow_query_log = ON, GLOBAL \
+                     log_output = 'FILE,TABLE';"
+                        .into()
+                )
+            )
+        );
+        assert_eq!(no_plans_words(Flavor::Mysql, true, true), (none.into(), None));
     }
 
     #[test]

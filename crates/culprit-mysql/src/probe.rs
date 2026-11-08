@@ -320,4 +320,105 @@ mod tests {
         let mysql = probe(Flavor::Mysql, false);
         assert!(!mysql.unlock_statement().unwrap().contains("userstat"), "MySQL has no userstat");
     }
+
+    /// Why each capability is missing, and its fix, as a person reads them.
+    fn missing(p: &Probe) -> Vec<(Capability, String, Option<String>)> {
+        p.server_info().missing.into_iter().map(|m| (m.capability, m.reason, m.fix)).collect()
+    }
+
+    // Why a capability is locked and how to unlock it, word for word: its messages come from locales/en.json.
+    #[test]
+    fn locked_capabilities_say_why_in_english() {
+        assert_eq!(
+            missing(&probe(Flavor::Mariadb, false)),
+            [
+                (
+                    Capability::PerformanceSchema,
+                    "performance_schema is off (MariaDB's default), so the server keeps no statement statistics.".into(),
+                    Some(
+                        "Run SET GLOBAL userstat = ON, GLOBAL slow_query_log = ON, GLOBAL log_output = 'FILE,TABLE', \
+                         GLOBAL long_query_time = 0.1; MariaDB then logs statements slower than long_query_time to \
+                         mysql.slow_log, which Culprit reads: no restart needed. Connections opened earlier keep the old \
+                         threshold until they reconnect, and the settings last until the next restart unless they are \
+                         also added to the server configuration. For statistics on every statement (not only slow \
+                         ones) and waits, set performance_schema = ON in the server configuration and restart MariaDB."
+                            .into()
+                    )
+                ),
+                (
+                    Capability::IndexUsage,
+                    "MariaDB counts index reads only with performance_schema or userstat on.".into(),
+                    Some(
+                        "Run SET GLOBAL userstat = ON; to start counting (no restart needed), then scan again once the \
+                         application has run for a while."
+                            .into()
+                    )
+                ),
+                (
+                    Capability::QueryPlans,
+                    "Plans come from the statements the server recorded, and it records none.".into(),
+                    None
+                ),
+            ]
+        );
+        assert_eq!(
+            missing(&probe(Flavor::Mysql, false)),
+            [
+                (
+                    Capability::PerformanceSchema,
+                    "performance_schema is off, so MySQL keeps no statement statistics.".into(),
+                    Some(
+                        "Run SET GLOBAL slow_query_log = ON, GLOBAL log_output = 'FILE,TABLE', GLOBAL long_query_time \
+                         = 0.1; MySQL then logs statements slower than long_query_time to mysql.slow_log, which Culprit \
+                         reads: no restart needed. Connections opened earlier keep the old threshold until they \
+                         reconnect, and the settings last until the next restart unless they are also added to the \
+                         server configuration. For statistics on every statement (not only slow ones) and waits, set \
+                         performance_schema = ON in the server configuration and restart MySQL."
+                            .into()
+                    )
+                ),
+                (
+                    Capability::IndexUsage,
+                    "performance_schema is off, so MySQL counts no index use.".into(),
+                    Some("Set performance_schema = ON in the server configuration and restart MySQL.".into())
+                ),
+                (
+                    Capability::QueryPlans,
+                    "Plans come from the statements the server recorded, and it records none.".into(),
+                    None
+                ),
+            ]
+        );
+        // With the slow query log already in the table, only the restart is left to say.
+        let logging = Probe {
+            slow_query_log: true,
+            log_output: "TABLE".into(),
+            long_query_time: Some(0.5),
+            ..probe(Flavor::Mysql, false)
+        };
+        assert_eq!(
+            missing(&logging)[0].2.as_deref(),
+            Some(
+                "For statistics on every statement (not only slow ones) and waits, set performance_schema = ON in the \
+                 server configuration and restart MySQL."
+            )
+        );
+        assert!(missing(&probe(Flavor::Mysql, true)).is_empty());
+
+        let connector = Connector::new(&culprit_core::ConnectionSpec {
+            engine: Some(Engine::Mysql),
+            host: "db.example.com".into(),
+            user: Some("reader".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        let e = database_of(&connector).unwrap_err();
+        assert_eq!(
+            (e.message.as_str(), e.hint.as_deref()),
+            (
+                "A MySQL or MariaDB connection needs a database (schema) to analyze",
+                Some("Add it to the connection string, e.g. mysql://user@host:3306/shop")
+            )
+        );
+    }
 }

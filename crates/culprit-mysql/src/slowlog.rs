@@ -506,4 +506,36 @@ mod tests {
         assert_eq!(q.recent.as_ref().map(|s| s.max_ms), Some(Some(900.0)));
         assert_eq!(data.baseline_coverage, 1.0);
     }
+
+    // What the slow query log's notes say, word for word: their messages come from locales/en.json.
+    #[test]
+    fn slow_log_notes_say_what_it_keeps_in_english() {
+        let t0 = 1_791_734_400.0;
+        let runs = vec![run(t0 + 10.0, 2000.0, "SELECT a FROM t WHERE id = 1")];
+        let note =
+            |threshold: Option<f64>| workload(&runs, &iso(t0), &iso(t0 + 3600.0), threshold, 10, false).threshold_note;
+        assert_eq!(
+            note(Some(0.1)),
+            "The slow query log only keeps statements that ran longer than long_query_time (100 ms), so fast, frequent \
+             statements are missing from these totals."
+        );
+        assert_eq!(
+            note(Some(2.5)),
+            "The slow query log only keeps statements that ran longer than long_query_time (2.5 s), so fast, frequent \
+             statements are missing from these totals."
+        );
+        assert_eq!(
+            note(Some(10.0)),
+            "The slow query log only keeps statements that ran longer than long_query_time (10 s), so fast, frequent \
+             statements are missing from these totals."
+        );
+        assert_eq!(note(Some(0.0)), "long_query_time is 0, so the slow query log keeps every statement.");
+        assert_eq!(note(None), "long_query_time is 0, so the slow query log keeps every statement.");
+        let baseline = Period { start: iso(t0), end: iso(t0 + 3600.0) };
+        let recent = Period { start: iso(t0 + 3600.0), end: iso(t0 + 7200.0) };
+        assert_eq!(
+            periods(&runs, &baseline, &recent, Some(t0)).notes,
+            ["From the slow query log: only runs slower than long_query_time are counted, in both periods alike."]
+        );
+    }
 }
