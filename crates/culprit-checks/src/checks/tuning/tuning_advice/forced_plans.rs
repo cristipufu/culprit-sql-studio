@@ -15,8 +15,8 @@ pub(super) struct SeekableScan<'a> {
     /// The share of the rows read that the scan keeps.
     kept: f64,
     /// Columns the scan returns that the index doesn't hold, so a seek would look each row up in the table; empty when
-    /// it covers them.
-    lookups: Vec<String>,
+    /// it covers them, `None` when the plan doesn't say which columns it returns (counted as lookups).
+    lookups: Option<Vec<String>>,
 }
 
 /// An index that doesn't hold every column the query reads costs a lookup per row it finds: worth it over a scan only
@@ -53,11 +53,8 @@ pub(super) fn seekable_scan<'a>(snapshot: &'a Snapshot, q: &QueryStat, plan_id: 
         }
         let index = leading_index(snapshot, &schema, &table, &cols.equality, &columns)?;
         // Without the plan's output columns, coverage is unknown: count it as lookups.
-        let lookups = match node.facts().output_columns.as_ref() {
-            Some(list) => uncovered(snapshot, index, list),
-            None => vec!["the columns it returns".to_string()],
-        };
-        if !lookups.is_empty() && kept > LOOKUPS_KEEP_AT_MOST {
+        let lookups = node.facts().output_columns.as_ref().map(|list| uncovered(snapshot, index, list));
+        if lookups.as_ref().is_none_or(|l| !l.is_empty()) && kept > LOOKUPS_KEEP_AT_MOST {
             return None;
         }
         Some(SeekableScan { node: node.id, schema, table, columns, rows, index, kept, lookups })
@@ -86,94 +83,151 @@ pub(super) fn uncovered(snapshot: &Snapshot, index: &IndexStat, output: &[String
         .collect()
 }
 
-pub(super) fn forced_scan_finding(
-    snapshot: &Snapshot,
-    p: &ForcedPlan,
-    q: &QueryStat,
-    how: &str,
-    forced_at: Option<&str>,
-    scan: SeekableScan,
-) -> Finding {
+/// Who forced a plan, as Query Store and the tuning recommendations say.
+#[derive(Clone, Copy)]
+pub(super) enum Forcing<'s> {
+    /// Automatic tuning (automatic plan correction), on the date it applied its recommendation where known.
+    Automatic(Option<&'s str>),
+    /// Someone, by hand.
+    Hand,
+    /// Query Store doesn't say.
+    Unknown,
+}
+
+impl Forcing<'_> {
+    /// The `how` a message selects on, and the date for `automatic_on`.
+    fn said(self, snapshot: &Snapshot) -> (&'static str, String) {
+        match self {
+            Forcing::Automatic(Some(at)) => ("automatic_on", format::friendly_date(at, &snapshot.taken_at)),
+            Forcing::Automatic(None) => ("automatic", String::new()),
+            Forcing::Hand => ("hand", String::new()),
+            Forcing::Unknown => ("unknown", String::new()),
+        }
+    }
+}
+
+/// A forced plan that scans where an index could seek, as it stands.
+pub struct ForcedScan<'s> {
+    plan: &'s ForcedPlan,
+    query: &'s QueryStat,
+    how: Forcing<'s>,
+    scan: SeekableScan<'s>,
+    /// The query's time in the window, where it has some.
+    impact: Option<QueryImpact>,
+    severity: Severity,
+    /// When the index first showed, where something dates it as new and not to before the forcing.
+    newer: Option<&'s str>,
+}
+
+impl<'s> ForcedScan<'s> {
+    pub(super) fn of(
+        snapshot: &'s Snapshot,
+        plan: &'s ForcedPlan,
+        query: &'s QueryStat,
+        how: Forcing<'s>,
+        forced_at: Option<&str>,
+        scan: SeekableScan<'s>,
+    ) -> ForcedScan<'s> {
+        // "Forced before the index existed" only where something dates the index as new (a scan saw it appear, or
+        // the database dated a change to its table), and not to before the forcing. SQL Server doesn't say which time
+        // zone the tuning view's times are in, so within the widest UTC offset (14 hours) of each other their order is
+        // unknown.
+        const ZONE_UNKNOWN_SECONDS: f64 = 14.0 * 3600.0;
+        let before_forcing = |at: &str| match (parse_epoch_seconds(at), forced_at.and_then(parse_epoch_seconds)) {
+            (Some(created), Some(forced)) => created <= forced + ZONE_UNKNOWN_SECONDS,
+            _ => false,
+        };
+        let impact = query_impact(snapshot, &[query]);
+        ForcedScan {
+            plan,
+            query,
+            how,
+            newer: scan.index.created_at_latest.as_deref().filter(|at| !before_forcing(at)),
+            scan,
+            severity: match &impact {
+                Some(impact) => severity_for_impact(snapshot, &[query], impact),
+                None => Severity::Medium,
+            },
+            impact,
+        }
+    }
+}
+
+pub(super) fn forced_scan_finding(snapshot: &Snapshot, forced: ForcedScan<'_>) -> Finding {
+    let ForcedScan { plan: p, query: q, how, scan, newer, .. } = forced;
     let table_name = format!("{}.{}", scan.schema, scan.table);
     let index = &scan.index.name;
-    let columns = format::list(&scan.columns);
     let mut f = finding(
         "tuning-advice",
         &format!("forced-scan:{}", p.query_id),
         Category::Queries,
         subject(SubjectKind::Query, p.query_id.clone()),
     );
-    f.title = format!("A forced plan makes {} scan {} though {index} could seek it", query_handle(q), scan.table);
-    let lookups = if scan.lookups.is_empty() {
-        String::new()
-    } else {
-        format!(
-            " {index} doesn't hold {}, so a seek would look each row it finds up in the table: still far less than \
-             reading every row for the {} it keeps.",
-            format::list(&scan.lookups),
-            format::percent(scan.kept)
-        )
+    f.title =
+        t!("check.tuning_advice.forced_scan.title", statement = query_handle(q), table = &scan.table, index = index);
+    let (how, forced_on) = how.said(snapshot);
+    let mut summary = vec![t!(
+        "check.tuning_advice.forced_scan.summary",
+        plan = &p.plan_id,
+        how = how,
+        date = forced_on,
+        query = &p.query_id,
+        table = &table_name,
+        rows = format::count(scan.rows),
+        kept = format::percent(scan.kept),
+        columns = format::list(&scan.columns),
+        index = index,
+        n = scan.columns.len()
+    )];
+    let lookups = match &scan.lookups {
+        Some(columns) if columns.is_empty() => None,
+        Some(columns) => Some(format::list(columns)),
+        None => Some(t!("check.tuning_advice.forced_scan.columns_it_returns")),
     };
-    // "Forced before the index existed" only where something dates the index as new (a scan saw it appear, or the
-    // database dated a change to its table), and not to before the forcing. SQL Server doesn't say which time zone the
-    // tuning view's times are in, so within the widest UTC offset (14 hours) of each other their order is unknown.
-    const ZONE_UNKNOWN_SECONDS: f64 = 14.0 * 3600.0;
-    let before_forcing = |at: &str| match (parse_epoch_seconds(at), forced_at.and_then(parse_epoch_seconds)) {
-        (Some(created), Some(forced)) => created <= forced + ZONE_UNKNOWN_SECONDS,
-        _ => false,
-    };
-    let newer = match scan.index.created_at_latest.as_deref().filter(|at| !before_forcing(at)) {
-        Some(at) => format!(
-            " {index} may be new (Culprit dates it to {} at the latest), so this plan was most likely forced before it \
-             existed.",
-            format::friendly_date(at, &snapshot.taken_at)
-        ),
-        None => String::new(),
-    };
-    f.summary = format!(
-        "Plan {} is {how} for query {}. SQL Server runs a forced plan as it is, even after an index is added, so this \
-         one reads all of {table_name} ({} rows) and keeps about {} of them to find the rows by {columns}, while \
-         {index} leads with {} and could seek them.{lookups}{newer}",
-        p.plan_id,
-        p.query_id,
-        format::count(scan.rows),
-        format::percent(scan.kept),
-        if scan.columns.len() == 1 { "it" } else { "them" },
-    );
-    match query_impact(snapshot, &[q]) {
-        Some(impact) => {
-            apply_query_impact(&mut f, &impact);
-            f.severity = severity_for_impact(snapshot, &[q], &impact);
-        }
+    if let Some(columns) = lookups {
+        summary.push(t!(
+            "check.tuning_advice.forced_scan.lookups",
+            index = index,
+            columns = columns,
+            kept = format::percent(scan.kept)
+        ));
+    }
+    if let Some(at) = newer {
+        summary.push(t!(
+            "check.tuning_advice.forced_scan.newer",
+            index = index,
+            date = format::friendly_date(at, &snapshot.taken_at)
+        ));
+    }
+    f.summary = summary.join(" ");
+    f.severity = forced.severity;
+    match &forced.impact {
+        Some(impact) => apply_query_impact(&mut f, impact),
         None => {
-            f.severity = Severity::Medium;
             f.impact.score = base_score(f.severity);
-            f.impact.label = "Forced plan".into();
+            f.impact.label = t!("check.tuning_advice.forced_scan.impact");
         }
     }
     f.confidence = Confidence::Medium;
-    f.metrics.push(Metric::text("Forced plan", p.plan_id.clone()));
-    f.metrics.push(Metric::text("Index that could seek", index.clone()));
-    f.metrics.push(Metric::new("Rows in table", scan.rows, Unit::Rows));
+    f.metrics.push(Metric::text(t!("check.tuning_advice.metric.forced_plan"), p.plan_id.clone()));
+    f.metrics.push(Metric::text(t!("check.tuning_advice.metric.index_that_could_seek"), index.clone()));
+    f.metrics.push(Metric::new(t!("check.tuning_advice.metric.rows_in_table"), scan.rows, Unit::Rows));
     f.queries = vec![QueryRef {
         id: q.id.clone(),
         plan_node: Some(scan.node),
-        note: Some(format!("Scans {} under the forced plan.", scan.table)),
+        note: Some(t!("check.tuning_advice.forced_scan.note", table = &scan.table)),
     }];
     f.last_seen = q.last_seen.clone();
     f.fix = Some(Fix {
-        summary: format!(
-            "Unforce it, so SQL Server compiles a plan that can seek {index}. If automatic plan correction is on and the \
-             new plan turns out slower, it forces a plan again, chosen among the plans it has seen since."
-        ),
+        summary: t!("check.tuning_advice.forced_scan.fix", index = index),
         sql: Some(format!("EXEC sp_query_store_unforce_plan @query_id = {}, @plan_id = {};", p.query_id, p.plan_id)),
         cost: None,
     });
     f.verify = vec![
-        format!("Re-scan: query {} seeks {index}, and its reads and average duration drop.", p.query_id),
-        format!(
-            "If it gets slower, force the plan again: EXEC sp_query_store_force_plan @query_id = {}, @plan_id = {};",
-            p.query_id, p.plan_id
+        t!("check.tuning_advice.forced_scan.verify", query = &p.query_id, index = index),
+        t!(
+            "check.tuning_advice.forced_scan.verify_force_again",
+            sql = format!("EXEC sp_query_store_force_plan @query_id = {}, @plan_id = {};", p.query_id, p.plan_id)
         ),
     ];
     f
@@ -182,127 +236,155 @@ pub(super) fn forced_scan_finding(
 /// Plans listed one by one in the forced-plans finding; the rest are counted.
 pub(super) const FORCED_LISTED: usize = 12;
 
-pub(super) fn forced_plans_finding(snapshot: &Snapshot, kept: &[(&ForcedPlan, Option<&QueryStat>, String)]) -> Finding {
+/// A forced plan that applies.
+pub(super) struct Forced<'s> {
+    pub(super) plan: &'s ForcedPlan,
+    pub(super) query: Option<&'s QueryStat>,
+    pub(super) how: Forcing<'s>,
+    /// Not among the window's statements, and not run for a day or more since this.
+    pub(super) quiet: Option<&'s str>,
+}
+
+/// The forced plans that apply.
+pub struct ForcedPlans<'s> {
+    pub(super) kept: Vec<Forced<'s>>,
+    /// Automatic plan correction is on, so it keeps checking the plans it forced.
+    pub(super) correcting: bool,
+}
+
+pub(super) fn forced_plans_finding(snapshot: &Snapshot, plans: ForcedPlans<'_>) -> Finding {
+    let kept = &plans.kept;
     let n = kept.len();
-    let automatic = kept.iter().filter(|(_, _, how)| how.contains("automatic tuning")).count();
+    let automatic = kept.iter().filter(|p| matches!(p.how, Forcing::Automatic(_))).count();
     let mut f = finding(
         "tuning-advice",
         "forced-plans",
         Category::Queries,
         subject(SubjectKind::Database, snapshot.server.database.clone()),
     );
+    let count = n.to_string();
     f.title = match (n, automatic) {
-        (1, 1) => "Automatic tuning forced a plan in Query Store".to_string(),
-        (1, _) => "A plan is forced in Query Store".to_string(),
-        (n, a) if a == n => format!("{n} plans are forced in Query Store, all by automatic tuning"),
-        (n, 0) => format!("{n} plans are forced in Query Store"),
-        (n, a) => format!("{n} plans are forced in Query Store, {a} by automatic tuning"),
-    };
-    let automatic_sentence = match (n, automatic) {
-        (_, 0) => String::new(),
-        (1, _) => " Automatic plan correction forced it after the query got slower with a new plan.".to_string(),
-        (n, a) if a == n => {
-            " Automatic plan correction forced all of them after their queries got slower with a new plan.".to_string()
-        }
-        (_, 1) => {
-            " Automatic plan correction forced one of them after its query got slower with a new plan.".to_string()
-        }
+        (1, 1) => t!("check.tuning_advice.forced_plans.title.one_automatic"),
+        (1, _) => t!("check.tuning_advice.forced_plans.title.one"),
+        (_, a) if a == n => t!("check.tuning_advice.forced_plans.title.all_automatic", count = &count),
+        (_, 0) => t!("check.tuning_advice.forced_plans.title.none_automatic", count = &count),
         (_, a) => {
-            format!(" Automatic plan correction forced {a} of them after their queries got slower with a new plan.")
+            t!("check.tuning_advice.forced_plans.title.some_automatic", count = &count, automatic = a.to_string())
         }
     };
+    let mut summary = vec![t!("check.tuning_advice.forced_plans.summary", n = n)];
+    match (n, automatic) {
+        (_, 0) => {}
+        (1, _) => summary.push(t!("check.tuning_advice.forced_plans.automatic.it")),
+        (_, a) if a == n => summary.push(t!("check.tuning_advice.forced_plans.automatic.all")),
+        (_, 1) => summary.push(t!("check.tuning_advice.forced_plans.automatic.one_of")),
+        (_, a) => summary.push(t!("check.tuning_advice.forced_plans.automatic.some", count = a.to_string())),
+    }
     // Automatic plan correction keeps checking the plans it forced and unforces one that turns out slower, while it is
     // on; a plan forced by hand (or once it's off) stays forced until someone unforces it.
-    let correcting = crate::tuning::automatic_plan_correction(snapshot) == Some(true);
-    let checked = if correcting { automatic } else { 0 };
-    let unchecked = match (n - checked, checked) {
-        (0, _) => " It is still on, so it keeps checking the plans it forced and unforces one that turns out slower."
-            .to_string(),
-        (_, 0) => " Once the query or its indexes change, a forced plan can become the slower one without anything \
-                   saying so."
-            .to_string(),
-        (1, _) => " It is still on, so it keeps checking the plans it forced and unforces one that turns out slower. \
-                   The other plan stays forced until someone unforces it: once its query or indexes change, it can \
-                   become the slower one without anything saying so."
-            .to_string(),
-        (rest, _) => format!(
-            " It is still on, so it keeps checking the plans it forced and unforces one that turns out slower. The \
-             other {rest} stay forced until someone unforces them: once their queries or indexes change, one can \
-             become the slower one without anything saying so."
-        ),
-    };
-    f.summary = format!(
-        "SQL Server runs {} with the plan forced for {} instead of choosing one, even after an index is added or the \
-         data grows. A forced plan keeps a query on the plan it ran fast with, so a new plan can't slow it \
-         down.{automatic_sentence}{unchecked}",
-        if n == 1 { "this query" } else { "these queries" },
-        if n == 1 { "it" } else { "each" },
-    );
+    let checked = if plans.correcting { automatic } else { 0 };
+    summary.push(match (n - checked, checked) {
+        (0, _) => t!("check.tuning_advice.forced_plans.checked"),
+        (_, 0) => t!("check.tuning_advice.forced_plans.unchecked"),
+        (1, _) => t!("check.tuning_advice.forced_plans.checked_but_one"),
+        (rest, _) => t!("check.tuning_advice.forced_plans.checked_but_some", count = rest.to_string()),
+    });
+    f.summary = summary.join(" ");
     f.severity = Severity::Low;
     f.impact.score = base_score(f.severity) + (n as f64).min(10.0) * 0.2;
-    f.impact.label = format!("{n} forced {}", if n == 1 { "plan" } else { "plans" });
+    f.impact.label = t!("check.tuning_advice.forced_plans.impact", n = n, count = &count);
     f.confidence = Confidence::High;
-    f.metrics.push(Metric::new("Forced plans", n as f64, Unit::Count));
+    f.metrics.push(Metric::new(t!("check.tuning_advice.metric.forced_plans"), n as f64, Unit::Count));
     if automatic > 0 {
-        f.metrics.push(Metric::new("Forced by automatic tuning", automatic as f64, Unit::Count));
+        f.metrics.push(Metric::new(
+            t!("check.tuning_advice.metric.forced_by_automatic_tuning"),
+            automatic as f64,
+            Unit::Count,
+        ));
     }
     let mut lines: Vec<String> = kept
         .iter()
         .take(FORCED_LISTED)
-        .map(|(p, q, how)| {
-            let what = q.map(query_handle).map(|h| format!(" ({h})")).unwrap_or_default();
-            let ran = match (q, quiet_since(snapshot, p.last_execution.as_deref())) {
-                (None, Some((_, last))) => {
-                    format!("; not run since {}", format::friendly_date(last, &snapshot.taken_at))
-                }
-                _ => String::new(),
-            };
-            format!("Query {}{what}: plan {}, {how}{ran}.", p.query_id, p.plan_id)
+        .map(|p| {
+            let (how, forced_on) = p.how.said(snapshot);
+            t!(
+                "check.tuning_advice.forced_plans.line",
+                query = &p.plan.query_id,
+                named = if p.query.is_some() { "yes" } else { "no" },
+                statement = p.query.map(query_handle).unwrap_or_default(),
+                plan = &p.plan.plan_id,
+                how = how,
+                date = forced_on,
+                quiet = if p.quiet.is_some() { "yes" } else { "no" },
+                since = p.quiet.map(|last| format::friendly_date(last, &snapshot.taken_at)).unwrap_or_default()
+            )
         })
         .collect();
     if n > FORCED_LISTED {
-        lines.push(format!("And {} more.", n - FORCED_LISTED));
+        lines.push(t!("check.tuning_advice.forced_plans.more", count = (n - FORCED_LISTED).to_string()));
     }
-    f.caveats.push(format!("Forced plans:\n{}", lines.join("\n")));
+    f.caveats.push(t!("check.tuning_advice.forced_plans.caveat", plans = lines.join("\n")));
     f.queries = kept
         .iter()
-        .filter_map(|(p, q, _)| q.map(|q| (p, q)))
+        .filter_map(|p| p.query.map(|q| (p.plan, q)))
         .take(FORCED_LISTED)
         .map(|(p, q)| QueryRef {
             id: q.id.clone(),
             plan_node: None,
-            note: Some(format!("Plan {} is forced.", p.plan_id)),
+            note: Some(t!("check.tuning_advice.forced_plans.note", plan = &p.plan_id)),
         })
         .collect();
     f.informational();
     f.fix = Some(Fix {
-        summary: "Nothing to do while they help. Unforce one whose query or indexes changed since it was forced and \
-            compare its duration before and after: SQL Server chooses a plan again."
-            .into(),
+        summary: t!("check.tuning_advice.forced_plans.fix"),
         sql: Some(
             std::iter::once("-- One at a time, comparing the query's duration before and after".to_string())
-                .chain(kept.iter().take(FORCED_LISTED).map(|(p, _, _)| {
-                    format!("-- EXEC sp_query_store_unforce_plan @query_id = {}, @plan_id = {};", p.query_id, p.plan_id)
+                .chain(kept.iter().take(FORCED_LISTED).map(|p| {
+                    format!(
+                        "-- EXEC sp_query_store_unforce_plan @query_id = {}, @plan_id = {};",
+                        p.plan.query_id, p.plan.plan_id
+                    )
                 }))
                 .collect::<Vec<_>>()
                 .join("\n"),
         ),
         cost: None,
     });
-    f.verify = vec!["Re-scan after unforcing one: its query's average duration stays the same or drops.".into()];
+    f.verify = vec![t!("check.tuning_advice.forced_plans.verify")];
     f
 }
 
-pub(super) fn failure_hint(reason: &str) -> &'static str {
-    let r = reason.to_ascii_uppercase();
-    if r.contains("NO_INDEX") {
-        "An index the plan uses no longer exists."
-    } else if r.contains("NO_PLAN") || r.contains("GENERAL_FAILURE") {
-        "The query or schema changed so the plan can no longer be produced."
-    } else if r.contains("TIME_OUT") || r.contains("TIMEOUT") {
-        "Compiling with the forced plan took too long."
-    } else {
-        ""
+/// What a forced plan's failure reason says went wrong, where it says something.
+#[derive(Clone, Copy)]
+pub(super) enum FailureHint {
+    /// NO_INDEX: an index the plan uses is gone.
+    IndexGone,
+    /// NO_PLAN, GENERAL_FAILURE: the plan can't be produced any more.
+    PlanImpossible,
+    /// TIME_OUT: compiling with it took too long.
+    CompileTimeout,
+}
+
+impl FailureHint {
+    pub(super) fn of(reason: &str) -> Option<FailureHint> {
+        let r = reason.to_ascii_uppercase();
+        if r.contains("NO_INDEX") {
+            Some(FailureHint::IndexGone)
+        } else if r.contains("NO_PLAN") || r.contains("GENERAL_FAILURE") {
+            Some(FailureHint::PlanImpossible)
+        } else if r.contains("TIME_OUT") || r.contains("TIMEOUT") {
+            Some(FailureHint::CompileTimeout)
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn said(self) -> String {
+        match self {
+            FailureHint::IndexGone => t!("check.tuning_advice.forcing_fails.hint.index_gone"),
+            FailureHint::PlanImpossible => t!("check.tuning_advice.forcing_fails.hint.plan_impossible"),
+            FailureHint::CompileTimeout => t!("check.tuning_advice.forcing_fails.hint.compile_timeout"),
+        }
     }
 }
 

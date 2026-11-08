@@ -36,8 +36,7 @@ pub(crate) fn automatic_plan_correction(snapshot: &Snapshot) -> Option<bool> {
 /// good plan itself once it is sure of a regression, and unforces one that turns out slower, while a plan forced by hand
 /// stays forced until someone unforces it. `None` where it is off or unknown.
 pub(crate) fn hand_forcing_note(snapshot: &Snapshot) -> Option<String> {
-    automatic_plan_correction(snapshot).filter(|on| *on).map(|_| {
-        "Automatic plan correction (FORCE_LAST_GOOD_PLAN) is on for this database: SQL Server forces the last good plan itself once it is sure a regression costs enough (sys.dm_db_tuning_recommendations lists the ones it found), and unforces a plan it forced that turns out slower. A plan forced by hand stays forced until someone unforces it, whatever changes after."
-            .to_string()
-    })
+    automatic_plan_correction(snapshot)
+        .filter(|on| *on)
+        .map(|_| culprit_core::t!("check.tuning_advice.hand_forcing_note"))
 }
