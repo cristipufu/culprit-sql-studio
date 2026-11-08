@@ -439,28 +439,36 @@ mod tests {
         assert_eq!(days_counted(1277.4), "1277");
     }
 
-    // French and German write a decimal comma (and group thousands where a message is handed a number); these helpers
-    // keep their digits otherwise, and their words read in English until a catalog translates them.
+    // French and German write a decimal comma (and group thousands where a message is handed a number). The words
+    // around the digits (units, suffixes) are each catalog's own and may change as it is translated, so this checks the
+    // digits only: the number a helper writes, read up to its first character that isn't a digit or a separator.
     #[test]
     fn numbers_are_written_in_the_language_s_digits() {
+        fn digits_of(text: &str) -> &str {
+            let end = text
+                .find(|c: char| !(c.is_ascii_digit() || c == ',' || c == '.' || c == '\u{202f}'))
+                .unwrap_or(text.len());
+            // A separator only counts between digits: French puts the same narrow space before "%".
+            text[..end].trim_end_matches([',', '.', '\u{202f}'])
+        }
         crate::i18n::scope("fr", || {
-            assert_eq!(count(1_234.0), "1,2K");
-            assert_eq!(count(18_200_000.0), "18,2M");
+            assert_eq!(digits_of(&count(1_234.0)), "1,2");
+            assert_eq!(digits_of(&count(18_200_000.0)), "18,2");
             assert_eq!(count(1.6), "1,6");
-            assert_eq!(duration(12_300.0), "12,3 s");
-            assert_eq!(duration(2.59), "2,6 ms");
-            assert_eq!(bytes(6.1 * 1024.0 * 1024.0 * 1024.0), "6,1 GB");
-            assert_eq!(percent_value(0.135), "0,14%");
-            assert_eq!(factor(3.44), "3,4×");
-            assert_eq!(days(9.51), "9,5 days");
+            assert_eq!(digits_of(&duration(12_300.0)), "12,3");
+            assert_eq!(digits_of(&duration(2.59)), "2,6");
+            assert_eq!(digits_of(&bytes(6.1 * 1024.0 * 1024.0 * 1024.0)), "6,1");
+            assert_eq!(digits_of(&percent_value(0.135)), "0,14");
+            assert_eq!(digits_of(&factor(3.44)), "3,4");
+            assert_eq!(digits_of(&days(9.51)), "9,5");
             assert_eq!(days_counted(1277.4), "1277");
             let lang = crate::i18n::current();
             assert_eq!(crate::i18n::format_number(1_234_567.5, &lang), "1\u{202f}234\u{202f}567,5");
         });
         crate::i18n::scope("de", || {
-            assert_eq!(count(1_234.0), "1,2K");
-            assert_eq!(duration(0.5), "0,50 ms");
-            assert_eq!(percent_value(12.5), "12,5%");
+            assert_eq!(digits_of(&count(1_234.0)), "1,2");
+            assert_eq!(digits_of(&duration(0.5)), "0,50");
+            assert_eq!(digits_of(&percent_value(12.5)), "12,5");
             assert_eq!(crate::i18n::format_number(1_234_567.5, &crate::i18n::current()), "1.234.567,5");
         });
         // Outside the scope, English again.
