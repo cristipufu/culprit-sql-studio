@@ -4,6 +4,7 @@
 
 mod dashboard;
 mod demo_sidecars;
+mod error_words;
 mod escalations;
 mod export_words;
 mod file_pickers;

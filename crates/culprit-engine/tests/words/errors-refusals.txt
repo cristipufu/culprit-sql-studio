@@ -1,0 +1,52 @@
+bad name: [InvalidInput] 'bad name' is not a valid connection name
+  hint: Use letters, digits, '-', '_' or '.' (not first), up to 64 characters, e.g. shop-staging
+unknown: [NotFound] No connection named 'nope'
+  hint: List saved connections with `culprit conn list`, add one with `culprit conn add`
+rename onto another: [InvalidInput] A connection named 'prod' already exists
+remove unknown: [NotFound] No connection named 'nope'
+  hint: List saved connections with `culprit conn list`, add one with `culprit conn add`
+saved unknown: [NotFound] No saved query named 'nope'
+  hint: List them with `culprit saved list`, save one with `culprit saved add`
+delete unknown: [NotFound] No saved query named 'nope'
+save no name: [InvalidInput] A saved query needs a name of 1 to 80 characters
+save no sql: [InvalidInput] There is no SQL to save
+save over another: [InvalidInput] A saved query named 'a' already exists
+  hint: Pick another name, or open that query and save over it.
+export finding: [NotFound] 'dev' hasn't been scanned yet
+  hint: Run `culprit scan dev` first
+export report: [NotFound] 'dev' hasn't been scanned yet
+  hint: Run `culprit scan dev` first
+verify: [NotFound] 'dev' hasn't been scanned yet, so there's nothing to compare with
+  hint: Scan before the change (`culprit scan dev`), then verify after it ships
+dashboard: [NotFound] No saved report for 'dev'
+  hint: Run `culprit scan dev` first
+query plan: [NotFound] No report for dev
+digest nothing: [InvalidInput] Name a connection or pass --report <file>
+  hint: culprit digest shop, or culprit digest --report report.json --since previous.json
+digest unscanned: [NotFound] No saved report for 'dev'
+  hint: Run `culprit scan dev` first
+index advice: [NotFound] No saved report for 'dev'
+  hint: Run `culprit scan dev` first
+waits: [NotFound] No report for dev yet
+  hint: Scan it first: culprit scan <connection>
+drift: [NotFound] No saved report for 'dev'
+  hint: Run `culprit scan dev` first
+report at: [NotFound] No saved report '20260101T000000.000Z' for 'dev'
+unclosed: [InvalidInput] A quoted string or name is never closed
+  hint: Check the quotes and comments: one starts and doesn't end.
+two statements: [InvalidInput] This text holds more than one statement
+  hint: Run one statement at a time: select it in the editor first, or split the script.
+write on production: [ConfirmationRequired] This DELETE changes data on the production connection 'prod'
+  hint: There is no WHERE clause, so this changes every row in the table.
+locking read on production: [ConfirmationRequired] This SELECT may change data on the production connection 'prod'
+  hint: Culprit can't prove this only reads: it locks rows, writes into a table, or calls a function with side effects.
+read that writes: [PermissionDenied] Only statements that read data run here
+  hint: Send a single SELECT: no writes, DDL, procedure calls or locking reads.
+analyze a write on production: [PermissionDenied] 'prod' is a production connection; Explain Analyze would execute a statement that changes data
+  hint: Use the estimated plan (Explain), or measure it on a non-production copy.
+with an index that isn't one: [InvalidInput] `--with-index` expects a `CREATE INDEX` statement
+verify no index: [InvalidInput] At least one `CREATE INDEX` statement is required to verify a hypothetical index
+cancel on production: [PermissionDenied] 'prod' is a production connection; Culprit never cancels or ends sessions there
+  hint: Use the database's own tooling, or mark the connection as non-production if it isn't one.
+plan with no text: [InvalidInput] This plan has no original text to save
+  hint: Plans read from a scan keep only Culprit's model; open the query's plan or export HTML or Markdown

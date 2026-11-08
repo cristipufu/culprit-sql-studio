@@ -101,7 +101,8 @@ fn the_browser_demos_finding_pages_are_the_pages_of_the_demo_reports() {
     let sample = share_sample();
     let saved = sample["findings"].as_object().expect("findings");
     let options = ExportOptions::default();
-    for file in ["mssql-demo.report.json", "pg-demo.report.json", "mysql-demo.report.json", "mariadb-demo.report.json"] {
+    for file in ["mssql-demo.report.json", "pg-demo.report.json", "mysql-demo.report.json", "mariadb-demo.report.json"]
+    {
         let r = report(file);
         for f in r.findings.iter().take(3) {
             let key = format!("{}|{}", r.snapshot.connection, f.id);

@@ -1,0 +1,19 @@
+words: [InvalidInput] Culprit doesn't recognize this as a query plan
+  hint: Paste or open a SQL Server plan (.sqlplan), PostgreSQL EXPLAIN output (text or FORMAT JSON), MySQL EXPLAIN FORMAT=JSON / EXPLAIN ANALYZE output, or SQLite EXPLAIN QUERY PLAN output.
+html: [InvalidInput] This XML isn't a SQL Server execution plan
+  hint: Paste or open a SQL Server plan (.sqlplan), PostgreSQL EXPLAIN output (text or FORMAT JSON), MySQL EXPLAIN FORMAT=JSON / EXPLAIN ANALYZE output, or SQLite EXPLAIN QUERY PLAN output.
+yaml: [InvalidInput] PostgreSQL plans in XML or YAML aren't supported; use EXPLAIN (FORMAT JSON) or the default text format
+  hint: Paste or open a SQL Server plan (.sqlplan), PostgreSQL EXPLAIN output (text or FORMAT JSON), MySQL EXPLAIN FORMAT=JSON / EXPLAIN ANALYZE output, or SQLite EXPLAIN QUERY PLAN output.
+json: [InvalidInput] This JSON isn't a plan Culprit knows
+  hint: Paste or open a SQL Server plan (.sqlplan), PostgreSQL EXPLAIN output (text or FORMAT JSON), MySQL EXPLAIN FORMAT=JSON / EXPLAIN ANALYZE output, or SQLite EXPLAIN QUERY PLAN output.
+showplan text: [InvalidInput] This is a SQL Server text plan (SHOWPLAN_TEXT); Culprit reads the XML plan (SET SHOWPLAN_XML ON or Save Execution Plan As in SSMS)
+  hint: Paste or open a SQL Server plan (.sqlplan), PostgreSQL EXPLAIN output (text or FORMAT JSON), MySQL EXPLAIN FORMAT=JSON / EXPLAIN ANALYZE output, or SQLite EXPLAIN QUERY PLAN output.
+empty: [InvalidInput] There is no plan to read
+broken showplan: [InvalidInput] This looks like SQL Server showplan XML but Culprit couldn't read it: Could not read the SQL Server plan XML: expected 'unclosed' tag, not 'ShowPlanXML' at 1:24
+pg text without nodes: [InvalidInput] Culprit doesn't recognize this as a query plan
+  hint: Paste or open a SQL Server plan (.sqlplan), PostgreSQL EXPLAIN output (text or FORMAT JSON), MySQL EXPLAIN FORMAT=JSON / EXPLAIN ANALYZE output, or SQLite EXPLAIN QUERY PLAN output.
+culprit json from elsewhere: [InvalidInput] This looks like Culprit plan JSON but Culprit couldn't read it: it was saved by another version of Culprit (missing field `id` at line 1 column 11); open the engine's own plan text (XML, JSON or text) instead
+too large: [InvalidInput] This is 80 MB, far larger than any query plan
+not text: [InvalidInput] This file isn't text
+  hint: Open a .sqlplan, an EXPLAIN (FORMAT JSON) file, or EXPLAIN text output.
+bad utf-16: [InvalidInput] The file says it is UTF-16 but isn't valid UTF-16
