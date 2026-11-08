@@ -2,154 +2,246 @@
 
 use super::*;
 use crate::evidence::Requirement as Evidence;
+use culprit_core::t;
 
 pub fn unused_index_info() -> CheckInfo {
     CheckInfo {
         id: "unused-index".into(),
-        title: "Unused indexes".into(),
+        title: t!("check.unused_index.info.title"),
         category: Category::Indexes,
         engines: vec![Engine::Mssql, Engine::Postgres, Engine::Yugabyte, Engine::Mysql],
         requires: vec![Capability::IndexUsage],
-        description:
-            "Indexes that are maintained on every write but no query has read since usage counters were reset. \
-            One that may be less than a week old (a scan saw it appear, or its table changed before Culprit's first \
-            scan) isn't called unused yet."
-                .into(),
+        description: t!("check.unused_index.info.description"),
     }
 }
 
-check!(UnusedIndexCheck: unused_index_info, unused_index, &[Evidence::IndexCatalog, Evidence::IndexHistory]);
+check!(
+    UnusedIndexCheck: unused_index_info,
+    decide = unused_index_cases,
+    render = unused_index_finding,
+    case<'s> = UnusedIndex<'s>,
+    evidence = &[Evidence::IndexCatalog, Evidence::IndexHistory],
+);
 
-pub fn unused_index(snapshot: &Snapshot) -> Vec<Finding> {
+/// The unused-index findings of `snapshot`: its cases, each worded.
+#[cfg(test)]
+pub(crate) fn unused_index(snapshot: &Snapshot) -> Vec<Finding> {
+    culprit_core::Check::run(&UnusedIndexCheck, snapshot)
+}
+
+/// What the unused-index check concludes about one subject.
+pub enum UnusedIndex<'s> {
+    /// A table's indexes that no query read.
+    Unread(UnreadIndexes<'s>),
+    /// A PostgreSQL index an unfinished build left invalid.
+    Invalid(InvalidIndex<'s>),
+}
+
+/// The indexes of one table that no query read ([`unused_indexes`]), and what they cost.
+pub struct UnreadIndexes<'s> {
+    schema: &'s str,
+    table: &'s str,
+    indexes: Vec<&'s IndexStat>,
+    size: f64,
+    /// The writes that maintained them since the counters started.
+    writes: Option<f64>,
+    /// SQL Server counts the writes that maintained each index (`user_updates`), not the table's: the number is the
+    /// index's own. MySQL's per-index count is the table's writes, and PostgreSQL keeps only the table's.
+    index_counted: bool,
+    /// The youngest index, where it may be younger than the counters: its age in days, and the latest it may have been
+    /// created. It has gone unread only since then.
+    youngest: Option<(f64, &'s str)>,
+    /// The days they have surely gone unread.
+    days: Option<f64>,
+    /// Those that lead with a foreign key's columns, with the key.
+    foreign_keys: Vec<(&'s IndexStat, &'s culprit_core::ForeignKey)>,
+    severity: Severity,
+    score: f64,
+    confidence: Confidence,
+}
+
+/// A PostgreSQL index left invalid by an unfinished concurrent build, that nothing else accounts for.
+pub struct InvalidIndex<'s> {
+    index: &'s IndexStat,
+    size: f64,
+    /// The table's writes since the counters started.
+    writes: Option<f64>,
+    /// Writes still update it.
+    maintained: bool,
+    severity: Severity,
+    score: f64,
+    confidence: Confidence,
+}
+
+fn unused_index_cases(snapshot: &Snapshot) -> Vec<UnusedIndex<'_>> {
     let engine = snapshot.server.engine;
     // What the counters have surely watched: on performance_schema counters that may have been reset, the digests' days.
     let days = crate::support::watched_days(snapshot);
-    let mut by_table: Vec<(String, String, Vec<&IndexStat>)> = Vec::new();
+    let mut by_table: Vec<(&str, &str, Vec<&IndexStat>)> = Vec::new();
     for i in unused_indexes(snapshot) {
         match by_table.iter_mut().find(|(s, t, _)| *s == i.schema && *t == i.table) {
             Some((_, _, list)) => list.push(i),
-            None => by_table.push((i.schema.clone(), i.table.clone(), vec![i])),
+            None => by_table.push((&i.schema, &i.table, vec![i])),
         }
     }
     by_table
         .into_iter()
-        .map(|(schema, table, list)| {
-            let table_name = format!("{schema}.{table}");
-            let total_size: f64 = list.iter().filter_map(|i| i.size_bytes).sum();
-            let writes = table_writes(snapshot, &schema, &table, &list);
-            // SQL Server counts the writes that maintained each index (user_updates), not the table's: the number is
-            // the index's own. MySQL's per-index count is the table's writes, and PostgreSQL keeps only the table's.
-            let index_counted = engine == Engine::Mssql && list.iter().any(|i| i.writes.is_some());
+        .map(|(schema, table, indexes)| {
+            let size: f64 = indexes.iter().filter_map(|i| i.size_bytes).sum();
+            let writes = table_writes(snapshot, schema, table, &indexes);
+            let index_counted = engine == Engine::Mssql && indexes.iter().any(|i| i.writes.is_some());
             // An index that may be younger than the counters has gone unread only since it may have been created.
-            let youngest = list
+            let youngest = indexes
                 .iter()
                 .filter_map(|i| Some((index_age_days(snapshot, i)?, i.created_at_latest.as_deref()?)))
                 .filter(|(age, _)| days.is_none_or(|d| *age < d))
                 .min_by(|a, b| a.0.total_cmp(&b.0));
             let days = youngest.map(|(age, _)| age).or(days);
-            let since = match youngest {
-                Some((age, created)) => format!(
-                    "in the {} days since {}, before which {} may not have existed",
-                    age.round(),
-                    format::friendly_date(created, &snapshot.taken_at),
-                    if list.len() == 1 { "it" } else { "some of them" }
-                ),
-                None => since_phrase(snapshot),
-            };
-            let mut f = finding("unused-index", &table_name, Category::Indexes, subject(SubjectKind::Table, &table_name));
-            f.title = match list.as_slice() {
-                [one] => format!("{} on {} is never read", one.name, table),
-                many => format!("{} indexes on {} are never read", many.len(), table),
-            };
-            let names = format::list(&list.iter().map(|i| i.name.clone()).collect::<Vec<_>>());
-            let written = |w: f64| match (index_counted, list.len()) {
-                (true, 1) => format!(", while writes had to update it {} times", format::count(w)),
-                (true, _) => format!(", while writes had to update the busiest of them {} times", format::count(w)),
-                (false, _) => format!(", while {} was written {} times", table_name, format::count(w)),
-            };
-            f.summary = match writes {
-                // Nothing written either: the cost is the space, not the upkeep.
-                Some(0.0) => format!(
-                    "No query has read {} {}, and {} either. {} {} of storage and buffer memory.",
-                    names,
-                    since,
-                    match (index_counted, list.len()) {
-                        (true, 1) => "no write has had to update it".to_string(),
-                        (true, _) => "no write has had to update them".to_string(),
-                        (false, _) => format!("{table_name} hasn't been written to"),
-                    },
-                    if list.len() == 1 { "It takes" } else { "Together they take" },
-                    format::bytes(total_size)
-                ),
-                _ => format!(
-                    "No query has read {} {}{}. {} still has to be updated on every insert, and on updates that touch its columns, and it takes {} of storage and buffer memory.",
-                    names,
-                    since,
-                    writes.map(written).unwrap_or_default(),
-                    if list.len() == 1 { "It" } else { "Each one" },
-                    format::bytes(total_size)
-                ),
-            };
             // What the index costs: its size, or the upkeep of a busy table, as a rate (a total since a restart months
             // ago says nothing about today).
             let writes_a_day = writes.and_then(|w| counter_rate_per_day(snapshot, w));
-            f.severity = if total_size >= 1024.0 * 1024.0 * 1024.0 || writes_a_day.is_some_and(|w| w >= UPKEEP_A_DAY) {
+            let severity = if size >= 1024.0 * 1024.0 * 1024.0 || writes_a_day.is_some_and(|w| w >= UPKEEP_A_DAY) {
                 Severity::Medium
             } else {
                 Severity::Low
             };
-            f.impact.score = base_score(f.severity) + (total_size / (1024.0 * 1024.0 * 1024.0)).min(10.0);
-            f.impact.label = format!("{} unused", format::bytes(total_size));
-            f.confidence = match days {
-                Some(d) if d >= 30.0 => Confidence::High,
-                Some(d) if d >= 7.0 => Confidence::Medium,
-                _ => Confidence::Low,
-            };
-            f.metrics.push(Metric::new("Size", total_size, Unit::Bytes));
-            if let Some(w) = writes {
-                let label = if index_counted { "Writes that updated the index" } else { "Writes to the table" };
-                f.metrics.push(Metric::new(label, w, Unit::Count));
-            }
-            if let Some(d) = days {
-                f.metrics.push(Metric::new("Counting for", d, Unit::Days));
-            }
-            let sql = list
-                .iter()
-                .map(|i| crate::index_health::hide_index_sql(snapshot, i))
-                .collect::<Vec<_>>()
-                .join("\n");
-            f.fix = Some(Fix {
-                summary: engine.spec().unused_index_advice(&snapshot.server, snapshot.table(&schema, &table).and_then(|t| t.kind.as_deref())).into(),
-                sql: Some(sql),
-                cost: Some(format!("Frees {} and makes writes to {} cheaper.", format::bytes(total_size), table_name)),
-            });
-            f.verify = vec!["Watch the queries on this table for a week after disabling; none should get slower.".into()];
-            f.caveats.push("Usage counters reset when the server restarts or fails over, so an index used only by a monthly job can look unused.".into());
-            f.caveats.push("Reads on read replicas or secondaries are not counted here. Check them before dropping.".into());
-            let fk_backers: Vec<String> = list
-                .iter()
-                .filter_map(|i| backs_foreign_key(snapshot, i).map(|fk| format!("{} (foreign key {})", i.name, fk.name)))
-                .collect();
-            if !fk_backers.is_empty() {
-                f.caveats.push(format!(
-                    "{} also {} a foreign key: without it, deleting or updating parent rows scans this table.",
-                    format::list(&fk_backers),
-                    if fk_backers.len() == 1 { "supports" } else { "support" }
-                ));
-            }
-            if let Some(defs) = definitions(&list) {
-                f.caveats.push(format!("Definitions, to recreate if needed:\n{defs}"));
-            }
-            f
+            let foreign_keys =
+                indexes.iter().filter_map(|i| backs_foreign_key(snapshot, i).map(|fk| (*i, fk))).collect();
+            UnusedIndex::Unread(UnreadIndexes {
+                schema,
+                table,
+                size,
+                writes,
+                index_counted,
+                youngest,
+                days,
+                foreign_keys,
+                severity,
+                score: base_score(severity) + (size / (1024.0 * 1024.0 * 1024.0)).min(10.0),
+                confidence: match days {
+                    Some(d) if d >= 30.0 => Confidence::High,
+                    Some(d) if d >= 7.0 => Confidence::Medium,
+                    _ => Confidence::Low,
+                },
+                indexes,
+            })
         })
-        .chain(invalid_postgres_indexes(snapshot, &covered(snapshot)))
+        .chain(invalid_postgres_indexes(snapshot, &covered(snapshot)).into_iter().map(UnusedIndex::Invalid))
         .collect()
+}
+
+fn unused_index_finding(snapshot: &Snapshot, case: UnusedIndex<'_>) -> Finding {
+    match case {
+        UnusedIndex::Unread(u) => unread_finding(snapshot, u),
+        UnusedIndex::Invalid(i) => invalid_finding(snapshot, i),
+    }
+}
+
+fn unread_finding(snapshot: &Snapshot, u: UnreadIndexes<'_>) -> Finding {
+    let (schema, table) = (u.schema, u.table);
+    let table_name = format!("{schema}.{table}");
+    let n = u.indexes.len();
+    let since = match u.youngest {
+        Some((age, created)) => t!(
+            "check.unused_index.since_created",
+            days = age.round().to_string(),
+            date = format::friendly_date(created, &snapshot.taken_at),
+            n = n
+        ),
+        None => since_phrase(snapshot),
+    };
+    let mut f = finding("unused-index", &table_name, Category::Indexes, subject(SubjectKind::Table, &table_name));
+    f.title = match u.indexes.as_slice() {
+        [one] => t!("check.unused_index.title.one", index = &one.name, table = table),
+        many => t!("check.unused_index.title.many", count = many.len().to_string(), table = table),
+    };
+    let indexes = format::list(&u.indexes.iter().map(|i| i.name.clone()).collect::<Vec<_>>());
+    let size = format::bytes(u.size);
+    f.summary = match u.writes {
+        // Nothing written either: the cost is the space, not the upkeep.
+        Some(w) if w == 0.0 => [
+            if u.index_counted {
+                t!("check.unused_index.summary.unwritten_index", indexes = &indexes, since = &since, n = n)
+            } else {
+                t!(
+                    "check.unused_index.summary.unwritten_table",
+                    indexes = &indexes,
+                    since = &since,
+                    table = &table_name
+                )
+            },
+            t!("check.unused_index.summary.space", size = &size, n = n),
+        ],
+        writes => [
+            match writes {
+                Some(w) if u.index_counted => t!(
+                    "check.unused_index.summary.unread_index_written",
+                    indexes = &indexes,
+                    since = &since,
+                    writes = format::count(w),
+                    n = n
+                ),
+                Some(w) => t!(
+                    "check.unused_index.summary.unread_table_written",
+                    indexes = &indexes,
+                    since = &since,
+                    table = &table_name,
+                    writes = format::count(w)
+                ),
+                None => t!("check.unused_index.summary.unread", indexes = &indexes, since = &since),
+            },
+            t!("check.unused_index.summary.upkeep", size = &size, n = n),
+        ],
+    }
+    .join(" ");
+    f.severity = u.severity;
+    f.impact.score = u.score;
+    f.impact.label = t!("check.unused_index.impact", size = &size);
+    f.confidence = u.confidence;
+    f.metrics.push(Metric::new(t!("common.metric.size"), u.size, Unit::Bytes));
+    if let Some(w) = u.writes {
+        let label = if u.index_counted {
+            t!("check.unused_index.metric.index_writes")
+        } else {
+            t!("check.unused_index.metric.table_writes")
+        };
+        f.metrics.push(Metric::new(label, w, Unit::Count));
+    }
+    if let Some(d) = u.days {
+        f.metrics.push(Metric::new(t!("common.metric.counting_for"), d, Unit::Days));
+    }
+    let sql = u.indexes.iter().map(|i| crate::index_health::hide_index_sql(snapshot, i)).collect::<Vec<_>>().join("\n");
+    let kind = snapshot.table(schema, table).and_then(|t| t.kind.as_deref());
+    f.fix = Some(Fix {
+        summary: snapshot.server.engine.spec().unused_index_advice(&snapshot.server, kind).into(),
+        sql: Some(sql),
+        cost: Some(t!("check.unused_index.fix_cost", size = &size, table = &table_name)),
+    });
+    f.verify = vec![t!("check.unused_index.verify.unread")];
+    f.caveats.push(t!("check.unused_index.caveat.restarts"));
+    f.caveats.push(t!("check.unused_index.caveat.replicas"));
+    if !u.foreign_keys.is_empty() {
+        let backers: Vec<String> = u
+            .foreign_keys
+            .iter()
+            .map(|(i, fk)| t!("check.unused_index.caveat.backer", index = &i.name, foreign_key = &fk.name))
+            .collect();
+        f.caveats.push(t!(
+            "check.unused_index.caveat.foreign_keys",
+            backers = format::list(&backers),
+            n = backers.len()
+        ));
+    }
+    if let Some(defs) = definitions(&u.indexes) {
+        f.caveats.push(t!("check.unused_index.caveat.definitions", definitions = defs));
+    }
+    f
 }
 
 /// Orphaned PostgreSQL `INVALID` indexes left behind by an unfinished `CREATE INDEX CONCURRENTLY` or
 /// `REINDEX CONCURRENTLY` that neither duplicate an active index (`redundant_indexes`) nor serve a scan that
 /// recommends rebuilding them (`disabled_leading_index`).
-fn invalid_postgres_indexes(snapshot: &Snapshot, redundant: &[(&str, &str, &str)]) -> Vec<Finding> {
+fn invalid_postgres_indexes<'s>(snapshot: &'s Snapshot, redundant: &[(&str, &str, &str)]) -> Vec<InvalidIndex<'s>> {
     if snapshot.server.engine != Engine::Postgres || !watched_long_enough(snapshot) {
         return Vec::new();
     }
@@ -174,60 +266,77 @@ fn invalid_postgres_indexes(snapshot: &Snapshot, redundant: &[(&str, &str, &str)
                 && !rebuilt_by_scan(i)
         })
         .map(|i| {
-            let table_name = format!("{}.{}", i.schema, i.table);
-            let index_name = format!("{table_name}.{}", i.name);
             let size = i.size_bytes.unwrap_or(0.0);
             let writes = table_writes(snapshot, &i.schema, &i.table, &[i]);
             let writes_a_day = writes.and_then(|w| counter_rate_per_day(snapshot, w));
             let maintained = i.maintained != Some(false);
-            let mut f = finding(
-                "unused-index",
-                &format!("invalid:{index_name}"),
-                Category::Indexes,
-                subject(SubjectKind::Index, &index_name),
-            );
-            f.title = format!("{} on {} is invalid after an unfinished index build", i.name, i.table);
-            f.summary = format!(
-                "PostgreSQL marks {} invalid (indisvalid = false), which happens when CREATE INDEX CONCURRENTLY or \
-                 REINDEX CONCURRENTLY stops before finishing. The planner never reads an invalid index{}{}.",
-                i.name,
-                if maintained { format!(", yet every write to {table_name} still updates it") } else { String::new() },
-                if size > 0.0 { format!(" and it takes {} on disk", format::bytes(size)) } else { String::new() }
-            );
-            f.severity = if maintained
+            let severity = if maintained
                 && (size >= 1024.0 * 1024.0 * 1024.0 || writes_a_day.is_some_and(|w| w >= UPKEEP_A_DAY))
             {
                 Severity::Medium
             } else {
                 Severity::Low
             };
-            f.impact.score = base_score(f.severity) + (size / (1024.0 * 1024.0 * 1024.0)).min(10.0);
-            f.impact.label =
-                if size > 0.0 { format!("{} invalid", format::bytes(size)) } else { "Invalid index".into() };
-            f.confidence = Confidence::High;
-            if size > 0.0 {
-                f.metrics.push(Metric::new("Size", size, Unit::Bytes));
+            InvalidIndex {
+                index: i,
+                size,
+                writes,
+                maintained,
+                severity,
+                score: base_score(severity) + (size / (1024.0 * 1024.0 * 1024.0)).min(10.0),
+                confidence: Confidence::High,
             }
-            if let Some(w) = writes {
-                f.metrics.push(Metric::new("Writes to the table", w, Unit::Count));
-            }
-            let drop_sql = drop_index_for_snapshot(snapshot, &i.schema, &i.table, &i.name);
-            f.fix = Some(Fix {
-                summary: format!(
-                    "Drop the failed index concurrently so writes to {table_name} stop maintaining it, or rebuild it \
-                     with REINDEX INDEX CONCURRENTLY if queries still need it."
-                ),
-                sql: Some(drop_sql),
-                cost: (size > 0.0)
-                    .then(|| format!("Frees {} and makes writes to {table_name} cheaper.", format::bytes(size))),
-            });
-            f.verify = vec![format!("Re-scan: {} is no longer listed as an invalid index on {table_name}.", i.name)];
-            if let Some(defs) = definitions(&[i]) {
-                f.caveats.push(format!("Definition, to recreate if needed:\n{defs}"));
-            }
-            f
         })
         .collect()
+}
+
+fn invalid_finding(snapshot: &Snapshot, v: InvalidIndex<'_>) -> Finding {
+    let i = v.index;
+    let table_name = format!("{}.{}", i.schema, i.table);
+    let index_name = format!("{table_name}.{}", i.name);
+    let size = format::bytes(v.size);
+    let mut f = finding(
+        "unused-index",
+        &format!("invalid:{index_name}"),
+        Category::Indexes,
+        subject(SubjectKind::Index, &index_name),
+    );
+    f.title = t!("check.unused_index.title.invalid", index = &i.name, table = &i.table);
+    f.summary = [
+        t!("check.unused_index.summary.invalid", index = &i.name),
+        t!(
+            "check.unused_index.summary.invalid_never_read",
+            maintained = if v.maintained { "yes" } else { "no" },
+            table = &table_name,
+            sized = if v.size > 0.0 { "yes" } else { "no" },
+            size = &size
+        ),
+    ]
+    .join(" ");
+    f.severity = v.severity;
+    f.impact.score = v.score;
+    f.impact.label = if v.size > 0.0 {
+        t!("check.unused_index.impact.invalid", size = &size)
+    } else {
+        t!("check.unused_index.impact.invalid_unsized")
+    };
+    f.confidence = v.confidence;
+    if v.size > 0.0 {
+        f.metrics.push(Metric::new(t!("common.metric.size"), v.size, Unit::Bytes));
+    }
+    if let Some(w) = v.writes {
+        f.metrics.push(Metric::new(t!("check.unused_index.metric.table_writes"), w, Unit::Count));
+    }
+    f.fix = Some(Fix {
+        summary: t!("check.unused_index.fix.invalid", table = &table_name),
+        sql: Some(drop_index_for_snapshot(snapshot, &i.schema, &i.table, &i.name)),
+        cost: (v.size > 0.0).then(|| t!("check.unused_index.fix_cost", size = &size, table = &table_name)),
+    });
+    f.verify = vec![t!("check.unused_index.verify.invalid", index = &i.name, table = &table_name)];
+    if let Some(defs) = definitions(&[i]) {
+        f.caveats.push(t!("check.unused_index.caveat.definition", definition = defs));
+    }
+    f
 }
 
 /// The indexes this check calls unused ([`is_unused`]), less those a wider index covers (the duplicate-index check says
