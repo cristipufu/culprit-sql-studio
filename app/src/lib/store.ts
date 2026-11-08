@@ -56,7 +56,6 @@ export function changeRequest(fields: Partial<ChangeRequest> = {}): ChangeReques
 export const WINDOW_OPTIONS = [60, 360, 1440, 10080, 43200] as const;
 export type WindowMinutes = (typeof WINDOW_OPTIONS)[number];
 const DEFAULT_WINDOW: WindowMinutes = 10080;
-const MINUTES_PER_DAY = 1440;
 
 function windowKey(name: string): string {
   return `culprit.window.${name}`;
@@ -65,11 +64,7 @@ function windowKey(name: string): string {
 function rememberedWindow(name: string): WindowMinutes {
   try {
     const v = Number(localStorage.getItem(windowKey(name)));
-    const offered = (m: number): m is WindowMinutes => (WINDOW_OPTIONS as readonly number[]).includes(m);
-    if (offered(v)) return v;
-    // Remembered in days before the picker offered hours.
-    const fromDays = v * MINUTES_PER_DAY;
-    return offered(fromDays) ? fromDays : DEFAULT_WINDOW;
+    return (WINDOW_OPTIONS as readonly number[]).includes(v) ? (v as WindowMinutes) : DEFAULT_WINDOW;
   } catch {
     return DEFAULT_WINDOW;
   }
