@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use culprit_core::changes::{CompareOptions, Period, PeriodData, PeriodStats, PlanPeriods, QueryPeriods, epoch};
-use culprit_core::{ChangeKind, Changes, Engine, Error, Result, TimelineSource};
+use culprit_core::{ChangeKind, Changes, Engine, Error, Result, TimelineSource, t};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -64,8 +64,8 @@ fn parse(field: &str, value: &Option<String>) -> Result<Option<f64>> {
         .as_deref()
         .map(|v| {
             epoch(v).ok_or_else(|| {
-                Error::invalid(format!("`{field}` isn't a timestamp: {v}"))
-                    .with_hint("Use ISO 8601 with a time zone, e.g. 2026-10-11T14:05:00Z")
+                Error::invalid(t!("engine.changes.not_a_timestamp", field = field, value = v))
+                    .with_hint(t!("engine.changes.not_a_timestamp_hint"))
             })
         })
         .transpose()
@@ -88,13 +88,13 @@ pub fn resolve(request: &ChangeRequest, history: (f64, f64)) -> Result<(Period, 
         }
     };
     if recent_start >= recent_end {
-        return Err(Error::invalid("The recent period is empty: its start must come before its end"));
+        return Err(Error::invalid(t!("engine.changes.recent_empty")));
     }
     let length = recent_end - recent_start;
     let baseline_end = parse("baseline_end", &request.baseline_end)?.unwrap_or(recent_start).min(recent_start);
     let baseline_start = parse("baseline_start", &request.baseline_start)?.unwrap_or(baseline_end - length);
     if baseline_start >= baseline_end {
-        return Err(Error::invalid("The baseline period is empty: its start must come before its end"));
+        return Err(Error::invalid(t!("engine.changes.baseline_empty")));
     }
     Ok((
         Period { start: iso(baseline_start), end: iso(baseline_end) },
@@ -146,7 +146,7 @@ fn readable_names(text: &str) -> String {
             let rest = &part[word.len()..];
             let generated = word.starts_with("PK__")
                 && word.rsplit("__").next().is_some_and(|h| h.len() >= 8 && h.chars().all(|c| c.is_ascii_hexdigit()));
-            if generated { format!("primary key{rest}") } else { part.to_string() }
+            if generated { format!("{}{rest}", t!("engine.changes.primary_key")) } else { part.to_string() }
         })
         .collect()
 }
@@ -246,8 +246,9 @@ pub fn from_scans(history: &[Counters], baseline: &Period, recent: &Period) -> P
     let ((b0, _), (r0, r1)) = (at(baseline), at(recent));
     if points.len() < 3 {
         let why = format!(
-            "Comparing two periods needs at least three scans of this database; Culprit has {}. Scan again later (each scan marks a point in time).",
-            points.len()
+            "{} {}",
+            t!("engine.changes.too_few_scans", count = points.len().to_string()),
+            t!("engine.changes.scan_again")
         );
         data.notes.push(why.clone());
         data.unavailable = Some(why);
@@ -263,7 +264,7 @@ pub fn from_scans(history: &[Counters], baseline: &Period, recent: &Period) -> P
         }
     }
     if !(start < mid && mid < end) {
-        let why = "The scans Culprit has don't fall inside both periods; pick a longer range.".to_string();
+        let why = t!("engine.changes.outside_periods");
         data.notes.push(why.clone());
         data.unavailable = Some(why);
         return data;
@@ -272,20 +273,19 @@ pub fn from_scans(history: &[Counters], baseline: &Period, recent: &Period) -> P
     data.recent = Period { start: iso(points[mid].0), end: iso(points[end].0) };
     let wanted = (r0 - b0).max(1.0);
     data.baseline_coverage = ((points[mid].0 - points[start].0) / wanted).clamp(0.0, 1.0);
-    data.notes.push(format!(
-        "Periods follow Culprit's scans: {} scans between {} and {}.",
-        end - start + 1,
-        culprit_core::changes::short_time(&iso(points[start].0)),
-        culprit_core::changes::short_time(&iso(points[end].0))
+    let scans = end - start + 1;
+    data.notes.push(t!(
+        "engine.changes.periods_follow_scans",
+        n = scans,
+        count = scans.to_string(),
+        from = culprit_core::changes::short_time(&iso(points[start].0)),
+        to = culprit_core::changes::short_time(&iso(points[end].0))
     ));
 
     let before = span(&points, start, mid);
     let after = span(&points, mid, end);
     if before.unknown_steps + after.unknown_steps > 0 {
-        data.notes.push(
-            "Between some of these scans the source's totals shrank without a reset (entries evicted or plans dropped), so those stretches count only what the statements still tracked grew by: totals there are a lower bound."
-                .to_string(),
-        );
+        data.notes.push(t!("engine.changes.lower_bound"));
     }
     data.baseline_total = PeriodStats::new(before.executions, before.time_ms);
     data.recent_total = PeriodStats::new(after.executions, after.time_ms);
@@ -304,17 +304,9 @@ pub fn from_scans(history: &[Counters], baseline: &Period, recent: &Period) -> P
         let unknown_after = after.queries.get(&id).is_none_or(Option::is_none);
         let meta = latest_meta(&id, start, end);
         let untracked = match (&b, &r) {
-            (None, Some(_)) if unknown_before && baseline_empty => Some(
-                "Culprit's scans before then recorded no queries at all (the statistics were empty, for example just reset), so there is nothing to compare it with"
-                    .to_string(),
-            ),
-            (None, Some(_)) if unknown_before => {
-                Some("Culprit's earlier scans didn't track it (it wasn't among the heaviest queries then)".to_string())
-            }
-            (Some(_), None) if unknown_after => Some(
-                "it's no longer among the heaviest queries Culprit tracks, and the source doesn't say when it last ran"
-                    .to_string(),
-            ),
+            (None, Some(_)) if unknown_before && baseline_empty => Some(t!("engine.changes.untracked.empty_before")),
+            (None, Some(_)) if unknown_before => Some(t!("engine.changes.untracked.not_tracked")),
+            (Some(_), None) if unknown_after => Some(t!("engine.changes.untracked.dropped_out")),
             _ => None,
         };
         // A query the source says last ran before the recent period really stopped; one it says first ran after the
@@ -590,8 +582,10 @@ mod tests {
         let few = from_scans(&[counters("2026-10-11T00:00:00Z", [1.0, 1.0], &[])], &p, &p);
         assert_eq!(
             few.notes,
-            ["Comparing two periods needs at least three scans of this database; Culprit has 1. Scan again later (each \
-              scan marks a point in time)."]
+            [
+                "Comparing two periods needs at least three scans of this database; Culprit has 1. Scan again later (each \
+              scan marks a point in time)."
+            ]
         );
         assert_eq!(few.unavailable.as_deref(), Some(few.notes[0].as_str()));
         let history = vec![
