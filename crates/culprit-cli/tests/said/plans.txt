@@ -1,0 +1,121 @@
+$ culprit --format text plan show <repo>/crates/culprit-engine/tests/plans/mssql-actual.sqlplan
+Actual rows from the last run · % = share of the estimated cost (no per-operator time was kept)
+   —  Top  rows 20 → 0
+   —    Nested Loops  rows 20 → 0
+   —      Nested Loops  rows 20 → 0
+   —        Index Seek shop.orders (ix_orders_status_created)  rows 20 → 0
+   —        Key Lookup shop.orders (pk_orders)  rows 0 → 0
+   —      Clustered Index Seek shop.customers (pk_customers)  rows 0 → 0
+   —  The plan as a whole is cheap, so no share of its cost is put on one step.
+
+No problems found in this plan.
+$ culprit --format text plan show <repo>/crates/culprit-engine/tests/plans/mssql-scan.sqlplan
+Estimated plan · total cost 0.99
+ 12%  Nested Loops  rows 1.0
+ 88%    ◆ Index Scan shop.customers (ix_customers_email)  rows 1.0  ⚠ Filters after reading
+ <1%    Key Lookup shop.customers (pk_customers)  rows 1.0
+
+Insights (1)
+
+high    A type mismatch on customers.email stops SQL Server from seeking an index  · 88% of the work · implicit-conversion · operator 2
+        The value it's compared with has a different type, so SQL Server converts customers.email to nvarchar(200) on every row (`CONVERT_IMPLICIT(nvarchar(200),email,0) = @email`) and, by its own warning, can't seek the index.
+        Fix: Make the types match: send the value as non-Unicode text (SqlDbType.VarChar in .NET, sql.VarChar in Node's mssql, a non-Unicode mapping in your ORM), or, if your schema keeps text as Unicode, change customers.email to nvarchar(200). Changing a column rewrites it and the indexes on it.
+        Verify: Explain again: no CONVERT_IMPLICIT in the plan, and the scan became a seek.
+
+Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.
+$ culprit --format text plan show <repo>/crates/culprit-engine/tests/plans/pg-analyze.txt
+Actual plan · 1.4 ms elapsed · % = share of timed operator work
+ <1%  Limit  rows 20 → 20
+ <1%    Nested Loop  rows 400K → 20
+ 31%      Index Scan orders (orders_status_created_idx)  rows 400K → 20
+ 12%      Memoize  rows 20 → 20
+ 56%        Index Scan customers (customers_pkey)  rows 20 → 20 · 0.78 ms
+
+No problems found in this plan.
+
+PostgreSQL plans carry no index suggestions or memory grants; index advice comes from the filters.
+$ culprit --format text plan show <repo>/crates/culprit-engine/tests/plans/pg-seqscan.json
+Estimated plan · total cost 53813.63
+   —  Limit  rows 20
+ 47%    Gather Merge  rows 400K
+  5%      Sort  rows 400K
+  2%        Hash Join  rows 400K
+ 43%          Seq Scan orders  rows 400K
+   —          Hash  rows 282K
+  3%            Seq Scan customers  rows 282K
+
+No problems found in this plan.
+
+Without EXPLAIN ANALYZE there are no actual rows, spills or timings to check. PostgreSQL plans never carry index suggestions; Culprit reads filters instead.
+$ culprit --format text plan show <repo>/crates/culprit-engine/tests/plans/mysql-analyze.txt
+Actual plan · 5.9 ms elapsed · % = share of timed operator work
+ <1%  Limit  rows 20 → 20
+ <1%    Nested loop inner join  rows 218K → 20
+ 88%      Index lookup o (ix_orders_status_created)  rows 218K → 20 · 5.2 ms
+ 12%      Single-row index lookup c (PRIMARY)  rows 20 → 20 · 0.71 ms
+
+No problems found in this plan.
+
+MySQL plans don't record spills, memory grants or parallel threads, so those checks don't apply.
+$ culprit --format text plan show <repo>/crates/culprit-engine/tests/plans/mysql-scan.json
+Estimated plan · total cost 234277.66
+   —  Query block  rows 166K
+   —    Sort  rows 166K
+   —      Nested loop  rows 166K
+   —        Table scan o  rows 166K
+   —        Unique index lookup c (PRIMARY)  rows 166K
+   —  `Sort` (using filesort) has no cost of its own in the plan, so no share is given.
+
+No problems found in this plan.
+
+MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.
+$ culprit --format text plan show <repo>/crates/culprit-engine/tests/plans/sqlite-scan.txt
+Estimated plan · the access path only: no row or cost estimates
+   ·  QUERY PLAN  
+   ·    Scan orders  
+
+No problems found in this plan.
+
+SQLite's EXPLAIN QUERY PLAN shows the access path only: no estimated or actual rows, costs or timings.
+$ culprit --format text plan show <repo>/crates/culprit-engine/tests/plans/yugabyte-scan.json
+Actual plan · 7 ms elapsed · % = share of timed operator work
+100%  Seq Scan orders  rows 1 → 1 · 6.2 ms
+
+No problems found in this plan.
+
+DocDB storage RPCs and rows scanned are distinct from PostgreSQL buffer pages. RPC timings may overlap and are not exclusive shares of execution time.
+$ culprit --format text plan diff <repo>/crates/culprit-engine/tests/plans/pg-index.json <repo>/crates/culprit-engine/tests/plans/pg-seqscan.json
+pg-seqscan.json is estimated 3.5K× more expensive because it scans orders (43% of its cost) where pg-index.json seeks orders_status_created_idx.
+pg-seqscan.json joins with Hash Join where pg-index.json uses Nested Loop.
+pg-seqscan.json adds a Gather Merge and Sort (52% of its cost).
+A = pg-index.json · cost 15.5   B = pg-seqscan.json · cost 54K
+
+~ orders: Index Scan (orders_status_created_idx) → Seq Scan  48% of the plan's cost in A, 43% in B
+~ Nested Loop → Hash Join  52% of the plan's cost in A, 2% in B
++ Only in B: Gather Merge and Sort  52% of that plan's cost
+~ customers: Index Scan (customers_pkey) → Seq Scan  <1% of the plan's cost in A, 3% in B
+~ Memoize → Hash
+# Seq Scan on customers: estimated rows 1 → 282K
+$ culprit --format text plan diff <repo>/crates/culprit-engine/tests/plans/mssql-seek.sqlplan <repo>/crates/culprit-engine/tests/plans/mssql-scan.sqlplan
+mssql-scan.sqlplan is estimated 151× more expensive because it scans customers (88% of its cost) where mssql-seek.sqlplan seeks ix_customers_email.
+mssql-scan.sqlplan has plan warnings mssql-seek.sqlplan doesn't: implicit conversion and filters after reading.
+A = mssql-seek.sqlplan · cost 0.007   B = mssql-scan.sqlplan · cost 0.991
+
+~ customers: Index Seek (ix_customers_email) → Index Scan (ix_customers_email)  50% of the plan's cost in A, 88% in B
+$ Key Lookup on customers: 50% → <1% of the plan's cost
+! Filters after reading on Index Scan on customers
+$ Nested Loops: <1% → 12% of the plan's cost
+! Plan warning: Implicit conversion
+$ culprit --format text plan show nowhere.sqlplan
+[stderr]
+error: No file 'nowhere.sqlplan'
+hint: Pass a plan file, `-` for stdin, or <connection>:<query_id>[:<plan_id>]
+[exit 1]
+$ culprit --format text plan diff - -
+[stderr]
+error: Only one side can come from stdin
+[exit 1]
+$ culprit --format text plan export <repo>/crates/culprit-engine/tests/plans/pg-index.json <repo>/crates/culprit-engine/tests/plans/pg-seqscan.json --native
+[stderr]
+error: --native saves one plan; compare two as Markdown or --html
+[exit 1]

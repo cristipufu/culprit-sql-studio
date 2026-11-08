@@ -1,0 +1,583 @@
+$ culprit --format text checks
+missing-index     Missing indexes
+                  SQL Server · Index suggestions recorded by SQL Server's optimizer, merged with each other and checked against existing indexes.
+filtered-scan     Scans an index would avoid
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB · Heavy queries whose plan reads a large table in full and keeps only the rows matching a filter that no index supports.
+unused-index      Unused indexes
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB · Indexes that are maintained on every write but no query has read since usage counters were reset. One that may be less than a week old (a scan saw it appear, or its table changed before Culprit's first scan) isn't called unused yet.
+duplicate-index   Duplicate and redundant indexes
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB, SQLite · Indexes with the same keys as another index, or whose keys are a leading part of a wider one.
+unindexed-fk      Foreign keys without an index
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB, SQLite · Foreign key columns with no index starting with them, which makes deletes on the parent and joins from the child slow.
+overlapping-index  Overlapping indexes
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB · Two indexes that lead with the same column where one is barely read and the other holds all its key columns: queries that use the first can seek the second and filter the rest there.
+over-indexed      Many indexes on write-heavy tables
+                  SQL Server, PostgreSQL, MySQL/MariaDB · Tables with many secondary indexes that are written a lot: every insert updates each index.
+scan-heavy        Tables read in full over and over
+                  PostgreSQL, MySQL/MariaDB · Large tables that queries read in full many times a day, from the table scan counters.
+tuning-advice     SQL Server's own tuning advice
+                  SQL Server · Plan-forcing and index recommendations from automatic tuning, forced plans (those that stopped applying, and those that scan where an index added since could seek), Query Store hints that stopped applying, and automatic plan correction left off.
+query-family      Statements with literals baked in
+                  SQL Server, PostgreSQL, YugabyteDB · The same statement sent many times with different literal values (or value-list lengths), so the database compiles and tracks each copy separately; and plan caches filled with single-use plans.
+logged-errors     SQL errors recorded by the application
+                  SQLite · Recognized error codes in structured query logs, including errors with no duration. Counts describe log records, not failed business requests or zero-cost executions.
+repeated-request  Repeated statements within logged requests
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB, SQLite · Repeated SQL shapes correlated by explicit request_id in structured logs. Repetition identifies a caller to inspect; it does not prove an N+1 bug or removable work.
+heavy-query       Queries that dominate database time
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB, SQLite · Single queries that take a large share of database time, with what their plan spends it on.
+chatty-query      Chatty queries
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB · Tiny queries executed so often that the round trips cost more than the work, typically a loop in application code.
+plan-warnings     Plan warnings
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB · Implicit conversions, spills, missing join predicates and missing statistics in the plans of heavy queries.
+plan-insights     Plan insights
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB, SQLite · Key lookups, functions on filtered columns, leading wildcards, NOT IN, scalar functions, eager spools, misestimates and repeated loops in the plans of queries that matter.
+plan-regression   Plan regressions
+                  SQL Server · Queries whose current plan is much slower than a plan they used before.
+regression        Queries that got slower
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB · Queries whose runs became much slower at some point in the window, with when it started and whether a plan change coincides. Needs Query Store history or a few earlier scans.
+unstable-query    Unstable queries
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB, SQLite · Queries whose duration swings wildly between runs with the same plan, a sign of parameter sensitivity or blocking.
+parameter-sensitive  Queries that are fast for most calls and slow for some
+                  SQL Server, MySQL/MariaDB · Statements whose run time depends heavily on the values they run with: two plans used side by side, one fast and one slow (SQL Server Query Store), or a long tail in the run-time histogram (MySQL). Single-plan variance on any engine is `unstable-query`.
+temp-spill        Queries writing temp files
+                  PostgreSQL, MySQL/MariaDB · Statements whose sorts, hashes or temporary tables outgrow memory and spill to disk.
+stale-stats       Stale statistics
+                  SQL Server, PostgreSQL · Tables whose optimizer statistics are far behind their data, which leads to bad row estimates and plans.
+heap-table        Large tables without a clustered index
+                  SQL Server · Heaps grow forwarded records and can't be read in key order; most OLTP tables should be clustered.
+dead-rows         Dead rows and lagging autovacuum
+                  PostgreSQL · Tables carrying many dead tuples, which bloat storage and slow scans.
+xid-age           Transaction ID wraparound risk
+                  PostgreSQL · Transaction ID age approaching the point where PostgreSQL stops accepting writes to protect data.
+multixact-age     MultiXact wraparound risk
+                  PostgreSQL · The independent PostgreSQL MultiXact age limit, which can reject row-locking writes even when ordinary transaction ID age is healthy.
+config            Configuration
+                  SQL Server, PostgreSQL, MySQL/MariaDB, SQLite · Database and server settings that commonly hurt performance or hide the data needed to diagnose it.
+deadlocks         Deadlocks
+                  SQL Server, PostgreSQL, MySQL/MariaDB · Deadlocks in the last day, grouped by pattern (key lookup, opposite order, read-then-update, lock escalation, parallelism) with the fix that removes them. SQL Server reads system_health (Azure SQL Database its deadlock telemetry), MySQL the latest InnoDB report, PostgreSQL only keeps a counter.
+memory-grant      Queries that reserve far more memory than they use
+                  SQL Server · Statements whose memory grant (reserved before they run, for sorts and hashes) is many times what they use, so other queries queue for memory.
+memory-queue      Queries waiting in line for memory
+                  SQL Server · Waiting for memory takes a real amount of time (a minute an hour or more), or queries in this database were queueing for a memory grant when the scan ran.
+compile-pressure  Instance compilation context
+                  SQL Server · Shared compilation counters provide context for this database's literal query families; measured Query Store costs establish its compilation impact.
+worker-pressure   Running out of workers or connections
+                  SQL Server, PostgreSQL, MySQL/MariaDB · SQL Server sessions waiting for a worker thread (THREADPOOL), or PostgreSQL/MySQL connections close to max_connections.
+held-cleanup      A long open transaction holds cleanup back
+                  SQL Server, PostgreSQL, MySQL/MariaDB · The transaction that holds this database's cleanup back: one with uncommitted changes or row versions here (SQL Server), the oldest snapshot, replication slot or prepared transaction behind VACUUM's horizon (PostgreSQL), or the oldest read view behind InnoDB's purge (MySQL).
+network-wait      Results the application reads slowly
+                  SQL Server · Queries that spend much of their time waiting for the application to take results (ASYNC_NETWORK_IO), usually because they return large result sets.
+tier-limit        Resource use near the cloud tier's limits
+                  SQL Server · Azure SQL Database resources (CPU, data IO, log writes, workers) persistently near their limits in the available selected-period samples.
+checkpoint-pressure  Requested checkpoints
+                  PostgreSQL · The server's requested checkpoints, with the possible causes and the evidence needed before changing WAL settings.
+row-lock-waits    Transactions waiting for row locks
+                  MySQL/MariaDB · InnoDB row-lock waits add up to real time (a minute an hour or more across the server), from long transactions or updates that scan instead of using an index.
+storage-capacity  Files and logs near their allocation limits
+                  SQL Server · Current database file and transaction-log capacity, log reuse reasons, and shared tempdb allocation. Autogrowth room is distinguished from a hard limit.
+sequence-capacity  Identity and sequence allocation limits
+                  SQL Server, PostgreSQL, MySQL/MariaDB · Non-cycling identities, sequences and auto-increment columns approaching their numeric bounds; cache allocation is not a forecast of remaining requests.
+operational-errors  Archive, replication and redo failures
+                  PostgreSQL, MySQL/MariaDB, SQL Server · WAL archive failures, logical subscription errors, standby recovery cancellations, InnoDB redo buffer waits, connection handshake failures, and storage page checksum or I/O corruption errors. Counter history is kept separate from newly observed errors.
+cluster-health    Galera node readiness and flow control
+                  MySQL/MariaDB · The current readiness, connectivity and primary-component verdict reported by a Galera node; its historical flow-control fraction is context, not database-specific pressure.
+sqlite-wal        SQLite WAL file size and growth
+                  SQLite · Read-only WAL sidecar metadata and changes between scans; retained allocation is not inferred to be a checkpoint backlog or a blocked reader.
+failing-query     Queries that fail or time out
+                  SQL Server, MySQL/MariaDB · Statements whose runs end in an error or are cancelled by the client (usually a command timeout): Query Store's aborted and exception runs, performance_schema's errors per digest. PostgreSQL keeps no per-statement error count.
+planning-time     Queries that spend their time being planned
+                  SQL Server, PostgreSQL · Statements where planning (PostgreSQL, with pg_stat_statements.track_planning on) or compiling (SQL Server Query Store) takes a large part of their time, usually because the plan isn't reused.
+jit-overhead      JIT compilation that takes much of a statement's time
+                  PostgreSQL · Statements where PostgreSQL's JIT compilation (pg_stat_statements jit_* columns, 15+) takes a large part of their run time.
+log-volume        Writes that produce most of the log
+                  SQL Server, PostgreSQL · Statements that write a large share of the WAL (PostgreSQL 13+) or transaction log (SQL Server 2017+), or many kilobytes of it per row changed. Log volume drives replication lag, backup size and checkpoints. MySQL keeps no redo bytes per statement.
+lock-time         Queries that spend their time waiting for locks
+                  SQL Server, MySQL/MariaDB · Statements that spend a large part of their time waiting for locks other sessions hold: Query Store's lock waits per query, MySQL and MariaDB lock time per digest. PostgreSQL keeps no lock time per statement; Live shows blocking as it happens.
+big-result        Queries that return huge results
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB · Reads that send tens of thousands of rows to the application on every run, with an estimate in bytes from the plan's row width where the engine gives one.
+hot-rows          Rows that many sessions fight over
+                  SQL Server · Indexes where sessions waited a long time for row and page locks, and where locks escalated to the whole table (sys.dm_db_index_operational_stats). MySQL, MariaDB and PostgreSQL keep no lock waits per table; see lock-time and Live.
+lock-escalations  Statements that lock a whole table
+                  SQL Server · Tables where one statement took so many row or page locks that SQL Server replaced them with a lock on the whole table (sys.dm_db_index_operational_stats). MySQL, MariaDB and PostgreSQL never escalate row locks.
+last-page-insert  Inserts that queue for the last page
+                  SQL Server · Indexes keyed on an ever-increasing value (identity, sequence, insert time) where concurrent inserts wait for the latch on the last page (PAGELATCH_EX).
+untrusted-constraint  Unvalidated or disabled constraints
+                  SQL Server, PostgreSQL, YugabyteDB · SQL Server foreign keys and check constraints added or re-enabled WITH NOCHECK (or switched off), PostgreSQL CHECK constraints added NOT VALID, and YugabyteDB CHECK or foreign-key constraints awaiting validation.
+missing-histogram  Filter columns the optimizer has to guess about
+                  MySQL/MariaDB · Columns that heavy queries filter on with no index leading on them and no histogram (MySQL 8 COLUMN_STATISTICS, MariaDB mysql.column_stats), so the optimizer assumes a fixed share of rows match.
+hot-updates       Updates that rewrite every index
+                  PostgreSQL · Tables where few updates are HOT (heap-only): each other update writes a new entry in every index and leaves cleanup for VACUUM. Says whether pages are too full (fillfactor) or an indexed column changes (PostgreSQL 16+ tells them apart).
+table-bloat       Tables that are mostly empty space
+                  PostgreSQL · Tables whose pages hold far fewer rows than they could, estimated from row counts and column widths in pg_stats (no extension needed). Every scan still reads the empty space.
+large-rows        Tables whose rows are mostly large values
+                  SQL Server, PostgreSQL · Tables whose rows average many kilobytes, most of it in large values kept apart from the rows (SQL Server's LOB pages, PostgreSQL's TOAST): every statement that reads whole rows pulls them in, every write that sets them writes them again. From the catalog's page counts; no data is read.
+slow-storage      Storage that's slow to read or write
+                  SQL Server, PostgreSQL, MySQL/MariaDB · Average read and write latency per database file since startup: sys.dm_io_virtual_file_stats, pg_stat_io (16+, with track_io_timing), performance_schema file I/O.
+connection-churn  Applications that connect for every request
+                  SQL Server, PostgreSQL, MySQL/MariaDB · New connections per second since startup (SQL Server logins, PostgreSQL 14+ sessions, MySQL and MariaDB Connections), with how long sessions last and how many came from a pool where the engine says.
+replica-lag       Replicas that fall behind
+                  SQL Server, PostgreSQL, MySQL/MariaDB · Replicas far behind the primary or stopped, and PostgreSQL replication slots that keep WAL for a consumer that's gone: pg_stat_replication, availability group replica states, SHOW REPLICA STATUS.
+last-actual-plans  Actual plans without re-running queries
+                  SQL Server · SQL Server 2019+ can keep each query's last actual plan (LAST_QUERY_PLAN_STATS) and report live per-operator progress (LIGHTWEIGHT_QUERY_PROFILING).
+$ culprit --format text sources
+SQL Server
+  log_capacity              database log space and log reuse reason · adds detail
+  file_capacity             data file space and growth limits · adds detail
+  temp_capacity             tempdb shared space · adds detail
+  sequence_capacity         sequence and identity allocation limits · adds detail
+  query_store               Query Store · Query Store
+  query_waits               Query Store statement waits · adds detail
+  plan_cache                plan cache statistics · Plan cache statistics
+  tables                    table statistics · Table statistics
+  indexes                   index statistics · Index usage statistics
+  columns                   columns · adds detail
+  foreign_keys              foreign keys · adds detail
+  statistics                statistics · Optimizer statistics
+  missing_indexes           missing-index requests · Missing-index suggestions
+  waits                     wait statistics · Wait statistics
+  resources                 resource statistics · Resource usage
+  forwarded_fetches         forwarded fetches · adds detail
+  query_families            query families · adds detail
+  plan cache use            plan cache use · adds detail
+  tuning                    automatic tuning · adds detail
+  settings                  settings · adds detail
+  performance counters      performance counters · adds detail
+  resource use              resource use · adds detail
+  memory grants             pending memory grants · adds detail
+  wait totals               wait totals · adds detail
+  memory grants per query   memory grants per query · adds detail
+  open transactions         open transactions · adds detail
+  query costs               statement costs · adds detail
+  query compilation         Query Store compilation statistics · adds detail
+  index contention          index contention · adds detail
+  constraints               constraints · adds detail
+  file latency              file latency · adds detail
+  logins                    login counters · adds detail
+PostgreSQL
+  timescale-hypertables     TimescaleDB hypertables, dimensions and aggregate storage sizes · Table statistics, Optimizer statistics, Index usage statistics
+  timescale-chunks          TimescaleDB managed chunks and compressed storage sizes · adds detail
+  timescale-indexes         TimescaleDB logical hypertable index sizes · adds detail
+  multixacts                database and table MultiXact ages · adds detail
+  archiver                  shared WAL archive failure counters · adds detail
+  subscription_errors       logical subscription error counters (15+) · adds detail
+  standby_conflicts         standby query cancellation counters · adds detail
+  sequence_capacity         visible sequence allocation limits · adds detail
+  workload                  pg_stat_statements · pg_stat_statements
+  tables                    table statistics · Table statistics, Optimizer statistics
+  indexes                   index statistics · Index usage statistics
+  columns                   columns · adds detail
+  foreign_keys              foreign keys · adds detail
+  settings                  settings · adds detail
+  database statistics       pg_stat_database · adds detail
+  checkpoints               checkpoint counters · adds detail
+  open transactions         open transactions · adds detail
+  cleanup slots             replication slots retaining row or catalog cleanup · adds detail
+  cleanup prepared          prepared transactions retaining cleanup · adds detail
+  query costs               statement costs · adds detail
+  table storage             table storage · adds detail
+  constraints               constraints · adds detail
+  advice settings           the settings advice depends on · adds detail
+  file latency              file latency · adds detail
+  sessions                  session statistics · adds detail
+  replication               replication · adds detail
+YugabyteDB
+  tables                    YSQL relation catalog and optimizer row estimates · Table statistics, Optimizer statistics
+  indexes                   YSQL index definitions, LSM keys and backfill state · adds detail
+  sizes                     DocDB table/index allocation size APIs · adds detail
+  table storage             yb_table_properties: tablets, hash keys and colocation · adds detail
+  columns                   YSQL columns and defaults · adds detail
+  foreign_keys              YSQL foreign-key catalog · adds detail
+  constraints               YSQL CHECK and foreign-key constraints awaiting validation · adds detail
+  workload                  YSQL pg_stat_statements and native DocDB costs, in node/cluster scope · pg_stat_statements
+  query costs               native statement metrics with collection settings verified on every contributing node · adds detail
+  docdb-plan-history        retained native QPM plan counts and timings, independently of statement-statistics epochs · adds detail
+  docdb-activity-history    bounded native active-task observations in their own database, role, node and time scope · adds detail
+  docdb-terminations        bounded unexpected YSQL termination records, without raw SQL or free-form messages · adds detail
+  docdb-node-resources      native shared node CPU samples, host memory and TServer memory-tracker allocations · adds detail
+  docdb-counter-epochs      statement reset epochs for every contributing YB-TServer · adds detail
+  settings                  YSQL and DocDB supported configuration · adds detail
+  docdb-index-usage         complete cluster-wide index usage and its reset epochs · Index usage statistics
+MySQL
+  redo_pressure             shared InnoDB redo buffer wait counter · adds detail
+  cluster_health            Galera readiness and flow control (where enabled) · adds detail
+  sequence_capacity         auto-increment allocation limits · adds detail
+  live_locks                InnoDB lock relationships · adds detail
+  metadata_locks            sys.schema_table_lock_waits (metadata lock dependencies; sys schema and enabled metadata-lock instrumentation required) · adds detail
+  workload                  statement digests · performance_schema statement digests, Query plans
+  tables                    tables · Table statistics
+  columns                   columns · adds detail
+  indexes                   indexes · Index usage statistics
+  foreign_keys              foreign keys · adds detail
+  settings                  settings · adds detail
+  waits                     wait totals · adds detail
+  global status             global status · adds detail
+  open transactions         open transactions · adds detail
+  signals                   the signals' connection · adds detail
+  query errors              statement errors · adds detail
+  histograms                column statistics · adds detail
+  file latency              file latency · adds detail
+  connections               connection counters · adds detail
+  server variables          server variables · adds detail
+  replication               replica status · adds detail
+SQLite
+  catalog                   the file's catalog · Table statistics
+  statistics                planner statistics · Optimizer statistics
+  sizes                     table and index sizes · adds detail
+  settings                  file settings · adds detail
+  query log                 the application's query log · Application query log
+  wal_file                  WAL sidecar file size (metadata only) · adds detail
+$ culprit --format text deadlocks --file -
+1 deadlock (file).
+
+2026-10-11 13:48:28 Two transactions locked customers in opposite order and waited on each other; session 539's transaction was rolled back.
+  Each transaction had already changed rows the other one wanted next: session 539 was running “UPDATE customers SET id = id WHERE id = 1” and session 545 “UPDATE orders SET id = id WHERE id = 1”. With the same order in both, the second would simply wait instead of deadlocking.
+  rolled back  session 539
+               UPDATE customers SET id = id WHERE id = 1
+               session 545
+               UPDATE orders SET id = id WHERE id = 1
+  1. Touch tables and rows in the same order everywhere: Make every code path that changes customers do it in one order (for example, always the parent row first, and rows sorted by key). Then the second transaction waits instead of deadlocking.
+  2. Keep transactions short: Do reads, validation and outside calls before the transaction starts; hold locks only for the writes.
+  3. Retry the victim: A deadlock victim can be retried safely; the application should catch SQLSTATE 40P01 and run the transaction again.
+$ culprit --format text deadlocks
+[stderr]
+error: Name a connection, or pass --file with a saved deadlock
+[exit 1]
+$ culprit --format text deadlocks x --since soon
+[stderr]
+error: Can't read `soon` as a time span
+hint: Use 90m, 24h or 7d.
+[exit 1]
+$ culprit --format text deadlocks x --since 3w
+[stderr]
+error: Unknown time unit `w`
+hint: Use 90m, 24h or 7d.
+[exit 1]
+$ culprit --format text deadlocks x --since 0h
+[stderr]
+error: The time span must be positive
+[exit 1]
+$ culprit --format text waits
+[stderr]
+error: Name a connection, or pass --file
+[exit 1]
+$ culprit --format text waits --now
+[stderr]
+error: Name the connection to sample
+[exit 1]
+$ culprit --format text findings nope
+[stderr]
+error: No saved report for 'nope'
+hint: Run `culprit scan nope` first
+[exit 1]
+$ culprit --format text export nope
+[stderr]
+error: 'nope' hasn't been scanned yet
+hint: Run `culprit scan nope` first
+[exit 1]
+$ culprit --format text verify nope
+[stderr]
+Re-scanning nope to compare with its latest scan…
+error: 'nope' hasn't been scanned yet, so there's nothing to compare with
+hint: Scan before the change (`culprit scan nope`), then verify after it ships
+[exit 1]
+$ culprit --format text lint-sql x --report <repo>/fixtures/pg-demo.report.json
+[stderr]
+error: Pass --sql <SQL> or --file <PATH>
+[exit 1]
+$ culprit --format text lint-sql x --report <repo>/fixtures/pg-demo.report.json --write
+[stderr]
+error: --write requires --file <PATH>
+[exit 1]
+$ culprit --format text lint-sql x --report <repo>/fixtures/pg-demo.report.json --file nowhere.sql
+[stderr]
+error: nowhere.sql: no such file or directory
+[exit 1]
+$ culprit --format text explain x
+[stderr]
+error: Pass --sql, --file or --query-id
+[exit 1]
+$ culprit --format md waits --file <repo>/fixtures/pg-demo.report.json
+[stderr]
+error: This command has no Markdown output
+hint: Markdown is available for scan, findings, show, dashboard, analyze, verify, export, plan export and lint-sql; use --format text or json here.
+[exit 1]
+$ culprit --format sarif top x --report <repo>/fixtures/pg-demo.report.json
+[stderr]
+error: This command has no SARIF output
+hint: SARIF is available for lint-sql, drift, scan, findings and analyze; use --format text or json here.
+[exit 1]
+$ culprit --format text --lang xx plan show nowhere
+[stderr]
+culprit: no language "xx" (known: en, de, es, fr); writing English
+error: No file 'nowhere'
+hint: Pass a plan file, `-` for stdin, or <connection>:<query_id>[:<plan_id>]
+[exit 1]
+$ culprit --format text changes x --recent soon
+[stderr]
+error: invalid value 'soon' for '--recent <RECENT>': 'soon' isn't a duration like 6h, 90m or 2d
+
+For more information, try '--help'.
+[exit 2]
+$ culprit --format sarif drift <repo>/fixtures/mssql-demo.report.json <repo>/fixtures/mssql-demo-staging.report.json
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "fingerprints": {
+            "culpritDriftSubject": "index:shop.order_items.ix_order_items_order_id"
+          },
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "mssql-demo-vs-mssql-demo-staging"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "shop.order_items has an index on (order_id) in mssql-demo-staging that mssql-demo lacks.\n\nTo align on mssql-demo:\n```sql\nCREATE NONCLUSTERED INDEX [ix_order_items_order_id]\n    ON [shop].[order_items] ([order_id])\n    WITH (ONLINE = ON);\n```"
+          },
+          "ruleId": "drift:index"
+        },
+        {
+          "fingerprints": {
+            "culpritDriftSubject": "index:shop.support_tickets.ix_support_tickets_priority"
+          },
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "mssql-demo-vs-mssql-demo-staging"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "shop.support_tickets has an index on (priority) in mssql-demo that mssql-demo-staging lacks.\n\nTo align on mssql-demo-staging:\n```sql\nCREATE NONCLUSTERED INDEX [ix_support_tickets_priority]\n    ON [shop].[support_tickets] ([priority])\n    WITH (ONLINE = ON);\n```"
+          },
+          "ruleId": "drift:index"
+        },
+        {
+          "fingerprints": {
+            "culpritDriftSubject": "index:shop.orders.ix_orders_channel"
+          },
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "mssql-demo-vs-mssql-demo-staging"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "shop.orders has the same index under different names: ix_orders_channel in mssql-demo, ix_orders_by_channel in mssql-demo-staging."
+          },
+          "ruleId": "drift:index"
+        },
+        {
+          "fingerprints": {
+            "culpritDriftSubject": "table:archive.child"
+          },
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "mssql-demo-vs-mssql-demo-staging"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "archive.child exists in mssql-demo but not in mssql-demo-staging."
+          },
+          "ruleId": "drift:table"
+        },
+        {
+          "fingerprints": {
+            "culpritDriftSubject": "table:archive.hot"
+          },
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "mssql-demo-vs-mssql-demo-staging"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "archive.hot exists in mssql-demo but not in mssql-demo-staging."
+          },
+          "ruleId": "drift:table"
+        },
+        {
+          "fingerprints": {
+            "culpritDriftSubject": "column:shop.customers.email"
+          },
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "mssql-demo-vs-mssql-demo-staging"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "shop.customers.email is varchar(200) in mssql-demo and nvarchar(200) in mssql-demo-staging."
+          },
+          "ruleId": "drift:column"
+        },
+        {
+          "fingerprints": {
+            "culpritDriftSubject": "setting:compatibility_level"
+          },
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "mssql-demo-vs-mssql-demo-staging"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "compatibility_level is 160 in mssql-demo and 150 in mssql-demo-staging."
+          },
+          "ruleId": "drift:setting"
+        },
+        {
+          "fingerprints": {
+            "culpritDriftSubject": "setting:is_read_committed_snapshot_on"
+          },
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "mssql-demo-vs-mssql-demo-staging"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "is_read_committed_snapshot_on is 0 in mssql-demo and 1 in mssql-demo-staging."
+          },
+          "ruleId": "drift:setting"
+        },
+        {
+          "fingerprints": {
+            "culpritDriftSubject": "version:version"
+          },
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "mssql-demo-vs-mssql-demo-staging"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "mssql-demo runs SQL Server 2022 16.0.4295.3 and mssql-demo-staging runs SQL Server 2022 16.0.4175.1."
+          },
+          "ruleId": "drift:version"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://culpritsql.com",
+          "name": "Culprit",
+          "rules": [
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "id": "drift:column",
+              "shortDescription": {
+                "text": "Schema or setting drift (column)"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "id": "drift:index",
+              "shortDescription": {
+                "text": "Schema or setting drift (index)"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "id": "drift:setting",
+              "shortDescription": {
+                "text": "Schema or setting drift (setting)"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "id": "drift:table",
+              "shortDescription": {
+                "text": "Schema or setting drift (table)"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "id": "drift:version",
+              "shortDescription": {
+                "text": "Schema or setting drift (version)"
+              }
+            }
+          ],
+          "version": "0.5.5"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

@@ -1,0 +1,65 @@
+$ culprit --format text conn list
+No saved connections. Add one with:
+  culprit conn add <name> --url '<connection string>' --env development
+$ culprit --format text conn add shop --url postgres://reader@db.invalid/shop --env staging --no-test
+Saved shop (PostgreSQL, reader@db.invalid/shop).
+Next: culprit scan shop
+$ culprit --format text conn add files --url Server=tcp:db.invalid;Database=files;User Id=reader --no-test
+Saved files (SQL Server, reader@db.invalid/files).
+Next: culprit scan files
+$ culprit --format text conn list
+files                 SQL Server   development   reader@db.invalid/files  ·  never scanned
+shop                  PostgreSQL   staging       reader@db.invalid/shop  ·  never scanned
+$ culprit --format text conn set shop --env production
+shop is now marked production
+$ culprit --format text conn set shop --no-ssh
+shop connects without SSH forwarding
+$ culprit --format text conn set shop --no-query-log
+Scans of shop no longer read a query log
+$ culprit --format text conn set shop --agent off
+Coding agents can no longer see shop
+$ culprit --format text conn set shop --agent stats
+Coding agents can read findings, statistics, schema and estimated plans for shop
+$ culprit --format text conn set shop --agent query
+Coding agents can also run read-only statements on shop, each one after you approve it in the Culprit app
+$ culprit --format text conn rename shop shop2
+Renamed shop to shop2; its scan history and saved password moved with it.
+$ culprit --format text conn rm shop2
+Removed shop2
+$ culprit --format text conn rm shop2
+[stderr]
+error: No connection named 'shop2'
+hint: List saved connections with `culprit conn list`, add one with `culprit conn add`
+[exit 1]
+$ culprit --format text saved list
+No saved queries yet. Save one with `culprit saved add <name> --sql "…"`.
+$ culprit --format text saved add open orders --sql SELECT * FROM orders WHERE status = 'open' --description The open ones
+open orders
+The open ones
+SELECT * FROM orders WHERE status = 'open'
+$ culprit --format text saved list
+open orders
+  SELECT * FROM orders WHERE status = 'open'
+$ culprit --format text saved show open orders
+open orders
+The open ones
+SELECT * FROM orders WHERE status = 'open'
+$ culprit --format text saved add nothing
+[stderr]
+error: Pass the SQL with --sql or --file
+[exit 1]
+$ culprit --format text saved rm open orders
+Forgot 'open orders'
+$ culprit --format text saved show open orders
+[stderr]
+error: No saved query named 'open orders'
+hint: List them with `culprit saved list`, save one with `culprit saved add`
+[exit 1]
+$ culprit --format text mark files --list
+No marks on files yet. Add one: culprit mark files deploy v1.4.2
+$ culprit --format text mark files
+[stderr]
+error: Say what happened, e.g. `culprit mark shop deploy v1.4.2`
+[exit 1]
+$ culprit --format text audit
+No agent activity yet. Agents reach Culprit through `culprit mcp`.

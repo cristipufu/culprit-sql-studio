@@ -5,10 +5,15 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+autotests = false
 
 [[bin]]
 name = "culprit"
 path = "src/main.rs"
+
+[[test]]
+name = "all"
+path = "tests/all.rs"
 
 [dependencies]
 culprit-core.workspace = true
