@@ -509,4 +509,239 @@ mod tests {
             }
         }
     }
+
+    /// Everything a plan reading says in words, one line a part.
+    fn said(r: &PlanInsights) -> String {
+        let mut out = Vec::new();
+        for i in &r.items {
+            out.push(format!("{} · {:?}", i.rule, i.severity));
+            out.push(format!("title: {}", i.title));
+            out.push(format!("fix: {}", i.fix));
+            out.push(format!("verify: {}", i.verify));
+        }
+        if let Some(note) = &r.note {
+            out.push(format!("note: {note}"));
+        }
+        out.join("\n")
+    }
+
+    #[track_caller]
+    fn same(actual: &str, expected: &str) {
+        assert!(actual == expected, "said:\n{actual}\n\nwhere the English was:\n{expected}");
+    }
+
+    fn read(s: &Snapshot) -> PlanInsights {
+        let q = &s.queries()[0];
+        query_plan_insights(s, q, q.plan.as_ref().unwrap())
+    }
+
+    fn hint(s: &mut Snapshot, table: &str, equality: &[&str], include: &[&str]) {
+        let p = s.workload.as_mut().unwrap().queries[0].plan.as_mut().unwrap();
+        p.index_hints.push(PlanIndexHint {
+            table: table.into(),
+            equality: equality.iter().map(|c| c.to_string()).collect(),
+            inequality: vec![],
+            include: include.iter().map(|c| c.to_string()).collect(),
+            impact_pct: 90.0,
+        });
+    }
+
+    fn root(s: &mut Snapshot) -> &mut culprit_core::PlanNode {
+        &mut s.workload.as_mut().unwrap().queries[0].plan.as_mut().unwrap().root
+    }
+
+    /// `shop.orders` with an index on `status` and a `payload` column too large to copy into one.
+    fn indexed_with_payload() -> Snapshot {
+        let mut s = workload(Engine::Mssql, 24.0, 500.0);
+        let fixture: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
+        let mut index = fixture.indexes.iter().find(|i| i.table == "orders" && !i.is_clustered).unwrap().clone();
+        index.name = "ix_orders_status".into();
+        index.columns = vec!["status".into()];
+        index.include.clear();
+        index.filter = None;
+        index.is_disabled = false;
+        s.indexes.push(index);
+        let mut col = s.columns.iter().find(|c| c.table == "orders").unwrap().clone();
+        col.name = "payload".into();
+        col.data_type = "nvarchar(max)".into();
+        s.columns.push(col);
+        s
+    }
+
+    // What a plan reading says of a cheap statement, one that ran once, and a scan of a small table, word for word.
+    #[test]
+    fn plan_readings_say_what_the_workload_establishes_in_english() {
+        let mut out = vec![said(&read(&workload(Engine::Mssql, 24.0, 0.1)))];
+        let mut s = workload(Engine::Mssql, 24.0, 500.0);
+        s.workload.as_mut().unwrap().queries[0].executions = 1.0;
+        out.push(said(&read(&s)));
+        let mut s = workload(Engine::Mssql, 24.0, 0.1);
+        let n = root(&mut s);
+        (n.table_rows, n.rows_read, n.est_rows) = (Some(200.0), Some(200.0), 1.0);
+        out.push(said(&read(&s)));
+        same(
+            &out.join("\n--\n"),
+            r#"scan-filter · Low
+title: Reads 1.0M rows of shop.orders to keep 100
+fix: The selected workload does not establish material execution cost. Structural concerns remain relevant as table size or call volume grows; compare reads and time under representative load before changing an index. Create an index on status.
+verify: Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure.
+note: Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan. The selected workload does not establish material execution cost. Structural concerns remain relevant as table size or call volume grows; compare reads and time under representative load before changing an index.
+--
+scan-filter · Low
+title: Reads 1.0M rows of shop.orders to keep 100
+fix: This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns. Create an index on status.
+verify: Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure.
+note: Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.
+--
+note: Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan. A filtered scan of a small table can be appropriate today. Track rows read and execution time as the table grows; low current cost does not establish that the access path will scale."#,
+        );
+    }
+
+    // What index advice from a plan says where the catalog can't back keys, word for word.
+    #[test]
+    fn plan_index_advice_says_what_the_catalog_allows_in_english() {
+        let mut out = Vec::new();
+        let mut s = workload(Engine::Mssql, 24.0, 500.0);
+        s.server.capabilities.retain(|c| *c != culprit_core::Capability::IndexUsage);
+        s.sources.retain(|o| o.source != "indexes");
+        s.sources.push(culprit_core::SourceOutcome {
+            source: "indexes".into(),
+            state: culprit_core::SourceState::Unavailable,
+            reason: Some("Index definitions unavailable".into()),
+        });
+        out.push(said(&read(&s)));
+        // MySQL's filter above the scan: the scan itself carries no predicate to take keys from.
+        let mut s = workload(Engine::Mysql, 24.0, 500.0);
+        let n = root(&mut s);
+        let mut scan = n.clone();
+        (scan.id, scan.predicate) = (2, None);
+        (n.op, n.kind, n.object, n.table_rows, n.rows_read) = ("Filter".into(), NodeKind::Other, None, None, None);
+        n.children.push(scan);
+        out.push(said(&read(&s)));
+        let mut s = workload(Engine::Mssql, 24.0, 500.0);
+        hint(&mut s, "shop.orders", &[], &[]);
+        out.push(said(&read(&s)));
+        let mut s = workload(Engine::Mssql, 24.0, 500.0);
+        s.workload.as_mut().unwrap().queries[0].executions = 1.0;
+        hint(&mut s, "shop.gone_table", &["status"], &[]);
+        out.push(said(&read(&s)));
+        let mut s = indexed_with_payload();
+        hint(&mut s, "shop.orders", &["status"], &["payload"]);
+        out.push(said(&read(&s)));
+        out.push(said(&read(&indexed_with_payload())));
+        let mut s = workload(Engine::Mssql, 24.0, 500.0);
+        hint(&mut s, "shop.orders", &["customer_id"], &["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"]);
+        out.push(said(&read(&s)));
+        same(
+            &out.join("\n--\n"),
+            r#"scan-filter · Low
+title: Reads 1.0M rows of shop.orders to keep 100
+fix: Current index definitions were unavailable in this scan. Inspect the current keys, filters and included columns before choosing an index change; the captured structure can still pose a scaling risk.
+verify: Explain again: orders reads about as many rows as it keeps.
+note: Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.
+--
+scan-filter · High
+title: Reads 1.0M rows of shop.orders to keep 100
+fix: Check the complete predicate and current index definitions before choosing index keys.
+verify: Explain again: orders reads about as many rows as it keeps.
+note: MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.
+--
+missing-index-hint · High
+title: SQL Server estimates an index on shop.orders () would make this 90% cheaper
+fix: Inspect the complete predicate and current index definitions; these conditions do not establish a safe choice of index keys.
+verify: Explain again: the suggestion is gone and the read of orders becomes a seek.
+note: Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.
+--
+scan-filter · Low
+title: Reads 1.0M rows of shop.orders to keep 100
+fix: This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns. Create an index on status.
+verify: Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure.
+missing-index-hint · Low
+title: SQL Server estimates an index on shop.gone_table (status) would make this 90% cheaper
+fix: This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns. The captured table is absent from this scan's catalog. Confirm the current schema before acting on this historical plan.
+verify: Explain again: the suggestion is gone and the read of gone_table becomes a seek.
+note: Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.
+--
+missing-index-hint · Low
+title: The captured request on shop.orders has matching index keys now
+fix: ix_orders_status already starts with these columns, so the remaining gap is small. Check whether the queries below use it; if not, look at their predicates for type mismatches or functions on the column. Left payload out of INCLUDE: its type can hold large values, and including it would copy whatever it holds into the index. The rows the index finds go back to the table for it.
+verify: Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure.
+note: Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.
+--
+scan-filter · Low
+title: The captured scan on shop.orders has matching index keys now
+fix: ix_orders_status already starts with these columns, so the remaining gap is small. Check whether the queries below use it; if not, look at their predicates for type mismatches or functions on the column.
+verify: Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure.
+note: Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.
+--
+missing-index-hint · High
+title: SQL Server estimates an index on shop.orders (customer_id) would make this 90% cheaper
+fix: Create an index on customer_id. The wide INCLUDE list is omitted. Select fewer columns and test a narrow index before copying the payload into an index.
+verify: Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure.
+note: Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."#,
+        );
+    }
+
+    // What a lookup's advice says of covering it, word for word: a narrow projection, an unknown column, a wide one,
+    // and a column too large to copy.
+    #[test]
+    fn lookup_advice_says_what_covering_costs_in_english() {
+        let mut s = indexed_with_payload();
+        s.indexes.last_mut().unwrap().name = "ix_orders_status".into();
+        let q = &s.queries()[0];
+        let mut plan = q.plan.clone().unwrap();
+        let mut insight = query_plan_insights(&s, q, &plan).items[0].clone();
+        let mut seek = plan.root.clone();
+        seek.id = 401;
+        seek.index = Some("ix_orders_status".into());
+        plan.root.children.push(seek);
+        plan.root.id = 400;
+        plan.root.kind = NodeKind::Lookup;
+        plan.root.op = "Key Lookup".into();
+        insight.nodes = vec![400, 401];
+        let mut out = Vec::new();
+        for output in [
+            vec!["customer_id"],
+            vec!["stale_not_a_column"],
+            vec!["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"],
+            vec!["payload", "customer_id"],
+        ] {
+            plan.root.facts_mut().output_columns = Some(output.iter().map(|c| c.to_string()).collect());
+            let mut finding = insight.clone();
+            lookup_advice(&s, q, &plan, &mut finding);
+            out.push(format!("fix: {}\nverify: {}", finding.fix, finding.verify));
+        }
+        same(
+            &out.join("\n--\n"),
+            r#"fix: Select fewer columns where possible. Test adding only the narrow columns needed by frequent reads as included columns, balancing saved lookups against index size and write cost. ix_orders_status already has the right keys but makes every matching row go back to the table for customer_id. Rebuild it with those columns included so it covers the query. The statement keeps its keys, their order, its filter and the columns it already includes; restate DATA_COMPRESSION, FILLFACTOR or its partition scheme in it if the index uses them.
+verify: Compare a newly compiled plan, lookup counts, reads and time under equivalent parameters and load. Retain a covering index only if its read benefit justifies its storage and write cost.
+--
+fix: Select fewer columns where possible. Test adding only the narrow columns needed by frequent reads as included columns, balancing saved lookups against index size and write cost. Confirm the projection against current column definitions before choosing INCLUDE columns.
+verify: Compare a newly compiled plan, lookup counts, reads and time under equivalent parameters and load. Retain a covering index only if its read benefit justifies its storage and write cost.
+--
+fix: Select fewer columns where possible. Test adding only the narrow columns needed by frequent reads as included columns, balancing saved lookups against index size and write cost. The remaining projection is also wide; a covering index is not automatically worthwhile. Confirm the projection against current column definitions before choosing INCLUDE columns.
+verify: Compare a newly compiled plan, lookup counts, reads and time under equivalent parameters and load. Retain a covering index only if its read benefit justifies its storage and write cost.
+--
+fix: Select fewer columns where possible. Test adding only the narrow columns needed by frequent reads as included columns, balancing saved lookups against index size and write cost. Left payload out of INCLUDE: its type can hold large values, and including it would copy whatever it holds into the index. The rows the index finds go back to the table for it. ix_orders_status already has the right keys but makes every matching row go back to the table for customer_id. Rebuild it with those columns included so it covers the query. The statement keeps its keys, their order, its filter and the columns it already includes; restate DATA_COMPRESSION, FILLFACTOR or its partition scheme in it if the index uses them.
+verify: Compare a newly compiled plan, lookup counts, reads and time under equivalent parameters and load. Retain a covering index only if its read benefit justifies its storage and write cost."#,
+        );
+    }
+
+    // An actual plan with untimed steps says their share isn't measured, word for word.
+    #[test]
+    fn untimed_steps_are_said_to_have_no_measured_share() {
+        let s = workload(Engine::Mssql, 24.0, 500.0);
+        let mut plan = s.queries()[0].plan.clone().unwrap();
+        plan.kind = culprit_core::PlanKind::Actual;
+        plan.root.act_time_ms = Some(10.0);
+        for (id, time) in [(2, Some(5.0)), (3, None)] {
+            let mut child = plan.root.clone();
+            (child.id, child.act_time_ms) = (id, time);
+            plan.root.children.push(child);
+        }
+        same(
+            crate::plan_view(&plan, None).time_note.as_deref().unwrap_or("-"),
+            r#"Only recorded operator times contribute; untimed steps have no measured share."#,
+        );
+    }
 }

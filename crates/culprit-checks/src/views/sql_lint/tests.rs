@@ -390,3 +390,12 @@ fn flags_vacuum_full_cluster_blocking_reindex_and_suppresses_concurrent_quick_fi
         "{rename_short:?}"
     );
 }
+
+// A table's size, as the linter's titles say it: what the snapshot knows of it, word for word.
+#[test]
+fn a_table_size_says_what_the_snapshot_knows() {
+    assert_eq!(super::table_size_label(2_000_000.0, 400.0 * 1024.0 * 1024.0), "2.0M rows, 400 MB");
+    assert_eq!(super::table_size_label(2_000_000.0, 0.0), "2.0M rows");
+    assert_eq!(super::table_size_label(0.0, 400.0 * 1024.0 * 1024.0), "400 MB");
+    assert_eq!(super::table_size_label(0.0, 0.0), "large table");
+}
