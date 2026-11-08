@@ -767,9 +767,9 @@ pub fn summary_window(snapshot: &Snapshot) -> Option<String> {
     };
     use culprit_core::SpanLength::{Days, Hours, Minutes};
     let (said, covered) = (culprit_core::span_length(asked), culprit_core::span_length(w.measurement_hours()));
-    let words = culprit_core::span_words(asked);
+    let window = culprit_core::last_span(asked);
     if said == covered {
-        return Some(t!("model.window.last", span = words));
+        return Some(window);
     }
     // "7" after "6 hours"; the unit too when it differs (in its unit, or one against several).
     let covered = match (said, covered) {
@@ -778,7 +778,7 @@ pub fn summary_window(snapshot: &Snapshot) -> Option<String> {
         }
         _ => culprit_core::span_words(w.measurement_hours()),
     };
-    Some(t!("support.window.query_store_intervals", span = words, covered = covered))
+    Some(t!("support.window.query_store_intervals", window = window, covered = covered))
 }
 
 /// `value` from the workload window as a daily rate for comparing with a threshold, over at least an hour of data

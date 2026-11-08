@@ -13,7 +13,7 @@ mod workload;
 pub use workload::{
     Cadence, CounterScope, CounterSet, PER_DAY_MIN_HOURS, PlanHistory, PlanHistoryKind, PlanVariant, QueryStat,
     QueryTrend, RATE_MIN_HOURS, ScanSpan, SpanLength, Spread, StatementActivity, StatementCost, Timeline,
-    TimelineSource, Workload, WorkloadKind, span_length, span_when, span_words,
+    TimelineSource, Workload, WorkloadKind, last_span, log_span, since_reset_span, span_length, span_when, span_words,
 };
 
 /// The format a snapshot is saved in. One saved in another (by an older Culprit) isn't read: its fields may be missing

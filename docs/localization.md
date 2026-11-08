@@ -71,8 +71,11 @@ f.title = t!("check.heap_table.title.no_clustered_index", table = &t.name, rows 
   paragraph is sentences joined with a space.
 - **Arguments** are names, numbers, SQL, or phrases that are themselves messages. Numbers, sizes, durations and
   percentages are written through `format::` (Rust) or `lib/format.ts` (app), which follow the language.
-- **A phrase about a period** ("the last 7 days") is a whole message per unit with the number as a plural, chosen by
-  `byPeriod` (`app/src/lib/format.ts`), never "the last" + a worded span: the words around a number agree with it.
+- **A phrase about a period** ("the last 7 days") is a whole message per unit with the number as a plural, never "the
+  last" + a worded span: the words around a number agree with it. Rust has `culprit_core::last_span`, `log_span` and
+  `since_reset_span`; a sentence takes the phrase as its `{window}`. The app chooses with `byPeriod`
+  (`app/src/lib/format.ts`). A duration written with an abbreviated unit (`{span}` as "5.2 h") is the one exception:
+  translate around it without agreeing with it ("el último periodo de {span}").
 - **A number before a noun** is a plural on the number (`{n, plural, one {{count} run} other {{count} runs}}`, with `count`
   the number as written), even where English reads the same for every count: other languages agree with it.
 - **A counted noun** is a plural message (`common.noun.time`: `{n, plural, one {time} other {times}}`), handed to helpers

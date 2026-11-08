@@ -131,6 +131,35 @@ pub fn span_length(hours: f64) -> SpanLength {
     }
 }
 
+/// "the last 7 days": a recent window of `hours`, rounded as [`span_words`] rounds it. Each unit is a whole message, never
+/// "the last" + a span, so a language can make every word agree with the number ("los últimos 7 días", "las últimas 5
+/// horas"); a sentence takes it as its `{window}`.
+pub fn last_span(hours: f64) -> String {
+    match span_length(hours) {
+        SpanLength::Days(n) => t!("model.window.last_days", n = n, count = digits(format!("{n}"))),
+        SpanLength::Hours(n) => t!("model.window.last_hours", n = n, count = digits(format!("{n}"))),
+        SpanLength::Minutes(n) => t!("model.window.last_minutes", n = n, count = digits(format!("{n}"))),
+    }
+}
+
+/// "the 50 minutes the Rails log covers", worded whole per unit as [`last_span`] is.
+pub fn log_span(hours: f64, log: &str) -> String {
+    match span_length(hours) {
+        SpanLength::Days(n) => t!("model.window.log_days", n = n, count = digits(format!("{n}")), log = log),
+        SpanLength::Hours(n) => t!("model.window.log_hours", n = n, count = digits(format!("{n}")), log = log),
+        SpanLength::Minutes(n) => t!("model.window.log_minutes", n = n, count = digits(format!("{n}")), log = log),
+    }
+}
+
+/// "the 35 minutes since statistics were reset", worded whole per unit as [`last_span`] is.
+pub fn since_reset_span(hours: f64) -> String {
+    match span_length(hours) {
+        SpanLength::Days(n) => t!("model.window.since_reset_days", n = n, count = digits(format!("{n}"))),
+        SpanLength::Hours(n) => t!("model.window.since_reset_hours", n = n, count = digits(format!("{n}"))),
+        SpanLength::Minutes(n) => t!("model.window.since_reset_minutes", n = n, count = digits(format!("{n}"))),
+    }
+}
+
 /// `n` days, written `count`.
 fn span_days(n: f64, count: String) -> String {
     t!("model.span.days", n = n, count = count)
@@ -212,19 +241,19 @@ impl Workload {
             return if self.window_unknown() {
                 t!("model.window.log_period", log = log)
             } else {
-                t!("model.window.log", span = span_words(self.measurement_hours()), log = log)
+                log_span(self.measurement_hours(), log)
             };
         }
         if self.is_windowed() {
             if self.window_unknown() {
                 t!("model.window.recorded")
             } else {
-                t!("model.window.last", span = span_words(self.measurement_hours()))
+                last_span(self.measurement_hours())
             }
         } else if self.window_unknown() {
             t!("model.window.since_reset_unknown")
         } else {
-            t!("model.window.since_reset", span = span_words(self.measurement_hours()))
+            since_reset_span(self.measurement_hours())
         }
     }
 
