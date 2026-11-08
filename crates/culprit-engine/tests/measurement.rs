@@ -58,9 +58,13 @@ fn saved_counter_context_round_trips_and_counters_without_one_join_no_series() {
     let saved = serde_json::to_string(&counters).unwrap();
     let loaded: Counters = serde_json::from_str(&saved).unwrap();
     assert_eq!(loaded.measurement, counters.measurement);
+    // A counters file that doesn't state the context (another version's) isn't read.
+    let mut older = serde_json::to_value(&counters).unwrap();
+    older.as_object_mut().unwrap().remove("measurement");
+    assert!(serde_json::from_value::<Counters>(older).is_err());
     // An unidentified scan's counters carry no context: nothing is filled in for them.
     let mut contextless = serde_json::to_value(&counters).unwrap();
-    contextless.as_object_mut().unwrap().remove("measurement");
+    contextless["measurement"] = serde_json::Value::Null;
     let contextless: Counters = serde_json::from_value(contextless).unwrap();
     assert!(contextless.measurement.is_none());
     assert!(!loaded.same_series(&contextless));

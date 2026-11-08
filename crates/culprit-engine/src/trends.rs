@@ -29,7 +29,8 @@ const MIN_BUCKET_SECONDS: f64 = 300.0;
 /// A scan's running totals: the workload's and each tracked query's `[time ms, executions]`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Counters {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// The scan these totals are of. Every counters file names it; one that doesn't (another version's) isn't read.
+    #[serde(deserialize_with = "Option::deserialize")]
     pub reference: Option<culprit_core::ScanReference>,
     pub taken_at: String,
     pub database: String,
@@ -41,7 +42,9 @@ pub struct Counters {
     /// Eviction rounds since the source's counters started (pg_stat_statements_info.dealloc, 14+; each round evicts
     /// about 5% of the entries): when it grew between two scans, entries left and took their totals with them.
     pub evictions: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// What the totals measured, for a scan that knows its database; `None` for one that doesn't, which joins no series.
+    /// A counters file always states it, `null` included.
+    #[serde(deserialize_with = "Option::deserialize")]
     pub measurement: Option<MeasurementContext>,
 }
 
