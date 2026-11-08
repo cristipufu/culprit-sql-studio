@@ -18,7 +18,7 @@
 //! (`table_to_xml`) evaluated for an estimate; the ones that run arbitrary SQL (`query_to_xml`) are VOLATILE, so the
 //! planner never runs them.
 
-use culprit_core::{Error, ErrorCode, Result};
+use culprit_core::{Error, ErrorCode, Result, t};
 use tokio_postgres::Client;
 
 use crate::connect::map_error;
@@ -108,27 +108,15 @@ pub async fn foreign_code(client: &Client) -> Result<Vec<String>> {
 
 /// Why this login doesn't plan: other roles' code is in reach (`owners`, from [`foreign_code`]).
 pub fn withheld(owners: &[String]) -> Error {
-    Error::new(
-        ErrorCode::PermissionDenied,
-        format!(
-            "Not planned: functions or operators in this database belong to other roles ({}), and the planner runs the ones a statement reaches with this login's privileges, which go beyond reading statistics.",
-            owners.join(", ")
-        ),
-    )
-    .with_hint(MONITORING_LOGIN)
+    Error::new(ErrorCode::PermissionDenied, t!("provider.postgres.plans.withheld", owners = owners.join(", ")))
+        .with_hint(t!("provider.postgres.plans.monitoring_login"))
 }
 
 /// Why this login doesn't plan a statement someone else recorded.
 pub fn not_its_own() -> Error {
-    Error::new(
-        ErrorCode::PermissionDenied,
-        "Not planned: another role ran this statement, and planning it runs the functions it reaches with this login's privileges, which go beyond reading statistics.",
-    )
-    .with_hint(MONITORING_LOGIN)
+    Error::new(ErrorCode::PermissionDenied, t!("provider.postgres.plans.not_its_own"))
+        .with_hint(t!("provider.postgres.plans.monitoring_login"))
 }
-
-const MONITORING_LOGIN: &str =
-    "Connect with a login that has only pg_monitor, and SELECT on the tables: it plans every statement.";
 
 /// This login's own text of the statement pg_stat_statements records as `query_id`, when it ran it. "This login" is
 /// the role it authenticated as (`session_user`), and only while it acts as itself: one acting as a shared role (a
