@@ -358,9 +358,9 @@ impl Coverage {
         self.note(source, error.message.clone());
         let denied = error.code == ErrorCode::PermissionDenied;
         let reason = if denied {
-            "This login lacks the permission to read it.".to_string()
+            crate::t!("model.source.no_permission")
         } else {
-            format!("Reading it failed: {}", error.message)
+            crate::t!("model.source.failed", error = &error.message)
         };
         let fix = if denied { grant.or_else(|| error.hint.clone()) } else { error.hint.clone() };
         self.lacking(capability, reason, fix);
@@ -401,9 +401,9 @@ impl Coverage {
         self.recorded(source, SourceState::Unavailable, Some(error.message.clone()));
         self.note(source.name, error.message.clone());
         let reason = if error.code == ErrorCode::PermissionDenied {
-            format!("This login lacks the permission to read {}.", source.reads)
+            crate::t!("model.source.no_permission_to_read", reads = source.reads)
         } else {
-            format!("Reading {} failed: {}", source.reads, error.message)
+            crate::t!("model.source.reading_failed", reads = source.reads, error = &error.message)
         };
         for capability in source.delivers {
             self.lost(*capability, reason.clone(), error.hint.clone());
