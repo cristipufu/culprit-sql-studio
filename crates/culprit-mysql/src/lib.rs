@@ -30,7 +30,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use culprit_core::{
     ConnectionSpec, Engine, Error, ErrorCode, ExplainMode, LiveState, Plan, PlanKind, Provider, Result, ResultSet,
-    ServerInfo, Session, SessionAction, Snapshot, SnapshotOptions, WaitStat,
+    ServerInfo, Session, SessionAction, Snapshot, SnapshotOptions, WaitStat, format, t,
 };
 use mysql_async::consts::ColumnType;
 use mysql_async::prelude::Queryable;
@@ -151,10 +151,7 @@ fn parameter_error(e: Error) -> Error {
     if !e.message.contains("parameters but") {
         return e;
     }
-    Error::invalid("This statement has `?` parameters, which MySQL needs values for to plan it").with_hint(
-        "Replace each ? with a sample value of its type (a quoted string for text, a number for an id) and explain again. \
-         Queries Culprit captured open from Queries with the plan of a real statement.",
-    )
+    Error::invalid(t!("provider.mysql.explain.parameters")).with_hint(t!("provider.mysql.explain.parameters_hint"))
 }
 
 #[async_trait]
@@ -397,26 +394,30 @@ fn with_progress(state: String, r: &rows::Rec) -> String {
 
 fn progress_label(state: String, progress: Option<f64>, stage: Option<f64>, max: Option<f64>) -> String {
     let Some(progress) = progress.filter(|p| *p > 0.0) else { return state };
+    let percent = format::digits(format!("{progress:.0}"));
     match (stage, max) {
-        (Some(stage), Some(max)) if max > 1.0 => format!("{state} · stage {stage:.0} of {max:.0}, {progress:.0}%"),
-        _ => format!("{state} · {progress:.0}%"),
+        (Some(stage), Some(max)) if max > 1.0 => t!(
+            "provider.mysql.live.progress_stage",
+            state = state,
+            stage = format::digits(format!("{stage:.0}")),
+            stages = format::digits(format!("{max:.0}")),
+            percent = percent
+        ),
+        _ => t!("provider.mysql.live.progress", state = state, percent = percent),
     }
 }
 
 fn not_mysql(engine: Engine) -> Error {
-    Error::invalid(format!("This connection is for {engine}, not MySQL"))
+    Error::invalid(t!("provider.mysql.not_mysql", engine = engine.to_string()))
 }
 
 /// A statement EXPLAIN doesn't take (`verb` lowercased).
 fn cant_explain(flavor: Flavor, verb: &str) -> Error {
     Error::new(
         culprit_core::ErrorCode::Unsupported,
-        format!("{} can't EXPLAIN a {} statement", flavor.name(), verb.to_ascii_uppercase()),
+        t!("provider.mysql.explain.cant_explain", server = flavor.name(), verb = verb.to_ascii_uppercase()),
     )
-    .with_hint(
-        "EXPLAIN covers SELECT, INSERT, UPDATE, DELETE and REPLACE. The scan's statement statistics show \
-         this one's measured times.",
-    )
+    .with_hint(t!("provider.mysql.explain.cant_explain_hint"))
 }
 
 /// A write (`verb` lowercased) the server refused to plan in Culprit's read-only session; `values`: an INSERT … VALUES,
@@ -424,19 +425,12 @@ fn cant_explain(flavor: Flavor, verb: &str) -> Error {
 fn no_plan_for_write(flavor: Flavor, verb: &str, values: bool) -> Error {
     Error::new(
         culprit_core::ErrorCode::Unsupported,
-        format!(
-            "{} won't plan {} {} in a read-only session, and Culprit's sessions are always read-only",
-            flavor.name(),
-            if matches!(verb, "insert" | "update") { "an" } else { "a" },
-            verb.to_ascii_uppercase()
-        ),
+        t!("provider.mysql.explain.read_only_write", server = flavor.name(), verb = verb.to_ascii_uppercase()),
     )
     .with_hint(if values {
-        "An INSERT … VALUES searches no rows, so there's nothing to plan; its cost is the indexes and \
-         triggers on the table."
+        t!("provider.mysql.explain.insert_values_hint")
     } else {
-        "Explain the SELECT with the same FROM and WHERE: the server usually finds the rows the \
-         same way."
+        t!("provider.mysql.explain.explain_the_select_hint")
     })
 }
 
@@ -450,54 +444,48 @@ enum Explain {
 
 fn no_plan(command: Explain) -> Error {
     Error::internal(match command {
-        Explain::Explain => "EXPLAIN returned no plan",
-        Explain::Analyze => "ANALYZE returned no plan",
-        Explain::ExplainAnalyze => "EXPLAIN ANALYZE returned no plan",
+        Explain::Explain => t!("provider.mysql.explain.no_plan.explain"),
+        Explain::Analyze => t!("provider.mysql.explain.no_plan.analyze"),
+        Explain::ExplainAnalyze => t!("provider.mysql.explain.no_plan.explain_analyze"),
     })
 }
 
 /// MySQL before 8.0.18 (`version` as the server reports it) has no EXPLAIN ANALYZE.
 fn cant_measure(version: &str) -> Error {
     let short = version.split('-').next().unwrap_or(version);
-    Error::new(
-        culprit_core::ErrorCode::Unsupported,
-        format!("MySQL {short} can't measure a run: EXPLAIN ANALYZE arrived in MySQL 8.0.18"),
-    )
-    .with_hint("Explain shows the estimated plan; the scan's statement statistics show each query's measured times.")
+    Error::new(culprit_core::ErrorCode::Unsupported, t!("provider.mysql.explain.cant_measure", version = short))
+        .with_hint(t!("provider.mysql.explain.cant_measure_hint"))
 }
 
 fn analyze_reads_only() -> Error {
-    Error::invalid("Explain Analyze runs the statement, so Culprit only allows it for SELECT")
-        .with_hint("Use Explain (estimated) for statements that change data.")
+    Error::invalid(t!("provider.mysql.explain.analyze_reads_only"))
+        .with_hint(t!("provider.mysql.explain.analyze_reads_only_hint"))
 }
 
 /// A recorded statement whose placeholders stop it from being planned.
 fn recorded_without_values(flavor: Flavor) -> Error {
-    let name = if flavor == Flavor::Mariadb { "MariaDB" } else { "MySQL" };
-    Error::invalid(format!(
-        "{name} recorded this statement without its values (each ? stands for one), so it can't be planned as recorded"
-    ))
-    .with_hint("Open it in the editor, put a real value in place of each ?, and explain it there.")
+    Error::invalid(t!("provider.mysql.explain.recorded_without_values", server = flavor.name()))
+        .with_hint(t!("provider.mysql.explain.recorded_without_values_hint"))
 }
 
 fn unresolved_metadata_lock() -> String {
-    "A metadata-lock wait is visible but its holder could not be resolved. Check sys.schema_table_lock_waits, metadata-lock instrumentation and this login's visibility; an unresolved blocker is not an unblocked session.".into()
+    t!("provider.mysql.live.unresolved_metadata_lock")
 }
 
 /// What running a statement says: how many rows it returned (`notice`: why Culprit stopped reading them), or, for a
 /// change the person ran (`committed`), how many it changed; a change that returned rows says it committed.
 fn result_messages(count: u64, notice: Option<String>, columns: bool, committed: bool) -> Vec<String> {
-    let mut message = format!("{count} row{}", if count == 1 { "" } else { "s" });
-    if let Some(notice) = notice {
-        message.push_str(&format!(" ({notice})"));
+    let rows = format::digits(count.to_string());
+    if committed && !columns {
+        // Nothing was read back, so nothing was cut short: there is no notice to give.
+        return vec![t!("provider.mysql.result.rows_changed", n = count, count = rows)];
     }
-    let mut messages = vec![message];
+    let mut messages = vec![match notice {
+        Some(notice) => t!("provider.mysql.result.rows_stopped", n = count, count = rows, notice = notice),
+        None => t!("provider.mysql.result.rows", n = count, count = rows),
+    }];
     if committed {
-        // "3 rows changed, committed." for a write; a statement that returned rows just says it committed.
-        match messages.last_mut().filter(|_| !columns) {
-            Some(last) => last.push_str(" changed, committed."),
-            None => messages.push("Committed.".to_string()),
-        }
+        messages.push(t!("provider.mysql.result.committed"));
     }
     messages
 }

@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use culprit_core::{Engine, Error, NodeKind, Plan, PlanKind, PlanNode, PlanWarning, Properties, Result};
+use culprit_core::{Engine, Error, NodeKind, Plan, PlanKind, PlanNode, PlanWarning, Properties, Result, t};
 
 use crate::plan_json::{aliases, unquote};
 
@@ -28,7 +28,7 @@ pub fn parse(tree: &str, statement: Option<&str>, schema: Option<&str>) -> Resul
         })
         .collect();
     if lines.is_empty() {
-        return Err(Error::internal("EXPLAIN ANALYZE returned no plan"));
+        return Err(Error::internal(t!("provider.mysql.explain.no_plan.explain_analyze")));
     }
     let names = statement.map(aliases).unwrap_or_default();
     let mut next_id = 0;

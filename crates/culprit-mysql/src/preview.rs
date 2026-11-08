@@ -9,6 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use culprit_core::{
     Error, ErrorCode, Result, ResultSet,
     limits::{OBSERVE_TIMEOUT, PREVIEW_TIMEOUT, timeout_error},
+    t,
 };
 use mysql_async::{Conn, prelude::Queryable};
 use tokio::sync::{Semaphore, oneshot};
@@ -30,7 +31,7 @@ fn marker() -> String {
 }
 
 pub(crate) async fn read(connector: Arc<Connector>, sql: String, limit: usize) -> Result<ResultSet> {
-    let permit = PREVIEWS.acquire().await.map_err(|_| Error::internal("The preview worker gate closed"))?;
+    let permit = PREVIEWS.acquire().await.map_err(|_| Error::internal(t!("provider.mysql.preview.gate_closed")))?;
     let conn = connector.connect(Scope::Database).await?;
     let control = connector.connect(Scope::Server).await?;
     let setting = connector.flavor().timeout_for(PREVIEW_TIMEOUT);
@@ -41,7 +42,7 @@ pub(crate) async fn read(connector: Arc<Connector>, sql: String, limit: usize) -
         let _permit = permit;
         worker(conn, control, &sql, limit, &setting, canceled).await
     });
-    let result = task.await.map_err(|_| Error::internal("The table preview worker stopped"))?;
+    let result = task.await.map_err(|_| Error::internal(t!("provider.mysql.preview.worker_stopped")))?;
     drop(owner);
     result
 }
@@ -115,10 +116,7 @@ async fn stage<T>(
     if confirmed_stop(work, cancel(control, id, marker)).await {
         Err(timeout_error())
     } else {
-        Err(Error::new(
-            ErrorCode::Timeout,
-            "Culprit stopped waiting and could not confirm server cancellation. Check Live before retrying.",
-        ))
+        Err(Error::new(ErrorCode::Timeout, t!("provider.mysql.preview.cancel_unconfirmed")))
     }
 }
 

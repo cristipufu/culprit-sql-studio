@@ -1,6 +1,6 @@
 //! Cancel a statement (`KILL QUERY`) or end a connection (`KILL`) from Live. Culprit's own connections are refused.
 
-use culprit_core::{Error, Result, SessionAction, session_number};
+use culprit_core::{Error, Result, SessionAction, session_number, t};
 use mysql_async::Value;
 use mysql_async::prelude::Queryable;
 
@@ -19,12 +19,12 @@ pub(crate) async fn interrupt(connector: &Connector, session: &str, action: Sess
     .await;
     let result = match target {
         Ok(rows) => match rows.first() {
-            None => Err(Error::not_found(format!("Session {id} is gone"))),
+            None => Err(Error::not_found(t!("provider.mysql.session.gone", id = id.to_string()))),
             Some(row) if row.number("own") == Some(1.0) || row.text("info").is_some_and(|i| i.contains(TAG)) => {
-                Err(Error::invalid(format!("Session {id} is Culprit's own")))
+                Err(Error::invalid(t!("provider.mysql.session.own", id = id.to_string())))
             }
             Some(row) if matches!(row.string("command").as_str(), "Daemon" | "Binlog Dump" | "Binlog Dump GTID") => {
-                Err(Error::invalid(format!("Session {id} is a MySQL system thread")))
+                Err(Error::invalid(t!("provider.mysql.session.system_thread", id = id.to_string())))
             }
             Some(_) => {
                 let statement = match action {

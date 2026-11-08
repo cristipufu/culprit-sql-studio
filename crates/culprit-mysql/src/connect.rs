@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use culprit_core::{
     AuthKind, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, Engine, Error, ErrorCode, Result,
-    aws_iam_host_allowed, entra_host_allowed, is_local_host,
+    aws_iam_host_allowed, entra_host_allowed, is_local_host, t,
 };
 use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, DriverError, IoError, OptsBuilder, SslOpts};
@@ -90,8 +90,8 @@ impl Tls {
             "required" | "require" | "true" | "on" => Ok(Tls::Required),
             "verify_ca" => Ok(Tls::VerifyCa),
             "verify_identity" | "verify_full" => Ok(Tls::VerifyIdentity),
-            other => Err(Error::invalid(format!("Unknown ssl-mode `{other}`"))
-                .with_hint("Use one of DISABLED, PREFERRED, REQUIRED, VERIFY_CA, VERIFY_IDENTITY.")),
+            other => Err(Error::invalid(t!("provider.mysql.connect.unknown_ssl_mode", mode = other))
+                .with_hint(t!("provider.mysql.connect.ssl_modes_hint"))),
         }
     }
 }
@@ -123,12 +123,12 @@ impl Connector {
         install_crypto_provider();
         let host = spec.host.trim().to_string();
         if host.is_empty() {
-            return Err(Error::invalid("A MySQL host is required"));
+            return Err(Error::invalid(t!("provider.mysql.connect.host_required")));
         }
         let port = spec.port.unwrap_or(DEFAULT_PORT);
         let user = spec.user.clone().filter(|u| !u.is_empty()).ok_or_else(|| {
-            Error::invalid("MySQL needs a user name")
-                .with_hint("Add one to the connection string, e.g. mysql://app@host/db")
+            Error::invalid(t!("provider.mysql.connect.user_required"))
+                .with_hint(t!("provider.mysql.connect.user_required_hint"))
         })?;
         let mode = ["sslmode", "ssl-mode", "ssl_mode"].iter().find_map(|k| spec.option(k));
         // Like the mysql client, a local server gets TLS when it offers it; anything else must present a certificate that
@@ -150,14 +150,11 @@ impl Connector {
             AuthKind::None => {}
             AuthKind::Entra => {
                 if !entra_host_allowed(Engine::Mysql, &host) {
-                    return Err(Error::new(
-                        ErrorCode::PermissionDenied,
-                        "Microsoft Entra ID tokens are only sent to Azure Database for MySQL hosts",
-                    ));
+                    return Err(Error::new(ErrorCode::PermissionDenied, t!("provider.mysql.connect.entra_hosts_only")));
                 }
                 let token = spec.token.clone().ok_or_else(|| {
-                    Error::new(ErrorCode::AuthFailed, "No Microsoft Entra ID token is available")
-                        .with_hint("Sign in with `az login`, then try again.")
+                    Error::new(ErrorCode::AuthFailed, t!("provider.mysql.connect.no_entra_token"))
+                        .with_hint(t!("provider.mysql.connect.no_entra_token_hint"))
                 })?;
                 // The token travels as a cleartext password, so it only ever goes over fully verified TLS.
                 tls = Tls::VerifyIdentity;
@@ -165,14 +162,11 @@ impl Connector {
             }
             AuthKind::AwsIam => {
                 if !aws_iam_host_allowed(&host) {
-                    return Err(Error::new(
-                        ErrorCode::PermissionDenied,
-                        "AWS IAM authentication tokens are only sent to Amazon RDS hosts",
-                    ));
+                    return Err(Error::new(ErrorCode::PermissionDenied, t!("provider.mysql.connect.iam_hosts_only")));
                 }
                 let token = spec.token.clone().ok_or_else(|| {
-                    Error::new(ErrorCode::AuthFailed, "No AWS IAM authentication token is available")
-                        .with_hint("Sign in with the AWS CLI (aws sso login or aws configure), then try again.")
+                    Error::new(ErrorCode::AuthFailed, t!("provider.mysql.connect.no_iam_token"))
+                        .with_hint(t!("provider.mysql.connect.no_iam_token_hint"))
                 })?;
                 // RDS IAM tokens go through the cleartext plugin; like Entra tokens, only over verified TLS.
                 tls = Tls::VerifyIdentity;
@@ -295,30 +289,39 @@ impl Connector {
     }
 
     fn database_connect_error(&self, error: mysql_async::Error) -> Error {
-        let (host, port) = (&self.host, self.port);
+        let (host, port) = (&self.host, self.port.to_string());
+        // What the network, the TLS layer or the server said, in its own words: Culprit's messages (in the reader's
+        // language) are never what decides.
+        let said = match &error {
+            mysql_async::Error::Io(io) => Some(io.to_string().to_ascii_lowercase()),
+            mysql_async::Error::Server(server) => Some(server.message.to_ascii_lowercase()),
+            _ => None,
+        };
         let mapped = map_error(error);
         if mapped.code != ErrorCode::ConnectionFailed && mapped.code != ErrorCode::Timeout {
             return mapped;
         }
-        let lower = mapped.message.to_ascii_lowercase();
+        let Some(lower) = said else { return mapped };
         if lower.contains("timed out") {
-            return Error::new(ErrorCode::Timeout, format!("Timed out connecting to {host}:{port}"))
-                .with_hint("Check the host, the port, and any firewall or VPN in between.");
+            return Error::new(ErrorCode::Timeout, t!("provider.mysql.connect.timed_out", host = host, port = &port))
+                .with_hint(t!("provider.mysql.connect.timed_out_hint"));
         }
         if lower.contains("refused") {
-            return Error::new(ErrorCode::ConnectionFailed, format!("Nothing is listening on {host}:{port}"))
-                .with_hint("Check the host and port, and that the MySQL or MariaDB server is running.");
+            return Error::new(
+                ErrorCode::ConnectionFailed,
+                t!("provider.mysql.connect.nothing_listening", host = host, port = &port),
+            )
+            .with_hint(t!("provider.mysql.connect.nothing_listening_hint"));
         }
         if lower.contains("failed to lookup") || lower.contains("nodename nor servname") || lower.contains("not known")
         {
-            return Error::new(ErrorCode::ConnectionFailed, format!("Cannot resolve host `{host}`"))
-                .with_hint("Check the host name.");
+            return Error::new(ErrorCode::ConnectionFailed, t!("provider.mysql.connect.unresolved_host", host = host))
+                .with_hint(t!("provider.mysql.connect.unresolved_host_hint"));
         }
         // A specific TLS diagnosis (certificate, cipher suites) already carries its own advice.
         if mapped.hint.is_none() && (lower.contains("certificate") || lower.contains("tls") || lower.contains("ssl")) {
-            return Error::new(ErrorCode::ConnectionFailed, mapped.message).with_hint(
-                "TLS failed. Check `ssl-mode` (DISABLED, PREFERRED, REQUIRED, VERIFY_CA, VERIFY_IDENTITY) and `ssl-ca`.",
-            );
+            return Error::new(ErrorCode::ConnectionFailed, mapped.message)
+                .with_hint(t!("provider.mysql.connect.tls_failed_hint"));
         }
         mapped
     }
@@ -354,18 +357,22 @@ pub fn map_error(error: mysql_async::Error) -> Error {
         mysql_async::Error::Server(server) => {
             let message = server.message.clone();
             match server.code {
-                1045 => Error::new(ErrorCode::AuthFailed, message)
-                    .with_hint("Check the user name and password (or token) for this connection."),
-                1044 | 1142 | 1143 | 1227 | 1370 => Error::new(ErrorCode::PermissionDenied, message).with_hint(
-                    "Grant the monitoring privileges: GRANT PROCESS ON *.* TO <user>; GRANT SELECT ON performance_schema.* TO <user>;",
-                ),
-                1049 => Error::new(ErrorCode::NotFound, message).with_hint("Check the database name."),
+                1045 => Error::new(ErrorCode::AuthFailed, message).with_hint(t!("provider.mysql.error.auth_hint")),
+                1044 | 1142 | 1143 | 1227 | 1370 => Error::new(ErrorCode::PermissionDenied, message).with_hint(t!(
+                    "provider.mysql.error.grant_hint",
+                    sql = "GRANT PROCESS ON *.* TO <user>; GRANT SELECT ON performance_schema.* TO <user>;"
+                )),
+                1049 => Error::new(ErrorCode::NotFound, message).with_hint(t!("provider.mysql.error.database_hint")),
                 1792 => Error::new(ErrorCode::PermissionDenied, message)
-                    .with_hint("Culprit's sessions are read-only; this statement would write."),
-                1205 | 3024 | 1969 => Error::new(ErrorCode::Timeout, message)
-                    .with_hint("The statement hit Culprit's lock or execution timeout and was stopped."),
-                1064 => Error::new(ErrorCode::QueryFailed, message).with_hint("Check the statement's syntax."),
-                _ => Error::new(ErrorCode::QueryFailed, format!("{message} (error {})", server.code)),
+                    .with_hint(t!("provider.mysql.error.read_only_hint")),
+                1205 | 3024 | 1969 => {
+                    Error::new(ErrorCode::Timeout, message).with_hint(t!("provider.mysql.error.timeout_hint"))
+                }
+                1064 => Error::new(ErrorCode::QueryFailed, message).with_hint(t!("provider.mysql.error.syntax_hint")),
+                code => Error::new(
+                    ErrorCode::QueryFailed,
+                    t!("provider.mysql.error.server", message = message, code = code.to_string()),
+                ),
             }
         }
         mysql_async::Error::Io(io) => {
@@ -375,24 +382,24 @@ pub fn map_error(error: mysql_async::Error) -> Error {
                 return Error::new(ErrorCode::Timeout, message);
             }
             if lower.contains("certificate") {
-                return Error::new(ErrorCode::ConnectionFailed, format!("The server's TLS certificate didn't verify: {message}"))
-                    .with_hint("Point ssl-ca at the server's CA bundle (ssl-ca=rds for Amazon RDS), or add ssl-mode=REQUIRED to encrypt without verifying the certificate.");
-            }
-            if lower.contains("handshakefailure") || lower.contains("handshake_failure") {
                 return Error::new(
                     ErrorCode::ConnectionFailed,
-                    "The server and Culprit share no TLS cipher suite, so no encrypted session could be set up",
+                    t!("provider.mysql.error.certificate", error = message),
                 )
-                .with_hint("Culprit needs TLS 1.2+ with ECDHE and AES-GCM or ChaCha20. MySQL 5.7 built on OpenSSL 1.0 only negotiates DHE suites: enable ECDHE on the server (OpenSSL 1.1+, ssl_cipher), or use ssl-mode=PREFERRED or DISABLED on a trusted network.");
+                .with_hint(t!("provider.mysql.error.certificate_hint"));
+            }
+            if lower.contains("handshakefailure") || lower.contains("handshake_failure") {
+                return Error::new(ErrorCode::ConnectionFailed, t!("provider.mysql.error.no_shared_cipher"))
+                    .with_hint(t!("provider.mysql.error.no_shared_cipher_hint"));
             }
             Error::new(ErrorCode::ConnectionFailed, message)
         }
         mysql_async::Error::Driver(DriverError::ConnectionClosed) => {
-            Error::new(ErrorCode::ConnectionFailed, "The server closed the connection")
+            Error::new(ErrorCode::ConnectionFailed, t!("provider.mysql.error.connection_closed"))
         }
         mysql_async::Error::Driver(DriverError::NoClientSslFlagFromServer) => {
-            Error::new(ErrorCode::ConnectionFailed, "The server does not support TLS")
-                .with_hint("Use ssl-mode=PREFERRED or DISABLED for this server, or enable TLS on it.")
+            Error::new(ErrorCode::ConnectionFailed, t!("provider.mysql.error.no_server_tls"))
+                .with_hint(t!("provider.mysql.error.no_server_tls_hint"))
         }
         other => Error::new(ErrorCode::QueryFailed, other.to_string()),
     }
