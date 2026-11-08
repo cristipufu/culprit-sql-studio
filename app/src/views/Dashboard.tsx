@@ -272,8 +272,8 @@ function DbTimeTile({ tile, report }: { tile: Tile; report: Report }) {
                 : t("ui.dashboard.db_time.no_history", { server: serverName(report.snapshot.server.engine) }))}
           </p>
           {periods && (
-            <button type="button" className="btn small" onClick={compare} title={t("ui.dashboard.db_time.compare_title", { key: "V" })}>
-              <GitCompareArrows size={12} /> {t("ui.dashboard.db_time.compare")}
+            <button type="button" className="btn small" onClick={compare} title={t("ui.common.compare_periods", { key: "V" })}>
+              <GitCompareArrows size={12} /> {t("ui.common.what_changed")}
             </button>
           )}
         </div>

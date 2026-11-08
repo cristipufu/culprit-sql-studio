@@ -14,15 +14,36 @@ import type { Report } from "../gen/Report";
 import { api } from "../lib/api";
 import { ago, count, duration, findingMetric, percent, rowCount } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
+import { t } from "../lib/i18n";
 import { aboutThePlan, doesRealWork, estRows, findingNoShareReason, findingStepShare, hottestStep, rowsOut, rowsRead, stepShare } from "../lib/plan-format";
 import { figures, honest } from "../lib/rates";
 import { setState, toast, toggleDismissed, useStore } from "../lib/store";
 import { copyAndTell } from "../lib/clipboard";
 import { canOpenFixInEditor } from "../lib/editor-sql";
 import { can } from "../lib/engines";
+import { slot, withElements } from "./message-parts";
 
-const CONFIDENCE_LABEL = { high: "High confidence", medium: "Medium confidence", low: "Low confidence" } as const;
-const SEVERITY_LABEL = { high: "High impact", medium: "Medium impact", low: "Low impact" } as const;
+function confidenceLabel(confidence: Finding["confidence"]): string {
+  switch (confidence) {
+    case "high":
+      return t("ui.finding_detail.confidence.high");
+    case "medium":
+      return t("ui.finding_detail.confidence.medium");
+    case "low":
+      return t("ui.finding_detail.confidence.low");
+  }
+}
+
+function severityLabel(severity: Finding["severity"]): string {
+  switch (severity) {
+    case "high":
+      return t("ui.finding_detail.severity.high");
+    case "medium":
+      return t("ui.finding_detail.severity.medium");
+    case "low":
+      return t("ui.finding_detail.severity.low");
+  }
+}
 
 export function FindingDetail({ report, finding }: { report: Report; finding: Finding }) {
   const dismissed = useStore((s) => !!s.dismissed[finding.id]);
@@ -35,12 +56,12 @@ export function FindingDetail({ report, finding }: { report: Report; finding: Fi
   const firstWithPlan = queries.find((q) => q.query.plan);
 
   const copyFix = async () => {
-    if (!finding.fix?.sql) return toast("This finding has no script to copy");
-    await copyAndTell(finding.fix.sql, "Fix copied");
+    if (!finding.fix?.sql) return toast(t("ui.finding_detail.no_script"));
+    await copyAndTell(finding.fix.sql, t("ui.finding_detail.fix_copied"));
   };
   const copyBrief = async () => {
     const brief = await (await api()).brief(report.snapshot.connection, finding.id, report.snapshot.options?.window_minutes ?? null);
-    await copyAndTell(brief, "Brief copied. Paste it into your coding agent");
+    await copyAndTell(brief, t("ui.finding_detail.brief_copied"));
   };
   const canOpenFix = canOpenFixInEditor(finding.fix?.sql, report.snapshot.server.engine);
   const openInEditor = () => {
@@ -61,15 +82,15 @@ export function FindingDetail({ report, finding }: { report: Report; finding: Fi
       <div className="detail-inner">
         <div className="crumbs">
           <span className={`tag ${isActionable(finding) ? finding.severity : ""}`}>{actionLabel(finding)}</span>
-          {isActionable(finding) && <span className={`tag ${finding.severity}`}>{SEVERITY_LABEL[finding.severity]}</span>}
-          <span className="tag">{CONFIDENCE_LABEL[finding.confidence]}</span>
+          {isActionable(finding) && <span className={`tag ${finding.severity}`}>{severityLabel(finding.severity)}</span>}
+          <span className="tag">{confidenceLabel(finding.confidence)}</span>
           <CopyId id={finding.id} />
         </div>
         {finding.inactive && (
           <div className="notice" style={{ marginTop: 12 }}>
             <History size={15} style={{ flexShrink: 0, marginTop: 1 }} />
             <div>
-              <StoppedRunning report={report} lastSeen={finding.last_seen} /> Check the current version of this code path before acting.
+              <StoppedRunning report={report} lastSeen={finding.last_seen} /> {t("ui.finding_detail.check_current")}
             </div>
           </div>
         )}
@@ -97,7 +118,7 @@ export function FindingDetail({ report, finding }: { report: Report; finding: Fi
         {queries.length > 0 && (
           <section>
             <h3>
-              Evidence <span className="muted">{queries.length === 1 ? "1 query" : `${queries.length} queries`}</span>
+              {t("ui.finding_detail.evidence")} <span className="muted">{t("ui.finding_detail.query_count", { n: queries.length, count: String(queries.length) })}</span>
             </h3>
             {queries.map(({ ref, query }) => (
               <QueryCard key={query.id} report={report} query={query} node={ref.plan_node} />
@@ -112,7 +133,7 @@ export function FindingDetail({ report, finding }: { report: Report; finding: Fi
                   weighed={can(firstWithPlan.query.plan.engine, "plan_estimates") || firstWithPlan.query.plan.kind === "actual"}
                 />
                 <button type="button" className="btn ghost" style={{ marginTop: 8 }} onClick={() => setShowPlan((v) => !v)}>
-                  {showPlan ? "Hide plan" : "Show full plan"}
+                  {showPlan ? t("ui.finding_detail.hide_plan") : t("ui.finding_detail.show_plan")}
                 </button>
                 {showPlan && (
                   <div style={{ marginTop: 8 }}>
@@ -127,11 +148,11 @@ export function FindingDetail({ report, finding }: { report: Report; finding: Fi
         {finding.fix && (
           <section>
             <h3>
-              Fix
+              {t("ui.finding_detail.fix")}
               {finding.fix.sql && (
                 <span className="actions">
                   <button type="button" className="btn" onClick={copyFix}>
-                    <Copy size={13} /> Copy <span className="kbd">C</span>
+                    <Copy size={13} /> {t("ui.common.copy")} <span className="kbd">C</span>
                   </button>
                 </span>
               )}
@@ -144,13 +165,13 @@ export function FindingDetail({ report, finding }: { report: Report; finding: Fi
                 <Sql text={finding.fix.sql} pretty={false} />
               </div>
             )}
-            {finding.fix.cost && <div className="fix-cost">Cost: {finding.fix.cost}</div>}
+            {finding.fix.cost && <div className="fix-cost">{t("ui.finding_detail.cost", { cost: finding.fix.cost })}</div>}
           </section>
         )}
 
         {finding.verify.length > 0 && (
           <section>
-            <h3>How to verify</h3>
+            <h3>{t("ui.finding_detail.verify")}</h3>
             <ol className="steps selectable">
               {finding.verify.map((v) => (
                 <li key={v}>
@@ -163,7 +184,7 @@ export function FindingDetail({ report, finding }: { report: Report; finding: Fi
 
         {finding.caveats.length > 0 && (
           <section>
-            <h3>Before you act</h3>
+            <h3>{t("ui.finding_detail.caveats")}</h3>
             <ul className="caveats selectable">
               {finding.caveats.map((c) => (
                 <li key={c} style={{ whiteSpace: "pre-wrap" }}>
@@ -177,18 +198,18 @@ export function FindingDetail({ report, finding }: { report: Report; finding: Fi
         <div className="actionbar">
           <VerifyResult result={verify.result} report={report} onClose={verify.clear} />
           <button type="button" className="btn primary" onClick={copyBrief}>
-            <Bot size={14} /> Copy for agent <span className="kbd">A</span>
+            <Bot size={14} /> {t("ui.finding_detail.copy_for_agent")} <span className="kbd">A</span>
           </button>
           {canOpenFix && (
             <button type="button" className="btn" onClick={openInEditor}>
-              <SquarePen size={13} /> Open in editor <span className="kbd">E</span>
+              <SquarePen size={13} /> {t("ui.common.open_in_editor")} <span className="kbd">E</span>
             </button>
           )}
           <VerifyButton running={verify.result?.status === "running"} onRun={verify.run} />
           <FindingShareMenu report={report} finding={finding} />
           <span className="spacer" />
-          <button type="button" className="btn ghost dismiss" onClick={() => toggleDismissed(finding.id)} aria-label={dismissed ? "Restore" : "Dismiss"} title={`${dismissed ? "Restore" : "Dismiss"} (D)`}>
-            <EyeOff size={13} /> <span className="btn-label">{dismissed ? "Restore" : "Dismiss"}</span> <span className="kbd">D</span>
+          <button type="button" className="btn ghost dismiss" onClick={() => toggleDismissed(finding.id)} aria-label={dismissed ? t("ui.finding_detail.restore") : t("ui.finding_detail.dismiss")} title={dismissed ? t("ui.finding_detail.restore_title", { key: "D" }) : t("ui.finding_detail.dismiss_title", { key: "D" })}>
+            <EyeOff size={13} /> <span className="btn-label">{dismissed ? t("ui.finding_detail.restore") : t("ui.finding_detail.dismiss")}</span> <span className="kbd">D</span>
           </button>
         </div>
       </div>
@@ -201,7 +222,7 @@ function CopyId({ id }: { id: string }) {
   return (
     <button type="button"
       className="tag mono"
-      title="Copy finding id (for culprit show)"
+      title={t("ui.finding_detail.copy_id")}
       onClick={async () => {
         if (!(await copyAndTell(id))) return;
         setCopied(true);
@@ -244,7 +265,7 @@ function SqlPreview({ text }: { text: string }) {
           }}
           onKeyDown={(e) => e.stopPropagation()}
         >
-          {open ? "Show less" : "Show all"}
+          {open ? t("ui.finding_detail.show_less") : t("ui.finding_detail.show_all")}
         </button>
       )}
     </>
@@ -269,23 +290,23 @@ function QueryCard({ report, query, node }: { report: Report; query: QueryStat; 
       onKeyDown={(e) => e.key === "Enter" && setState({ view: "queries", query: query.id })}
     >
       <SqlPreview text={query.text} />
-      <div className="qmeta" title={stated?.over ? `Over ${stated.over}${stated.totals ? ` (${stated.totals})` : ""}` : undefined}>
+      <div className="qmeta" title={stated?.over ? (stated.totals ? t("ui.finding_detail.over_totals", { over: stated.over, totals: stated.totals }) : t("ui.finding_detail.over", { over: stated.over })) : undefined}>
         {share != null && (
-          <span>
-            <b>{percent(share)}</b> of DB time
-          </span>
+          <span>{withElements(t("ui.finding_detail.db_time_share", { share: slot(0) }), [<b key="share">{percent(share)}</b>])}</span>
         )}
         <span>
           <b>{count(stated ? stated.runs : query.executions)}</b>{" "}
-          {ran != null ? ran.replace(/^\S+ /, "") : (stated?.perDay ?? rates?.perDay) ? "runs/day" : "runs"}
+          {ran != null
+            ? ran.replace(/^\S+ /, "")
+            : (stated?.perDay ?? rates?.perDay)
+              ? t("ui.finding_detail.runs_per_day", { n: stated ? stated.runs : query.executions })
+              : t("ui.finding_detail.runs", { n: stated ? stated.runs : query.executions })}
         </span>
-        <span>
-          avg <b>{duration(stated?.mean ?? query.mean_time_ms)}</b>
-        </span>
-        {stated?.over && <span className="muted">over {stated.over}</span>}
+        <span>{withElements(t("ui.finding_detail.average", { duration: slot(0) }), [<b key="avg">{duration(stated?.mean ?? query.mean_time_ms)}</b>])}</span>
+        {stated?.over && <span className="muted">{t("ui.finding_detail.over_short", { over: stated.over })}</span>}
         {query.object_name && <span className="mono">{query.object_name}</span>}
         <span className="open muted">
-          {node != null ? "Open plan" : "Open query"} <ArrowUpRight size={12} />
+          {node != null ? t("ui.finding_detail.open_plan") : t("ui.finding_detail.open_query")} <ArrowUpRight size={12} />
         </span>
       </div>
     </div>
@@ -303,13 +324,13 @@ function StoppedRunning({ report, lastSeen }: { report: Report; lastSeen: string
   if (lastSeen != null && Math.abs(first - Date.parse(lastSeen)) < 1000) {
     return (
       <>
-        <b>Not run since Culprit's first scan, {ago(firstScan)}.</b> These queries may have stopped before it: a deploy before that scan may have changed them.
+        <b>{t("ui.finding_detail.not_run_since_first_scan", { ago: ago(firstScan) })}</b> {t("ui.finding_detail.not_run_since_first_scan_detail")}
       </>
     );
   }
   return (
     <>
-      <b>{lastSeen ? `Last ran ${ago(lastSeen)}.` : "Stopped running."}</b> These queries no longer run: a deploy may have changed them.
+      <b>{lastSeen ? t("ui.finding_detail.last_ran", { ago: ago(lastSeen) }) : t("ui.finding_detail.stopped")}</b> {t("ui.finding_detail.stopped_detail")}
     </>
   );
 }
@@ -342,7 +363,7 @@ function HotNode({ plan, query, focus, weighed, aboutThePlan }: { plan: Plan; qu
             {named.object && <span className="mono"> {named.object}</span>}
             {named.index && <span className="muted"> · {named.index}</span>}
           </div>
-          {by && <div className="muted" style={{ marginTop: 2 }}>by {shortPredicate(by)}</div>}
+          {by && <div className="muted" style={{ marginTop: 2 }}>{t("ui.finding_detail.by", { predicate: shortPredicate(by) })}</div>}
         </div>
       </div>
     );
@@ -357,7 +378,7 @@ function HotNode({ plan, query, focus, weighed, aboutThePlan }: { plan: Plan; qu
   // Counted only by an actual plan whose engine reported it; otherwise the optimizer's estimate or the table's size.
   const counted = plan.kind === "actual" && node.rows_read != null;
   const projectedRows = rowsOut(plan, node);
-  const returned = node.act_rows != null ? count(node.act_rows) : projectedRows == null ? "an unrecorded number of rows" : `~${count(Math.max(1, Math.round(projectedRows)))}`;
+  const returned = node.act_rows != null ? count(node.act_rows) : projectedRows == null ? t("ui.finding_detail.unrecorded_rows") : `~${count(Math.max(1, Math.round(projectedRows)))}`;
   return (
     <div className="hotnode">
       <Flame size={16} color="var(--heat-4)" style={{ marginTop: 1, flexShrink: 0 }} />
@@ -365,11 +386,17 @@ function HotNode({ plan, query, focus, weighed, aboutThePlan }: { plan: Plan; qu
         <div>
           <span className="op">{node.op}</span>
           {node.object && <span className="mono"> {node.object}</span>}
-          {share != null && <span className="muted"> · {percent(share)} of the plan's cost</span>}
+          {share != null && <span className="muted"> · {t("ui.finding_detail.plan_cost_share", { share: percent(share) })}</span>}
         </div>
         <div className="muted" style={{ marginTop: 2 }}>
-          {read != null ? `${counted ? "Reads" : "Expected to read"} ${rowCount(read)} to return ${returned}` : node.act_rows != null ? `Returns ${rowCount(node.act_rows)}` : `Estimates ${rowCount(estRows(plan, node))}`}
-          {node.predicate ? ` · filter ${shortPredicate(node.predicate)}` : ""}
+          {read != null
+            ? counted
+              ? t("ui.finding_detail.reads", { rows: rowCount(read), returned })
+              : t("ui.finding_detail.expected_reads", { rows: rowCount(read), returned })
+            : node.act_rows != null
+              ? t("ui.finding_detail.returns", { rows: rowCount(node.act_rows) })
+              : t("ui.finding_detail.estimates", { rows: rowCount(estRows(plan, node)) })}
+          {node.predicate ? ` · ${t("ui.finding_detail.filter", { predicate: shortPredicate(node.predicate) })}` : ""}
         </div>
         {why && (
           <div className="muted" style={{ marginTop: 2 }}>
