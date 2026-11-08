@@ -2,6 +2,9 @@ import { expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { argumentsOf } from "./message-format";
+import { pluralRule } from "./plural";
+import { isLanguageCode } from "./language-code";
+import languageTags from "../../../locales/.tests/language-tags.json";
 
 // The catalogs contributors add: each must read, and say what English says with the same arguments used the same way.
 const dir = join(import.meta.dir, "../../../locales");
@@ -9,16 +12,22 @@ const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
 const load = (file: string) => JSON.parse(readFileSync(join(dir, file), "utf8")) as Record<string, unknown>;
 const english = load("en.json");
 
+test("catalog tags allow scripts, regions and variants with canonical spelling", () => {
+  for (const tag of languageTags.valid) expect(isLanguageCode(tag), tag).toBe(true);
+  for (const tag of languageTags.invalid) expect(isLanguageCode(tag), tag).toBe(false);
+});
+
 test("every language is a file named by its code, describing itself", () => {
   expect(files).toContain("en.json");
   for (const file of files) {
-    expect(file).toMatch(/^[a-z]{2,3}(-[A-Z][A-Za-z]{1,3})?\.json$/);
+    expect(isLanguageCode(file.replace(/\.json$/, "")), file).toBe(true);
     const meta = load(file)._meta as Record<string, string>;
     expect(meta?.name, file).toBeTruthy();
     expect(meta?.english_name, file).toBeTruthy();
-    expect(["one_is_1", "one_below_2"], file).toContain(meta?.plural ?? "");
+    expect(pluralRule(meta?.plural ?? ""), file).toBeDefined();
     expect(typeof meta?.decimal, file).toBe("string");
     expect(typeof meta?.group, file).toBe("string");
+    expect(["ltr", "rtl"], file).toContain(meta?.direction ?? "");
   }
 });
 

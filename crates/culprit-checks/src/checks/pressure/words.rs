@@ -584,8 +584,8 @@ summary: Azure caps each tier's cpu. In the last 60 minutes it was at 95% or mor
 impact: near limit 40%
 metric: Samples at or above 95%
 metric: Peak
-fix: Fix the queries that use the most CPU first (Waits → CPU lists them); then consider more vCores.
-verify: Re-scan: cpu should stay under 95% for most of the time (the Health strip on Overview shows it)."#,
+fix: Fix the queries that use the most CPU first (Where time goes → CPU lists them); then consider more vCores.
+verify: Re-scan: cpu should stay under 95% for most of the time (the Health strip on Dashboard shows it)."#,
     ),
     (
         "data-io",
@@ -596,7 +596,7 @@ impact: near limit 40%
 metric: Samples at or above 95%
 metric: Peak
 fix: Cut scans with the missing-index findings and check memory; then consider a tier with more IO.
-verify: Re-scan: data reads should stay under 95% for most of the time (the Health strip on Overview shows it)."#,
+verify: Re-scan: data reads should stay under 95% for most of the time (the Health strip on Dashboard shows it)."#,
     ),
     (
         "log-write",
@@ -607,7 +607,7 @@ impact: near limit 40%
 metric: Samples at or above 95%
 metric: Peak
 fix: Batch small writes into fewer transactions and avoid row-by-row changes; then consider a tier with more log throughput.
-verify: Re-scan: log writes should stay under 95% for most of the time (the Health strip on Overview shows it)."#,
+verify: Re-scan: log writes should stay under 95% for most of the time (the Health strip on Dashboard shows it)."#,
     ),
     (
         "workers",
@@ -618,7 +618,7 @@ impact: near limit 40%
 metric: Samples at or above 95%
 metric: Peak
 fix: Look for blocking chains and heavy parallelism (they hold many workers); then consider a bigger tier.
-verify: Re-scan: worker threads should stay under 95% for most of the time (the Health strip on Overview shows it)."#,
+verify: Re-scan: worker threads should stay under 95% for most of the time (the Health strip on Dashboard shows it)."#,
     ),
 ];
 const MEMORY_GRANT: &[(&str, &str)] = &[
@@ -731,7 +731,7 @@ metric: Lock waits since start
 metric: Time waiting since start
 metric: Average wait
 fix: Keep transactions short (no user input or slow calls inside them), make UPDATE and DELETE filter on indexed columns, and touch tables in the same order everywhere. Live shows who blocks whom right now.
-verify: Sample Waits → Right now during normal load: it counts row-lock waits over the sample, which should be rare and short.
+verify: Sample Where time goes → Right now during normal load: it counts row-lock waits over the sample, which should be rare and short.
 caveat: MySQL counts row-lock waits for the whole server, so other databases' waits are in these numbers."#,
     ),
     (
@@ -744,7 +744,7 @@ metric: Lock waits since start
 metric: Time waiting since start
 metric: Average wait
 fix: Keep transactions short (no user input or slow calls inside them), make UPDATE and DELETE filter on indexed columns, and touch tables in the same order everywhere. Live shows who blocks whom right now.
-verify: Sample Waits → Right now during normal load: it counts row-lock waits over the sample, which should be rare and short.
+verify: Sample Where time goes → Right now during normal load: it counts row-lock waits over the sample, which should be rare and short.
 caveat: MySQL counts row-lock waits for the whole server, so other databases' waits are in these numbers."#,
     ),
 ];
@@ -757,8 +757,8 @@ summary: When the scan ran, 1 query was waiting for a grant before it could star
 impact: 1 waiting
 metric: Waiting now
 fix: Shrink the biggest over-sized grants first (see the memory-grant findings), then look at plans that sort or hash large scans. Raising max server memory, or the tier, treats the symptom.
-verify: Re-scan, or sample Right now in Waits: memory waits should fall under a minute an hour and nothing should be waiting for a grant.
-caveat: Seen once, when the scan ran, with nothing on record before it: sample Waits → Right now a few times before acting on it."#,
+verify: Re-scan, or sample Right now in Where time goes: memory waits should fall under a minute an hour and nothing should be waiting for a grant.
+caveat: Seen once, when the scan ran, with nothing on record before it: sample Where time goes → Right now a few times before acting on it."#,
     ),
     (
         "pending",
@@ -768,8 +768,8 @@ summary: When the scan ran, 6 queries were waiting for a grant before they could
 impact: 6 waiting
 metric: Waiting now
 fix: Shrink the biggest over-sized grants first (see the memory-grant findings), then look at plans that sort or hash large scans. Raising max server memory, or the tier, treats the symptom.
-verify: Re-scan, or sample Right now in Waits: memory waits should fall under a minute an hour and nothing should be waiting for a grant.
-caveat: Seen once, when the scan ran, with nothing on record before it: sample Waits → Right now a few times before acting on it."#,
+verify: Re-scan, or sample Right now in Where time goes: memory waits should fall under a minute an hour and nothing should be waiting for a grant.
+caveat: Seen once, when the scan ran, with nothing on record before it: sample Where time goes → Right now a few times before acting on it."#,
     ),
     (
         "grant-history",
@@ -779,7 +779,7 @@ summary: Since SQL Server started 3 days ago, this database's queries waited 36 
 impact: 36 h grant waits
 metric: Grant waits since start
 fix: Shrink the biggest over-sized grants first (see the memory-grant findings), then look at plans that sort or hash large scans. Raising max server memory, or the tier, treats the symptom.
-verify: Re-scan, or sample Right now in Waits: memory waits should fall under a minute an hour and nothing should be waiting for a grant."#,
+verify: Re-scan, or sample Right now in Where time goes: memory waits should fall under a minute an hour and nothing should be waiting for a grant."#,
     ),
     (
         "windowed",
@@ -789,8 +789,8 @@ summary: Waits for memory are 100% of all waiting in the last 5 hours, about 1 h
 impact: 100% of waits
 metric: Share of waits
 metric: Memory waits per hour
-fix: Sample Waits → Right now while it happens to see which wait it is. For grant waits (RESOURCE_SEMAPHORE), shrink the biggest over-sized grants (the memory-grant findings); for allocation waits (CMEMTHREAD), parameterize one-off statements so fewer compile, and keep parallelism in check.
-verify: Re-scan, or sample Right now in Waits: memory waits should fall under a minute an hour and nothing should be waiting for a grant."#,
+fix: Sample Where time goes → Right now while it happens to see which wait it is. For grant waits (RESOURCE_SEMAPHORE), shrink the biggest over-sized grants (the memory-grant findings); for allocation waits (CMEMTHREAD), parameterize one-off statements so fewer compile, and keep parallelism in check.
+verify: Re-scan, or sample Right now in Where time goes: memory waits should fall under a minute an hour and nothing should be waiting for a grant."#,
     ),
     (
         "shared",
@@ -802,7 +802,7 @@ metric: Share of waits
 metric: Memory waits per hour
 metric: Waiting now
 fix: Shrink the biggest over-sized grants first (see the memory-grant findings), then look at plans that sort or hash large scans. Raising max server memory, or the tier, treats the symptom.
-verify: Re-scan, or sample Right now in Waits: memory waits should fall under a minute an hour and nothing should be waiting for a grant."#,
+verify: Re-scan, or sample Right now in Where time goes: memory waits should fall under a minute an hour and nothing should be waiting for a grant."#,
     ),
     (
         "database",
@@ -812,8 +812,8 @@ summary: Waits for memory are 100% of all waiting in the time since SQL Server s
 impact: 100% of waits
 metric: Share of waits
 metric: Memory waits per hour
-fix: Sample Waits → Right now while it happens to see which wait it is. For grant waits (RESOURCE_SEMAPHORE), shrink the biggest over-sized grants (the memory-grant findings); for allocation waits (CMEMTHREAD), parameterize one-off statements so fewer compile, and keep parallelism in check.
-verify: Re-scan, or sample Right now in Waits: memory waits should fall under a minute an hour and nothing should be waiting for a grant."#,
+fix: Sample Where time goes → Right now while it happens to see which wait it is. For grant waits (RESOURCE_SEMAPHORE), shrink the biggest over-sized grants (the memory-grant findings); for allocation waits (CMEMTHREAD), parameterize one-off statements so fewer compile, and keep parallelism in check.
+verify: Re-scan, or sample Right now in Where time goes: memory waits should fall under a minute an hour and nothing should be waiting for a grant."#,
     ),
 ];
 const WORKER_PRESSURE: &[(&str, &str)] = &[
@@ -826,7 +826,7 @@ impact: THREADPOOL waits
 metric: Waiting now
 fix: Find the head blocker in Live and end the transaction behind the chain; then lower parallelism so each query takes fewer workers (cost threshold for parallelism, MAXDOP). Raising max worker threads only hides it.
 verify: Re-scan: THREADPOOL waits should stop growing and nothing should wait for a worker.
-caveat: Seen once, when the scan ran, with nothing on record before it: sample Waits → Right now a few times before acting on it."#,
+caveat: Seen once, when the scan ran, with nothing on record before it: sample Where time goes → Right now a few times before acting on it."#,
     ),
     (
         "one-waiting",
@@ -837,7 +837,7 @@ impact: THREADPOOL waits
 metric: Waiting now
 fix: Find the head blocker in Live and end the transaction behind the chain; then lower parallelism so each query takes fewer workers (cost threshold for parallelism, MAXDOP). Raising max worker threads only hides it.
 verify: Re-scan: THREADPOOL waits should stop growing and nothing should wait for a worker.
-caveat: Seen once, when the scan ran, with nothing on record before it: sample Waits → Right now a few times before acting on it."#,
+caveat: Seen once, when the scan ran, with nothing on record before it: sample Where time goes → Right now a few times before acting on it."#,
     ),
     (
         "history",

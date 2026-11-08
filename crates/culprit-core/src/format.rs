@@ -249,10 +249,8 @@ pub fn list_or(items: &[String]) -> String {
 /// `items` listed with `pair` (the message joining two: "{first} and {last}") for the last two, and
 /// `common.list.more` ("{first}, {rest}") for each before them.
 fn joined(items: &[String], pair: &str) -> String {
-    let Some((last, rest)) = items.split_last() else { return String::new() };
-    let Some((before, rest)) = rest.split_last() else { return last.clone() };
-    let tail = i18n::t(pair, &[("first", Arg::from(before)), ("last", Arg::from(last))]);
-    rest.iter().rev().fold(tail, |tail, item| t!("common.list.more", first = item, rest = tail))
+    let messages: Vec<_> = items.iter().map(i18n::Message::from).collect();
+    i18n::Message::joined_list(&messages, pair).render()
 }
 
 /// `[db].[dbo].[orders].[created_at]>=[@P1]` reads as `created_at >= @P1`, and MySQL's `` `shop`.`orders`.`status` ``

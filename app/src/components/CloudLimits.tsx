@@ -161,7 +161,7 @@ function CloudChart({ series, signals }: { series: CloudSeries; signals: CloudSi
             <>
               <path className="cloud-area" d={`${line}L${x((last.start + last.end) / 2)},${VH}L${x((first.start + first.end) / 2)},${VH}Z`} />
               <path className="cloud-line" d={line} />
-              {limit != null && <line className={`cloud-limit ${series.limit_label?.startsWith("baseline") ? "baseline" : ""}`} x1={0} x2={1000} y1={y(limit)} y2={y(limit)} />}
+              {limit != null && <line className={`cloud-limit ${series.limit_kind === "baseline" ? "baseline" : ""}`} x1={0} x2={1000} y1={y(limit)} y2={y(limit)} />}
             </>
           );
         }}

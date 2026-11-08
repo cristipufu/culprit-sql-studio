@@ -9,7 +9,7 @@ use crate::{
 };
 use culprit_core::{
     Capability, ConnectionSpec, Coverage, Engine, Result, SNAPSHOT_FORMAT, Setting, Snapshot, SnapshotOptions,
-    StatisticsInfo, t,
+    StatisticsInfo,
 };
 use std::time::Instant;
 
@@ -59,7 +59,11 @@ pub async fn snapshot(
             }
             let withheld = collected.plans_withheld.is_some();
             if let Some(e) = collected.plans_withheld {
-                coverage.lost(Capability::QueryPlans, e.message, e.hint);
+                let mut missing = culprit_core::MissingCapability::new(Capability::QueryPlans, e.message_source());
+                if let Some(hint) = e.hint_source() {
+                    missing = missing.with_fix(hint);
+                }
+                coverage.lost_capability(missing);
             }
             families = collected.families;
             statement_status = collected.status;
@@ -69,10 +73,10 @@ pub async fn snapshot(
             Some(collected.workload)
         }
         Ok(None) => {
-            coverage.recorded(
+            coverage.recorded_message(
                 &sources::STATEMENTS,
                 culprit_core::SourceState::Unavailable,
-                Some(t!("provider.postgres.coverage.statements_unavailable")),
+                culprit_core::message!("provider.postgres.coverage.statements_unavailable"),
             );
             None
         }
@@ -84,7 +88,7 @@ pub async fn snapshot(
     if !probe.privileged && probe.statements_usable() {
         coverage.partial(
             &sources::STATEMENTS,
-            t!("provider.postgres.coverage.statements_hidden", user = quote_ident(&probe.user)),
+            culprit_core::message!("provider.postgres.coverage.statements_hidden", user = quote_ident(&probe.user)),
         );
     }
 
@@ -129,7 +133,7 @@ pub async fn snapshot(
     // PostgreSQL keeps no wait history: time by category comes from statement and WAL timing, when they are on.
     let waits_out = crate::pressure::history_waits(&primary, &probe, statements_ms, statements_io_ms).await;
     if statements_io_ms > statements_ms {
-        coverage.note("waits", t!("provider.postgres.coverage.io_exceeds_execution"));
+        coverage.note("waits", culprit_core::message!("provider.postgres.coverage.io_exceeds_execution"));
     }
 
     if waits_out.is_empty() {

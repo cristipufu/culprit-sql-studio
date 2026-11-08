@@ -803,6 +803,7 @@ mod tests {
         let mut r = report();
         r.snapshot.deadlocks = None;
         r.snapshot.notes.push(culprit_core::CollectorNote {
+            message_source: None,
             collector: "deadlocks".into(),
             message: "Reading deadlocks needs VIEW SERVER STATE.".into(),
             table: None,

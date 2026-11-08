@@ -29,6 +29,7 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock", "s
 clap = { version = "4.6.7", features = ["derive", "env"] }
 dirs = "7.0.0"
 futures-util = "0.3.34"
+icu_locale_core = { version = "2.3.0", features = ["alloc"] }
 keyring = "4.2.0"
 ring = "0.17.14"
 mysql_async = { version = "0.37.1", default-features = false, features = ["minimal-rust", "default-rustls-ring"] }

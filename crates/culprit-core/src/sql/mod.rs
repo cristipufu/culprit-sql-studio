@@ -28,6 +28,24 @@ pub use safety::{
     check, is_session_statement, mark_mssql_statements, reads_only, single_statement, without_parameter_list,
 };
 
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum StatementProblem {
+    Lexical(LexError),
+    Empty,
+    Multiple,
+}
+
+impl StatementProblem {
+    pub fn is_unclosed(self) -> bool {
+        matches!(
+            self,
+            Self::Lexical(LexError::UnclosedQuote | LexError::UnclosedComment | LexError::UnclosedDollarQuote)
+        )
+    }
+}
+
 /// What a statement does, for the question asked before it changes data on production.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
@@ -40,4 +58,7 @@ pub struct StatementCheck {
     pub warning: Option<String>,
     /// Why the text can't run as one statement (several statements, an unclosed quote), when it can't.
     pub problem: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub problem_kind: Option<StatementProblem>,
 }

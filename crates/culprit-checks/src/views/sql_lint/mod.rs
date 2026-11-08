@@ -14,7 +14,7 @@ mod lex;
 #[cfg(test)]
 mod tests;
 
-use culprit_core::{Engine, Finding, Metric, Snapshot, TableStat, Unit, format, t};
+use culprit_core::{Engine, Finding, Metric, Snapshot, StatementEvidence, TableStat, Unit, format, t};
 
 use alter_table::{check_alter_table, collect_validated_constraint_tables};
 use index_ddl::{
@@ -36,15 +36,28 @@ pub(super) struct ScriptContext<'a> {
 
 /// Lint one or more SQL statements (such as a migration file) against the catalog and table sizes in `snapshot`.
 pub fn lint_sql(snapshot: &Snapshot, sql: &str) -> Vec<Finding> {
-    let statements = split_statements(sql);
+    let spans = split_statement_spans(sql);
+    let statements: Vec<String> = spans.iter().map(|(_, _, statement)| statement.clone()).collect();
     let created_indexes = collect_script_indexes(&statements);
     let validated_tables = collect_validated_constraint_tables(&statements);
     let mut findings = Vec::new();
     let mut in_transaction = false;
-    for stmt in &statements {
+    let (mut previous, mut utf16, mut line) = (0, 0, 1);
+    for (start, end, stmt) in &spans {
+        let prefix = &sql[previous..*start];
+        utf16 += prefix.encode_utf16().count();
+        line += prefix.bytes().filter(|byte| *byte == b'\n').count();
+        previous = *start;
+        let source = &sql[*start..*end];
+        let evidence =
+            StatementEvidence { sql: source.into(), start: utf16, end: utf16 + source.encode_utf16().count(), line };
+        let first = findings.len();
         let ctx =
             ScriptContext { created_indexes: &created_indexes, validated_tables: &validated_tables, in_transaction };
         lint_single_statement(snapshot, stmt, &ctx, &mut in_transaction, &mut findings);
+        for finding in &mut findings[first..] {
+            finding.facts.statement = Some(evidence.clone());
+        }
     }
     findings
 }
@@ -225,10 +238,10 @@ pub(super) fn table_size_label(rows: f64, bytes: f64) -> String {
 
 pub(super) fn push_table_metrics(f: &mut Finding, rows: f64, bytes: f64) {
     if rows > 0.0 {
-        f.metrics.push(Metric::new(t!("view.sql_lint.metric.rows"), rows, Unit::Rows));
+        f.metrics.push(Metric::said(culprit_core::key!("view.sql_lint.metric.rows"), rows, Unit::Rows));
     }
     if bytes > 0.0 {
-        f.metrics.push(Metric::new(t!("view.sql_lint.metric.size"), bytes, Unit::Bytes));
+        f.metrics.push(Metric::said(culprit_core::key!("view.sql_lint.metric.size"), bytes, Unit::Bytes));
     }
 }
 

@@ -156,16 +156,20 @@ fn worker_pressure_finding(snapshot: &Snapshot, case: WorkerPressure) -> Finding
             f.summary = parts.join(" ");
             f.severity = severity;
             f.impact.score = base_score(f.severity);
-            f.impact.label = t!("check.worker_pressure.impact.threadpool");
+            f.impact.set_label(t!("check.worker_pressure.impact.threadpool"));
             f.confidence = confidence;
             if !history {
                 f.caveats.push(seen_once());
             }
             if let Some(t) = total.filter(|t| *t > 0.0) {
-                f.metrics.push(Metric::new(t!("check.worker_pressure.metric.waited"), t, Unit::Ms));
+                f.metrics.push(Metric::said(culprit_core::key!("check.worker_pressure.metric.waited"), t, Unit::Ms));
             }
             if waiting > 0.0 {
-                f.metrics.push(Metric::new(t!("check.worker_pressure.metric.waiting"), waiting, Unit::Count));
+                f.metrics.push(Metric::said(
+                    culprit_core::key!("check.worker_pressure.metric.waiting"),
+                    waiting,
+                    Unit::Count,
+                ));
             }
             f.fix = Some(Fix { summary: t!("check.worker_pressure.fix.threadpool"), sql: None, cost: None });
             f.verify = vec![t!("check.worker_pressure.verify.threadpool")];
@@ -209,9 +213,13 @@ fn worker_pressure_finding(snapshot: &Snapshot, case: WorkerPressure) -> Finding
             // context, but this count does not identify this database as its cause.
             f.severity = Severity::Low;
             f.impact.score = base_score(f.severity);
-            f.impact.label = t!("check.worker_pressure.impact.connections", percent = &percent);
+            f.impact.set_label(t!("check.worker_pressure.impact.connections", percent = &percent));
             f.confidence = Confidence::High;
-            f.metrics = vec![Metric::new(t!("check.worker_pressure.metric.connections"), used / 100.0, Unit::Ratio)];
+            f.metrics = vec![Metric::said(
+                culprit_core::key!("check.worker_pressure.metric.connections"),
+                used / 100.0,
+                Unit::Ratio,
+            )];
             f.fix = Some(Fix {
                 summary: if postgres {
                     t!("check.worker_pressure.fix.postgres")

@@ -40,6 +40,14 @@ pub enum CloudUnit {
     Sessions,
 }
 
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum CloudLimitKind {
+    Capacity,
+    Baseline,
+}
+
 /// One metric over the period, with the limit it is judged against when there is one.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
@@ -55,6 +63,9 @@ pub struct CloudSeries {
     pub limit_label: Option<String>,
     /// Lower is worse (credit balances, free memory): the limit is a floor.
     pub floor: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub limit_kind: Option<CloudLimitKind>,
 }
 
 impl CloudSeries {
@@ -67,13 +78,21 @@ impl CloudSeries {
             limit: None,
             limit_label: None,
             floor: false,
+            limit_kind: None,
         }
     }
 
     pub fn limit(mut self, limit: f64, label: impl Into<String>) -> CloudSeries {
         self.limit = Some(limit);
         self.limit_label = Some(label.into());
+        self.limit_kind = Some(CloudLimitKind::Capacity);
         self
+    }
+
+    pub fn baseline(self, limit: f64, label: impl Into<String>) -> CloudSeries {
+        let mut series = self.limit(limit, label);
+        series.limit_kind = Some(CloudLimitKind::Baseline);
+        series
     }
 
     pub fn floor(mut self) -> CloudSeries {
@@ -363,6 +382,19 @@ pub fn gp2_baseline_iops(allocated_gb: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn limit_kind_is_independent_of_its_display_label() {
+        let baseline =
+            CloudSeries::new("CPUUtilization", "CPU", CloudUnit::Percent, vec![]).baseline(20.0, "limite de base");
+        assert_eq!(baseline.limit_kind, Some(CloudLimitKind::Baseline));
+        assert_eq!(
+            baseline.clone().limit(100.0, "baseline is a word in this label").limit_kind,
+            Some(CloudLimitKind::Capacity)
+        );
+        let restored: CloudSeries = serde_json::from_str(&serde_json::to_string(&baseline).unwrap()).unwrap();
+        assert_eq!(restored.limit_kind, Some(CloudLimitKind::Baseline));
+    }
 
     fn series(values: &[f64]) -> CloudSeries {
         let points = values

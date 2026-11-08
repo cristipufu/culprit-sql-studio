@@ -9,7 +9,7 @@ import { fromRust } from "../test/fixtures";
 test("format.ts writes digits with the language's separators and units in its words", () => {
   registerCatalogs({
     xx: {
-      _meta: { name: "Test", english_name: "Test", plural: "one_below_2", decimal: ",", group: "." },
+      _meta: { name: "Test", english_name: "Test", plural: "fr", decimal: ",", group: "." },
       "ui.format.days": "{n, plural, one {{count} jour} other {{count} jours}}",
       "ui.format.count.thousands": "{value} k",
     },

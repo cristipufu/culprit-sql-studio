@@ -18,8 +18,8 @@
         "nodes": [
           "3d2d9e10555b4ae2a683a8402505e416"
         ],
-        "observations": 720.0,
-        "weighted_observations": 720.0,
+        "observations": 720,
+        "weighted_observations": 720,
         "partial": false,
         "notes": [
           "Weights describe sampled active tasks, not query elapsed time, exclusive wait time, or CPU utilization. YSQL and DocDB components can execute concurrently.",
@@ -34,8 +34,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": null,
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 8.0,
-          "weighted_observations": 8.0
+          "observations": 8,
+          "weighted_observations": 8
         },
         {
           "category": "cpu",
@@ -43,8 +43,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "-2728707991994911518",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -52,8 +52,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "-3689209423570559802",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -61,8 +61,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "-5007079708436876482",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "cpu",
@@ -70,8 +70,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "-713168459184540613",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 5.0,
-          "weighted_observations": 5.0
+          "observations": 5,
+          "weighted_observations": 5
         },
         {
           "category": "cpu",
@@ -79,8 +79,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "-71879613880347319",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "cpu",
@@ -88,8 +88,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "-931933775931894404",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -97,8 +97,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "235466480053740090",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -106,8 +106,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "4357247400045295631",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 3.0,
-          "weighted_observations": 3.0
+          "observations": 3,
+          "weighted_observations": 3
         },
         {
           "category": "cpu",
@@ -115,8 +115,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "5719102014621219231",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "cpu",
@@ -124,8 +124,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "5823602820705934744",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -133,8 +133,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "5921151122338638923",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 4.0,
-          "weighted_observations": 4.0
+          "observations": 4,
+          "weighted_observations": 4
         },
         {
           "category": "cpu",
@@ -142,8 +142,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "7006469591806129477",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -151,8 +151,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "7273159468184047901",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -160,8 +160,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": null,
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 4.0,
-          "weighted_observations": 4.0
+          "observations": 4,
+          "weighted_observations": 4
         },
         {
           "category": "cpu",
@@ -169,8 +169,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "-1517548228165474989",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -178,8 +178,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "-1787568209473882094",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -187,8 +187,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "-2703255303163799507",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 3.0,
-          "weighted_observations": 3.0
+          "observations": 3,
+          "weighted_observations": 3
         },
         {
           "category": "cpu",
@@ -196,8 +196,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "-3192186016408867343",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -205,8 +205,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "-3392469409788823189",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -214,8 +214,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "-408364268248938295",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -223,8 +223,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "-5340329820669083003",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -232,8 +232,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "-5792860803345533714",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "cpu",
@@ -241,8 +241,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "-6537040776677608807",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -250,8 +250,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "-753680036036179657",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -259,8 +259,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "-864983160724116246",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -268,8 +268,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "-8929714698874203245",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -277,8 +277,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "2632737199838699367",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -286,8 +286,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "2674185192700380354",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -295,8 +295,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "3271918854569934339",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 17.0,
-          "weighted_observations": 17.0
+          "observations": 17,
+          "weighted_observations": 17
         },
         {
           "category": "cpu",
@@ -304,8 +304,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "4301505524073350148",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -313,8 +313,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "4357247400045295631",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -322,8 +322,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "4440392919792280265",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -331,8 +331,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "5038046910825610469",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "cpu",
@@ -340,8 +340,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "596898573015391586",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 4.0,
-          "weighted_observations": 4.0
+          "observations": 4,
+          "weighted_observations": 4
         },
         {
           "category": "cpu",
@@ -349,8 +349,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "6015843350145977360",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -358,8 +358,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "6468024676927488686",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -367,8 +367,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "6946118948037394950",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "cpu",
@@ -376,8 +376,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "7523565620358372916",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -385,8 +385,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "814450674345135467",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -394,8 +394,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "8345917977273313509",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "cpu",
@@ -403,8 +403,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "8605776759770690123",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -412,8 +412,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "8629010497789226172",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -421,8 +421,8 @@
           "wait_event": "OnCpu_Passive",
           "query_id": "8650148149602117896",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -430,8 +430,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": null,
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 15.0,
-          "weighted_observations": 15.0
+          "observations": 15,
+          "weighted_observations": 15
         },
         {
           "category": "cpu",
@@ -439,8 +439,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "-1028551508738045588",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -448,8 +448,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "-2056459776884762677",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -457,8 +457,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "-5007079708436876482",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 3.0,
-          "weighted_observations": 3.0
+          "observations": 3,
+          "weighted_observations": 3
         },
         {
           "category": "cpu",
@@ -466,8 +466,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "-71879613880347319",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -475,8 +475,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "-7204468180729579037",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -484,8 +484,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "-8917791705733506944",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -493,8 +493,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "-9004267941791404519",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -502,8 +502,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "2928110151295439704",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -511,8 +511,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "4748180227537106784",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -520,8 +520,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "6015843350145977360",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "cpu",
@@ -529,8 +529,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "6433999367571201465",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "cpu",
@@ -538,8 +538,8 @@
           "wait_event": "OnCpu_Active",
           "query_id": "8562978910369145513",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "lock",
@@ -547,8 +547,8 @@
           "wait_event": "ConflictResolution_WaitOnConflictingTxns",
           "query_id": "-7152432444458441206",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 30.0,
-          "weighted_observations": 30.0
+          "observations": 30,
+          "weighted_observations": 30
         },
         {
           "category": "log",
@@ -556,8 +556,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-1276741498789909678",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -565,8 +565,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-13316467560742958",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -574,8 +574,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-1373375161034666496",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "log",
@@ -583,8 +583,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-2703255303163799507",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -592,8 +592,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-2754644767582019477",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -601,8 +601,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-3104306926680498094",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -610,8 +610,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-3192186016408867343",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "log",
@@ -619,8 +619,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-4949468023234369794",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -628,8 +628,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-5340329820669083003",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -637,8 +637,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-5792860803345533714",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -646,8 +646,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-7152432444458441206",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 10.0,
-          "weighted_observations": 10.0
+          "observations": 10,
+          "weighted_observations": 10
         },
         {
           "category": "log",
@@ -655,8 +655,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-726154913371195336",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -664,8 +664,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-753680036036179657",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "log",
@@ -673,8 +673,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-7702684928429264269",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -682,8 +682,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-8354496417938307580",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -691,8 +691,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-8929714698874203245",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "log",
@@ -700,8 +700,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "-9122282135254722884",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -709,8 +709,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "140927240553615407",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -718,8 +718,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "2160487361778214680",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -727,8 +727,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "2674185192700380354",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "log",
@@ -736,8 +736,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "3271918854569934339",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 20.0,
-          "weighted_observations": 20.0
+          "observations": 20,
+          "weighted_observations": 20
         },
         {
           "category": "log",
@@ -745,8 +745,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "3309601389840078471",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -754,8 +754,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "4760071149706557231",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -763,8 +763,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "5058528066607146945",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -772,8 +772,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "596898573015391586",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "log",
@@ -781,8 +781,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "6156205948076866034",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -790,8 +790,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "7204630376357230959",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -799,8 +799,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "7279720627173030517",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -808,8 +808,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "7769279846708932230",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -817,8 +817,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "7948482031762687007",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -826,8 +826,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "821638449254366825",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -835,8 +835,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "8527318246400101247",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "log",
@@ -844,8 +844,8 @@
           "wait_event": "Raft_WaitingForReplication",
           "query_id": "8839079152179972803",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "other",
@@ -853,8 +853,8 @@
           "wait_event": "BackfillIndex_WaitToBackfillTablet",
           "query_id": "596898573015391586",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "other",
@@ -862,8 +862,8 @@
           "wait_event": "PgSleep",
           "query_id": "-7325742767792124762",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 19.0,
-          "weighted_observations": 19.0
+          "observations": 19,
+          "weighted_observations": 19
         },
         {
           "category": "other",
@@ -871,8 +871,8 @@
           "wait_event": "PgSleep",
           "query_id": "-7611524858906631594",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 71.0,
-          "weighted_observations": 71.0
+          "observations": 71,
+          "weighted_observations": 71
         },
         {
           "category": "other",
@@ -880,8 +880,8 @@
           "wait_event": "PgSleep",
           "query_id": "4722964161584367629",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 13.0,
-          "weighted_observations": 13.0
+          "observations": 13,
+          "weighted_observations": 13
         },
         {
           "category": "rpc",
@@ -889,8 +889,8 @@
           "wait_event": "YBClient_LookingUpTablet",
           "query_id": null,
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -898,8 +898,8 @@
           "wait_event": "YBClient_LookingUpTablet",
           "query_id": "4096141041948979767",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -907,8 +907,8 @@
           "wait_event": "YBClient_WaitingOnMaster",
           "query_id": null,
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -916,8 +916,8 @@
           "wait_event": "YBClient_WaitingOnMaster",
           "query_id": "-1179983938375594333",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -925,8 +925,8 @@
           "wait_event": "YBClient_WaitingOnMaster",
           "query_id": "-5792860803345533714",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -934,8 +934,8 @@
           "wait_event": "YBClient_WaitingOnMaster",
           "query_id": "-6083335322144042091",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -943,8 +943,8 @@
           "wait_event": "YBClient_WaitingOnMaster",
           "query_id": "-7601473890952630532",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -952,8 +952,8 @@
           "wait_event": "YBClient_WaitingOnMaster",
           "query_id": "4301505524073350148",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -961,8 +961,8 @@
           "wait_event": "YBClient_WaitingOnMaster",
           "query_id": "596898573015391586",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -970,8 +970,8 @@
           "wait_event": "YBClient_WaitingOnMaster",
           "query_id": "6451500124395707827",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -979,8 +979,8 @@
           "wait_event": "YBClient_WaitingOnMaster",
           "query_id": "6468024676927488686",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -988,8 +988,8 @@
           "wait_event": "CatalogRead",
           "query_id": null,
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 94.0,
-          "weighted_observations": 94.0
+          "observations": 94,
+          "weighted_observations": 94
         },
         {
           "category": "rpc",
@@ -997,8 +997,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-1276741498789909678",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1006,8 +1006,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-13316467560742958",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1015,8 +1015,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-1479195344014297589",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1024,8 +1024,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-2703255303163799507",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 3.0,
-          "weighted_observations": 3.0
+          "observations": 3,
+          "weighted_observations": 3
         },
         {
           "category": "rpc",
@@ -1033,8 +1033,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-2860102644019654430",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1042,8 +1042,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-3066537730724545520",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1051,8 +1051,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-3104306926680498094",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1060,8 +1060,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-3192186016408867343",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1069,8 +1069,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-3193250455600049243",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1078,8 +1078,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-3569357883525559680",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1087,8 +1087,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-3689209423570559802",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1096,8 +1096,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-3735522913179602041",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1105,8 +1105,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-3840171284034082028",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1114,8 +1114,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-4153638838219698907",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1123,8 +1123,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-4289801482278566499",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "rpc",
@@ -1132,8 +1132,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-4825957762359672767",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1141,8 +1141,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-4980241883324164820",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1150,8 +1150,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-5007079708436876482",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 13.0,
-          "weighted_observations": 13.0
+          "observations": 13,
+          "weighted_observations": 13
         },
         {
           "category": "rpc",
@@ -1159,8 +1159,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-5774174497088897041",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1168,8 +1168,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-5792860803345533714",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1177,8 +1177,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-6103641176246441540",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1186,8 +1186,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-6504034630337227641",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1195,8 +1195,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-6537040776677608807",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1204,8 +1204,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-6985753706444711410",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1213,8 +1213,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-7212225344362703587",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1222,8 +1222,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-7237359852250298158",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1231,8 +1231,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-726154913371195336",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1240,8 +1240,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-7504099400277568102",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1249,8 +1249,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-753680036036179657",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1258,8 +1258,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-7702684928429264269",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1267,8 +1267,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-8354496417938307580",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1276,8 +1276,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-8424009250137967587",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1285,8 +1285,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-851268166472549988",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1294,8 +1294,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-8833146572111975712",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1303,8 +1303,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-8917791705733506944",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1312,8 +1312,8 @@
           "wait_event": "CatalogRead",
           "query_id": "-8929714698874203245",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1321,8 +1321,8 @@
           "wait_event": "CatalogRead",
           "query_id": "1064624875571929057",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1330,8 +1330,8 @@
           "wait_event": "CatalogRead",
           "query_id": "1749148260912568714",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "rpc",
@@ -1339,8 +1339,8 @@
           "wait_event": "CatalogRead",
           "query_id": "2160487361778214680",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1348,8 +1348,8 @@
           "wait_event": "CatalogRead",
           "query_id": "2218764411308582030",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1357,8 +1357,8 @@
           "wait_event": "CatalogRead",
           "query_id": "2620372088682860836",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1366,8 +1366,8 @@
           "wait_event": "CatalogRead",
           "query_id": "2674185192700380354",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1375,8 +1375,8 @@
           "wait_event": "CatalogRead",
           "query_id": "278224027727008978",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1384,8 +1384,8 @@
           "wait_event": "CatalogRead",
           "query_id": "2784582649328327428",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1393,8 +1393,8 @@
           "wait_event": "CatalogRead",
           "query_id": "2928110151295439704",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "rpc",
@@ -1402,8 +1402,8 @@
           "wait_event": "CatalogRead",
           "query_id": "3661334309730614615",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1411,8 +1411,8 @@
           "wait_event": "CatalogRead",
           "query_id": "3688553736187017036",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1420,8 +1420,8 @@
           "wait_event": "CatalogRead",
           "query_id": "381540023235544666",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1429,8 +1429,8 @@
           "wait_event": "CatalogRead",
           "query_id": "4096141041948979767",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1438,8 +1438,8 @@
           "wait_event": "CatalogRead",
           "query_id": "4232283076295021357",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1447,8 +1447,8 @@
           "wait_event": "CatalogRead",
           "query_id": "4301505524073350148",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "rpc",
@@ -1456,8 +1456,8 @@
           "wait_event": "CatalogRead",
           "query_id": "4567995671601448908",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1465,8 +1465,8 @@
           "wait_event": "CatalogRead",
           "query_id": "4760071149706557231",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "rpc",
@@ -1474,8 +1474,8 @@
           "wait_event": "CatalogRead",
           "query_id": "4779348807761320991",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1483,8 +1483,8 @@
           "wait_event": "CatalogRead",
           "query_id": "596898573015391586",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1492,8 +1492,8 @@
           "wait_event": "CatalogRead",
           "query_id": "6015843350145977360",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 3.0,
-          "weighted_observations": 3.0
+          "observations": 3,
+          "weighted_observations": 3
         },
         {
           "category": "rpc",
@@ -1501,8 +1501,8 @@
           "wait_event": "CatalogRead",
           "query_id": "6156205948076866034",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1510,8 +1510,8 @@
           "wait_event": "CatalogRead",
           "query_id": "6285946342424321169",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1519,8 +1519,8 @@
           "wait_event": "CatalogRead",
           "query_id": "6468024676927488686",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1528,8 +1528,8 @@
           "wait_event": "CatalogRead",
           "query_id": "6758665142378950909",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "rpc",
@@ -1537,8 +1537,8 @@
           "wait_event": "CatalogRead",
           "query_id": "6843425117121118984",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1546,8 +1546,8 @@
           "wait_event": "CatalogRead",
           "query_id": "6946118948037394950",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1555,8 +1555,8 @@
           "wait_event": "CatalogRead",
           "query_id": "7145909129865983618",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "rpc",
@@ -1564,8 +1564,8 @@
           "wait_event": "CatalogRead",
           "query_id": "7204630376357230959",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1573,8 +1573,8 @@
           "wait_event": "CatalogRead",
           "query_id": "7279720627173030517",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1582,8 +1582,8 @@
           "wait_event": "CatalogRead",
           "query_id": "7452713498068816006",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1591,8 +1591,8 @@
           "wait_event": "CatalogRead",
           "query_id": "7578521457132567737",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1600,8 +1600,8 @@
           "wait_event": "CatalogRead",
           "query_id": "821638449254366825",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1609,8 +1609,8 @@
           "wait_event": "CatalogRead",
           "query_id": "8605776759770690123",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "rpc",
@@ -1618,8 +1618,8 @@
           "wait_event": "CatalogRead",
           "query_id": "8805990718693291899",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1627,8 +1627,8 @@
           "wait_event": "CatalogWrite",
           "query_id": "-2175594862022475206",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1636,8 +1636,8 @@
           "wait_event": "CatalogWrite",
           "query_id": "-6537040776677608807",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1645,8 +1645,8 @@
           "wait_event": "CatalogWrite",
           "query_id": "3284295404673222535",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1654,8 +1654,8 @@
           "wait_event": "CatalogWrite",
           "query_id": "3394469831684051852",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1663,8 +1663,8 @@
           "wait_event": "CatalogWrite",
           "query_id": "4567995671601448908",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1672,8 +1672,8 @@
           "wait_event": "CatalogWrite",
           "query_id": "4760071149706557231",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1681,8 +1681,8 @@
           "wait_event": "CatalogWrite",
           "query_id": "9207799508657410746",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1690,8 +1690,8 @@
           "wait_event": "StorageFlush",
           "query_id": "-1269900487716692310",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1699,8 +1699,8 @@
           "wait_event": "StorageFlush",
           "query_id": "-1373375161034666496",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1708,8 +1708,8 @@
           "wait_event": "StorageFlush",
           "query_id": "-1476593201782770303",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1717,8 +1717,8 @@
           "wait_event": "StorageFlush",
           "query_id": "-2493667070262699002",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1726,8 +1726,8 @@
           "wait_event": "StorageFlush",
           "query_id": "-3306639839067324183",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1735,8 +1735,8 @@
           "wait_event": "StorageFlush",
           "query_id": "-5340329820669083003",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1744,8 +1744,8 @@
           "wait_event": "StorageFlush",
           "query_id": "-5603783198124391966",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 29.0,
-          "weighted_observations": 29.0
+          "observations": 29,
+          "weighted_observations": 29
         },
         {
           "category": "rpc",
@@ -1753,8 +1753,8 @@
           "wait_event": "StorageFlush",
           "query_id": "-5792860803345533714",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1762,8 +1762,8 @@
           "wait_event": "StorageFlush",
           "query_id": "-7152432444458441206",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 32.0,
-          "weighted_observations": 32.0
+          "observations": 32,
+          "weighted_observations": 32
         },
         {
           "category": "rpc",
@@ -1771,8 +1771,8 @@
           "wait_event": "StorageFlush",
           "query_id": "-7692889190764288043",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1780,8 +1780,8 @@
           "wait_event": "StorageFlush",
           "query_id": "-8047301712394901574",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1789,8 +1789,8 @@
           "wait_event": "StorageFlush",
           "query_id": "-8328236635380811978",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1798,8 +1798,8 @@
           "wait_event": "StorageFlush",
           "query_id": "-8756337409846580508",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1807,8 +1807,8 @@
           "wait_event": "StorageFlush",
           "query_id": "-8833146572111975712",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 4.0,
-          "weighted_observations": 4.0
+          "observations": 4,
+          "weighted_observations": 4
         },
         {
           "category": "rpc",
@@ -1816,8 +1816,8 @@
           "wait_event": "StorageFlush",
           "query_id": "1064624875571929057",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1825,8 +1825,8 @@
           "wait_event": "StorageFlush",
           "query_id": "1563172275284861835",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1834,8 +1834,8 @@
           "wait_event": "StorageFlush",
           "query_id": "2640987166992520608",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1843,8 +1843,8 @@
           "wait_event": "StorageFlush",
           "query_id": "414077537514678573",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1852,8 +1852,8 @@
           "wait_event": "StorageFlush",
           "query_id": "4779348807761320991",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1861,8 +1861,8 @@
           "wait_event": "StorageFlush",
           "query_id": "4997833971506889113",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1870,8 +1870,8 @@
           "wait_event": "StorageFlush",
           "query_id": "5310480582243568540",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1879,8 +1879,8 @@
           "wait_event": "StorageFlush",
           "query_id": "5828168292802807985",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1888,8 +1888,8 @@
           "wait_event": "StorageFlush",
           "query_id": "6015843350145977360",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1897,8 +1897,8 @@
           "wait_event": "StorageFlush",
           "query_id": "6468024676927488686",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1906,8 +1906,8 @@
           "wait_event": "StorageFlush",
           "query_id": "7279720627173030517",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 7.0,
-          "weighted_observations": 7.0
+          "observations": 7,
+          "weighted_observations": 7
         },
         {
           "category": "rpc",
@@ -1915,8 +1915,8 @@
           "wait_event": "StorageFlush",
           "query_id": "7606134902596528277",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1924,8 +1924,8 @@
           "wait_event": "StorageFlush",
           "query_id": "8558517091041250994",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1933,8 +1933,8 @@
           "wait_event": "StorageFlush",
           "query_id": "8839079152179972803",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1942,8 +1942,8 @@
           "wait_event": "TableRead",
           "query_id": "-71879613880347319",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1951,8 +1951,8 @@
           "wait_event": "TableRead",
           "query_id": "4357247400045295631",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "rpc",
@@ -1960,8 +1960,8 @@
           "wait_event": "TableRead",
           "query_id": "8345917977273313509",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "rpc",
@@ -1969,8 +1969,8 @@
           "wait_event": "TransactionCommit",
           "query_id": "-1787568209473882094",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1978,8 +1978,8 @@
           "wait_event": "TransactionCommit",
           "query_id": "-2703255303163799507",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1987,8 +1987,8 @@
           "wait_event": "TransactionCommit",
           "query_id": "-2754644767582019477",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -1996,8 +1996,8 @@
           "wait_event": "TransactionCommit",
           "query_id": "-408364268248938295",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2005,8 +2005,8 @@
           "wait_event": "TransactionCommit",
           "query_id": "-5792860803345533714",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2014,8 +2014,8 @@
           "wait_event": "TransactionCommit",
           "query_id": "-6537040776677608807",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2023,8 +2023,8 @@
           "wait_event": "TransactionCommit",
           "query_id": "-864983160724116246",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2032,8 +2032,8 @@
           "wait_event": "TransactionCommit",
           "query_id": "5038046910825610469",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2041,8 +2041,8 @@
           "wait_event": "TransactionCommit",
           "query_id": "6468024676927488686",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2050,8 +2050,8 @@
           "wait_event": "TransactionCommit",
           "query_id": "8605776759770690123",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2059,8 +2059,8 @@
           "wait_event": "TransactionCommit",
           "query_id": "8629010497789226172",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2068,8 +2068,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": null,
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 18.0,
-          "weighted_observations": 18.0
+          "observations": 18,
+          "weighted_observations": 18
         },
         {
           "category": "rpc",
@@ -2077,8 +2077,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "-1179983938375594333",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2086,8 +2086,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "-1517548228165474989",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2095,8 +2095,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "-2121905963223087937",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2104,8 +2104,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "-2703255303163799507",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "rpc",
@@ -2113,8 +2113,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "-2728707991994911518",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2122,8 +2122,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "-3392469409788823189",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2131,8 +2131,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "-5340329820669083003",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2140,8 +2140,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "-5792860803345533714",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "rpc",
@@ -2149,8 +2149,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "-6083335322144042091",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2158,8 +2158,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "-713168459184540613",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 5.0,
-          "weighted_observations": 5.0
+          "observations": 5,
+          "weighted_observations": 5
         },
         {
           "category": "rpc",
@@ -2167,8 +2167,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "-7601473890952630532",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2176,8 +2176,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "-9004267941791404519",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2185,8 +2185,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "2632737199838699367",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2194,8 +2194,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "2674185192700380354",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2203,8 +2203,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "3271918854569934339",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 17.0,
-          "weighted_observations": 17.0
+          "observations": 17,
+          "weighted_observations": 17
         },
         {
           "category": "rpc",
@@ -2212,8 +2212,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "4301505524073350148",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "rpc",
@@ -2221,8 +2221,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "4440392919792280265",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2230,8 +2230,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "5038046910825610469",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2239,8 +2239,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "5719102014621219231",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "rpc",
@@ -2248,8 +2248,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "5823602820705934744",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2257,8 +2257,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "5921151122338638923",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 4.0,
-          "weighted_observations": 4.0
+          "observations": 4,
+          "weighted_observations": 4
         },
         {
           "category": "rpc",
@@ -2266,8 +2266,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "596898573015391586",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 5.0,
-          "weighted_observations": 5.0
+          "observations": 5,
+          "weighted_observations": 5
         },
         {
           "category": "rpc",
@@ -2275,8 +2275,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "6451500124395707827",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2284,8 +2284,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "6468024676927488686",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2293,8 +2293,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "6946118948037394950",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 2.0,
-          "weighted_observations": 2.0
+          "observations": 2,
+          "weighted_observations": 2
         },
         {
           "category": "rpc",
@@ -2302,8 +2302,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "7006469591806129477",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2311,8 +2311,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "7273159468184047901",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2320,8 +2320,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "7523565620358372916",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2329,8 +2329,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "814450674345135467",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         },
         {
           "category": "rpc",
@@ -2338,8 +2338,8 @@
           "wait_event": "WaitingOnTServer",
           "query_id": "8506135989504812233",
           "node": "3d2d9e10555b4ae2a683a8402505e416",
-          "observations": 1.0,
-          "weighted_observations": 1.0
+          "observations": 1,
+          "weighted_observations": 1
         }
       ]
     },
@@ -2553,19 +2553,19 @@
           "available": true,
           "cpu_user_fraction": 0.001443,
           "cpu_system_fraction": 0.001443,
-          "host_memory_total_bytes": 16818343936.0,
-          "host_memory_available_bytes": 14681309184.0,
-          "host_memory_free_bytes": 13936234496.0,
+          "host_memory_total_bytes": 16818343936,
+          "host_memory_available_bytes": 14681309184,
+          "host_memory_free_bytes": 13936234496,
           "process_memory": {
             "name": "YB-TServer root memory tracker",
-            "tracked_bytes": 181338325.0,
+            "tracked_bytes": 181338325,
             "hard_limit": {
               "kind": "bytes",
-              "bytes": 2147483648.0
+              "bytes": 2147483648
             },
             "soft_limit": {
               "kind": "bytes",
-              "bytes": 1825361100.0
+              "bytes": 1825361100
             }
           }
         }
@@ -2614,8 +2614,8 @@
     "window_hours": 0.001489345563782586,
     "total_time_ms": 536.527688,
     "total_cpu_ms": null,
-    "total_executions": 130.0,
-    "query_count": 5.0,
+    "total_executions": 130,
+    "query_count": 5,
     "queries": [
       {
         "requests": null,
@@ -2625,13 +2625,13 @@
         "text": "SELECT id,total FROM public.orders WHERE created_at >= $1::timestamptz ORDER BY created_at LIMIT $2",
         "parameters": null,
         "object_name": null,
-        "executions": 30.0,
+        "executions": 30,
         "total_time_ms": 252.867974,
         "mean_time_ms": 8.428932466666668,
         "max_time_ms": 13.649233,
         "stddev_time_ms": 2.414820547812505,
         "cpu_time_ms": null,
-        "rows": 600.0,
+        "rows": 600,
         "logical_reads": null,
         "physical_reads": null,
         "temp_writes": null,
@@ -2640,7 +2640,7 @@
         "plans": [
           {
             "id": "-235985156820883037",
-            "executions": 210.0,
+            "executions": 210,
             "total_time_ms": 3036.0781469999993,
             "mean_time_ms": 14.457514985714282,
             "first_seen": "2026-10-23T23:01:53.392791Z",
@@ -2669,14 +2669,14 @@
             "index": null,
             "seek_predicate": null,
             "predicate": null,
-            "est_rows": 667.0,
-            "est_executions": 1.0,
+            "est_rows": 667,
+            "est_executions": 1,
             "act_rows": null,
             "act_executions": null,
             "rows_read": null,
             "table_rows": null,
             "subtree_cost": 2011.82,
-            "self_cost": 0.0,
+            "self_cost": 0,
             "act_time_ms": null,
             "runtime": null,
             "warnings": [],
@@ -2693,7 +2693,7 @@
               "user_functions": [],
               "columns_without_statistics": [],
               "possible_index_names": [],
-              "estimated_row_bytes": 22.0
+              "estimated_row_bytes": 22
             },
             "children": [
               {
@@ -2705,8 +2705,8 @@
                 "index": null,
                 "seek_predicate": null,
                 "predicate": null,
-                "est_rows": 6667.0,
-                "est_executions": 1.0,
+                "est_rows": 6667,
+                "est_executions": 1,
                 "act_rows": null,
                 "act_executions": null,
                 "rows_read": null,
@@ -2734,7 +2734,7 @@
                   "user_functions": [],
                   "columns_without_statistics": [],
                   "possible_index_names": [],
-                  "estimated_row_bytes": 22.0
+                  "estimated_row_bytes": 22
                 },
                 "children": [
                   {
@@ -2746,8 +2746,8 @@
                     "index": null,
                     "seek_predicate": null,
                     "predicate": "(orders.created_at >= $1)",
-                    "est_rows": 6667.0,
-                    "est_executions": 1.0,
+                    "est_rows": 6667,
+                    "est_executions": 1,
                     "act_rows": null,
                     "act_executions": null,
                     "rows_read": null,
@@ -2781,7 +2781,7 @@
                       "user_functions": [],
                       "columns_without_statistics": [],
                       "possible_index_names": [],
-                      "estimated_row_bytes": 22.0
+                      "estimated_row_bytes": 22
                     },
                     "children": []
                   }
@@ -2830,23 +2830,23 @@
           "row_bytes": null,
           "compile_history": null,
           "docdb": {
-            "read_requests": 210.0,
-            "write_requests": 0.0,
-            "read_operations": 210.0,
-            "write_operations": 0.0,
-            "rows_scanned": 600000.0,
-            "rows_returned": 211230.0,
+            "read_requests": 210,
+            "write_requests": 0,
+            "read_operations": 210,
+            "write_operations": 0,
+            "rows_scanned": 600000,
+            "rows_returned": 211230,
             "read_ms": 151.289,
-            "write_ms": 0.0,
+            "write_ms": 0,
             "wait_ms": 161.38412,
             "catalog_ms": 9.000368,
-            "retries": 0.0,
-            "conflict_retries": 0.0,
-            "read_restarts": 0.0,
-            "obsolete_rows_scanned": 0.0,
-            "seeks": 212.0,
-            "nexts": 600182.0,
-            "prevs": 0.0
+            "retries": 0,
+            "conflict_retries": 0,
+            "read_restarts": 0,
+            "obsolete_rows_scanned": 0,
+            "seeks": 212,
+            "nexts": 600182,
+            "prevs": 0
           }
         },
         "rows_affected": null,
@@ -2860,7 +2860,7 @@
             "engine": "yugabyte",
             "kind": "estimated",
             "statement": null,
-            "total_cost": 0.0,
+            "total_cost": 0,
             "root": {
               "id": 0,
               "op": "Limit",
@@ -2870,14 +2870,14 @@
               "index": null,
               "seek_predicate": null,
               "predicate": null,
-              "est_rows": 0.0,
-              "est_executions": 1.0,
+              "est_rows": 0,
+              "est_executions": 1,
               "act_rows": null,
               "act_executions": null,
               "rows_read": null,
               "table_rows": null,
-              "subtree_cost": 0.0,
-              "self_cost": 0.0,
+              "subtree_cost": 0,
+              "self_cost": 0,
               "act_time_ms": null,
               "runtime": null,
               "warnings": [],
@@ -2904,14 +2904,14 @@
                   "index": null,
                   "seek_predicate": null,
                   "predicate": null,
-                  "est_rows": 0.0,
-                  "est_executions": 1.0,
+                  "est_rows": 0,
+                  "est_executions": 1,
                   "act_rows": null,
                   "act_executions": null,
                   "rows_read": null,
                   "table_rows": null,
-                  "subtree_cost": 0.0,
-                  "self_cost": 0.0,
+                  "subtree_cost": 0,
+                  "self_cost": 0,
                   "act_time_ms": null,
                   "runtime": null,
                   "warnings": [],
@@ -2943,14 +2943,14 @@
                       "index": null,
                       "seek_predicate": null,
                       "predicate": "(created_at >= '?'::timestamp with time zone)",
-                      "est_rows": 0.0,
-                      "est_executions": 1.0,
+                      "est_rows": 0,
+                      "est_executions": 1,
                       "act_rows": null,
                       "act_executions": null,
                       "rows_read": null,
                       "table_rows": null,
-                      "subtree_cost": 0.0,
-                      "self_cost": 0.0,
+                      "subtree_cost": 0,
+                      "self_cost": 0,
                       "act_time_ms": null,
                       "runtime": null,
                       "warnings": [],
@@ -3006,13 +3006,13 @@
         "text": "SELECT id,status,total FROM public.orders WHERE customer_id = $1 LIMIT $2",
         "parameters": null,
         "object_name": null,
-        "executions": 30.0,
+        "executions": 30,
         "total_time_ms": 113.869271,
         "mean_time_ms": 3.795642366666667,
         "max_time_ms": 5.814245,
         "stddev_time_ms": 0.8079847240303702,
         "cpu_time_ms": null,
-        "rows": 300.0,
+        "rows": 300,
         "logical_reads": null,
         "physical_reads": null,
         "temp_writes": null,
@@ -3021,7 +3021,7 @@
         "plans": [
           {
             "id": "-3627985068787917270",
-            "executions": 210.0,
+            "executions": 210,
             "total_time_ms": 1146.2143619999997,
             "mean_time_ms": 5.458163628571427,
             "first_seen": "2026-10-23T23:01:52.726135Z",
@@ -3050,14 +3050,14 @@
             "index": null,
             "seek_predicate": null,
             "predicate": null,
-            "est_rows": 1.0,
-            "est_executions": 1.0,
+            "est_rows": 1,
+            "est_executions": 1,
             "act_rows": null,
             "act_executions": null,
             "rows_read": null,
             "table_rows": null,
             "subtree_cost": 148.81,
-            "self_cost": 0.0,
+            "self_cost": 0,
             "act_time_ms": null,
             "runtime": null,
             "warnings": [],
@@ -3074,7 +3074,7 @@
               "user_functions": [],
               "columns_without_statistics": [],
               "possible_index_names": [],
-              "estimated_row_bytes": 22.0
+              "estimated_row_bytes": 22
             },
             "children": [
               {
@@ -3086,8 +3086,8 @@
                 "index": null,
                 "seek_predicate": null,
                 "predicate": "(orders.customer_id = $1)",
-                "est_rows": 10.0,
-                "est_executions": 1.0,
+                "est_rows": 10,
+                "est_executions": 1,
                 "act_rows": null,
                 "act_executions": null,
                 "rows_read": null,
@@ -3119,7 +3119,7 @@
                   "user_functions": [],
                   "columns_without_statistics": [],
                   "possible_index_names": [],
-                  "estimated_row_bytes": 22.0
+                  "estimated_row_bytes": 22
                 },
                 "children": []
               }
@@ -3166,23 +3166,23 @@
           "row_bytes": null,
           "compile_history": null,
           "docdb": {
-            "read_requests": 30.0,
-            "write_requests": 0.0,
-            "read_operations": 30.0,
-            "write_operations": 0.0,
-            "rows_scanned": 600000.0,
-            "rows_returned": 300.0,
+            "read_requests": 30,
+            "write_requests": 0,
+            "read_operations": 30,
+            "write_operations": 0,
+            "rows_scanned": 600000,
+            "rows_returned": 300,
             "read_ms": 107.91299999999998,
-            "write_ms": 0.0,
+            "write_ms": 0,
             "wait_ms": 111.65011900000005,
             "catalog_ms": 7.763743,
-            "retries": 0.0,
-            "conflict_retries": 0.0,
-            "read_restarts": 0.0,
-            "obsolete_rows_scanned": 0.0,
-            "seeks": 30.0,
-            "nexts": 600000.0,
-            "prevs": 0.0
+            "retries": 0,
+            "conflict_retries": 0,
+            "read_restarts": 0,
+            "obsolete_rows_scanned": 0,
+            "seeks": 30,
+            "nexts": 600000,
+            "prevs": 0
           }
         },
         "rows_affected": null,
@@ -3196,7 +3196,7 @@
             "engine": "yugabyte",
             "kind": "estimated",
             "statement": null,
-            "total_cost": 0.0,
+            "total_cost": 0,
             "root": {
               "id": 0,
               "op": "Limit",
@@ -3206,14 +3206,14 @@
               "index": null,
               "seek_predicate": null,
               "predicate": null,
-              "est_rows": 0.0,
-              "est_executions": 1.0,
+              "est_rows": 0,
+              "est_executions": 1,
               "act_rows": null,
               "act_executions": null,
               "rows_read": null,
               "table_rows": null,
-              "subtree_cost": 0.0,
-              "self_cost": 0.0,
+              "subtree_cost": 0,
+              "self_cost": 0,
               "act_time_ms": null,
               "runtime": null,
               "warnings": [],
@@ -3240,14 +3240,14 @@
                   "index": null,
                   "seek_predicate": null,
                   "predicate": "(customer_id = ?)",
-                  "est_rows": 0.0,
-                  "est_executions": 1.0,
+                  "est_rows": 0,
+                  "est_executions": 1,
                   "act_rows": null,
                   "act_executions": null,
                   "rows_read": null,
                   "table_rows": null,
-                  "subtree_cost": 0.0,
-                  "self_cost": 0.0,
+                  "subtree_cost": 0,
+                  "self_cost": 0,
                   "act_time_ms": null,
                   "runtime": null,
                   "warnings": [],
@@ -3301,13 +3301,13 @@
         "text": "SELECT count(*) FROM public.orders WHERE status = $1",
         "parameters": null,
         "object_name": null,
-        "executions": 30.0,
+        "executions": 30,
         "total_time_ms": 107.137245,
         "mean_time_ms": 3.5712414999999997,
         "max_time_ms": 6.036563,
         "stddev_time_ms": 0.6935227743968565,
         "cpu_time_ms": null,
-        "rows": 30.0,
+        "rows": 30,
         "logical_reads": null,
         "physical_reads": null,
         "temp_writes": null,
@@ -3316,7 +3316,7 @@
         "plans": [
           {
             "id": "1037543280030318267",
-            "executions": 210.0,
+            "executions": 210,
             "total_time_ms": 1372.9472560000006,
             "mean_time_ms": 6.5378440761904795,
             "first_seen": "2026-10-23T23:01:53.023248Z",
@@ -3345,8 +3345,8 @@
             "index": null,
             "seek_predicate": null,
             "predicate": null,
-            "est_rows": 1.0,
-            "est_executions": 1.0,
+            "est_rows": 1,
+            "est_executions": 1,
             "act_rows": null,
             "act_executions": null,
             "rows_read": null,
@@ -3372,7 +3372,7 @@
               "user_functions": [],
               "columns_without_statistics": [],
               "possible_index_names": [],
-              "estimated_row_bytes": 8.0
+              "estimated_row_bytes": 8
             },
             "children": [
               {
@@ -3384,8 +3384,8 @@
                 "index": null,
                 "seek_predicate": null,
                 "predicate": "(orders.status = $1)",
-                "est_rows": 10000.0,
-                "est_executions": 1.0,
+                "est_rows": 10000,
+                "est_executions": 1,
                 "act_rows": null,
                 "act_executions": null,
                 "rows_read": null,
@@ -3418,7 +3418,7 @@
                   "user_functions": [],
                   "columns_without_statistics": [],
                   "possible_index_names": [],
-                  "estimated_row_bytes": 0.0
+                  "estimated_row_bytes": 0
                 },
                 "children": []
               }
@@ -3465,23 +3465,23 @@
           "row_bytes": null,
           "compile_history": null,
           "docdb": {
-            "read_requests": 30.0,
-            "write_requests": 0.0,
-            "read_operations": 30.0,
-            "write_operations": 0.0,
-            "rows_scanned": 600000.0,
-            "rows_returned": 30.0,
+            "read_requests": 30,
+            "write_requests": 0,
+            "read_operations": 30,
+            "write_operations": 0,
+            "rows_scanned": 600000,
+            "rows_returned": 30,
             "read_ms": 101.75400000000003,
-            "write_ms": 0.0,
+            "write_ms": 0,
             "wait_ms": 105.357362,
             "catalog_ms": 1.561776,
-            "retries": 0.0,
-            "conflict_retries": 0.0,
-            "read_restarts": 0.0,
-            "obsolete_rows_scanned": 0.0,
-            "seeks": 30.0,
-            "nexts": 600000.0,
-            "prevs": 0.0
+            "retries": 0,
+            "conflict_retries": 0,
+            "read_restarts": 0,
+            "obsolete_rows_scanned": 0,
+            "seeks": 30,
+            "nexts": 600000,
+            "prevs": 0
           }
         },
         "rows_affected": null,
@@ -3495,7 +3495,7 @@
             "engine": "yugabyte",
             "kind": "estimated",
             "statement": null,
-            "total_cost": 0.0,
+            "total_cost": 0,
             "root": {
               "id": 0,
               "op": "Aggregate",
@@ -3505,14 +3505,14 @@
               "index": null,
               "seek_predicate": null,
               "predicate": null,
-              "est_rows": 0.0,
-              "est_executions": 1.0,
+              "est_rows": 0,
+              "est_executions": 1,
               "act_rows": null,
               "act_executions": null,
               "rows_read": null,
               "table_rows": null,
-              "subtree_cost": 0.0,
-              "self_cost": 0.0,
+              "subtree_cost": 0,
+              "self_cost": 0,
               "act_time_ms": null,
               "runtime": null,
               "warnings": [],
@@ -3542,14 +3542,14 @@
                   "index": null,
                   "seek_predicate": null,
                   "predicate": "(status = '?'::text)",
-                  "est_rows": 0.0,
-                  "est_executions": 1.0,
+                  "est_rows": 0,
+                  "est_executions": 1,
                   "act_rows": null,
                   "act_executions": null,
                   "rows_read": null,
                   "table_rows": null,
-                  "subtree_cost": 0.0,
-                  "self_cost": 0.0,
+                  "subtree_cost": 0,
+                  "self_cost": 0,
                   "act_time_ms": null,
                   "runtime": null,
                   "warnings": [],
@@ -3604,13 +3604,13 @@
         "text": "SELECT o.id,c.name FROM public.orders o JOIN public.customers c ON c.id=o.customer_id WHERE o.id < $1",
         "parameters": null,
         "object_name": null,
-        "executions": 10.0,
+        "executions": 10,
         "total_time_ms": 51.815822,
         "mean_time_ms": 5.181582199999999,
         "max_time_ms": 7.49776,
         "stddev_time_ms": 1.2381343092638095,
         "cpu_time_ms": null,
-        "rows": 200.0,
+        "rows": 200,
         "logical_reads": null,
         "physical_reads": null,
         "temp_writes": null,
@@ -3619,7 +3619,7 @@
         "plans": [
           {
             "id": "-8345723963170102064",
-            "executions": 70.0,
+            "executions": 70,
             "total_time_ms": 510.004148,
             "mean_time_ms": 7.285773542857143,
             "first_seen": "2026-10-23T23:01:53.821498Z",
@@ -3648,8 +3648,8 @@
             "index": null,
             "seek_predicate": null,
             "predicate": "(o.customer_id = c.id)",
-            "est_rows": 6667.0,
-            "est_executions": 1.0,
+            "est_rows": 6667,
+            "est_executions": 1,
             "act_rows": null,
             "act_executions": null,
             "rows_read": null,
@@ -3677,7 +3677,7 @@
               "user_functions": [],
               "columns_without_statistics": [],
               "possible_index_names": [],
-              "estimated_row_bytes": 21.0
+              "estimated_row_bytes": 21
             },
             "children": [
               {
@@ -3689,8 +3689,8 @@
                 "index": null,
                 "seek_predicate": null,
                 "predicate": "(o.id < $1)",
-                "est_rows": 6667.0,
-                "est_executions": 1.0,
+                "est_rows": 6667,
+                "est_executions": 1,
                 "act_rows": null,
                 "act_executions": null,
                 "rows_read": null,
@@ -3724,7 +3724,7 @@
                   "user_functions": [],
                   "columns_without_statistics": [],
                   "possible_index_names": [],
-                  "estimated_row_bytes": 12.0
+                  "estimated_row_bytes": 12
                 },
                 "children": []
               },
@@ -3737,14 +3737,14 @@
                 "index": null,
                 "seek_predicate": null,
                 "predicate": null,
-                "est_rows": 2000.0,
-                "est_executions": 1.0,
+                "est_rows": 2000,
+                "est_executions": 1,
                 "act_rows": null,
                 "act_executions": null,
                 "rows_read": null,
                 "table_rows": null,
                 "subtree_cost": 198.35,
-                "self_cost": 0.0,
+                "self_cost": 0,
                 "act_time_ms": null,
                 "runtime": null,
                 "warnings": [],
@@ -3765,7 +3765,7 @@
                   "user_functions": [],
                   "columns_without_statistics": [],
                   "possible_index_names": [],
-                  "estimated_row_bytes": 17.0
+                  "estimated_row_bytes": 17
                 },
                 "children": [
                   {
@@ -3777,8 +3777,8 @@
                     "index": null,
                     "seek_predicate": null,
                     "predicate": null,
-                    "est_rows": 2000.0,
-                    "est_executions": 1.0,
+                    "est_rows": 2000,
+                    "est_executions": 1,
                     "act_rows": null,
                     "act_executions": null,
                     "rows_read": null,
@@ -3807,7 +3807,7 @@
                       "user_functions": [],
                       "columns_without_statistics": [],
                       "possible_index_names": [],
-                      "estimated_row_bytes": 17.0
+                      "estimated_row_bytes": 17
                     },
                     "children": []
                   }
@@ -3856,23 +3856,23 @@
           "row_bytes": null,
           "compile_history": null,
           "docdb": {
-            "read_requests": 20.0,
-            "write_requests": 0.0,
-            "read_operations": 20.0,
-            "write_operations": 0.0,
-            "rows_scanned": 200200.0,
-            "rows_returned": 400.0,
+            "read_requests": 20,
+            "write_requests": 0,
+            "read_operations": 20,
+            "write_operations": 0,
+            "rows_scanned": 200200,
+            "rows_returned": 400,
             "read_ms": 38.423,
-            "write_ms": 0.0,
+            "write_ms": 0,
             "wait_ms": 49.398397,
             "catalog_ms": 15.34737,
-            "retries": 0.0,
-            "conflict_retries": 0.0,
-            "read_restarts": 0.0,
-            "obsolete_rows_scanned": 0.0,
-            "seeks": 202.0,
-            "nexts": 200562.0,
-            "prevs": 0.0
+            "retries": 0,
+            "conflict_retries": 0,
+            "read_restarts": 0,
+            "obsolete_rows_scanned": 0,
+            "seeks": 202,
+            "nexts": 200562,
+            "prevs": 0
           }
         },
         "rows_affected": null,
@@ -3886,7 +3886,7 @@
             "engine": "yugabyte",
             "kind": "estimated",
             "statement": null,
-            "total_cost": 0.0,
+            "total_cost": 0,
             "root": {
               "id": 0,
               "op": "YB Batched Nested Loop",
@@ -3896,14 +3896,14 @@
               "index": null,
               "seek_predicate": null,
               "predicate": "(o.customer_id = c.id)",
-              "est_rows": 0.0,
-              "est_executions": 1.0,
+              "est_rows": 0,
+              "est_executions": 1,
               "act_rows": null,
               "act_executions": null,
               "rows_read": null,
               "table_rows": null,
-              "subtree_cost": 0.0,
-              "self_cost": 0.0,
+              "subtree_cost": 0,
+              "self_cost": 0,
               "act_time_ms": null,
               "runtime": null,
               "warnings": [],
@@ -3938,14 +3938,14 @@
                   "index": null,
                   "seek_predicate": null,
                   "predicate": "(id < ?)",
-                  "est_rows": 0.0,
-                  "est_executions": 1.0,
+                  "est_rows": 0,
+                  "est_executions": 1,
                   "act_rows": null,
                   "act_executions": null,
                   "rows_read": null,
                   "table_rows": null,
-                  "subtree_cost": 0.0,
-                  "self_cost": 0.0,
+                  "subtree_cost": 0,
+                  "self_cost": 0,
                   "act_time_ms": null,
                   "runtime": null,
                   "warnings": [],
@@ -3984,14 +3984,14 @@
                   "index": "customers_pkey",
                   "seek_predicate": "(id = ANY (ARRAY[o.customer_id, $1, $2, ..., $1023]))",
                   "predicate": null,
-                  "est_rows": 0.0,
-                  "est_executions": 1.0,
+                  "est_rows": 0,
+                  "est_executions": 1,
                   "act_rows": null,
                   "act_executions": null,
                   "rows_read": null,
                   "table_rows": null,
-                  "subtree_cost": 0.0,
-                  "self_cost": 0.0,
+                  "subtree_cost": 0,
+                  "self_cost": 0,
                   "act_time_ms": null,
                   "runtime": null,
                   "warnings": [],
@@ -4046,13 +4046,13 @@
         "text": "SELECT name FROM public.customers WHERE id = $1",
         "parameters": null,
         "object_name": null,
-        "executions": 30.0,
+        "executions": 30,
         "total_time_ms": 10.837376,
         "mean_time_ms": 0.36124586666666664,
         "max_time_ms": 0.998101,
         "stddev_time_ms": 0.18929466561681615,
         "cpu_time_ms": null,
-        "rows": 30.0,
+        "rows": 30,
         "logical_reads": null,
         "physical_reads": null,
         "temp_writes": null,
@@ -4061,7 +4061,7 @@
         "plans": [
           {
             "id": "1767271698225980175",
-            "executions": 207.0,
+            "executions": 207,
             "total_time_ms": 253.4337950000001,
             "mean_time_ms": 1.2243178502415464,
             "first_seen": "2026-10-23T21:59:38.239502Z",
@@ -4077,7 +4077,7 @@
           },
           {
             "id": "6828047944719173985",
-            "executions": 4.0,
+            "executions": 4,
             "total_time_ms": 12.963306000000005,
             "mean_time_ms": 3.2408265000000007,
             "first_seen": "2026-10-24T03:46:28.531066Z",
@@ -4106,8 +4106,8 @@
             "index": "customers_pkey",
             "seek_predicate": "(customers.id = $1)",
             "predicate": null,
-            "est_rows": 1.0,
-            "est_executions": 1.0,
+            "est_rows": 1,
+            "est_executions": 1,
             "act_rows": null,
             "act_executions": null,
             "rows_read": null,
@@ -4136,7 +4136,7 @@
               "user_functions": [],
               "columns_without_statistics": [],
               "possible_index_names": [],
-              "estimated_row_bytes": 13.0
+              "estimated_row_bytes": 13
             },
             "children": []
           },
@@ -4181,23 +4181,23 @@
           "row_bytes": null,
           "compile_history": null,
           "docdb": {
-            "read_requests": 30.0,
-            "write_requests": 0.0,
-            "read_operations": 30.0,
-            "write_operations": 0.0,
-            "rows_scanned": 2029.0,
-            "rows_returned": 30.0,
+            "read_requests": 30,
+            "write_requests": 0,
+            "read_operations": 30,
+            "write_operations": 0,
+            "rows_scanned": 2029,
+            "rows_returned": 30,
             "read_ms": 0.8850000000000002,
-            "write_ms": 0.0,
+            "write_ms": 0,
             "wait_ms": 9.362433,
             "catalog_ms": 6.939964,
-            "retries": 0.0,
-            "conflict_retries": 0.0,
-            "read_restarts": 0.0,
-            "obsolete_rows_scanned": 0.0,
-            "seeks": 30.0,
-            "nexts": 2029.0,
-            "prevs": 0.0
+            "retries": 0,
+            "conflict_retries": 0,
+            "read_restarts": 0,
+            "obsolete_rows_scanned": 0,
+            "seeks": 30,
+            "nexts": 2029,
+            "prevs": 0
           }
         },
         "rows_affected": null,
@@ -4211,7 +4211,7 @@
             "engine": "yugabyte",
             "kind": "estimated",
             "statement": null,
-            "total_cost": 0.0,
+            "total_cost": 0,
             "root": {
               "id": 0,
               "op": "Index Scan",
@@ -4221,14 +4221,14 @@
               "index": "customers_pkey",
               "seek_predicate": "(id = ?)",
               "predicate": null,
-              "est_rows": 0.0,
-              "est_executions": 1.0,
+              "est_rows": 0,
+              "est_executions": 1,
               "act_rows": null,
               "act_executions": null,
               "rows_read": null,
               "table_rows": null,
-              "subtree_cost": 0.0,
-              "self_cost": 0.0,
+              "subtree_cost": 0,
+              "self_cost": 0,
               "act_time_ms": null,
               "runtime": null,
               "warnings": [],
@@ -4286,10 +4286,10 @@
     {
       "schema": "public",
       "name": "customers",
-      "rows": 2000.0,
-      "total_bytes": 1048576.0,
-      "data_bytes": 1048576.0,
-      "index_bytes": 0.0,
+      "rows": 2000,
+      "total_bytes": 1048576,
+      "data_bytes": 1048576,
+      "index_bytes": 0,
       "has_primary_key": true,
       "is_heap": null,
       "seq_scans": null,
@@ -4330,10 +4330,10 @@
     {
       "schema": "public",
       "name": "orders",
-      "rows": 20000.0,
-      "total_bytes": 4676802.0,
-      "data_bytes": 3628226.0,
-      "index_bytes": 1048576.0,
+      "rows": 20000,
+      "total_bytes": 4676802,
+      "data_bytes": 3628226,
+      "index_bytes": 1048576,
       "has_primary_key": true,
       "is_heap": null,
       "seq_scans": null,
@@ -4429,7 +4429,7 @@
       "state": null,
       "maintained": true,
       "has_statistics": null,
-      "size_bytes": 1048576.0,
+      "size_bytes": 1048576,
       "reads": null,
       "writes": null,
       "seeks": null,
@@ -4605,7 +4605,7 @@
       "table": "customers",
       "name": "customers",
       "last_updated": null,
-      "rows": 2000.0,
+      "rows": 2000,
       "rows_sampled": null,
       "modifications": null,
       "auto_created": false
@@ -4615,7 +4615,7 @@
       "table": "orders",
       "name": "orders",
       "last_updated": null,
-      "rows": 20000.0,
+      "rows": 20000,
       "rows_sampled": null,
       "modifications": null,
       "auto_created": false

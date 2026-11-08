@@ -91,11 +91,15 @@ fn checkpoint_pressure_finding(snapshot: &Snapshot, c: RequestedCheckpoints<'_>)
     .join(" ");
     f.severity = Severity::Low;
     f.impact.score = base_score(f.severity) + c.requested / 10.0;
-    f.impact.label = t!("check.checkpoint_pressure.impact", percent = &percent);
+    f.impact.set_label(t!("check.checkpoint_pressure.impact", percent = &percent));
     f.confidence = Confidence::Medium;
     f.metrics = vec![
-        Metric::new(t!("check.checkpoint_pressure.metric.requested"), c.requested / 100.0, Unit::Ratio),
-        Metric::new(t!("check.checkpoint_pressure.metric.checkpoints"), c.total, Unit::Count),
+        Metric::said(
+            culprit_core::key!("check.checkpoint_pressure.metric.requested"),
+            c.requested / 100.0,
+            Unit::Ratio,
+        ),
+        Metric::said(culprit_core::key!("check.checkpoint_pressure.metric.checkpoints"), c.total, Unit::Count),
     ];
     let change = setting_change(&snapshot.server, "max_wal_size", &c.proposed);
     f.fix = Some(Fix {

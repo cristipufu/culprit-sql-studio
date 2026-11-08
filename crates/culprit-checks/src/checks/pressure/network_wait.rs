@@ -93,12 +93,12 @@ fn network_wait_finding(_: &Snapshot, n: NetworkWait<'_>) -> Finding {
     f.severity = n.severity;
     f.confidence = Confidence::High;
     f.queries = query_refs(&[q]);
-    f.metrics.push(Metric::new(t!("check.network_wait.metric.share"), n.share, Unit::Ratio));
+    f.metrics.push(Metric::said(culprit_core::key!("check.network_wait.metric.share"), n.share, Unit::Ratio));
     f.facts.network_wait_share = Some(n.share);
     if let Some(r) = n.rows {
-        f.metrics.push(Metric::new(t!("check.network_wait.metric.rows"), r, Unit::Rows));
+        f.metrics.push(Metric::said(culprit_core::key!("check.network_wait.metric.rows"), r, Unit::Rows));
     }
     f.fix = Some(Fix { summary: t!("check.network_wait.fix"), sql: None, cost: None });
-    f.verify = vec![t!("check.network_wait.verify")];
+    f.verify = vec![t!("check.network_wait.verify", results = culprit_core::t!("core.waits.category.network.label"))];
     f
 }

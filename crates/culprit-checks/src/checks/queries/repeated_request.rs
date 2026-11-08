@@ -64,12 +64,16 @@ fn repeated_request_finding(_: &Snapshot, repeated: RepeatedRequest<'_>) -> Find
     f.severity = Severity::Low;
     f.confidence = Confidence::Medium;
     f.impact.score = base_score(Severity::Low);
-    f.impact.label = t!("check.repeated_request.impact", requests = repeated);
+    f.impact.set_label(t!("check.repeated_request.impact", requests = repeated));
     f.queries = query_refs(&[q]);
     f.metrics = vec![
-        Metric::new(t!("check.repeated_request.metric.requests"), r.requests as f64, Unit::Count),
-        Metric::new(t!("check.repeated_request.metric.repeated"), r.repeated_requests as f64, Unit::Count),
-        Metric::new(t!("check.repeated_request.metric.most_calls"), r.most_calls as f64, Unit::Count),
+        Metric::said(culprit_core::key!("check.repeated_request.metric.requests"), r.requests as f64, Unit::Count),
+        Metric::said(
+            culprit_core::key!("check.repeated_request.metric.repeated"),
+            r.repeated_requests as f64,
+            Unit::Count,
+        ),
+        Metric::said(culprit_core::key!("check.repeated_request.metric.most_calls"), r.most_calls as f64, Unit::Count),
     ];
     f.fix = Some(Fix { summary: t!("check.repeated_request.fix"), sql: None, cost: None });
     f.verify = vec![t!("check.repeated_request.verify")];

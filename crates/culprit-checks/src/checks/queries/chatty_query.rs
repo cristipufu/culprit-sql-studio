@@ -301,7 +301,7 @@ fn chatty_query_finding(snapshot: &Snapshot, chatty: ChattyQuery<'_>) -> Finding
     f.impact.score = chatty.score;
     f.impact.db_time_share = Some(chatty.impact.share);
     f.impact.time_ms_per_day = chatty.impact.per_day_ms;
-    f.impact.label = t!("check.chatty_query.impact", share = &exec);
+    f.impact.set_label(t!("check.chatty_query.impact", share = &exec));
     f.confidence = Confidence::Medium;
     f.queries = query_refs(&[q]);
     // Named for what they are over, as the title and summary say them: Culprit's scans where they measured it, with

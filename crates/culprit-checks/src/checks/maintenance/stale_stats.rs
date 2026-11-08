@@ -145,13 +145,14 @@ fn stale_stats_finding(snapshot: &Snapshot, case: StaleTable<'_>) -> Finding {
         f.caveats.push(t!("check.stale_stats.caveat.auto_update"));
     }
     f.impact.score = base_score(f.severity) + case.ratio.min(2.0) * 3.0;
-    f.impact.label = t!("check.stale_stats.impact", changes = &changes);
+    f.impact.set_label(t!("check.stale_stats.impact", changes = &changes));
     f.confidence = Confidence::Medium;
     f.queries = query_refs(&case.in_use);
     f.metrics.push(Metric::said(CHANGES_SINCE_UPDATE, s.modifications, Unit::Count));
-    f.metrics.push(Metric::new(t!("check.stale_stats.metric.rows"), s.rows, Unit::Rows));
+    f.metrics.push(Metric::said(culprit_core::key!("check.stale_stats.metric.rows"), s.rows, Unit::Rows));
     if !s.names.is_empty() {
-        f.metrics.push(Metric::text(t!("check.stale_stats.metric.statistics"), format::list(&s.names)));
+        f.metrics
+            .push(Metric::said_text(culprit_core::key!("check.stale_stats.metric.statistics"), format::list(&s.names)));
     }
     let engine = snapshot.server.engine;
     let target = qualified(engine, &s.schema, &s.table);

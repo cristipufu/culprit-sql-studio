@@ -167,32 +167,48 @@ fn memory_queue_finding(snapshot: &Snapshot, m: MemoryQueue) -> Finding {
     f.summary = parts.join(" ");
     f.severity = m.severity;
     f.impact.score = base_score(f.severity) + if m.history { m.share.min(1.0) * 40.0 } else { 0.0 };
-    f.impact.label = if m.history {
+    f.impact.set_label(if m.history {
         t!("check.memory_queue.impact.share", share = &share)
     } else if m.pending > 0.0 {
         t!("check.memory_queue.impact.pending", count = &pending)
     } else {
         t!("check.memory_queue.impact.grants", time = format::duration(m.grant_ms))
-    };
+    });
     f.confidence = m.confidence;
     if m.seen_once {
         f.caveats.push(seen_once());
     }
     if m.history {
-        f.metrics.push(Metric::new(t!("check.memory_queue.metric.share"), m.share, Unit::Ratio));
-        f.metrics.push(Metric::new(t!("check.memory_queue.metric.per_hour"), m.memory_per_hour, Unit::Ms));
+        f.metrics.push(Metric::said(culprit_core::key!("check.memory_queue.metric.share"), m.share, Unit::Ratio));
+        f.metrics.push(Metric::said(
+            culprit_core::key!("check.memory_queue.metric.per_hour"),
+            m.memory_per_hour,
+            Unit::Ms,
+        ));
     }
     if m.grants {
-        f.metrics.push(Metric::new(t!("check.memory_queue.metric.grants"), m.grant_ms, Unit::Ms));
+        f.metrics.push(Metric::said(culprit_core::key!("check.memory_queue.metric.grants"), m.grant_ms, Unit::Ms));
     }
     if m.pending > 0.0 {
-        f.metrics.push(Metric::new(t!("check.memory_queue.metric.pending"), m.pending, Unit::Count));
+        f.metrics.push(Metric::said(culprit_core::key!("check.memory_queue.metric.pending"), m.pending, Unit::Count));
     }
     f.fix = Some(Fix {
-        summary: if m.grant_story { t!("check.memory_queue.fix.grants") } else { t!("check.memory_queue.fix.sample") },
+        summary: if m.grant_story {
+            t!("check.memory_queue.fix.grants")
+        } else {
+            t!(
+                "check.memory_queue.fix.sample",
+                waits = culprit_core::t!("core.dashboard.tile.waits"),
+                now = culprit_core::t!("core.dashboard.tile.now")
+            )
+        },
         sql: None,
         cost: None,
     });
-    f.verify = vec![t!("check.memory_queue.verify")];
+    f.verify = vec![t!(
+        "check.memory_queue.verify",
+        now = culprit_core::t!("core.dashboard.tile.now"),
+        waits = culprit_core::t!("core.dashboard.tile.waits")
+    )];
     f
 }

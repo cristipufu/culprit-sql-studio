@@ -208,8 +208,8 @@ fn missing_histogram_finding(snapshot: &Snapshot, guessed: GuessedFilter<'_>) ->
     severity_score(&mut f);
     f.confidence = Confidence::High;
     f.metrics = vec![
-        Metric::text(t!("check.missing_histogram.metric.columns"), columns.join(", ")),
-        Metric::new(t!("check.missing_histogram.metric.filtered"), guess / 100.0, Unit::Ratio),
+        Metric::said_text(culprit_core::key!("check.missing_histogram.metric.columns"), columns.join(", ")),
+        Metric::said(culprit_core::key!("check.missing_histogram.metric.filtered"), guess / 100.0, Unit::Ratio),
     ];
     let target = qualified(Engine::Mysql, &schema, &table);
     f.facts.histogram_columns = columns.clone();

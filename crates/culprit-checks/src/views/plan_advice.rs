@@ -40,7 +40,7 @@ pub fn present_retained_plan(plan: &mut Plan, note: &str) {
         item.severity = Severity::Low;
         item.fix_sql = None;
     }
-    plan.insights = Some(PlanInsights { items, note: Some(note.into()) });
+    plan.insights = Some(PlanInsights { scan_context: Some(true), items, note: Some(note.into()) });
     super::plan_view::present_plan(plan, None);
 }
 
@@ -48,7 +48,7 @@ pub fn present_retained_plan(plan: &mut Plan, note: &str) {
 /// growing tables even when the selected workload does not justify treating them as current incidents.
 pub fn query_plan_insights(snapshot: &Snapshot, query: &QueryStat, plan: &Plan) -> PlanInsights {
     if let Some(note) = culprit_core::insights::statistics_maintenance_note(plan.engine, &query.text) {
-        return PlanInsights { items: Vec::new(), note: Some(note) };
+        return PlanInsights { scan_context: Some(true), items: Vec::new(), note: Some(note) };
     }
     let mut items = catalog_insights(snapshot, query, plan);
     if let Some(rewrite) = crate::queries::late_filter_rewrite(snapshot, query, plan) {
@@ -65,6 +65,7 @@ pub fn query_plan_insights(snapshot: &Snapshot, query: &QueryStat, plan: &Plan) 
     };
     for i in &mut items {
         if history || !material {
+            i.scan_context = Some(true);
             i.severity = Severity::Low;
             i.fix_sql = None;
             i.fix = format!("{} {}", context.as_deref().unwrap_or_default(), i.fix);
@@ -86,7 +87,7 @@ pub fn query_plan_insights(snapshot: &Snapshot, query: &QueryStat, plan: &Plan) 
         .then(|| t!("view.plan_advice.growth"));
     let notes: Vec<_> = [culprit_core::insights::coverage_note(plan), context, growth].into_iter().flatten().collect();
     let note = (!notes.is_empty()).then(|| notes.join(" "));
-    PlanInsights { items, note }
+    PlanInsights { scan_context: Some(true), items, note }
 }
 
 /// Catalog safety is also used during detection, before the pipeline decides whether a finding is history.
@@ -96,6 +97,9 @@ pub(crate) fn catalog_insights(snapshot: &Snapshot, query: &QueryStat, plan: &Pl
     }
     let mut found = culprit_core::insights::insights(plan);
     for i in &mut found {
+        if i.area == culprit_core::insights::InsightArea::Index {
+            i.scan_context = Some(true);
+        }
         if i.area == culprit_core::insights::InsightArea::Index && crate::evidence::index_catalog(snapshot).is_some() {
             i.severity = Severity::Low;
             i.fix_sql = None;
@@ -450,6 +454,7 @@ mod tests {
         s.server.capabilities.retain(|c| *c != culprit_core::Capability::IndexUsage);
         s.sources.retain(|o| o.source != "indexes");
         s.sources.push(culprit_core::SourceOutcome {
+            reason_message: None,
             source: "indexes".into(),
             state: culprit_core::SourceState::Unavailable,
             reason: Some("Index definitions unavailable".into()),
@@ -611,6 +616,7 @@ note: Estimated plan: misestimates, spills, unused memory grants and uneven thre
         s.server.capabilities.retain(|c| *c != culprit_core::Capability::IndexUsage);
         s.sources.retain(|o| o.source != "indexes");
         s.sources.push(culprit_core::SourceOutcome {
+            reason_message: None,
             source: "indexes".into(),
             state: culprit_core::SourceState::Unavailable,
             reason: Some("Index definitions unavailable".into()),

@@ -1,5 +1,6 @@
 //! Workload, statement statistics, timeline buckets, and rate/cadence evidence math.
 
+use crate::i18n::{Message, MessageValue};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -33,7 +34,7 @@ pub enum WorkloadKind {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct Workload {
-    /// Where the statements were read from, by name, for sentences ("Query Store covers …").
+    /// The source's stable name, retained for counter identity and compatibility. Display uses `source_name()`.
     pub source: String,
     /// The same, typed: see [`Workload::kind`]. `None` when the provider doesn't say (a plugin's): its source is then
     /// told by name.
@@ -74,6 +75,14 @@ pub struct Workload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub counter_set: Option<CounterSet>,
+    // Presentation fields follow the optional facts; `source` remains the series identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_label: Option<String>,
+    // A provider's scoped label retains native node/role identifiers as arguments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_message: Option<Message>,
 }
 
 /// Native contributors to distributed cumulative counters. A missing epoch or skipped node cannot establish
@@ -104,11 +113,15 @@ impl CounterSet {
 
 /// "7 days", "10 hours", "35 minutes": a window's length in words.
 pub fn span_words(hours: f64) -> String {
-    match span_length(hours) {
-        SpanLength::Days(n) => span_days(n, digits(format!("{n}"))),
-        SpanLength::Hours(n) => span_hours(n),
-        SpanLength::Minutes(n) => t!("model.span.minutes", n = n, count = digits(format!("{n}"))),
-    }
+    span_words_message(hours).render()
+}
+
+pub fn span_words_message(hours: f64) -> Message {
+    span_message(
+        hours,
+        [crate::key!("model.span.days"), crate::key!("model.span.hours"), crate::key!("model.span.minutes")],
+        &[],
+    )
 }
 
 /// A window's length as [`span_words`] says it: whole days from 47 hours, whole hours from an hour and a half, whole
@@ -135,39 +148,64 @@ pub fn span_length(hours: f64) -> SpanLength {
 /// "the last" + a span, so a language can make every word agree with the number ("los últimos 7 días", "las últimas 5
 /// horas"); a sentence takes it as its `{window}`.
 pub fn last_span(hours: f64) -> String {
-    match span_length(hours) {
-        SpanLength::Days(n) => t!("model.window.last_days", n = n, count = digits(format!("{n}"))),
-        SpanLength::Hours(n) => t!("model.window.last_hours", n = n, count = digits(format!("{n}"))),
-        SpanLength::Minutes(n) => t!("model.window.last_minutes", n = n, count = digits(format!("{n}"))),
-    }
+    last_span_message(hours).render()
+}
+
+pub fn last_span_message(hours: f64) -> Message {
+    span_message(
+        hours,
+        [
+            crate::key!("model.window.last_days"),
+            crate::key!("model.window.last_hours"),
+            crate::key!("model.window.last_minutes"),
+        ],
+        &[],
+    )
 }
 
 /// "the 50 minutes the Rails log covers", worded whole per unit as [`last_span`] is.
 pub fn log_span(hours: f64, log: &str) -> String {
-    match span_length(hours) {
-        SpanLength::Days(n) => t!("model.window.log_days", n = n, count = digits(format!("{n}")), log = log),
-        SpanLength::Hours(n) => t!("model.window.log_hours", n = n, count = digits(format!("{n}")), log = log),
-        SpanLength::Minutes(n) => t!("model.window.log_minutes", n = n, count = digits(format!("{n}")), log = log),
-    }
+    log_span_message(hours, log).render()
+}
+
+pub fn log_span_message(hours: f64, log: &str) -> Message {
+    span_message(
+        hours,
+        [
+            crate::key!("model.window.log_days"),
+            crate::key!("model.window.log_hours"),
+            crate::key!("model.window.log_minutes"),
+        ],
+        &[("log", log.into())],
+    )
 }
 
 /// "the 35 minutes since statistics were reset", worded whole per unit as [`last_span`] is.
 pub fn since_reset_span(hours: f64) -> String {
-    match span_length(hours) {
-        SpanLength::Days(n) => t!("model.window.since_reset_days", n = n, count = digits(format!("{n}"))),
-        SpanLength::Hours(n) => t!("model.window.since_reset_hours", n = n, count = digits(format!("{n}"))),
-        SpanLength::Minutes(n) => t!("model.window.since_reset_minutes", n = n, count = digits(format!("{n}"))),
-    }
+    since_reset_span_message(hours).render()
 }
 
-/// `n` days, written `count`.
-fn span_days(n: f64, count: String) -> String {
-    t!("model.span.days", n = n, count = count)
+pub fn since_reset_span_message(hours: f64) -> Message {
+    span_message(
+        hours,
+        [
+            crate::key!("model.window.since_reset_days"),
+            crate::key!("model.window.since_reset_hours"),
+            crate::key!("model.window.since_reset_minutes"),
+        ],
+        &[],
+    )
 }
 
-/// `n` whole hours.
-fn span_hours(n: f64) -> String {
-    t!("model.span.hours", n = n, count = digits(format!("{n}")))
+fn span_message(hours: f64, keys: [&str; 3], extra: &[(&str, MessageValue)]) -> Message {
+    let (key, n) = match span_length(hours) {
+        SpanLength::Days(n) => (keys[0], n),
+        SpanLength::Hours(n) => (keys[1], n),
+        SpanLength::Minutes(n) => (keys[2], n),
+    };
+    let mut arguments = vec![("n", n.into()), ("count", MessageValue::Digits(n.to_string()))];
+    arguments.extend_from_slice(extra);
+    Message::catalog(key, &arguments)
 }
 
 /// `runs` for a plural: exactly 1 where it is within rounding of one (`runs_noun` said "run" so).
@@ -184,6 +222,31 @@ pub const PER_DAY_MIN_HOURS: f64 = 20.0;
 pub const RATE_MIN_HOURS: f64 = 1.0;
 
 impl Workload {
+    pub fn source_message(&self) -> Message {
+        if let Some(message) = &self.source_message {
+            return message.clone();
+        }
+        match self.kind {
+            Some(WorkloadKind::PlanCache) => crate::message!("model.workload.source.plan_cache"),
+            Some(WorkloadKind::SlowLog) => crate::message!("model.workload.source.slow_log"),
+            Some(WorkloadKind::QueryLog) => match &self.log {
+                Some(format) => crate::message!("model.workload.source.query_log", format = format),
+                None => crate::message!("model.workload.source.query_log_unknown"),
+            },
+            _ => Message::from(self.source.clone()),
+        }
+    }
+
+    /// Wording a source must never change the identity used to compare its counters.
+    pub fn source_name(&self) -> String {
+        self.source_message().render()
+    }
+
+    pub fn refresh_language(&mut self) {
+        let message = self.source_message();
+        self.source_label = message.is_translatable().then(|| message.render());
+    }
+
     /// What the workload was read from, as its provider said.
     pub fn kind(&self) -> Option<WorkloadKind> {
         self.kind
@@ -267,19 +330,27 @@ impl Workload {
     /// "the last 7 days" for windowed history, "the 35 minutes since statistics were reset" for cumulative counters,
     /// "the 50 minutes the Rails log covers" for an application's log.
     pub fn window_phrase(&self) -> String {
+        self.window_message().render()
+    }
+
+    pub fn window_message(&self) -> Message {
         if let Some(log) = &self.log {
             return if self.window_unknown() {
-                t!("model.window.log_period", log = log)
+                crate::message!("model.window.log_period", log = log)
             } else {
-                log_span(self.measurement_hours(), log)
+                log_span_message(self.measurement_hours(), log)
             };
         }
         if self.is_windowed() {
-            if self.window_unknown() { t!("model.window.recorded") } else { last_span(self.measurement_hours()) }
+            if self.window_unknown() {
+                crate::message!("model.window.recorded")
+            } else {
+                last_span_message(self.measurement_hours())
+            }
         } else if self.window_unknown() {
-            t!("model.window.since_reset_unknown")
+            crate::message!("model.window.since_reset_unknown")
         } else {
-            since_reset_span(self.measurement_hours())
+            since_reset_span_message(self.measurement_hours())
         }
     }
 
@@ -777,24 +848,32 @@ impl ScanSpan {
 
     /// "72 hours of Culprit's scans": the steps, as sentences name them (they need not be every scan's).
     pub fn phrase(&self) -> String {
+        self.phrase_message().render()
+    }
+
+    pub fn phrase_message(&self) -> Message {
         match self.period {
-            Some((from, to)) => t!(
+            Some((from, to)) => crate::message!(
                 "model.scans.over_when",
-                span = self.length(),
-                when = span_when(&format::iso_from_epoch(from), &format::iso_from_epoch(to))
+                span = self.length_message(),
+                when = MessageValue::DateSpan { from: format::iso_from_epoch(from), to: format::iso_from_epoch(to) }
             ),
-            None => t!("model.scans.over", span = self.length()),
+            None => crate::message!("model.scans.over", span = self.length_message()),
         }
     }
 
-    /// How long the steps cover: hours under four days (89 hours are not "4 days"), days to a tenth after.
+    /// How long the steps cover: hours under four days, then days rounded down to a tenth.
     pub fn length(&self) -> String {
-        if self.hours < 96.0 {
-            return span_hours(self.hours.round());
-        }
-        let days = (self.hours / 2.4).floor() / 10.0;
-        let tenths = format!("{days:.1}");
-        span_days(days, digits(tenths.strip_suffix(".0").unwrap_or(&tenths).to_string()))
+        self.length_message().render()
+    }
+
+    fn length_message(&self) -> Message {
+        let (key, n) = if self.hours < 96.0 {
+            (crate::key!("model.span.hours"), self.hours.round())
+        } else {
+            (crate::key!("model.span.days"), (self.hours / 2.4).floor() / 10.0)
+        };
+        Message::catalog(key, &[("n", n.into()), ("count", MessageValue::Digits(n.to_string()))])
     }
 
     /// The statement's average run in these steps. `None` without a run.
@@ -1195,6 +1274,25 @@ pub struct PlanHistory {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub captured_plan: Option<Plan>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_message: Option<Message>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub note_message: Option<Message>,
+}
+
+impl PlanHistory {
+    pub fn set_note(&mut self, message: impl Into<Message>) {
+        let message = message.into();
+        self.note = message.render();
+        self.note_message = message.is_translatable().then_some(message);
+    }
+
+    pub fn append_note(&mut self, message: impl Into<Message>) {
+        let existing = self.note_message.clone().unwrap_or_else(|| Message::from(self.note.clone()));
+        self.set_note(Message::paragraph(vec![existing, message.into()]));
+    }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]

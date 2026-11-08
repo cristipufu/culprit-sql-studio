@@ -403,18 +403,21 @@
           "value": 6.0
         },
         {
+          "key": "check.failing_query.metric.unfinished",
           "label": "Didn't finish",
           "text": null,
           "unit": "ratio",
           "value": 1.0
         },
         {
+          "key": "check.failing_query.metric.cancelled",
           "label": "Cancelled",
           "text": null,
           "unit": "count",
           "value": 6.0
         },
         {
+          "key": "check.failing_query.metric.cancelled_after",
           "label": "Cancelled after",
           "text": null,
           "unit": "ms",
@@ -469,12 +472,14 @@
           "value": 200.0
         },
         {
+          "key": "check.failing_query.metric.unfinished",
           "label": "Didn't finish",
           "text": null,
           "unit": "ratio",
           "value": 0.25
         },
         {
+          "key": "check.failing_query.metric.errors",
           "label": "Errors",
           "text": null,
           "unit": "count",
@@ -572,6 +577,7 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "check.last_page_insert.metric.waits",
           "label": "Page latch waits",
           "text": null,
           "unit": "count",
@@ -585,6 +591,7 @@
           "value": 53595.0
         },
         {
+          "key": "check.last_page_insert.metric.inserts",
           "label": "Inserts",
           "text": null,
           "unit": "count",
@@ -629,18 +636,21 @@
       "last_seen": "2026-10-11T14:19:10Z",
       "metrics": [
         {
+          "key": "check.hot_rows.metric.historical_waits",
           "label": "Historical lock waits",
           "text": null,
           "unit": "count",
           "value": 5.0
         },
         {
+          "key": "check.hot_rows.metric.historical_time",
           "label": "Historical time waiting",
           "text": null,
           "unit": "ms",
           "value": 186660.0
         },
         {
+          "key": "check.hot_rows.metric.historical_average",
           "label": "Historical average wait",
           "text": null,
           "unit": "ms",
@@ -693,6 +703,7 @@
       "impact": {
         "db_time_share": 0.2673650901995407,
         "label": "27% of DB time",
+        "label_key": "support.impact.share",
         "score": 51.707358296430186,
         "time_ms_per_day": null
       },
@@ -700,18 +711,21 @@
       "last_seen": "2026-10-11T15:55:55Z",
       "metrics": [
         {
+          "key": "common.metric.share_of_db_time",
           "label": "Share of DB time",
           "text": null,
           "unit": "ratio",
           "value": 0.2673650901995407
         },
         {
+          "key": "check.plan_insights.metric.plan_share",
           "label": "Share of the plan's work",
           "text": null,
           "unit": "ratio",
           "value": 0.999
         },
         {
+          "key": "common.metric.average_duration",
           "label": "Average duration",
           "text": null,
           "unit": "ms",
@@ -755,6 +769,7 @@
       "impact": {
         "db_time_share": 0.2673650901995407,
         "label": "27% of DB time",
+        "label_key": "support.impact.share",
         "score": 51.707358296430186,
         "time_ms_per_day": null
       },
@@ -762,12 +777,14 @@
       "last_seen": "2026-10-11T15:55:55Z",
       "metrics": [
         {
+          "key": "common.metric.share_of_db_time",
           "label": "Share of DB time",
           "text": null,
           "unit": "ratio",
           "value": 0.2673650901995407
         },
         {
+          "key": "common.metric.average_duration",
           "label": "Average duration",
           "text": null,
           "unit": "ms",
@@ -824,6 +841,7 @@
           "value": 0.8400302410886792
         },
         {
+          "key": "common.metric.average_duration",
           "label": "Average duration",
           "text": null,
           "unit": "ms",
@@ -864,6 +882,7 @@
       "impact": {
         "db_time_share": 0.06577964676947273,
         "label": "7% of DB time",
+        "label_key": "support.impact.share",
         "score": 25.647543112250094,
         "time_ms_per_day": null
       },
@@ -877,12 +896,14 @@
           "value": 0.06577964676947273
         },
         {
+          "key": "common.metric.average_duration",
           "label": "Average duration",
           "text": null,
           "unit": "ms",
           "value": 18.470993333333332
         },
         {
+          "key": "check.plan_warnings.metric.column",
           "label": "Column",
           "text": "customers.email",
           "unit": "text",
@@ -939,6 +960,7 @@
       "impact": {
         "db_time_share": 0.06033893214724244,
         "label": "20.3 s of database time over the last 5 hours (6%)",
+        "label_key": "support.impact.share",
         "score": 24.498803196658823,
         "time_ms_per_day": null
       },
@@ -946,24 +968,28 @@
       "last_seen": "2026-10-11T15:55:21Z",
       "metrics": [
         {
+          "key": "common.metric.share_of_db_time",
           "label": "Share of DB time",
           "text": null,
           "unit": "ratio",
           "value": 0.06033893214724244
         },
         {
+          "key": "check.missing_index.metric.lookups",
           "label": "Lookups that wanted it",
           "text": null,
           "unit": "count",
           "value": 300.0
         },
         {
+          "key": "check.missing_index.metric.improvement",
           "label": "Estimated improvement",
           "text": null,
           "unit": "ratio",
           "value": 0.9947
         },
         {
+          "key": "common.metric.rows_in_table",
           "label": "Rows in table",
           "text": null,
           "unit": "rows",
@@ -1019,6 +1045,7 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "check.config.read_committed_snapshot.metric.reads_waiting",
           "label": "Reads waiting on locks",
           "text": null,
           "unit": "ms",
@@ -1075,30 +1102,35 @@
       "last_seen": "2026-10-11T12:13:40Z",
       "metrics": [
         {
+          "key": "check.regression.metric.before",
           "label": "Before",
           "text": null,
           "unit": "ms",
           "value": 9.52014492753623
         },
         {
+          "key": "check.regression.metric.since_then",
           "label": "Since then",
           "text": null,
           "unit": "ms",
           "value": 32.35602150537635
         },
         {
+          "key": "common.metric.extra_time",
           "label": "Extra time",
           "text": null,
           "unit": "ms",
           "value": 2123.736521739131
         },
         {
+          "key": "check.regression.metric.started",
           "label": "Started",
           "text": "Oct 11, 10:45 UTC",
           "unit": "text",
           "value": 0.0
         },
         {
+          "key": "check.regression.metric.plan_change",
           "label": "Plan change",
           "text": "8 → 47",
           "unit": "text",
@@ -1160,12 +1192,14 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "common.metric.rows_in_table",
           "label": "Rows in table",
           "text": null,
           "unit": "rows",
           "value": 800000.0
         },
         {
+          "key": "check.unindexed_fk.metric.foreign_key",
           "label": "Foreign key",
           "text": "fk_ticket_events_ticket",
           "unit": "text",
@@ -1216,6 +1250,7 @@
       "impact": {
         "db_time_share": 0.014778470818232064,
         "label": "5.0 s of database time over the last 5 hours (1%)",
+        "label_key": "support.impact.share",
         "score": 10.941006061038433,
         "time_ms_per_day": null
       },
@@ -1223,24 +1258,28 @@
       "last_seen": "2026-10-11T12:13:40Z",
       "metrics": [
         {
+          "key": "common.metric.share_of_db_time",
           "label": "Share of DB time",
           "text": null,
           "unit": "ratio",
           "value": 0.014778470818232064
         },
         {
+          "key": "check.missing_index.metric.lookups",
           "label": "Lookups that wanted it",
           "text": null,
           "unit": "count",
           "value": 150.0
         },
         {
+          "key": "check.missing_index.metric.improvement",
           "label": "Estimated improvement",
           "text": null,
           "unit": "ratio",
           "value": 0.81
         },
         {
+          "key": "common.metric.rows_in_table",
           "label": "Rows in table",
           "text": null,
           "unit": "rows",
@@ -1295,12 +1334,14 @@
           "value": 1.0
         },
         {
+          "key": "check.deadlocks.metric.pattern",
           "label": "Pattern",
           "text": "key-lookup deadlock",
           "unit": "text",
           "value": 0.0
         },
         {
+          "key": "check.deadlocks.metric.rolled_back",
           "label": "Rolled back",
           "text": "session 61 (orders-api)",
           "unit": "text",
@@ -1345,6 +1386,7 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "common.metric.size",
           "label": "Size",
           "text": null,
           "unit": "bytes",
@@ -1387,6 +1429,7 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "common.metric.size",
           "label": "Size",
           "text": null,
           "unit": "bytes",
@@ -1429,6 +1472,7 @@
       "last_seen": "2026-10-11T15:55:40Z",
       "metrics": [
         {
+          "key": "check.big_result.metric.rows_per_run",
           "label": "Rows per run",
           "text": null,
           "unit": "rows",
@@ -1483,6 +1527,7 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "check.untrusted_constraint.metric.constraints",
           "label": "Constraints",
           "text": null,
           "unit": "count",
@@ -1601,7 +1646,7 @@
       "title": "LAST_QUERY_PLAN_STATS is off for this database",
       "verification_basis": "rescan",
       "verify": [
-        "Let the workload run, re-scan, then open a complex or resource-intensive query in Queries and pick \"Last actual run\" when available: the diagram shows the rows and timings SQL Server retained. A simple query may have only a root operator, and an uncached or evicted plan has no last-run data."
+        "Let the workload run, re-scan, then open a complex or resource-intensive query in Queries and pick \"Last run\" when available: the diagram shows the rows and timings SQL Server retained. A simple query may have only a root operator, and an uncached or evicted plan has no last-run data."
       ]
     },
     {
@@ -1644,18 +1689,21 @@
       "last_seen": "2026-10-11T15:55:31Z",
       "metrics": [
         {
+          "key": "check.log_volume.metric.written",
           "label": "Log written",
           "text": null,
           "unit": "bytes",
           "value": 242946788.0
         },
         {
+          "key": "check.log_volume.metric.share",
           "label": "Share of log",
           "text": null,
           "unit": "ratio",
           "value": 0.829868577958574
         },
         {
+          "key": "check.log_volume.metric.per_row",
           "label": "Per row",
           "text": null,
           "unit": "bytes",
@@ -1779,6 +1827,7 @@
         "last-actual-plans"
       ],
       "prepare": [
+        "retained observations are worded for this reader",
         "measurement context identifies this database and its clock",
         "index availability and maintenance follow the engine",
         "CTE writes named for their base table",
@@ -1820,7 +1869,7 @@
         "query-driven index changes need measured work",
         "query evidence leads with absolute cost and period",
         "names without the database",
-        "a caveat repeats nothing the summary or the fix says"
+        "identical complete caveats are shown once"
       ]
     },
     "previous_analyzer": {
@@ -3970,6 +4019,17 @@
           "healthy": null,
           "key": "batch-requests",
           "label": "Batch requests (whole server)",
+          "label_message": {
+            "arguments": {
+              "whole": {
+                "kind": "text",
+                "value": "server"
+              }
+            },
+            "key": "provider.mssql.signal.batch_requests",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "per-second",
@@ -3979,6 +4039,17 @@
           "healthy": "New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.",
           "key": "compiles-per-batch",
           "label": "Plans compiled (whole server)",
+          "label_message": {
+            "arguments": {
+              "whole": {
+                "kind": "text",
+                "value": "server"
+              }
+            },
+            "key": "provider.mssql.signal.plans_compiled",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "percent",
@@ -3988,6 +4059,17 @@
           "healthy": "A server cache counter at the scan's instant. There is no universal healthy number of seconds; cache size, workload and measured I/O matter.",
           "key": "page-life",
           "label": "Page life expectancy (whole server)",
+          "label_message": {
+            "arguments": {
+              "whole": {
+                "kind": "text",
+                "value": "server"
+              }
+            },
+            "key": "provider.mssql.signal.page_life",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "now",
           "status": "info",
           "unit": "seconds",
@@ -3997,6 +4079,12 @@
           "healthy": "No requests in this queue when the scan ran. Historical waits are reported separately.",
           "key": "memory-grants-pending",
           "label": "Waiting for memory",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.mssql.signal.grants_pending",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "now",
           "status": "good",
           "unit": "count",
@@ -4006,6 +4094,21 @@
           "healthy": "The share of recorded waiting spent ready to run, before a worker was scheduled. This is not CPU utilization and alone does not establish CPU pressure.",
           "key": "signal-wait",
           "label": "Scheduling share of recorded waits (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "health.label.signal_wait",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "percent",
@@ -4015,6 +4118,17 @@
           "healthy": null,
           "key": "threadpool-wait-ms",
           "label": "Waiting for workers since start (whole instance)",
+          "label_message": {
+            "arguments": {
+              "whole": {
+                "kind": "text",
+                "value": "instance"
+              }
+            },
+            "key": "provider.mssql.signal.threadpool_wait_ms",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "milliseconds",
@@ -4024,6 +4138,26 @@
           "healthy": "Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.",
           "key": "threadpool-waits",
           "label": "Waiting for workers, per hour (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {
+                    "per": {
+                      "kind": "text",
+                      "value": "hour"
+                    }
+                  },
+                  "key": "provider.mssql.signal.threadpool_waits",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "milliseconds",
@@ -4033,6 +4167,12 @@
           "healthy": "Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.",
           "key": "version-store",
           "label": "Version store",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.mssql.version_store",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "now",
           "status": "info",
           "unit": "bytes",
@@ -4042,6 +4182,17 @@
           "healthy": "The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.",
           "key": "new-connections",
           "label": "New connections (whole server)",
+          "label_message": {
+            "arguments": {
+              "whole": {
+                "kind": "text",
+                "value": "server"
+              }
+            },
+            "key": "provider.mssql.signal.new_connections",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "per-second",
@@ -5093,12 +5244,14 @@
                     2
                   ],
                   "rule": "implicit-conversion",
+                  "scan_context": false,
                   "severity": "high",
                   "title": "A type mismatch on customers.email stops SQL Server from seeking an index",
                   "verify": "Explain again: no CONVERT_IMPLICIT in the plan, and the scan became a seek."
                 }
               ],
-              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -5595,12 +5748,14 @@
                     1
                   ],
                   "rule": "missing-index-hint",
+                  "scan_context": true,
                   "severity": "high",
                   "title": "SQL Server estimates an index on shop.order_items (order_id) would make this 99% cheaper",
                   "verify": "Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure."
                 }
               ],
-              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -6000,7 +6155,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -6482,12 +6638,14 @@
                     1
                   ],
                   "rule": "missing-index-hint",
+                  "scan_context": true,
                   "severity": "high",
                   "title": "SQL Server estimates an index on shop.orders (shipped_at) would make this 81% cheaper",
                   "verify": "Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure."
                 }
               ],
-              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -6921,7 +7079,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -7200,7 +7359,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -7717,7 +7877,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -8076,7 +8237,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -8610,7 +8772,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -8850,7 +9013,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -9184,12 +9348,14 @@
                     12
                   ],
                   "rule": "missing-index-hint",
+                  "scan_context": true,
                   "severity": "high",
                   "title": "SQL Server estimates an index on shop.order_items (order_id) would make this 50% cheaper",
                   "verify": "Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure."
                 }
               ],
-              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -10600,7 +10766,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns."
+              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -10994,6 +11161,7 @@
                     4
                   ],
                   "rule": "nested-loops",
+                  "scan_context": false,
                   "severity": "medium",
                   "title": "Compares each of 1.5M rows of order_items with 999 rows the Table Spool replays (1.5B pairs)",
                   "verify": "Explain again without the hint: a hash or merge join instead of the loop."
@@ -11009,12 +11177,14 @@
                     0
                   ],
                   "rule": "parallelism-blocked",
+                  "scan_context": false,
                   "severity": "medium",
                   "title": "This plan runs on one CPU because its statement says OPTION (MAXDOP 1)",
                   "verify": "Explain again: no NonParallelPlanReason, and Parallelism operators appear."
                 }
               ],
-              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+              "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -11993,6 +12163,70 @@
       }
     ],
     "headline": "22 opportunities. The top ones touch 2 min of database time over the last 5 hours (28%).",
+    "headline_message": {
+      "kind": "sequence",
+      "messages": [
+        {
+          "arguments": {
+            "count": {
+              "kind": "digits",
+              "value": "22"
+            },
+            "n": {
+              "kind": "number",
+              "value": 22.0
+            }
+          },
+          "key": "summary.headline.opportunities",
+          "kind": "catalog"
+        },
+        {
+          "arguments": {
+            "cost": {
+              "kind": "message",
+              "value": {
+                "arguments": {
+                  "of": {
+                    "kind": "text",
+                    "value": "database"
+                  },
+                  "share": {
+                    "kind": "percent",
+                    "value": 0.2846163023196287
+                  },
+                  "span": {
+                    "kind": "message",
+                    "value": {
+                      "arguments": {
+                        "count": {
+                          "kind": "digits",
+                          "value": "5"
+                        },
+                        "n": {
+                          "kind": "number",
+                          "value": 5.0
+                        }
+                      },
+                      "key": "model.window.last_hours",
+                      "kind": "catalog"
+                    }
+                  },
+                  "time": {
+                    "kind": "duration",
+                    "value": 95904.66500000001
+                  }
+                },
+                "key": "support.cost.time_over",
+                "kind": "catalog"
+              }
+            }
+          },
+          "key": "summary.headline.top_cost",
+          "kind": "catalog"
+        }
+      ],
+      "separator": " "
+    },
     "index_counting": "in the hour since the server last restarted",
     "index_notes": [
       {
@@ -12053,6 +12287,57 @@
         "runs": "2 runs on Oct 11, 11:54–12:13 UTC"
       }
     ],
+    "takeaway": "The top ones touch 2 min of database time over the last 5 hours (28%).",
+    "takeaway_message": {
+      "kind": "sequence",
+      "messages": [
+        {
+          "arguments": {
+            "cost": {
+              "kind": "message",
+              "value": {
+                "arguments": {
+                  "of": {
+                    "kind": "text",
+                    "value": "database"
+                  },
+                  "share": {
+                    "kind": "percent",
+                    "value": 0.2846163023196287
+                  },
+                  "span": {
+                    "kind": "message",
+                    "value": {
+                      "arguments": {
+                        "count": {
+                          "kind": "digits",
+                          "value": "5"
+                        },
+                        "n": {
+                          "kind": "number",
+                          "value": 5.0
+                        }
+                      },
+                      "key": "model.window.last_hours",
+                      "kind": "catalog"
+                    }
+                  },
+                  "time": {
+                    "kind": "duration",
+                    "value": 95904.66500000001
+                  }
+                },
+                "key": "support.cost.time_over",
+                "kind": "catalog"
+              }
+            }
+          },
+          "key": "summary.headline.top_cost",
+          "kind": "catalog"
+        }
+      ],
+      "separator": " "
+    },
     "top_share": 0.2846163023196287
   }
 }

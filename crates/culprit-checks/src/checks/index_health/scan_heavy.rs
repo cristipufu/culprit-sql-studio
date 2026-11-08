@@ -307,25 +307,37 @@ fn scan_heavy_finding(snapshot: &Snapshot, s: ScanHeavy<'_>) -> Finding {
         Some(i) => apply_query_impact(&mut f, i),
         None => {
             f.impact.score = s.score;
-            f.impact.label = if s.measured {
+            f.impact.set_label(if s.measured {
                 t!("check.scan_heavy.impact.rows_per_day", rows = format::count(rows_read))
             } else {
                 t!("check.scan_heavy.impact.rows", rows = format::count(s.rows_read))
-            };
+            });
         }
     }
     f.severity = s.severity;
     f.confidence = s.confidence;
     f.queries = query_refs(&s.proven.iter().chain(&s.unplanned).copied().take(5).collect::<Vec<_>>());
     if s.measured {
-        f.metrics.push(Metric::new(t!("check.scan_heavy.metric.full_reads_per_day"), scans, Unit::Count));
-        f.metrics.push(Metric::new(t!("check.scan_heavy.metric.rows_read_per_day"), rows_read, Unit::Rows));
+        f.metrics.push(Metric::said(
+            culprit_core::key!("check.scan_heavy.metric.full_reads_per_day"),
+            scans,
+            Unit::Count,
+        ));
+        f.metrics.push(Metric::said(
+            culprit_core::key!("check.scan_heavy.metric.rows_read_per_day"),
+            rows_read,
+            Unit::Rows,
+        ));
     } else {
-        f.metrics.push(Metric::new(t!("check.scan_heavy.metric.full_reads"), s.full_reads, Unit::Count));
-        f.metrics.push(Metric::new(t!("check.scan_heavy.metric.rows_read"), s.rows_read, Unit::Rows));
+        f.metrics.push(Metric::said(
+            culprit_core::key!("check.scan_heavy.metric.full_reads"),
+            s.full_reads,
+            Unit::Count,
+        ));
+        f.metrics.push(Metric::said(culprit_core::key!("check.scan_heavy.metric.rows_read"), s.rows_read, Unit::Rows));
     }
     if let Some(rows) = t.rows {
-        f.metrics.push(Metric::new(t!("common.metric.rows_in_table"), rows, Unit::Rows));
+        f.metrics.push(Metric::said(culprit_core::key!("common.metric.rows_in_table"), rows, Unit::Rows));
     }
     let generic = if snapshot.server.engine == Engine::Postgres { "yes" } else { "no" };
     let explain = if f.queries.is_empty() {

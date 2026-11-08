@@ -32,6 +32,11 @@ jobs:
           toolchain: stable
           components: rustfmt
       - run: cargo fmt --all --check
+      - name: Catalog tooling and translation freshness
+        run: |
+          python3 -B -m unittest discover -s dev -p test_catalog.py
+          python3 -B -m unittest discover -s dev -p test_smoke_providers.py
+          python3 dev/catalog.py stale --check
 
   check:
     name: Lint and test (${{ matrix.os }})
@@ -77,6 +82,36 @@ jobs:
           bun run typecheck
           bun run test
           bun run lint
+
+  providers:
+    name: Live provider (${{ matrix.fixture }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { fixture: postgres, os: ubuntu-latest }
+          - { fixture: mysql, os: ubuntu-latest }
+          - { fixture: mariadb-10.6, os: ubuntu-latest }
+          - { fixture: mariadb-10.11, os: ubuntu-latest }
+          - { fixture: mariadb-11.8, os: ubuntu-latest }
+          - { fixture: mssql, os: ubuntu-latest }
+          # These fixture digests pin the native arm64 images used for provider verification.
+          - { fixture: timescale, os: ubuntu-24.04-arm }
+          - { fixture: yugabyte, os: ubuntu-24.04-arm }
+          - { fixture: yugabyte-cluster, os: ubuntu-24.04-arm }
+          - { fixture: ssh, os: ubuntu-latest }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Collect, restrict permissions and verify cancellation in a disposable database
+        run: python3 -B dev/smoke-providers.py ${{ matrix.fixture }}
 
   dependencies:
     name: Dependencies

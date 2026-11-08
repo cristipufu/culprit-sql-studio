@@ -9,6 +9,64 @@ fn trend_spans_add_up_to_the_window() {
 use super::*;
 
 #[test]
+fn deadlock_groups_keep_their_identity_and_order_when_labels_change_language() {
+    use culprit_core::{Deadlock, DeadlockPattern, DeadlockReport, i18n};
+    let mut report = crate::analyze(crate::waits::snapshot_with(Engine::Mssql));
+    report.snapshot.deadlocks = Some(DeadlockReport {
+        source: "system_health".into(),
+        since_hours: 24.0,
+        deadlocks: [
+            DeadlockPattern::Cycle,
+            DeadlockPattern::Parallelism,
+            DeadlockPattern::OppositeOrder,
+            DeadlockPattern::LockEscalation,
+            DeadlockPattern::KeyLookup,
+            DeadlockPattern::LockConversion,
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, pattern)| {
+            let mut deadlock = Deadlock::new("system_health", Some(report.snapshot.taken_at.clone()), vec![], vec![]);
+            deadlock.id = format!("event-{index}");
+            deadlock.pattern = pattern;
+            deadlock.objects = vec!["dbo.items".into()];
+            deadlock
+        })
+        .collect(),
+        ..Default::default()
+    });
+    let english = i18n::scope("en", || super::deadlocks::deadlocks(&report));
+    let ids = |tile: &Tile| tile.items.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
+    assert_eq!(english.items.len(), 3);
+    for language in ["de", "fr", "es"] {
+        let translated = i18n::scope(language, || super::deadlocks::deadlocks(&report));
+        assert_eq!(ids(&translated), ids(&english), "{language}");
+        assert_ne!(translated.items[0].label, english.items[0].label);
+    }
+}
+
+#[test]
+fn capability_actions_are_facts_and_their_sentences_stay_intact() {
+    use culprit_core::{Capability, MissingCapability};
+    let mut snapshot = crate::waits::snapshot_with(Engine::Mssql);
+    snapshot.workload = None;
+    snapshot.server.missing = vec![MissingCapability::sql(
+        Capability::QueryStore,
+        "La collecte n’est pas disponible.",
+        "ALTER DATABASE CURRENT SET QUERY_STORE = ON;",
+    )];
+    snapshot.server.missing[0].fix = Some("Instructions mention CREATE TABLE example; without authorizing it.".into());
+    let report = crate::analyze(snapshot.clone());
+    let dashboard = super::dashboard(&report);
+    let tile = dashboard.tile(TileKey::Statistics).unwrap();
+    assert_eq!(tile.fix_sql.as_deref(), Some("ALTER DATABASE CURRENT SET QUERY_STORE = ON;"));
+    assert!(tile.takeaway.ends_with("La collecte n’est pas disponible."));
+    assert_eq!(report.summary.no_workload_capability, Some(Capability::QueryStore));
+    snapshot.server.missing[0].action = None;
+    assert!(super::dashboard(&crate::analyze(snapshot)).tile(TileKey::Statistics).unwrap().fix_sql.is_none());
+}
+
+#[test]
 fn a_bucket_holding_a_lower_bound_is_left_out_of_the_comparison() {
     // Eight hours at a steady second an hour, except a bucket that holds only a lower bound (a running total fell
     // without a reset). Counted as 50 ms it would make the earlier hours look quieter and today look busier.
@@ -27,27 +85,6 @@ fn a_bucket_holding_a_lower_bound_is_left_out_of_the_comparison() {
     });
     let t = trend(&w).expect("a trend");
     assert!((t.ratio - 1.0).abs() < 1e-9, "{}", t.ratio);
-}
-
-#[test]
-fn fix_statements_come_out_of_sentences() {
-    assert_eq!(
-        fix_statement("Run CREATE EXTENSION pg_stat_statements; in this database. No restart is needed.").as_deref(),
-        Some("CREATE EXTENSION pg_stat_statements;")
-    );
-    assert_eq!(
-        fix_statement("ALTER DATABASE CURRENT SET QUERY_STORE = ON;").as_deref(),
-        Some("ALTER DATABASE CURRENT SET QUERY_STORE = ON;")
-    );
-    assert_eq!(fix_statement("Ask an administrator."), None);
-    assert_eq!(fix_statement("Set performance_schema = ON in the server configuration and restart."), None);
-}
-
-#[test]
-fn reasons_read_as_sentence_ends() {
-    assert_eq!(sentence("Query Store is OFF on this database."), "Query Store is OFF on this database.");
-    assert_eq!(sentence("The login can't read it"), "the login can't read it.");
-    assert_eq!(sentence("SQL Server 2016 or newer"), "SQL Server 2016 or newer.");
 }
 
 #[test]

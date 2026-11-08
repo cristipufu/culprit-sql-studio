@@ -494,18 +494,22 @@ fn lock_escalations_finding(snapshot: &Snapshot, e: EscalatedTable<'_>) -> Findi
         f.caveats.push(t!("check.lock_escalations.caveat.no_new_increase"));
     }
     severity_score(&mut f);
-    f.impact.label = match new {
+    f.impact.set_label(match new {
         Some((_, n)) if n > 0.0 => t!("check.lock_escalations.impact.new", n = n, count = format::count(n)),
         Some(_) => t!("check.lock_escalations.impact.none_new", n = total_n, count = &total),
         None => t!("check.lock_escalations.impact.total", n = total_n, count = &total),
-    };
+    });
     f.confidence = Confidence::High;
     f.metrics = vec![Metric::said(super::ESCALATIONS_METRIC, t.escalations, Unit::Count)];
     if let Some((_, n)) = new {
         f.metrics.push(Metric::said(key!("check.lock_escalations.metric.since_previous"), n, Unit::Count));
     }
     if t.lock_waits >= 1.0 {
-        f.metrics.push(Metric::new(t!("check.lock_escalations.metric.lock_waits"), t.lock_waits, Unit::Count));
+        f.metrics.push(Metric::said(
+            culprit_core::key!("check.lock_escalations.metric.lock_waits"),
+            t.lock_waits,
+            Unit::Count,
+        ));
         f.metrics.push(Metric::said(key!("check.lock_escalations.metric.time_waiting"), t.lock_wait_ms, Unit::Ms));
     }
     let target = qualified(Engine::Mssql, &schema, &table);

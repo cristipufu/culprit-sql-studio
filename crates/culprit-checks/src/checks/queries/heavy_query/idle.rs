@@ -219,7 +219,9 @@ impl IdleKind {
             IdleKind::Locks => after_holder(t!("check.heavy_query.fix.idle.locks")),
             IdleKind::Sleep => (t!("check.heavy_query.fix.idle.sleep"), None),
             IdleKind::Client => (t!("check.heavy_query.fix.idle.client"), None),
-            IdleKind::Memory => (t!("check.heavy_query.fix.idle.memory"), None),
+            IdleKind::Memory => {
+                (t!("check.heavy_query.fix.idle.memory", health = culprit_core::t!("core.dashboard.tile.health")), None)
+            }
             IdleKind::Latch => (t!("check.heavy_query.fix.idle.latch"), None),
             IdleKind::Unknown => (t!("check.heavy_query.fix.idle.unknown"), None),
         };
@@ -304,7 +306,7 @@ impl DominantWait<'_> {
         let part = if self.share >= 1.0 { "most" } else { "share" };
         let share = format::percent(self.share);
         let source =
-            snapshot.workload.as_ref().map_or_else(|| t!("check.heavy_query.the_statistics"), |w| w.source.clone());
+            snapshot.workload.as_ref().map_or_else(|| t!("check.heavy_query.the_statistics"), |w| w.source_name());
         // A part of its time the source keeps only in its totals: said over them where the share is the scans'.
         match crate::support::totals_basis(snapshot, q) {
             Some(basis) => t!(

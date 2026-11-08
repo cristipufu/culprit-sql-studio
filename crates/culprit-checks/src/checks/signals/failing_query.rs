@@ -219,23 +219,23 @@ fn failing_query_finding(snapshot: &Snapshot, runs: FailingRuns<'_>) -> Finding 
     f.severity = runs.severity;
     with_query(snapshot, &mut f, q);
     severity_score(&mut f);
-    f.impact.label = t!("check.failing_query.impact", share = &share);
+    f.impact.set_label(t!("check.failing_query.impact", share = &share));
     f.confidence = Confidence::High;
     f.metrics = vec![
         Metric::said(key!("common.metric.runs"), q.executions, Unit::Count),
-        Metric::new(t!("check.failing_query.metric.unfinished"), rate, Unit::Ratio),
+        Metric::said(culprit_core::key!("check.failing_query.metric.unfinished"), rate, Unit::Ratio),
     ];
     if aborted > 0.0 {
-        f.metrics.push(Metric::new(t!("check.failing_query.metric.cancelled"), aborted, Unit::Count));
+        f.metrics.push(Metric::said(culprit_core::key!("check.failing_query.metric.cancelled"), aborted, Unit::Count));
     }
     if failed > 0.0 {
-        f.metrics.push(Metric::new(t!("check.failing_query.metric.errors"), failed, Unit::Count));
+        f.metrics.push(Metric::said(culprit_core::key!("check.failing_query.metric.errors"), failed, Unit::Count));
     }
     if let Some(ms) = costs.aborted_mean_ms {
-        f.metrics.push(Metric::new(t!("check.failing_query.metric.cancelled_after"), ms, Unit::Ms));
+        f.metrics.push(Metric::said(culprit_core::key!("check.failing_query.metric.cancelled_after"), ms, Unit::Ms));
     }
     if let Some(e) = &costs.top_error {
-        f.metrics.push(Metric::text(t!("check.failing_query.metric.recent_error"), e.clone()));
+        f.metrics.push(Metric::said_text(culprit_core::key!("check.failing_query.metric.recent_error"), e.clone()));
     }
     f.fix = Some(failing_fix(snapshot, &runs));
     // On running totals the failures hold every run from before the change: two scans show it.

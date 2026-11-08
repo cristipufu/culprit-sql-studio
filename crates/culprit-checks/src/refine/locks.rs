@@ -167,7 +167,7 @@ impl Refine for Rule {
                     target.summary.push(' ');
                     target.summary.push_str(&t!(
                         "refine.locks.same_episode",
-                        handle = capitalize(&support::query_handle(q)),
+                        handle = support::query_handle_of(q).leading_words(),
                         query = &q.id,
                         table = &table,
                         when = when,
@@ -181,7 +181,7 @@ impl Refine for Rule {
                         fix.summary.push_str(&t!("refine.locks.row_versioning", query = &q.id, stopped = stopped));
                     }
                     note = Some(t!("refine.locks.episode_note", waited = waited, table = table));
-                    target.impact.label = t!("refine.locks.impact", time = format::duration(d.total_lock_ms));
+                    target.impact.set_label(t!("refine.locks.impact", time = format::duration(d.total_lock_ms)));
                 }
                 Evidence::Chain { current, promote } => {
                     if promote {
@@ -195,7 +195,7 @@ impl Refine for Rule {
                         target.summary.push(' ');
                         target.summary.push_str(&t!(
                             "refine.locks.chain_waited",
-                            handle = capitalize(&support::query_handle(q)),
+                            handle = support::query_handle_of(q).leading_words(),
                             waited = &waited,
                             window = &window,
                             share = &share
@@ -206,7 +206,7 @@ impl Refine for Rule {
                         }
                     }
                     if current {
-                        target.impact.label = t!("refine.locks.impact", time = format::duration(d.total_lock_ms));
+                        target.impact.set_label(t!("refine.locks.impact", time = format::duration(d.total_lock_ms)));
                     }
                 }
             }

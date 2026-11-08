@@ -295,12 +295,11 @@ function QueryCard({ report, query, node }: { report: Report; query: QueryStat; 
           <span>{withElements(t("ui.finding_detail.db_time_share", { share: slot(0) }), [<b key="share">{percent(share)}</b>])}</span>
         )}
         <span>
-          <b>{count(stated ? stated.runs : query.executions)}</b>{" "}
           {ran != null
-            ? ran.replace(/^\S+ /, "")
-            : (stated?.perDay ?? rates?.perDay)
+            ? ran
+            : <><b>{count(stated ? stated.runs : query.executions)}</b>{" "}{(stated?.perDay ?? rates?.perDay)
               ? t("ui.finding_detail.runs_per_day", { n: stated ? stated.runs : query.executions })
-              : t("ui.finding_detail.runs", { n: stated ? stated.runs : query.executions })}
+              : t("ui.finding_detail.runs", { n: stated ? stated.runs : query.executions })}</>}
         </span>
         <span>{withElements(t("ui.finding_detail.average", { duration: slot(0) }), [<b key="avg">{duration(stated?.mean ?? query.mean_time_ms)}</b>])}</span>
         {stated?.over && <span className="muted">{t("ui.finding_detail.over_short", { over: stated.over })}</span>}

@@ -2,6 +2,8 @@
 //! static predicate matching, and plan predicate inspection.
 
 use crate::{Engine, SqlSyntax, t};
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// How backslashes behave inside quoted text. MySQL and Postgres both have a server setting that flips this
 /// (NO_BACKSLASH_ESCAPES, standard_conforming_strings).
@@ -72,7 +74,9 @@ pub(crate) fn lex(text: &str, engine: Engine, mode: Mode) -> std::result::Result
 }
 
 /// Why text can't be lexed with confidence.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
 pub enum LexError {
     /// A quoted string or name never closes: the one lexing error that depends on the server's settings.
     UnclosedQuote,
@@ -102,6 +106,7 @@ impl LexError {
 impl From<LexError> for crate::Error {
     fn from(e: LexError) -> crate::Error {
         crate::Error::invalid(e.message())
+            .with_detail(crate::ErrorDetail::Statement(super::StatementProblem::Lexical(e)))
     }
 }
 

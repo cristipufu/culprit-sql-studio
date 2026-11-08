@@ -1,9 +1,10 @@
 import { useSyncExternalStore } from "react";
 import english from "../../../locales/en.json";
 import { type Args, type Locale, formatMessage } from "./message-format";
+import { isLanguageCode } from "./language-code";
 
 /** A language's own description, from its catalog's `_meta`. */
-export type LanguageMeta = Locale & { name: string; english_name: string };
+export type LanguageMeta = Locale & { name: string; english_name: string; direction?: "ltr" | "rtl" };
 
 /** A language's catalog: `locales/<code>.json`, its keys and messages beside its `_meta`. */
 export type Catalog = { _meta: LanguageMeta } & Record<string, unknown>;
@@ -23,7 +24,7 @@ let current = "en";
  */
 export function registerCatalogs(found: Record<string, Catalog>): void {
   for (const [code, catalog] of Object.entries(found)) {
-    if (/^[a-z]{2,3}(-[A-Z][A-Za-z]{1,3})?$/.test(code) && catalog?._meta) catalogs.set(code, catalog);
+    if (isLanguageCode(code) && catalog?._meta) catalogs.set(code, catalog);
   }
   current = chosen();
   notify();
@@ -42,7 +43,7 @@ export function language(): string {
 }
 
 /** How the app's language writes numbers and counts: its catalog's `_meta`. */
-export function locale(): Locale {
+export function locale(): LanguageMeta {
   return (catalogs.get(current) ?? ENGLISH)._meta;
 }
 
@@ -68,7 +69,8 @@ export function t(key: string, args: Args = {}): string {
   const message = typeof own === "string" ? own : ENGLISH[key];
   if (typeof message !== "string") return key;
   const meta = typeof own === "string" ? catalog._meta : ENGLISH._meta;
-  return formatMessage(message, args, meta);
+  const rendered = formatMessage(message, args, meta);
+  return typeof own !== "string" && catalog._meta.direction === "rtl" ? `\u2066${rendered}\u2069` : rendered;
 }
 
 /** A message key handed on to be said later with t(): marked so the catalog test sees it used. */

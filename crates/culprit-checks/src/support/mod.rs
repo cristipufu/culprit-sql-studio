@@ -3,12 +3,13 @@ mod predicates;
 #[cfg(test)]
 pub(crate) mod tests;
 
+use culprit_core::i18n::{Message, MessageValue};
 pub use handles::*;
 pub use predicates::*;
 
 use culprit_core::{
     Capability, Category, Confidence, Engine, Finding, Impact, QueryRef, QueryStat, Severity, Snapshot, Subject,
-    SubjectKind, format, t,
+    SubjectKind, format, key, t,
 };
 
 pub fn finding(check: &str, key: &str, category: Category, subject: Subject) -> Finding {
@@ -222,40 +223,36 @@ pub(crate) fn index_work_is_material(snapshot: &Snapshot, queries: &[&QueryStat]
 /// Absolute query cost and its period on the same basis as the share. Mixed scan intervals cannot honestly be
 /// added into a single measured total; in that case retain the individual evidence rather than inventing a period.
 pub(crate) fn query_cost_context(snapshot: &Snapshot, queries: &[&QueryStat]) -> Option<String> {
+    query_cost_message(snapshot, queries).map(|message| message.render())
+}
+
+pub(crate) fn query_cost_message(snapshot: &Snapshot, queries: &[&QueryStat]) -> Option<Message> {
     let w = snapshot.workload.as_ref()?;
     let impact = query_impact(snapshot, queries)?;
     // What the time is of: all database time, or only the runs the slow query log kept.
     let of = if crate::queries::slow_log_only(snapshot) { "slow_log" } else { "database" };
-    let said = |time: f64, span: String| {
-        t!(
+    let said = |time: f64, span: Message| {
+        culprit_core::message!(
             "support.cost.time_over",
-            time = format::duration(time),
+            time = MessageValue::Duration(time),
             of = of,
             span = span,
-            share = format::percent(impact.share)
+            share = MessageValue::Percent(impact.share)
         )
     };
     if queries.iter().any(|q| w.scans_of(q).is_some()) {
         if queries.len() != 1 {
             return None;
         }
-        if !queries.iter().all(|q| w.scans_of(q).is_some()) {
-            return None;
-        }
-        let scans: Vec<_> = queries.iter().filter_map(|q| w.scans_of(q)).collect();
-        let first = scans.first()?;
-        if !scans.iter().all(|s| s.phrase() == first.phrase()) {
-            return None;
-        }
-        let time: f64 = scans.iter().map(|s| s.time_ms).sum();
-        Some(said(time, first.phrase()))
+        let scans = w.scans_of(queries[0])?;
+        Some(said(scans.time_ms, scans.phrase_message()))
     } else {
         // Plan-cache shares can weight entries with different ages. Their raw totals are not an amount over one
         // common interval, so keep their existing per-entry evidence rather than manufacture a matching total.
         if w.hourly_time_ms.is_some() {
             return None;
         }
-        Some(said(queries.iter().map(|q| q.total_time_ms).sum(), w.window_phrase()))
+        Some(said(queries.iter().map(|q| q.total_time_ms).sum(), w.window_message()))
     }
 }
 
@@ -263,7 +260,7 @@ pub fn apply_query_impact(f: &mut Finding, impact: &QueryImpact) {
     f.impact.db_time_share = Some(impact.share);
     f.impact.time_ms_per_day = impact.per_day_ms;
     f.impact.score = score_for_share(impact.share);
-    f.impact.label = share_label(impact.share);
+    f.impact.set_keyed_label(key!("support.impact.share"), share_label(impact.share));
 }
 
 pub fn share_label(share: f64) -> String {
@@ -735,7 +732,14 @@ pub(crate) fn top_findings_cost<'a>(
     snapshot: &'a Snapshot,
     findings: impl IntoIterator<Item = &'a Finding>,
 ) -> Option<String> {
-    query_cost_context(snapshot, &top_queries(snapshot, findings))
+    top_findings_cost_message(snapshot, findings).map(|message| message.render())
+}
+
+pub(crate) fn top_findings_cost_message<'a>(
+    snapshot: &'a Snapshot,
+    findings: impl IntoIterator<Item = &'a Finding>,
+) -> Option<Message> {
+    query_cost_message(snapshot, &top_queries(snapshot, findings))
 }
 
 /// The distinct statements behind the top three active findings.
@@ -774,14 +778,14 @@ pub fn top_findings_share<'a>(
 
 /// What the share behind the top three active findings ([`top_findings_share`]) is over, when Culprit's scans measured
 /// every statement behind them: "89 hours of Culprit's scans". `None` otherwise: it is over the workload's window.
-pub fn top_findings_scans<'a>(
+pub fn top_findings_scans_message<'a>(
     snapshot: &'a Snapshot,
     findings: impl IntoIterator<Item = &'a culprit_core::Finding>,
-) -> Option<String> {
+) -> Option<Message> {
     let w = snapshot.workload.as_ref()?;
     let spans: Option<Vec<culprit_core::ScanSpan>> =
         top_queries(snapshot, findings).iter().map(|q| w.scans_of(q)).collect();
-    spans?.into_iter().max_by(|a, b| a.hours.total_cmp(&b.hours)).map(|s| s.phrase())
+    spans?.into_iter().max_by(|a, b| a.hours.total_cmp(&b.hours)).map(|s| s.phrase_message())
 }
 
 /// "the last 7 days" for windowed history, "the 35 minutes since statistics were reset" for cumulative counters.
@@ -792,7 +796,7 @@ pub fn window_phrase(workload: &culprit_core::Workload) -> String {
 /// The window a summary names: the one the scan asked for. Query Store keeps whole intervals (an hour by default), so
 /// `--window 6h` reads up to an interval more, and the rounding is said when it shows: "the last 6 hours (Query Store
 /// keeps whole intervals, so this covers 7)". Data that covers less than asked for is named as it is.
-pub fn summary_window(snapshot: &Snapshot) -> Option<String> {
+pub fn summary_window_message(snapshot: &Snapshot) -> Option<Message> {
     let w = snapshot.workload.as_ref()?;
     let asked = snapshot.options.as_ref().map(|o| f64::from(o.window_in_minutes()) / 60.0);
     let Some(asked) = asked.filter(|a| {
@@ -801,22 +805,22 @@ pub fn summary_window(snapshot: &Snapshot) -> Option<String> {
             && w.measurement_hours() > *a
             && w.measurement_hours() <= a + 1.5
     }) else {
-        return Some(w.window_phrase());
+        return Some(w.window_message());
     };
     use culprit_core::SpanLength::{Days, Hours, Minutes};
     let (said, covered) = (culprit_core::span_length(asked), culprit_core::span_length(w.measurement_hours()));
-    let window = culprit_core::last_span(asked);
+    let window = culprit_core::last_span_message(asked);
     if said == covered {
         return Some(window);
     }
     // "7" after "6 hours"; the unit too when it differs (in its unit, or one against several).
     let covered = match (said, covered) {
         (Days(a), Days(n)) | (Hours(a), Hours(n)) | (Minutes(a), Minutes(n)) if (a == 1.0) == (n == 1.0) => {
-            format::digits(format!("{n}"))
+            MessageValue::Digits(n.to_string())
         }
-        _ => culprit_core::span_words(w.measurement_hours()),
+        _ => culprit_core::span_words_message(w.measurement_hours()).into(),
     };
-    Some(t!("support.window.query_store_intervals", window = window, covered = covered))
+    Some(culprit_core::message!("support.window.query_store_intervals", window = window, covered = covered))
 }
 
 /// `value` from the workload window as a daily rate for comparing with a threshold, over at least an hour of data

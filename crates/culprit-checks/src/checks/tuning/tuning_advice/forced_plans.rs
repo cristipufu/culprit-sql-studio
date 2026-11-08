@@ -205,13 +205,14 @@ pub(super) fn forced_scan_finding(snapshot: &Snapshot, forced: ForcedScan<'_>) -
         Some(impact) => apply_query_impact(&mut f, impact),
         None => {
             f.impact.score = base_score(f.severity);
-            f.impact.label = t!("check.tuning_advice.forced_scan.impact");
+            f.impact.set_label(t!("check.tuning_advice.forced_scan.impact"));
         }
     }
     f.confidence = Confidence::Medium;
-    f.metrics.push(Metric::text(t!("check.tuning_advice.metric.forced_plan"), p.plan_id.clone()));
-    f.metrics.push(Metric::text(t!("check.tuning_advice.metric.index_that_could_seek"), index.clone()));
-    f.metrics.push(Metric::new(t!("check.tuning_advice.metric.rows_in_table"), scan.rows, Unit::Rows));
+    f.metrics.push(Metric::said_text(culprit_core::key!("check.tuning_advice.metric.forced_plan"), p.plan_id.clone()));
+    f.metrics
+        .push(Metric::said_text(culprit_core::key!("check.tuning_advice.metric.index_that_could_seek"), index.clone()));
+    f.metrics.push(Metric::said(culprit_core::key!("check.tuning_advice.metric.rows_in_table"), scan.rows, Unit::Rows));
     f.queries = vec![QueryRef {
         id: q.id.clone(),
         plan_node: Some(scan.node),
@@ -292,12 +293,12 @@ pub(super) fn forced_plans_finding(snapshot: &Snapshot, plans: ForcedPlans<'_>) 
     f.summary = summary.join(" ");
     f.severity = Severity::Low;
     f.impact.score = base_score(f.severity) + (n as f64).min(10.0) * 0.2;
-    f.impact.label = t!("check.tuning_advice.forced_plans.impact", n = n, count = &count);
+    f.impact.set_label(t!("check.tuning_advice.forced_plans.impact", n = n, count = &count));
     f.confidence = Confidence::High;
-    f.metrics.push(Metric::new(t!("check.tuning_advice.metric.forced_plans"), n as f64, Unit::Count));
+    f.metrics.push(Metric::said(culprit_core::key!("check.tuning_advice.metric.forced_plans"), n as f64, Unit::Count));
     if automatic > 0 {
-        f.metrics.push(Metric::new(
-            t!("check.tuning_advice.metric.forced_by_automatic_tuning"),
+        f.metrics.push(Metric::said(
+            culprit_core::key!("check.tuning_advice.metric.forced_by_automatic_tuning"),
             automatic as f64,
             Unit::Count,
         ));

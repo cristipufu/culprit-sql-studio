@@ -18,29 +18,13 @@ const READS_ONLY: Partial<Record<Capability, () => string>> = {
   "slow-log": () => t("ui.workload_unlock.reads_only.slow_log"),
 };
 
-/** The first SQL statement in a fix sentence ("Run CREATE EXTENSION pg_stat_statements; in this database…"). */
-function fixSql(fix: string | null): string | null {
-  const match = fix?.match(/\b(CREATE|GRANT|ALTER|EXEC|SET|UPDATE|CALL|INSTALL) [^;]*;/);
-  return match ? match[0] : null;
-}
-
-/** The fix sentence with the statement taken out, so the card shows the SQL once. */
-function fixText(fix: string, sql: string | null): string {
-  if (!sql) return fix;
-  return fix
-    .replace(sql, "")
-    .replace(/^\s*Run\s+(in this database\.?\s*)?/i, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
 /**
  * Shown when the database keeps no query statistics Culprit can read. Says what that costs, what one step unlocks it,
  * and offers the exact statement: copy it, or open it in the editor (which asks before it changes a production database).
  */
 export function WorkloadUnlock({ report }: { report: Report }) {
   if (report.snapshot.workload || !report.summary.no_workload) return null;
-  const missing: MissingCapability | undefined = report.snapshot.server.missing.find((m) => m.reason === report.summary.no_workload);
+  const missing: MissingCapability | undefined = report.snapshot.server.missing.find((m) => m.capability === report.summary.no_workload_capability);
   if (!missing) return null;
   // A source the application already writes (SQLite's query log): point at the connection's setting, not at SQL.
   if (missing.capability === "query-log") {
@@ -62,8 +46,8 @@ export function WorkloadUnlock({ report }: { report: Report }) {
       </div>
     );
   }
-  const sql = fixSql(missing.fix);
-  const rest = missing.fix ? fixText(missing.fix, sql) : null;
+  const sql = missing.action?.sql ?? null;
+  const rest = missing.action ? missing.action.detail : missing.fix;
   return (
     <div className="unlock">
       <div className="unlock-head">

@@ -138,9 +138,9 @@ fn connection_churn_finding(snapshot: &Snapshot, churn: ConnectionChurn) -> Find
         f.caveats.push(t!("check.connection_churn.caveat.shared", engine = snapshot.server.name()));
     }
     severity_score(&mut f);
-    f.impact.label = t!("check.connection_churn.impact", rate = &rate);
+    f.impact.set_label(t!("check.connection_churn.impact", rate = &rate));
     f.confidence = Confidence::Medium;
-    f.metrics = vec![Metric::new(t!("check.connection_churn.metric.rate"), churn.rate, Unit::Count)];
+    f.metrics = vec![Metric::said(culprit_core::key!("check.connection_churn.metric.rate"), churn.rate, Unit::Count)];
     let cache_change = churn
         .raise_thread_cache
         .then(|| setting_change(&snapshot.server, "thread_cache_size", &format!("{THREAD_CACHE:.0}")));

@@ -8,7 +8,7 @@ use crate::{
 };
 use culprit_core::{
     Capability, ConnectionSpec, Coverage, Engine, Error, Result, SNAPSHOT_FORMAT, Setting, Snapshot, SnapshotOptions,
-    WorkloadKind, t,
+    WorkloadKind,
 };
 use std::time::Instant;
 
@@ -75,17 +75,21 @@ pub async fn snapshot(
             if planned {
                 coverage.delivered(Capability::QueryPlans);
             } else if let Some((reason, fix)) = collected.no_plans {
-                coverage.lost(Capability::QueryPlans, reason, fix);
+                let mut missing = culprit_core::MissingCapability::new(Capability::QueryPlans, reason);
+                if let Some(fix) = fix {
+                    missing = missing.with_fix(fix);
+                }
+                coverage.lost_capability(missing);
             } else {
                 coverage.withdraw(Capability::QueryPlans);
             }
             Some(collected.workload)
         }
         Ok(None) => {
-            coverage.recorded(
+            coverage.recorded_message(
                 &sources::STATEMENTS,
                 culprit_core::SourceState::Unavailable,
-                Some(t!("provider.mysql.statements.unavailable")),
+                culprit_core::message!("provider.mysql.statements.unavailable"),
             );
             None
         }

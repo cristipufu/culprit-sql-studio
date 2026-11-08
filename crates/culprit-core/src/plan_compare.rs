@@ -76,8 +76,8 @@ pub(crate) fn scenarios(
     a: &Plan,
     b: &Plan,
     diff: &PlanDiff,
-    name_a: &str,
-    name_b: &str,
+    name_a: &PlanName<'_>,
+    name_b: &PlanName<'_>,
     ctx: &CompareContext,
 ) -> Vec<Scenario> {
     let mut out = Vec::new();
@@ -102,11 +102,11 @@ pub(crate) fn scenarios(
     if a.kind != b.kind {
         let (actual, other) = if a.kind == PlanKind::Actual { (name_a, name_b) } else { (name_b, name_a) };
         let title = if a.kind == PlanKind::Actual || b.kind == PlanKind::Actual {
-            t!("core.plan_compare.plan_kind.actual", plan = cap(actual), other = other)
+            t!("core.plan_compare.plan_kind.actual", plan = actual.initial, other = other)
         } else {
             t!(
                 "core.plan_compare.plan_kind.kinds",
-                plan = cap(name_a),
+                plan = name_a.initial,
                 kind = kind_word(a.kind),
                 other = name_b,
                 other_kind = kind_word(b.kind)
@@ -223,7 +223,7 @@ pub(crate) fn scenarios(
         detail.push(t!("core.plan_compare.conversion.cause"));
         out.push(Scenario {
             kind: ScenarioKind::Conversion,
-            title: t!("core.plan_compare.conversion.title", plan = cap(who), other = other),
+            title: t!("core.plan_compare.conversion.title", plan = who.initial, other = other),
             detail: Some(detail.join(" ")),
             a: None,
             b: None,
@@ -240,15 +240,15 @@ pub(crate) fn scenarios(
             title: if dop > 1 {
                 t!(
                     "core.plan_compare.parallelism.title_threads",
-                    plan = cap(yes),
+                    plan = yes.initial,
                     threads = dop.to_string(),
                     other = no
                 )
             } else {
-                t!("core.plan_compare.parallelism.title", plan = cap(yes), other = no)
+                t!("core.plan_compare.parallelism.title", plan = yes.initial, other = no)
             },
             detail: Some(match reason {
-                Some(r) => t!("core.plan_compare.parallelism.blocked", plan = cap(no), reason = r),
+                Some(r) => t!("core.plan_compare.parallelism.blocked", plan = no.initial, reason = r),
                 None => t!("core.plan_compare.parallelism.detail"),
             }),
             a: None,
@@ -266,7 +266,7 @@ pub(crate) fn scenarios(
             kind: ScenarioKind::Memory,
             title: t!(
                 "core.plan_compare.memory.title",
-                plan = cap(more),
+                plan = more.initial,
                 memory = kb(big),
                 other = less,
                 other_memory = kb(small)
@@ -281,7 +281,7 @@ pub(crate) fn scenarios(
         let (yes, no) = if spills(b) { (name_b, name_a) } else { (name_a, name_b) };
         out.push(Scenario {
             kind: ScenarioKind::Memory,
-            title: t!("core.plan_compare.spill.title", plan = cap(yes), other = no),
+            title: t!("core.plan_compare.spill.title", plan = yes.initial, other = no),
             detail: Some(t!("core.plan_compare.spill.detail")),
             a: None,
             b: None,
@@ -293,8 +293,8 @@ pub(crate) fn scenarios(
 fn estimate_scenarios(
     out: &mut Vec<Scenario>,
     pairs: &[(&PlanNode, &PlanNode)],
-    (a, name_a): (&Plan, &str),
-    (b, name_b): (&Plan, &str),
+    (a, name_a): (&Plan, &PlanName<'_>),
+    (b, name_b): (&Plan, &PlanName<'_>),
     parameters_differ: bool,
     ctx: &CompareContext,
 ) {
@@ -366,7 +366,7 @@ fn estimate_scenarios(
             let estimated = node.est_rows_for_runs();
             let title = t!(
                 "core.plan_compare.estimates.misestimate",
-                plan = cap(name),
+                plan = name.initial,
                 rows = rows(estimated),
                 table = table(node),
                 actual = format::count(actual)
@@ -508,15 +508,22 @@ fn kb(value: f64) -> String {
     format::bytes(value * 1024.0)
 }
 
-/// Capitalize a generic name at the start of a sentence ("plan A" → "Plan A"); names people chose keep their case.
-pub(crate) fn cap(s: &str) -> String {
-    if !["plan ", "query ", "these "].iter().any(|w| s.starts_with(w)) {
-        return s.to_string();
+/// Names supplied by a person keep their spelling. Built-in names provide both grammatical positions explicitly.
+#[derive(Clone, Copy)]
+pub(crate) struct PlanName<'a> {
+    pub inline: &'a str,
+    pub initial: &'a str,
+}
+
+impl<'a> PlanName<'a> {
+    pub fn supplied(name: &'a str) -> Self {
+        Self { inline: name, initial: name }
     }
-    let mut c = s.chars();
-    match c.next() {
-        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-        None => String::new(),
+}
+
+impl From<&PlanName<'_>> for crate::i18n::Arg {
+    fn from(value: &PlanName<'_>) -> Self {
+        Self::from(value.inline)
     }
 }
 
@@ -775,11 +782,11 @@ mod tests {
             r#"## statements
 Statement: These plans are for different statements. | Some differences may come from the SQL itself (another filter, join or column), not from the optimizer.
 ## actual and estimated
-PlanKind: Plan A is an actual plan and Plan 2 isn't. | Compare estimates with estimates; actual rows and times only exist on the executed plan.
+PlanKind: plan A is an actual plan and Plan 2 isn't. | Compare estimates with estimates; actual rows and times only exist on the executed plan.
 ## estimated and actual
 PlanKind: Plan 2 is an actual plan and plan A isn't. | Compare estimates with estimates; actual rows and times only exist on the executed plan.
 ## estimated and generic
-PlanKind: Plan A is a estimated plan and Plan 2 a generic plan. | Compare estimates with estimates; actual rows and times only exist on the executed plan.
+PlanKind: plan A is a estimated plan and Plan 2 a generic plan. | Compare estimates with estimates; actual rows and times only exist on the executed plan.
 ## estimator and parameters
 Estimator: Different cardinality estimators: version 70 in plan A, 160 in Plan 2. | SQL Server estimates rows differently per estimator version. It follows the database's compatibility level unless a hint or LEGACY_CARDINALITY_ESTIMATION overrides it, so a compatibility-level change alone can change the plan.
 Parameters: Compiled for different parameter values: plan A for @p1 = N'rare'; Plan 2 for @p1 = N'common'. | A plan is optimized for the values it was first compiled with. When some values match a few rows and others many, the same query gets very different plans (parameter sensitivity).
@@ -795,19 +802,19 @@ Index: Different indexes on orders. | orders: plan A uses ix_status, Plan 2 uses
 Estimates: On orders, plan A expects 12 rows and Plan 2 expects 140K rows. | Different row estimates lead the optimizer to different joins and access paths. They come from different parameter values, newer statistics or a different estimator.
 Index: Different indexes on orders. | orders: plan A uses ix_status, Plan 2 uses pk_orders. If an index was added, dropped or rebuilt between the two plans, that explains it; otherwise the optimizer chose differently because it expected a different number of rows.
 ## misestimate
-Estimates: Plan A: estimated 12 rows from orders, got 40K. | Estimates this far off lead to the wrong join type, too little memory or a needless scan.
+Estimates: plan A: estimated 12 rows from orders, got 40K. | Estimates this far off lead to the wrong join type, too little memory or a needless scan.
 ## misestimate, stale
 Estimates: Plan 2: estimated 12 rows from orders, got 40K. | Statistics on orders are stale: 23% of the table changed since they were updated, 6.0 days before the scan.
 ## converts
 Conversion: Plan 2 converts a column's type before comparing it; plan A doesn't. | A converted column can't be searched through its index, so the plan reads every entry instead. Here: CONVERT_IMPLICIT(nvarchar(64),status,0) = @p1. This usually means the application sent the parameter with a different type (e.g. nvarchar for a varchar column).
 ## converts no more
-Conversion: Plan A converts a column's type before comparing it; Plan 2 doesn't. | A converted column can't be searched through its index, so the plan reads every entry instead. Here: CONVERT_IMPLICIT(nvarchar(64),status,0) = @p1. This usually means the application sent the parameter with a different type (e.g. nvarchar for a varchar column).
+Conversion: plan A converts a column's type before comparing it; Plan 2 doesn't. | A converted column can't be searched through its index, so the plan reads every entry instead. Here: CONVERT_IMPLICIT(nvarchar(64),status,0) = @p1. This usually means the application sent the parameter with a different type (e.g. nvarchar for a varchar column).
 ## parallel
-Parallelism: Plan A runs in parallel (8 threads); Plan 2 runs on one thread. | Plan 2 couldn't go parallel: could not generate valid parallel plan.
+Parallelism: plan A runs in parallel (8 threads); Plan 2 runs on one thread. | Plan 2 couldn't go parallel: could not generate valid parallel plan.
 ## serial
 Parallelism: Plan 2 runs in parallel; plan A runs on one thread. | Parallelism helps large scans and joins and costs more CPU; the optimizer only chooses it when the estimated cost passes the server's threshold.
 ## memory
-Memory: Plan A reserves 39.1 MB of memory per run; Plan 2 1.0 MB. | Sorts and hashes get memory sized from the row estimates. A large grant on a busy server makes other queries wait for memory; a small one spills to tempdb.
+Memory: plan A reserves 39.1 MB of memory per run; Plan 2 1.0 MB. | Sorts and hashes get memory sized from the row estimates. A large grant on a busy server makes other queries wait for memory; a small one spills to tempdb.
 ## memory, less
 Memory: Plan 2 reserves 39.1 MB of memory per run; plan A 1.0 MB. | Sorts and hashes get memory sized from the row estimates. A large grant on a busy server makes other queries wait for memory; a small one spills to tempdb."#
         );

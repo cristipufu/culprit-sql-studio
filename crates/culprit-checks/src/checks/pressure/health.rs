@@ -115,7 +115,12 @@ pub(crate) fn grade_on_evidence(snapshot: &mut Snapshot) {
     for s in &mut p.signals {
         let explanation = match s.key.as_str() {
             "signal-wait" => {
-                s.label = t!("health.label.signal_wait");
+                let label = culprit_core::message!("health.label.signal_wait");
+                s.label_message = if s.measurement_scope == Some(culprit_core::MeasurementScope::Server) {
+                    culprit_core::message!("health.label.whole_server", label = label)
+                } else {
+                    label
+                };
                 Some(t!("health.explain.signal_wait"))
             }
             "cache-hit" => Some(t!("health.explain.cache_hit")),
@@ -143,35 +148,18 @@ pub(crate) fn grade_on_evidence(snapshot: &mut Snapshot) {
             s.healthy = Some(explanation);
             s.status = SignalStatus::Info;
         }
-        // These counters are shared even when the login connected to just one database.
-        let shared = match engine {
-            Engine::Yugabyte | Engine::Mysql => !matches!(s.key.as_str(), "oldest-transaction"),
-            Engine::Mssql => {
-                matches!(
-                    s.key.as_str(),
-                    "batch-requests"
-                        | "compiles-per-batch"
-                        | "recompiles-per-batch"
-                        | "page-life"
-                        | "new-connections"
-                        | "pooled-reuse"
-                ) || (!azure
-                    && matches!(
-                        s.key.as_str(),
-                        "signal-wait" | "threadpool-waits" | "threadpool-wait-ms" | "grant-wait-ms"
-                    ))
-            }
-            Engine::Postgres => matches!(s.key.as_str(), "connections" | "checkpoints" | "checkpoints-requested"),
-            Engine::Sqlite => false,
-        };
-        if shared {
-            // A label the provider already wrote as the whole server's (or instance's) keeps its words. That reads the
-            // label, written by the provider in the language of its scan: a field saying so belongs on `Signal`.
-            if !s.label.contains("whole server") && !s.label.contains("whole instance") {
-                s.label = t!("health.label.whole_server", label = &s.label);
+        let measured_in = s.measurement_scope.unwrap_or_else(|| engine.spec().signal_scope(&snapshot.server, &s.key));
+        if measured_in == culprit_core::MeasurementScope::Server {
+            if s.measurement_scope != Some(measured_in) {
+                s.label_message = engine.spec().scoped_signal_label(s).unwrap_or_else(|| {
+                    let label = s.label_message.clone();
+                    culprit_core::message!("health.label.whole_server", label = label)
+                });
             }
             s.status = SignalStatus::Info;
         }
+        s.measurement_scope = Some(measured_in);
+        s.label = s.label_message.render();
         if s.scope == SignalScope::SinceStartup && !counted {
             s.status = SignalStatus::Info;
         }
@@ -239,6 +227,44 @@ pub(crate) fn grade_on_evidence(snapshot: &mut Snapshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_scope_and_label_survive_language_changes_without_reading_prose() {
+        let mut snapshot: Snapshot =
+            serde_json::from_str(include_str!("../../../../../fixtures/mssql-demo.json")).unwrap();
+        snapshot.pressure = Some(Pressure {
+            uptime_hours: Some(48.0),
+            signals: vec![
+                Signal::new(
+                    "compiles-per-batch",
+                    culprit_core::message!("provider.mssql.signal.plans_compiled", whole = "server"),
+                    4.0,
+                    culprit_core::SignalUnit::Percent,
+                    SignalScope::SinceStartup,
+                ),
+                Signal::new(
+                    "signal-wait",
+                    culprit_core::message!("provider.mssql.signal.scheduling_share"),
+                    4.0,
+                    culprit_core::SignalUnit::Percent,
+                    SignalScope::SinceStartup,
+                ),
+            ],
+            ..Pressure::default()
+        });
+        for language in ["fr", "en", "de", "en"] {
+            culprit_core::i18n::scope(language, || {
+                grade_on_evidence(&mut snapshot);
+                let signal = snapshot.pressure.as_ref().unwrap().signal("compiles-per-batch").unwrap();
+                assert_eq!(signal.measurement_scope, Some(culprit_core::MeasurementScope::Server));
+                assert_eq!(signal.scope, SignalScope::SinceStartup);
+                assert_eq!(signal.status, SignalStatus::Info);
+                assert_eq!(signal.label, t!("provider.mssql.signal.plans_compiled", whole = "server"));
+                let signal = snapshot.pressure.as_ref().unwrap().signal("signal-wait").unwrap();
+                assert_eq!(signal.label, t!("health.label.whole_server", label = t!("health.label.signal_wait")));
+            });
+        }
+    }
     use culprit_core::SnapshotOptions;
 
     fn azure(cpu: impl Fn(usize) -> f64) -> Snapshot {
@@ -384,7 +410,7 @@ mod tests {
                 signals: keys
                     .iter()
                     .map(|key| {
-                        Signal::new(key, key, 99.0, SignalUnit::Percent, SignalScope::SinceStartup)
+                        Signal::new(key, *key, 99.0, SignalUnit::Percent, SignalScope::SinceStartup)
                             .graded("bad", 1.0, 2.0, true)
                     })
                     .collect(),
@@ -446,13 +472,17 @@ mod tests {
                 signals: KEYS
                     .iter()
                     .map(|key| {
-                        // A label that already says it is the whole server's keeps its words.
+                        // The provider declares an already scoped label without requiring anyone to read its words.
                         let label = match *key {
                             "batch-requests" => "Batch requests (whole server)".to_string(),
                             "connections" => "Connections (whole instance)".to_string(),
                             _ => format!("Label of {key}"),
                         };
-                        Signal::new(key, &label, 3.0, SignalUnit::Count, SignalScope::SinceStartup)
+                        let mut signal = Signal::new(key, &label, 3.0, SignalUnit::Count, SignalScope::SinceStartup);
+                        if matches!(*key, "batch-requests" | "connections") {
+                            signal.measurement_scope = Some(culprit_core::MeasurementScope::Server);
+                        }
+                        signal
                     })
                     .collect(),
                 ..Pressure::default()
@@ -492,7 +522,7 @@ mod tests {
 signal-wait | Scheduling share of recorded waits (whole server) | Info | The share of recorded waiting spent ready to run, before a worker was scheduled. This is not CPU utilization and alone does not establish CPU pressure.
 cache-hit | Label of cache-hit | Info | Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
 buffer-pool-hit | Label of buffer-pool-hit | Info | The share of reads served by InnoDB's buffer pool across the whole server. A miss ratio alone does not establish a memory shortage in this database.
-page-life | Label of page-life (whole server) | Info | A server cache counter at the scan's instant. There is no universal healthy number of seconds; cache size, workload and measured I/O matter.
+page-life | Page life expectancy (whole server) | Info | A server cache counter at the scan's instant. There is no universal healthy number of seconds; cache size, workload and measured I/O matter.
 tmp-disk-tables | Label of tmp-disk-tables | Info | The share of internal temporary tables written to disk across the whole server. Table sizes and the statements' measured cost determine whether this needs work.
 temp-bytes | Label of temp-bytes | Info | Temporary data written by this database over its statistics period. This amount alone does not establish a performance problem; the findings identify costly spills.
 deadlocks | Label of deadlocks | Info | A count over the statistics period, not deadlocks happening now. The deadlock finding uses the amount and period recorded.
@@ -500,15 +530,15 @@ rollbacks | Label of rollbacks | Info | Rollbacks can be deliberate application 
 row-lock-avg | Label of row-lock-avg | Info | An average across the whole server's recorded row-lock waits, not a current wait. The lock findings use the amount of waiting too.
 max-used-connections | Label of max-used-connections | Info | The busiest moment since these counters started, compared with today's limit. This does not establish a connection shortage now.
 checkpoints-requested | Label of checkpoints-requested | Info | Requested checkpoints include WAL-triggered checkpoints, manual CHECKPOINT, backups and CREATE DATABASE. This shared historical ratio does not identify their cause or establish current write pressure.
-new-connections | Label of new-connections (whole server) | Info | The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
+new-connections | New connections (whole server) | Info | The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
 session-length | Label of session-length | Info | Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.
 sessions-abandoned | Label of sessions-abandoned | Info | The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.
-pooled-reuse | Label of pooled-reuse (whole server) | Info | SQL Server's recorded connection resets compared with new logins, across the server. Some pools reuse a connection without resetting it, so this does not prove whether the application pools connections.
+pooled-reuse | Connections served from a pool (whole server) | Info | SQL Server's recorded connection resets compared with new logins, across the server. Some pools reuse a connection without resetting it, so this does not prove whether the application pools connections.
 thread-cache-misses | Label of thread-cache-misses | Info | The share of connections needing a new server thread across the whole server. This does not measure application connection pooling or its cost.
 version-store | Label of version-store | Info | Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.
 history-length | Label of history-length | Info | Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
 threadpool-waits | Label of threadpool-waits (whole server) | Info | Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.
-compiles-per-batch | Label of compiles-per-batch (whole server) | Info | New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
+compiles-per-batch | Plans compiled (whole server) | Info | New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
 batch-requests | Batch requests (whole server) | Info | -
 connections | Connections (whole instance) | Info | -
 threadpool-waiting | Label of threadpool-waiting | Watch | Requests waiting at the scan's instant. Sample again to establish whether the queue persists before changing settings.
@@ -519,7 +549,7 @@ SQL Server, graded on no findings:
 signal-wait | Scheduling share of recorded waits (whole server) | Info | The share of recorded waiting spent ready to run, before a worker was scheduled. This is not CPU utilization and alone does not establish CPU pressure.
 cache-hit | Label of cache-hit | Info | Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
 buffer-pool-hit | Label of buffer-pool-hit | Info | The share of reads served by InnoDB's buffer pool across the whole server. A miss ratio alone does not establish a memory shortage in this database.
-page-life | Label of page-life (whole server) | Info | A server cache counter at the scan's instant. There is no universal healthy number of seconds; cache size, workload and measured I/O matter.
+page-life | Page life expectancy (whole server) | Info | A server cache counter at the scan's instant. There is no universal healthy number of seconds; cache size, workload and measured I/O matter.
 tmp-disk-tables | Label of tmp-disk-tables | Info | The share of internal temporary tables written to disk across the whole server. Table sizes and the statements' measured cost determine whether this needs work.
 temp-bytes | Label of temp-bytes | Info | Temporary data written by this database over its statistics period. This amount alone does not establish a performance problem; the findings identify costly spills.
 deadlocks | Label of deadlocks | Info | A count over the statistics period, not deadlocks happening now. The deadlock finding uses the amount and period recorded.
@@ -527,15 +557,15 @@ rollbacks | Label of rollbacks | Info | Rollbacks can be deliberate application 
 row-lock-avg | Label of row-lock-avg | Info | An average across the whole server's recorded row-lock waits, not a current wait. The lock findings use the amount of waiting too.
 max-used-connections | Label of max-used-connections | Info | The busiest moment since these counters started, compared with today's limit. This does not establish a connection shortage now.
 checkpoints-requested | Label of checkpoints-requested | Info | Requested checkpoints include WAL-triggered checkpoints, manual CHECKPOINT, backups and CREATE DATABASE. This shared historical ratio does not identify their cause or establish current write pressure.
-new-connections | Label of new-connections (whole server) | Info | The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
+new-connections | New connections (whole server) | Info | The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
 session-length | Label of session-length | Info | Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.
 sessions-abandoned | Label of sessions-abandoned | Info | The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.
-pooled-reuse | Label of pooled-reuse (whole server) | Info | SQL Server's recorded connection resets compared with new logins, across the server. Some pools reuse a connection without resetting it, so this does not prove whether the application pools connections.
+pooled-reuse | Connections served from a pool (whole server) | Info | SQL Server's recorded connection resets compared with new logins, across the server. Some pools reuse a connection without resetting it, so this does not prove whether the application pools connections.
 thread-cache-misses | Label of thread-cache-misses | Info | The share of connections needing a new server thread across the whole server. This does not measure application connection pooling or its cost.
 version-store | Label of version-store | Info | Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.
 history-length | Label of history-length | Info | Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
 threadpool-waits | Label of threadpool-waits (whole server) | Info | Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.
-compiles-per-batch | Label of compiles-per-batch (whole server) | Info | New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
+compiles-per-batch | Plans compiled (whole server) | Info | New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
 batch-requests | Batch requests (whole server) | Info | -
 connections | Connections (whole instance) | Info | -
 threadpool-waiting | Label of threadpool-waiting | Info | Requests waiting at the scan's instant. Sample again to establish whether the queue persists before changing settings.
@@ -614,7 +644,7 @@ sessions-abandoned | Label of sessions-abandoned (whole server) | Info | The sha
 pooled-reuse | Label of pooled-reuse (whole server) | Info | SQL Server's recorded connection resets compared with new logins, across the server. Some pools reuse a connection without resetting it, so this does not prove whether the application pools connections.
 thread-cache-misses | Label of thread-cache-misses (whole server) | Info | The share of connections needing a new server thread across the whole server. This does not measure application connection pooling or its cost.
 version-store | Label of version-store (whole server) | Info | Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.
-history-length | Label of history-length (whole server) | Info | Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
+history-length | Undo logs not yet purged (whole server) | Info | Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
 threadpool-waits | Label of threadpool-waits (whole server) | Info | Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.
 compiles-per-batch | Label of compiles-per-batch (whole server) | Info | New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
 batch-requests | Batch requests (whole server) | Info | -
@@ -641,7 +671,7 @@ sessions-abandoned | Label of sessions-abandoned (whole server) | Info | The sha
 pooled-reuse | Label of pooled-reuse (whole server) | Info | SQL Server's recorded connection resets compared with new logins, across the server. Some pools reuse a connection without resetting it, so this does not prove whether the application pools connections.
 thread-cache-misses | Label of thread-cache-misses (whole server) | Info | The share of connections needing a new server thread across the whole server. This does not measure application connection pooling or its cost.
 version-store | Label of version-store (whole server) | Info | Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.
-history-length | Label of history-length (whole server) | Info | Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
+history-length | Undo logs not yet purged (whole server) | Info | Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
 threadpool-waits | Label of threadpool-waits (whole server) | Info | Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.
 compiles-per-batch | Label of compiles-per-batch (whole server) | Info | New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
 batch-requests | Batch requests (whole server) | Info | -

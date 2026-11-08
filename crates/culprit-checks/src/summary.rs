@@ -1,7 +1,8 @@
 //! The report's summary: counts by category and severity, the share of database time the top findings touch, and the
 //! headline sentence.
 
-use culprit_core::{Category, CategoryCount, Finding, Severity, SeverityCount, Snapshot, Summary, format, t};
+use culprit_core::i18n::{Message, MessageValue};
+use culprit_core::{Category, CategoryCount, Finding, Severity, SeverityCount, Snapshot, Summary};
 
 use crate::support;
 
@@ -25,27 +26,30 @@ pub fn summarize(snapshot: &Snapshot, findings: &[Finding]) -> Summary {
 
     let top_share = support::top_findings_share(snapshot, findings.iter());
     // Over Culprit's scans where they measured every statement behind it, as the findings say it.
-    let scans = support::top_findings_scans(snapshot, findings.iter());
+    let scans = support::top_findings_scans_message(snapshot, findings.iter());
 
-    let cost = support::top_findings_cost(snapshot, findings.iter());
+    let cost = support::top_findings_cost_message(snapshot, findings.iter());
     let n = findings.iter().filter(|f| f.is_actionable()).count();
-    let window = support::summary_window(snapshot);
+    let window = support::summary_window_message(snapshot);
     // The headline's sentences, joined.
     let mut headline = Vec::new();
-    let opportunities = || t!("summary.headline.opportunities", n = n, count = n.to_string());
+    let opportunities =
+        || culprit_core::message!("summary.headline.opportunities", n = n, count = MessageValue::Digits(n.to_string()));
     match (n, top_share, &window) {
-        (0, _, Some(window)) => headline.push(t!("summary.headline.nothing_over", window = window)),
+        (0, _, Some(window)) => headline.push(culprit_core::message!("summary.headline.nothing_over", window = window)),
         // No statements were examined: say what was.
-        (0, _, None) if snapshot.workload.is_none() => headline.push(t!("summary.headline.nothing_without_history")),
-        (0, _, None) => headline.push(t!("summary.headline.nothing")),
+        (0, _, None) if snapshot.workload.is_none() => {
+            headline.push(culprit_core::message!("summary.headline.nothing_without_history"))
+        }
+        (0, _, None) => headline.push(culprit_core::message!("summary.headline.nothing")),
         (_, Some(share), Some(window)) if share >= 0.05 => {
             headline.push(opportunities());
             headline.push(match cost {
-                Some(cost) => t!("summary.headline.top_cost", cost = cost),
-                None => t!(
+                Some(cost) => culprit_core::message!("summary.headline.top_cost", cost = cost),
+                None => culprit_core::message!(
                     "summary.headline.top_share",
-                    share = format::percent(share),
-                    window = scans.as_deref().unwrap_or(window)
+                    share = MessageValue::Percent(share),
+                    window = scans.as_ref().unwrap_or(window)
                 ),
             });
         }
@@ -55,17 +59,29 @@ pub fn summarize(snapshot: &Snapshot, findings: &[Finding]) -> Summary {
     let (statements, findings_on) = (stopped.statements, stopped.unnamed);
     match (statements, findings_on) {
         (0, 0) => {}
-        (s, 0) => headline.push(t!("summary.headline.stopped_statements", n = s, count = s.to_string())),
-        (0, u) => headline.push(t!("summary.headline.stopped_findings", n = u, count = u.to_string())),
-        (s, u) => headline.push(t!(
+        (s, 0) => headline.push(culprit_core::message!(
+            "summary.headline.stopped_statements",
+            n = s,
+            count = MessageValue::Digits(s.to_string())
+        )),
+        (0, u) => headline.push(culprit_core::message!(
+            "summary.headline.stopped_findings",
+            n = u,
+            count = MessageValue::Digits(u.to_string())
+        )),
+        (s, u) => headline.push(culprit_core::message!(
             "summary.headline.stopped_both",
             s = s,
-            statements = s.to_string(),
+            statements = MessageValue::Digits(s.to_string()),
             u = u,
-            findings = u.to_string()
+            findings = MessageValue::Digits(u.to_string())
         )),
     }
-    let headline = headline.join(" ");
+    let takeaway_messages = if n > 0 { &headline[1..] } else { &headline[..] };
+    let takeaway_message = (!takeaway_messages.is_empty()).then(|| Message::paragraph(takeaway_messages.to_vec()));
+    let takeaway = takeaway_message.as_ref().map(Message::render);
+    let headline_message = Message::paragraph(headline);
+    let headline = headline_message.render();
     Summary {
         opportunities: n as u32,
         by_category,
@@ -78,6 +94,11 @@ pub fn summarize(snapshot: &Snapshot, findings: &[Finding]) -> Summary {
         index_notes: crate::indexes::notes::index_notes(snapshot, findings),
         index_counting: crate::indexes::notes::index_counting(snapshot),
         foreign_key_indexes: crate::indexes::notes::foreign_key_indexes(snapshot),
+        no_workload_capability: snapshot.missing_workload().map(|missing| missing.capability),
+        takeaway,
+        headline_message: Some(headline_message),
+        takeaway_message,
+        no_workload_message: snapshot.no_workload_message(),
     }
 }
 

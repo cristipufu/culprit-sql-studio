@@ -432,18 +432,21 @@ fn type_mismatch_finding(m: TypeMismatch<'_>) -> Finding {
     .join(" ");
     f.severity = Severity::Low;
     f.impact.score = base_score(Severity::Low);
-    f.impact.label =
-        t!("check.unindexed_fk.impact.type_mismatch", column_type = &c_col.data_type, parent_type = &p_col.data_type);
+    f.impact.set_label(t!(
+        "check.unindexed_fk.impact.type_mismatch",
+        column_type = &c_col.data_type,
+        parent_type = &p_col.data_type
+    ));
     f.confidence = Confidence::High;
-    f.metrics.push(Metric::text(
-        t!("check.unindexed_fk.metric.child_column"),
+    f.metrics.push(Metric::said_text(
+        culprit_core::key!("check.unindexed_fk.metric.child_column"),
         format!("{}.{} ({})", fk.table, c_col.name, c_col.data_type),
     ));
-    f.metrics.push(Metric::text(
-        t!("check.unindexed_fk.metric.parent_column"),
+    f.metrics.push(Metric::said_text(
+        culprit_core::key!("check.unindexed_fk.metric.parent_column"),
         format!("{}.{} ({})", fk.ref_table, p_col.name, p_col.data_type),
     ));
-    f.metrics.push(Metric::text(t!("check.unindexed_fk.metric.foreign_key"), fk.name.clone()));
+    f.metrics.push(Metric::said_text(culprit_core::key!("check.unindexed_fk.metric.foreign_key"), fk.name.clone()));
     f.fix = Some(Fix {
         summary: t!(
             "check.unindexed_fk.fix.type_mismatch",
@@ -558,7 +561,7 @@ fn uuid_text_finding(u: UuidText<'_>) -> Finding {
     f.actionability = culprit_core::Actionability::OptionalImprovement;
     f.severity = Severity::Low;
     f.impact.score = base_score(Severity::Low);
-    f.impact.label = t!("check.unindexed_fk.impact.uuid_text", column_type = &col.data_type, native = native_type);
+    f.impact.set_label(t!("check.unindexed_fk.impact.uuid_text", column_type = &col.data_type, native = native_type));
     f.confidence = Confidence::High;
     f.title = t!(
         "check.unindexed_fk.title.uuid_text",
@@ -579,12 +582,15 @@ fn uuid_text_finding(u: UuidText<'_>) -> Finding {
         t!("check.unindexed_fk.summary.uuid_text_cost", engine = u.native.engine()),
     ]
     .join(" ");
-    f.metrics.push(Metric::new(t!("common.metric.rows_in_table"), rows, Unit::Rows));
-    f.metrics.push(Metric::text(
-        t!("check.unindexed_fk.metric.column"),
+    f.metrics.push(Metric::said(culprit_core::key!("common.metric.rows_in_table"), rows, Unit::Rows));
+    f.metrics.push(Metric::said_text(
+        culprit_core::key!("check.unindexed_fk.metric.column"),
         format!("{}.{} ({})", table.name, col.name, col.data_type),
     ));
-    f.metrics.push(Metric::text(t!("check.unindexed_fk.metric.recommended_type"), native_type.to_string()));
+    f.metrics.push(Metric::said_text(
+        culprit_core::key!("check.unindexed_fk.metric.recommended_type"),
+        native_type.to_string(),
+    ));
     f.fix = Some(Fix {
         summary: t!(
             "check.unindexed_fk.fix.uuid_text",
@@ -754,7 +760,7 @@ fn unindexed_key_finding(snapshot: &Snapshot, k: UnindexedKey<'_>) -> Finding {
     if k.sqlite {
         f.caveats.push(t!("check.unindexed_fk.caveat.sqlite_key"));
     }
-    f.impact.label = t!("check.unindexed_fk.impact", rows = format::count(k.rows));
+    f.impact.set_label(t!("check.unindexed_fk.impact", rows = format::count(k.rows)));
     if let Some(impact) = &k.impact {
         apply_query_impact(&mut f, impact);
         summary.push(t!("check.unindexed_fk.summary.share", share = format::percent(impact.share)));
@@ -775,10 +781,13 @@ fn unindexed_key_finding(snapshot: &Snapshot, k: UnindexedKey<'_>) -> Finding {
             child = &child
         ));
     }
-    f.metrics.push(Metric::new(t!("common.metric.rows_in_table"), k.rows, Unit::Rows));
-    f.metrics.push(Metric::text(t!("check.unindexed_fk.metric.foreign_key"), fk.name.clone()));
+    f.metrics.push(Metric::said(culprit_core::key!("common.metric.rows_in_table"), k.rows, Unit::Rows));
+    f.metrics.push(Metric::said_text(culprit_core::key!("check.unindexed_fk.metric.foreign_key"), fk.name.clone()));
     if let Some(rule) = fk.delete_rule.as_deref() {
-        f.metrics.push(Metric::text(t!("check.unindexed_fk.metric.on_delete"), format!("ON DELETE {rule}")));
+        f.metrics.push(Metric::said_text(
+            culprit_core::key!("check.unindexed_fk.metric.on_delete"),
+            format!("ON DELETE {rule}"),
+        ));
     }
     f.queries = query_refs(&k.listed.iter().copied().take(5).collect::<Vec<_>>());
     f.fix = Some(Fix {
@@ -993,15 +1002,27 @@ fn pattern_finding(snapshot: &Snapshot, p: UnindexedPattern<'_>) -> Finding {
     f.summary = summary.join(" ");
     f.severity = Severity::Low;
     f.impact.score = base_score(f.severity) + (p.small.len() as f64).log2().min(4.0);
-    f.impact.label = t!("check.unindexed_fk.impact.pattern", unindexed = &unindexed, total = &total);
+    f.impact.set_label(t!("check.unindexed_fk.impact.pattern", unindexed = &unindexed, total = &total));
     f.confidence = Confidence::High;
     if snapshot.server.engine == Engine::Sqlite {
         f.caveats.push(t!("check.unindexed_fk.caveat.sqlite_keys"));
     }
-    f.metrics.push(Metric::new(t!("check.unindexed_fk.metric.unindexed"), p.unindexed as f64, Unit::Count));
-    f.metrics.push(Metric::new(t!("check.unindexed_fk.metric.foreign_keys"), p.total as f64, Unit::Count));
+    f.metrics.push(Metric::said(
+        culprit_core::key!("check.unindexed_fk.metric.unindexed"),
+        p.unindexed as f64,
+        Unit::Count,
+    ));
+    f.metrics.push(Metric::said(
+        culprit_core::key!("check.unindexed_fk.metric.foreign_keys"),
+        p.total as f64,
+        Unit::Count,
+    ));
     if !p.filtered.is_empty() {
-        f.metrics.push(Metric::new(t!("check.unindexed_fk.metric.filtered"), p.filtered.len() as f64, Unit::Count));
+        f.metrics.push(Metric::said(
+            culprit_core::key!("check.unindexed_fk.metric.filtered"),
+            p.filtered.len() as f64,
+            Unit::Count,
+        ));
     }
     let mut fix = vec![t!("check.unindexed_fk.fix.pattern")];
     if snapshot.server.engine == Engine::Postgres {

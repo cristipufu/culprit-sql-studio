@@ -36,7 +36,7 @@ impl Check for BigTables {
                 title: format!("{} has no retention plan", t.name),
                 summary: "Our policy asks for one above a million rows.".into(),
                 subject: Subject { kind: SubjectKind::Table, name: t.qualified() },
-                impact: Impact { score: 99.0, db_time_share: None, time_ms_per_day: None, label: "Policy".into() },
+                impact: Impact { score: 99.0, label: "Policy".into(), ..Default::default() },
                 metrics: vec![Metric::new("Rows", t.rows.unwrap_or(0.0), Unit::Rows)],
                 queries: Vec::new(),
                 fix: Some(Fix { summary: "Add a purge job.".into(), sql: None, cost: None }),

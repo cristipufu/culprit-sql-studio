@@ -89,6 +89,7 @@ export function ResultGrid({ result, types, summary, order, onSort, sortDisabled
       select({ row: Math.min(result.rows.length - 1, Math.max(0, cell.row + move[0])), col: Math.min(result.columns.length - 1, Math.max(0, cell.col + move[1])) });
     }}>
       <table
+        dir="ltr"
         ref={grid}
         className="rg"
         // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: ARIA in HTML allows role="grid" on a table; arrow keys move the selected cell

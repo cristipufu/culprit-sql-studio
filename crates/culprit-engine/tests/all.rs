@@ -14,6 +14,7 @@ mod history_words;
 mod insight_words;
 mod insights;
 mod invariants;
+mod live_providers;
 mod measurement;
 mod plan_samples;
 mod plan_view;

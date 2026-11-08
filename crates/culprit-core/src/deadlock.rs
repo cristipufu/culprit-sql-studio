@@ -72,13 +72,21 @@ pub enum DeadlockPattern {
 
 impl DeadlockPattern {
     pub fn label(self) -> String {
+        self.label_at(crate::i18n::LabelPosition::Inline)
+    }
+
+    pub fn leading_label(self) -> String {
+        self.label_at(crate::i18n::LabelPosition::Initial)
+    }
+
+    fn label_at(self, position: crate::i18n::LabelPosition) -> String {
         match self {
-            DeadlockPattern::KeyLookup => t!("core.deadlock.pattern.key_lookup"),
-            DeadlockPattern::LockConversion => t!("core.deadlock.pattern.lock_conversion"),
-            DeadlockPattern::OppositeOrder => t!("core.deadlock.pattern.opposite_order"),
-            DeadlockPattern::LockEscalation => t!("core.deadlock.pattern.lock_escalation"),
-            DeadlockPattern::Parallelism => t!("core.deadlock.pattern.parallelism"),
-            DeadlockPattern::Cycle => t!("core.deadlock.pattern.cycle"),
+            DeadlockPattern::KeyLookup => t!("core.deadlock.pattern.key_lookup", position = position),
+            DeadlockPattern::LockConversion => t!("core.deadlock.pattern.lock_conversion", position = position),
+            DeadlockPattern::OppositeOrder => t!("core.deadlock.pattern.opposite_order", position = position),
+            DeadlockPattern::LockEscalation => t!("core.deadlock.pattern.lock_escalation", position = position),
+            DeadlockPattern::Parallelism => t!("core.deadlock.pattern.parallelism", position = position),
+            DeadlockPattern::Cycle => t!("core.deadlock.pattern.cycle", position = position),
         }
     }
 }

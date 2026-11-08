@@ -389,6 +389,7 @@ impl Provider for PostgresProvider {
                         None
                     },
                     wait: if active { wait } else { None },
+                    waiting_on_lock: Some(active && r.text("wait_event_type").as_deref() == Some("Lock")),
                     wait_ms: None,
                     blocked_by: r.text("blockers").and_then(|b| parse_array(&b).into_iter().next()),
                     elapsed_ms: r.number("elapsed_ms"),

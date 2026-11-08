@@ -8,7 +8,7 @@ use crate::{
     sources,
 };
 use culprit_core::signals::{HypertableChunk, HypertableStorage};
-use culprit_core::{Coverage, Snapshot, TableStorage, t};
+use culprit_core::{Coverage, Snapshot, TableStorage};
 use std::collections::{BTreeMap, BTreeSet};
 use tokio_postgres::Client;
 
@@ -137,7 +137,7 @@ pub async fn collect(client: &Client, probe: &Probe, snapshot: &mut Snapshot) {
             stat.last_updated = table.last_analyze.clone();
         }
     }
-    coverage.note("timescale-indexes", t!("provider.postgres.coverage.hypertable_indexes"));
+    coverage.note("timescale-indexes", culprit_core::message!("provider.postgres.coverage.hypertable_indexes"));
     coverage.append_to(snapshot);
 }
 
@@ -261,7 +261,7 @@ mod tests {
             host: "127.0.0.1".into(),
             port: Some(std::env::var("CULPRIT_TIMESCALE_TEST_PORT").unwrap().parse().unwrap()),
             user: Some("postgres".into()),
-            password: Some("culprit".into()),
+            password: Some(std::env::var("CULPRIT_TIMESCALE_TEST_PASSWORD").unwrap_or_else(|_| "culprit".into())),
             database: Some("culprit_timescale".into()),
             ..Default::default()
         };

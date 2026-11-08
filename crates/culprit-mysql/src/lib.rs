@@ -311,6 +311,10 @@ impl Provider for MysqlProvider {
                     host: r.text("host"),
                     database: r.text("db"),
                     command: active.then(|| command.to_uppercase()),
+                    waiting_on_lock: Some(
+                        blockers.contains_key(&id)
+                            || wait.as_deref().is_some_and(|s| s.to_ascii_lowercase().contains("lock")),
+                    ),
                     wait: wait.map(|w| with_progress(w, r)),
                     wait_ms: None,
                     elapsed_ms: r.number("ms").or_else(|| r.number("seconds").map(|s| s * 1000.0)),
@@ -330,7 +334,7 @@ impl Provider for MysqlProvider {
         let mut waits: Vec<WaitStat> = Vec::new();
         for session in sessions.iter().filter(|s| s.state == "active") {
             let waiting = session.wait.as_deref().unwrap_or("").to_ascii_lowercase();
-            let category = if session.blocked_by.is_some() || waiting.contains("lock") {
+            let category = if session.waiting_on_lock == Some(true) {
                 "Lock"
             } else if waiting.starts_with("waiting") {
                 "Waiting"

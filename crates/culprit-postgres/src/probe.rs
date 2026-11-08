@@ -3,8 +3,11 @@ use crate::{
     connect::sql_state,
     rows::{iso, query_one, quote_ident},
 };
+use culprit_core::i18n::Message;
 use culprit_core::{Capability, Engine, MissingCapability, Platform, Result, ServerInfo, t};
 use tokio_postgres::Client;
+
+const CREATE_STATEMENTS_EXTENSION: &str = "CREATE EXTENSION pg_stat_statements;";
 
 /// What the probe learned about the server, shared by every collector.
 pub struct Probe {
@@ -68,54 +71,47 @@ impl Probe {
         let mut missing = Vec::new();
         match &self.statements {
             StatementsAccess::Usable { .. } => capabilities.push(Capability::PgStatStatements),
-            StatementsAccess::NotInstalled => missing.push(MissingCapability {
-                capability: Capability::PgStatStatements,
-                reason: t!("provider.postgres.capability.statements.not_installed"),
-                fix: Some(self.statements_fix()),
-            }),
-            StatementsAccess::NotLoaded(message) => missing.push(MissingCapability {
-                capability: Capability::PgStatStatements,
-                reason: t!("provider.postgres.capability.statements.not_loaded", error = message),
-                fix: Some(self.statements_fix()),
-            }),
-            StatementsAccess::Failed(message) => missing.push(MissingCapability {
-                capability: Capability::PgStatStatements,
-                reason: t!("provider.postgres.capability.statements.failed", error = message),
-                fix: Some(format!("GRANT pg_read_all_stats TO {};", quote_ident(&self.user))),
-            }),
+            StatementsAccess::NotInstalled => missing.push(self.statements_missing(
+                Capability::PgStatStatements,
+                culprit_core::message!("provider.postgres.capability.statements.not_installed"),
+            )),
+            StatementsAccess::NotLoaded(message) => missing.push(self.statements_missing(
+                Capability::PgStatStatements,
+                culprit_core::message!("provider.postgres.capability.statements.not_loaded", error = message),
+            )),
+            StatementsAccess::Failed(message) => missing.push(MissingCapability::sql(
+                Capability::PgStatStatements,
+                culprit_core::message!("provider.postgres.capability.statements.failed", error = message),
+                format!("GRANT pg_read_all_stats TO {};", quote_ident(&self.user)),
+            )),
         }
         if self.generic_plans() {
             capabilities.push(Capability::GenericPlans);
             if self.statements_usable() {
                 capabilities.push(Capability::QueryPlans);
             } else {
-                missing.push(MissingCapability {
-                    capability: Capability::QueryPlans,
-                    reason: t!("provider.postgres.capability.plans.no_statements"),
-                    fix: Some(self.statements_fix()),
-                });
+                missing.push(self.statements_missing(
+                    Capability::QueryPlans,
+                    culprit_core::message!("provider.postgres.capability.plans.no_statements"),
+                ));
             }
         } else {
-            let reason = t!(
+            let reason = culprit_core::message!(
                 "provider.postgres.capability.generic_plans.old_version",
                 version = self.version.split_whitespace().next().unwrap_or(&self.version)
             );
-            let fix = Some(t!("provider.postgres.capability.generic_plans.upgrade"));
-            missing.push(MissingCapability {
-                capability: Capability::GenericPlans,
-                reason: reason.clone(),
-                fix: fix.clone(),
-            });
-            missing.push(MissingCapability { capability: Capability::QueryPlans, reason, fix });
+            let fix = culprit_core::message!("provider.postgres.capability.generic_plans.upgrade");
+            missing.push(MissingCapability::new(Capability::GenericPlans, reason.clone()).with_fix(fix.clone()));
+            missing.push(MissingCapability::new(Capability::QueryPlans, reason).with_fix(fix));
         }
         if self.privileged {
             capabilities.push(Capability::WaitStats);
         } else {
-            missing.push(MissingCapability {
-                capability: Capability::WaitStats,
-                reason: t!("provider.postgres.capability.waits.hidden"),
-                fix: Some(format!("GRANT pg_monitor TO {};", quote_ident(&self.user))),
-            });
+            missing.push(MissingCapability::sql(
+                Capability::WaitStats,
+                culprit_core::message!("provider.postgres.capability.waits.hidden"),
+                format!("GRANT pg_monitor TO {};", quote_ident(&self.user)),
+            ));
         }
         ServerInfo {
             engine: Engine::Postgres,
@@ -133,21 +129,43 @@ impl Probe {
         }
     }
 
-    fn statements_fix(&self) -> String {
+    fn statements_missing(&self, capability: Capability, reason: Message) -> MissingCapability {
+        let missing = MissingCapability::new(capability, reason).with_fix(self.statements_fix());
+        if self.preloaded != Some(true) || !matches!(self.statements, StatementsAccess::NotInstalled) {
+            return missing;
+        }
+        let mut detail = Vec::new();
+        if !self.can_create_extension {
+            detail.push(culprit_core::message!("provider.postgres.capability.statements.create_permission"));
+        }
+        detail.push(culprit_core::message!("provider.postgres.capability.statements.preloaded"));
+        missing.with_action(CREATE_STATEMENTS_EXTENSION, Some(Message::paragraph(detail)))
+    }
+
+    fn statements_fix(&self) -> Message {
         if self.preloaded == Some(true) {
             let create = if self.can_create_extension {
-                t!("provider.postgres.capability.statements.create")
+                culprit_core::message!(
+                    "provider.postgres.capability.statements.create",
+                    sql = CREATE_STATEMENTS_EXTENSION
+                )
             } else {
-                t!("provider.postgres.capability.statements.create_as_admin")
+                culprit_core::message!(
+                    "provider.postgres.capability.statements.create_as_admin",
+                    sql = CREATE_STATEMENTS_EXTENSION
+                )
             };
-            return format!("{create} {}", t!("provider.postgres.capability.statements.preloaded"));
+            return Message::paragraph(vec![
+                create,
+                culprit_core::message!("provider.postgres.capability.statements.preloaded"),
+            ]);
         }
         if self.preloaded.is_none() {
-            return t!("provider.postgres.capability.statements.preload_unknown");
+            return culprit_core::message!("provider.postgres.capability.statements.preload_unknown");
         }
-        self.platform
-            .and_then(|p| p.preload_library("pg_stat_statements"))
-            .unwrap_or_else(|| t!("provider.postgres.capability.statements.restart"))
+        self.platform.and_then(|p| p.preload_library_message("pg_stat_statements")).unwrap_or_else(|| {
+            culprit_core::message!("provider.postgres.capability.statements.restart", sql = CREATE_STATEMENTS_EXTENSION)
+        })
     }
 }
 
@@ -304,6 +322,32 @@ mod tests {
         let info = probe.server_info();
         let m = info.missing.iter().find(|m| m.capability == capability).unwrap();
         (m.reason.clone(), m.fix.clone())
+    }
+
+    #[test]
+    fn the_extension_action_requires_confirmed_preload_and_an_absent_extension() {
+        for language in culprit_core::i18n::languages() {
+            culprit_core::i18n::scope(&language.code, || {
+                for preloaded in [None, Some(false), Some(true)] {
+                    for absent in [false, true] {
+                        let state = if absent {
+                            StatementsAccess::NotInstalled
+                        } else {
+                            StatementsAccess::NotLoaded("not loaded".into())
+                        };
+                        let mut probe = probe(state);
+                        probe.preloaded = preloaded;
+                        let server = probe.server_info();
+                        let missing =
+                            server.missing.iter().find(|m| m.capability == Capability::PgStatStatements).unwrap();
+                        assert_eq!(missing.action.is_some(), preloaded == Some(true) && absent);
+                        if let Some(action) = &missing.action {
+                            assert_eq!(action.sql, CREATE_STATEMENTS_EXTENSION);
+                        }
+                    }
+                }
+            });
+        }
     }
 
     // Why each capability is locked and how to unlock it, word for word.

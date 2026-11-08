@@ -2,6 +2,7 @@
 import type { EventAction } from "./EventAction";
 import type { EventKind } from "./EventKind";
 import type { EventSource } from "./EventSource";
+import type { Message } from "./Message";
 
 /**
  * One thing that changed, and when.
@@ -46,4 +47,4 @@ minor: boolean,
 /**
  * Marks: who put it there ("cli", "app" or the coding agent's name).
  */
-by: string | null, };
+by: string | null, title_message?: Message, detail_message?: Message, };

@@ -242,11 +242,11 @@ fn pattern_finding(snapshot: &Snapshot, p: Pattern<'_>) -> Finding {
     f.summary = [latest.headline.as_str(), latest.explanation.as_str()].join(" ");
     f.impact.score = base_score(f.severity) + (dated as f64).min(20.0);
     // What InnoDB keeps is the latest one: a floor, as the title says ("at least once"), never a count.
-    f.impact.label = if latest_only {
+    f.impact.set_label(if latest_only {
         t!("check.deadlocks.impact_at_least", n = all, count = all.to_string())
     } else {
         t!("check.deadlocks.impact", n = all, count = all.to_string())
-    };
+    });
     if dated == 0 {
         f.caveats.push(t!("check.deadlocks.caveat.undated"));
     }
@@ -260,10 +260,10 @@ fn pattern_finding(snapshot: &Snapshot, p: Pattern<'_>) -> Finding {
             all as f64,
             Unit::Count,
         ),
-        Metric::text(t!("check.deadlocks.metric.pattern"), &label),
+        Metric::said_text(culprit_core::key!("check.deadlocks.metric.pattern"), &label),
     ];
     if let Some(who) = latest.victim().and_then(victim_text) {
-        f.metrics.push(Metric::text(t!("check.deadlocks.metric.rolled_back"), who));
+        f.metrics.push(Metric::said_text(culprit_core::key!("check.deadlocks.metric.rolled_back"), who));
     }
     // Lead with the primary fix; when it has no SQL, offer the first alternative that does, named in its own words.
     if let Some(primary) = latest.fixes.first() {
@@ -329,7 +329,7 @@ fn counted_finding(snapshot: &Snapshot, c: Counted<'_>) -> Finding {
     };
     f.summary = c.note.unwrap_or_default().to_string();
     f.impact.score = base_score(f.severity);
-    f.impact.label = t!("check.deadlocks.impact", n = c.counted, count = &count);
+    f.impact.set_label(t!("check.deadlocks.impact", n = c.counted, count = &count));
     f.fix = Some(Fix { summary: t!("check.deadlocks.counter.fix"), sql: None, cost: None });
     f.verify = vec![t!("check.deadlocks.counter.verify")];
     f

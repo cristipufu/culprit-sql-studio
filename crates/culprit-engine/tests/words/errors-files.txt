@@ -8,7 +8,7 @@ import unknown tool: [InvalidInput] Can't tell which tool wrote <dir>/words.txt
   hint: Pass --from ads, vscode, dbeaver or datagrip
 import bad json: [InvalidInput] <dir>/words.txt is not valid JSON: expected value at line 1 column 1
 import bad xml: [InvalidInput] <dir>/words.txt is not valid XML: unknown token at 1:1
-log without statements: [InvalidInput] /private<dir>/app.log has no statements in a format Culprit reads
+log without statements: [InvalidInput] <dir>/app.log has no statements in a format Culprit reads
   hint: Culprit reads the logs Rails (debug level), Django (django.db.backends at DEBUG), Entity Framework Core (Database.Command at Information) and Phoenix/Ecto (debug) write, and JSON lines with sql and ms. A framework at its production log level usually leaves SQL out.
 import note 10.0.0.5-reports: Uses Windows authentication there; Culprit needs a SQL login and asks for its password.
 import note sql.internal.example-shop: Signs in with Microsoft Entra ID there, but this host isn't an Azure database; Culprit uses a password.

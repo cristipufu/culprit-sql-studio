@@ -7,9 +7,8 @@ use crate::{
     rows::{Rec, explain_one, query, query_one, query_with, tagged},
     slowlog,
 };
-use culprit_core::{
-    Engine, Plan, PlanKind, QueryStat, Result, SnapshotOptions, Spread, WaitStat, Workload, format, key, t,
-};
+use culprit_core::i18n::{Message, MessageValue};
+use culprit_core::{Engine, Plan, PlanKind, QueryStat, Result, SnapshotOptions, Spread, WaitStat, Workload, key};
 use mysql_async::{Conn, Value, prelude::Queryable};
 use std::collections::HashMap;
 
@@ -17,9 +16,9 @@ pub(crate) struct CollectedWorkload {
     pub(crate) workload: Workload,
     /// Waits the workload source measured itself (the slow query log's lock time), for servers without wait totals.
     pub(crate) waits: Vec<WaitStat>,
-    pub(crate) notes: Vec<(&'static str, String)>,
+    pub(crate) notes: Vec<(&'static str, Message)>,
     /// Why no statement could be planned and what would change that, when none was.
-    pub(crate) no_plans: Option<(String, Option<String>)>,
+    pub(crate) no_plans: Option<(Message, Option<Message>)>,
 }
 
 struct Digest {
@@ -30,27 +29,7 @@ struct Digest {
     rows_examined: f64,
 }
 
-/// Where the statement a digest is planned from came from: its values are that run's, which may not be typical.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum SampleFrom {
-    /// The digest table's QUERY_SAMPLE_TEXT: the slowest run of the last minute or so (performance_schema keeps the
-    /// sample with the longest wait until it ages out), so its values lean to an outlier's.
-    Digest,
-    /// The statement history: the latest run.
-    History,
-    /// The slow query log: a run slower than long_query_time.
-    SlowLog,
-}
-
-impl SampleFrom {
-    fn sentence(self) -> String {
-        match self {
-            SampleFrom::Digest => t!("provider.mysql.plans.sample.digest"),
-            SampleFrom::History => t!("provider.mysql.plans.sample.history"),
-            SampleFrom::SlowLog => t!("provider.mysql.plans.sample.slow_log"),
-        }
-    }
-}
+use culprit_core::PlanSampleSource as SampleFrom;
 
 const PICOS_PER_MS: f64 = 1e9;
 
@@ -151,6 +130,8 @@ pub(crate) async fn collect_workload(
     Ok(Some(CollectedWorkload {
         waits: Vec::new(),
         workload: Workload {
+            source_label: None,
+            source_message: None,
             counter_set: None,
             history_inputs: Vec::new(),
             source: "performance_schema".into(),
@@ -176,8 +157,8 @@ pub(crate) async fn collect_workload(
 }
 
 /// The note on statement time (`ms`) performance_schema couldn't keep per digest.
-fn digests_full(ms: f64) -> String {
-    t!("provider.mysql.workload.digests_full", time = format::duration(ms))
+fn digests_full(ms: f64) -> Message {
+    culprit_core::message!("provider.mysql.workload.digests_full", time = MessageValue::Duration(ms))
 }
 
 /// Statement time performance_schema couldn't keep per digest once its table was full: the row with no digest. It is
@@ -427,12 +408,12 @@ struct PlanOutcome {
 }
 
 impl PlanOutcome {
-    fn note(&self) -> Option<String> {
+    fn note(&self) -> Option<Message> {
         if let Some(error) = &self.error {
-            return Some(t!("provider.mysql.plans.no_session", error = error));
+            return Some(culprit_core::message!("provider.mysql.plans.no_session", error = error));
         }
         // Each statement that couldn't be planned, by why: (its message, how many).
-        let problems: Vec<String> = [
+        let problems: Vec<Message> = [
             (key!("provider.mysql.plans.problem.no_text"), self.no_text),
             (key!("provider.mysql.plans.problem.unusable"), self.unusable),
             (key!("provider.mysql.plans.problem.matched_no_rows"), self.empty),
@@ -440,15 +421,17 @@ impl PlanOutcome {
         ]
         .into_iter()
         .filter(|(_, n)| *n > 0)
-        .map(|(key, n)| culprit_core::i18n::t(key, &[("n", n.into()), ("count", format::digits(n.to_string()).into())]))
+        .map(|(key, n)| Message::catalog(key, &[("n", n.into()), ("count", MessageValue::Digits(n.to_string()))]))
         .collect();
         // The reasons, each a clause of its own, listed as the language lists them ("a, b, c").
-        let problems =
-            problems.into_iter().rev().reduce(|rest, first| t!("common.list.more", first = first, rest = rest))?;
-        Some(t!(
+        let problems = problems
+            .into_iter()
+            .rev()
+            .reduce(|rest, first| culprit_core::message!("common.list.more", first = first, rest = rest))?;
+        Some(culprit_core::message!(
             "provider.mysql.plans.planned",
             n = self.planned,
-            count = format::digits(self.planned.to_string()),
+            count = MessageValue::Digits(self.planned.to_string()),
             problems = problems
         ))
     }
@@ -502,7 +485,8 @@ async fn attach_plans(connector: &Connector, database: &str, queries: &mut [Dige
                             plan.facts_mut().flavor = Some("MariaDB".into());
                             plan.props.insert("flavor".into(), "MariaDB".into());
                         }
-                        plan.props.insert("Sample".into(), digest.sample_from.sentence());
+                        plan.facts.sample_source = Some(digest.sample_from);
+                        plan.render_recorded_messages();
                         digest.stat.plan = Some(plan);
                         outcome.planned += 1;
                     }
@@ -588,7 +572,7 @@ async fn attach_samples(conn: &mut Conn, probe: &Probe, options: &SnapshotOption
 
 /// Why nothing could be planned, and the change that would let Culprit plan statements. `sample_text`: the digest
 /// table keeps a sample statement per digest (MySQL 8.0.3+); without it the statement history is the only text.
-async fn no_plans_reason(conn: &mut Conn, probe: &Probe, sample_text: bool) -> (String, Option<String>) {
+async fn no_plans_reason(conn: &mut Conn, probe: &Probe, sample_text: bool) -> (Message, Option<Message>) {
     // The history tables fill only under the current-statement consumer.
     let off: Vec<String> = query(
         conn,
@@ -604,36 +588,36 @@ async fn no_plans_reason(conn: &mut Conn, probe: &Probe, sample_text: bool) -> (
 }
 
 /// Why no logged statement could be planned.
-fn no_logged_plans() -> String {
-    t!("provider.mysql.plans.none_logged")
+fn no_logged_plans() -> Message {
+    culprit_core::message!("provider.mysql.plans.none_logged")
 }
 
 /// [`no_plans_reason`] in words: `consumers_off`, the consumers that keep the latest statements are off.
-fn no_plans_words(flavor: Flavor, sample_text: bool, consumers_off: bool) -> (String, Option<String>) {
+fn no_plans_words(flavor: Flavor, sample_text: bool, consumers_off: bool) -> (Message, Option<Message>) {
     if !sample_text && consumers_off {
         let names = ["events_statements_current", "events_statements_history_long"];
         let settings: Vec<String> = names.iter().map(|n| format!("performance_schema_consumer_{n} = ON")).collect();
         // MySQL 8.0 keeps a sample statement per digest; MariaDB never does.
         let why = match flavor {
-            Flavor::Mariadb => t!("provider.mysql.plans.no_text.mariadb"),
-            Flavor::Mysql => t!("provider.mysql.plans.no_text.mysql"),
+            Flavor::Mariadb => culprit_core::message!("provider.mysql.plans.no_text.mariadb"),
+            Flavor::Mysql => culprit_core::message!("provider.mysql.plans.no_text.mysql"),
         };
         return (
             why,
-            Some(t!(
+            Some(culprit_core::message!(
                 "provider.mysql.plans.no_text_fix",
                 sql = format!(
                     "UPDATE performance_schema.setup_consumers SET ENABLED = 'YES' WHERE NAME IN ({});",
                     names.map(|n| format!("'{n}'")).join(", ")
                 ),
-                config = format::list(&settings)
+                config = Message::list(settings.into_iter().map(Message::from).collect())
             )),
         );
     }
     (
-        t!("provider.mysql.plans.none_planned"),
+        culprit_core::message!("provider.mysql.plans.none_planned"),
         (!sample_text).then(|| {
-            t!(
+            culprit_core::message!(
                 "provider.mysql.plans.history_only_hint",
                 server = flavor.name(),
                 sql = "SET GLOBAL slow_query_log = ON, GLOBAL log_output = 'FILE,TABLE';"
@@ -703,6 +687,11 @@ mod tests {
         }
     }
 
+    fn no_plans_said(flavor: Flavor, sample_text: bool, consumers_off: bool) -> (String, Option<String>) {
+        let (reason, fix) = no_plans_words(flavor, sample_text, consumers_off);
+        (reason.render(), fix.map(|message| message.render()))
+    }
+
     #[test]
     fn a_plan_says_which_run_it_was_planned_from() {
         // performance_schema keeps a digest's slowest recent run as its sample: its values may be an outlier's.
@@ -728,7 +717,7 @@ mod tests {
             "Planned from a run in the slow query log: a slow run, so the values may be an outlier's rather than a \
              typical run's."
         );
-        let note = |outcome: PlanOutcome| outcome.note();
+        let note = |outcome: PlanOutcome| outcome.note().map(|message| message.render());
         assert_eq!(
             note(PlanOutcome { error: Some("Nothing is listening on db:3306".into()), ..Default::default() })
                 .as_deref(),
@@ -756,12 +745,12 @@ mod tests {
             Some("Planned 2 queries; 1 could not be explained.")
         );
         assert_eq!(
-            digests_full(1_500.0),
+            digests_full(1_500.0).render(),
             "performance_schema's digest table is full (performance_schema_digests_size), so 1.5 s of statement time \
              across the server went into one catch-all row and isn't in these totals: shares are of the time it could \
              attribute."
         );
-        assert_eq!(no_logged_plans(), "No logged statement could be planned.");
+        assert_eq!(no_logged_plans().render(), "No logged statement could be planned.");
         let consumers = "Run UPDATE performance_schema.setup_consumers SET ENABLED = 'YES' WHERE NAME IN \
                          ('events_statements_current', 'events_statements_history_long'); to keep the latest \
                          statements (no restart needed; add performance_schema_consumer_events_statements_current = ON \
@@ -769,7 +758,7 @@ mod tests {
                          configuration to keep them after a restart). Or open a statement in the editor and Explain it \
                          there.";
         assert_eq!(
-            no_plans_words(Flavor::Mariadb, false, true),
+            no_plans_said(Flavor::Mariadb, false, true),
             (
                 "MariaDB keeps statement digests but not the statements themselves, so there is no text to plan."
                     .into(),
@@ -777,7 +766,7 @@ mod tests {
             )
         );
         assert_eq!(
-            no_plans_words(Flavor::Mysql, false, true),
+            no_plans_said(Flavor::Mysql, false, true),
             (
                 "This MySQL keeps statement digests but no sample statement for each (MySQL 8.0 added one), so there is \
                  no text to plan."
@@ -788,7 +777,7 @@ mod tests {
         let none = "None of the recorded statements could be planned: their text was truncated, prepared with \
                     placeholders, or no longer in the statement history.";
         assert_eq!(
-            no_plans_words(Flavor::Mariadb, false, false),
+            no_plans_said(Flavor::Mariadb, false, false),
             (
                 none.into(),
                 Some(
@@ -800,13 +789,16 @@ mod tests {
                 )
             )
         );
-        assert_eq!(no_plans_words(Flavor::Mysql, true, true), (none.into(), None));
+        assert_eq!(no_plans_said(Flavor::Mysql, true, true), (none.into(), None));
     }
 
     #[test]
     fn plan_notes_tell_missing_text_from_writes() {
         let outcome = PlanOutcome { planned: 2, no_text: 3, not_reads: 4, ..Default::default() };
-        assert_eq!(outcome.note().as_deref(), Some("Planned 2 queries; 3 had no recorded statement text."));
+        assert_eq!(
+            outcome.note().map(|note| note.render()).as_deref(),
+            Some("Planned 2 queries; 3 had no recorded statement text.")
+        );
         assert_eq!(PlanOutcome { planned: 5, not_reads: 2, ..Default::default() }.note(), None);
         assert!(reads_shape(" (SELECT 1)") && !reads_shape("UPDATE t SET a = 1"));
     }
@@ -865,7 +857,7 @@ mod tests {
                 .unwrap();
         assert!(plan.root.children.is_empty(), "the parser keeps the empty block; attach_plans skips it");
         let outcome = PlanOutcome { planned: 2, empty: 1, ..Default::default() };
-        let note = outcome.note().unwrap();
+        let note = outcome.note().unwrap().render();
         assert!(note.contains("matched no rows"), "{note}");
     }
 

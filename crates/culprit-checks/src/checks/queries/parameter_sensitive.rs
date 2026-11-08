@@ -337,8 +337,10 @@ fn parameter_sensitive_finding(snapshot: &Snapshot, case: ParameterSensitive<'_>
                     share = format::percent(slow_share)
                 )
             };
-            f.impact.label =
-                t!("check.parameter_sensitive.impact.calls", factor = times(slow.mean_time_ms / fast_ms.max(0.001)));
+            f.impact.set_label(t!(
+                "check.parameter_sensitive.impact.calls",
+                factor = times(slow.mean_time_ms / fast_ms.max(0.001))
+            ));
             let compiled_for = |p: &PlanVariant| {
                 compiled(p, q).map(|c| t!("check.parameter_sensitive.compiled_for", values = c)).unwrap_or_default()
             };
@@ -378,12 +380,23 @@ fn parameter_sensitive_finding(snapshot: &Snapshot, case: ParameterSensitive<'_>
                 )
             };
             f.summary = [first, t!("check.parameter_sensitive.summary.plans_why")].join(" ");
-            f.metrics.push(Metric::new(t!("common.metric.fast_plan"), fast.mean_time_ms, Unit::Ms));
-            f.metrics.push(Metric::new(t!("check.parameter_sensitive.metric.slow_plan"), slow.mean_time_ms, Unit::Ms));
-            f.metrics.push(Metric::new(t!("check.parameter_sensitive.metric.slow_calls"), slow_share, Unit::Ratio));
+            f.metrics.push(Metric::said(culprit_core::key!("common.metric.fast_plan"), fast.mean_time_ms, Unit::Ms));
+            f.metrics.push(Metric::said(
+                culprit_core::key!("check.parameter_sensitive.metric.slow_plan"),
+                slow.mean_time_ms,
+                Unit::Ms,
+            ));
+            f.metrics.push(Metric::said(
+                culprit_core::key!("check.parameter_sensitive.metric.slow_calls"),
+                slow_share,
+                Unit::Ratio,
+            ));
             // Forcing is offered only for a plan that serves most calls on its own.
             if let Some(p) = case.most_calls {
-                f.metrics.push(Metric::text(t!("check.parameter_sensitive.metric.most_calls_plan"), p.id.clone()));
+                f.metrics.push(Metric::said_text(
+                    culprit_core::key!("check.parameter_sensitive.metric.most_calls_plan"),
+                    p.id.clone(),
+                ));
                 f.facts.usual_fast_plan = Some(p.id.clone());
             }
             f.confidence = Confidence::High;
@@ -424,8 +437,8 @@ fn parameter_sensitive_finding(snapshot: &Snapshot, case: ParameterSensitive<'_>
                     p99 = run(*p99_ms)
                 ),
             };
-            f.impact.label =
-                t!("check.parameter_sensitive.impact.runs", factor = times(p99_ms / typical_ms.max(0.001)));
+            f.impact
+                .set_label(t!("check.parameter_sensitive.impact.runs", factor = times(p99_ms / typical_ms.max(0.001))));
             let name = snapshot.server.name();
             let source = match (tail.from_log && !tail.logged, tail.logged, tail.threshold_ms) {
                 (true, _, _) => t!("check.parameter_sensitive.source.log_every_run"),
@@ -465,10 +478,18 @@ fn parameter_sensitive_finding(snapshot: &Snapshot, case: ParameterSensitive<'_>
                 Unit::Ms,
             ));
             if tail.percentile_99 {
-                f.metrics.push(Metric::new(t!("check.parameter_sensitive.metric.p99"), *p99_ms, Unit::Ms));
+                f.metrics.push(Metric::said(
+                    culprit_core::key!("check.parameter_sensitive.metric.p99"),
+                    *p99_ms,
+                    Unit::Ms,
+                ));
             }
             if let Some(s) = slow_share {
-                f.metrics.push(Metric::new(t!("check.parameter_sensitive.metric.slow_runs"), *s, Unit::Ratio));
+                f.metrics.push(Metric::said(
+                    culprit_core::key!("check.parameter_sensitive.metric.slow_runs"),
+                    *s,
+                    Unit::Ratio,
+                ));
             }
             f.confidence = if tail.logged { Confidence::Medium } else { Confidence::High };
         }
@@ -478,7 +499,14 @@ fn parameter_sensitive_finding(snapshot: &Snapshot, case: ParameterSensitive<'_>
         Ladder::Mysql { lock_share, slow_runs } => mysql_fix(snapshot, q, *lock_share, *slow_runs),
     });
     f.queries = query_refs(&[q]);
-    f.verify = vec![t!("check.parameter_sensitive.verify.compare"), t!("check.parameter_sensitive.verify.rescan")];
+    f.verify = vec![
+        t!("check.parameter_sensitive.verify.compare"),
+        t!(
+            "check.parameter_sensitive.verify.rescan",
+            queries = culprit_core::t!("ui.common.view.queries"),
+            spread = culprit_core::t!("ui.runtime_spread.title")
+        ),
+    ];
     f
 }
 

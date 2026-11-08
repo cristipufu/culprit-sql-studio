@@ -218,6 +218,33 @@ fn absorption_keeps_each_querys_recorded_note() {
 }
 
 #[test]
+fn absorption_updates_share_labels_by_identity_and_preserves_custom_labels() {
+    let s = snapshot();
+    let (first, second) = (&s.queries()[0], &s.queries()[1]);
+    let mut target = finding("heavy-query", &first.id, &[&first.id]);
+    let source = finding("heavy-query", &second.id, &[&second.id]);
+    support::apply_query_impact(&mut target, &support::query_impact(&s, &[first]).unwrap());
+    // Display words can change independently of the numeric state and label identity.
+    target.impact.label = "A translated share label".into();
+    let mut findings = vec![target.clone(), source.clone()];
+    let decision = merge::Absorption::decide(&s, &findings, 0, 1);
+    decision.apply_state(&mut findings);
+    decision.render(&mut findings, None);
+    assert_eq!(findings[0].impact.db_time_share, Some(1.0));
+    assert_eq!(findings[0].impact.label, support::share_label(1.0));
+
+    // A custom label can have exactly the same words as a share label without becoming one.
+    let custom = support::share_label(0.5);
+    target.impact.set_label(&custom);
+    let mut findings = vec![target, source];
+    let decision = merge::Absorption::decide(&s, &findings, 0, 1);
+    decision.apply_state(&mut findings);
+    decision.render(&mut findings, None);
+    assert_eq!(findings[0].impact.db_time_share, Some(1.0));
+    assert_eq!(findings[0].impact.label, custom);
+}
+
+#[test]
 fn partial_automatic_index_transfer_remeasures_the_remaining_queries() {
     let mut s: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/sqlite-demo.json")).unwrap();
     let mut original = s.queries().iter().find(|q| q.text.contains("LEFT OUTER JOIN")).unwrap().clone();

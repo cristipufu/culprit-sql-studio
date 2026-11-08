@@ -122,14 +122,14 @@ fn last_page_insert_finding(snapshot: &Snapshot, latch: LastPageLatch<'_>) -> Fi
         None => {}
     }
     severity_score(&mut f);
-    f.impact.label = t!("check.last_page_insert.impact", time = format::duration(c.page_latch_wait_ms));
+    f.impact.set_label(t!("check.last_page_insert.impact", time = format::duration(c.page_latch_wait_ms)));
     f.confidence = Confidence::Medium;
     f.metrics = vec![
-        Metric::new(t!("check.last_page_insert.metric.waits"), c.page_latch_waits, Unit::Count),
+        Metric::said(culprit_core::key!("check.last_page_insert.metric.waits"), c.page_latch_waits, Unit::Count),
         Metric::said(key!("check.last_page_insert.metric.time"), c.page_latch_wait_ms, Unit::Ms),
     ];
     if let Some(inserts) = c.leaf_inserts {
-        f.metrics.push(Metric::new(t!("check.last_page_insert.metric.inserts"), inserts, Unit::Count));
+        f.metrics.push(Metric::said(culprit_core::key!("check.last_page_insert.metric.inserts"), inserts, Unit::Count));
     }
     f.fix = Some(match c.optimize_for_sequential_key {
         _ if !latch.inserts => Fix { summary: t!("check.last_page_insert.fix.hot_pages"), sql: None, cost: None },

@@ -13,7 +13,7 @@ import { keys } from "../../lib/keys";
 import { querySummary } from "../../lib/query-summary";
 import { scan, setState } from "../../lib/store";
 import { openLive } from "../Live";
-import { slot, withElements } from "../../lib/message-parts";
+import { slot, tx, withElements } from "../../lib/message-parts";
 import { rememberQueryTab } from "../Queries";
 
 /** Open a query in Queries, on one of its tabs. */
@@ -355,7 +355,13 @@ export function StatisticsTile({ tile, report }: { tile: Tile; report: Report })
             </span>
           ) : (
             <span key={m.key} className={m.key === "locked" ? "warn" : ""}>
-              <b>{m.text}</b> {m.label.toLowerCase()}
+              {m.key === "queries"
+                ? tx("ui.dashboard.statistics.queries_count", { n: m.value ?? 0 }, { count: <b>{m.text}</b> })
+                : m.key === "plans"
+                  ? tx("ui.dashboard.statistics.plans_count", { n: m.value ?? 0 }, { count: <b>{m.text}</b> })
+                  : m.key === "locked"
+                    ? tx("ui.dashboard.statistics.locked_count", { n: m.value ?? 0 }, { count: <b>{m.text}</b> })
+                    : <><b>{m.text}</b> {m.label}</>}
             </span>
           ),
         )}

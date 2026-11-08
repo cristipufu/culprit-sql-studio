@@ -326,18 +326,18 @@ Yugabyte.refusal.last_actual_plan.hint: Analyze a representative statement to ca
 Yugabyte.refusal.operator_progress: YSQL does not expose live row counters for every plan operator
 Yugabyte.refusal.operator_progress.hint: Use a measured plan and native statement/operation progress.
 Yugabyte.refused.sessions: YugabyteDB cannot provide sessions
-Yugabyte.refused.wait_sample: YugabyteDB cannot provide wait_sample
+Yugabyte.refused.wait_sample: YugabyteDB cannot provide wait samples
 Yugabyte.refused.deadlocks: DocDB's distributed deadlock detection is not PostgreSQL's heap lock accounting. A PostgreSQL deadlock counter does not establish this database's distributed deadlocks.
 Yugabyte.refused.deadlocks.hint: Correlate YSQL errors and the YB-TServer logs for the affected transaction.
-Yugabyte.refused.measures_runs: YugabyteDB cannot provide measures_runs
-Yugabyte.refused.plan_estimates: YugabyteDB cannot provide plan_estimates
+Yugabyte.refused.measures_runs: YugabyteDB cannot provide measured runs
+Yugabyte.refused.plan_estimates: YugabyteDB cannot provide plan estimates
 Yugabyte.refused.writes: YugabyteDB cannot provide writes
 Yugabyte.refused.periods: YugabyteDB cannot provide periods
 Yugabyte.refused.last_actual_plan: YSQL statement totals do not retain the measured plan of every past execution
 Yugabyte.refused.last_actual_plan.hint: Analyze a representative statement to capture its actual DocDB work.
 Yugabyte.refused.operator_progress: YSQL does not expose live row counters for every plan operator
 Yugabyte.refused.operator_progress.hint: Use a measured plan and native statement/operation progress.
-Yugabyte.refused.sign_in: YugabyteDB cannot provide sign_in
+Yugabyte.refused.sign_in: YugabyteDB cannot provide sign-in
 Yugabyte.metrics.planning_label: Planning
 Yugabyte.metrics.write_rows_label: Some("Rows changed per run")
 Yugabyte.metrics.log_name: log

@@ -265,7 +265,7 @@ fn request_finding(snapshot: &Snapshot, r: Request<'_>) -> Finding {
                     None => t!("check.missing_index.summary.no_query"),
                 });
             }
-            f.impact.label = t!("check.missing_index.impact.lookups", lookups = format::count(lookups));
+            f.impact.set_label(t!("check.missing_index.impact.lookups", lookups = format::count(lookups)));
         }
     }
     if let Some(score) = r.azure {
@@ -287,12 +287,16 @@ fn request_finding(snapshot: &Snapshot, r: Request<'_>) -> Finding {
     f.queries = query_refs(linked);
     // A request made before the window is context: no share of the window's time is its.
     if let Some(impact) = r.impact.as_ref().filter(|_| !matches!(r.shape, Shape::Previous)) {
-        f.metrics.push(Metric::new(t!("common.metric.share_of_db_time"), impact.share, Unit::Ratio));
+        f.metrics.push(Metric::said(culprit_core::key!("common.metric.share_of_db_time"), impact.share, Unit::Ratio));
     }
-    f.metrics.push(Metric::new(t!("check.missing_index.metric.lookups"), lookups, Unit::Count));
-    f.metrics.push(Metric::new(t!("check.missing_index.metric.improvement"), c.impact_pct / 100.0, Unit::Ratio));
+    f.metrics.push(Metric::said(culprit_core::key!("check.missing_index.metric.lookups"), lookups, Unit::Count));
+    f.metrics.push(Metric::said(
+        culprit_core::key!("check.missing_index.metric.improvement"),
+        c.impact_pct / 100.0,
+        Unit::Ratio,
+    ));
     if let Some(rows) = r.rows {
-        f.metrics.push(Metric::new(t!("common.metric.rows_in_table"), rows, Unit::Rows));
+        f.metrics.push(Metric::said(culprit_core::key!("common.metric.rows_in_table"), rows, Unit::Rows));
     }
     match &r.asked {
         Some(a) if a.stopped() => f.caveats.push(t!(
@@ -318,7 +322,7 @@ fn request_finding(snapshot: &Snapshot, r: Request<'_>) -> Finding {
             );
             f.impact.db_time_share = None;
             f.impact.time_ms_per_day = None;
-            f.impact.label = t!("check.missing_index.impact.previous");
+            f.impact.set_label(t!("check.missing_index.impact.previous"));
             for q in &mut f.queries {
                 q.note = Some(t!("check.missing_index.query_note.previous"));
             }

@@ -104,15 +104,15 @@ fn xid_age_finding(snapshot: &Snapshot, xid: XidAge<'_>) -> Finding {
     f.summary = summary.join(" ");
     f.severity = xid.severity;
     f.impact.score = xid.score;
-    f.impact.label = t!("check.xid_age.impact", remaining = format::count(remaining));
+    f.impact.set_label(t!("check.xid_age.impact", remaining = format::count(remaining)));
     f.confidence = Confidence::High;
-    f.metrics.push(Metric::new(t!("check.xid_age.metric.age"), age, Unit::Count));
-    f.metrics.push(Metric::new(t!("check.xid_age.metric.remaining"), remaining, Unit::Count));
+    f.metrics.push(Metric::said(culprit_core::key!("check.xid_age.metric.age"), age, Unit::Count));
+    f.metrics.push(Metric::said(culprit_core::key!("check.xid_age.metric.remaining"), remaining, Unit::Count));
     if let Some(t) = xid.oldest {
-        f.metrics.push(Metric::text(t!("check.xid_age.metric.oldest_table"), t.qualified()));
+        f.metrics.push(Metric::said_text(culprit_core::key!("check.xid_age.metric.oldest_table"), t.qualified()));
     }
     if let Some(h) = xid.holder {
-        f.metrics.push(Metric::text(t!("check.xid_age.metric.holder"), cleanup_holder_phrase(h)));
+        f.metrics.push(Metric::said_text(culprit_core::key!("check.xid_age.metric.holder"), cleanup_holder_phrase(h)));
     }
     f.fix = Some(Fix {
         summary: t!("check.xid_age.fix"),

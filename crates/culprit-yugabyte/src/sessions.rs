@@ -70,6 +70,12 @@ pub(crate) async fn live(connector: &Connector, environment: Environment) -> Res
             database: text(&v, "datname"),
             state: text(&v, "state").unwrap_or_else(|| "unknown".into()),
             command: None,
+            waiting_on_lock: Some(
+                crate::waits::category(
+                    text(&v, "wait_event_type").as_deref().unwrap_or(""),
+                    text(&v, "wait_event").as_deref().unwrap_or(""),
+                ) == "Lock",
+            ),
             wait: match (text(&v, "wait_event_type"), text(&v, "wait_event")) {
                 (Some(kind), Some(event)) => Some(format!("{kind}: {event}")),
                 (kind, event) => event.or(kind),

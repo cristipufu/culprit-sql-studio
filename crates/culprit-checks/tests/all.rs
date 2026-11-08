@@ -17,6 +17,7 @@ mod heap_tables;
 mod index_advice;
 mod index_false_flags;
 mod index_words;
+mod localization;
 mod mariadb;
 mod multi_tenant;
 mod old_versions;
@@ -42,7 +43,12 @@ mod waits_words;
 /// Record `source`'s outcome in `s`, in place of any the scan recorded for it.
 pub fn record(s: &mut culprit_core::Snapshot, source: &str, state: culprit_core::SourceState, reason: Option<&str>) {
     s.sources.retain(|o| o.source != source);
-    s.sources.push(culprit_core::SourceOutcome { source: source.into(), state, reason: reason.map(str::to_string) });
+    s.sources.push(culprit_core::SourceOutcome {
+        reason_message: None,
+        source: source.into(),
+        state,
+        reason: reason.map(str::to_string),
+    });
 }
 
 /// Make `w` a window of the last `hours`: its length, and a start that agrees with its end (a window whose bounds and

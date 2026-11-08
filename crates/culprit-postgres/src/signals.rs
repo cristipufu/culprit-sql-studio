@@ -520,7 +520,7 @@ fn session_signals(
         out.push(
             Signal::new(
                 culprit_core::signal_id::NEW_CONNECTIONS,
-                &t!("provider.postgres.signal.new_connections"),
+                culprit_core::message!("provider.postgres.signal.new_connections"),
                 rate,
                 SignalUnit::PerSecond,
                 SignalScope::SinceStartup,
@@ -531,7 +531,7 @@ fn session_signals(
     if let Some(ms) = session_ms {
         let length = Signal::new(
             culprit_core::signal_id::SESSION_LENGTH,
-            &t!("provider.postgres.signal.session_length"),
+            culprit_core::message!("provider.postgres.signal.session_length"),
             ms / sessions / 1000.0,
             SignalUnit::Seconds,
             SignalScope::SinceStartup,
@@ -547,7 +547,7 @@ fn session_signals(
         out.push(
             Signal::new(
                 culprit_core::signal_id::SESSIONS_ABANDONED,
-                &t!("provider.postgres.signal.sessions_abandoned"),
+                culprit_core::message!("provider.postgres.signal.sessions_abandoned"),
                 abandoned / sessions * 100.0,
                 SignalUnit::Percent,
                 SignalScope::SinceStartup,

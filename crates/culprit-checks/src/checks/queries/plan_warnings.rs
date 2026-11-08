@@ -309,7 +309,7 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
         .collect();
     let share_metric = Metric::new(share_metric_label(snapshot), case.impact.share, Unit::Ratio);
     f.metrics.push(share_metric.clone());
-    f.metrics.push(Metric::new(t!("common.metric.average_duration"), q.mean_time_ms, Unit::Ms));
+    f.metrics.push(Metric::said(culprit_core::key!("common.metric.average_duration"), q.mean_time_ms, Unit::Ms));
     let query = query_handle(q);
     // A statement that stopped running is told in the past.
     let tense = if crate::all_stopped(snapshot, &[q]) { "past" } else { "present" };
@@ -336,7 +336,7 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
             if let Some(c) = &conversion.column {
                 f.id = id;
                 f.subject = subject(SubjectKind::Table, c);
-                f.metrics.push(Metric::text(t!("check.plan_warnings.metric.column"), c.clone()));
+                f.metrics.push(Metric::said_text(culprit_core::key!("check.plan_warnings.metric.column"), c.clone()));
             }
         }
         Warned::Spill => {
@@ -430,11 +430,11 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
         ]
         .join(" ");
         let mut metrics = vec![
-            Metric::new(t!("common.metric.share_of_db_time"), shared.impact.share, Unit::Ratio),
-            Metric::new(t!("common.metric.queries_affected"), shared.queries as f64, Unit::Count),
+            Metric::said(culprit_core::key!("common.metric.share_of_db_time"), shared.impact.share, Unit::Ratio),
+            Metric::said(culprit_core::key!("common.metric.queries_affected"), shared.queries as f64, Unit::Count),
         ];
         if let Some(per_day_ms) = shared.impact.per_day_ms {
-            metrics.push(Metric::new(t!("common.metric.db_time_per_day"), per_day_ms, Unit::Ms));
+            metrics.push(Metric::said(culprit_core::key!("common.metric.db_time_per_day"), per_day_ms, Unit::Ms));
         }
         // The share of logged slow-run time stays: it is of the first statement alone.
         if slow_log_only(snapshot) {
@@ -556,7 +556,7 @@ fn statistics_now_said(snapshot: &Snapshot, now: &StatisticsNow) -> String {
         (None, Some(now)) => Some(t!("check.plan_warnings.statistics.table_now", now = rows(now))),
         (None, None) => None,
     });
-    t!("check.plan_warnings.statistics.said", clauses = clauses.join("; "))
+    clauses.join(" ")
 }
 
 pub(super) fn warning_key(w: PlanWarning) -> &'static str {

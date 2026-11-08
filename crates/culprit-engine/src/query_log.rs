@@ -9,12 +9,18 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use culprit_core::{Capability, CollectorNote, Error, ErrorCode, Provider, Result, Snapshot, SnapshotOptions, t};
+use culprit_core::i18n::{Message, MessageValue};
+use culprit_core::{
+    Capability, CollectorNote, Error, ErrorCode, Provider, Result, Snapshot, SnapshotOptions, message, t,
+};
 use culprit_querylog::{Aggregator, Reader};
 
 /// Shared source descriptor, independent of which database provider supplied the catalog.
-const QUERY_LOG_SOURCE: culprit_core::Source =
-    culprit_core::Source { name: "query log", reads: "the application's query log", delivers: &[Capability::QueryLog] };
+const QUERY_LOG_SOURCE: culprit_core::Source = culprit_core::Source {
+    name: "query log",
+    reads: culprit_core::key!("engine.query_log.source.reads"),
+    delivers: &[Capability::QueryLog],
+};
 /// Lines read to tell the log's format.
 const SAMPLE_LINES: usize = 5_000;
 /// At most this much of a file is read to tell whether it's a query log, however long its lines.
@@ -40,7 +46,7 @@ pub fn recognize(path: &Path) -> Result<&'static str> {
         }
     }
     culprit_querylog::detect(sample.iter().map(String::as_str)).map(|f| f.name()).ok_or_else(|| {
-        lines.limitation.as_ref().map_or_else(|| no_statements(path), |reason| Error::invalid(reason.clone()))
+        lines.limitation.as_ref().map_or_else(|| no_statements(path), |reason| Error::invalid(reason.render()))
     })
 }
 
@@ -105,13 +111,15 @@ pub async fn attach(
     options: &SnapshotOptions,
     found: bool,
 ) -> Result<()> {
-    let name =
-        path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| t!("engine.query_log.the_log"));
+    let name: Message = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned().into())
+        .unwrap_or_else(|| message!("engine.query_log.the_log"));
     if snapshot.workload.is_some() {
         let mut coverage = culprit_core::Coverage::default();
         coverage.not_applicable(&QUERY_LOG_SOURCE, t!("engine.query_log.has_history"));
         coverage.append_to(snapshot);
-        let said = t!("engine.query_log.not_read", engine = snapshot.server.name(), log = &name);
+        let said = message!("engine.query_log.not_read", engine = snapshot.server.name(), log = &name);
         snapshot.notes.push(note(said));
         return Ok(());
     }
@@ -140,14 +148,11 @@ pub async fn attach(
     let read = aggregator.entries();
     snapshot.operations.log_failures = aggregator.failures();
     if !snapshot.operations.log_failures.is_empty() {
-        snapshot.notes.push(note(
-            [
-                t!("engine.query_log.failures.retained"),
-                t!("engine.query_log.failures.no_duration"),
-                t!("engine.query_log.failures.counts"),
-            ]
-            .join(" "),
-        ));
+        snapshot.notes.push(note(Message::paragraph(vec![
+            message!("engine.query_log.failures.retained"),
+            message!("engine.query_log.failures.no_duration"),
+            message!("engine.query_log.failures.counts"),
+        ])));
     }
     let mut workload = aggregator.workload(format, options.top_queries.max(1) as usize);
     // Each shape is planned as text someone else wrote (the application did), under the engine's rules for recorded
@@ -167,16 +172,15 @@ pub async fn attach(
     if planned > 0 && !server.has(Capability::QueryPlans) {
         server.capabilities.push(Capability::QueryPlans);
     }
-    let statements =
-        t!("engine.query_log.statements", n = read as f64, count = culprit_core::format::count(read as f64));
-    let shapes = t!(
+    let statements = message!("engine.query_log.statements", n = read, count = MessageValue::Count(read as f64));
+    let shapes = message!(
         "engine.query_log.shapes",
         n = workload.query_count,
-        count = culprit_core::format::count(workload.query_count)
+        count = MessageValue::Count(workload.query_count)
     );
-    let (kept, planned) = (workload.queries.len().to_string(), planned.to_string());
-    let mut said = if found {
-        t!(
+    let (kept, planned) = (workload.queries.len(), planned);
+    let said = if found {
+        message!(
             "engine.query_log.read_found",
             statements = statements,
             log = &name,
@@ -186,7 +190,7 @@ pub async fn attach(
             planned = planned
         )
     } else {
-        t!(
+        message!(
             "engine.query_log.read",
             statements = statements,
             log = &name,
@@ -196,23 +200,21 @@ pub async fn attach(
             planned = planned
         )
     };
+    let mut read_notes = vec![said];
     if workload.window_unknown() {
-        said = format!("{said} {}", t!("engine.query_log.no_times"));
+        read_notes.push(message!("engine.query_log.no_times"));
     }
-    snapshot.notes.push(note(said));
-    snapshot.notes.push(note(
-        [
-            t!("engine.query_log.limits.visible"),
-            t!("engine.query_log.limits.tables"),
-            t!("engine.query_log.limits.requests"),
-        ]
-        .join(" "),
-    ));
+    snapshot.notes.push(note(Message::paragraph(read_notes)));
+    snapshot.notes.push(note(Message::paragraph(vec![
+        message!("engine.query_log.limits.visible"),
+        message!("engine.query_log.limits.tables"),
+        message!("engine.query_log.limits.requests"),
+    ])));
     if elsewhere > 0 {
-        snapshot.notes.push(note(t!(
+        snapshot.notes.push(note(message!(
             "engine.query_log.elsewhere",
-            n = elsewhere as f64,
-            count = culprit_core::format::count(elsewhere as f64)
+            n = elsewhere,
+            count = MessageValue::Count(elsewhere as f64)
         )));
     }
     coverage.completed(&QUERY_LOG_SOURCE, workload.queries.len() + snapshot.operations.log_failures.len());
@@ -224,8 +226,8 @@ pub async fn attach(
     Ok(())
 }
 
-fn note(message: String) -> CollectorNote {
-    CollectorNote { collector: "query log".into(), message, table: None }
+fn note(message: Message) -> CollectorNote {
+    CollectorNote::recorded("query log", message)
 }
 
 /// The file, line by line: its format told from the first lines, every statement fingerprinted. A line that isn't
@@ -249,7 +251,7 @@ struct LogLines {
     line_limit: u64,
     end: u64,
     initial_len: u64,
-    limitation: Option<String>,
+    limitation: Option<Message>,
 }
 impl LogLines {
     fn open(path: &Path, limits: LogLimits) -> Result<Self> {
@@ -281,7 +283,7 @@ impl LogLines {
             return Ok(None);
         }
         if Instant::now() >= self.deadline {
-            self.limitation = Some(t!("engine.query_log.limitation.deadline"));
+            self.limitation = Some(message!("engine.query_log.limitation.deadline"));
             return Ok(None);
         }
         self.buffer.clear();
@@ -297,15 +299,14 @@ impl LogLines {
                 || self.reader.get_ref().get_ref().metadata().map_err(|e| Error::invalid(e.to_string()))?.len()
                     != self.initial_len);
         if at_limit && (read == 0 || !self.buffer.ends_with(b"\n")) {
-            self.limitation = Some(format!(
-                "{} {}",
-                t!("engine.query_log.limitation.budget"),
-                t!("engine.query_log.limitation.budget_hint")
-            ));
+            self.limitation = Some(Message::paragraph(vec![
+                message!("engine.query_log.limitation.budget"),
+                message!("engine.query_log.limitation.budget_hint"),
+            ]));
             return Ok(None);
         }
         if read as u64 > self.line_limit {
-            self.limitation = Some(t!("engine.query_log.limitation.oversized"));
+            self.limitation = Some(message!("engine.query_log.limitation.oversized"));
             return Ok(None);
         }
         if read == 0 {
@@ -315,7 +316,7 @@ impl LogLines {
     }
 }
 
-fn read_file(path: &Path, engine: culprit_core::Engine) -> Result<(&'static str, Aggregator, Option<String>)> {
+fn read_file(path: &Path, engine: culprit_core::Engine) -> Result<(&'static str, Aggregator, Option<Message>)> {
     read_file_with_limits(path, engine, LogLimits::default())
 }
 
@@ -323,7 +324,7 @@ fn read_file_with_limits(
     path: &Path,
     engine: culprit_core::Engine,
     limits: LogLimits,
-) -> Result<(&'static str, Aggregator, Option<String>)> {
+) -> Result<(&'static str, Aggregator, Option<Message>)> {
     read_lines(path, engine, LogLines::open(path, limits)?)
 }
 
@@ -331,7 +332,7 @@ fn read_lines(
     path: &Path,
     engine: culprit_core::Engine,
     mut lines: LogLines,
-) -> Result<(&'static str, Aggregator, Option<String>)> {
+) -> Result<(&'static str, Aggregator, Option<Message>)> {
     let mut sample = Vec::new();
     let mut sample_bytes = 0;
     while sample.len() < SAMPLE_LINES && sample_bytes < SAMPLE_BYTES as usize {
@@ -344,7 +345,7 @@ fn read_lines(
         }
     }
     let mut reader = Reader::detect(sample.iter().map(String::as_str), engine).ok_or_else(|| {
-        lines.limitation.as_ref().map_or_else(|| no_statements(path), |reason| Error::invalid(reason.clone()))
+        lines.limitation.as_ref().map_or_else(|| no_statements(path), |reason| Error::invalid(reason.render()))
     })?;
     let format = reader.format();
     for line in &sample {
@@ -360,7 +361,7 @@ fn read_lines(
     let partial = lines.limitation.is_some() || reader.limited();
     let aggregator = if partial { reader.discard_pending() } else { reader.finish() };
     if aggregator.limited() && lines.limitation.is_none() {
-        lines.limitation = Some(t!("engine.query_log.limitation.aggregation"));
+        lines.limitation = Some(message!("engine.query_log.limitation.aggregation"));
     }
     Ok((format, aggregator, lines.limitation))
 }
@@ -423,7 +424,7 @@ mod tests {
             read_file_with_limits(&path, culprit_core::Engine::Sqlite, LogLimits { bytes: 1024, line: 100, ..limits })
                 .unwrap();
         assert_eq!(a.entries(), 1);
-        assert!(reason.unwrap().contains("oversized"));
+        assert!(reason.unwrap().render().contains("oversized"));
         let error =
             read_file_with_limits(&path, culprit_core::Engine::Sqlite, LogLimits { time: Duration::ZERO, ..limits })
                 .err()
@@ -450,7 +451,7 @@ mod tests {
             drop(writer);
             let (_, a, reason) = read_lines(&path, culprit_core::Engine::Sqlite, lines).unwrap();
             assert_eq!(a.entries(), 1, "a cut statement must not count: {ending:?}");
-            assert!(reason.unwrap().contains("changed"));
+            assert!(reason.unwrap().render().contains("changed"));
             // A static EOF still completes a final statement, including one without a trailing newline.
             std::fs::write(&path, text).unwrap();
             let (_, a, reason) = read_file(&path, culprit_core::Engine::Sqlite).unwrap();
@@ -472,7 +473,7 @@ mod tests {
             std::fs::write(&path, format!("{prefix}{ending}")).unwrap();
             let (_, a, reason) = read_lines(&path, culprit_core::Engine::Sqlite, lines).unwrap();
             assert_eq!(a.entries(), 1, "a cut statement must not count: {ending:?}");
-            assert!(reason.unwrap().contains("changed"));
+            assert!(reason.unwrap().render().contains("changed"));
         }
         std::fs::remove_dir_all(root).unwrap();
     }

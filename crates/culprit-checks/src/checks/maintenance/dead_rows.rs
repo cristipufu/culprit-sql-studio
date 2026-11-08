@@ -304,13 +304,13 @@ fn backlog_finding(b: Backlog<'_>) -> Finding {
     f.summary = summary.join(" ");
     f.severity = b.severity;
     f.impact.score = base_score(f.severity) + b.ratio * 10.0;
-    f.impact.label = t!("check.dead_rows.impact", dead = format::count(b.dead));
+    f.impact.set_label(t!("check.dead_rows.impact", dead = format::count(b.dead)));
     f.confidence = Confidence::High;
-    f.metrics.push(Metric::new(t!("check.dead_rows.metric.dead"), b.dead, Unit::Rows));
-    f.metrics.push(Metric::new(t!("check.dead_rows.metric.live"), b.live, Unit::Rows));
-    f.metrics.push(Metric::new(t!("check.dead_rows.metric.dead_share"), b.ratio, Unit::Ratio));
+    f.metrics.push(Metric::said(culprit_core::key!("check.dead_rows.metric.dead"), b.dead, Unit::Rows));
+    f.metrics.push(Metric::said(culprit_core::key!("check.dead_rows.metric.live"), b.live, Unit::Rows));
+    f.metrics.push(Metric::said(culprit_core::key!("check.dead_rows.metric.dead_share"), b.ratio, Unit::Ratio));
     if let Some(tr) = b.trigger {
-        f.metrics.push(Metric::new(t!("check.dead_rows.metric.trigger"), tr, Unit::Rows));
+        f.metrics.push(Metric::said(culprit_core::key!("check.dead_rows.metric.trigger"), tr, Unit::Rows));
     }
     let target = qualified(Engine::Postgres, &t.schema, &t.name);
     f.fix = Some(match b.cause {
@@ -345,7 +345,7 @@ fn scale_factor_finding(s: ScaleFactor<'_>) -> Finding {
     f.actionability = culprit_core::Actionability::OptionalImprovement;
     f.severity = Severity::Low;
     f.impact.score = base_score(Severity::Low);
-    f.impact.label = t!("check.dead_rows.scale_factor.impact", trigger = format::count(s.trigger));
+    f.impact.set_label(t!("check.dead_rows.scale_factor.impact", trigger = format::count(s.trigger)));
     f.confidence = Confidence::High;
     f.title = t!(
         "check.dead_rows.scale_factor.title",
@@ -361,11 +361,11 @@ fn scale_factor_finding(s: ScaleFactor<'_>) -> Finding {
         factor = format::percent(s.factor),
         trigger = format::count(s.trigger)
     );
-    f.metrics.push(Metric::new(t!("check.dead_rows.metric.live"), s.live, Unit::Rows));
+    f.metrics.push(Metric::said(culprit_core::key!("check.dead_rows.metric.live"), s.live, Unit::Rows));
     if s.dead > 0.0 {
-        f.metrics.push(Metric::new(t!("check.dead_rows.metric.dead"), s.dead, Unit::Rows));
+        f.metrics.push(Metric::said(culprit_core::key!("check.dead_rows.metric.dead"), s.dead, Unit::Rows));
     }
-    f.metrics.push(Metric::new(t!("check.dead_rows.metric.trigger"), s.trigger, Unit::Rows));
+    f.metrics.push(Metric::said(culprit_core::key!("check.dead_rows.metric.trigger"), s.trigger, Unit::Rows));
     let target = qualified(Engine::Postgres, &t.schema, &t.name);
     f.fix = Some(Fix {
         summary: t!("check.dead_rows.scale_factor.fix", table = &table_name),
@@ -392,7 +392,7 @@ fn disabled_finding(d: Disabled<'_>) -> Finding {
     f.confidence = Confidence::High;
     f.severity = d.severity;
     f.impact.score = base_score(f.severity);
-    f.impact.label = t!("check.dead_rows.disabled.impact", param = param);
+    f.impact.set_label(t!("check.dead_rows.disabled.impact", param = param));
     f.title = t!("check.dead_rows.disabled.title", table = &t.name, param = param);
     f.summary = if d.toast {
         t!("check.dead_rows.disabled.summary_toast", table = &table_name, option = d.option, param = param)
@@ -400,10 +400,10 @@ fn disabled_finding(d: Disabled<'_>) -> Finding {
         t!("check.dead_rows.disabled.summary", table = &table_name, option = d.option, param = param, name = &t.name)
     };
     if d.live > 0.0 {
-        f.metrics.push(Metric::new(t!("check.dead_rows.metric.live"), d.live, Unit::Rows));
+        f.metrics.push(Metric::said(culprit_core::key!("check.dead_rows.metric.live"), d.live, Unit::Rows));
     }
     if d.dead > 0.0 {
-        f.metrics.push(Metric::new(t!("check.dead_rows.metric.dead"), d.dead, Unit::Rows));
+        f.metrics.push(Metric::said(culprit_core::key!("check.dead_rows.metric.dead"), d.dead, Unit::Rows));
     }
     let target = qualified(Engine::Postgres, &t.schema, &t.name);
     f.fix = Some(Fix {

@@ -20,8 +20,11 @@ pub(super) fn top_queries(s: &Snapshot) -> Tile {
             TileStatus::Info,
             t!("view.dashboard.top_queries.none", window = window_phrase(w)),
         );
-        tile.detail =
-            Some(t!("view.dashboard.top_queries.recorded", source = &w.source, count = format::count(w.query_count)));
+        tile.detail = Some(t!(
+            "view.dashboard.top_queries.recorded",
+            source = w.source_name(),
+            count = format::count(w.query_count)
+        ));
         return tile;
     }
     let top = &queries[..queries.len().min(5)];

@@ -236,7 +236,8 @@ pub(super) fn render(snapshot: &Snapshot, case: Case<'_>) -> Finding {
                 },
             );
             f.confidence = Confidence::Low;
-            f.metrics.push(Metric::text(t!("check.config.compatibility_level.metric.current"), level));
+            f.metrics
+                .push(Metric::said_text(culprit_core::key!("check.config.compatibility_level.metric.current"), level));
             f
         }
         Case::CostThreshold => {
@@ -273,7 +274,11 @@ pub(super) fn render(snapshot: &Snapshot, case: Case<'_>) -> Finding {
                 },
             );
             f.confidence = Confidence::High;
-            f.metrics.push(Metric::new(t!("check.config.query_store_size.metric.used"), used / max, Unit::Ratio));
+            f.metrics.push(Metric::said(
+                culprit_core::key!("check.config.query_store_size.metric.used"),
+                used / max,
+                Unit::Ratio,
+            ));
             f
         }
         Case::QueryStoreCapture { busy, statements } => {
@@ -359,7 +364,11 @@ pub(super) fn render(snapshot: &Snapshot, case: Case<'_>) -> Finding {
                 fix,
             );
             f.confidence = Confidence::Low;
-            f.metrics.push(Metric::new(t!("check.config.maxdop.metric.processors"), cpus, Unit::Count));
+            f.metrics.push(Metric::said(
+                culprit_core::key!("check.config.maxdop.metric.processors"),
+                cpus,
+                Unit::Count,
+            ));
             f
         }
     }
@@ -681,8 +690,8 @@ fn read_committed_snapshot_finding(snapshot: &Snapshot, db: &str, r: Rcsi<'_>) -
         },
     );
     if r.blocking && *lock_ms > 0.0 {
-        f.metrics.push(Metric::new(
-            t!("check.config.read_committed_snapshot.metric.reads_waiting"),
+        f.metrics.push(Metric::said(
+            culprit_core::key!("check.config.read_committed_snapshot.metric.reads_waiting"),
             *lock_ms,
             Unit::Ms,
         ));

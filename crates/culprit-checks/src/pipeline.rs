@@ -75,6 +75,9 @@ impl Prepare for Step<fn(&mut Snapshot)> {
 fn preparation() -> Vec<Arc<dyn Prepare>> {
     let step = |name: &'static str, run: fn(&mut Snapshot)| Arc::new(Step { name, run }) as Arc<dyn Prepare>;
     vec![
+        step("retained observations are worded for this reader", |snapshot| {
+            snapshot.render_recorded_messages();
+        }),
         step("measurement context identifies this database and its clock", measurement_context),
         step("index availability and maintenance follow the engine", |s| {
             for i in &mut s.indexes {
@@ -118,7 +121,7 @@ fn measurement_context(snapshot: &mut Snapshot) {
     };
     if let Some(message) = reason {
         snapshot.workload = None;
-        snapshot.notes.push(CollectorNote { collector: "workload".into(), message, table: None });
+        snapshot.notes.push(CollectorNote { message_source: None, collector: "workload".into(), message, table: None });
         return;
     }
     if let Some(workload) = &mut snapshot.workload {
@@ -152,6 +155,7 @@ fn lock_time_that_counts_the_run(snapshot: &mut Snapshot) {
     }
     snapshot.waits.retain(|w| w.wait_type.as_deref() != Some("lock time (slow query log)"));
     snapshot.notes.push(CollectorNote {
+        message_source: None,
         collector: "workload".into(),
         message: t!("pipeline.note.mariadb_lock_time", n = inflated.len(), count = inflated.len().to_string()),
         table: None,
@@ -175,6 +179,7 @@ fn io_within_statement_time(snapshot: &mut Snapshot) {
         snapshot.waits.clear();
         snapshot.server.capabilities.retain(|c| *c != culprit_core::Capability::WaitStats);
         snapshot.notes.push(CollectorNote {
+            message_source: None,
             collector: "waits".into(),
             message: t!("pipeline.note.io_exceeds_statement_time"),
             table: None,

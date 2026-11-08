@@ -201,17 +201,21 @@ fn held_cleanup_finding(snapshot: &Snapshot, h: HeldCleanup<'_>) -> Finding {
     f.summary = summary.join(" ");
     f.severity = h.severity;
     f.impact.score = base_score(f.severity);
-    f.impact.label = if slot {
+    f.impact.set_label(if slot {
         t!("check.held_cleanup.impact.behind", behind = &behind)
     } else {
         t!("check.held_cleanup.impact.open", open = &open)
-    };
+    });
     f.confidence = h.confidence;
     if !slot {
-        f.metrics.push(Metric::new(t!("check.held_cleanup.metric.open"), t.seconds * 1000.0, Unit::Ms));
+        f.metrics.push(Metric::said(
+            culprit_core::key!("check.held_cleanup.metric.open"),
+            t.seconds * 1000.0,
+            Unit::Ms,
+        ));
     }
     if let Some(b) = t.held_bytes.filter(|b| *b > 0.0) {
-        f.metrics.push(Metric::new(t!("check.held_cleanup.metric.version_store"), b, Unit::Bytes));
+        f.metrics.push(Metric::said(culprit_core::key!("check.held_cleanup.metric.version_store"), b, Unit::Bytes));
     }
     if h.behind > 0.0 {
         f.metrics.push(Metric::said(key!("check.held_cleanup.metric.behind"), h.behind, Unit::Count));

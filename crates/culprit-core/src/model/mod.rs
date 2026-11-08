@@ -13,7 +13,8 @@ mod workload;
 pub use workload::{
     Cadence, CounterScope, CounterSet, PER_DAY_MIN_HOURS, PlanHistory, PlanHistoryKind, PlanVariant, QueryStat,
     QueryTrend, RATE_MIN_HOURS, ScanSpan, SpanLength, Spread, StatementActivity, StatementCost, Timeline,
-    TimelineSource, Workload, WorkloadKind, last_span, log_span, since_reset_span, span_length, span_when, span_words,
+    TimelineSource, Workload, WorkloadKind, last_span, last_span_message, log_span, log_span_message, since_reset_span,
+    since_reset_span_message, span_length, span_when, span_words, span_words_message,
 };
 
 /// The format a snapshot is saved in. One saved in another (by an older Culprit) isn't read: its fields may be missing
@@ -246,6 +247,74 @@ pub struct MissingCapability {
     pub capability: Capability,
     pub reason: String,
     pub fix: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub action: Option<CapabilityAction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reason_message: Option<crate::i18n::Message>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fix_message: Option<crate::i18n::Message>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[ts(export)]
+pub struct CapabilityAction {
+    pub sql: String,
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub detail_message: Option<crate::i18n::Message>,
+}
+
+impl MissingCapability {
+    pub fn new(capability: Capability, reason: impl Into<crate::i18n::Message>) -> Self {
+        let reason = reason.into();
+        Self {
+            capability,
+            reason: reason.render(),
+            reason_message: reason.is_translatable().then_some(reason),
+            fix: None,
+            fix_message: None,
+            action: None,
+        }
+    }
+
+    pub fn with_fix(mut self, fix: impl Into<crate::i18n::Message>) -> Self {
+        let fix = fix.into();
+        self.fix = Some(fix.render());
+        self.fix_message = fix.is_translatable().then_some(fix);
+        self
+    }
+
+    pub fn sql(capability: Capability, reason: impl Into<crate::i18n::Message>, sql: impl Into<String>) -> Self {
+        let sql = sql.into();
+        Self::new(capability, reason).with_fix(sql.clone()).with_action(sql, None)
+    }
+
+    pub fn with_action(mut self, sql: impl Into<String>, detail: Option<crate::i18n::Message>) -> Self {
+        self.action = Some(CapabilityAction {
+            sql: sql.into(),
+            detail: detail.as_ref().map(crate::i18n::Message::render),
+            detail_message: detail.filter(crate::i18n::Message::is_translatable),
+        });
+        self
+    }
+
+    pub fn render_messages(&mut self) {
+        if let Some(message) = &self.reason_message {
+            self.reason = message.render();
+        }
+        if let Some(message) = &self.fix_message {
+            self.fix = Some(message.render());
+        }
+        if let Some(action) = &mut self.action
+            && let Some(message) = &action.detail_message
+        {
+            action.detail = Some(message.render());
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
@@ -615,6 +684,21 @@ pub struct CollectorNote {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub table: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub message_source: Option<crate::i18n::Message>,
+}
+
+impl CollectorNote {
+    pub fn recorded(collector: &str, message: crate::i18n::Message) -> Self {
+        Self { collector: collector.into(), message: message.render(), table: None, message_source: Some(message) }
+    }
+
+    pub fn refresh_language(&mut self) {
+        if let Some(message) = &self.message_source {
+            self.message = message.render();
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
@@ -679,18 +763,54 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    pub fn render_recorded_messages(&mut self) {
+        self.operations.render_recorded_messages();
+        if let Some(workload) = &mut self.workload {
+            workload.refresh_language();
+            for query in &mut workload.queries {
+                if let Some(plan) = &mut query.plan {
+                    plan.render_recorded_messages();
+                }
+                if let Some(history) = &mut query.plan_history {
+                    crate::i18n::render_text(&mut history.source, history.source_message.as_ref());
+                    crate::i18n::render_text(&mut history.note, history.note_message.as_ref());
+                    if let Some(plan) = &mut history.captured_plan {
+                        plan.render_recorded_messages();
+                    }
+                }
+            }
+        }
+        for missing in &mut self.server.missing {
+            missing.render_messages();
+        }
+        for note in &mut self.notes {
+            note.refresh_language();
+        }
+        for source in &mut self.sources {
+            source.refresh_language();
+        }
+    }
+
+    pub fn missing_workload(&self) -> Option<&MissingCapability> {
+        if self.workload.is_some() {
+            return None;
+        }
+        self.server.missing.iter().find(|m| m.capability.is_workload_source())
+    }
+
     /// Why this scan has no query statistics ("Query Store is OFF on this database."), or `None` when it has them.
     pub fn no_workload_reason(&self) -> Option<String> {
+        self.no_workload_message().map(|message| message.render())
+    }
+
+    pub fn no_workload_message(&self) -> Option<crate::i18n::Message> {
         if self.workload.is_some() {
             return None;
         }
         Some(
-            self.server
-                .missing
-                .iter()
-                .find(|m| m.capability.is_workload_source())
-                .map(|m| m.reason.clone())
-                .unwrap_or_else(|| crate::t!("model.no_query_history")),
+            self.missing_workload()
+                .map(|missing| missing.reason_message.clone().unwrap_or_else(|| missing.reason.clone().into()))
+                .unwrap_or_else(|| crate::message!("model.no_query_history")),
         )
     }
 
@@ -731,6 +851,10 @@ pub struct Session {
     pub cpu_ms: Option<f64>,
     pub reads: Option<f64>,
     pub sql: Option<String>,
+    // Established from the engine's native wait category, independently of the displayed wait description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub waiting_on_lock: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
@@ -751,12 +875,7 @@ pub struct LiveState {
 impl LiveState {
     pub fn blocking_incomplete(&self) -> bool {
         !self.notes.is_empty()
-            || self.sessions.iter().any(|s| {
-                s.blocked_by.is_none()
-                    && s.wait
-                        .as_deref()
-                        .is_some_and(|w| w.to_ascii_lowercase().contains("lock") || w.starts_with("LCK_"))
-            })
+            || self.sessions.iter().any(|s| s.blocked_by.is_none() && s.waiting_on_lock == Some(true))
     }
 }
 

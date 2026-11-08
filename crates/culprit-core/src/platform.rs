@@ -94,16 +94,24 @@ impl Platform {
 
     /// How to add a library to `shared_preload_libraries` (pg_stat_statements) where that isn't a configuration file.
     pub fn preload_library(self, library: &str) -> Option<String> {
+        self.preload_library_message(library).map(|message| message.render())
+    }
+
+    pub fn preload_library_message(self, library: &str) -> Option<crate::i18n::Message> {
         Some(match self {
             Platform::AmazonRds | Platform::AmazonAurora => {
-                t!("model.platform.preload.parameter_group", library = library)
+                crate::message!("model.platform.preload.parameter_group", library = library)
             }
-            Platform::AzureDatabase => t!("model.platform.preload.azure_database", library = library),
+            Platform::AzureDatabase => crate::message!("model.platform.preload.azure_database", library = library),
             Platform::GoogleCloudSql | Platform::Neon | Platform::Supabase => {
-                t!("model.platform.preload.preloaded", library = library, platform = self.label(Engine::Postgres))
+                crate::message!(
+                    "model.platform.preload.preloaded",
+                    library = library,
+                    platform = self.label(Engine::Postgres)
+                )
             }
-            Platform::GoogleAlloyDb => t!("model.platform.preload.google_alloydb", library = library),
-            Platform::TigerData => t!("model.platform.preload.tiger_data", library = library),
+            Platform::GoogleAlloyDb => crate::message!("model.platform.preload.google_alloydb", library = library),
+            Platform::TigerData => crate::message!("model.platform.preload.tiger_data", library = library),
             Platform::AzureSqlDatabase | Platform::AzureSqlManagedInstance | Platform::MariaDbCloud => return None,
         })
     }

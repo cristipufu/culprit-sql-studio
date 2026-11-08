@@ -398,6 +398,18 @@ pub fn too_deep() -> crate::Error {
 }
 
 impl Plan {
+    pub fn render_recorded_messages(&mut self) {
+        if let Some(source) = self.facts.sample_source {
+            self.props.insert("Sample".into(), source.sentence());
+        }
+    }
+
+    pub fn clear_recorded_text(&mut self) {
+        if self.facts.sample_source.is_some() {
+            self.props.remove("Sample");
+        }
+    }
+
     /// How many steps deep the operator tree goes (the root alone is 1), counted without recursion.
     pub fn depth(&self) -> usize {
         let mut deepest = 0;

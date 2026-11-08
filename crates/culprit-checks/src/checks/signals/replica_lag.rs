@@ -233,21 +233,33 @@ fn replica_finding(snapshot: &Snapshot, r: &Replica, status: ReplicaStatus) -> F
             }
             f.severity = if seconds.is_some_and(|s| s >= 600.0) { Severity::High } else { Severity::Medium };
             if let Some(s) = seconds {
-                f.metrics.push(Metric::new(t!("check.replica_lag.metric.behind_by"), s * 1000.0, Unit::Ms));
+                f.metrics.push(Metric::said(
+                    culprit_core::key!("check.replica_lag.metric.behind_by"),
+                    s * 1000.0,
+                    Unit::Ms,
+                ));
             }
             if let Some(b) = r.lag_bytes {
-                f.metrics.push(Metric::new(t!("check.replica_lag.metric.not_applied"), b, Unit::Bytes));
+                f.metrics.push(Metric::said(
+                    culprit_core::key!("check.replica_lag.metric.not_applied"),
+                    b,
+                    Unit::Bytes,
+                ));
             }
             if let Some(d) = r.delay_seconds {
-                f.metrics.push(Metric::new(t!("check.replica_lag.metric.delayed_by"), d * 1000.0, Unit::Ms));
+                f.metrics.push(Metric::said(
+                    culprit_core::key!("check.replica_lag.metric.delayed_by"),
+                    d * 1000.0,
+                    Unit::Ms,
+                ));
             }
         }
     }
     severity_score(&mut f);
-    f.impact.label = match status {
+    f.impact.set_label(match status {
         ReplicaStatus::Behind(lag) => t!("check.replica_lag.impact.behind", lag = lag_words(lag)),
         _ => r.state_words().unwrap_or_else(|| t!("check.replica_lag.impact.stopped")),
-    };
+    });
     f.confidence = Confidence::High;
     f.verify = vec![match status {
         ReplicaStatus::LeftConfigured => t!("check.replica_lag.verify.left_configured"),
@@ -315,15 +327,19 @@ fn slot_finding(snapshot: &Snapshot, slot: InactiveSlot<'_>) -> Finding {
         None => {}
     }
     f.fix = Some(Fix { summary: fix.join(" "), sql: Some(sql), cost: None });
-    f.metrics = vec![Metric::new(t!("check.replica_lag.metric.wal_kept"), kept, Unit::Bytes)];
+    f.metrics = vec![Metric::said(culprit_core::key!("check.replica_lag.metric.wal_kept"), kept, Unit::Bytes)];
     if let Some(s) = r.inactive_seconds {
-        f.metrics.push(Metric::new(t!("check.replica_lag.metric.without_consumer"), s * 1000.0, Unit::Ms));
+        f.metrics.push(Metric::said(
+            culprit_core::key!("check.replica_lag.metric.without_consumer"),
+            s * 1000.0,
+            Unit::Ms,
+        ));
     }
     if let Some(b) = r.safe_wal_bytes {
-        f.metrics.push(Metric::new(t!("check.replica_lag.metric.wal_left"), b, Unit::Bytes));
+        f.metrics.push(Metric::said(culprit_core::key!("check.replica_lag.metric.wal_left"), b, Unit::Bytes));
     }
     severity_score(&mut f);
-    f.impact.label = t!("check.replica_lag.impact.wal_kept", kept = format::bytes(kept));
+    f.impact.set_label(t!("check.replica_lag.impact.wal_kept", kept = format::bytes(kept)));
     f.confidence = Confidence::High;
     f.verify = vec![if logical {
         t!("check.replica_lag.verify.logical_slot")

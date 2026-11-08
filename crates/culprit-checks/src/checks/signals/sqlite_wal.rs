@@ -67,8 +67,8 @@ fn sqlite_wal_finding(s: &Snapshot, wal: LargeWal<'_>) -> Finding {
     f.actionability = Actionability::Information;
     f.confidence = Confidence::High;
     f.impact.score = base_score(f.severity);
-    f.impact.label = t!("check.sqlite_wal.impact");
-    f.metrics = vec![Metric::new(t!("check.sqlite_wal.metric.length"), wal.bytes, Unit::Bytes)];
+    f.impact.set_label(t!("check.sqlite_wal.impact"));
+    f.metrics = vec![Metric::said(culprit_core::key!("check.sqlite_wal.metric.length"), wal.bytes, Unit::Bytes)];
     f.fix = Some(Fix { summary: t!("check.sqlite_wal.fix"), sql: None, cost: None });
     f.verify = vec![t!("check.sqlite_wal.verify")];
     f

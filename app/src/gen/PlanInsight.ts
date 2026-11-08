@@ -41,4 +41,4 @@ fix_sql: string | null,
 /**
  * How to tell the fix worked.
  */
-verify: string, index_hint?: PlanIndexHint, };
+verify: string, index_hint?: PlanIndexHint, scan_context?: boolean, };

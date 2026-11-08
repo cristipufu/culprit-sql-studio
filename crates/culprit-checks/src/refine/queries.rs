@@ -120,7 +120,8 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Option<Decision
 }
 fn add_metrics(target: &mut Finding, source: &Finding, skip_runs: bool) {
     for m in &source.metrics {
-        if (!skip_runs || !m.is(key!("common.metric.runs"))) && !target.metrics.iter().any(|x| x.label == m.label) {
+        let already_present = !m.key.is_empty() && target.metrics.iter().any(|metric| metric.is(&m.key));
+        if (!skip_runs || !m.is(key!("common.metric.runs"))) && !already_present {
             target.metrics.push(m.clone());
         }
     }
@@ -137,15 +138,23 @@ fn timeline(s: &Snapshot, source: &Finding, named: bool) -> Option<String> {
 }
 fn recommendation_caveat(rec: &Finding, sensitive: &Finding) -> String {
     let recommended = rec.facts.recommended_plan.as_ref().map(|r| r.plan.as_str());
-    let plan = recommended.map_or_else(|| t!("refine.queries.another_plan"), str::to_string);
-    let plan = match rec.facts.recommended_plan.as_ref().and_then(|r| r.cpu_saved_share) {
-        Some(g) => t!("refine.queries.plan_saving_cpu", plan = plan, share = format::percent(g)),
-        None => plan,
-    };
+    let saving = rec.facts.recommended_plan.as_ref().and_then(|r| r.cpu_saved_share);
+    let (kind, plan) = recommended.map_or(("unknown", ""), |plan| ("known", plan));
+    let share = saving.map(format::percent).unwrap_or_default();
+    let saving = if saving.is_some() { "yes" } else { "no" };
     match sensitive.facts.usual_fast_plan.as_deref() {
-        Some(fast) if Some(fast) == recommended => t!("refine.queries.force_the_fast_plan", plan = plan),
-        Some(fast) => t!("refine.queries.force_another_than_the_fast_plan", plan = plan, fast = fast),
-        None => t!("refine.queries.force_plan", plan = plan),
+        Some(fast) if Some(fast) == recommended => {
+            t!("refine.queries.force_the_fast_plan", kind = kind, plan = plan, saving = saving, share = share)
+        }
+        Some(fast) => t!(
+            "refine.queries.force_another_than_the_fast_plan",
+            kind = kind,
+            plan = plan,
+            saving = saving,
+            share = share,
+            fast = fast
+        ),
+        None => t!("refine.queries.force_plan", kind = kind, plan = plan, saving = saving, share = share),
     }
 }
 impl Refine for Rule {
@@ -232,6 +241,21 @@ impl Refine for Rule {
 mod tests {
     use super::*;
     use culprit_core::{Category, Metric, Unit};
+
+    #[test]
+    fn merged_metrics_keep_distinct_keys_even_when_their_labels_match() {
+        let subject = support::subject(SubjectKind::Query, "q1");
+        let mut target = support::finding("temp-spill", "q1", Category::Queries, subject.clone());
+        target.metrics = vec![Metric::new("Same label", 1.0, Unit::Count).keyed("first")];
+        let mut source = support::finding("big-result", "q1", Category::Queries, subject);
+        source.metrics = vec![
+            Metric::new("Same label", 2.0, Unit::Count).keyed("second"),
+            Metric::new("Renamed label", 3.0, Unit::Count).keyed("first"),
+            Metric::new("Same label", 4.0, Unit::Count),
+        ];
+        add_metrics(&mut target, &source, false);
+        assert_eq!(target.metrics.iter().map(|metric| metric.value).collect::<Vec<_>>(), [1.0, 2.0, 4.0]);
+    }
 
     // A result's runs are left out of the spill it joins by what the metric is, in any language.
     #[test]

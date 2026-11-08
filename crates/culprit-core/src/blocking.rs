@@ -404,6 +404,7 @@ mod tests {
             state: state.into(),
             command: None,
             wait: blocked_by.map(|_| "LCK_M_U".into()),
+            waiting_on_lock: Some(blocked_by.is_some()),
             wait_ms: blocked_by.map(|_| 30_000.0),
             blocked_by: blocked_by.map(str::to_string),
             elapsed_ms: Some(48_000.0),

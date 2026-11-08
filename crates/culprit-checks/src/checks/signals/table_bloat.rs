@@ -150,12 +150,12 @@ fn bloated_finding(b: Bloated<'_>) -> Finding {
     f.summary = summary.join(" ");
     f.severity = severity;
     severity_score(&mut f);
-    f.impact.label = t!("check.table_bloat.impact", bloat = format::bytes(bloat));
+    f.impact.set_label(t!("check.table_bloat.impact", bloat = format::bytes(bloat)));
     f.confidence = Confidence::Medium;
     f.metrics = vec![
-        Metric::new(t!("check.table_bloat.metric.empty"), bloat, Unit::Bytes),
-        Metric::new(t!("check.table_bloat.metric.size"), size, Unit::Bytes),
-        Metric::new(t!("check.table_bloat.metric.share"), share, Unit::Ratio),
+        Metric::said(culprit_core::key!("check.table_bloat.metric.empty"), bloat, Unit::Bytes),
+        Metric::said(culprit_core::key!("check.table_bloat.metric.size"), size, Unit::Bytes),
+        Metric::said(culprit_core::key!("check.table_bloat.metric.share"), share, Unit::Ratio),
     ];
     let target = qualified(Engine::Postgres, &t.schema, &t.name);
     f.fix = Some(if dead.is_some() {
@@ -259,11 +259,11 @@ pub(crate) fn expiring_partition_finding(_: &Snapshot, e: ExpiringPartition) -> 
             date = bound_date,
             days = format::days(days_remaining)
         );
-        f.impact.label = t!("check.table_bloat.partition.impact.ends", days = format::days(days_remaining));
+        f.impact.set_label(t!("check.table_bloat.partition.impact.ends", days = format::days(days_remaining)));
     } else {
         f.title =
             t!("check.table_bloat.partition.title.ended", parent = parent_short, part = &last_part, date = bound_date);
-        f.impact.label = t!("check.table_bloat.partition.impact.ended", date = bound_date);
+        f.impact.set_label(t!("check.table_bloat.partition.impact.ended", date = bound_date));
     }
     f.severity = severity;
     severity_score(&mut f);
@@ -276,8 +276,12 @@ pub(crate) fn expiring_partition_finding(_: &Snapshot, e: ExpiringPartition) -> 
         bound = &bound_literal
     );
     f.metrics = vec![
-        Metric::new(t!("check.table_bloat.partition.metric.partitions"), parts as f64, Unit::Count),
-        Metric::new(t!("check.table_bloat.partition.metric.days"), days_remaining.max(0.0), Unit::Days),
+        Metric::said(culprit_core::key!("check.table_bloat.partition.metric.partitions"), parts as f64, Unit::Count),
+        Metric::said(
+            culprit_core::key!("check.table_bloat.partition.metric.days"),
+            days_remaining.max(0.0),
+            Unit::Days,
+        ),
     ];
     f.fix = Some(Fix {
         summary: t!("check.table_bloat.partition.fix", parent = &parent, bound = &bound_literal),
@@ -367,11 +371,11 @@ fn default_partition_finding(d: DefaultPartition<'_>) -> Finding {
     };
     f.severity = severity;
     severity_score(&mut f);
-    f.impact.label = if size > 0.0 {
+    f.impact.set_label(if size > 0.0 {
         t!("check.table_bloat.default.impact_size", size = &bytes)
     } else {
         t!("check.table_bloat.default.impact_rows", rows = &count)
-    };
+    });
     f.confidence = Confidence::High;
     f.summary = if size > 0.0 {
         t!("check.table_bloat.default.summary_size", name = &t.name, parent = parent, rows = &count, size = &bytes)
@@ -379,10 +383,10 @@ fn default_partition_finding(d: DefaultPartition<'_>) -> Finding {
         t!("check.table_bloat.default.summary", name = &t.name, parent = parent, rows = &count)
     };
     if rows > 0.0 {
-        f.metrics.push(Metric::new(t!("check.table_bloat.default.metric.rows"), rows, Unit::Rows));
+        f.metrics.push(Metric::said(culprit_core::key!("check.table_bloat.default.metric.rows"), rows, Unit::Rows));
     }
     if size > 0.0 {
-        f.metrics.push(Metric::new(t!("common.metric.size"), size, Unit::Bytes));
+        f.metrics.push(Metric::said(culprit_core::key!("common.metric.size"), size, Unit::Bytes));
     }
     f.fix = Some(Fix {
         summary: t!("check.table_bloat.default.fix", parent = parent, name = &t.name),
@@ -494,7 +498,7 @@ fn brin_finding(b: BrinCandidate<'_>) -> Finding {
     f.title = t!("check.table_bloat.brin.title", index = &idx.name, table = &t.name, size = &index_size);
     f.severity = severity;
     severity_score(&mut f);
-    f.impact.label = t!("check.table_bloat.brin.impact", size = &index_size);
+    f.impact.set_label(t!("check.table_bloat.brin.impact", size = &index_size));
     f.confidence = Confidence::Medium;
     f.summary = t!(
         "check.table_bloat.brin.summary",
@@ -509,9 +513,9 @@ fn brin_finding(b: BrinCandidate<'_>) -> Finding {
         column = col_name
     );
     f.metrics = vec![
-        Metric::new(t!("check.table_bloat.brin.metric.index_size"), index_bytes, Unit::Bytes),
-        Metric::new(t!("check.table_bloat.brin.metric.rows"), rows, Unit::Rows),
-        Metric::new(t!("check.table_bloat.brin.metric.inserts"), inserts, Unit::Rows),
+        Metric::said(culprit_core::key!("check.table_bloat.brin.metric.index_size"), index_bytes, Unit::Bytes),
+        Metric::said(culprit_core::key!("check.table_bloat.brin.metric.rows"), rows, Unit::Rows),
+        Metric::said(culprit_core::key!("check.table_bloat.brin.metric.inserts"), inserts, Unit::Rows),
     ];
     let target = qualified(Engine::Postgres, &t.schema, &t.name);
     let brin_name = quote(Engine::Postgres, &format!("ix_{}_{}_brin", t.name, col_name));

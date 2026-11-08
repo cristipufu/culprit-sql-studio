@@ -93,27 +93,34 @@ Sessions: SQLite has no server, so no sessions to list. | -"
     );
     assert_eq!(reason("wal_file").as_deref(), Some("The database is not using WAL journal mode."));
 
-    assert_eq!(no_dbstat(), "this SQLite library has no dbstat table to measure them");
-    assert_eq!(too_large(5e9, true), "the file is 4.7 GB: Culprit doesn't read that much of it to count");
+    assert_eq!(no_dbstat().render(), "this SQLite library has no dbstat table to measure them");
+    assert_eq!(too_large(5e9, true).render(), "the file is 4.7 GB: Culprit doesn't read that much of it to count");
     assert_eq!(
-        too_large(2e8, false),
+        too_large(2e8, false).render(),
         "the file is 191 MB with a rollback journal, where reading it whole would make the application's writes wait"
     );
     assert_eq!(
-        reading_stopped("the sqlite statement was cancelled or reached its execution deadline"),
+        reading_stopped(&rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_INTERRUPT),
+            None
+        ))
+        .render(),
         "reading every page stopped (the sqlite statement was cancelled or reached its execution deadline)"
     );
     assert_eq!(
-        sizes_unknown(&no_dbstat()),
+        sizes_unknown(&no_dbstat()).render(),
         "Table and index sizes are unknown: this SQLite library has no dbstat table to measure them."
     );
     assert_eq!(
-        columns_unavailable("docs", "no such module: fts9"),
+        columns_unavailable("docs", "no such module: fts9").render(),
         "Columns of main.docs are unavailable: no such module: fts9. The table's original definition is retained."
     );
-    assert_eq!(pragmas_partial(), "Some file pragmas were not available from this SQLite library.");
-    assert_eq!(wal_unreadable(), "WAL file size could not be read; no file contents were inspected.");
-    assert_eq!(journal_mode_unknown(), "The journal mode was unavailable, so WAL file health could not be assessed.");
+    assert_eq!(pragmas_partial().render(), "Some file pragmas were not available from this SQLite library.");
+    assert_eq!(wal_unreadable().render(), "WAL file size could not be read; no file contents were inspected.");
+    assert_eq!(
+        journal_mode_unknown().render(),
+        "The journal mode was unavailable, so WAL file health could not be assessed."
+    );
     assert_eq!(blob(12), "<12 bytes>");
     assert_eq!(blob(1), "<1 byte>");
     assert_eq!(blob(12345), "<12345 bytes>");

@@ -387,8 +387,12 @@ impl Out {
             } else {
                 t!("cli.scan.time_per_day", time = format::duration(w.per_day(w.total_time_ms)))
             };
-            let queries =
-                t!("cli.scan.queries", n = w.query_count, count = format::count(w.query_count), source = &w.source);
+            let queries = t!(
+                "cli.scan.queries",
+                n = w.query_count,
+                count = format::count(w.query_count),
+                source = w.source_name()
+            );
             println!("{}", self.paint(DIM, &format!("{queries} · {time}")));
         }
         println!();
@@ -396,7 +400,7 @@ impl Out {
         if !s.notes.is_empty() {
             println!();
             for n in &s.notes {
-                println!("{} {}: {}", self.paint(YELLOW, "!"), n.collector, n.message);
+                println!("{} {}", self.paint(YELLOW, "!"), n.message);
             }
         }
         println!();
@@ -571,9 +575,9 @@ impl Out {
         // states it; the source's totals for the rest.
         let scans = queries.iter().filter_map(|q| w.scans_of(q)).max_by(|a, b| a.hours.total_cmp(&b.hours));
         let header = match &scans {
-            Some(s) => t!("cli.top.header_scans", source = &w.source, scans = s.phrase()),
-            None if short_window => t!("cli.top.header_short", source = &w.source, window = w.window_phrase()),
-            None => t!("cli.top.header", source = &w.source, span = span),
+            Some(s) => t!("cli.top.header_scans", source = w.source_name(), scans = s.phrase()),
+            None if short_window => t!("cli.top.header_short", source = w.source_name(), window = w.window_phrase()),
+            None => t!("cli.top.header", source = w.source_name(), span = span),
         };
         println!("{}", self.paint(DIM, &header));
         for q in queries {
@@ -615,9 +619,9 @@ impl Out {
                     self.paint(
                         DIM,
                         &if delivers.is_empty() {
-                            t!("cli.sources.adds_detail", reads = s.reads)
+                            t!("cli.sources.adds_detail", reads = s.description())
                         } else {
-                            format!("{} · {}", s.reads, delivers.join(", "))
+                            format!("{} · {}", s.description(), delivers.join(", "))
                         }
                     )
                 );

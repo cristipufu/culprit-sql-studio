@@ -411,7 +411,9 @@ fn print_signals(title: &str, p: &Pressure, signals: &[Signal]) {
             SignalScope::QueryHistory => t!("cli.waits.signal_scope.query_history"),
             SignalScope::Window => t!("cli.waits.signal_scope.window"),
         };
-        println!("  {mark} {:<36} {:>10}  {:<11} {}", s.label, value(s), scope, s.healthy.as_deref().unwrap_or(""));
+        let line =
+            format!("  {mark} {:<36} {:>10}  {:<11} {}", s.label, value(s), scope, s.healthy.as_deref().unwrap_or(""));
+        println!("{}", line.trim_end());
     }
 }
 

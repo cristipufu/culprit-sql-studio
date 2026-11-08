@@ -275,7 +275,7 @@ Showplan: This login cannot request estimated plans. | GRANT SHOWPLAN TO [reader
     };
     assert_eq!(
         reasons(&crate::probe::expected_capabilities(&off).1),
-        "QueryStore: Query Store is read only requested on this database. | ALTER DATABASE CURRENT SET QUERY_STORE = \
+        "QueryStore: Query Store reports the state “READ_ONLY_REQUESTED” on this database. | ALTER DATABASE CURRENT SET QUERY_STORE = \
          ON (OPERATION_MODE = READ_WRITE);"
     );
     let unknown = Probe { query_store: None, can_view_database_state: true, can_showplan: true, ..probe() };
@@ -309,8 +309,8 @@ QueryStore: Query Store is not available here; it needs SQL Server 2016 or later
 QueryStore: Query Store is off on this database, so workload history is limited to what is still in the plan cache. \
          | ALTER DATABASE CURRENT SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE);"
     );
-    assert_eq!(unparsed_plans(3), "3 Query Store plans could not be parsed");
-    assert_eq!(unparsed_plans(1), "1 Query Store plan could not be parsed");
+    assert_eq!(unparsed_plans(3).render(), "3 Query Store plans could not be parsed");
+    assert_eq!(unparsed_plans(1).render(), "1 Query Store plan could not be parsed");
     let mut c = Coverage::default();
     plan_cache_unreadable(&mut c, &probe());
     index_usage_unreadable(&mut c, &probe());
@@ -379,7 +379,7 @@ fn changes_and_spaces() {
             [EventAction::Created, EventAction::Changed].into_iter().flat_map(move |action| {
                 [None, Some("sales.orders")]
                     .into_iter()
-                    .map(move |parent| title(kind, action, "audit", "sales.audit", parent))
+                    .map(move |parent| title(kind, action, "audit", "sales.audit", parent).render())
             })
         })
         .collect();

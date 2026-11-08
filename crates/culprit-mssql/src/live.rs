@@ -135,6 +135,7 @@ fn session_of(r: &Rec) -> Session {
         state: r.string("state"),
         command: r.str("command"),
         wait: r.str("wait_type"),
+        waiting_on_lock: r.str("wait_type").map(|wait| wait_type_category(&wait) == "Lock"),
         wait_ms: r.f64("wait_time").filter(|_| r.str("wait_type").is_some()),
         blocked_by: r.str("blocked_by"),
         elapsed_ms: r.f64("elapsed_ms"),

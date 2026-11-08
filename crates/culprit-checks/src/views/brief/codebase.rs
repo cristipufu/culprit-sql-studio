@@ -421,7 +421,7 @@ fn verify_line(
             .map(|w| {
                 format!(
                     ": {} keeps running totals, so {stay} in them and their numbers move only as new runs add up",
-                    w.source
+                    w.source_name()
                 )
             })
             .unwrap_or_default()
@@ -442,7 +442,7 @@ fn verify_line(
         let kept = format!(
             "the slowest run and the spread behind `{id}` are kept by {} since its last reset, so they stay as they \
              are",
-            w.source
+            w.source_name()
         );
         // A statement that no longer runs has nothing to catch (its *How to verify* says so): the fix says what runs
         // in its place, if anything.
@@ -499,7 +499,7 @@ fn verify_line(
 /// such a source uses), or that the counters it compares do ("The scan counters of orders keep totals since they
 /// started"), so the brief doesn't say it again.
 fn says_running_totals(finding: &Finding, w: &culprit_core::Workload) -> bool {
-    let sentence = format!("{} keeps running totals", w.source);
+    let sentence = format!("{} keeps running totals", w.source_name());
     finding.verify.iter().any(|v| v.contains(&sentence) || v.contains("keep totals since"))
 }
 

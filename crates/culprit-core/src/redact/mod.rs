@@ -104,6 +104,29 @@ fn redact_scope(text: &str) -> String {
     out
 }
 
+// Retained observation labels carry private scope identifiers separately from translated words.
+fn redact_scoped_message(message: &mut crate::i18n::Message) {
+    use crate::i18n::{Message, MessageValue};
+    match message {
+        Message::Text { text } => *text = redact_scope(text),
+        Message::Sequence { messages, .. } => {
+            for message in messages {
+                redact_scoped_message(message);
+            }
+        }
+        Message::Catalog { arguments, .. } => {
+            for (name, value) in arguments {
+                match value {
+                    MessageValue::Text(text) if name == "node" && !text.is_empty() => *text = opaque(text),
+                    MessageValue::Text(text) if name == "role" && !text.is_empty() => *text = "[redacted]".into(),
+                    MessageValue::Message(message) => redact_scoped_message(message),
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
 fn redact_reference(reference: &mut crate::ScanReference) {
     if let Some(database) = &mut reference.database {
         redact_identity(database);
@@ -128,30 +151,45 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
         redact_identity(identity);
     }
     for note in &mut s.notes {
+        note.message_source = None;
         note.message = "Collection details omitted from shared data.".into();
     }
     for source in &mut s.sources {
+        source.reason_message = None;
         if source.reason.is_some() {
             source.reason = Some("Collection details omitted from shared data.".into());
         }
     }
     for missing in &mut s.server.missing {
+        missing.reason_message = None;
+        missing.fix_message = None;
         missing.reason = "This capability was not collected; diagnostic details omitted from shared data.".into();
         missing.fix = None;
+        missing.action = None;
     }
     for failure in &mut s.operations.log_failures {
         failure.statement = redact_sql(&failure.statement, engine);
     }
     if let Some(resources) = &mut s.operations.node_resources {
+        for message in resources.source_message.iter_mut().chain(resources.note_messages.iter_mut().flatten()) {
+            redact_scoped_message(message);
+        }
         resources.source = redact_scope(&resources.source);
         for note in &mut resources.notes {
             *note = redact_scope(note);
         }
         for node in &mut resources.nodes {
             node.node = opaque(&node.node);
+            if let Some(message) = node.process_memory.as_mut().and_then(|memory| memory.name_message.as_mut()) {
+                redact_scoped_message(message);
+            }
         }
     }
     if let Some(history) = &mut s.operations.activity_history {
+        for message in history.period.source_message.iter_mut().chain(history.period.note_messages.iter_mut().flatten())
+        {
+            redact_scoped_message(message);
+        }
         history.period.source = redact_scope(&history.period.source);
         for note in &mut history.period.notes {
             *note = redact_scope(note);
@@ -164,6 +202,14 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
         }
     }
     if let Some(history) = &mut s.operations.termination_history {
+        for message in history
+            .source_message
+            .iter_mut()
+            .chain(history.visibility_message.iter_mut())
+            .chain(history.note_messages.iter_mut().flatten())
+        {
+            redact_scoped_message(message);
+        }
         history.source = redact_scope(&history.source);
         history.visibility = redact_scope(&history.visibility);
         for note in &mut history.notes {
@@ -176,6 +222,7 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             event.node = event.node.as_deref().map(opaque);
         }
     }
+    s.operations.render_recorded_messages();
     for table in &mut s.tables {
         table.definition = table.definition.as_deref().map(|sql| redact_sql(sql, engine));
         if let Some(storage) = &mut table.storage {
@@ -234,6 +281,8 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
     }
     if let Some(w) = &mut s.workload {
         w.source = redact_scope(&w.source);
+        w.source_label = None;
+        w.source_message = None;
         if let Some(counters) = &mut w.counter_set {
             counters.members =
                 std::mem::take(&mut counters.members).into_iter().map(|(node, epoch)| (opaque(&node), epoch)).collect();
@@ -245,7 +294,12 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             q.text = redact_sql(&q.text, engine);
             q.plan = q.plan.as_ref().map(redact_plan);
             if let Some(history) = &mut q.plan_history {
+                for message in history.source_message.iter_mut().chain(history.note_message.iter_mut()) {
+                    redact_scoped_message(message);
+                }
                 history.source = redact_scope(&history.source);
+                crate::i18n::render_text(&mut history.source, history.source_message.as_ref());
+                crate::i18n::render_text(&mut history.note, history.note_message.as_ref());
                 history.captured_plan = history.captured_plan.as_ref().map(redact_plan);
             }
             for p in &mut q.plans {
@@ -403,6 +457,8 @@ fn is_iso_date_or_timestamp(s: &str) -> bool {
 pub fn redact_finding(finding: &Finding, engine: Engine) -> Finding {
     let prose = |t: &str| redact_prose(t, engine);
     let mut f = finding.clone();
+    // Original editor locations authorize edits only in the original private document.
+    f.facts.statement = None;
     f.title = prose(&f.title);
     f.summary = prose(&f.summary);
     f.caveats = f.caveats.iter().map(|c| prose(c)).collect();

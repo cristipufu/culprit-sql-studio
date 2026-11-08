@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use culprit_core::i18n::{Message, MessageValue};
 use culprit_core::{
     Capability, ColumnInfo, Coverage, Engine, Environment, ForeignKey, IndexStat, MissingCapability, Result, ResultSet,
     SNAPSHOT_FORMAT, ServerInfo, Setting, Snapshot, TableStat, format, t,
@@ -30,7 +31,7 @@ const WHOLE_READ_BUDGET_WAL: Duration = Duration::from_secs(3);
 const WHOLE_READ_BUDGET_ROLLBACK: Duration = Duration::from_millis(500);
 
 /// Whether the file may be read whole (`dbstat`) for sizes and row counts, and for how long at most; why not otherwise.
-pub fn whole_file_read(conn: &Connection) -> std::result::Result<Duration, String> {
+pub fn whole_file_read(conn: &Connection) -> std::result::Result<Duration, Message> {
     if conn.prepare("SELECT 1 FROM dbstat LIMIT 0").is_err() {
         return Err(no_dbstat());
     }
@@ -48,47 +49,74 @@ pub fn whole_file_read(conn: &Connection) -> std::result::Result<Duration, Strin
 }
 
 /// Why sizes can't be measured: the library has no dbstat table.
-pub(crate) fn no_dbstat() -> String {
-    t!("provider.sqlite.sizes.no_dbstat")
+pub(crate) fn no_dbstat() -> Message {
+    culprit_core::message!("provider.sqlite.sizes.no_dbstat")
 }
 
 /// Why the file isn't read whole: it is `bytes` large, in WAL mode or with a rollback journal.
-pub(crate) fn too_large(bytes: f64, wal: bool) -> String {
+pub(crate) fn too_large(bytes: f64, wal: bool) -> Message {
     if wal {
-        t!("provider.sqlite.sizes.too_large", size = format::bytes(bytes))
+        culprit_core::message!("provider.sqlite.sizes.too_large", size = MessageValue::Bytes(bytes))
     } else {
-        t!("provider.sqlite.sizes.too_large_rollback", size = format::bytes(bytes))
+        culprit_core::message!("provider.sqlite.sizes.too_large_rollback", size = MessageValue::Bytes(bytes))
     }
 }
 
-/// Reading every page stopped with `error` (already worded, lowercased).
-pub(crate) fn reading_stopped(error: &str) -> String {
-    t!("provider.sqlite.sizes.reading_stopped", error = error)
+/// A typed interruption has its own message; native error details retain their spelling.
+pub(crate) fn reading_stopped(error: &rusqlite::Error) -> Message {
+    if error.sqlite_error_code() == Some(rusqlite::ErrorCode::OperationInterrupted) {
+        culprit_core::message!("provider.sqlite.sizes.reading_interrupted")
+    } else {
+        culprit_core::message!("provider.sqlite.sizes.reading_stopped", error = map_error(error).message_source())
+    }
+}
+
+#[cfg(test)]
+mod recorded_reason_tests {
+    use super::*;
+
+    #[test]
+    fn interrupted_reads_are_typed_and_native_error_details_keep_their_case() {
+        let interrupted =
+            rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_INTERRUPT), None);
+        let native = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+            Some("MixedCaseObject".into()),
+        );
+        let recorded = crate::map_error(&interrupted).message_source();
+        let stopped = reading_stopped(&native);
+        for language in ["en", "fr", "de", "es"] {
+            culprit_core::i18n::scope(language, || {
+                assert_eq!(recorded.render(), culprit_core::t!("provider.sqlite.error.interrupted"));
+                assert!(stopped.render().contains("MixedCaseObject"));
+            });
+        }
+    }
 }
 
 /// Table and index sizes weren't measured, and `why`.
-pub(crate) fn sizes_unknown(why: &str) -> String {
-    t!("provider.sqlite.sizes.unknown", why = why)
+pub(crate) fn sizes_unknown(why: &Message) -> Message {
+    culprit_core::message!("provider.sqlite.sizes.unknown", why = why)
 }
 
 /// A virtual table whose module this library lacks: its columns can't be read.
-pub(crate) fn columns_unavailable(table: &str, error: &str) -> String {
-    t!("provider.sqlite.catalog.columns_unavailable", table = table, error = error)
+pub(crate) fn columns_unavailable(table: &str, error: &str) -> culprit_core::i18n::Message {
+    culprit_core::message!("provider.sqlite.catalog.columns_unavailable", table = table, error = error)
 }
 
 /// Some of the file's settings the library couldn't report.
-pub(crate) fn pragmas_partial() -> String {
-    t!("provider.sqlite.settings.partial")
+pub(crate) fn pragmas_partial() -> culprit_core::i18n::Message {
+    culprit_core::message!("provider.sqlite.settings.partial")
 }
 
 /// The WAL file's size couldn't be read.
-pub(crate) fn wal_unreadable() -> String {
-    t!("provider.sqlite.wal.unreadable")
+pub(crate) fn wal_unreadable() -> Message {
+    culprit_core::message!("provider.sqlite.wal.unreadable")
 }
 
 /// The journal mode couldn't be read, so whether a WAL file applies is unknown.
-pub(crate) fn journal_mode_unknown() -> String {
-    t!("provider.sqlite.wal.journal_mode_unknown")
+pub(crate) fn journal_mode_unknown() -> Message {
+    culprit_core::message!("provider.sqlite.wal.journal_mode_unknown")
 }
 
 /// A blob in a result, by its size.
@@ -100,7 +128,7 @@ pub(crate) fn blob(len: usize) -> String {
 /// unknown, if they are.
 pub fn capabilities(
     conn: &Connection,
-    rows: std::result::Result<(), String>,
+    rows: std::result::Result<(), Message>,
 ) -> (Vec<Capability>, Vec<MissingCapability>) {
     let mut coverage = Coverage::with(vec![Capability::Showplan], Vec::new());
     let stat1 = has_stat1(conn);
@@ -109,21 +137,31 @@ pub fn capabilities(
     } else {
         coverage.lacking(
             Capability::Statistics,
-            t!("provider.sqlite.capability.no_statistics"),
+            culprit_core::message!("provider.sqlite.capability.no_statistics"),
             Some("ANALYZE;".into()),
         );
     }
     match rows {
         Ok(()) => coverage.delivered(Capability::TableStats),
         Err(_) if stat1 => coverage.delivered(Capability::TableStats),
-        Err(why) => {
-            coverage.lacking(Capability::TableStats, t!("provider.sqlite.capability.rows_unknown", why = why), None)
-        }
+        Err(why) => coverage.lacking(
+            Capability::TableStats,
+            culprit_core::message!("provider.sqlite.capability.rows_unknown", why = why),
+            None,
+        ),
     }
-    coverage.lacking(Capability::QueryLog, t!("provider.sqlite.capability.no_query_log"), None);
-    coverage.lacking(Capability::IndexUsage, t!("provider.sqlite.capability.no_index_usage"), None);
-    coverage.lacking(Capability::WaitStats, t!("provider.sqlite.capability.no_waits"), None);
-    coverage.lacking(Capability::Sessions, t!("provider.sqlite.capability.no_sessions"), None);
+    coverage.lacking(
+        Capability::QueryLog,
+        culprit_core::message!(
+            "provider.sqlite.capability.no_query_log",
+            add_log = culprit_core::message!("ui.workload_unlock.add_query_log"),
+            command = "culprit conn set <name> --query-log <file>"
+        ),
+        None,
+    );
+    coverage.lacking(Capability::IndexUsage, culprit_core::message!("provider.sqlite.capability.no_index_usage"), None);
+    coverage.lacking(Capability::WaitStats, culprit_core::message!("provider.sqlite.capability.no_waits"), None);
+    coverage.lacking(Capability::Sessions, culprit_core::message!("provider.sqlite.capability.no_sessions"), None);
     let (have, missing, _) = coverage.finish();
     (have, missing)
 }
@@ -196,9 +234,9 @@ pub fn snapshot(
     let without_rowid: HashSet<&str> =
         schema.tables.iter().filter(|t| t.without_rowid).map(|t| t.name.as_str()).collect();
     // Counted rows where the file was read whole; the planner's statistics otherwise.
-    let (sizes, counted, whole) = match whole_file_read(conn).and_then(|budget| {
-        object_sizes(conn, &without_rowid, budget).map_err(|e| reading_stopped(&map_error(&e).message.to_lowercase()))
-    }) {
+    let (sizes, counted, whole) = match whole_file_read(conn)
+        .and_then(|budget| object_sizes(conn, &without_rowid, budget).map_err(|error| reading_stopped(&error)))
+    {
         Ok(ObjectSizes { bytes, rows }) => {
             coverage.completed(&crate::sources::SIZES, bytes.len());
             (bytes, rows, Ok(()))
@@ -223,7 +261,10 @@ pub fn snapshot(
             .map_err(|e| map_error(&e)),
         )
     } else {
-        coverage.not_applicable(&crate::sources::PLANNER_STATISTICS, t!("provider.sqlite.statistics.not_analyzed"));
+        coverage.not_applicable(
+            &crate::sources::PLANNER_STATISTICS,
+            culprit_core::message!("provider.sqlite.statistics.not_analyzed"),
+        );
         Some(HashSet::new())
     };
     if has_statistics && let Some(statistics) = &statistics {
@@ -316,7 +357,7 @@ pub fn snapshot(
         let wal_bytes = coverage.read(&crate::sources::WAL_FILE, size);
         operations.sqlite = Some(culprit_core::operations::SqliteFileHealth { wal_bytes, before: None });
     } else if settings.iter().any(|s| s.name == "journal_mode") {
-        coverage.not_applicable(&crate::sources::WAL_FILE, t!("provider.sqlite.wal.not_wal"));
+        coverage.not_applicable(&crate::sources::WAL_FILE, culprit_core::message!("provider.sqlite.wal.not_wal"));
     } else {
         coverage.source_failed(&crate::sources::WAL_FILE, &culprit_core::Error::internal(journal_mode_unknown()));
     }

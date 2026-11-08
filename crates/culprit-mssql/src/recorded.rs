@@ -2,7 +2,8 @@
 //! created and last altered (a table's date also moves when one of its indexes is created or altered). Catalog only.
 
 use culprit_core::changes::epoch;
-use culprit_core::{ChangeEvent, EventAction, EventKind, EventSource, t};
+use culprit_core::i18n::Message;
+use culprit_core::{ChangeEvent, EventAction, EventKind, EventSource, message};
 
 use crate::conn::{MsClient, query};
 use crate::workload::utc_local_iso;
@@ -65,20 +66,22 @@ pub(crate) async fn changes(client: &mut MsClient, since: &str) -> tiberius::Res
 }
 
 /// How a change to an object reads: `kind` is its sys.objects type, `parent` the table a trigger is on.
-pub(crate) fn title(kind: &str, action: EventAction, name: &str, qualified: &str, parent: Option<&str>) -> String {
+pub(crate) fn title(kind: &str, action: EventAction, name: &str, qualified: &str, parent: Option<&str>) -> Message {
     let created = action == EventAction::Created;
     match (kind, parent) {
-        ("U", _) if created => t!("provider.mssql.change.table.created", name = qualified),
-        ("U", _) => t!("provider.mssql.change.table.altered", name = qualified),
-        ("V", _) if created => t!("provider.mssql.change.view.created", name = qualified),
-        ("V", _) => t!("provider.mssql.change.view.altered", name = qualified),
-        ("P", _) if created => t!("provider.mssql.change.procedure.created", name = qualified),
-        ("P", _) => t!("provider.mssql.change.procedure.altered", name = qualified),
-        ("TR", Some(table)) if created => t!("provider.mssql.change.trigger_on.created", name = name, table = table),
-        ("TR", Some(table)) => t!("provider.mssql.change.trigger_on.altered", name = name, table = table),
-        ("TR", None) if created => t!("provider.mssql.change.trigger.created", name = qualified),
-        ("TR", None) => t!("provider.mssql.change.trigger.altered", name = qualified),
-        _ if created => t!("provider.mssql.change.function.created", name = qualified),
-        _ => t!("provider.mssql.change.function.altered", name = qualified),
+        ("U", _) if created => message!("provider.mssql.change.table.created", name = qualified),
+        ("U", _) => message!("provider.mssql.change.table.altered", name = qualified),
+        ("V", _) if created => message!("provider.mssql.change.view.created", name = qualified),
+        ("V", _) => message!("provider.mssql.change.view.altered", name = qualified),
+        ("P", _) if created => message!("provider.mssql.change.procedure.created", name = qualified),
+        ("P", _) => message!("provider.mssql.change.procedure.altered", name = qualified),
+        ("TR", Some(table)) if created => {
+            message!("provider.mssql.change.trigger_on.created", name = name, table = table)
+        }
+        ("TR", Some(table)) => message!("provider.mssql.change.trigger_on.altered", name = name, table = table),
+        ("TR", None) if created => message!("provider.mssql.change.trigger.created", name = qualified),
+        ("TR", None) => message!("provider.mssql.change.trigger.altered", name = qualified),
+        _ if created => message!("provider.mssql.change.function.created", name = qualified),
+        _ => message!("provider.mssql.change.function.altered", name = qualified),
     }
 }

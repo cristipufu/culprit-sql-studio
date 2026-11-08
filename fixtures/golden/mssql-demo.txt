@@ -643,7 +643,7 @@ fix: Turn it on for this database.
       ALTER DATABASE SCOPED CONFIGURATION SET LAST_QUERY_PLAN_STATS = ON;
   cost: Uses SQL Server's lightweight profiling to keep a little runtime data per cached plan: a small CPU overhead on very busy servers.
 verify:
-  1. Let the workload run, re-scan, then open a complex or resource-intensive query in Queries and pick "Last actual run" when available: the diagram shows the rows and timings SQL Server retained. A simple query may have only a root operator, and an uncached or evicted plan has no last-run data.
+  1. Let the workload run, re-scan, then open a complex or resource-intensive query in Queries and pick "Last run" when available: the diagram shows the rows and timings SQL Server retained. A simple query may have only a root operator, and an uncached or evicted plan has no last-run data.
 brief:
     # LAST_QUERY_PLAN_STATS is off for this database
 
@@ -665,7 +665,7 @@ brief:
 
     ## How to verify
 
-    - Let the workload run, re-scan, then open a complex or resource-intensive query in Queries and pick "Last actual run" when available: the diagram shows the rows and timings SQL Server retained. A simple query may have only a root operator, and an uncached or evicted plan has no last-run data.
+    - Let the workload run, re-scan, then open a complex or resource-intensive query in Queries and pick "Last run" when available: the diagram shows the rows and timings SQL Server retained. A simple query may have only a root operator, and an uncached or evicted plan has no last-run data.
 
     ## What to do in the codebase
 

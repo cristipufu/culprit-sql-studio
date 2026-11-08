@@ -62,6 +62,12 @@ pub trait EngineSpec: Send + Sync {
     fn statement_metrics(&self) -> StatementMetrics;
     /// How a live wait sample is collected. Required so a new engine cannot inherit another engine's description.
     fn wait_sampling(&self) -> Option<WaitSampling>;
+    /// Whether a health counter measures this database or a shared server, independently of its temporal scope.
+    fn signal_scope(&self, server: &ServerInfo, key: &str) -> crate::MeasurementScope;
+    /// A native label that already names its shared scope.
+    fn scoped_signal_label(&self, _signal: &crate::Signal) -> Option<crate::i18n::Message> {
+        None
+    }
     /// Advice for the driver's session settings or reset command, after generic transactions and pings are handled.
     fn session_advice(&self, _command: &str) -> Option<String> {
         None

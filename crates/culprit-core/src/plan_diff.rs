@@ -8,7 +8,7 @@ use ts_rs::TS;
 
 use crate::format::{self, digits};
 use crate::plan::{NodeKind, Plan, PlanNode, PlanWarning};
-use crate::plan_compare::{CompareContext, Scenario, cap, scenarios};
+use crate::plan_compare::{CompareContext, PlanName, Scenario, scenarios};
 use crate::t;
 
 /// A cost-share move smaller than this (10 points of the plan's cost) is noise.
@@ -183,7 +183,13 @@ pub fn verify_hypothetical_index(baseline: Plan, hypothetical: Plan) -> Hypothet
 
 /// Compare plan `b` against plan `a` (the baseline), naming them "plan A" and "plan B" in the headlines.
 pub fn plan_diff(a: &Plan, b: &Plan) -> PlanDiff {
-    plan_diff_named(a, &t!("core.plan_diff.name.plan_a"), b, &t!("core.plan_diff.name.plan_b"))
+    compare(
+        a,
+        &PlanName { inline: &t!("core.plan_diff.name.plan_a"), initial: &t!("core.plan_diff.name.plan_a_initial") },
+        b,
+        &PlanName { inline: &t!("core.plan_diff.name.plan_b"), initial: &t!("core.plan_diff.name.plan_b_initial") },
+        &CompareContext::default(),
+    )
 }
 
 /// Compare plan `b` against plan `a` (the baseline); headlines refer to them by the given names ("Plan 815", "staging").
@@ -194,6 +200,10 @@ pub fn plan_diff_named(a: &Plan, name_a: &str, b: &Plan, name_b: &str) -> PlanDi
 /// [`plan_diff_named`] with what Culprit knows about the database (statistics from its latest scan), so scenarios can
 /// say "statistics on orders are stale".
 pub fn plan_diff_in(a: &Plan, name_a: &str, b: &Plan, name_b: &str, context: &CompareContext) -> PlanDiff {
+    compare(a, &PlanName::supplied(name_a), b, &PlanName::supplied(name_b), context)
+}
+
+fn compare(a: &Plan, name_a: &PlanName<'_>, b: &Plan, name_b: &PlanName<'_>, context: &CompareContext) -> PlanDiff {
     let fa = Flat::new(a);
     let fb = Flat::new(b);
     let mut m = Matching { a: vec![None; fa.nodes.len()], b: vec![None; fb.nodes.len()] };
@@ -679,13 +689,21 @@ fn rank(kind: ChangeKind) -> u8 {
     }
 }
 
-fn headlines(diff: &PlanDiff, a: &Plan, b: &Plan, fa: &Flat, fb: &Flat, name_a: &str, name_b: &str) -> Vec<String> {
+fn headlines(
+    diff: &PlanDiff,
+    a: &Plan,
+    b: &Plan,
+    fa: &Flat,
+    fb: &Flat,
+    name_a: &PlanName<'_>,
+    name_b: &PlanName<'_>,
+) -> Vec<String> {
     let mut out = Vec::new();
     if !diff.comparable {
         out.push(t!("core.plan_diff.headline.engines", a = a.engine.label(), b = b.engine.label()));
     }
     // Every other sentence opens with plan B's name.
-    let plan = cap(name_b);
+    let plan = name_b.initial;
     let node_a = |id: Option<u32>| id.and_then(|id| fa.nodes.iter().find(|n| n.id == id).copied());
     let node_b = |id: Option<u32>| id.and_then(|id| fb.nodes.iter().find(|n| n.id == id).copied());
     let mut explained: Vec<String> = Vec::new();
@@ -728,7 +746,7 @@ fn headlines(diff: &PlanDiff, a: &Plan, b: &Plan, fa: &Flat, fb: &Flat, name_a: 
             };
             out.push(crate::i18n::t(
                 key,
-                &[("plan", plan.as_str().into()), ("factor", m.factor.into()), ("because", because.into())],
+                &[("plan", plan.into()), ("factor", m.factor.into()), ("because", because.into())],
             ));
             used_lead = true;
         }
@@ -742,7 +760,7 @@ fn headlines(diff: &PlanDiff, a: &Plan, b: &Plan, fa: &Flat, fb: &Flat, name_a: 
             out.push(crate::i18n::t(
                 key,
                 &[
-                    ("plan", plan.as_str().into()),
+                    ("plan", plan.into()),
                     ("factor", m.factor.into()),
                     ("other", name_a.into()),
                     ("before", m.before.into()),
@@ -765,7 +783,7 @@ fn headlines(diff: &PlanDiff, a: &Plan, b: &Plan, fa: &Flat, fb: &Flat, name_a: 
                 explained.push(normalize(&table(x)));
                 t!(
                     "core.plan_diff.headline.access",
-                    plan = &plan,
+                    plan = plan,
                     verb = verb(y, &fb.nodes),
                     other = name_a,
                     other_verb = verb(x, &fa.nodes)
@@ -789,16 +807,16 @@ fn headlines(diff: &PlanDiff, a: &Plan, b: &Plan, fa: &Flat, fb: &Flat, name_a: 
                 continue;
             }
             (ChangeKind::Operator, Some(x), Some(y)) if x.kind == NodeKind::Join || y.kind == NodeKind::Join => {
-                t!("core.plan_diff.headline.join", plan = &plan, op = &y.op, other = name_a, other_op = &x.op)
+                t!("core.plan_diff.headline.join", plan = plan, op = &y.op, other = name_a, other_op = &x.op)
             }
             (ChangeKind::Operator, Some(x), Some(y)) => {
-                t!("core.plan_diff.headline.operator", plan = &plan, op = &y.op, other = name_a, other_op = &x.op)
+                t!("core.plan_diff.headline.operator", plan = plan, op = &y.op, other = name_a, other_op = &x.op)
             }
             (ChangeKind::Added, _, Some(y)) => {
                 let branch = fb.branch_of(y.id, &diff.only_b);
                 t!(
                     "core.plan_diff.headline.adds",
-                    plan = &plan,
+                    plan = plan,
                     initial = initial(&y.op),
                     steps = branch_words(fb, &branch),
                     share = format::percent(fb.branch_share(&branch))
@@ -806,7 +824,7 @@ fn headlines(diff: &PlanDiff, a: &Plan, b: &Plan, fa: &Flat, fb: &Flat, name_a: 
             }
             (ChangeKind::Removed, Some(x), _) => {
                 let steps = branch_words(fa, &fa.branch_of(x.id, &diff.only_a));
-                t!("core.plan_diff.headline.has_no", plan = &plan, steps = steps, other = name_a)
+                t!("core.plan_diff.headline.has_no", plan = plan, steps = steps, other = name_a)
             }
             _ => continue,
         };
@@ -817,16 +835,16 @@ fn headlines(diff: &PlanDiff, a: &Plan, b: &Plan, fa: &Flat, fb: &Flat, name_a: 
         out.push(t!(
             "core.plan_diff.headline.warnings",
             n = names.len(),
-            plan = &plan,
+            plan = plan,
             other = name_a,
             warnings = format::list(&names)
         ));
     }
     if out.is_empty() || (out.len() == 1 && !diff.comparable) {
         out.push(if diff.same_shape {
-            t!("core.plan_diff.headline.same_steps", plan = &plan, other = name_a)
+            t!("core.plan_diff.headline.same_steps", plan = plan, other = name_a)
         } else {
-            t!("core.plan_diff.headline.minor_steps", plan = &plan, other = name_a)
+            t!("core.plan_diff.headline.minor_steps", plan = plan, other = name_a)
         });
     }
     out
@@ -1225,7 +1243,11 @@ mod tests {
         let mut minor = plan_diff(&a, &b);
         minor.same_shape = false;
         let (fa, fb) = (Flat::new(&a), Flat::new(&b));
-        out.push(format!("## minor steps\n{}", headlines(&minor, &a, &b, &fa, &fb, "plan A", "plan B").join("\n")));
+        out.push(format!(
+            "## minor steps\n{}",
+            headlines(&minor, &a, &b, &fa, &fb, &PlanName::supplied("plan A"), &PlanName::supplied("Plan B"))
+                .join("\n")
+        ));
         // How each kind of step reads its table.
         for (op, kind, index) in [
             ("Index Seek", NodeKind::Seek, None),
@@ -1361,7 +1383,7 @@ Plan B has no Key Lookup on orders (plan A has).
   Removed: Only in A: Index Seek on orders | 33% of that plan's cost
   ? Index: Different indexes on orders. | orders: plan A uses ix_orders_customer and pk_orders, plan B uses no index. If an index was added, dropped or rebuilt between the two plans, that explains it; otherwise the optimizer chose differently because it expected a different number of rows.
 ## named
-Query 7 is estimated 6.7× more expensive because it scans orders (100% of its cost) where staging seeks ix_orders_customer and looks up the rows in orders.
+query 7 is estimated 6.7× more expensive because it scans orders (100% of its cost) where staging seeks ix_orders_customer and looks up the rows in orders.
   Access: orders: Key Lookup (pk_orders) → Clustered Index Scan (pk_orders) | 50% of the plan's cost in A, 100% in B
   Removed: Only in A: Nested Loops and Index Seek on orders | 50% of that plan's cost
   ? Index: Different indexes on orders. | orders: staging uses ix_orders_customer and pk_orders, query 7 uses pk_orders. If an index was added, dropped or rebuilt between the two plans, that explains it; otherwise the optimizer chose differently because it expected a different number of rows.

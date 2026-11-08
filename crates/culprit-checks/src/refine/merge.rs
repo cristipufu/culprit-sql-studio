@@ -24,7 +24,7 @@ pub(super) struct Absorption {
     queries: Vec<QueryRef>,
     severity: Severity,
     last_seen: Option<String>,
-    share_label: Option<(f64, f64)>,
+    listed_share: Option<f64>,
 }
 impl Absorption {
     pub fn decide(s: &Snapshot, findings: &[Finding], into: usize, from: usize) -> Self {
@@ -77,7 +77,7 @@ impl Absorption {
             queries,
             severity: if history { target.severity } else { target.severity.max(source.severity) },
             last_seen: target.last_seen.clone().max(source.last_seen.clone()),
-            share_label: target.impact.db_time_share.zip(listed_share),
+            listed_share: target.impact.db_time_share.and(listed_share),
         }
     }
     pub fn apply_state(&self, findings: &mut [Finding]) {
@@ -89,10 +89,10 @@ impl Absorption {
     }
     pub fn render(&self, findings: &mut [Finding], note: Option<String>) {
         let target = &mut findings[self.into];
-        if let Some((before, after)) = self.share_label
-            && target.impact.label == support::share_label(before)
+        if let Some(share) = self.listed_share
+            && target.impact.label_key == key!("support.impact.share")
         {
-            target.impact.label = support::share_label(after);
+            target.impact.set_keyed_label(key!("support.impact.share"), support::share_label(share));
         }
         if let Some(note) = note {
             for q in &self.source.queries {

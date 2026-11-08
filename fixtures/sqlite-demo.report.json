@@ -93,6 +93,7 @@
       "impact": {
         "db_time_share": 0.9887727501019123,
         "label": "99% of DB time",
+        "label_key": "support.impact.share",
         "score": 99.43705295823646,
         "time_ms_per_day": null
       },
@@ -100,12 +101,14 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "common.metric.rows_in_table",
           "label": "Rows in table",
           "text": null,
           "unit": "rows",
           "value": 200000.0
         },
         {
+          "key": "check.unindexed_fk.metric.foreign_key",
           "label": "Foreign key",
           "text": "orders_fk_0",
           "unit": "text",
@@ -181,12 +184,14 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "common.metric.rows_in_table",
           "label": "Rows in table",
           "text": null,
           "unit": "rows",
           "value": 200000.0
         },
         {
+          "key": "check.unindexed_fk.metric.foreign_key",
           "label": "Foreign key",
           "text": "order_items_fk_0",
           "unit": "text",
@@ -228,6 +233,7 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "common.metric.size",
           "label": "Size",
           "text": null,
           "unit": "bytes",
@@ -270,6 +276,7 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "check.config.sqlite_statistics.metric.secondary",
           "label": "Secondary indexes",
           "text": null,
           "unit": "count",
@@ -311,12 +318,14 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "check.config.sqlite_free_pages.metric.free_pages",
           "label": "Free pages",
           "text": null,
           "unit": "bytes",
           "value": 49270784.0
         },
         {
+          "key": "check.config.sqlite_free_pages.metric.share",
           "label": "Share of the file",
           "text": null,
           "unit": "ratio",
@@ -412,6 +421,7 @@
         "last-actual-plans"
       ],
       "prepare": [
+        "retained observations are worded for this reader",
         "measurement context identifies this database and its clock",
         "index availability and maintenance follow the engine",
         "CTE writes named for their base table",
@@ -453,7 +463,7 @@
         "query-driven index changes need measured work",
         "query evidence leads with absolute cost and period",
         "names without the database",
-        "a caveat repeats nothing the summary or the fix says"
+        "identical complete caveats are shown once"
       ]
     },
     "previous_analyzer": {
@@ -1207,7 +1217,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values."
+              "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -1463,7 +1474,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values."
+              "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -1717,12 +1729,14 @@
                     22
                   ],
                   "rule": "automatic-index",
+                  "scan_context": true,
                   "severity": "low",
                   "title": "SQLite builds a temporary index on orders every time this runs",
                   "verify": "Explain again: no AUTOMATIC INDEX, and a SEARCH using the new index."
                 }
               ],
-              "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values."
+              "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -2038,7 +2052,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values."
+              "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -2225,7 +2240,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values."
+              "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -2391,6 +2407,7 @@
       ],
       "query_count": 7.0,
       "source": "Rails log",
+      "source_label": "Rails log",
       "timeline": null,
       "total_cpu_ms": null,
       "total_executions": 3546.0,
@@ -2444,6 +2461,74 @@
       }
     ],
     "headline": "5 opportunities. The top ones touch 43.9 s of database time over the 90 minutes the Rails log covers (99%).",
+    "headline_message": {
+      "kind": "sequence",
+      "messages": [
+        {
+          "arguments": {
+            "count": {
+              "kind": "digits",
+              "value": "5"
+            },
+            "n": {
+              "kind": "number",
+              "value": 5.0
+            }
+          },
+          "key": "summary.headline.opportunities",
+          "kind": "catalog"
+        },
+        {
+          "arguments": {
+            "cost": {
+              "kind": "message",
+              "value": {
+                "arguments": {
+                  "of": {
+                    "kind": "text",
+                    "value": "database"
+                  },
+                  "share": {
+                    "kind": "percent",
+                    "value": 0.9887727501019123
+                  },
+                  "span": {
+                    "kind": "message",
+                    "value": {
+                      "arguments": {
+                        "count": {
+                          "kind": "digits",
+                          "value": "90"
+                        },
+                        "log": {
+                          "kind": "text",
+                          "value": "Rails"
+                        },
+                        "n": {
+                          "kind": "number",
+                          "value": 90.0
+                        }
+                      },
+                      "key": "model.window.log_minutes",
+                      "kind": "catalog"
+                    }
+                  },
+                  "time": {
+                    "kind": "duration",
+                    "value": 43902.40000000001
+                  }
+                },
+                "key": "support.cost.time_over",
+                "kind": "catalog"
+              }
+            }
+          },
+          "key": "summary.headline.top_cost",
+          "kind": "catalog"
+        }
+      ],
+      "separator": " "
+    },
     "index_counting": "",
     "index_notes": [
       {
@@ -2459,6 +2544,61 @@
     "opportunities": 5,
     "over_scans": [],
     "runs_said": [],
+    "takeaway": "The top ones touch 43.9 s of database time over the 90 minutes the Rails log covers (99%).",
+    "takeaway_message": {
+      "kind": "sequence",
+      "messages": [
+        {
+          "arguments": {
+            "cost": {
+              "kind": "message",
+              "value": {
+                "arguments": {
+                  "of": {
+                    "kind": "text",
+                    "value": "database"
+                  },
+                  "share": {
+                    "kind": "percent",
+                    "value": 0.9887727501019123
+                  },
+                  "span": {
+                    "kind": "message",
+                    "value": {
+                      "arguments": {
+                        "count": {
+                          "kind": "digits",
+                          "value": "90"
+                        },
+                        "log": {
+                          "kind": "text",
+                          "value": "Rails"
+                        },
+                        "n": {
+                          "kind": "number",
+                          "value": 90.0
+                        }
+                      },
+                      "key": "model.window.log_minutes",
+                      "kind": "catalog"
+                    }
+                  },
+                  "time": {
+                    "kind": "duration",
+                    "value": 43902.40000000001
+                  }
+                },
+                "key": "support.cost.time_over",
+                "kind": "catalog"
+              }
+            }
+          },
+          "key": "summary.headline.top_cost",
+          "kind": "catalog"
+        }
+      ],
+      "separator": " "
+    },
     "top_share": 0.9887727501019123
   }
 }

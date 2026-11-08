@@ -234,13 +234,13 @@ pub(super) fn create_index_finding(snapshot: &Snapshot, c: CreateIndex<'_>) -> F
     f.queries = query_refs(&filtering.iter().take(LISTED).copied().collect::<Vec<_>>());
     f.severity = c.severity;
     f.impact.score = base_score(f.severity) + r.score.unwrap_or(0.0) / 10.0;
-    f.impact.label = t!("check.tuning_advice.azure_recommended");
+    f.impact.set_label(t!("check.tuning_advice.azure_recommended"));
     f.confidence = Confidence::Medium;
     if let Some(score) = r.score {
-        f.metrics.push(Metric::new(t!("check.tuning_advice.metric.azure_score"), score, Unit::Count));
+        f.metrics.push(Metric::said(culprit_core::key!("check.tuning_advice.metric.azure_score"), score, Unit::Count));
     }
     if let Some(rows) = c.rows {
-        f.metrics.push(Metric::new(t!("check.tuning_advice.metric.rows_in_table"), rows, Unit::Rows));
+        f.metrics.push(Metric::said(culprit_core::key!("check.tuning_advice.metric.rows_in_table"), rows, Unit::Rows));
     }
     // Azure's word on its score, said before what to do.
     let rated = match (low, &heavy) {
@@ -658,13 +658,13 @@ pub(super) fn drop_index_finding(snapshot: &Snapshot, d: DropIndex<'_>) -> Findi
     );
     f.severity = Severity::Low;
     f.impact.score = base_score(f.severity) + r.score.unwrap_or(0.0) / 20.0;
-    f.impact.label = t!("check.tuning_advice.azure_recommended");
+    f.impact.set_label(t!("check.tuning_advice.azure_recommended"));
     f.confidence = Confidence::Medium;
     if let Some(size) = existing.size_bytes {
-        f.metrics.push(Metric::new(t!("common.metric.size"), size, Unit::Bytes));
+        f.metrics.push(Metric::said(culprit_core::key!("common.metric.size"), size, Unit::Bytes));
     }
     if let Some(reads) = existing.reads {
-        f.metrics.push(Metric::new(t!("common.metric.reads"), reads, Unit::Count));
+        f.metrics.push(Metric::said(culprit_core::key!("common.metric.reads"), reads, Unit::Count));
     }
     let target = qualified(Engine::Mssql, &existing.schema, &existing.table);
     f.fix = Some(Fix {

@@ -20,7 +20,7 @@ impl Policy {
         match self {
             Self::AbsoluteCost => "query evidence leads with absolute cost and period",
             Self::Names => "names without the database",
-            Self::Caveats => "a caveat repeats nothing the summary or the fix says",
+            Self::Caveats => "identical complete caveats are shown once",
         }
     }
 }
@@ -157,27 +157,11 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Vec<Decision> {
                 }
             }
             Policy::Caveats if !f.caveats.is_empty() => {
-                let said: BTreeSet<_> = sentences(&f.summary)
-                    .into_iter()
-                    .chain(f.fix.iter().flat_map(|fix| sentences(&fix.summary)))
-                    .map(sentence_key)
-                    .collect();
-                let replacement: Vec<_> = f
-                    .caveats
-                    .iter()
-                    .filter_map(|caveat| {
-                        if caveat.contains('\n') {
-                            return Some(caveat.clone());
-                        }
-                        let all = sentences(caveat);
-                        let kept: Vec<_> = all.iter().copied().filter(|s| !said.contains(&sentence_key(s))).collect();
-                        match kept.len() {
-                            0 => None,
-                            n if n == all.len() => Some(caveat.clone()),
-                            _ => Some(kept.join(" ")),
-                        }
-                    })
-                    .collect();
+                // Presentation may discard an identical complete message, never infer or cut sentences from prose.
+                let mut said: BTreeSet<&str> =
+                    std::iter::once(f.summary.as_str()).chain(f.fix.iter().map(|fix| fix.summary.as_str())).collect();
+                let replacement: Vec<_> =
+                    f.caveats.iter().filter(|caveat| said.insert(caveat.as_str())).cloned().collect();
                 if replacement != f.caveats {
                     out.push(Decision { at, change: Change::Caveats { replacement } });
                 }
@@ -238,9 +222,10 @@ mod tests {
         let s: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
         let mut f = crate::analyze(s.clone()).findings.remove(0);
         let prefix = format!("[{}].[dbo].[orders]", s.server.database);
-        f.summary = format!("{prefix} is measured. A repeated sentence.");
-        f.caveats = vec!["A repeated sentence.".into(), "Another caveat.".into()];
+        f.summary = format!("{prefix} is measured.");
+        f.caveats = vec!["A repeated complete message.".into(), "Another caveat.".into()];
         if let Some(fix) = &mut f.fix {
+            fix.summary = "A repeated complete message.".into();
             fix.sql = Some(format!("SELECT * FROM {prefix}"));
         }
         let before = policy_fields(&f);
@@ -250,6 +235,6 @@ mod tests {
             assert_eq!(before, policy_fields(&findings[0]));
         }
         assert!(!findings[0].summary.contains(&format!("[{}]", s.server.database)));
-        assert!(!findings[0].caveats.iter().any(|c| c == "A repeated sentence."));
+        assert_eq!(findings[0].caveats, ["Another caveat."]);
     }
 }

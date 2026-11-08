@@ -227,12 +227,12 @@ Where mssql-demo's database time goes · Query Store, last 5 hours
                                 1% of it  query 161      UPDATE [shop].[orders] set [total] = [total]+@1 WHERE [id]=@2
 
 Health ("since start" covers 1 h 7 min)
-    Batch requests (whole server)             0.2/s  since start 
+    Batch requests (whole server)             0.2/s  since start
     Plans compiled (whole server)            45.89%  since start New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
     Page life expectancy (whole server)   1 h 7 min  when scanned A server cache counter at the scan's instant. There is no universal healthy number of seconds; cache size, workload and measured I/O matter.
   ○ Waiting for memory                            0  when scanned No requests in this queue when the scan ran. Historical waits are reported separately.
     Scheduling share of recorded waits (whole server)      1.76%  since start The share of recorded waiting spent ready to run, before a worker was scheduled. This is not CPU utilization and alone does not establish CPU pressure.
-    Waiting for workers since start (whole instance)      1.1 s  since start 
+    Waiting for workers since start (whole instance)      1.1 s  since start
     Waiting for workers, per hour (whole server)     973 ms  since start Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.
     Version store                               0 B  when scanned Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.
     New connections (whole server)          3.0/min  since start The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
@@ -380,8 +380,8 @@ Needs a look: 14 opportunities; the top ones touch 2 min of database time over t
                     Each signal states the period it measures.
                     Bad 0 · Watch 0 · Healthy 0
                     ○ Oldest open transaction  4.2 s · idle in transaction
-                    ○ Reads served from memory  55.29%
-                    ○ Temporary files written  661 MB
+                    ○ Reads served from shared_buffers  55.29%
+                    ○ Temporary files written since reset  661 MB
                     → culprit waits pg-demo
 
 ○ Deadlocks         PostgreSQL counted 1 deadlock in the 4 h 53 min since its statistics were reset; it keeps no details to explain them.
@@ -438,15 +438,15 @@ Where pg-demo's database time goes · Statement timing from pg_stat_statements, 
 Note: PostgreSQL keeps no history of what sessions waited on. These totals come from per-statement timing; use Right now to sample what sessions wait on at this moment.
 
 Health ("since start" covers 6 h 59 min)
-    Reads served from memory                 55.29%  since start Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
-    Temporary files written                  661 MB  since start Temporary data written by this database over its statistics period. This amount alone does not establish a performance problem; the findings identify costly spills.
-    Commits                                   0.7/s  since start 
+    Reads served from shared_buffers         55.29%  since start Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
+    Temporary files written since reset      661 MB  since start Temporary data written by this database over its statistics period. This amount alone does not establish a performance problem; the findings identify costly spills.
+    Commits                                   0.7/s  since start
     Transactions rolled back                  0.25%  since start Rollbacks can be deliberate application behavior. This historical share alone does not establish failed requests.
     Deadlocks                                     1  since start A count over the statistics period, not deadlocks happening now. The deadlock finding uses the amount and period recorded.
-    Checkpoints (whole server)                   32  since start 
+    Checkpoints (whole server)                   32  since start
     Checkpoints forced early (whole server)     15.62%  since start Requested checkpoints include WAL-triggered checkpoints, manual CHECKPOINT, backups and CREATE DATABASE. This shared historical ratio does not identify their cause or establish current write pressure.
     Connections in use (whole server)         6.19%  when scanned under 80% of max_connections is healthy
-    Oldest open transaction                   4.2 s  when scanned A cleanup holder observed at the scan's instant; no long-held-cleanup finding is supported by this scan.
+    Oldest transaction holding cleanup        4.2 s  when scanned A cleanup holder observed at the scan's instant; no long-held-cleanup finding is supported by this scan.
     New connections                         1.0/min  since start The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
     Average session length                    1.3 s  since start Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.
     Sessions the client abandoned             1.09%  since start The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.
@@ -619,18 +619,18 @@ Note: MySQL counts waits since it started, only for enabled performance_schema i
 Health ("since start" covers 1 h 20 min)
     Reads served from memory (whole server)     98.14%  since start The share of reads served by InnoDB's buffer pool across the whole server. A miss ratio alone does not establish a memory shortage in this database.
     Temporary tables on disk (whole server)     67.95%  since start The share of internal temporary tables written to disk across the whole server. Table sizes and the statements' measured cost determine whether this needs work.
-    Statements (whole server)                 8.7/s  since start 
-    Statements running now (whole server)          5  when scanned 
-    Row-lock waits (whole server)             4.5/h  since start 
-    Time waiting for row locks since start (whole server)      1 min  since start 
+    Statements (whole server)                 8.7/s  since start
+    Statements running now (whole server)          5  when scanned
+    Row-lock waits (whole server)             4.5/h  since start
+    Time waiting for row locks since start (whole server)      1 min  since start
     Average row-lock wait (whole server)     14.5 s  since start An average across the whole server's recorded row-lock waits, not a current wait. The lock findings use the amount of waiting too.
     Connections in use (whole server)         4.64%  when scanned under 80% of max_connections is healthy
     Busiest moment (whole server)             4.64%  since start The busiest moment since these counters started, compared with today's limit. This does not establish a connection shortage now.
-    Undo history (whole server)                   0  when scanned Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
-    Oldest open transaction                   5.0 s  when scanned A cleanup holder observed at the scan's instant; no long-held-cleanup finding is supported by this scan.
+    Undo logs not yet purged (whole server)          0  when scanned Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
+    Oldest transaction to inspect for locks or a retained read view      5.0 s  when scanned A cleanup holder observed at the scan's instant; no long-held-cleanup finding is supported by this scan.
     New connections (whole server)          3.7/min  since start The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
-    Failed connection attempts, per hour (whole server)      1.2/h  since start 
-    Connections dropped without closing, per hour (whole server)     22.9/h  since start 
+    Failed connection attempts (whole server)      1.2/h  since start
+    Connections dropped without closing (whole server)     22.9/h  since start
 
 Storage (average per operation, since start)
   #innodb_temp/temp_10.ibt           reads      5 µs × 1.0M    writes     16 µs × 1.0M  
@@ -1051,8 +1051,8 @@ _pg_stat_statements, the 5 hours since statistics were reset; scanned Sun Oct 11
 - **Health** (for context): 12 signals recorded; none has a threshold to grade.
   Each signal states the period it measures.
   - Oldest open transaction — 4.2 s · idle in transaction
-  - Reads served from memory — 55.29%
-  - Temporary files written — 661 MB
+  - Reads served from shared_buffers — 55.29%
+  - Temporary files written since reset — 661 MB
 - **Deadlocks** (for context): PostgreSQL counted 1 deadlock in the 4 h 53 min since its statistics were reset; it keeps no details to explain them.
   PostgreSQL counted 1 deadlock in this database since statistics were reset on Oct 11. It writes the details (who waited for whom, and the statements) only to the server log, which SQL can't read: paste those log lines here to have them explained. Turning on log_lock_waits also logs any lock wait longer than deadlock_timeout.
 - **Indexes** (worth a look): 3 new indexes would help queries that take 28% of database time; 2 indexes can go (13.6 MB).

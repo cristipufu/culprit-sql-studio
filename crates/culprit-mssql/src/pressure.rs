@@ -202,7 +202,7 @@ pub(crate) fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azu
     if let Some(hours) = uptime.filter(|_| batches > 0.0) {
         let rate = Signal::new(
             culprit_core::signal_id::BATCH_REQUESTS,
-            &t!("provider.mssql.signal.batch_requests", whole = whole),
+            culprit_core::message!("provider.mssql.signal.batch_requests", whole = whole),
             batches / (hours * 3600.0),
             SignalUnit::PerSecond,
             SignalScope::SinceStartup,
@@ -212,7 +212,7 @@ pub(crate) fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azu
     if batches > 0.0 {
         let ratio = Signal::new(
             culprit_core::signal_id::COMPILES_PER_BATCH,
-            &t!("provider.mssql.signal.plans_compiled", whole = whole),
+            culprit_core::message!("provider.mssql.signal.plans_compiled", whole = whole),
             compiles / batches * 100.0,
             SignalUnit::Percent,
             SignalScope::SinceStartup,
@@ -228,7 +228,7 @@ pub(crate) fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azu
         });
         let recompiled = Signal::new(
             culprit_core::signal_id::RECOMPILES_PER_BATCH,
-            &t!("provider.mssql.signal.plans_recompiled", whole = whole),
+            culprit_core::message!("provider.mssql.signal.plans_recompiled", whole = whole),
             recompiles / batches * 100.0,
             SignalUnit::Percent,
             SignalScope::SinceStartup,
@@ -238,7 +238,7 @@ pub(crate) fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azu
     if let Some(ple) = c.get("Page life expectancy") {
         let life = Signal::new(
             culprit_core::signal_id::PAGE_LIFE,
-            &t!("provider.mssql.signal.page_life", whole = whole),
+            culprit_core::message!("provider.mssql.signal.page_life", whole = whole),
             *ple,
             SignalUnit::Seconds,
             SignalScope::Now,
@@ -263,7 +263,7 @@ pub(crate) fn resource_signals(data_io: f64, data_io_peak: f64, memory: f64) -> 
             )),
             ..Signal::new(
                 culprit_core::signal_id::DATA_IO,
-                &t!("provider.mssql.signal.data_io"),
+                culprit_core::message!("provider.mssql.signal.data_io"),
                 data_io,
                 SignalUnit::Percent,
                 SignalScope::LastHour,
@@ -273,7 +273,7 @@ pub(crate) fn resource_signals(data_io: f64, data_io_peak: f64, memory: f64) -> 
             healthy: Some(t!("provider.mssql.signal.memory_use.healthy")),
             ..Signal::new(
                 culprit_core::signal_id::MEMORY_USE,
-                &t!("provider.mssql.signal.memory_use"),
+                culprit_core::message!("provider.mssql.signal.memory_use"),
                 memory,
                 SignalUnit::Percent,
                 SignalScope::LastHour,
@@ -378,7 +378,7 @@ pub(crate) async fn collect(client: &mut MsClient, probe: &Probe) -> (Pressure, 
 pub(crate) fn pending_grants_signal(pending: f64) -> Signal {
     Signal::new(
         culprit_core::signal_id::MEMORY_GRANTS_PENDING,
-        &t!("provider.mssql.signal.grants_pending"),
+        culprit_core::message!("provider.mssql.signal.grants_pending"),
         pending,
         SignalUnit::Count,
         SignalScope::Now,
@@ -398,7 +398,10 @@ pub(crate) fn wait_total_signals(totals: &WaitTotals, azure: bool, uptime: Optio
     // say how much and since when instead of an hourly rate.
     out.push(Signal::new(
         culprit_core::signal_id::THREADPOOL_WAIT_MS,
-        &t!("provider.mssql.signal.threadpool_wait_ms", whole = if azure { "other" } else { "instance" }),
+        culprit_core::message!(
+            "provider.mssql.signal.threadpool_wait_ms",
+            whole = if azure { "other" } else { "instance" }
+        ),
         threadpool,
         SignalUnit::Milliseconds,
         SignalScope::SinceStartup,
@@ -407,7 +410,7 @@ pub(crate) fn wait_total_signals(totals: &WaitTotals, azure: bool, uptime: Optio
     let grants = totals.get("RESOURCE_SEMAPHORE").map(|t| t.0).unwrap_or(0.0);
     out.push(Signal::new(
         culprit_core::signal_id::GRANT_WAIT_MS,
-        &t!("provider.mssql.signal.grant_wait_ms", whole = if azure { "other" } else { "instance" }),
+        culprit_core::message!("provider.mssql.signal.grant_wait_ms", whole = if azure { "other" } else { "instance" }),
         grants,
         SignalUnit::Milliseconds,
         SignalScope::SinceStartup,
@@ -416,7 +419,10 @@ pub(crate) fn wait_total_signals(totals: &WaitTotals, azure: bool, uptime: Optio
         out.push(
             Signal::new(
                 culprit_core::signal_id::THREADPOOL_WAITS,
-                &t!("provider.mssql.signal.threadpool_waits", per = if hours >= 1.0 { "hour" } else { "other" }),
+                culprit_core::message!(
+                    "provider.mssql.signal.threadpool_waits",
+                    per = if hours >= 1.0 { "hour" } else { "other" }
+                ),
                 // Under an hour of uptime, report the total rather than extrapolate an hourly rate.
                 threadpool / hours.max(1.0),
                 SignalUnit::Milliseconds,
@@ -432,7 +438,7 @@ pub(crate) fn wait_total_signals(totals: &WaitTotals, azure: bool, uptime: Optio
 pub(crate) fn threadpool_now_signal(waiting: f64) -> Signal {
     Signal::new(
         culprit_core::signal_id::THREADPOOL_WAITING,
-        &t!("provider.mssql.signal.threadpool_waiting"),
+        culprit_core::message!("provider.mssql.signal.threadpool_waiting"),
         waiting,
         SignalUnit::Count,
         SignalScope::Now,
@@ -444,7 +450,7 @@ pub(crate) fn threadpool_now_signal(waiting: f64) -> Signal {
 pub(crate) fn version_store_signal(bytes: f64) -> Signal {
     Signal::new(
         culprit_core::signal_id::VERSION_STORE,
-        &t!("provider.mssql.version_store"),
+        culprit_core::message!("provider.mssql.version_store"),
         bytes,
         SignalUnit::Bytes,
         SignalScope::Now,
@@ -461,7 +467,7 @@ pub(crate) fn version_store_signal(bytes: f64) -> Signal {
 pub(crate) fn oldest_transaction_signal(seconds: f64) -> Signal {
     Signal::new(
         culprit_core::signal_id::OLDEST_TRANSACTION,
-        &t!("provider.mssql.signal.oldest_transaction"),
+        culprit_core::message!("provider.mssql.signal.oldest_transaction"),
         seconds,
         SignalUnit::Seconds,
         SignalScope::Now,
@@ -549,7 +555,7 @@ pub(crate) fn sampled_signals(
     if let Some(batches) = rate("Batch Requests/sec") {
         signals.push(Signal::new(
             "batch-requests",
-            &t!("provider.mssql.signal.batch_requests", whole = "other"),
+            culprit_core::message!("provider.mssql.signal.batch_requests", whole = "other"),
             batches,
             SignalUnit::PerSecond,
             SignalScope::Sampled,
@@ -561,7 +567,7 @@ pub(crate) fn sampled_signals(
         {
             signals.push(Signal::new(
                 "compiles-per-batch",
-                &t!("provider.mssql.signal.plans_compiled", whole = "instance"),
+                culprit_core::message!("provider.mssql.signal.plans_compiled", whole = "instance"),
                 compiles / batches * 100.0,
                 SignalUnit::Percent,
                 SignalScope::Sampled,
@@ -571,7 +577,7 @@ pub(crate) fn sampled_signals(
     if let Some(recompiles) = rate("SQL Re-Compilations/sec") {
         signals.push(Signal::new(
             "recompiles",
-            &t!("provider.mssql.signal.recompiles"),
+            culprit_core::message!("provider.mssql.signal.recompiles"),
             recompiles,
             SignalUnit::PerSecond,
             SignalScope::Sampled,
@@ -592,7 +598,7 @@ fn scheduling_share(signal: f64, wait: f64, scope: SignalScope) -> Signal {
         healthy: Some(t!("provider.mssql.signal.scheduling_share.healthy")),
         ..Signal::new(
             culprit_core::signal_id::SIGNAL_WAIT,
-            &t!("provider.mssql.signal.scheduling_share"),
+            culprit_core::message!("provider.mssql.signal.scheduling_share"),
             signal / wait * 100.0,
             SignalUnit::Percent,
             scope,

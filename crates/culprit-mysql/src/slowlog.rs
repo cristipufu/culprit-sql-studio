@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use culprit_core::changes::{Period, PeriodData, PeriodStats, QueryPeriods};
-use culprit_core::{QueryStat, QueryTrend, Result, Spread, Timeline, TimelineSource, WaitStat, Workload, format, t};
+use culprit_core::{QueryStat, QueryTrend, Result, Spread, Timeline, TimelineSource, WaitStat, Workload, t};
 use mysql_async::{Conn, Value};
 
 use crate::connect::TAG;
@@ -176,7 +176,7 @@ pub struct Collected {
     pub lock_ms: f64,
     /// A real statement for each kept query, to plan it.
     pub samples: Vec<(String, String)>,
-    pub threshold_note: String,
+    pub threshold_note: culprit_core::i18n::Message,
 }
 
 /// The workload from logged runs, keeping the heaviest `top` statement shapes by time. The window is the one asked for
@@ -267,12 +267,16 @@ pub fn workload(
         })
         .collect();
     let threshold_note = match threshold_s {
-        Some(s) if s > 0.0 => t!("provider.mysql.slow_log.threshold", threshold = seconds_text(s)),
-        _ => t!("provider.mysql.slow_log.every_statement"),
+        Some(s) if s > 0.0 => {
+            culprit_core::message!("provider.mysql.slow_log.threshold", threshold = seconds_message(s))
+        }
+        _ => culprit_core::message!("provider.mysql.slow_log.every_statement"),
     };
     Collected {
         lock_ms: runs.iter().map(|r| r.lock_ms).sum(),
         workload: Workload {
+            source_label: None,
+            source_message: None,
             counter_set: None,
             history_inputs: Vec::new(),
             source: SOURCE.into(),
@@ -298,11 +302,14 @@ pub fn workload(
 }
 
 /// long_query_time as the server's setting reads: whole milliseconds under a second, seconds as set above.
-fn seconds_text(s: f64) -> String {
+fn seconds_message(s: f64) -> culprit_core::i18n::Message {
     if s < 1.0 {
-        t!("common.duration.ms", n = format::digits(format!("{:.0}", s * 1000.0)))
+        culprit_core::message!(
+            "common.duration.ms",
+            n = culprit_core::i18n::MessageValue::Digits(format!("{:.0}", s * 1000.0))
+        )
     } else {
-        t!("common.duration.s", n = format::digits(format!("{s}")))
+        culprit_core::message!("common.duration.s", n = culprit_core::i18n::MessageValue::Digits(format!("{s}")))
     }
 }
 
@@ -465,7 +472,7 @@ mod tests {
         let trend = lookup.trend.as_ref().unwrap();
         assert_eq!(trend.executions.iter().flatten().sum::<f64>(), 40.0);
         assert_eq!(c.samples[0].1, "SELECT * FROM t WHERE id = 39", "the newest run is the sample");
-        assert!(c.threshold_note.contains("100 ms"));
+        assert!(c.threshold_note.render().contains("100 ms"));
         assert_eq!(w.min_logged_ms, Some(100.0), "totals are of runs slower than long_query_time");
     }
 
@@ -512,8 +519,9 @@ mod tests {
     fn slow_log_notes_say_what_it_keeps_in_english() {
         let t0 = 1_791_734_400.0;
         let runs = vec![run(t0 + 10.0, 2000.0, "SELECT a FROM t WHERE id = 1")];
-        let note =
-            |threshold: Option<f64>| workload(&runs, &iso(t0), &iso(t0 + 3600.0), threshold, 10, false).threshold_note;
+        let note = |threshold: Option<f64>| {
+            workload(&runs, &iso(t0), &iso(t0 + 3600.0), threshold, 10, false).threshold_note.render()
+        };
         assert_eq!(
             note(Some(0.1)),
             "The slow query log only keeps statements that ran longer than long_query_time (100 ms), so fast, frequent \

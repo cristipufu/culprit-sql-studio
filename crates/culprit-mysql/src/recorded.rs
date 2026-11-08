@@ -3,7 +3,8 @@
 //! records when each global setting was last SET. Catalog and performance_schema only.
 
 use culprit_core::changes::epoch;
-use culprit_core::{ChangeEvent, EventAction, EventKind, EventSource, Result, t};
+use culprit_core::i18n::Message;
+use culprit_core::{ChangeEvent, EventAction, EventKind, EventSource, Result, message};
 use mysql_async::{Conn, Value};
 
 use crate::rows::{query, query_with};
@@ -121,26 +122,30 @@ pub async fn changes(conn: &mut Conn, database: &str, since: &str) -> Result<Vec
 }
 
 /// A table (or `view`) whose CREATE_TIME moved.
-fn table_title(table: &str, view: bool) -> String {
-    if view { t!("provider.mysql.change.view", view = table) } else { t!("provider.mysql.change.table", table = table) }
-}
-
-/// A stored procedure (or function) that was created (`new`) or altered.
-fn routine_title(name: &str, procedure: bool, new: bool) -> String {
-    match (procedure, new) {
-        (true, true) => t!("provider.mysql.change.procedure_created", name = name),
-        (true, false) => t!("provider.mysql.change.procedure_altered", name = name),
-        (false, true) => t!("provider.mysql.change.function_created", name = name),
-        (false, false) => t!("provider.mysql.change.function_altered", name = name),
+fn table_title(table: &str, view: bool) -> Message {
+    if view {
+        message!("provider.mysql.change.view", view = table)
+    } else {
+        message!("provider.mysql.change.table", table = table)
     }
 }
 
-fn trigger_title(name: &str, table: &str) -> String {
-    t!("provider.mysql.change.trigger", name = name, table = table)
+/// A stored procedure (or function) that was created (`new`) or altered.
+fn routine_title(name: &str, procedure: bool, new: bool) -> Message {
+    match (procedure, new) {
+        (true, true) => message!("provider.mysql.change.procedure_created", name = name),
+        (true, false) => message!("provider.mysql.change.procedure_altered", name = name),
+        (false, true) => message!("provider.mysql.change.function_created", name = name),
+        (false, false) => message!("provider.mysql.change.function_altered", name = name),
+    }
 }
 
-fn setting_title(name: &str) -> String {
-    t!("provider.mysql.change.setting", name = name)
+fn trigger_title(name: &str, table: &str) -> Message {
+    message!("provider.mysql.change.trigger", name = name, table = table)
+}
+
+fn setting_title(name: &str) -> Message {
+    message!("provider.mysql.change.setting", name = name)
 }
 
 #[cfg(test)]
@@ -151,15 +156,18 @@ mod tests {
     #[test]
     fn recorded_changes_say_what_changed_in_english() {
         assert_eq!(
-            table_title("shop.orders", false),
+            table_title("shop.orders", false).render(),
             "Table shop.orders was created or altered (its columns or indexes)"
         );
-        assert_eq!(table_title("shop.open_orders", true), "View shop.open_orders was created or altered");
-        assert_eq!(routine_title("shop.archive", true, true), "Procedure shop.archive was created");
-        assert_eq!(routine_title("shop.archive", true, false), "Procedure shop.archive was altered");
-        assert_eq!(routine_title("shop.total", false, true), "Function shop.total was created");
-        assert_eq!(routine_title("shop.total", false, false), "Function shop.total was altered");
-        assert_eq!(trigger_title("orders_audit", "shop.orders"), "Trigger orders_audit on shop.orders was created");
-        assert_eq!(setting_title("max_connections"), "max_connections was set");
+        assert_eq!(table_title("shop.open_orders", true).render(), "View shop.open_orders was created or altered");
+        assert_eq!(routine_title("shop.archive", true, true).render(), "Procedure shop.archive was created");
+        assert_eq!(routine_title("shop.archive", true, false).render(), "Procedure shop.archive was altered");
+        assert_eq!(routine_title("shop.total", false, true).render(), "Function shop.total was created");
+        assert_eq!(routine_title("shop.total", false, false).render(), "Function shop.total was altered");
+        assert_eq!(
+            trigger_title("orders_audit", "shop.orders").render(),
+            "Trigger orders_audit on shop.orders was created"
+        );
+        assert_eq!(setting_title("max_connections").render(), "max_connections was set");
     }
 }

@@ -140,8 +140,11 @@ impl Refine for Rule {
                 )),
                 Evidence::Cold { query, rows, log, once } => {
                     if let Some((w, q)) = s.workload.as_ref().and_then(|w| Some((w, w.query(&query)?))) {
-                        let (handle, rows, bytes) =
-                            (capitalize(&support::query_handle(q)), format::count(rows), format::bytes(log.bytes));
+                        let (handle, rows, bytes) = (
+                            support::query_handle_of(q).leading_words(),
+                            format::count(rows),
+                            format::bytes(log.bytes),
+                        );
                         target.summary.push(' ');
                         target.summary.push_str(&match log.per_row {
                             Some(per_row) => t!(
@@ -153,8 +156,8 @@ impl Refine for Rule {
                             ),
                             None => t!("refine.writes.cold", handle = handle, rows = rows, bytes = &bytes),
                         });
-                        target.metrics.push(culprit_core::Metric::new(
-                            t!("refine.writes.metric.wal_its_update_wrote"),
+                        target.metrics.push(culprit_core::Metric::said(
+                            culprit_core::key!("refine.writes.metric.wal_its_update_wrote"),
                             log.bytes,
                             culprit_core::Unit::Bytes,
                         ));
@@ -224,7 +227,7 @@ fn log_of_writers(snapshot: &Snapshot, writers: &[(&QueryStat, &'static str, f64
     let a_row = |bytes: f64, rows: Option<f64>| rows.filter(|r| *r > 0.0).map(|r| format::bytes(bytes / r));
     if let [(q, _, bytes)] = writers {
         let (handle, bytes, per_row) =
-            (capitalize(&support::query_handle(q)), format::bytes(*bytes), a_row(*bytes, q.rows));
+            (support::query_handle_of(q).leading_words(), format::bytes(*bytes), a_row(*bytes, q.rows));
         return Some(match per_row {
             Some(per_row) => {
                 t!("refine.writes.one_writer_per_row", handle = handle, bytes = bytes, log = log, per_row = per_row)

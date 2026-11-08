@@ -163,11 +163,11 @@ fn overlapping_index_finding(snapshot: &Snapshot, o: OverlappingIndex<'_>) -> Fi
     .join(" ");
     f.severity = o.severity;
     f.impact.score = o.score;
-    f.impact.label = t!("check.overlapping_index.impact", size = format::bytes(o.size));
+    f.impact.set_label(t!("check.overlapping_index.impact", size = format::bytes(o.size)));
     f.confidence = o.confidence;
     f.metrics.push(Metric::new(t!("common.metric.reads_of", index = &a.name), o.reads, Unit::Count));
     f.metrics.push(Metric::new(t!("common.metric.reads_of", index = &b.name), o.wider_reads, Unit::Count));
-    f.metrics.push(Metric::new(t!("common.metric.size"), o.size, Unit::Bytes));
+    f.metrics.push(Metric::said(culprit_core::key!("common.metric.size"), o.size, Unit::Bytes));
     f.fix = Some(Fix {
         summary: t!("check.overlapping_index.fix", index = &a.name, wider = &b.name),
         sql: Some(hide_index_sql(snapshot, a)),

@@ -6,12 +6,13 @@ in [`locales/`](../locales).
 
 ## Adding a language
 
-1. Copy `locales/en.json` to `locales/<code>.json`, where `<code>` is the language's code (`it`, `pt-BR`, `zh-Hans`).
+1. Copy `locales/en.json` to `locales/<code>.json`, using a canonical BCP 47 tag (`it`, `pt-BR`, `zh-Hans`,
+   `sr-Latn-RS`). Tags are case sensitive; `pt-br` is not canonical.
 2. Fill in `_meta`:
    - `name`: the language's name for itself (`Italiano`);
    - `english_name`: its name in English (`Italian`);
-   - `plural`: `one_is_1` when "one" is exactly 1 (English, German, Italian, Spanish), or `one_below_2` when it covers 0
-     and 1 (French);
+   - `plural`: the CLDR cardinal rule locale (`it`, `fr`, `pl`, `ar`, `pt-PT`); the shared CLDR data supplies its rules;
+   - `direction`: `ltr` or `rtl`;
    - `decimal` and `group`: the decimal and thousands separators (`","` and `"."` in German; `","` and a narrow
      no-break space in French).
 3. Translate the values. Leave out any you haven't translated yet: those messages read in English.
@@ -25,14 +26,24 @@ python3 dev/catalog.py status                 # how much of English each languag
 python3 dev/catalog.py todo it ui.editor. > todo.json   # what Italian lacks (optionally under a prefix), as {key: English}
 python3 dev/catalog.py add it todo.json       # after translating the values in place: into locales/it.json, sorted
 python3 dev/catalog.py prune it               # drop messages English no longer has, or whose arguments English changed
+python3 dev/catalog.py stale it               # translations whose reviewed English changed, even with the same arguments
+python3 dev/catalog.py stale --check           # fail if any translation needs source review
 ```
 
 A language's terminology (how it says "index", "wait", "scan", "finding"; formal or informal address) is kept in
 `locales/glossary/<code>.md`, so every message says a thing the same way. Start one for a new language, and read it
 before changing an existing one.
 
-That's all: the build compiles every file in `locales/` into the app and the CLI. Nothing is read from disk when Culprit
-runs, and CI checks that every language is inside the built app.
+`todo` includes missing and stale messages. Its `_meta.source_hashes` records the English exported for that batch;
+leave this metadata intact while translating. `add` refuses a batch if English changed after export. It updates only
+the submitted keys' fingerprints in the language catalog. A manually authored batch without metadata records review
+against the current English. `review <code>` records a review of the entire catalog; use it only after reviewing every
+message. `track <code>` bootstraps older catalogs from Git history without marking old translations as current.
+
+The build embeds every language. Rust includes the complete catalogs; the app includes UI/common messages and keys
+referenced by frontend code or generated engine facts. Backend prose arrives already rendered by Rust. Contributor
+fingerprints are excluded from runtime assets. Nothing loads a catalog from disk at runtime, and the bundle check
+verifies each language's selected messages in the built app.
 
 ## The message format
 
@@ -48,6 +59,12 @@ translation tools know:
 Keep every `{argument}` a message has, spelled as in English; reorder them as the language needs. Braces are never
 literal text. Write a translation as a whole sentence in your language, not word for word: arguments that are phrases
 (`{since}`: "since the server last restarted 3 days ago") are themselves translated messages.
+
+Cardinal cases are `zero`, `one`, `two`, `few`, `many` and `other`; include the categories your language needs and always
+include `other`. Exact selectors such as `=0` take precedence. Rules use the absolute numeric value and its decimal
+operands. Numeric arguments do not preserve visible trailing zeros (`1.0` is `1`) or compact-number exponents.
+Both runtimes use the same pinned CLDR data in `locales/.cldr/`; `python3 dev/update-plurals.py` regenerates it and the
+upstream sample vectors in `locales/.tests/plurals.json`. Review the data/version and license when updating it.
 
 ## Writing code that shows text
 
@@ -81,11 +98,22 @@ f.title = t!("check.heap_table.title.no_clustered_index", table = &t.name, rows 
 - **A counted noun** is a plural message (`common.noun.time`: `{n, plural, one {time} other {times}}`), handed to helpers
   by key with `key!("common.noun.time")` and said with `support::counted`.
 - **Engine vocabulary** (MySQL's "rows examined" against "pages") comes from the engine's facts, not ad-hoc strings.
-- **No logic reads text**: decide on facts, then word them.
+- **No logic reads text**: decide on facts, then word them. Metrics carry their catalog key through `Metric::said` or
+  `Metric::keyed`; de-duplication uses that identity, retaining unkeyed custom metrics. Impact labels that refinement
+  updates carry a key through `Impact::set_keyed_label`. Use `Impact::set_label` for custom wording so it clears any
+  previous label identity.
 - **Render text as text**: the app shows messages as text nodes, never as HTML. A sentence with an element inside (a
   name in bold, a command in `<code>`) is still one message: `tx("ui.drift_panel.compare", {}, { connection: <b>{name}</b> })`
   (`app/src/lib/message-parts.tsx`) puts each element where its `{argument}` is.
 - SQL a fix gives is never translated: it is an argument.
+- A retained observation uses `message!("key", ...)` and `i18n::Message`, with unformatted `MessageValue` arguments,
+  instead of storing the result of `t!`. Recorded event titles/details and collector notes render when read. Raw SQL,
+  identifiers and user-authored marks remain text. Saved data uses the current format; older formats are not supported.
+- Workload source identity stays in `source`; backend text uses `source_name()` and the app uses `workloadSource()`.
+  The rendered `source_label` is refreshed for the reader. A scoped provider label retains its arguments in
+  `source_message`, so translating a node/role label never changes the counters' identity.
+- RTL catalogs set the page's direction. Use logical CSS properties for layout; SQL, identifiers and coordinate plots
+  retain LTR isolation. English fallback messages are isolated within an RTL paragraph.
 
 ## Checks: decide, then render
 

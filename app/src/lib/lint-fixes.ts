@@ -1,13 +1,13 @@
 // The editor's DDL quick fixes as text changes: which statement a finding's safe SQL replaces, or, for an unindexed
 // foreign key, where its supporting CREATE INDEX goes. Pure, so the editor only dispatches what this returns.
 import type { Finding } from "../gen/Finding";
-import { locateFindingSpan, statementEndOffset } from "./editor-sql";
+import { locateStatementSpan } from "./editor-sql";
 import { t } from "./i18n";
 
 /** One edit of the document: replace `from`..`to` with `insert` (an insertion when they are equal). */
 export type TextChange = { from: number; to: number; insert: string };
 
-type Fixable = Pick<Finding, "id" | "summary" | "subject" | "fix">;
+type Fixable = Pick<Finding, "id" | "facts" | "fix">;
 
 /** A foreign key's fix adds an index before the statement instead of rewriting it. */
 function addsIndex(f: Fixable): boolean {
@@ -18,13 +18,13 @@ function addsIndex(f: Fixable): boolean {
 export function lintFix(doc: string, f: Fixable): { change: TextChange; message: string } | null {
   const fixSql = f.fix?.sql?.trim();
   if (!fixSql) return null;
-  const span = locateFindingSpan(doc, f);
+  const span = locateStatementSpan(doc, f);
+  if (!span) return null;
   if (addsIndex(f)) {
-    const at = span ? span[0] : 0;
+    const at = span[0];
     return { change: { from: at, to: at, insert: `${fixSql}\n` }, message: t("ui.lint_fixes.added_index") };
   }
-  if (!span) return null;
-  return { change: { from: span[0], to: statementEndOffset(doc, span[0], span[1]), insert: fixSql }, message: t("ui.lint_fixes.applied") };
+  return { change: { from: span[0], to: span[1], insert: fixSql }, message: t("ui.lint_fixes.applied") };
 }
 
 /**
@@ -37,19 +37,20 @@ export function allLintFixes(doc: string, findings: readonly Fixable[]): { chang
   for (const f of findings) {
     const fixSql = f.fix?.sql?.trim();
     if (!fixSql) continue;
-    const span = locateFindingSpan(doc, f);
+    const span = locateStatementSpan(doc, f);
+    if (!span) continue;
     if (addsIndex(f)) {
-      const from = span ? span[0] : 0;
-      const to = span ? statementEndOffset(doc, span[0], span[1]) : 0;
+      const from = span[0];
+      const to = span[1];
       const entry = byStart.get(from) ?? { from, to, prefixes: [], replacement: null };
       if (!entry.prefixes.includes(fixSql)) {
         entry.prefixes.push(fixSql);
         applied += 1;
       }
       byStart.set(from, entry);
-    } else if (span) {
+    } else {
       const from = span[0];
-      const to = statementEndOffset(doc, from, span[1]);
+      const to = span[1];
       const entry = byStart.get(from) ?? { from, to, prefixes: [], replacement: null };
       entry.to = Math.max(entry.to, to);
       if (entry.replacement === null) {

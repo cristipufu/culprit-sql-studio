@@ -218,7 +218,7 @@ pub(super) fn waits_missing(s: &Snapshot) -> Tile {
                 let mut tile = Tile::new(
                     TileKey::Waits,
                     TileStatus::Unavailable,
-                    t!("view.dashboard.waits.not_counting", family = family, reason = sentence(&m.reason)),
+                    t!("view.dashboard.waits.not_counting", family = family, reason = m.reason.clone()),
                 );
                 tile.detail = m.fix.clone();
                 tile
@@ -234,7 +234,7 @@ pub(super) fn waits_missing(s: &Snapshot) -> Tile {
                 let mut tile = Tile::new(
                     TileKey::Waits,
                     TileStatus::Unavailable,
-                    t!("view.dashboard.waits.unreadable", reason = sentence(&m.reason)),
+                    t!("view.dashboard.waits.unreadable", reason = m.reason.clone()),
                 );
                 tile.detail = m.fix.clone();
                 tile

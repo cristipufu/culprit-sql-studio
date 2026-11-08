@@ -1,6 +1,6 @@
 //! QPM's independent, evictable plan cache. These are not pg_stat_statements lifetime totals or measured operators.
 use crate::{probe::Probe, sources};
-use culprit_core::{Coverage, Error, Plan, PlanHistory, PlanHistoryKind, PlanKind, PlanVariant, Result, Workload, t};
+use culprit_core::{Coverage, Error, Plan, PlanHistory, PlanHistoryKind, PlanKind, PlanVariant, Result, Workload};
 use culprit_postgres::wire::{ObservedSession, query_bounded};
 use std::collections::BTreeMap;
 
@@ -14,9 +14,9 @@ fn authorize(probe: &Probe) -> Result<()> {
     if probe.statement_role.is_some() {
         return Err(Error::new(
             culprit_core::ErrorCode::PermissionDenied,
-            t!("provider.yugabyte.error.plan_history_privilege"),
+            culprit_core::message!("provider.yugabyte.error.plan_history_privilege"),
         )
-        .with_hint(t!("provider.yugabyte.error.plan_history_privilege_hint")));
+        .with_hint(culprit_core::message!("provider.yugabyte.error.plan_history_privilege_hint")));
     }
     Ok(())
 }
@@ -27,22 +27,33 @@ pub(crate) async fn collect(
     workload: &mut Workload,
     coverage: &mut Coverage,
 ) {
-    let source = format!(
-        "yb_pg_stat_plans ({})",
-        if probe.global {
-            "configured cluster views".into()
+    let source_message = culprit_core::message!(
+        "model.observation.source.ysql",
+        relation = "yb_pg_stat_plans",
+        scope = if probe.global {
+            "cluster"
+        } else if probe.node.is_some() {
+            "node"
         } else {
-            format!("node {}", probe.node.as_deref().unwrap_or("unknown"))
-        }
+            "unknown"
+        },
+        node = probe.node.as_deref().unwrap_or_default(),
+        limited = "no",
+        role = ""
     );
+    let source = source_message.render();
+    let note_message = culprit_core::message!("provider.yugabyte.plan_history.note");
     for q in &mut workload.queries {
         q.plans.clear();
         q.plan_history = Some(PlanHistory {
+            source_message: Some(source_message.clone()),
+            note_message: Some(note_message.clone()),
+
             source: source.clone(),
             kind: PlanHistoryKind::Cache,
             captured_plan_id: None,
             captured_plan: None,
-            note: t!("provider.yugabyte.plan_history.note"),
+            note: note_message.render(),
         });
     }
     let ids: Vec<_> = workload.queries.iter().filter_map(|q| q.id.parse::<i64>().ok()).collect();
@@ -80,7 +91,8 @@ pub(crate) async fn collect(
     let Some(rows) = coverage.read_rows(&sources::PLAN_HISTORY, result.map(|(rows, _)| rows)) else {
         for q in &mut workload.queries {
             if let Some(history) = &mut q.plan_history {
-                history.note = t!("provider.yugabyte.plan_history.unreadable");
+                let message = culprit_core::message!("provider.yugabyte.plan_history.unreadable");
+                history.set_note(message);
             }
         }
         return;
@@ -123,12 +135,12 @@ pub(crate) async fn collect(
         q.plans = plans.remove(&q.id).unwrap_or_default();
     }
     if partial {
-        coverage.partial(&sources::PLAN_HISTORY, t!("provider.yugabyte.coverage.plan_history_partial"));
-        let partial = t!("provider.yugabyte.plan_history.partial");
+        coverage
+            .partial(&sources::PLAN_HISTORY, culprit_core::message!("provider.yugabyte.coverage.plan_history_partial"));
+        let partial = culprit_core::message!("provider.yugabyte.plan_history.partial");
         for q in &mut workload.queries {
             if let Some(history) = &mut q.plan_history {
-                history.note.push(' ');
-                history.note.push_str(&partial);
+                history.append_note(partial.clone());
             }
         }
     }
@@ -176,30 +188,42 @@ pub(crate) async fn capture(
     }
     .await;
     let Ok((rows, truncated)) = result else {
-        coverage.partial(&sources::PLAN_HISTORY, t!("provider.yugabyte.coverage.plan_bodies_unfetched"));
+        coverage.partial(
+            &sources::PLAN_HISTORY,
+            culprit_core::message!("provider.yugabyte.coverage.plan_bodies_unfetched"),
+        );
         return;
     };
     if truncated {
-        coverage.partial(&sources::PLAN_HISTORY, t!("provider.yugabyte.coverage.plan_bodies_budget"));
+        coverage
+            .partial(&sources::PLAN_HISTORY, culprit_core::message!("provider.yugabyte.coverage.plan_bodies_budget"));
     }
     if rows.len() < wanted.len() {
-        coverage.partial(&sources::PLAN_HISTORY, t!("provider.yugabyte.coverage.plan_entries_missing"));
+        coverage
+            .partial(&sources::PLAN_HISTORY, culprit_core::message!("provider.yugabyte.coverage.plan_entries_missing"));
     }
     let mut bodies = BTreeMap::new();
     for row in rows {
         let Some(raw) = row.text("plan") else {
-            coverage.partial(&sources::PLAN_HISTORY, t!("provider.yugabyte.coverage.plan_body_hidden"));
+            coverage
+                .partial(&sources::PLAN_HISTORY, culprit_core::message!("provider.yugabyte.coverage.plan_body_hidden"));
             continue;
         };
         if !budget.retain(raw.len()) {
-            coverage.partial(&sources::PLAN_HISTORY, t!("provider.yugabyte.coverage.plan_bodies_shared_budget"));
+            coverage.partial(
+                &sources::PLAN_HISTORY,
+                culprit_core::message!("provider.yugabyte.coverage.plan_bodies_shared_budget"),
+            );
             break;
         }
         match decode_stored(&raw) {
             Ok(plan) => {
                 bodies.insert((row.string("query"), row.string("id")), plan);
             }
-            Err(_) => coverage.partial(&sources::PLAN_HISTORY, t!("provider.yugabyte.coverage.plan_body_truncated")),
+            Err(_) => coverage.partial(
+                &sources::PLAN_HISTORY,
+                culprit_core::message!("provider.yugabyte.coverage.plan_body_truncated"),
+            ),
         }
     }
     for q in workload.queries.iter_mut().take(requested) {
@@ -214,8 +238,8 @@ pub(crate) async fn capture(
 
 fn decode_stored(raw: &str) -> Result<Plan> {
     let mut plan = crate::plan::parse(raw, PlanKind::Estimated, None).map_err(|_| {
-        Error::invalid(t!("provider.yugabyte.error.retained_plan_unreadable"))
-            .with_hint(t!("provider.yugabyte.error.retained_plan_unreadable_hint"))
+        Error::invalid(culprit_core::message!("provider.yugabyte.error.retained_plan_unreadable"))
+            .with_hint(culprit_core::message!("provider.yugabyte.error.retained_plan_unreadable_hint"))
     })?;
     crate::plan::redacted_constants(&mut plan);
     Ok(plan)
@@ -223,8 +247,10 @@ fn decode_stored(raw: &str) -> Result<Plan> {
 
 pub(crate) async fn stored(session: &ObservedSession, probe: &Probe, query: &str, id: &str) -> Result<Option<Plan>> {
     authorize(probe)?;
-    let query = query.parse::<i64>().map_err(|_| Error::invalid(t!("provider.yugabyte.error.query_id")))?;
-    let id = id.parse::<i64>().map_err(|_| Error::invalid(t!("provider.yugabyte.error.plan_id")))?;
+    let query =
+        query.parse::<i64>().map_err(|_| Error::invalid(culprit_core::message!("provider.yugabyte.error.query_id")))?;
+    let id =
+        id.parse::<i64>().map_err(|_| Error::invalid(culprit_core::message!("provider.yugabyte.error.plan_id")))?;
     let sql = format!(
         "SELECT plan FROM {} WHERE dbid={} AND queryid={query} AND planid={id} AND {}
         ORDER BY last_used DESC LIMIT 1",
@@ -235,7 +261,7 @@ pub(crate) async fn stored(session: &ObservedSession, probe: &Probe, query: &str
     let (rows, truncated) = query_bounded(&session.client, &sql, 1).await?;
     crate::probe::require_all_stats(&session.client).await?;
     if truncated {
-        return Err(Error::invalid(t!("provider.yugabyte.error.stored_plan_too_big")));
+        return Err(Error::invalid(culprit_core::message!("provider.yugabyte.error.stored_plan_too_big")));
     }
     let Some(raw) = rows.first().and_then(|r| r.text("plan")) else {
         return Ok(None);

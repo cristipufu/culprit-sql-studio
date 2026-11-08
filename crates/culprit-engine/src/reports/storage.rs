@@ -6,6 +6,56 @@ use serde::{Deserialize, Serialize, de::Error};
 use serde_json::Value;
 
 const KEY: &str = "_culprit_store";
+// This encoding stores catalog arguments instead of rendered observation text.
+const STORAGE_VERSION: u32 = 2;
+
+fn retained_snapshot(snapshot: &culprit_core::Snapshot) -> serde_json::Result<Value> {
+    let mut snapshot = snapshot.clone();
+    snapshot.operations.clear_recorded_text();
+    if let Some(workload) = &mut snapshot.workload {
+        workload.source_label = None;
+        for query in &mut workload.queries {
+            if let Some(plan) = &mut query.plan {
+                plan.clear_recorded_text();
+            }
+            if let Some(history) = &mut query.plan_history {
+                if history.source_message.is_some() {
+                    history.source.clear();
+                }
+                if history.note_message.is_some() {
+                    history.note.clear();
+                }
+                if let Some(plan) = &mut history.captured_plan {
+                    plan.clear_recorded_text();
+                }
+            }
+        }
+    }
+    for missing in &mut snapshot.server.missing {
+        if missing.reason_message.is_some() {
+            missing.reason.clear();
+        }
+        if missing.fix_message.is_some() {
+            missing.fix = None;
+        }
+        if let Some(action) = &mut missing.action
+            && action.detail_message.is_some()
+        {
+            action.detail = None;
+        }
+    }
+    for note in &mut snapshot.notes {
+        if note.message_source.is_some() {
+            note.message.clear();
+        }
+    }
+    for source in &mut snapshot.sources {
+        if source.reason_message.is_some() {
+            source.reason = None;
+        }
+    }
+    serde_json::to_value(snapshot)
+}
 
 #[derive(Serialize, Deserialize)]
 struct Stored {
@@ -127,15 +177,20 @@ fn apply(value: &mut Value, diff: Difference) -> serde_json::Result<()> {
 
 pub(super) fn encode(report: &Report) -> serde_json::Result<Vec<u8>> {
     let mut value = serde_json::to_value(super::display(report))?;
+    value["snapshot"] = retained_snapshot(&report.snapshot)?;
     if let Some(e) = &report.evidence {
-        let input = serde_json::to_value(&e.input)?;
+        let input = retained_snapshot(&e.input)?;
         let collected =
-            e.collected.as_ref().map(|s| serde_json::to_value(s).map(|s| difference(&input, &s))).transpose()?;
+            e.collected.as_ref().map(|s| retained_snapshot(s).map(|s| difference(&input, &s))).transpose()?;
+        let mut recorded_changes = e.recorded_changes.clone();
+        for event in &mut recorded_changes {
+            event.clear_rendered_text();
+        }
         let retained = Stored {
-            version: 1,
+            version: STORAGE_VERSION,
             input: difference(&value["snapshot"], &input),
             collected,
-            recorded_changes: e.recorded_changes.clone(),
+            recorded_changes,
         };
         value[KEY] = serde_json::to_value(retained)?;
     }
@@ -147,7 +202,7 @@ pub(super) fn expand(value: &mut Value) -> serde_json::Result<()> {
         return Ok(());
     };
     let stored: Stored = serde_json::from_value(stored)?;
-    if stored.version != 1 {
+    if stored.version != STORAGE_VERSION {
         return Err(serde_json::Error::custom(culprit_core::t!("engine.reports.bad_encoding")));
     }
     let mut input = value
@@ -170,7 +225,18 @@ pub(super) fn expand(value: &mut Value) -> serde_json::Result<()> {
 pub(super) fn decode(bytes: &[u8]) -> serde_json::Result<Report> {
     let mut value = serde_json::from_slice(bytes)?;
     expand(&mut value)?;
-    let mut report = serde_json::from_value(value)?;
+    let mut report: Report = serde_json::from_value(value)?;
+    report.summary.render_recorded_messages();
+    report.snapshot.render_recorded_messages();
+    if let Some(evidence) = &mut report.evidence {
+        evidence.input.render_recorded_messages();
+        if let Some(collected) = &mut evidence.collected {
+            collected.render_recorded_messages();
+        }
+        for event in &mut evidence.recorded_changes {
+            event.refresh_language();
+        }
+    }
     share_native_text(&mut report);
     Ok(report)
 }
@@ -181,7 +247,7 @@ pub(super) fn analysis_input(mut value: Value) -> serde_json::Result<crate::anal
     let provenance = serde_json::from_value(value.get_mut("provenance").map(Value::take).unwrap_or(Value::Null))?;
     let mut input = if let Some(stored) = value.as_object_mut().and_then(|o| o.remove(KEY)) {
         let stored: Stored = serde_json::from_value(stored)?;
-        if stored.version != 1 {
+        if stored.version != STORAGE_VERSION {
             return Err(serde_json::Error::custom(culprit_core::t!("engine.reports.bad_encoding")));
         }
         let mut snapshot = value
@@ -260,6 +326,34 @@ fn share_snapshots<'a>(snapshots: impl IntoIterator<Item = &'a mut culprit_core:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recorded_notes_keep_raw_arguments_and_render_after_loading_or_replay() {
+        use culprit_core::i18n::{MessageValue, scope};
+        let mut snapshot: culprit_core::Snapshot =
+            serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
+        snapshot.notes.push(culprit_core::CollectorNote::recorded(
+            "query log",
+            culprit_core::message!("engine.query_log.statements", n = 1234, count = MessageValue::Count(1234.0)),
+        ));
+        let report = scope("en", || culprit_checks::analyze(snapshot));
+        let encoded = encode(&report).unwrap();
+        let stored: Value = serde_json::from_slice(&encoded).unwrap();
+        let note =
+            stored["snapshot"]["notes"].as_array().unwrap().iter().find(|n| n["collector"] == "query log").unwrap();
+        assert_eq!(note["message"], "");
+        assert_eq!(note["message_source"]["arguments"]["count"]["value"], 1234.0);
+        let en = scope("en", || decode(&encoded).unwrap());
+        let fr = scope("fr", || decode(&encoded).unwrap());
+        let message =
+            |r: &Report| r.snapshot.notes.iter().find(|n| n.collector == "query log").unwrap().message.clone();
+        assert_ne!(message(&en), message(&fr));
+        let replay = scope("fr", || {
+            let input = analysis_input(serde_json::from_slice(&encoded).unwrap()).unwrap();
+            culprit_checks::analyze(input.snapshot)
+        });
+        assert_eq!(message(&fr), message(&replay));
+    }
     #[test]
     fn differences_preserve_null_removal_reordering_and_array_length_changes() {
         let values = [
@@ -352,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn replay_ignores_obsolete_output_but_rejects_invalid_retained_data() {
+    fn replay_recomputes_output_and_rejects_invalid_retained_data() {
         let snapshot: culprit_core::Snapshot =
             serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
         let report = culprit_checks::analyze(snapshot);
@@ -364,7 +458,7 @@ mod tests {
         assert_eq!(input.snapshot.id, report.analysis_input().id);
         assert_eq!(input.origin, culprit_core::AnalysisOrigin::RetainedInput);
         let mut unsupported = value.clone();
-        unsupported[KEY]["version"] = serde_json::json!(2);
+        unsupported[KEY]["version"] = serde_json::json!(STORAGE_VERSION + 1);
         assert!(analysis_input(unsupported).is_err());
         value[KEY]["input"] =
             serde_json::json!({"changes": [{"kind": "resize", "path": ["tables"], "length": usize::MAX}]});

@@ -15,7 +15,8 @@ DO $$ BEGIN
   END IF;
 END $$;
 GRANT pg_read_all_stats, yb_db_admin TO culprit_cluster_monitor;
-GRANT SELECT ON public.cluster_probe TO culprit_cluster_app;
+-- INSERT permits an empty, explicitly held COPY for pooled-worker observation; no rows are sent by the test.
+GRANT SELECT, INSERT ON public.cluster_probe TO culprit_cluster_app;
 ALTER ROLE culprit_cluster_monitor SET yb_enable_global_views=on;
 SELECT yb_create_global_view('public','pg_stat_statements_info')
 WHERE to_regclass('public."gv$pg_stat_statements_info"') IS NULL;

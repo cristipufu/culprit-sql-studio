@@ -4,20 +4,27 @@ use std::collections::BTreeMap;
 
 use super::Lang;
 
-/// How a language picks a plural case: from its catalog's `_meta.plural`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PluralRule {
-    /// "one" is exactly 1 (English, German, Spanish).
-    OneIs1,
-    /// "one" is 0 and anything below 2 (French).
-    OneBelow2,
-}
-
 /// An argument a message is given: text as it is, or a number (for `plural`, or written in the language's digits).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Arg {
     Text(String),
     Number(f64),
+}
+
+/// A catalog owns the complete label in either position, including its spelling and word order.
+#[derive(Clone, Copy)]
+pub enum LabelPosition {
+    Inline,
+    Initial,
+}
+
+impl From<LabelPosition> for Arg {
+    fn from(position: LabelPosition) -> Self {
+        match position {
+            LabelPosition::Inline => "inline".into(),
+            LabelPosition::Initial => "initial".into(),
+        }
+    }
 }
 
 impl From<&str> for Arg {
@@ -90,14 +97,6 @@ pub(crate) fn format_number_with(n: f64, decimal: &str, group: &str) -> String {
     if fraction.is_empty() { format!("{sign}{grouped}") } else { format!("{sign}{grouped}{decimal}{fraction}") }
 }
 
-fn category(n: f64, rule: PluralRule) -> &'static str {
-    let one = match rule {
-        PluralRule::OneIs1 => n == 1.0,
-        PluralRule::OneBelow2 => (0.0..2.0).contains(&n),
-    };
-    if one { "one" } else { "other" }
-}
-
 fn render(nodes: &[Node], args: &[(&str, Arg)], lang: &Lang, count: Option<f64>, out: &mut String) {
     let arg = |name: &str| args.iter().find(|(n, _)| *n == name).map(|(_, a)| a);
     for node in nodes {
@@ -118,8 +117,8 @@ fn render(nodes: &[Node], args: &[(&str, Arg)], lang: &Lang, count: Option<f64>,
                     Some(Arg::Text(text)) => text.parse().unwrap_or(f64::NAN),
                     None => f64::NAN,
                 };
-                let exact = cases.get(&format!("={}", format_number_with(n, ".", "")));
-                let chosen = exact.or_else(|| cases.get(category(n, lang.plural))).or_else(|| cases.get("other"));
+                let exact = cases.get(&format!("={n}"));
+                let chosen = exact.or_else(|| cases.get(lang.plural.category(n))).or_else(|| cases.get("other"));
                 if let Some(chosen) = chosen {
                     render(chosen, args, lang, Some(n), out);
                 }

@@ -88,7 +88,7 @@ fn compile_pressure_finding(snapshot: &Snapshot, c: CompileContext) -> Finding {
     // Historical instance-wide context, without assigning the server's cost to this database.
     f.severity = Severity::Low;
     f.impact.score = base_score(f.severity) + c.ratio / 5.0;
-    f.impact.label = t!("check.compile_pressure.impact", percent = &percent);
+    f.impact.set_label(t!("check.compile_pressure.impact", percent = &percent));
     f.confidence = Confidence::Medium;
     f.metrics = vec![
         Metric::said(key!("check.compile_pressure.metric.compiles"), c.ratio, Unit::Count),

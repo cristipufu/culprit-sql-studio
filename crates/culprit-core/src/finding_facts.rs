@@ -27,6 +27,23 @@ pub struct FindingFacts {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub nothing_to_check: Option<NothingToCheck>,
+    // The exact migration statement and its source location. Prose never identifies executable edits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub statement: Option<StatementEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub uncosted_plan_explained: Option<bool>,
+}
+
+/// An exact SQL source range: zero-based UTF-16 start and exclusive end, plus its one-based line number.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct StatementEvidence {
+    pub sql: String,
+    pub start: usize,
+    pub end: usize,
+    pub line: usize,
 }
 
 /// Why a finding's verify step says there is nothing to check for now ([`FindingFacts::nothing_to_check`]).

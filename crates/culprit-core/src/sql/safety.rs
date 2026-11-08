@@ -1,10 +1,16 @@
 //! Statement boundary, read-only classification, T-SQL marker injection, and session-statement detection.
 
 use crate::sql::lexer::{Token, readings};
-use crate::{Engine, Error, Result, sql::StatementCheck, t};
+use crate::{
+    Engine, Error, ErrorDetail, Result,
+    sql::{StatementCheck, StatementProblem},
+    t,
+};
 
 fn too_many() -> Error {
-    Error::invalid(t!("core.sql.several_statements")).with_hint(t!("core.sql.several_statements_hint"))
+    Error::invalid(t!("core.sql.several_statements"))
+        .with_hint(t!("core.sql.several_statements_hint"))
+        .with_detail(ErrorDetail::Statement(StatementProblem::Multiple))
 }
 
 /// The one statement in `text`, without trailing semicolons or trailing comments. Errors when the text holds more than
@@ -31,7 +37,9 @@ pub fn single_statement(text: &str, engine: Engine) -> Result<&str> {
     let statement = text[..cut.unwrap_or(text.len())].trim();
     let readings = readings(statement, engine)?;
     if statement.is_empty() || readings.iter().any(|tokens| tokens.is_empty()) {
-        return Err(Error::invalid(t!("core.sql.no_statement")));
+        return Err(
+            Error::invalid(t!("core.sql.no_statement")).with_detail(ErrorDetail::Statement(StatementProblem::Empty))
+        );
     }
     // T-SQL runs consecutive statements without a semicolon between them: `SELECT 1 COMMIT CREATE TABLE …` is three.
     if engine == Engine::Mssql
@@ -448,7 +456,17 @@ pub fn check(text: &str, engine: Engine) -> StatementCheck {
     let statement = match single_statement(text, engine) {
         Ok(statement) => statement,
         Err(e) => {
-            return StatementCheck { reads_only: false, verb: String::new(), warning: None, problem: Some(e.message) };
+            let problem_kind = match e.detail {
+                Some(ErrorDetail::Statement(problem)) => Some(problem),
+                _ => None,
+            };
+            return StatementCheck {
+                reads_only: false,
+                verb: String::new(),
+                warning: None,
+                problem: Some(e.message),
+                problem_kind,
+            };
         }
     };
     let reads = reads_only(statement, engine);
@@ -473,7 +491,7 @@ pub fn check(text: &str, engine: Engine) -> StatementCheck {
         "SELECT" | "WITH" | "TABLE" | "VALUES" | "SHOW" | "EXPLAIN" => Some(t!("core.sql.warning.may_write")),
         _ => None,
     };
-    StatementCheck { reads_only: reads, verb, warning, problem: None }
+    StatementCheck { reads_only: reads, verb, warning, problem: None, problem_kind: None }
 }
 
 /// The keywords after which [`mark_mssql_statements`] puts its marker: one starts every statement Query Store records.

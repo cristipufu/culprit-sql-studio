@@ -326,6 +326,7 @@
       "impact": {
         "db_time_share": 0.44029066258942773,
         "label": "44% of DB time",
+        "label_key": "support.impact.share",
         "score": 66.35440170700268,
         "time_ms_per_day": null
       },
@@ -339,18 +340,21 @@
           "value": 20824064.0
         },
         {
+          "key": "common.metric.average_duration",
           "label": "Average duration",
           "text": null,
           "unit": "ms",
           "value": 331.8799853551402
         },
         {
+          "key": "check.big_result.metric.rows_per_run",
           "label": "Rows per run",
           "text": null,
           "unit": "rows",
           "value": 246582.89719626168
         },
         {
+          "key": "check.big_result.metric.bytes_per_run",
           "label": "Bytes per run (estimated)",
           "text": null,
           "unit": "bytes",
@@ -406,6 +410,7 @@
       "impact": {
         "db_time_share": 0.23358130099961572,
         "label": "37.7 s of database time over the 5 hours since statistics were reset (23%)",
+        "label_key": "support.impact.share",
         "score": 48.33024943031183,
         "time_ms_per_day": null
       },
@@ -413,18 +418,21 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "common.metric.share_of_db_time",
           "label": "Share of DB time",
           "text": null,
           "unit": "ratio",
           "value": 0.23358130099961572
         },
         {
+          "key": "check.filtered_scan.metric.size_basis",
           "label": "Captured scan size basis",
           "text": null,
           "unit": "rows",
           "value": 1999995.0
         },
         {
+          "key": "check.filtered_scan.metric.queries",
           "label": "Queries",
           "text": null,
           "unit": "count",
@@ -473,18 +481,21 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "check.planning_time.metric.share",
           "label": "Planning share",
           "text": null,
           "unit": "ratio",
           "value": 0.9994043718675306
         },
         {
+          "key": "check.planning_time.metric.per_plan",
           "label": "Per plan",
           "text": null,
           "unit": "ms",
           "value": 89.91034895333338
         },
         {
+          "key": "check.planning_time.metric.plans",
           "label": "Plans",
           "text": null,
           "unit": "count",
@@ -539,6 +550,7 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "check.replica_lag.metric.wal_kept",
           "label": "WAL kept",
           "text": null,
           "unit": "bytes",
@@ -583,30 +595,35 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "check.hot_updates.metric.updates",
           "label": "Updates",
           "text": null,
           "unit": "count",
           "value": 21428.0
         },
         {
+          "key": "check.hot_updates.metric.hot",
           "label": "HOT",
           "text": null,
           "unit": "ratio",
           "value": 0.0
         },
         {
+          "key": "check.hot_updates.metric.indexes",
           "label": "Indexes",
           "text": null,
           "unit": "count",
           "value": 2.0
         },
         {
+          "key": "check.hot_updates.metric.fillfactor",
           "label": "Fillfactor",
           "text": null,
           "unit": "count",
           "value": 100.0
         },
         {
+          "key": "refine.writes.metric.wal_its_update_wrote",
           "label": "WAL its update wrote",
           "text": null,
           "unit": "bytes",
@@ -662,6 +679,7 @@
           "value": 0.6811039986698811
         },
         {
+          "key": "common.metric.average_duration",
           "label": "Average duration",
           "text": null,
           "unit": "ms",
@@ -716,6 +734,7 @@
       "impact": {
         "db_time_share": 0.042080061020187354,
         "label": "6.8 s of database time over the 5 hours since statistics were reset (4%)",
+        "label_key": "support.impact.share",
         "score": 20.513425121170613,
         "time_ms_per_day": null
       },
@@ -723,18 +742,21 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "common.metric.share_of_db_time",
           "label": "Share of DB time",
           "text": null,
           "unit": "ratio",
           "value": 0.042080061020187354
         },
         {
+          "key": "check.filtered_scan.metric.size_basis",
           "label": "Captured scan size basis",
           "text": null,
           "unit": "rows",
           "value": 1000000.0
         },
         {
+          "key": "check.filtered_scan.metric.queries",
           "label": "Queries",
           "text": null,
           "unit": "count",
@@ -783,18 +805,21 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "check.jit_overhead.metric.share",
           "label": "JIT share",
           "text": null,
           "unit": "ratio",
           "value": 0.9773769146834362
         },
         {
+          "key": "check.jit_overhead.metric.per_run",
           "label": "JIT per run",
           "text": null,
           "unit": "ms",
           "value": 31.06060338333334
         },
         {
+          "key": "check.jit_overhead.metric.run_time",
           "label": "Run time",
           "text": null,
           "unit": "ms",
@@ -844,24 +869,28 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "check.dead_rows.metric.dead",
           "label": "Dead rows",
           "text": null,
           "unit": "rows",
           "value": 126428.0
         },
         {
+          "key": "check.dead_rows.metric.live",
           "label": "Live rows",
           "text": null,
           "unit": "rows",
           "value": 45000.0
         },
         {
+          "key": "check.dead_rows.metric.dead_share",
           "label": "Dead share",
           "text": null,
           "unit": "ratio",
           "value": 0.7374991249970834
         },
         {
+          "key": "check.dead_rows.metric.trigger",
           "label": "Autovacuum trigger",
           "text": null,
           "unit": "rows",
@@ -917,12 +946,14 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "common.metric.rows_in_table",
           "label": "Rows in table",
           "text": null,
           "unit": "rows",
           "value": 1000000.0
         },
         {
+          "key": "check.unindexed_fk.metric.foreign_key",
           "label": "Foreign key",
           "text": "order_items_order_id_fkey",
           "unit": "text",
@@ -966,6 +997,7 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "common.metric.size",
           "label": "Size",
           "text": null,
           "unit": "bytes",
@@ -1008,6 +1040,7 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "common.metric.size",
           "label": "Size",
           "text": null,
           "unit": "bytes",
@@ -1084,6 +1117,7 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "check.untrusted_constraint.metric.constraints",
           "label": "Constraints",
           "text": null,
           "unit": "count",
@@ -1120,6 +1154,7 @@
       "impact": {
         "db_time_share": 0.1175241790094473,
         "label": "19.0 s of database time over the 5 hours since statistics were reset (12%)",
+        "label_key": "support.impact.share",
         "score": 8.57044992289813,
         "time_ms_per_day": null
       },
@@ -1133,6 +1168,7 @@
           "value": 0.1175241790094473
         },
         {
+          "key": "common.metric.average_duration",
           "label": "Average duration",
           "text": null,
           "unit": "ms",
@@ -1188,6 +1224,7 @@
       "impact": {
         "db_time_share": 0.12411350992902503,
         "label": "20.0 s of database time over the 5 hours since statistics were reset (12%)",
+        "label_key": "support.impact.share",
         "score": 2.0,
         "time_ms_per_day": null
       },
@@ -1201,6 +1238,7 @@
           "value": 0.12411350992902503
         },
         {
+          "key": "common.metric.average_duration",
           "label": "Average duration",
           "text": null,
           "unit": "ms",
@@ -1337,6 +1375,7 @@
         "last-actual-plans"
       ],
       "prepare": [
+        "retained observations are worded for this reader",
         "measurement context identifies this database and its clock",
         "index availability and maintenance follow the engine",
         "CTE writes named for their base table",
@@ -1378,7 +1417,7 @@
         "query-driven index changes need measured work",
         "query evidence leads with absolute cost and period",
         "names without the database",
-        "a caveat repeats nothing the summary or the fix says"
+        "identical complete caveats are shown once"
       ]
     },
     "previous_analyzer": {
@@ -2575,7 +2614,13 @@
         {
           "healthy": "Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.",
           "key": "cache-hit",
-          "label": "Reads served from memory",
+          "label": "Reads served from shared_buffers",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.cache_hit",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "since-startup",
           "status": "info",
           "unit": "percent",
@@ -2584,7 +2629,13 @@
         {
           "healthy": "Temporary data written by this database over its statistics period. This amount alone does not establish a performance problem; the findings identify costly spills.",
           "key": "temp-bytes",
-          "label": "Temporary files written",
+          "label": "Temporary files written since reset",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.temp_since_reset",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "since-startup",
           "status": "info",
           "unit": "bytes",
@@ -2594,6 +2645,12 @@
           "healthy": null,
           "key": "commits",
           "label": "Commits",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.commits",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "since-startup",
           "status": "info",
           "unit": "per-second",
@@ -2603,6 +2660,12 @@
           "healthy": "Rollbacks can be deliberate application behavior. This historical share alone does not establish failed requests.",
           "key": "rollbacks",
           "label": "Transactions rolled back",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.rollbacks",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "since-startup",
           "status": "info",
           "unit": "percent",
@@ -2612,6 +2675,12 @@
           "healthy": "A count over the statistics period, not deadlocks happening now. The deadlock finding uses the amount and period recorded.",
           "key": "deadlocks",
           "label": "Deadlocks",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.deadlocks",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "since-startup",
           "status": "info",
           "unit": "count",
@@ -2621,6 +2690,21 @@
           "healthy": null,
           "key": "checkpoints",
           "label": "Checkpoints (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.postgres.signal.checkpoints",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "count",
@@ -2630,6 +2714,21 @@
           "healthy": "Requested checkpoints include WAL-triggered checkpoints, manual CHECKPOINT, backups and CREATE DATABASE. This shared historical ratio does not identify their cause or establish current write pressure.",
           "key": "checkpoints-requested",
           "label": "Checkpoints forced early (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.postgres.signal.checkpoints_requested",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "percent",
@@ -2639,6 +2738,21 @@
           "healthy": "under 80% of max_connections is healthy",
           "key": "connections",
           "label": "Connections in use (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.postgres.signal.connections",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "now",
           "status": "info",
           "unit": "percent",
@@ -2647,7 +2761,13 @@
         {
           "healthy": "A cleanup holder observed at the scan's instant; no long-held-cleanup finding is supported by this scan.",
           "key": "oldest-transaction",
-          "label": "Oldest open transaction",
+          "label": "Oldest transaction holding cleanup",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.oldest_transaction",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "now",
           "status": "info",
           "unit": "seconds",
@@ -2657,6 +2777,12 @@
           "healthy": "The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.",
           "key": "new-connections",
           "label": "New connections",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.new_connections",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "since-startup",
           "status": "info",
           "unit": "per-second",
@@ -2666,6 +2792,12 @@
           "healthy": "Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.",
           "key": "session-length",
           "label": "Average session length",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.session_length",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "since-startup",
           "status": "info",
           "unit": "seconds",
@@ -2675,6 +2807,12 @@
           "healthy": "The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.",
           "key": "sessions-abandoned",
           "label": "Sessions the client abandoned",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.sessions_abandoned",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "since-startup",
           "status": "info",
           "unit": "percent",
@@ -3196,7 +3334,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -3554,12 +3693,14 @@
                     3
                   ],
                   "rule": "scan-filter",
+                  "scan_context": true,
                   "severity": "high",
                   "title": "Reads 2.0M rows of public.orders to keep 12",
                   "verify": "Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure."
                 }
               ],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -3973,7 +4114,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -4157,7 +4299,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -4426,12 +4569,14 @@
                     3
                   ],
                   "rule": "scan-filter",
+                  "scan_context": true,
                   "severity": "high",
                   "title": "Reads 1.0M rows of public.order_items to keep 101",
                   "verify": "Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure."
                 }
               ],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -4839,7 +4984,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -5322,7 +5468,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -5645,7 +5792,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -5892,7 +6040,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -6144,7 +6293,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -6321,7 +6471,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -6574,7 +6725,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -6902,7 +7054,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -7159,7 +7312,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -8823,7 +8977,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -9144,6 +9299,70 @@
       }
     ],
     "headline": "14 opportunities. The top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).",
+    "headline_message": {
+      "kind": "sequence",
+      "messages": [
+        {
+          "arguments": {
+            "count": {
+              "kind": "digits",
+              "value": "14"
+            },
+            "n": {
+              "kind": "number",
+              "value": 14.0
+            }
+          },
+          "key": "summary.headline.opportunities",
+          "kind": "catalog"
+        },
+        {
+          "arguments": {
+            "cost": {
+              "kind": "message",
+              "value": {
+                "arguments": {
+                  "of": {
+                    "kind": "text",
+                    "value": "database"
+                  },
+                  "share": {
+                    "kind": "percent",
+                    "value": 0.6739716209849599
+                  },
+                  "span": {
+                    "kind": "message",
+                    "value": {
+                      "arguments": {
+                        "count": {
+                          "kind": "digits",
+                          "value": "5"
+                        },
+                        "n": {
+                          "kind": "number",
+                          "value": 5.0
+                        }
+                      },
+                      "key": "model.window.since_reset_hours",
+                      "kind": "catalog"
+                    }
+                  },
+                  "time": {
+                    "kind": "duration",
+                    "value": 108716.87748899998
+                  }
+                },
+                "key": "support.cost.time_over",
+                "kind": "catalog"
+              }
+            }
+          },
+          "key": "summary.headline.top_cost",
+          "kind": "catalog"
+        }
+      ],
+      "separator": " "
+    },
     "index_counting": "in the 7 hours since the server last restarted",
     "index_notes": [
       {
@@ -9325,6 +9544,57 @@
         "runs": "1 run, sometime between 07:20 and 08:05 UTC on Oct 11"
       }
     ],
+    "takeaway": "The top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).",
+    "takeaway_message": {
+      "kind": "sequence",
+      "messages": [
+        {
+          "arguments": {
+            "cost": {
+              "kind": "message",
+              "value": {
+                "arguments": {
+                  "of": {
+                    "kind": "text",
+                    "value": "database"
+                  },
+                  "share": {
+                    "kind": "percent",
+                    "value": 0.6739716209849599
+                  },
+                  "span": {
+                    "kind": "message",
+                    "value": {
+                      "arguments": {
+                        "count": {
+                          "kind": "digits",
+                          "value": "5"
+                        },
+                        "n": {
+                          "kind": "number",
+                          "value": 5.0
+                        }
+                      },
+                      "key": "model.window.since_reset_hours",
+                      "kind": "catalog"
+                    }
+                  },
+                  "time": {
+                    "kind": "duration",
+                    "value": 108716.87748899998
+                  }
+                },
+                "key": "support.cost.time_over",
+                "kind": "catalog"
+              }
+            }
+          },
+          "key": "summary.headline.top_cost",
+          "kind": "catalog"
+        }
+      ],
+      "separator": " "
+    },
     "top_share": 0.6739716209849599
   }
 }

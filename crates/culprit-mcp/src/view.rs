@@ -375,6 +375,7 @@ pub fn plan_tree(plan: &Plan) -> String {
 /// Insights for a plan, computed if the plan doesn't carry them yet.
 fn insight_set(plan: &Plan) -> culprit_core::insights::PlanInsights {
     plan.insights.clone().unwrap_or_else(|| culprit_core::insights::PlanInsights {
+        scan_context: Some(false),
         items: culprit_core::insights::insights(plan),
         note: culprit_core::insights::coverage_note(plan),
     })

@@ -64,7 +64,7 @@ pub(super) fn check_concurrent_in_tx(
     f.confidence = Confidence::High;
     f.severity = Severity::High;
     f.impact.score = base_score(f.severity);
-    f.impact.label = t!("view.sql_lint.concurrent_in_tx.impact");
+    f.impact.set_label(t!("view.sql_lint.concurrent_in_tx.impact"));
     f.title = t!(
         "view.sql_lint.concurrent_in_tx.title",
         statement = format!("{head} {kind_word} CONCURRENTLY"),
@@ -136,7 +136,7 @@ pub(super) fn check_drop_or_truncate(
             f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
             f.impact.score = base_score(f.severity);
             let size = table_size_label(rows, bytes);
-            f.impact.label = size.clone();
+            f.impact.set_label(size.clone());
             let sql = compact_sql(stmt);
             if engine == Engine::Mysql {
                 f.title =
@@ -216,7 +216,7 @@ pub(super) fn check_drop_or_truncate(
             f.severity = Severity::High;
             f.impact.score = base_score(f.severity);
             let size = table_size_label(rows, bytes);
-            f.impact.label = size.clone();
+            f.impact.set_label(size.clone());
             f.title = t!("view.sql_lint.truncate.title", table = &table.name, size = &size);
             f.summary = t!("view.sql_lint.truncate.summary", sql = compact_sql(stmt), table = &qual, size = size);
             push_table_metrics(&mut f, rows, bytes);
@@ -263,7 +263,7 @@ pub(super) fn check_workload_references(
     f.impact.score = base_score(f.severity);
     // A count of statements, written as it is ("1234", not "1.2K").
     let (n, count) = (active.len(), active.len().to_string());
-    f.impact.label = t!("view.sql_lint.workload_break.impact", n = n, count = &count);
+    f.impact.set_label(t!("view.sql_lint.workload_break.impact", n = n, count = &count));
     f.queries = crate::support::query_refs(&active);
     f.title = t!("view.sql_lint.workload_break.title", action = action, target = &target_short, n = n, count = &count);
     f.summary = t!(
@@ -349,7 +349,7 @@ pub(super) fn check_maintenance(
             f.severity = Severity::High;
             f.impact.score = base_score(f.severity);
             let size = table_size_label(rows, bytes);
-            f.impact.label = size.clone();
+            f.impact.set_label(size.clone());
             f.title = t!("view.sql_lint.vacuum_full.title", table = &table.name, size = &size);
             f.summary = t!("view.sql_lint.vacuum_full.summary", sql = compact_sql(stmt), table = &qual, size = size);
             f.fix = Some(Fix {
@@ -384,7 +384,7 @@ pub(super) fn check_maintenance(
             f.severity = Severity::High;
             f.impact.score = base_score(f.severity);
             let size = table_size_label(rows, bytes);
-            f.impact.label = size.clone();
+            f.impact.set_label(size.clone());
             f.title = t!("view.sql_lint.cluster.title", table = &table.name, size = &size);
             f.summary = t!("view.sql_lint.cluster.summary", sql = compact_sql(stmt), table = &qual, size = size);
             f.fix = Some(Fix { summary: t!("view.sql_lint.cluster.fix"), sql: None, cost: None });
@@ -437,7 +437,7 @@ pub(super) fn check_maintenance(
                     f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
                     f.impact.score = base_score(f.severity);
                     let size = table_size_label(rows, bytes);
-                    f.impact.label = size.clone();
+                    f.impact.set_label(size.clone());
                     f.title = t!("view.sql_lint.reindex_table.title", table = &table.name, size = &size);
                     f.summary =
                         t!("view.sql_lint.reindex_table.summary", sql = compact_sql(stmt), table = &qual, size = size);
@@ -476,7 +476,7 @@ pub(super) fn check_maintenance(
                     f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
                     f.impact.score = base_score(f.severity);
                     let size = table_size_label(rows, bytes);
-                    f.impact.label = size.clone();
+                    f.impact.set_label(size.clone());
                     f.title =
                         t!("view.sql_lint.reindex_index.title", index = &ix.name, table = &table.name, size = &size);
                     f.summary = t!(
@@ -554,7 +554,7 @@ pub(super) fn check_create_index(
     f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
     f.impact.score = base_score(f.severity);
     let size = table_size_label(rows, bytes);
-    f.impact.label = size.clone();
+    f.impact.set_label(size.clone());
     let sql = compact_sql(stmt);
     match engine {
         Engine::Postgres => {

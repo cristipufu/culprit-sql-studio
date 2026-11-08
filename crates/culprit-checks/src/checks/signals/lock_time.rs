@@ -183,14 +183,20 @@ fn lock_time_finding(snapshot: &Snapshot, wait: LockWait<'_>) -> Finding {
     }
     with_query(snapshot, &mut f, q);
     f.impact.score = score_for_share(wait.db_share).max(base_score(f.severity));
-    f.impact.label = t!("check.lock_time.impact", lock = format::duration(lock));
+    f.impact.set_label(t!("check.lock_time.impact", lock = format::duration(lock)));
     f.confidence = Confidence::High;
     f.metrics = vec![
-        Metric::new(t!("check.lock_time.metric.lock_wait"), lock, Unit::Ms),
-        Metric::new(t!("check.lock_time.metric.share"), share, Unit::Ratio),
+        Metric::said(culprit_core::key!("check.lock_time.metric.lock_wait"), lock, Unit::Ms),
+        Metric::said(culprit_core::key!("check.lock_time.metric.share"), share, Unit::Ratio),
         match wait.per {
-            PerRun::Longest { longest, .. } => Metric::new(t!("check.lock_time.metric.longest_run"), longest, Unit::Ms),
-            _ => Metric::new(t!("check.lock_time.metric.per_run"), per_run(lock, q.executions), Unit::Ms),
+            PerRun::Longest { longest, .. } => {
+                Metric::said(culprit_core::key!("check.lock_time.metric.longest_run"), longest, Unit::Ms)
+            }
+            _ => Metric::said(
+                culprit_core::key!("check.lock_time.metric.per_run"),
+                per_run(lock, q.executions),
+                Unit::Ms,
+            ),
         },
     ];
     f.facts.lock_wait =

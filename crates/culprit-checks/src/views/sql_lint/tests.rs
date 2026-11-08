@@ -8,6 +8,31 @@ fn postgres_snapshot() -> Snapshot {
 }
 
 #[test]
+fn statement_locations_are_exact_and_locale_independent_in_unicode_scripts() {
+    let mut snapshot = postgres_snapshot();
+    snapshot.tables[0].rows = Some(500_000.0);
+    let table = &snapshot.tables[0].name;
+    let statement = format!("CREATE INDEX idx_location ON {table} (created_at);");
+    let prefix = format!("-- 😀 {table}\nSELECT 'é';\n");
+    let script = format!("{prefix}{statement}\n{statement}");
+    let reference = lint_sql(&snapshot, &script);
+    assert_eq!(reference.len(), 2);
+    for language in culprit_core::i18n::languages() {
+        let findings = culprit_core::i18n::scope(&language.code, || lint_sql(&snapshot, &script));
+        for (index, finding) in findings.iter().enumerate() {
+            let source = finding.facts.statement.as_ref().unwrap();
+            assert_eq!(source.sql, statement);
+            assert_eq!(source.line, index + 3);
+            assert_eq!(finding.id, reference[index].id);
+            assert_eq!(finding.severity, reference[index].severity);
+            assert_eq!(finding.fix.as_ref().unwrap().sql, reference[index].fix.as_ref().unwrap().sql);
+            let units: Vec<u16> = script.encode_utf16().skip(source.start).take(source.end - source.start).collect();
+            assert_eq!(String::from_utf16(&units).unwrap(), statement);
+        }
+    }
+}
+
+#[test]
 fn flags_blocking_create_index_unless_concurrent() {
     let mut s = postgres_snapshot();
     s.tables[0].rows = Some(500_000.0);

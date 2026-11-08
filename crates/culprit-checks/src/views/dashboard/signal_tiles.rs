@@ -537,7 +537,7 @@ pub(super) fn statistics(report: &Report) -> Tile {
                 TileKey::Statistics,
                 if turn_on.is_some() { TileStatus::Bad } else { TileStatus::Unavailable },
                 match missing {
-                    Some(m) => t!("view.dashboard.statistics.no_history_because", reason = sentence(&m.reason)),
+                    Some(m) => t!("view.dashboard.statistics.no_history_because", reason = m.reason.clone()),
                     None => t!("view.dashboard.statistics.no_history", family = family(&s.server)),
                 },
             );
@@ -546,7 +546,7 @@ pub(super) fn statistics(report: &Report) -> Tile {
             } else {
                 t!("view.dashboard.statistics.no_history_detail")
             });
-            t.fix_sql = turn_on.and_then(|m| m.fix.as_deref()).and_then(fix_statement);
+            t.fix_sql = turn_on.and_then(|m| m.action.as_ref()).map(|action| action.sql.clone());
             t.items = s
                 .server
                 .missing
@@ -580,7 +580,7 @@ pub(super) fn statistics(report: &Report) -> Tile {
                 t!(
                     "view.dashboard.statistics.source_covers",
                     n = n,
-                    source = &w.source,
+                    source = w.source_name(),
                     window = &window,
                     count = &count,
                     planned = &with_plans
@@ -605,7 +605,7 @@ pub(super) fn statistics(report: &Report) -> Tile {
                 takeaway = if w.log.is_some() {
                     t!("view.dashboard.statistics.thin_log", window = &window)
                 } else {
-                    t!("view.dashboard.statistics.thin", source = &w.source, window = &window)
+                    t!("view.dashboard.statistics.thin", source = w.source_name(), window = &window)
                 };
             }
             if let Some(worst) = stats_findings.iter().rev().max_by_key(|f| f.severity) {

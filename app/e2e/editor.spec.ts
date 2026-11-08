@@ -48,8 +48,8 @@ test("Tabs open and close from the keyboard, and keep their SQL across a reload"
   await expect(page.locator(".cm-content")).toContainText("SELECT 1 AS kept");
 
   await page.reload();
-  await page.getByRole("complementary").getByRole("button", { name: / pg-demo \d+$/ }).click();
-  await page.keyboard.press("6");
+  await page.getByRole("complementary").getByRole("button", { name: "Editor 6", exact: true }).click();
+  await expect(section(page)).toHaveText("Editor");
   await expect(page.locator(".cm-content")).toContainText("SELECT 1 AS kept");
 });
 
@@ -58,6 +58,9 @@ test("Each tab keeps its own text and undo history while another is shown", asyn
   await replaceSql(page, "SELECT 1 AS first");
   await page.keyboard.press("ControlOrMeta+t");
   await replaceSql(page, "SELECT 2 AS second");
+  // A language change reconfigures completions in hidden tabs too. It must keep their undo history.
+  await page.locator(".language-select").selectOption("fr");
+  await page.locator(".language-select").selectOption("en");
   await page.getByRole("tab", { name: "Query 1" }).click();
   await expect(page.getByRole("tab", { name: "Query 1" })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator(".cm-content")).toContainText("SELECT 1 AS first");

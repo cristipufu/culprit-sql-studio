@@ -1,6 +1,6 @@
 //! Shared host and TServer measurements. Never substitute them for database-specific pressure or RSS.
 use crate::{global, sources};
-use culprit_core::{Coverage, Error, ErrorCode, MemoryLimit, NodeResource, NodeResources, ProcessMemory, Result, t};
+use culprit_core::{Coverage, Error, ErrorCode, MemoryLimit, NodeResource, NodeResources, ProcessMemory, Result};
 use culprit_postgres::wire::{ObservedSession, query_bounded, query_one};
 use std::collections::BTreeMap;
 
@@ -11,7 +11,8 @@ pub(crate) async fn collect(session: &ObservedSession, coverage: &mut Coverage) 
     let data = coverage.read(&sources::NODE_RESOURCES, result)?;
     coverage.completed(&sources::NODE_RESOURCES, data.nodes.len());
     if data.partial {
-        coverage.partial(&sources::NODE_RESOURCES, t!("provider.yugabyte.coverage.resources_partial"));
+        coverage
+            .partial(&sources::NODE_RESOURCES, culprit_core::message!("provider.yugabyte.coverage.resources_partial"));
     }
     Some(data)
 }
@@ -21,7 +22,7 @@ async fn clock(session: &ObservedSession) -> Result<String> {
         .await?
         .map(|r| r.string("at"))
         .filter(|s| culprit_core::format::epoch_seconds(s).is_some())
-        .ok_or_else(|| Error::invalid(t!("provider.yugabyte.error.invalid_resource_time")))
+        .ok_or_else(|| Error::invalid(culprit_core::message!("provider.yugabyte.error.invalid_resource_time")))
 }
 
 fn number(value: Option<String>, fraction: bool, partial: &mut bool) -> Option<f64> {
@@ -70,7 +71,7 @@ pub(crate) async fn read(session: &ObservedSession, maximum: usize) -> Result<No
         metrics->>'tserver_root_memory_soft_limit' AS soft_limit FROM pg_catalog.yb_servers_metrics() ORDER BY uuid LIMIT {}",maximum+1);
     let (rows, truncated) = query_bounded(&session.client, &sql, maximum).await.map_err(|error| {
         if error.code == ErrorCode::PermissionDenied {
-            error.with_hint(t!("provider.yugabyte.error.resources_privilege_hint"))
+            error.with_hint(culprit_core::message!("provider.yugabyte.error.resources_privilege_hint"))
         } else {
             error
         }
@@ -112,12 +113,10 @@ pub(crate) async fn read(session: &ObservedSession, maximum: usize) -> Result<No
                 || entry.cpu_system_fraction.is_some()
                 || entry.host_memory_total_bytes.is_some()
                 || tracked_bytes.is_some();
-            entry.process_memory = Some(ProcessMemory {
-                name: t!("provider.yugabyte.resources.root_tracker"),
-                tracked_bytes,
-                hard_limit,
-                soft_limit,
-            });
+            let name_message = culprit_core::message!("provider.yugabyte.resources.root_tracker");
+            let name = name_message.render();
+            entry.process_memory =
+                Some(ProcessMemory { name_message: Some(name_message), name, tracked_bytes, hard_limit, soft_limit });
         } else {
             partial = true;
         }
@@ -141,17 +140,24 @@ pub(crate) async fn read(session: &ObservedSession, maximum: usize) -> Result<No
             None
         }
     };
+    let notes = vec![
+        culprit_core::message!("provider.yugabyte.resources.shared"),
+        culprit_core::message!("provider.yugabyte.resources.cpu"),
+        culprit_core::message!("provider.yugabyte.resources.memory"),
+    ];
+    let rendered_notes = notes.iter().map(culprit_core::i18n::Message::render).collect();
+    let source_message = culprit_core::message!("provider.yugabyte.resources.source");
+    let source = source_message.render();
     Ok(NodeResources {
-        source: t!("provider.yugabyte.resources.source"),
+        source_message: Some(source_message),
+        note_messages: Some(notes),
+
+        source,
         observed_from,
         observed_until,
         nodes_expected,
         partial,
-        notes: vec![
-            t!("provider.yugabyte.resources.shared"),
-            t!("provider.yugabyte.resources.cpu"),
-            t!("provider.yugabyte.resources.memory"),
-        ],
+        notes: rendered_notes,
         nodes: nodes.into_values().collect(),
     })
 }

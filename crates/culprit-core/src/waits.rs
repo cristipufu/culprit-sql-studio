@@ -94,6 +94,12 @@ pub struct ActivityPeriod {
     pub weighted_observations: f64,
     pub partial: bool,
     pub notes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_message: Option<crate::i18n::Message>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub note_messages: Option<Vec<crate::i18n::Message>>,
 }
 
 /// Aggregated native task observations, kept apart from measured wait durations and statement lifetime totals.
@@ -261,11 +267,32 @@ pub struct Signal {
     /// What healthy looks like, e.g. "under 10% is healthy".
     pub healthy: Option<String>,
     pub status: SignalStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub measurement_scope: Option<crate::MeasurementScope>,
+    pub label_message: crate::i18n::Message,
 }
 
 impl Signal {
-    pub fn new(key: &str, label: &str, value: f64, unit: SignalUnit, scope: SignalScope) -> Signal {
-        Signal { key: key.into(), label: label.into(), value, unit, scope, healthy: None, status: SignalStatus::Info }
+    pub fn new(
+        key: &str,
+        label: impl Into<crate::i18n::Message>,
+        value: f64,
+        unit: SignalUnit,
+        scope: SignalScope,
+    ) -> Signal {
+        let message = label.into();
+        Signal {
+            key: key.into(),
+            label: message.render(),
+            value,
+            unit,
+            scope,
+            healthy: None,
+            status: SignalStatus::Info,
+            measurement_scope: None,
+            label_message: message,
+        }
     }
 
     /// State the healthy range and grade the value: `watch`/`bad` are the thresholds, `higher_is_worse` their direction.

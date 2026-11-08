@@ -19,8 +19,7 @@ def load(path):
         return {}
 
 
-def main(base_path, ours_path, theirs_path):
-    base, ours, theirs = load(base_path), load(ours_path), load(theirs_path)
+def merge(base, ours, theirs, prefix=""):
     merged = dict(ours)
     conflicts = []
     for key in set(base) | set(ours) | set(theirs):
@@ -33,7 +32,16 @@ def main(base_path, ours_path, theirs_path):
             else:
                 merged[key] = t  # Only theirs changed it.
             continue
-        conflicts.append(key)
+        if isinstance(o, dict) and isinstance(t, dict) and (b is None or isinstance(b, dict)):
+            merged[key], nested = merge(b or {}, o, t, f"{prefix}{key}.")
+            conflicts.extend(nested)
+        else:
+            conflicts.append(f"{prefix}{key}")
+    return merged, conflicts
+
+
+def main(base_path, ours_path, theirs_path):
+    merged, conflicts = merge(load(base_path), load(ours_path), load(theirs_path))
     with open(ours_path, "w", encoding="utf-8") as f:
         f.write(json.dumps(merged, indent=2, ensure_ascii=False, sort_keys=True) + "\n")
     if conflicts:

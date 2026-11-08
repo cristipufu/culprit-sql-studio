@@ -275,6 +275,7 @@
       "impact": {
         "db_time_share": 0.9867093326578282,
         "label": "767 ms of database time over the 1 minute since statistics were reset (99%)",
+        "label_key": "support.impact.share",
         "score": 99.33324381383245,
         "time_ms_per_day": null
       },
@@ -288,6 +289,7 @@
           "value": 0.9867093326578282
         },
         {
+          "key": "common.metric.average_duration",
           "label": "Average duration",
           "text": null,
           "unit": "ms",
@@ -457,6 +459,7 @@
         "last-actual-plans"
       ],
       "prepare": [
+        "retained observations are worded for this reader",
         "measurement context identifies this database and its clock",
         "index availability and maintenance follow the engine",
         "CTE writes named for their base table",
@@ -498,7 +501,7 @@
         "query-driven index changes need measured work",
         "query evidence leads with absolute cost and period",
         "names without the database",
-        "a caveat repeats nothing the summary or the fix says"
+        "identical complete caveats are shown once"
       ]
     },
     "previous_analyzer": {
@@ -861,6 +864,12 @@
           "healthy": "Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.",
           "key": "cache-hit",
           "label": "Reads served from shared_buffers",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.cache_hit",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "since-startup",
           "status": "info",
           "unit": "percent",
@@ -870,6 +879,12 @@
           "healthy": "Temporary data written by this database over its statistics period. This amount alone does not establish a performance problem; the findings identify costly spills.",
           "key": "temp-bytes",
           "label": "Temporary files written since reset",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.temp_since_reset",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "since-startup",
           "status": "info",
           "unit": "bytes",
@@ -879,6 +894,12 @@
           "healthy": null,
           "key": "commits",
           "label": "Commits",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.commits",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "since-startup",
           "status": "info",
           "unit": "per-second",
@@ -888,6 +909,12 @@
           "healthy": "Rollbacks can be deliberate application behavior. This historical share alone does not establish failed requests.",
           "key": "rollbacks",
           "label": "Transactions rolled back",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.rollbacks",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "since-startup",
           "status": "info",
           "unit": "percent",
@@ -897,6 +924,12 @@
           "healthy": "A count over the statistics period, not deadlocks happening now. The deadlock finding uses the amount and period recorded.",
           "key": "deadlocks",
           "label": "Deadlocks",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.deadlocks",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "since-startup",
           "status": "info",
           "unit": "count",
@@ -906,6 +939,21 @@
           "healthy": null,
           "key": "checkpoints",
           "label": "Checkpoints (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.postgres.signal.checkpoints",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "count",
@@ -915,6 +963,21 @@
           "healthy": "Requested checkpoints include WAL-triggered checkpoints, manual CHECKPOINT, backups and CREATE DATABASE. This shared historical ratio does not identify their cause or establish current write pressure.",
           "key": "checkpoints-requested",
           "label": "Checkpoints forced early (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.postgres.signal.checkpoints_requested",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "percent",
@@ -924,6 +987,12 @@
           "healthy": null,
           "key": "wal-buffers-full",
           "label": "WAL buffer full writes",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.wal_buffers_full",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "since-startup",
           "status": "info",
           "unit": "count",
@@ -933,6 +1002,21 @@
           "healthy": "under 80% of max_connections is healthy",
           "key": "connections",
           "label": "Connections in use (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.postgres.signal.connections",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "now",
           "status": "info",
           "unit": "percent",
@@ -942,6 +1026,12 @@
           "healthy": "Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.",
           "key": "session-length",
           "label": "Average session length",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.session_length",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "since-startup",
           "status": "info",
           "unit": "seconds",
@@ -951,6 +1041,12 @@
           "healthy": "The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.",
           "key": "sessions-abandoned",
           "label": "Sessions the client abandoned",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.postgres.signal.sessions_abandoned",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "since-startup",
           "status": "info",
           "unit": "percent",
@@ -1554,7 +1650,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -4336,7 +4433,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -6190,7 +6288,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. A filtered scan of a small table can be appropriate today. Track rows read and execution time as the table grows; low current cost does not establish that the access path will scale."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. A filtered scan of a small table can be appropriate today. Track rows read and execution time as the table grows; low current cost does not establish that the access path will scale.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -6362,12 +6461,127 @@
     ],
     "foreign_key_indexes": [],
     "headline": "2 opportunities. The top ones touch 767 ms of database time over the 1 minute since statistics were reset (99%).",
+    "headline_message": {
+      "kind": "sequence",
+      "messages": [
+        {
+          "arguments": {
+            "count": {
+              "kind": "digits",
+              "value": "2"
+            },
+            "n": {
+              "kind": "number",
+              "value": 2.0
+            }
+          },
+          "key": "summary.headline.opportunities",
+          "kind": "catalog"
+        },
+        {
+          "arguments": {
+            "cost": {
+              "kind": "message",
+              "value": {
+                "arguments": {
+                  "of": {
+                    "kind": "text",
+                    "value": "database"
+                  },
+                  "share": {
+                    "kind": "percent",
+                    "value": 0.9867093326578282
+                  },
+                  "span": {
+                    "kind": "message",
+                    "value": {
+                      "arguments": {
+                        "count": {
+                          "kind": "digits",
+                          "value": "1"
+                        },
+                        "n": {
+                          "kind": "number",
+                          "value": 1.0
+                        }
+                      },
+                      "key": "model.window.since_reset_minutes",
+                      "kind": "catalog"
+                    }
+                  },
+                  "time": {
+                    "kind": "duration",
+                    "value": 767.0731959999998
+                  }
+                },
+                "key": "support.cost.time_over",
+                "kind": "catalog"
+              }
+            }
+          },
+          "key": "summary.headline.top_cost",
+          "kind": "catalog"
+        }
+      ],
+      "separator": " "
+    },
     "index_counting": "in the 34 minutes since the server last restarted",
     "index_notes": [],
     "no_workload": null,
     "opportunities": 2,
     "over_scans": [],
     "runs_said": [],
+    "takeaway": "The top ones touch 767 ms of database time over the 1 minute since statistics were reset (99%).",
+    "takeaway_message": {
+      "kind": "sequence",
+      "messages": [
+        {
+          "arguments": {
+            "cost": {
+              "kind": "message",
+              "value": {
+                "arguments": {
+                  "of": {
+                    "kind": "text",
+                    "value": "database"
+                  },
+                  "share": {
+                    "kind": "percent",
+                    "value": 0.9867093326578282
+                  },
+                  "span": {
+                    "kind": "message",
+                    "value": {
+                      "arguments": {
+                        "count": {
+                          "kind": "digits",
+                          "value": "1"
+                        },
+                        "n": {
+                          "kind": "number",
+                          "value": 1.0
+                        }
+                      },
+                      "key": "model.window.since_reset_minutes",
+                      "kind": "catalog"
+                    }
+                  },
+                  "time": {
+                    "kind": "duration",
+                    "value": 767.0731959999998
+                  }
+                },
+                "key": "support.cost.time_over",
+                "kind": "catalog"
+              }
+            }
+          },
+          "key": "summary.headline.top_cost",
+          "kind": "catalog"
+        }
+      ],
+      "separator": " "
+    },
     "top_share": 0.9867093326578282
   }
 }

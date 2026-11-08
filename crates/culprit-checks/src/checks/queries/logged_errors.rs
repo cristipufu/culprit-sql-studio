@@ -135,11 +135,11 @@ fn logged_error_finding(s: &Snapshot, error: LoggedError<'_>) -> Finding {
     };
     f.confidence = Confidence::High;
     f.impact.score = base_score(f.severity);
-    f.impact.label = t!("check.logged_errors.impact", count = count);
+    f.impact.set_label(t!("check.logged_errors.impact", count = count));
     f.metrics = vec![
-        Metric::text(t!("check.logged_errors.metric.code"), &e.code),
-        Metric::text(t!("check.logged_errors.metric.statement"), &e.statement),
-        Metric::new(t!("check.logged_errors.metric.records"), e.count, Unit::Count),
+        Metric::said_text(culprit_core::key!("check.logged_errors.metric.code"), &e.code),
+        Metric::said_text(culprit_core::key!("check.logged_errors.metric.statement"), &e.statement),
+        Metric::said(culprit_core::key!("check.logged_errors.metric.records"), e.count, Unit::Count),
     ];
     if let Some(q) = s.workload.as_ref().and_then(|w| w.query(&e.query_id)) {
         f.queries = crate::support::query_refs(&[q]);

@@ -1,0 +1,5 @@
+{
+  "_meta": { "name": "العربية", "english_name": "Arabic test catalog", "plural": "ar", "decimal": ".", "group": ",", "direction": "rtl" },
+  "ui.sidebar.language": "اللغة",
+  "ui.common.view.dashboard": "لوحة المعلومات"
+}

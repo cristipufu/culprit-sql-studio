@@ -1,7 +1,7 @@
 //! Native task samples have weights, not elapsed durations. Never mix these with PGSS or exclusive wait timings.
 use crate::{global, probe::Probe, sources};
 use culprit_core::{
-    ActivityEvent, ActivityHistory, ActivityPeriod, CounterScope, Coverage, Error, Result, SnapshotOptions, t,
+    ActivityEvent, ActivityHistory, ActivityPeriod, CounterScope, Coverage, Error, Result, SnapshotOptions,
 };
 use culprit_postgres::wire::{ObservedSession, query_bounded, query_one};
 use std::collections::{BTreeMap, BTreeSet};
@@ -19,7 +19,8 @@ pub(crate) async fn collect(
     let history = coverage.read(&sources::ACTIVITY_HISTORY, result)?;
     coverage.completed(&sources::ACTIVITY_HISTORY, history.period.observations as usize);
     if history.period.partial {
-        coverage.partial(&sources::ACTIVITY_HISTORY, t!("provider.yugabyte.coverage.activity_partial"));
+        coverage
+            .partial(&sources::ACTIVITY_HISTORY, culprit_core::message!("provider.yugabyte.coverage.activity_partial"));
     }
     Some(history)
 }
@@ -39,7 +40,7 @@ pub(crate) async fn read(
     limit: usize,
 ) -> Result<ActivityHistory> {
     let end = culprit_core::format::epoch_seconds(&probe.now)
-        .ok_or_else(|| Error::invalid(t!("provider.yugabyte.error.invalid_ash_time")))?;
+        .ok_or_else(|| Error::invalid(culprit_core::message!("provider.yugabyte.error.invalid_ash_time")))?;
     let minutes = options.window_in_minutes().min(culprit_core::MAX_WINDOW_MINUTES);
     let start = end - f64::from(minutes) * 60.0;
     let before = session.notices();
@@ -151,32 +152,43 @@ pub(crate) async fn read(
         ),
     )
     .await?
-    .ok_or_else(|| Error::invalid(t!("provider.yugabyte.error.no_ash_bounds")))?;
+    .ok_or_else(|| Error::invalid(culprit_core::message!("provider.yugabyte.error.no_ash_bounds")))?;
     if probe.statement_role.is_none() && !window.flag("all_stats") {
         return Err(Error::new(
             culprit_core::ErrorCode::PermissionDenied,
-            t!("provider.yugabyte.error.privilege_changed_activity"),
+            culprit_core::message!("provider.yugabyte.error.privilege_changed_activity"),
         ));
     }
     let mut notes = vec![
-        t!("provider.yugabyte.activity.weights"),
-        t!("provider.yugabyte.activity.buffer"),
-        t!("provider.yugabyte.activity.scope"),
+        culprit_core::message!("provider.yugabyte.activity.weights"),
+        culprit_core::message!("provider.yugabyte.activity.buffer"),
+        culprit_core::message!("provider.yugabyte.activity.scope"),
     ];
     if partial {
-        notes.push(t!("provider.yugabyte.activity.partial"));
+        notes.push(culprit_core::message!("provider.yugabyte.activity.partial"));
     }
+    let source_message = culprit_core::message!(
+        "model.observation.source.ysql",
+        relation = "yb_active_session_history",
+        scope = if probe.global {
+            "cluster"
+        } else if probe.node.is_some() {
+            "node"
+        } else {
+            "unknown"
+        },
+        node = probe.node.as_deref().unwrap_or_default(),
+        limited = if probe.statement_role.is_some() { "yes" } else { "no" },
+        role = probe.statement_role.map(|id| id.to_string()).unwrap_or_default()
+    );
+    let source = source_message.render();
+    let rendered_notes = notes.iter().map(culprit_core::i18n::Message::render).collect();
     Ok(ActivityHistory {
         period: ActivityPeriod {
-            source: format!(
-                "yb_active_session_history ({}){}",
-                if probe.global {
-                    "configured cluster views".into()
-                } else {
-                    format!("node {}", probe.node.as_deref().unwrap_or("unknown"))
-                },
-                probe.statement_role.map(|id| format!(", role {id} only")).unwrap_or_default()
-            ),
+            source_message: Some(source_message),
+            note_messages: Some(notes),
+
+            source,
             requested_start: window.string("start"),
             requested_end: window.string("end"),
             first_sample: first,
@@ -186,7 +198,7 @@ pub(crate) async fn read(
             observations,
             weighted_observations: weighted,
             partial,
-            notes,
+            notes: rendered_notes,
         },
         events: events.into_values().collect(),
     })

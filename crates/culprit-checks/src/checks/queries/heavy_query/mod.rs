@@ -428,14 +428,14 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
     let workload = snapshot.workload.as_ref();
     // With time the source couldn't attribute, the share is of what it could.
     let of = match workload.filter(|w| w.untracked_time_ms.is_some()) {
-        Some(w) => t!("check.heavy_query.summary.of_attributed", time = time, source = &w.source),
+        Some(w) => t!("check.heavy_query.summary.of_attributed", time = time, source = w.source_name()),
         None => t!("check.heavy_query.summary.of_all", time = time),
     };
     let window = workload.map(window_phrase).unwrap_or_default();
     let mut summary = vec![match &case.recent {
         Some(s) => t!(
             "check.heavy_query.summary.recent",
-            source = workload.map_or_else(|| t!("check.heavy_query.the_statistics"), |w| w.source.clone()),
+            source = workload.map_or_else(|| t!("check.heavy_query.the_statistics"), |w| w.source_name()),
             runs = format::count(s.runs),
             executions = format::count(q.executions),
             length = s.length(),
@@ -491,7 +491,10 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
             let step = describe_node(plan, node, examined);
             summary.push(match share {
                 Some(s) => t!("check.heavy_query.summary.step_share", share = format::percent(*s), step = step),
-                None => uncosted_step(snapshot, plan, &step),
+                None => {
+                    f.facts.uncosted_plan_explained = (!plan.uncosted_steps().is_empty()).then_some(true);
+                    uncosted_step(snapshot, plan, &step)
+                }
             });
         }
         Lead::Lookups(lookups) => summary.push(lookups.evidence()),
@@ -538,7 +541,11 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
         (Some(w), Some(s)) => {
             let totals = w.window_phrase();
             let beside = !s.is_recent(q);
-            f.metrics.push(Metric::new(t!("common.metric.share_of_db_time_over_scans"), s.share(), Unit::Ratio));
+            f.metrics.push(Metric::said(
+                culprit_core::key!("common.metric.share_of_db_time_over_scans"),
+                s.share(),
+                Unit::Ratio,
+            ));
             if beside && s.share_differs(w, q) {
                 let label = over(share_metric_label(snapshot), &totals);
                 f.metrics.push(Metric::new(label, w.share_of(q.total_time_ms, q), Unit::Ratio));
@@ -548,7 +555,7 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
                 let label = t!("common.metric.runs_per_day_over_scans");
                 f.metrics.push(Metric::new(label, s.per_day(s.runs), Unit::Count));
             } else {
-                f.metrics.push(Metric::new(t!("common.metric.runs_over_scans"), s.runs, Unit::Count));
+                f.metrics.push(Metric::said(culprit_core::key!("common.metric.runs_over_scans"), s.runs, Unit::Count));
             }
             if beside && s.runs_differ(w, q) && !w.cadence(q).is_burst() {
                 let label = over(t!("common.metric.runs_per_day"), &totals);
@@ -560,7 +567,7 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
             f.metrics.push(Metric::new(share_metric_label(snapshot), case.impact.share, Unit::Ratio));
             match workload.and_then(|w| Some((w.runs_per_day_of(q), w.per_day_measured(q.executions)?))) {
                 Some((Some(runs), _)) => {
-                    f.metrics.push(Metric::new(t!("common.metric.runs_per_day"), runs, Unit::Count))
+                    f.metrics.push(Metric::said(culprit_core::key!("common.metric.runs_per_day"), runs, Unit::Count))
                 }
                 // A day or more of window, but not runs that came a day at a time: what was counted.
                 Some((None, _)) => f.metrics.push(Metric::said(key!("common.metric.runs"), q.executions, Unit::Count)),
@@ -591,10 +598,14 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
         f.metrics.push(metric);
     }
     if let Some(cpu) = q.cpu_time_ms.filter(|_| q.total_time_ms > 0.0) {
-        f.metrics.push(Metric::new(t!("common.metric.cpu_share"), (cpu / q.total_time_ms).min(1.0), Unit::Ratio));
+        f.metrics.push(Metric::said(
+            culprit_core::key!("common.metric.cpu_share"),
+            (cpu / q.total_time_ms).min(1.0),
+            Unit::Ratio,
+        ));
     }
     if let Some((_, _, names)) = &case.triggers {
-        f.metrics.push(Metric::text(t!("check.heavy_query.metric.triggers"), names.join(", ")));
+        f.metrics.push(Metric::said_text(culprit_core::key!("check.heavy_query.metric.triggers"), names.join(", ")));
     }
     f.fix = Some(case.remedy.fix(snapshot, q));
     f.verify = vec![match &case.verify {

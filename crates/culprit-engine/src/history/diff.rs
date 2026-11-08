@@ -2,8 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use culprit_core::changes::epoch;
 use culprit_core::{
-    Capability, ChangeEvent, Engine, EventAction, EventKind, EventSource, IndexStat, Snapshot, server_label, sql, t,
+    Capability, ChangeEvent, Engine, EventAction, EventKind, EventSource, IndexStat, Snapshot, message, server_label,
+    sql,
 };
+
+use culprit_core::i18n::Message;
 
 use super::{SAME_TIME, USAGE, same_database};
 use crate::trends;
@@ -14,7 +17,10 @@ const MAX_STATISTICS: usize = 200;
 const MAX_SETTINGS: usize = 12;
 
 /// What changed from `previous` to `current` (the same database), plus what the database dated itself (`recorded`).
-pub fn diff(previous: Option<&Snapshot>, current: &Snapshot, recorded: Vec<ChangeEvent>) -> Vec<ChangeEvent> {
+pub fn diff(previous: Option<&Snapshot>, current: &Snapshot, mut recorded: Vec<ChangeEvent>) -> Vec<ChangeEvent> {
+    for event in &mut recorded {
+        event.refresh_language();
+    }
     let now = epoch(&current.taken_at).unwrap_or(0.0);
     let previous = previous.filter(|p| same_database(p, current) && epoch(&p.taken_at).is_some_and(|t| t < now));
     let since = previous.and_then(|p| epoch(&p.taken_at)).unwrap_or(now - trends::HISTORY_DAYS * 86_400.0);
@@ -140,7 +146,7 @@ fn schema(p: &Snapshot, c: &Snapshot, (after, at): (&str, &str), out: &mut Vec<C
                     EventSource::Scans,
                     name,
                     at,
-                    t!("engine.history.table_created", table = name),
+                    message!("engine.history.table_created", table = name),
                 )
                 .action(EventAction::Created)
                 .table(name.clone()),
@@ -156,7 +162,7 @@ fn schema(p: &Snapshot, c: &Snapshot, (after, at): (&str, &str), out: &mut Vec<C
                     EventSource::Scans,
                     name,
                     at,
-                    t!("engine.history.table_dropped", table = name),
+                    message!("engine.history.table_dropped", table = name),
                 )
                 .action(EventAction::Dropped)
                 .table(name.clone()),
@@ -203,31 +209,40 @@ fn columns(
         let mut changes = Vec::new();
         for (name, (display, ty, nullable)) in b {
             match a.get(name) {
-                None => changes.push(t!("engine.history.column.added", column = display, shape = shape(ty, *nullable))),
+                None => changes.push(message!(
+                    "engine.history.column.added",
+                    column = display,
+                    shape = shape(ty, *nullable)
+                )),
                 Some((_, old, old_null)) if !old.eq_ignore_ascii_case(ty) || old_null != nullable => {
-                    changes.push(format!("{display} {} → {}", shape(old, *old_null), shape(ty, *nullable)))
+                    changes.push(format!("{display} {} → {}", shape(old, *old_null), shape(ty, *nullable)).into())
                 }
                 Some(_) => {}
             }
         }
         for (name, (display, _, _)) in a {
             if !b.contains_key(name) {
-                changes.push(t!("engine.history.column.dropped", column = display));
+                changes.push(message!("engine.history.column.dropped", column = display));
             }
         }
         if changes.is_empty() {
             continue;
         }
         let title = if changes.len() == 1 {
-            t!("engine.history.columns.one", table = *table, change = &changes[0])
+            message!("engine.history.columns.one", table = *table, change = &changes[0])
         } else {
-            t!("engine.history.columns.many", n = changes.len(), count = changes.len().to_string(), table = *table)
+            message!(
+                "engine.history.columns.many",
+                n = changes.len(),
+                count = changes.len().to_string(),
+                table = *table
+            )
         };
         out.push(scans(
             ChangeEvent::new(EventKind::Table, EventSource::Scans, &format!("{table}.columns"), at, title)
                 .action(EventAction::Changed)
                 .table(table.to_string())
-                .detail(changes.join("; ")),
+                .detail(Message::sequence(changes, "; ")),
             after,
         ));
     }
@@ -281,7 +296,7 @@ fn indexes(
     let (ia, ib) = (index_map(p, common), index_map(c, common));
     let created: Vec<&IndexStat> = ib.iter().filter(|(k, _)| !ia.contains_key(*k)).map(|(_, i)| *i).collect();
     let mut dropped: Vec<&IndexStat> = ia.iter().filter(|(k, _)| !ib.contains_key(*k)).map(|(_, i)| *i).collect();
-    let event = |i: &IndexStat, title: String, action: EventAction| {
+    let event = |i: &IndexStat, title: Message, action: EventAction| {
         let table = i.qualified_table();
         scans(
             ChangeEvent::new(EventKind::Index, EventSource::Scans, &format!("{table}.{}", i.name), at, title)
@@ -302,7 +317,7 @@ fn indexes(
             out.push(
                 event(
                     i,
-                    t!("engine.history.index.renamed", old = &old.name, table = &table, new = &i.name),
+                    message!("engine.history.index.renamed", old = &old.name, table = &table, new = &i.name),
                     EventAction::Changed,
                 )
                 .minor(),
@@ -310,14 +325,14 @@ fn indexes(
             continue;
         }
         out.push(
-            event(i, t!("engine.history.index.created", index = &i.name, table = &table), EventAction::Created)
+            event(i, message!("engine.history.index.created", index = &i.name, table = &table), EventAction::Created)
                 .detail(describe(i)),
         );
     }
     for i in dropped {
         let table = i.qualified_table();
         out.push(
-            event(i, t!("engine.history.index.dropped", index = &i.name, table = &table), EventAction::Dropped)
+            event(i, message!("engine.history.index.dropped", index = &i.name, table = &table), EventAction::Dropped)
                 .detail(describe(i)),
         );
     }
@@ -326,13 +341,13 @@ fn indexes(
         let table = b.qualified_table();
         if a.is_disabled != b.is_disabled {
             let (title, action) = if b.is_disabled {
-                (t!("engine.history.index.disabled", index = &b.name, table = &table), EventAction::Dropped)
+                (message!("engine.history.index.disabled", index = &b.name, table = &table), EventAction::Dropped)
             } else {
-                (t!("engine.history.index.enabled", index = &b.name, table = &table), EventAction::Created)
+                (message!("engine.history.index.enabled", index = &b.name, table = &table), EventAction::Created)
             };
             out.push(event(b, title, action));
         } else if signature(a) != signature(b) {
-            let title = t!("engine.history.index.redefined", index = &b.name, table = &table);
+            let title = message!("engine.history.index.redefined", index = &b.name, table = &table);
             out.push(event(b, title, EventAction::Changed).detail(format!("{} → {}", describe(a), describe(b))));
         }
     }
@@ -394,7 +409,7 @@ fn foreign_keys(
         return;
     }
     let (fa, fb) = (fk_map(p, common), fk_map(c, common));
-    let event = |fk: &culprit_core::ForeignKey, title: String, action: EventAction| {
+    let event = |fk: &culprit_core::ForeignKey, title: Message, action: EventAction| {
         let table = format!("{}.{}", fk.schema, fk.table);
         scans(
             ChangeEvent::new(EventKind::Table, EventSource::Scans, &format!("{table}.{}", fk.name), at, title)
@@ -409,7 +424,7 @@ fn foreign_keys(
         match fa.get(k) {
             None => {
                 out.push(
-                    event(b, t!("engine.history.fk.added", name = &b.name, table = &table), EventAction::Created)
+                    event(b, message!("engine.history.fk.added", name = &b.name, table = &table), EventAction::Created)
                         .detail(describe_fk(b)),
                 );
             }
@@ -420,7 +435,7 @@ fn foreign_keys(
                     out.push(
                         event(
                             b,
-                            t!("engine.history.fk.delete_rule", name = &b.name, table = &table),
+                            message!("engine.history.fk.delete_rule", name = &b.name, table = &table),
                             EventAction::Changed,
                         )
                         .detail(format!(
@@ -437,7 +452,7 @@ fn foreign_keys(
         if !fb.contains_key(k) {
             let table = format!("{}.{}", a.schema, a.table);
             out.push(
-                event(a, t!("engine.history.fk.dropped", name = &a.name, table = &table), EventAction::Dropped)
+                event(a, message!("engine.history.fk.dropped", name = &a.name, table = &table), EventAction::Dropped)
                     .detail(describe_fk(a)),
             );
         }
@@ -471,12 +486,12 @@ fn constraints(
     let (ca, cb) = (con_map(p, common), con_map(c, common));
     let state = |con: &culprit_core::ConstraintIssue| {
         if con.disabled {
-            t!("engine.history.constraint.state.disabled")
+            message!("engine.history.constraint.state.disabled")
         } else {
-            t!("engine.history.constraint.state.untrusted")
+            message!("engine.history.constraint.state.untrusted")
         }
     };
-    let event = |con: &culprit_core::ConstraintIssue, title: String, action: EventAction| {
+    let event = |con: &culprit_core::ConstraintIssue, title: Message, action: EventAction| {
         let table = format!("{}.{}", con.schema, con.table);
         scans(
             ChangeEvent::new(EventKind::Table, EventSource::Scans, &format!("{table}.{}", con.name), at, title)
@@ -491,9 +506,9 @@ fn constraints(
         match ca.get(k) {
             None => {
                 let title = if b.disabled {
-                    t!("engine.history.constraint.is_disabled", name = &b.name, table = &table)
+                    message!("engine.history.constraint.is_disabled", name = &b.name, table = &table)
                 } else {
-                    t!("engine.history.constraint.is_untrusted", name = &b.name, table = &table)
+                    message!("engine.history.constraint.is_untrusted", name = &b.name, table = &table)
                 };
                 out.push(event(b, title, EventAction::Changed).detail(format!("{:?}", b.kind).to_ascii_uppercase()));
             }
@@ -501,10 +516,14 @@ fn constraints(
                 out.push(
                     event(
                         b,
-                        t!("engine.history.constraint.changed", name = &b.name, table = &table),
+                        message!("engine.history.constraint.changed", name = &b.name, table = &table),
                         EventAction::Changed,
                     )
-                    .detail(format!("{} → {}", state(a), state(b))),
+                    .detail(message!(
+                        "engine.history.before_after",
+                        before = state(a),
+                        after = state(b)
+                    )),
                 );
             }
             Some(_) => {}
@@ -514,13 +533,17 @@ fn constraints(
         if !cb.contains_key(k) {
             let table = format!("{}.{}", a.schema, a.table);
             let was = if a.disabled {
-                t!("engine.history.constraint.was_disabled")
+                message!("engine.history.constraint.was_disabled")
             } else {
-                t!("engine.history.constraint.was_untrusted")
+                message!("engine.history.constraint.was_untrusted")
             };
             out.push(
-                event(a, t!("engine.history.constraint.gone", name = &a.name, table = &table), EventAction::Changed)
-                    .detail(was),
+                event(
+                    a,
+                    message!("engine.history.constraint.gone", name = &a.name, table = &table),
+                    EventAction::Changed,
+                )
+                .detail(was),
             );
         }
     }
@@ -568,7 +591,7 @@ fn triggers(
     if ta.is_empty() && tb.is_empty() {
         return;
     }
-    let event = |table: &str, name: &str, title: String, action: EventAction| {
+    let event = |table: &str, name: &str, title: Message, action: EventAction| {
         scans(
             ChangeEvent::new(EventKind::Code, EventSource::Scans, &format!("{table}.{name}"), at, title)
                 .action(action)
@@ -584,7 +607,7 @@ fn triggers(
                     event(
                         table,
                         name,
-                        t!("engine.history.trigger.created", name = name, table = table),
+                        message!("engine.history.trigger.created", name = name, table = table),
                         EventAction::Created,
                     )
                     .detail(describe_trigger_events(ev_b)),
@@ -595,7 +618,7 @@ fn triggers(
                     event(
                         table,
                         name,
-                        t!("engine.history.trigger.redefined", name = name, table = table),
+                        message!("engine.history.trigger.redefined", name = name, table = table),
                         EventAction::Changed,
                     )
                     .detail(format!(
@@ -614,7 +637,7 @@ fn triggers(
                 event(
                     table,
                     name,
-                    t!("engine.history.trigger.dropped", name = name, table = table),
+                    message!("engine.history.trigger.dropped", name = name, table = table),
                     EventAction::Dropped,
                 )
                 .detail(describe_trigger_events(ev_a)),
@@ -659,7 +682,7 @@ fn settings(p: &Snapshot, c: &Snapshot, (after, at): (&str, &str), out: &mut Vec
                 EventSource::Scans,
                 "many",
                 at,
-                t!("engine.history.settings_changed", n = changed.len(), count = changed.len().to_string()),
+                message!("engine.history.settings_changed", n = changed.len(), count = changed.len().to_string()),
             )
             .action(EventAction::Changed)
             .detail(format!("{}; …", detail.join("; "))),
@@ -674,7 +697,7 @@ fn settings(p: &Snapshot, c: &Snapshot, (after, at): (&str, &str), out: &mut Vec
                 EventSource::Scans,
                 &name,
                 at,
-                t!("engine.history.setting_changed", name = &name, from = &a, to = &b),
+                message!("engine.history.setting_changed", name = &name, from = &a, to = &b),
             )
             .action(EventAction::Changed)
             .object(name.clone()),
@@ -694,7 +717,7 @@ fn version(p: &Snapshot, c: &Snapshot, (after, at): (&str, &str), out: &mut Vec<
         EventSource::Scans,
         &c.server.version,
         at,
-        t!("engine.history.version", from = a, to = b),
+        message!("engine.history.version", from = a, to = b),
     )
     .action(EventAction::Changed);
     // Upgrades restart the server, which dates them.
@@ -718,10 +741,10 @@ fn restart(p: Option<&Snapshot>, c: &Snapshot, since: f64, out: &mut Vec<ChangeE
     if !moved || t <= since {
         return;
     }
-    let title = if p.is_some() { t!("engine.history.restarted") } else { t!("engine.history.started") };
+    let title = if p.is_some() { message!("engine.history.restarted") } else { message!("engine.history.started") };
     out.push(
         ChangeEvent::new(EventKind::Restart, EventSource::Database, "server", started, title)
-            .detail(t!("engine.history.restart_detail")),
+            .detail(message!("engine.history.restart_detail")),
     );
 }
 
@@ -788,13 +811,19 @@ fn usage_reset(p: &Snapshot, c: &Snapshot, (after, at): (&str, &str), out: &mut 
     if tables.is_empty() {
         return;
     }
-    let gone = t!("engine.history.usage.gone");
+    let gone = message!("engine.history.usage.gone");
     if counted >= 4 && started_over * 2 > counted {
         out.push(
-            ChangeEvent::new(EventKind::StatsReset, EventSource::Scans, USAGE, at, t!("engine.history.usage.database"))
-                .object(USAGE)
-                .detail(format!("{} {gone}", t!("engine.history.usage.database_why")))
-                .between(after),
+            ChangeEvent::new(
+                EventKind::StatsReset,
+                EventSource::Scans,
+                USAGE,
+                at,
+                message!("engine.history.usage.database"),
+            )
+            .object(USAGE)
+            .detail(Message::paragraph(vec![message!("engine.history.usage.database_why"), gone.clone()]))
+            .between(after),
         );
         return;
     }
@@ -805,11 +834,11 @@ fn usage_reset(p: &Snapshot, c: &Snapshot, (after, at): (&str, &str), out: &mut 
                 EventSource::Scans,
                 &format!("{USAGE}:{name}"),
                 at,
-                t!("engine.history.usage.table", table = name),
+                message!("engine.history.usage.table", table = name),
             )
             .object(USAGE)
             .table(name.clone())
-            .detail(format!("{} {gone}", t!("engine.history.usage.table_why")))
+            .detail(Message::paragraph(vec![message!("engine.history.usage.table_why"), gone.clone()]))
             .minor()
             .between(after),
         );
@@ -837,9 +866,9 @@ fn stats_reset(p: Option<&Snapshot>, c: &Snapshot, since: f64, out: &mut Vec<Cha
             EventSource::Database,
             &w.source,
             reset,
-            t!("engine.history.stats_reset", source = &w.source),
+            message!("engine.history.stats_reset", source = w.source_message()),
         )
-        .detail(t!("engine.history.stats_reset_detail")),
+        .detail(message!("engine.history.stats_reset_detail")),
     );
 }
 
@@ -888,7 +917,7 @@ fn statistics(p: Option<&Snapshot>, c: &Snapshot, since: f64, out: &mut Vec<Chan
                 EventSource::Database,
                 &table,
                 &at,
-                t!("engine.history.statistics", table = &table),
+                message!("engine.history.statistics", table = &table),
             )
             .table(table)
             .minor()

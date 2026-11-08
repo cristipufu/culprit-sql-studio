@@ -1,3 +1,4 @@
+use culprit_core::i18n::LabelPosition;
 use culprit_core::{Engine, QueryStat, Snapshot, t};
 
 /// Queries that touch a table: by plan objects when a plan exists, otherwise by a whole-word match in the text.
@@ -241,20 +242,30 @@ pub enum Handle {
 impl Handle {
     /// "a read from orders", "an update of users": the handle in words, for titles and sentences.
     pub fn words(&self) -> String {
+        self.words_at(LabelPosition::Inline)
+    }
+
+    pub fn leading_words(&self) -> String {
+        self.words_at(LabelPosition::Initial)
+    }
+
+    fn words_at(&self, position: LabelPosition) -> String {
         match self {
-            Handle::InObject(object) => t!("support.handle.in_object", object = object),
-            Handle::Read(Some(table)) => t!("support.handle.read", table = table),
-            Handle::Read(None) => t!("support.handle.read_any"),
-            Handle::Insert(table) => t!("support.handle.insert", table = table),
-            Handle::Update(table) => t!("support.handle.update", table = table),
-            Handle::Delete(table) => t!("support.handle.delete", table = table),
-            Handle::Merge(table) => t!("support.handle.merge", table = table),
-            Handle::UpdateInWith => t!("support.handle.update_in_with"),
-            Handle::DeleteInWith => t!("support.handle.delete_in_with"),
-            Handle::StatisticsRefresh(table) => t!("support.handle.statistics_refresh", table = table),
-            Handle::Call(name) => t!("support.handle.call", name = name),
+            Handle::InObject(object) => t!("support.handle.in_object", position = position, object = object),
+            Handle::Read(Some(table)) => t!("support.handle.read", position = position, table = table),
+            Handle::Read(None) => t!("support.handle.read_any", position = position),
+            Handle::Insert(table) => t!("support.handle.insert", position = position, table = table),
+            Handle::Update(table) => t!("support.handle.update", position = position, table = table),
+            Handle::Delete(table) => t!("support.handle.delete", position = position, table = table),
+            Handle::Merge(table) => t!("support.handle.merge", position = position, table = table),
+            Handle::UpdateInWith => t!("support.handle.update_in_with", position = position),
+            Handle::DeleteInWith => t!("support.handle.delete_in_with", position = position),
+            Handle::StatisticsRefresh(table) => {
+                t!("support.handle.statistics_refresh", position = position, table = table)
+            }
+            Handle::Call(name) => t!("support.handle.call", position = position, name = name),
             Handle::Session(text) => text.clone(),
-            Handle::Query => t!("support.handle.query"),
+            Handle::Query => t!("support.handle.query", position = position),
         }
     }
 }

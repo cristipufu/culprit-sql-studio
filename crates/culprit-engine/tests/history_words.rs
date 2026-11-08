@@ -198,7 +198,7 @@ fn counters_that_started_over_say_what_they_said() {
 #[test]
 fn a_replicas_usage_counters_say_why_they_are_set_aside() {
     let mut out = Vec::new();
-    for role in ["standby", "readable secondary"] {
+    for role in ["standby", "readable-secondary"] {
         let mut s = demo();
         s.settings.push(setting(culprit_core::REPLICA_SETTING, role));
         history::set_aside_replica_usage(&mut s);

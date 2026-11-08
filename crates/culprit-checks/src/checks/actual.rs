@@ -71,7 +71,7 @@ fn setting_off_finding(_snapshot: &Snapshot, off: SettingOff) -> Finding {
     f.severity = Severity::Low;
     f.confidence = Confidence::High;
     f.impact.score = base_score(Severity::Low) * 0.6;
-    f.impact.label = t!("check.last_actual_plans.impact");
+    f.impact.set_label(t!("check.last_actual_plans.impact"));
     match off {
         SettingOff::LastQueryPlanStats { trace_flag } => {
             f.title = t!("check.last_actual_plans.last_query_plan_stats.title");
@@ -85,7 +85,11 @@ fn setting_off_finding(_snapshot: &Snapshot, off: SettingOff) -> Finding {
                 sql: Some("ALTER DATABASE SCOPED CONFIGURATION SET LAST_QUERY_PLAN_STATS = ON;".into()),
                 cost: Some(t!("check.last_actual_plans.last_query_plan_stats.fix_cost")),
             });
-            f.verify = vec![t!("check.last_actual_plans.last_query_plan_stats.verify")];
+            f.verify = vec![t!(
+                "check.last_actual_plans.last_query_plan_stats.verify",
+                queries = culprit_core::t!("ui.common.view.queries"),
+                last_run = culprit_core::t!("ui.common.last_run")
+            )];
         }
         SettingOff::LightweightQueryProfiling => {
             f.title = t!("check.last_actual_plans.lightweight_query_profiling.title");
@@ -95,7 +99,10 @@ fn setting_off_finding(_snapshot: &Snapshot, off: SettingOff) -> Finding {
                 sql: Some("ALTER DATABASE SCOPED CONFIGURATION SET LIGHTWEIGHT_QUERY_PROFILING = ON;".into()),
                 cost: Some(t!("check.last_actual_plans.lightweight_query_profiling.fix_cost")),
             });
-            f.verify = vec![t!("check.last_actual_plans.lightweight_query_profiling.verify")];
+            f.verify = vec![t!(
+                "check.last_actual_plans.lightweight_query_profiling.verify",
+                live = culprit_core::t!("ui.common.view.live")
+            )];
         }
     }
     f

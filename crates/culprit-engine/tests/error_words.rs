@@ -13,6 +13,9 @@ use culprit_engine::{NewConnection, Workspace, plans};
 
 use crate::export_words::pin;
 
+#[path = "../../../tests/support/paths.rs"]
+mod paths;
+
 struct Home(PathBuf);
 impl Drop for Home {
     fn drop(&mut self) {
@@ -39,7 +42,7 @@ fn said(dir: &Path, what: &str, result: Result<impl Sized, Error>) -> String {
         error.message,
         error.hint.map(|h| format!("\n  hint: {h}")).unwrap_or_default()
     );
-    text.replace(&dir.display().to_string(), "<dir>")
+    paths::normalize(&text, &[(dir, "<dir>")])
 }
 
 fn connection(name: &str, input: &str, environment: Environment) -> NewConnection {
@@ -186,9 +189,8 @@ fn files_that_dont_read_say_what_they_said() {
     ];
     // An application log with no statements in it.
     ws.add_connection(connection("dev", "postgres://reader@db.invalid/shop", Environment::Development)).unwrap();
-    let canonical = std::fs::canonicalize(dir).unwrap();
     let log = said(dir, "log without statements", ws.set_query_log("dev", Some(&empty_log)));
-    out.push(log.replace(&canonical.display().to_string(), "<dir>"));
+    out.push(log);
     // What an import says of the connections it found.
     let ads = write(
         "settings.json",

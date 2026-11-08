@@ -276,6 +276,9 @@ fn shared_node_cpu_and_memory_do_not_become_database_pressure() {
     let mut s = snapshot(Engine::Yugabyte);
     s.pressure = Some(culprit_core::Pressure::default());
     s.operations.node_resources = Some(culprit_core::NodeResources {
+        source_message: None,
+        note_messages: None,
+
         source: "shared native nodes".into(),
         observed_from: "2026-10-01T00:00:00Z".into(),
         observed_until: "2026-10-01T00:00:01Z".into(),
@@ -291,6 +294,8 @@ fn shared_node_cpu_and_memory_do_not_become_database_pressure() {
             host_memory_available_bytes: Some(1.0),
             host_memory_free_bytes: Some(0.0),
             process_memory: Some(culprit_core::ProcessMemory {
+                name_message: None,
+
                 name: "TServer tracker".into(),
                 tracked_bytes: Some(1e9),
                 hard_limit: Some(culprit_core::MemoryLimit::Bytes(1e9)),
@@ -316,6 +321,10 @@ fn shared_node_cpu_and_memory_do_not_become_database_pressure() {
 fn native_terminations_keep_their_own_dates_and_never_become_workload_failure_rates() {
     let mut s = snapshot(Engine::Yugabyte);
     s.operations.termination_history = Some(culprit_core::TerminationHistory {
+        source_message: None,
+        visibility_message: None,
+        note_messages: None,
+
         source: "native retained buffer".into(),
         requested_start: "2026-10-01T00:00:00Z".into(),
         requested_end: "2026-10-08T00:00:00Z".into(),
@@ -347,6 +356,7 @@ fn native_terminations_keep_their_own_dates_and_never_become_workload_failure_ra
     s.operations.termination_history = None;
     s.sources.retain(|s| s.source != culprit_core::source_id::DOCDB_TERMINATIONS);
     s.sources.push(culprit_core::SourceOutcome {
+        reason_message: None,
         source: culprit_core::source_id::DOCDB_TERMINATIONS.into(),
         state: culprit_core::SourceState::Unavailable,
         reason: Some("The native view was denied".into()),
@@ -362,6 +372,7 @@ fn logs_with_observations_are_not_disabled_by_their_success_note() {
     let mut s = snapshot(Engine::Sqlite);
     s.server.capabilities.push(culprit_core::Capability::QueryLog);
     s.notes.push(CollectorNote {
+        message_source: None,
         collector: "query log".into(),
         message: "Read structured error records".into(),
         table: None,

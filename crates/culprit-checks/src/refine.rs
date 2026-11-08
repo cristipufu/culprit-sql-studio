@@ -90,37 +90,6 @@ pub(crate) fn without_database(text: &str, database: &str) -> String {
     text.replace(&prefix, "[")
 }
 
-/// The sentences of a text: split after a full stop, a question or an exclamation mark that a space and a capital
-/// letter, a digit or a quote follow ("e.g. the" and "1.5 s" stay whole).
-pub(crate) fn sentences(text: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    let mut start = 0;
-    let chars: Vec<(usize, char)> = text.char_indices().collect();
-    for w in chars.windows(3) {
-        let [(at, end), (_, space), (_, next)] = [w[0], w[1], w[2]];
-        if matches!(end, '.' | '?' | '!')
-            && space == ' '
-            && (next.is_uppercase() || next.is_ascii_digit() || matches!(next, '`' | '"' | '“'))
-        {
-            let sentence = text[start..at + 1].trim();
-            if !sentence.is_empty() {
-                out.push(sentence);
-            }
-            start = at + 1;
-        }
-    }
-    let last = text[start..].trim();
-    if !last.is_empty() {
-        out.push(last);
-    }
-    out
-}
-
-/// A sentence as [`caveats_repeat_nothing`] compares it: lower case, spaces collapsed, no final stop.
-fn sentence_key(sentence: &str) -> String {
-    sentence.split_whitespace().collect::<Vec<_>>().join(" ").trim_end_matches(['.', '!', '?', ':', ';']).to_lowercase()
-}
-
 fn table_leaf(name: &str) -> String {
     name.rsplit('.').next().unwrap_or(name).trim_matches(['[', ']', '"', '`']).to_ascii_lowercase()
 }
@@ -347,11 +316,6 @@ fn leaf(table: &str) -> &str {
     table.rsplit('.').next().unwrap_or(table)
 }
 
-fn capitalize(s: &str) -> String {
-    let mut chars = s.chars();
-    chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
-}
-
 // ── pressure, config, maintenance ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -527,30 +491,24 @@ mod tables_tests {
         serde_json::from_str(&text).expect("snapshot")
     }
 
-    // CX-10d: a caveat repeated the fix ("… already leads with …; the recommended index differs from it only by …").
-    // Whatever check wrote it, a caveat sentence the summary or the fix already says goes; the rest of it stays.
     #[test]
-    fn a_caveat_repeats_nothing_the_summary_or_the_fix_says() {
+    fn repeated_caveats_preserve_complete_messages_in_every_script() {
         let s = fixture("postgres-demo.json");
         let mut f = finding("tuning-advice", "x", Category::Indexes, subject(SubjectKind::Table, "app.job_runs"));
-        f.summary = "The index helps. It costs every write.".into();
-        f.fix = Some(Fix { summary: "Nothing to create: ix_a already leads with a.".into(), sql: None, cost: None });
+        f.summary = "索引有帮助。每次写入都有代价。".into();
+        f.fix = Some(Fix { summary: "Rien à créer : ix_a existe déjà.".into(), sql: None, cost: None });
         f.caveats = vec![
-            "Nothing to create: ix_a already leads with a".into(),
+            f.summary.clone(),
+            f.fix.as_ref().unwrap().summary.clone(),
             "It costs every write. Measure it first.".into(),
             "Quoted, as recorded:\nIt costs every write.".into(),
-            "Something new.".into(),
+            "It costs every write. Measure it first.".into(),
         ];
         let mut findings = vec![f];
         caveats_repeat_nothing(&s, &mut findings);
         assert_eq!(
             findings[0].caveats,
-            vec!["Measure it first.", "Quoted, as recorded:\nIt costs every write.", "Something new."]
-        );
-        // "e.g. the" and "1.5 s" are inside one sentence.
-        assert_eq!(
-            sentences("Use one, e.g. the first. It takes 1.5 s. Done"),
-            vec!["Use one, e.g. the first.", "It takes 1.5 s.", "Done"]
+            ["It costs every write. Measure it first.", "Quoted, as recorded:\nIt costs every write.",]
         );
     }
 

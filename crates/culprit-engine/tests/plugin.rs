@@ -46,6 +46,9 @@ async fn retained_native_plans_open_offline_without_borrowing_current_catalog_or
     .unwrap();
     cached.facts_mut().constants_redacted = true;
     q.plan_history = Some(culprit_core::PlanHistory {
+        source_message: None,
+        note_message: None,
+
         source: "yb_pg_stat_plans".into(),
         kind: culprit_core::PlanHistoryKind::Cache,
         note: "Retained cache periods are independent of statement statistics".into(),

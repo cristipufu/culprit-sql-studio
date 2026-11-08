@@ -11,6 +11,11 @@ export function workloadKind(w: Workload): WorkloadKind | null {
   return w.kind ?? null;
 }
 
+/** The reader's label, separate from the stable source used to compare counters. */
+export function workloadSource(w: Workload): string {
+  return w.source_label ?? w.source;
+}
+
 /** Below this, a per-day figure would be a forecast from a sliver of data; show what was measured instead. */
 export const PER_DAY_MIN_HOURS = 20;
 

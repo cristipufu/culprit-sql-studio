@@ -49,39 +49,42 @@ pub(super) fn deadlocks(report: &Report) -> Tile {
     }
     if !here.is_empty() {
         // Same pattern on the same tables is the same problem.
-        let mut groups: BTreeMap<(String, String), Vec<&culprit_core::Deadlock>> = BTreeMap::new();
+        let mut groups: BTreeMap<(culprit_core::DeadlockPattern, String), Vec<&culprit_core::Deadlock>> =
+            BTreeMap::new();
         for dl in here.iter().filter(|dl| dl.at.is_some()) {
-            groups.entry((dl.pattern.label().to_string(), dl.objects.join(", "))).or_default().push(dl);
+            groups.entry((dl.pattern, dl.objects.join(", "))).or_default().push(dl);
         }
-        let mut groups: Vec<((String, String), Vec<&culprit_core::Deadlock>)> = groups.into_iter().collect();
+        let mut groups: Vec<((culprit_core::DeadlockPattern, String), Vec<&culprit_core::Deadlock>)> =
+            groups.into_iter().collect();
         groups.sort_by_key(|g| std::cmp::Reverse(g.1.len()));
         let n = dated;
         let ((pattern, objects), biggest) = &groups[0];
+        let pattern = pattern.label();
         let (count, same) = (n.to_string(), biggest.len().to_string());
         let when = last(d.since_hours);
         let takeaway = match (n, objects.is_empty()) {
-            (1, true) => t!("view.dashboard.deadlocks.one", when = &when, pattern = pattern),
-            (1, false) => t!("view.dashboard.deadlocks.one_on", when = &when, pattern = pattern, objects = objects),
+            (1, true) => t!("view.dashboard.deadlocks.one", when = &when, pattern = &pattern),
+            (1, false) => t!("view.dashboard.deadlocks.one_on", when = &when, pattern = &pattern, objects = objects),
             _ if biggest.len() == n && objects.is_empty() => {
-                t!("view.dashboard.deadlocks.all", count = &count, when = &when, pattern = pattern)
+                t!("view.dashboard.deadlocks.all", count = &count, when = &when, pattern = &pattern)
             }
             _ if biggest.len() == n => t!(
                 "view.dashboard.deadlocks.all_on",
                 count = &count,
                 when = &when,
-                pattern = pattern,
+                pattern = &pattern,
                 objects = objects
             ),
             _ if groups.len() == n => t!("view.dashboard.deadlocks.each_different", count = &count, when = &when),
             (_, true) => {
-                t!("view.dashboard.deadlocks.some", count = &count, when = &when, same = &same, pattern = pattern)
+                t!("view.dashboard.deadlocks.some", count = &count, when = &when, same = &same, pattern = &pattern)
             }
             (_, false) => t!(
                 "view.dashboard.deadlocks.some_on",
                 count = &count,
                 when = &when,
                 same = &same,
-                pattern = pattern,
+                pattern = &pattern,
                 objects = objects
             ),
         };
@@ -102,9 +105,9 @@ pub(super) fn deadlocks(report: &Report) -> Tile {
             .take(3)
             .map(|((pattern, objects), list)| {
                 let label = if objects.is_empty() {
-                    capitalized(pattern)
+                    pattern.leading_label()
                 } else {
-                    t!("view.dashboard.deadlocks.item_on", pattern = capitalized(pattern), objects = objects)
+                    t!("view.dashboard.deadlocks.item_on", pattern = pattern.leading_label(), objects = objects)
                 };
                 let mut item = TileItem::new(ItemKind::Deadlock, list[0].id.clone(), label);
                 item.value = Some(t!("view.dashboard.deadlocks.occurrences", count = list.len().to_string()));

@@ -31,7 +31,7 @@ export function ConnectionCard({ connection: c }: { connection: ConnectionInfo }
   const headline = c.last_report
     ? c.last_report.no_workload
       ? t("ui.connection_card.no_query_history", { reason: c.last_report.no_workload })
-      : (takeaway(c.last_report.headline) ?? t("ui.connection_card.no_takeaway"))
+      : (c.last_report.takeaway ?? t("ui.connection_card.no_takeaway"))
     : null;
 
   const save = async () => {
@@ -148,12 +148,6 @@ function RemoveConnection({ name }: { name: string }) {
       {error && <span className="error" role="alert">{error}</span>}
     </span>
   );
-}
-
-/** The report headline without its count ("14 opportunities. The top ones touch…"), which the card already shows. */
-function takeaway(headline: string | undefined): string | null {
-  const rest = headline?.replace(/^\s*\d[\d,]*\s+opportunit(?:y|ies)\.?\s*/i, "").trim();
-  return rest ? rest : null;
 }
 
 /** A report older than a day may describe a database that has moved on. */

@@ -5,8 +5,8 @@ use std::future::Future;
 use std::time::Instant;
 
 use culprit_core::{
-    Capability, ColumnInfo, Coverage, Engine, ForeignKey, IndexStat, MissingIndex, ResourceSample, Result,
-    SNAPSHOT_FORMAT, Setting, Snapshot, SnapshotOptions, StatisticsInfo, TableStat, WaitStat, Workload, format, t,
+    Capability, ColumnInfo, Coverage, Engine, ForeignKey, IndexStat, MissingCapability, MissingIndex, ResourceSample,
+    Result, SNAPSHOT_FORMAT, Setting, Snapshot, SnapshotOptions, StatisticsInfo, TableStat, WaitStat, Workload,
 };
 
 use crate::{
@@ -54,50 +54,65 @@ struct MiscPart {
 /// What the probe already knows about Query Store: none here (an older server, a system database), or one that is off.
 pub(crate) fn query_store_account(outcome: &mut Outcome, probe: &Probe) {
     if probe.query_store.is_none() {
-        outcome.not_applicable(&sources::QUERY_STORE, t!("provider.mssql.capability.query_store_requires"));
-        outcome.lacking(Capability::QueryStore, t!("provider.mssql.capability.query_store_missing"), None);
+        outcome.not_applicable(
+            &sources::QUERY_STORE,
+            culprit_core::message!("provider.mssql.capability.query_store_requires"),
+        );
+        outcome.lacking(
+            Capability::QueryStore,
+            culprit_core::message!("provider.mssql.capability.query_store_missing"),
+            None,
+        );
     }
     if let Some(qs) = &probe.query_store
         && !qs.readable()
     {
-        outcome.recorded(
+        outcome.recorded_message(
             &sources::QUERY_STORE,
             culprit_core::SourceState::Unavailable,
-            Some(t!("provider.mssql.capability.query_store_state", state = &qs.actual)),
+            qs.unavailable_message(),
         );
-        outcome.lacking(
+        outcome.missing_capability(MissingCapability::sql(
             Capability::QueryStore,
-            t!("provider.mssql.capability.query_store_off", state = qs.actual.to_ascii_lowercase().replace('_', " ")),
-            Some("ALTER DATABASE CURRENT SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE);".into()),
-        );
+            qs.limited_history_message(),
+            "ALTER DATABASE CURRENT SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE);",
+        ));
     }
 }
 
 /// Query Store plans whose XML couldn't be read.
-pub(crate) fn unparsed_plans(count: usize) -> String {
-    t!("provider.mssql.note.unparsed_plans", n = count, count = format::digits(count.to_string()))
+pub(crate) fn unparsed_plans(count: usize) -> culprit_core::i18n::Message {
+    culprit_core::message!(
+        "provider.mssql.note.unparsed_plans",
+        n = count,
+        count = culprit_core::i18n::MessageValue::Digits(count.to_string())
+    )
 }
 
 /// This login can't read the plan cache either.
 pub(crate) fn plan_cache_unreadable(outcome: &mut Outcome, probe: &Probe) {
-    let reason = t!("provider.mssql.capability.plan_cache_unreadable");
-    outcome.recorded(&sources::PLAN_CACHE, culprit_core::SourceState::Unavailable, Some(reason.clone()));
-    outcome.lacking(Capability::PlanCache, reason, Some(probe.grant_hint()));
+    let reason = culprit_core::message!("provider.mssql.capability.plan_cache_unreadable");
+    outcome.recorded_message(&sources::PLAN_CACHE, culprit_core::SourceState::Unavailable, reason.clone());
+    outcome.missing_capability(MissingCapability::sql(Capability::PlanCache, reason, probe.grant_hint()));
 }
 
 /// Index usage counters this login can't read.
 pub(crate) fn index_usage_unreadable(outcome: &mut Outcome, probe: &Probe) {
-    outcome.lacking(
+    outcome.missing_capability(MissingCapability::sql(
         Capability::IndexUsage,
-        t!("provider.mssql.capability.index_usage_unreadable"),
-        Some(probe.grant_hint()),
-    );
+        culprit_core::message!("provider.mssql.capability.index_usage_unreadable"),
+        probe.grant_hint(),
+    ));
 }
 
 /// What the server state views would have delivered, without the permission to read them.
 pub(crate) fn server_state_unreadable(outcome: &mut Outcome, probe: &Probe) {
     for capability in [Capability::MissingIndexes, Capability::WaitStats] {
-        outcome.lacking(capability, t!("provider.mssql.capability.no_server_state"), Some(probe.grant_hint()));
+        outcome.missing_capability(MissingCapability::sql(
+            capability,
+            culprit_core::message!("provider.mssql.capability.no_server_state"),
+            probe.grant_hint(),
+        ));
     }
 }
 
@@ -308,7 +323,7 @@ pub(crate) async fn snapshot(
     }
     for m in expected_missing {
         if matches!(m.capability, Capability::Showplan | Capability::Sessions) {
-            outcome.lacking(m.capability, m.reason, m.fix);
+            outcome.missing_capability(m);
         }
     }
     outcome.merge(workload_part.outcome);

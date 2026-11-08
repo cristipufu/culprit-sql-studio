@@ -171,6 +171,21 @@ pub struct Impact {
     pub time_ms_per_day: Option<f64>,
     /// Short human label for the impact column, e.g. "31% of DB time" or "6.1 GB unused".
     pub label: String,
+    // Stable identity for a label that refinement can update. Empty for a custom label.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label_key: String,
+}
+
+impl Impact {
+    pub fn set_label(&mut self, label: impl Into<String>) {
+        self.label = label.into();
+        self.label_key.clear();
+    }
+
+    pub fn set_keyed_label(&mut self, key: &str, label: impl Into<String>) {
+        self.set_label(label);
+        self.label_key = key.into();
+    }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
@@ -276,6 +291,34 @@ pub struct Summary {
     pub index_counting: String,
     /// Whether an index can serve each foreign key, as the unindexed-foreign-key check decides it.
     pub foreign_key_indexes: Vec<ForeignKeyIndex>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub no_workload_capability: Option<Capability>,
+    #[serde(default)]
+    pub takeaway: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub headline_message: Option<crate::i18n::Message>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub takeaway_message: Option<crate::i18n::Message>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub no_workload_message: Option<crate::i18n::Message>,
+}
+
+impl Summary {
+    pub fn render_recorded_messages(&mut self) {
+        if let Some(message) = &self.no_workload_message {
+            self.no_workload = Some(message.render());
+        }
+        if let Some(message) = &self.headline_message {
+            self.headline = message.render();
+        }
+        if let Some(message) = &self.takeaway_message {
+            self.takeaway = Some(message.render());
+        }
+    }
 }
 
 /// One line under an index in the schema view ([`Summary::index_notes`]).

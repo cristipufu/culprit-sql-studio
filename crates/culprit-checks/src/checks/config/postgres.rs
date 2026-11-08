@@ -259,7 +259,11 @@ pub(super) fn render(snapshot: &Snapshot, case: Case<'_>) -> Finding {
                 },
             );
             f.confidence = Confidence::Medium;
-            f.metrics.push(Metric::new(t!("check.config.wal_buffers.metric.full_writes"), full, Unit::Count));
+            f.metrics.push(Metric::said(
+                culprit_core::key!("check.config.wal_buffers.metric.full_writes"),
+                full,
+                Unit::Count,
+            ));
             after_restart(&mut f);
             f
         }
@@ -507,7 +511,11 @@ fn statements_evicted(
         },
     );
     f.confidence = Confidence::High;
-    f.metrics.push(Metric::new(t!("check.config.statements_evicted.metric.rounds"), rounds, Unit::Count));
+    f.metrics.push(Metric::said(
+        culprit_core::key!("check.config.statements_evicted.metric.rounds"),
+        rounds,
+        Unit::Count,
+    ));
     if let Some((new, _, _, when)) = &recent {
         f.metrics.push(Metric::new(
             t!("check.config.statements_evicted.metric.rounds_since_scan", when = when),

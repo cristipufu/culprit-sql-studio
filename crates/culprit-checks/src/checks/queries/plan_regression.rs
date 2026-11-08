@@ -174,13 +174,13 @@ fn plan_regression_finding(snapshot: &Snapshot, regression: PlanRegression<'_>) 
     f.impact.time_ms_per_day = regression.wasted_per_day;
     f.impact.score = regression.score;
     let factor = format::factor(regression.factor);
-    f.impact.label = t!("common.impact.times_slower", factor = factor.clone());
+    f.impact.set_label(t!("common.impact.times_slower", factor = factor.clone()));
     f.severity = regression.severity;
     f.confidence = Confidence::High;
     f.title = t!("check.plan_regression.title", query = capitalize(&query_handle(q)), factor = factor);
     f.summary = plan_change_sentence(&regression, None);
     f.queries = query_refs(&[q]);
-    f.metrics.push(Metric::new(t!("common.metric.fast_plan"), best.mean_time_ms, Unit::Ms));
+    f.metrics.push(Metric::said(culprit_core::key!("common.metric.fast_plan"), best.mean_time_ms, Unit::Ms));
     // A statement that stopped has no current plan: the slow one is the last it ran with.
     let slow_label = if regression.stopped || regression.gone.is_some() {
         t!("check.plan_regression.metric.last_plan")
@@ -189,8 +189,12 @@ fn plan_regression_finding(snapshot: &Snapshot, regression: PlanRegression<'_>) 
     };
     f.metrics.push(Metric::new(slow_label, latest.mean_time_ms, Unit::Ms));
     match regression.wasted_per_day {
-        Some(extra) => f.metrics.push(Metric::new(t!("common.metric.extra_time_per_day"), extra, Unit::Ms)),
-        None => f.metrics.push(Metric::new(t!("common.metric.extra_time"), regression.wasted, Unit::Ms)),
+        Some(extra) => {
+            f.metrics.push(Metric::said(culprit_core::key!("common.metric.extra_time_per_day"), extra, Unit::Ms))
+        }
+        None => {
+            f.metrics.push(Metric::said(culprit_core::key!("common.metric.extra_time"), regression.wasted, Unit::Ms))
+        }
     }
     // A plan forced onto a table that is gone can't apply: there is nothing to force.
     if let Some(gone) = regression.gone {

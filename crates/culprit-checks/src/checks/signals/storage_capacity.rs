@@ -132,11 +132,11 @@ fn storage_capacity_finding(_: &Snapshot, full: FullSpace<'_>) -> Finding {
     f.actionability = if full.actionable { Actionability::NeedsAttention } else { Actionability::Information };
     f.confidence = Confidence::High;
     f.impact.score = base_score(f.severity);
-    f.impact.label = t!("check.storage_capacity.impact", share = format::percent(full.share));
+    f.impact.set_label(t!("check.storage_capacity.impact", share = format::percent(full.share)));
     f.metrics = vec![
-        Metric::new(t!("check.storage_capacity.metric.used"), space.used_bytes, Unit::Bytes),
-        Metric::new(t!("check.storage_capacity.metric.allocation"), full.capacity, Unit::Bytes),
-        Metric::new(t!("check.storage_capacity.metric.free"), free, Unit::Bytes),
+        Metric::said(culprit_core::key!("check.storage_capacity.metric.used"), space.used_bytes, Unit::Bytes),
+        Metric::said(culprit_core::key!("check.storage_capacity.metric.allocation"), full.capacity, Unit::Bytes),
+        Metric::said(culprit_core::key!("check.storage_capacity.metric.free"), free, Unit::Bytes),
     ];
     f.metrics.extend(
         space

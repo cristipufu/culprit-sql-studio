@@ -164,19 +164,19 @@ fn operational_errors_finding(s: &Snapshot, e: ErrorCounter<'_>) -> Finding {
     f.actionability = if e.current { Actionability::NeedsAttention } else { Actionability::Information };
     f.confidence = Confidence::High;
     f.impact.score = base_score(f.severity);
-    f.impact.label = if let Some(d) = delta {
+    f.impact.set_label(if let Some(d) = delta {
         t!("check.operational_errors.impact.new", count = format::count(d))
     } else if e.corruption {
         t!("check.operational_errors.impact.corrupt_pages", count = format::count(c.count))
     } else {
         t!("check.operational_errors.impact.history")
-    };
-    f.metrics = vec![Metric::new(t!("check.operational_errors.metric.total"), c.count, Unit::Count)];
+    });
+    f.metrics = vec![Metric::said(culprit_core::key!("check.operational_errors.metric.total"), c.count, Unit::Count)];
     if let Some(d) = delta {
-        f.metrics.push(Metric::new(t!("check.operational_errors.metric.new"), d, Unit::Count));
+        f.metrics.push(Metric::said(culprit_core::key!("check.operational_errors.metric.new"), d, Unit::Count));
     }
     if let Some(a) = &c.last_event_at {
-        f.metrics.push(Metric::text(t!("check.operational_errors.metric.latest"), a));
+        f.metrics.push(Metric::said_text(culprit_core::key!("check.operational_errors.metric.latest"), a));
     }
     f.fix = Some(Fix { summary: fix, sql: None, cost: None });
     f.verify = vec![t!("check.operational_errors.verify")];

@@ -2,7 +2,7 @@
 .ssh-toggle { display: flex; align-items: center; gap: 8px; padding: 11px 12px; cursor: pointer; font-size: var(--fs-ui); color: var(--text-2); }
 .ssh-toggle input { margin: 0; accent-color: var(--focus); }
 .ssh-toggle > span { font-weight: 500; }
-.ssh-toggle small { margin-left: auto; color: var(--text-3); font-size: var(--fs-ui-sm); }
+.ssh-toggle small { margin-inline-start: auto; color: var(--text-3); font-size: var(--fs-ui-sm); }
 .ssh-fields-body { display: grid; gap: 12px; padding: 0 12px 12px; }
 .ssh-field { display: grid; min-width: 0; gap: 6px; }
 .ssh-field > label { font-size: var(--fs-ui-sm); color: var(--text-2); font-weight: 500; }

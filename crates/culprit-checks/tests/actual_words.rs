@@ -22,7 +22,7 @@ impact: Diagnostics
 fix: Turn it on for this database.
 sql: ALTER DATABASE SCOPED CONFIGURATION SET LAST_QUERY_PLAN_STATS = ON;
 cost: Uses SQL Server's lightweight profiling to keep a little runtime data per cached plan: a small CPU overhead on very busy servers.
-verify: Let the workload run, re-scan, then open a complex or resource-intensive query in Queries and pick "Last actual run" when available: the diagram shows the rows and timings SQL Server retained. A simple query may have only a root operator, and an uncached or evicted plan has no last-run data."#,
+verify: Let the workload run, re-scan, then open a complex or resource-intensive query in Queries and pick "Last run" when available: the diagram shows the rows and timings SQL Server retained. A simple query may have only a root operator, and an uncached or evicted plan has no last-run data."#,
     );
     // Azure SQL Database has no trace flags; live progress turned off too.
     let mut s = fixture("mssql-demo.json");
@@ -38,7 +38,7 @@ impact: Diagnostics
 fix: Turn it on for this database.
 sql: ALTER DATABASE SCOPED CONFIGURATION SET LAST_QUERY_PLAN_STATS = ON;
 cost: Uses SQL Server's lightweight profiling to keep a little runtime data per cached plan: a small CPU overhead on very busy servers.
-verify: Let the workload run, re-scan, then open a complex or resource-intensive query in Queries and pick "Last actual run" when available: the diagram shows the rows and timings SQL Server retained. A simple query may have only a root operator, and an uncached or evicted plan has no last-run data.
+verify: Let the workload run, re-scan, then open a complex or resource-intensive query in Queries and pick "Last run" when available: the diagram shows the rows and timings SQL Server retained. A simple query may have only a root operator, and an uncached or evicted plan has no last-run data.
 
 id: last-actual-plans:lightweight-query-profiling · Low · High · score 4.8 · share None
 title: Live progress of running queries is turned off

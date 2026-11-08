@@ -1960,6 +1960,7 @@ fn a_cheap_plan_states_no_share() {
     assert!(!p.states_shares());
     assert_eq!(p.step_share(&p.root), None);
     let insight = PlanInsight {
+        scan_context: Some(false),
         rule: "missing-statistics".into(),
         area: InsightArea::Statistics,
         severity: Severity::Low,

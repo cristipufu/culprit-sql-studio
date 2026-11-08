@@ -385,7 +385,7 @@ metrics:
   - Average wait: 7.6 s
 fix: Keep transactions short (no user input or slow calls inside them), make UPDATE and DELETE filter on indexed columns, and touch tables in the same order everywhere. Live shows who blocks whom right now.
 verify:
-  1. Sample Waits → Right now during normal load: it counts row-lock waits over the sample, which should be rare and short.
+  1. Sample Where time goes → Right now during normal load: it counts row-lock waits over the sample, which should be rare and short.
 caveats:
   - MariaDB counts row-lock waits for the whole server, so other databases' waits are in these numbers.
 brief:
@@ -409,7 +409,7 @@ brief:
 
     ## How to verify
 
-    - Sample Waits → Right now during normal load: it counts row-lock waits over the sample, which should be rare and short.
+    - Sample Where time goes → Right now during normal load: it counts row-lock waits over the sample, which should be rare and short.
 
     ## Caveats
 

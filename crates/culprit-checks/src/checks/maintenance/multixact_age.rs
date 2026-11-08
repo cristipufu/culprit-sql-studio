@@ -68,10 +68,10 @@ fn multixact_age_finding(s: &Snapshot, case: MultixactAge<'_>) -> Finding {
     f.severity = case.severity;
     f.confidence = Confidence::High;
     f.impact.score = base_score(f.severity);
-    f.impact.label = t!("check.multixact_age.impact", age = format::count(age.age));
+    f.impact.set_label(t!("check.multixact_age.impact", age = format::count(age.age)));
     f.metrics = vec![
-        Metric::new(t!("check.multixact_age.metric.age"), age.age, Unit::Count),
-        Metric::text(t!("check.multixact_age.metric.oldest"), &age.subject),
+        Metric::said(culprit_core::key!("check.multixact_age.metric.age"), age.age, Unit::Count),
+        Metric::said_text(culprit_core::key!("check.multixact_age.metric.oldest"), &age.subject),
     ];
     f.fix =
         Some(Fix { summary: t!("check.multixact_age.fix"), sql: None, cost: Some(t!("check.multixact_age.fix_cost")) });

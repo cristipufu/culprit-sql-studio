@@ -150,11 +150,20 @@ pub fn set_aside_replica_usage(snapshot: &mut Snapshot) {
     let Some(role) = snapshot.setting(culprit_core::REPLICA_SETTING).map(|s| s.value.clone()) else { return };
     snapshot.server.capabilities.retain(|c| *c != Capability::IndexUsage);
     snapshot.server.missing.retain(|m| m.capability != Capability::IndexUsage);
-    snapshot.server.missing.push(MissingCapability {
-        capability: Capability::IndexUsage,
-        reason: culprit_core::t!("engine.history.replica.reason", role = role),
-        fix: Some(culprit_core::t!("engine.history.replica.fix")),
-    });
+    // These are provider wire values, never translated labels.
+    let role = match role.as_str() {
+        "standby" => "standby",
+        "readable-secondary" => "secondary",
+        _ => "replica",
+    };
+    snapshot.server.missing.push(
+        MissingCapability::new(
+            Capability::IndexUsage,
+            culprit_core::message!("engine.history.replica.reason", role = role),
+        )
+        .with_fix(culprit_core::message!("engine.history.replica.fix")),
+    );
+
     for i in &mut snapshot.indexes {
         (i.reads, i.writes, i.seeks, i.scans, i.lookups, i.last_read) = (None, None, None, None, None, None);
     }

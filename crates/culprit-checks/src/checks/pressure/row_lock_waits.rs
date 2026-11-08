@@ -137,15 +137,19 @@ fn row_lock_waits_finding(snapshot: &Snapshot, r: RowLockWaits<'_>) -> Finding {
     }
     f.severity = r.severity;
     f.impact.score = base_score(f.severity);
-    f.impact.label = t!("check.row_lock_waits.impact", per_hour = format::duration(r.per_hour_ms));
+    f.impact.set_label(t!("check.row_lock_waits.impact", per_hour = format::duration(r.per_hour_ms)));
     f.confidence = Confidence::Medium;
     f.metrics = vec![
-        Metric::new(t!("check.row_lock_waits.metric.waits"), r.count, Unit::Count),
+        Metric::said(culprit_core::key!("check.row_lock_waits.metric.waits"), r.count, Unit::Count),
         Metric::said(key!("check.row_lock_waits.metric.time"), r.total_ms, Unit::Ms),
-        Metric::new(t!("check.row_lock_waits.metric.average"), r.avg_ms, Unit::Ms),
+        Metric::said(culprit_core::key!("check.row_lock_waits.metric.average"), r.avg_ms, Unit::Ms),
     ];
     f.caveats.push(t!("check.row_lock_waits.caveat.server_wide", engine = snapshot.server.name()));
     f.fix = Some(Fix { summary: t!("check.row_lock_waits.fix"), sql: None, cost: None });
-    f.verify = vec![t!("check.row_lock_waits.verify")];
+    f.verify = vec![t!(
+        "check.row_lock_waits.verify",
+        waits = culprit_core::t!("core.dashboard.tile.waits"),
+        now = culprit_core::t!("core.dashboard.tile.now")
+    )];
     f
 }

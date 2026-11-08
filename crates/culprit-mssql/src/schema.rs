@@ -652,7 +652,7 @@ pub(crate) async fn settings(
 /// "readable secondary" when this connection reached a replica that isn't the primary (`is_primary` 0); nothing for a
 /// primary or a database that isn't replicated (no row).
 fn replica_role(is_primary: Option<f64>) -> Option<&'static str> {
-    (is_primary == Some(0.0)).then_some("readable secondary")
+    (is_primary == Some(0.0)).then_some("readable-secondary")
 }
 
 fn render(value: &crate::value::Val) -> String {
@@ -680,7 +680,7 @@ mod tests {
 
     #[test]
     fn a_readable_secondary_says_so() {
-        assert_eq!(replica_role(Some(0.0)), Some("readable secondary"));
+        assert_eq!(replica_role(Some(0.0)), Some("readable-secondary"));
         assert_eq!(replica_role(Some(1.0)), None);
         assert_eq!(replica_role(None), None);
         assert!(REPLICA_ROLE_SQL.contains("rs.is_local = 1") && REPLICA_ROLE_SQL.contains("DB_ID()"));

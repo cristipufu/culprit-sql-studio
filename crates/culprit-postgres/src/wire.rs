@@ -90,6 +90,7 @@ mod tests {
             port: Some(port),
             user: Some("postgres".into()),
             database: Some("culprit_hypopg".into()),
+            password: std::env::var("CULPRIT_HYPOPG_PG_TEST_PASSWORD").ok(),
             environment: culprit_core::Environment::Local,
             ..Default::default()
         };
@@ -153,10 +154,11 @@ mod tests {
         assert_eq!(session.notices() - before, 1, "server warnings must not disappear behind a successful response");
 
         let executor = SqlExecutor::new(&spec).unwrap();
-        // Application stimulus: intentionally recorded as workload, like dev/yugabyte/seed.sql.
+        // ORDER BY gives this test its own fingerprint. Comments and literal values do not distinguish it from
+        // the seeded lookup, whose statistics retain the first recorded text rather than this test's marker.
         session
             .client
-            .simple_query("SELECT name FROM public.customers WHERE id = 42 /* ysql_native_test */")
+            .simple_query("SELECT name FROM public.customers WHERE id = 42 ORDER BY name /* ysql_native_test */")
             .await
             .unwrap();
         let recorded = query_one(
@@ -168,7 +170,10 @@ mod tests {
         .unwrap()
         .unwrap();
         let own = executor
-            .recorded_text("SELECT name FROM public.customers WHERE id = $1", recorded.text("id").as_deref())
+            .recorded_text(
+                "SELECT name FROM public.customers WHERE id = $1 ORDER BY name",
+                recorded.text("id").as_deref(),
+            )
             .await
             .unwrap();
         assert!(own.contains("ysql_native_test"));

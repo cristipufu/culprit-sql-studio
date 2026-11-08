@@ -1021,7 +1021,7 @@ fn churn(name: &str, signals: &[(&str, f64)], settings: &[(&str, &str)]) -> Vec<
     p.uptime_hours = Some(72.0);
     p.signals = signals
         .iter()
-        .map(|(key, value)| Signal::new(key, key, *value, SignalUnit::PerSecond, SignalScope::SinceStartup))
+        .map(|(key, value)| Signal::new(key, *key, *value, SignalUnit::PerSecond, SignalScope::SinceStartup))
         .collect();
     for (name, value) in settings {
         set(&mut s, name, value);
@@ -1948,7 +1948,7 @@ metric: Average read
 metric: Reads
 metric: File = shop_data
 metric: Average read size
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Waits → Right now during the busy hour.
+fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
 verify: Compare two readings after the change with the same source and reset period: divide the additional read time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 
@@ -1960,7 +1960,7 @@ metric: Average read
 metric: Reads
 metric: Files = other_data, other_2
 metric: Average read size
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Waits → Right now during the busy hour.
+fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
 verify: Compare two readings after the change with the same source and reset period: divide the additional read time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
@@ -1973,7 +1973,7 @@ metric: Average read
 metric: Reads
 metric: File = tempdev
 metric: Average read size
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Waits → Right now during the busy hour.
+fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
 verify: Compare two readings after the change with the same source and reset period: divide the additional read time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
@@ -1985,7 +1985,7 @@ impact: 20 ms per write
 metric: Average write
 metric: Writes
 metric: File = shop_log
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Waits → Right now during the busy hour.
+fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
 verify: Compare two readings after the change with the same source and reset period: divide the additional write time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 
@@ -1996,7 +1996,7 @@ impact: 20 ms per flush
 metric: Average flush
 metric: Flushes
 metric: File = shop_log
-fix: In Azure SQL Database the service tier decides this: General Purpose reads from remote storage (5 to 10 ms is normal there), Hyperscale serves most reads from a local cache and the rest from page servers, Business Critical uses local SSDs. Check avg_data_io_percent and avg_log_write_percent in sys.dm_db_resource_stats: near 100% means the tier's I/O limit is throttling, so add vCores or move to a faster tier; well below it, cut the reads instead (indexes, fewer full scans). A since-startup average hides bursts: sample Waits → Right now during the busy hour.
+fix: In Azure SQL Database the service tier decides this: General Purpose reads from remote storage (5 to 10 ms is normal there), Hyperscale serves most reads from a local cache and the rest from page servers, Business Critical uses local SSDs. Check avg_data_io_percent and avg_log_write_percent in sys.dm_db_resource_stats: near 100% means the tier's I/O limit is throttling, so add vCores or move to a faster tier; well below it, cut the reads instead (indexes, fewer full scans). A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
 verify: Compare two readings after the change with the same source and reset period: divide the additional flush time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 
@@ -2007,7 +2007,7 @@ impact: 20 ms per flush
 metric: Average flush
 metric: Flushes
 metric: File = shop_log
-fix: On Managed Instance General Purpose each data and log file is a remote disk whose IOPS and throughput come from the file's size (up to 128 GB about 500 IOPS, up to 512 GB about 2,300, up to 1 TB 5,000): growing a busy file past the next size step raises its limit, and the next-gen General Purpose tier sets IOPS apart from size. Business Critical uses local SSDs. Compare each file's latency in sys.dm_io_virtual_file_stats with its size, and cut the reads too (indexes, fewer full scans). A since-startup average hides bursts: sample Waits → Right now during the busy hour.
+fix: On Managed Instance General Purpose each data and log file is a remote disk whose IOPS and throughput come from the file's size (up to 128 GB about 500 IOPS, up to 512 GB about 2,300, up to 1 TB 5,000): growing a busy file past the next size step raises its limit, and the next-gen General Purpose tier sets IOPS apart from size. Business Critical uses local SSDs. Compare each file's latency in sys.dm_io_virtual_file_stats with its size, and cut the reads too (indexes, fewer full scans). A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
 verify: Compare two readings after the change with the same source and reset period: divide the additional flush time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences."#,
     );
@@ -2064,7 +2064,7 @@ metric: Average read
 metric: Reads
 metric: File = relation
 metric: Average read size
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Waits → Right now during the busy hour.
+fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
 verify: Compare two readings after the change with the same source and reset period: divide the additional read time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
@@ -2077,7 +2077,7 @@ metric: Average read
 metric: Reads
 metric: File = relation
 metric: Average read size
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Waits → Right now during the busy hour.
+fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
 verify: Compare two readings after the change with the same source and reset period: divide the additional read time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
@@ -2089,7 +2089,7 @@ impact: 30 ms per write
 metric: Average write
 metric: Writes
 metric: File = relation
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Waits → Right now during the busy hour.
+fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
 verify: Compare two readings after the change with the same source and reset period: divide the additional write time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
@@ -2102,7 +2102,7 @@ metric: Average read
 metric: Reads
 metric: File = ./shop/orders.ibd
 metric: Average read size
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Waits → Right now during the busy hour.
+fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
 verify: Compare two readings after the change with the same source and reset period: divide the additional read time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
@@ -2115,7 +2115,7 @@ metric: Average read
 metric: Reads
 metric: Files = ./#innodb_temp/temp_1.ibt, ./#innodb_temp/temp_2.ibt
 metric: Average read size
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Waits → Right now during the busy hour.
+fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
 verify: Compare two readings after the change with the same source and reset period: divide the additional read time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
@@ -2127,7 +2127,7 @@ impact: 30 ms per write
 metric: Average write
 metric: Writes
 metric: File = redo log
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Waits → Right now during the busy hour.
+fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
 verify: Compare two readings after the change with the same source and reset period: divide the additional write time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits."#,
@@ -2159,7 +2159,7 @@ metric: Average read
 metric: Reads
 metric: Files = ./shop/orders.ibd, ./shop/items.ibd
 metric: Average read size
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Waits → Right now during the busy hour.
+fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
 verify: Compare two readings after the change with the same source and reset period: divide the additional read time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.
@@ -2171,7 +2171,7 @@ impact: 30 ms per write
 metric: Average write
 metric: Writes
 metric: Files = ./binlog.000001, ./undo_001
-fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Waits → Right now during the busy hour.
+fix: Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Where time goes → Right now during the busy hour.
 verify: Compare two readings after the change with the same source and reset period: divide the additional write time by the additional operation count. Measure during representative load; the cumulative average includes older operations.
 caveat: Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.
 caveat: Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits."#,

@@ -68,6 +68,14 @@ impl EngineSpec for Postgres {
     fn statement_metrics(&self) -> StatementMetrics {
         StatementMetrics::pg_stat_statements(WriteLog::Wal)
     }
+    fn signal_scope(&self, _server: &ServerInfo, key: &str) -> crate::MeasurementScope {
+        if matches!(key, "connections" | "checkpoints" | "checkpoints-requested") {
+            crate::MeasurementScope::Server
+        } else {
+            crate::MeasurementScope::Database
+        }
+    }
+
     fn wait_sampling(&self) -> Option<WaitSampling> {
         Some(WaitSampling::Sessions)
     }
@@ -165,7 +173,7 @@ impl EngineSpec for Postgres {
     fn wait_not_per_statement(&self, _server: &ServerInfo, category: &str) -> String {
         match category {
             "io" => t!("core.engines.postgres.wait_not_per_statement.io"),
-            _ => t!("core.engines.postgres.wait_not_per_statement.other"),
+            _ => t!("core.engines.postgres.wait_not_per_statement.other", now = t!("core.dashboard.tile.now")),
         }
     }
 

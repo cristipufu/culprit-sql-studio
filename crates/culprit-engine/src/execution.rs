@@ -287,7 +287,8 @@ impl Execution<'_> {
         } else {
             [t!("engine.execution.retained.no_match"), t!("engine.execution.retained.structural")].join(" ")
         };
-        plan.insights = Some(culprit_core::insights::PlanInsights { items, note: Some(note) });
+        plan.insights =
+            Some(culprit_core::insights::PlanInsights { scan_context: Some(true), items, note: Some(note) });
         culprit_checks::present_plan(&mut plan, None);
         plan
     }
@@ -333,8 +334,9 @@ impl Execution<'_> {
                 // Normalized text (`WHERE id = ?`) can't be planned again; the scan planned a real sample of it.
                 (Err(e), Some(captured)) if e.code != ErrorCode::AuthFailed => Ok(captured.clone()),
                 (Err(e), _) => {
-                    let hint = e.hint.clone().unwrap_or_else(|| t!("engine.execution.needs_values"));
-                    Err(Error { hint: Some(hint), ..e })
+                    let hint =
+                        e.hint_source().unwrap_or_else(|| culprit_core::message!("engine.execution.needs_values"));
+                    Err(e.with_hint(hint))
                 }
             }
         })
@@ -439,12 +441,16 @@ impl Execution<'_> {
         // Text that isn't exactly one statement never runs, confirmed or not: on SQL Server, statements need no
         // semicolon between them, so `SELECT 1 COMMIT CREATE TABLE …` would otherwise run all three.
         if let Some(problem) = check.problem {
-            let hint = if problem.contains("never closed") {
+            let hint = if check.problem_kind.is_some_and(culprit_core::sql::StatementProblem::is_unclosed) {
                 t!("engine.execution.unclosed_hint")
             } else {
                 t!("engine.execution.one_at_a_time_hint")
             };
-            return Err(Error::invalid(problem).with_hint(hint));
+            let mut error = Error::invalid(problem).with_hint(hint);
+            if let Some(kind) = check.problem_kind {
+                error = error.with_detail(culprit_core::ErrorDetail::Statement(kind));
+            }
+            return Err(error);
         }
         if check.reads_only {
             return self.run_read(name, sql, limit).await;

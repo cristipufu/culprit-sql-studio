@@ -112,6 +112,9 @@ pub struct PlanFacts {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub docdb: Option<crate::signals::DocdbMetrics>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sample_source: Option<PlanSampleSource>,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
@@ -477,4 +480,24 @@ pub struct PlanChangedColumn {
 }
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+/// The native recorded run used to estimate a statement's plan.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum PlanSampleSource {
+    Digest,
+    History,
+    SlowLog,
+}
+
+impl PlanSampleSource {
+    pub fn sentence(self) -> String {
+        match self {
+            Self::Digest => crate::t!("provider.mysql.plans.sample.digest"),
+            Self::History => crate::t!("provider.mysql.plans.sample.history"),
+            Self::SlowLog => crate::t!("provider.mysql.plans.sample.slow_log"),
+        }
+    }
 }

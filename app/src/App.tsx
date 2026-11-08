@@ -19,7 +19,7 @@ import { Schema } from "./views/Schema";
 import { PasswordNeeded } from "./components/PasswordNeeded";
 import { DashboardSkeleton } from "./components/DashboardSkeleton";
 import { startUpdateChecks } from "./lib/updates";
-import { windowUnknown } from "./lib/rates";
+import { workloadSource, windowUnknown } from "./lib/rates";
 import { errorMessage } from "./lib/api";
 import { toast as notify } from "./lib/store";
 
@@ -152,7 +152,7 @@ function TopBar() {
   return (
     <header className="topbar" data-tauri-drag-region>
       <h1>{viewTitle(view)}</h1>
-      {showsWorkload && windowed && <WindowPicker coveredHours={w?.window_hours ?? null} source={w?.source ?? null} />}
+      {showsWorkload && windowed && <WindowPicker coveredHours={w?.window_hours ?? null} source={w ? workloadSource(w) : null} />}
       {showsWorkload && w?.log != null && (
         <span
           className="context"
@@ -165,8 +165,8 @@ function TopBar() {
           }
         >
           {windowUnknown(w)
-            ? t("ui.app.log_no_timestamps", { source: w.source })
-            : t("ui.app.log_window", { source: w.source, window: windowSpan(w.window_hours) })}
+            ? t("ui.app.log_no_timestamps", { source: workloadSource(w) })
+            : t("ui.app.log_window", { source: workloadSource(w), window: windowSpan(w.window_hours) })}
         </span>
       )}
       {showsWorkload && report && !w && (
@@ -184,8 +184,8 @@ function TopBar() {
           }
         >
           {w.window_start
-            ? t("ui.app.cumulative_since", { source: w.source, time: when(w.window_start).short })
-            : t("ui.app.cumulative_since_reset", { source: w.source })}
+            ? t("ui.app.cumulative_since", { source: workloadSource(w), time: when(w.window_start).short })
+            : t("ui.app.cumulative_since_reset", { source: workloadSource(w) })}
         </span>
       )}
       {environment && (

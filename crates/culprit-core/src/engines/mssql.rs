@@ -36,6 +36,36 @@ impl EngineSpec for Mssql {
             )
         }
     }
+    fn signal_scope(&self, server: &ServerInfo, key: &str) -> crate::MeasurementScope {
+        let azure = server.on(crate::Platform::AzureSqlDatabase);
+        let shared = matches!(
+            key,
+            "batch-requests"
+                | "compiles-per-batch"
+                | "recompiles-per-batch"
+                | "page-life"
+                | "new-connections"
+                | "pooled-reuse"
+        ) || (!azure
+            && matches!(key, "signal-wait" | "threadpool-waits" | "threadpool-wait-ms" | "grant-wait-ms"));
+        if shared { crate::MeasurementScope::Server } else { crate::MeasurementScope::Database }
+    }
+
+    fn scoped_signal_label(&self, signal: &crate::Signal) -> Option<crate::i18n::Message> {
+        let whole = if signal.scope == crate::SignalScope::Sampled { "instance" } else { "server" };
+        Some(match signal.key.as_str() {
+            "batch-requests" => crate::message!("provider.mssql.signal.batch_requests", whole = "server"),
+            "compiles-per-batch" => crate::message!("provider.mssql.signal.plans_compiled", whole = whole),
+            "recompiles-per-batch" => crate::message!("provider.mssql.signal.plans_recompiled", whole = "server"),
+            "page-life" => crate::message!("provider.mssql.signal.page_life", whole = "server"),
+            "new-connections" => crate::message!("provider.mssql.signal.new_connections", whole = "server"),
+            "pooled-reuse" => crate::message!("provider.mssql.signal.pooled_reuse", whole = "server"),
+            "threadpool-wait-ms" => crate::message!("provider.mssql.signal.threadpool_wait_ms", whole = "instance"),
+            "grant-wait-ms" => crate::message!("provider.mssql.signal.grant_wait_ms", whole = "instance"),
+            _ => return None,
+        })
+    }
+
     fn wait_sampling(&self) -> Option<WaitSampling> {
         Some(WaitSampling::Counters)
     }

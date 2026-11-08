@@ -122,7 +122,7 @@ fn memory_waits_need_an_amount_not_only_a_share() {
     assert_eq!(f[0].severity, Severity::High);
     // Query Store's Memory category mixes grants and allocations: no grant story without grant evidence.
     assert!(f[0].summary.contains("the totals don't say which"), "{}", f[0].summary);
-    assert!(f[0].fix.as_ref().unwrap().summary.starts_with("Sample Waits"));
+    assert!(f[0].fix.as_ref().unwrap().summary.starts_with("Sample Where time goes"));
 }
 
 // C4: one query seen waiting once is a moment to watch, like THREADPOOL; RESOURCE_SEMAPHORE since the start

@@ -57,15 +57,30 @@ pub struct QueryMeta {
     pub text: String,
     /// The captured plan's shape (operators and objects, in order); a different shape is a different plan.
     pub shape: Option<String>,
-    /// Where that plan spends most of its effort, in words: "Seq Scan on orders".
-    pub hot: Option<String>,
+    #[serde(default)]
+    pub hot: Option<PlanHotspot>,
     pub first_seen: Option<String>,
     pub last_seen: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct PlanHotspot {
+    pub operator: String,
+    pub object: Option<String>,
+}
+
+impl PlanHotspot {
+    pub fn label(&self) -> String {
+        match &self.object {
+            Some(object) => culprit_core::t!("engine.trends.hotspot", operator = &self.operator, object = object),
+            None => self.operator.clone(),
+        }
+    }
+}
+
 /// A plan's shape and its hottest step in words. Costs and row estimates are left out: they move with statistics
 /// while the plan stays the same.
-pub fn plan_mark(plan: &Plan) -> (String, String) {
+pub fn plan_mark(plan: &Plan) -> (String, PlanHotspot) {
     let shape = plan
         .nodes()
         .iter()
@@ -78,11 +93,7 @@ pub fn plan_mark(plan: &Plan) -> (String, String) {
         .join(">");
     // Without costs (SQLite), the plan's first step names it.
     let hot = plan.hottest().or(plan.root.children.first()).unwrap_or(&plan.root);
-    let words = match hot.object.as_deref() {
-        Some(o) => format!("{} on {}", hot.op, short_object(o)),
-        None => hot.op.clone(),
-    };
-    (shape, words)
+    (shape, PlanHotspot { operator: hot.op.clone(), object: hot.object.as_deref().map(short_object) })
 }
 
 /// `[shop].[dbo].[orders]` or `public.orders` → `orders`.
@@ -616,6 +627,17 @@ fn started_over(before: &Workload, after: &Workload) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn persisted_plan_hotspots_are_worded_when_read() {
+        let hotspot = PlanHotspot { operator: "Seq Scan".into(), object: Some("orders".into()) };
+        let stored = serde_json::to_string(&hotspot).unwrap();
+        assert!(!stored.contains(" on "));
+        let restored: PlanHotspot = serde_json::from_str(&stored).unwrap();
+        assert_eq!(culprit_core::i18n::scope("en", || restored.label()), "Seq Scan on orders");
+        assert_eq!(culprit_core::i18n::scope("fr", || restored.label()), "Seq Scan sur orders");
+    }
+
     use culprit_core::QueryStat;
 
     fn query(id: &str, time: f64, runs: f64) -> QueryStat {
@@ -632,6 +654,8 @@ mod tests {
 
     fn workload(reset: &str, queries: Vec<QueryStat>) -> Workload {
         Workload {
+            source_label: None,
+            source_message: None,
             counter_set: None,
             history_inputs: Vec::new(),
             source: "pg_stat_statements".into(),

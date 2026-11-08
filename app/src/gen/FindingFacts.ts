@@ -7,6 +7,7 @@ import type { FindingPlanChange } from "./FindingPlanChange";
 import type { FindingPlanRecommendation } from "./FindingPlanRecommendation";
 import type { NothingToCheck } from "./NothingToCheck";
 import type { PlanBaseline } from "./PlanBaseline";
+import type { StatementEvidence } from "./StatementEvidence";
 
 export type FindingFacts = { histogram_columns: Array<string>, index_keys: Array<string>, network_wait_share: number | null, lock_wait: FindingLockWait | null, plan_change: FindingPlanChange | null, plan_baseline?: PlanBaseline, recommended_plan: FindingPlanRecommendation | null, usual_fast_plan: string | null, bloat: FindingBloat | null, log_write: FindingLogWrite | null, large_rows: FindingLargeRows | null, 
 /**
@@ -17,4 +18,4 @@ storage_files?: Array<string>,
  * Its first verify step says there is nothing to check for now, and why: refine keeps a check's own such step,
  * and the brief adds no step of its own to it.
  */
-nothing_to_check?: NothingToCheck, };
+nothing_to_check?: NothingToCheck, statement?: StatementEvidence, uncosted_plan_explained?: boolean, };

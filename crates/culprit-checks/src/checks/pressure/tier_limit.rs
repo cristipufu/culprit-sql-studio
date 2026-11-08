@@ -112,28 +112,48 @@ fn tier_limit_finding(snapshot: &Snapshot, l: TierLimit) -> Finding {
             t!("check.tier_limit.log_write.caps"),
             t!("check.tier_limit.log_write.effect"),
             t!("check.tier_limit.log_write.fix"),
-            t!("check.tier_limit.log_write.verify"),
+            t!(
+                "check.tier_limit.log_write.verify",
+                health = culprit_core::t!("core.dashboard.tile.health"),
+                dashboard = culprit_core::t!("ui.common.view.dashboard")
+            ),
         ),
         Resource::Cpu => (
             t!("check.tier_limit.cpu.name"),
             t!("check.tier_limit.cpu.caps"),
             t!("check.tier_limit.cpu.effect"),
-            t!("check.tier_limit.cpu.fix"),
-            t!("check.tier_limit.cpu.verify"),
+            t!(
+                "check.tier_limit.cpu.fix",
+                waits = culprit_core::t!("core.dashboard.tile.waits"),
+                cpu = culprit_core::t!("core.waits.category.cpu.label")
+            ),
+            t!(
+                "check.tier_limit.cpu.verify",
+                health = culprit_core::t!("core.dashboard.tile.health"),
+                dashboard = culprit_core::t!("ui.common.view.dashboard")
+            ),
         ),
         Resource::DataIo => (
             t!("check.tier_limit.data_io.name"),
             t!("check.tier_limit.data_io.caps"),
             t!("check.tier_limit.data_io.effect"),
             t!("check.tier_limit.data_io.fix"),
-            t!("check.tier_limit.data_io.verify"),
+            t!(
+                "check.tier_limit.data_io.verify",
+                health = culprit_core::t!("core.dashboard.tile.health"),
+                dashboard = culprit_core::t!("ui.common.view.dashboard")
+            ),
         ),
         Resource::Workers => (
             t!("check.tier_limit.workers.name"),
             t!("check.tier_limit.workers.caps"),
             t!("check.tier_limit.workers.effect"),
             t!("check.tier_limit.workers.fix"),
-            t!("check.tier_limit.workers.verify"),
+            t!(
+                "check.tier_limit.workers.verify",
+                health = culprit_core::t!("core.dashboard.tile.health"),
+                dashboard = culprit_core::t!("ui.common.view.dashboard")
+            ),
         ),
     };
     f.title = t!("check.tier_limit.title", resource = name, share = &share, span = &span);
@@ -151,11 +171,11 @@ fn tier_limit_finding(snapshot: &Snapshot, l: TierLimit) -> Finding {
     .join(" ");
     f.severity = l.severity;
     f.impact.score = base_score(f.severity) + l.at_limit * 30.0;
-    f.impact.label = t!("check.tier_limit.impact", share = &share);
+    f.impact.set_label(t!("check.tier_limit.impact", share = &share));
     f.confidence = Confidence::High;
     f.metrics = vec![
-        Metric::new(t!("check.tier_limit.metric.at_limit"), l.at_limit, Unit::Ratio),
-        Metric::new(t!("check.tier_limit.metric.peak"), l.peak / 100.0, Unit::Ratio),
+        Metric::said(culprit_core::key!("check.tier_limit.metric.at_limit"), l.at_limit, Unit::Ratio),
+        Metric::said(culprit_core::key!("check.tier_limit.metric.peak"), l.peak / 100.0, Unit::Ratio),
     ];
     f.fix = Some(Fix { summary: fix, sql: None, cost: None });
     f.verify = vec![verify];

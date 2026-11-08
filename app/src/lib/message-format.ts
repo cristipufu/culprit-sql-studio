@@ -7,11 +7,12 @@
 //   {v, select, past {took} other {takes}}           a case by the argument's text; `other` is required
 //
 // Braces are never literal text: SQL and other text with braces goes in an argument.
+import { cardinalCategory, type PluralCategory } from "./plural";
 
 /** How a language counts and writes numbers: from its catalog's `_meta`. */
 export type Locale = {
-  /** `one_is_1`: "one" is exactly 1 (English, German, Spanish). `one_below_2`: 0 and 1 (French). */
-  plural: "one_is_1" | "one_below_2";
+  /** A CLDR language tag selecting the shared cardinal rule set. */
+  plural: string;
   /** The decimal separator ("." or ","). */
   decimal: string;
   /** The thousands separator ("," "." or a narrow no-break space). */
@@ -49,9 +50,8 @@ export function formatNumber(n: number, locale: Locale): string {
 }
 
 /** The plural category of `n` by the language's rule. */
-export function pluralCategory(n: number, locale: Locale): "one" | "other" {
-  const one = locale.plural === "one_below_2" ? n >= 0 && n < 2 : n === 1;
-  return one ? "one" : "other";
+export function pluralCategory(n: number, locale: Locale): PluralCategory {
+  return cardinalCategory(n, locale.plural);
 }
 
 /** What `message` asks for: its arguments, by the way it uses them. Throws on a malformed message. */

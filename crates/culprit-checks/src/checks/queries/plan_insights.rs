@@ -176,21 +176,25 @@ fn plan_insight_finding(_: &Snapshot, case: PlanInsightCase<'_>) -> Finding {
     // statement's work is.
     if let Some(impact) = &case.impact {
         apply_query_impact(&mut f, impact);
-        f.metrics.push(Metric::new(t!("common.metric.share_of_db_time"), impact.share, Unit::Ratio));
+        f.metrics.push(Metric::said(culprit_core::key!("common.metric.share_of_db_time"), impact.share, Unit::Ratio));
         if case.queries > 1 {
             summary.push(t!(
                 "check.plan_insights.summary.shared",
                 count = case.queries.to_string(),
                 share = format::percent(impact.share)
             ));
-            f.metrics.push(Metric::new(t!("common.metric.queries_affected"), case.queries as f64, Unit::Count));
+            f.metrics.push(Metric::said(
+                culprit_core::key!("common.metric.queries_affected"),
+                case.queries as f64,
+                Unit::Count,
+            ));
         }
     }
     f.summary = summary.join(" ");
     if let Some(share) = culprit_core::insights::stated_share(plan, &i) {
-        f.metrics.push(Metric::new(t!("check.plan_insights.metric.plan_share"), share, Unit::Ratio));
+        f.metrics.push(Metric::said(culprit_core::key!("check.plan_insights.metric.plan_share"), share, Unit::Ratio));
     }
-    f.metrics.push(Metric::new(t!("common.metric.average_duration"), q.mean_time_ms, Unit::Ms));
+    f.metrics.push(Metric::said(culprit_core::key!("common.metric.average_duration"), q.mean_time_ms, Unit::Ms));
     f.fix = Some(Fix { summary: i.fix.clone(), sql: i.fix_sql.clone(), cost: None });
     f.verify = vec![i.verify.clone(), t!("check.plan_insights.verify.rescan")];
     if culprit_core::insights::table_gone(plan, &i).is_some() {

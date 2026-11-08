@@ -189,31 +189,3 @@ fn coverage_notes_say_what_each_plan_cannot_show() {
         ["mssql-like.sqlplan", "pg-like.json", "mysql-like.json"].iter().map(|f| load(f).engine).collect();
     assert_eq!(engines, vec![Engine::Mssql, Engine::Postgres, Engine::Mysql]);
 }
-
-/// Regenerates `fixtures/insights.sample.json`, the browser demo's insights for the plans in the demo reports (the
-/// desktop app computes them live). Run with `python3 dev/refresh-demo.py`.
-#[test]
-#[ignore]
-fn write_demo_sidecar() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
-    let mut out = serde_json::Map::new();
-    let mut names: Vec<_> = std::fs::read_dir(&root)
-        .unwrap()
-        .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
-        .filter(|n| n.ends_with(".report.json"))
-        .collect();
-    names.sort();
-    for name in names {
-        let report = culprit_engine::reading::open(&root.join(&name)).unwrap();
-        let mut by_query = serde_json::Map::new();
-        for q in report.snapshot.workload.iter().flat_map(|w| &w.queries) {
-            if let Some(plan) = &q.plan {
-                let set = culprit_checks::query_plan_insights(&report.snapshot, q, plan);
-                by_query.insert(q.id.clone(), serde_json::to_value(set).unwrap());
-            }
-        }
-        out.insert(report.snapshot.connection.clone(), serde_json::Value::Object(by_query));
-    }
-    let text = serde_json::to_string_pretty(&serde_json::Value::Object(out)).unwrap();
-    std::fs::write(root.join("insights.sample.json"), text + "\n").unwrap();
-}

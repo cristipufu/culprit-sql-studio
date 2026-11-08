@@ -7,6 +7,9 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+#[path = "../../../tests/support/paths.rs"]
+mod paths;
+
 struct Home(PathBuf);
 impl Drop for Home {
     fn drop(&mut self) {
@@ -75,7 +78,7 @@ fn run(home: &Path, args: &[&str], stdin: Option<&str>) -> String {
     if !output.status.success() {
         said.push_str(&format!("[exit {}]\n", output.status.code().unwrap_or(-1)));
     }
-    let said = said.replace(&repo().display().to_string(), "<repo>").replace(&home.display().to_string(), "<home>");
+    let said = paths::normalize(&said, &[(&repo(), "<repo>"), (home, "<home>")]);
     without_ages(&said)
 }
 

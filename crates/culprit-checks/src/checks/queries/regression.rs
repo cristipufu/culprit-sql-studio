@@ -217,7 +217,7 @@ fn regression_finding(snapshot: &Snapshot, regression: Regression<'_>) -> Findin
     f.impact.time_ms_per_day = (after_hours >= culprit_core::PER_DAY_MIN_HOURS).then_some(extra_per_day);
     f.impact.score = regression.score;
     let factor = times(s.factor());
-    f.impact.label = t!("common.impact.times_slower", factor = factor.clone());
+    f.impact.set_label(t!("common.impact.times_slower", factor = factor.clone()));
     f.severity = regression.severity;
     f.confidence = regression.confidence;
     if regression.restarted {
@@ -249,17 +249,17 @@ fn regression_finding(snapshot: &Snapshot, regression: Regression<'_>) -> Findin
     });
     f.summary = summary.join(" ");
     f.queries = query_refs(&[q]);
-    f.metrics.push(Metric::new(t!("check.regression.metric.before"), s.before_ms, Unit::Ms));
-    f.metrics.push(Metric::new(t!("check.regression.metric.since_then"), s.after_ms, Unit::Ms));
+    f.metrics.push(Metric::said(culprit_core::key!("check.regression.metric.before"), s.before_ms, Unit::Ms));
+    f.metrics.push(Metric::said(culprit_core::key!("check.regression.metric.since_then"), s.after_ms, Unit::Ms));
     if after_hours >= 20.0 {
-        f.metrics.push(Metric::new(t!("common.metric.extra_time_per_day"), extra_per_day, Unit::Ms));
+        f.metrics.push(Metric::said(culprit_core::key!("common.metric.extra_time_per_day"), extra_per_day, Unit::Ms));
     } else {
-        f.metrics.push(Metric::new(t!("common.metric.extra_time"), s.extra_ms(), Unit::Ms));
+        f.metrics.push(Metric::said(culprit_core::key!("common.metric.extra_time"), s.extra_ms(), Unit::Ms));
     }
-    f.metrics.push(Metric::text(t!("check.regression.metric.started"), short_when(since)));
+    f.metrics.push(Metric::said_text(culprit_core::key!("check.regression.metric.started"), short_when(since)));
     if let Some(change) = &regression.plan {
-        f.metrics.push(Metric::text(
-            t!("check.regression.metric.plan_change"),
+        f.metrics.push(Metric::said_text(
+            culprit_core::key!("check.regression.metric.plan_change"),
             t!("check.regression.plan_change", from = &change.old.id, to = &change.new.id),
         ));
         f.facts.plan_change =

@@ -671,6 +671,7 @@ fn ysql_deferred_constraints_name_foreign_keys_without_postgres_planner_or_lock_
     assert!(fix.summary.contains("distributed scans"));
     assert!(!fix.summary.contains("SHARE UPDATE EXCLUSIVE") && !fix.summary.contains("reads and writes continue"));
     s.sources.push(culprit_core::SourceOutcome {
+        reason_message: None,
         source: culprit_core::source_id::CONSTRAINTS.into(),
         state: culprit_core::SourceState::Collected,
         reason: None,

@@ -108,12 +108,12 @@ fn jit_overhead_finding(snapshot: &Snapshot, case: JitOverhead<'_>) -> Finding {
     f.severity = case.severity;
     with_query(snapshot, &mut f, q);
     severity_score(&mut f);
-    f.impact.label = t!("check.jit_overhead.impact", share = format::percent(share));
+    f.impact.set_label(t!("check.jit_overhead.impact", share = format::percent(share)));
     f.confidence = Confidence::High;
     f.metrics = vec![
-        Metric::new(t!("check.jit_overhead.metric.share"), share, Unit::Ratio),
-        Metric::new(t!("check.jit_overhead.metric.per_run"), per_run(jit, q.executions), Unit::Ms),
-        Metric::new(t!("check.jit_overhead.metric.run_time"), q.mean_time_ms, Unit::Ms),
+        Metric::said(culprit_core::key!("check.jit_overhead.metric.share"), share, Unit::Ratio),
+        Metric::said(culprit_core::key!("check.jit_overhead.metric.per_run"), per_run(jit, q.executions), Unit::Ms),
+        Metric::said(culprit_core::key!("check.jit_overhead.metric.run_time"), q.mean_time_ms, Unit::Ms),
     ];
     let role = "-- For the role the application connects as (takes effect on its next connections):\nALTER ROLE <app_role> SET jit = off;";
     f.fix = Some(match case.fix {

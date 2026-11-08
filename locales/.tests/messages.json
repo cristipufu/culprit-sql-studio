@@ -1,27 +1,539 @@
 {
   "_about": "Message-format cases both implementations run: app/src/lib/message-format.test.ts and culprit_core::i18n's tests. Each case formats `message` with `args` in `locale` and expects `expected`.",
   "locales": {
-    "en": { "plural": "one_is_1", "decimal": ".", "group": "," },
-    "fr": { "plural": "one_below_2", "decimal": ",", "group": " " },
-    "de": { "plural": "one_is_1", "decimal": ",", "group": "." }
+    "en": {
+      "plural": "en",
+      "decimal": ".",
+      "group": ","
+    },
+    "fr": {
+      "plural": "fr",
+      "decimal": ",",
+      "group": " "
+    },
+    "de": {
+      "plural": "de",
+      "decimal": ",",
+      "group": "."
+    },
+    "pl": {
+      "plural": "pl",
+      "decimal": ".",
+      "group": ","
+    },
+    "ru": {
+      "plural": "ru",
+      "decimal": ".",
+      "group": ","
+    },
+    "cs": {
+      "plural": "cs",
+      "decimal": ".",
+      "group": ","
+    },
+    "ar": {
+      "plural": "ar",
+      "decimal": ".",
+      "group": ","
+    },
+    "ro": {
+      "plural": "ro",
+      "decimal": ".",
+      "group": ","
+    },
+    "ja": {
+      "plural": "ja",
+      "decimal": ".",
+      "group": ","
+    },
+    "pt-PT": {
+      "plural": "pt-PT",
+      "decimal": ".",
+      "group": ","
+    },
+    "sr-Latn-RS": {
+      "plural": "sr-Latn-RS",
+      "decimal": ".",
+      "group": ","
+    }
   },
   "cases": [
-    { "message": "Nothing to say", "args": {}, "locale": "en", "expected": "Nothing to say" },
-    { "message": "{handle} takes {share} of database time", "args": { "handle": "A read from orders", "share": "23%" }, "locale": "en", "expected": "A read from orders takes 23% of database time" },
-    { "message": "{n} rows", "args": { "n": 1234567.5 }, "locale": "en", "expected": "1,234,567.5 rows" },
-    { "message": "{n} lignes", "args": { "n": 1234567.5 }, "locale": "fr", "expected": "1 234 567,5 lignes" },
-    { "message": "{n} Zeilen", "args": { "n": 1234.25 }, "locale": "de", "expected": "1.234,25 Zeilen" },
-    { "message": "{n, plural, one {# row} other {# rows}}", "args": { "n": 1 }, "locale": "en", "expected": "1 row" },
-    { "message": "{n, plural, one {# row} other {# rows}}", "args": { "n": 0 }, "locale": "en", "expected": "0 rows" },
-    { "message": "{n, plural, one {# ligne} other {# lignes}}", "args": { "n": 0 }, "locale": "fr", "expected": "0 ligne" },
-    { "message": "{n, plural, one {# ligne} other {# lignes}}", "args": { "n": 2 }, "locale": "fr", "expected": "2 lignes" },
-    { "message": "{n, plural, =0 {no rows} one {one row} other {# rows}}", "args": { "n": 0 }, "locale": "en", "expected": "no rows" },
-    { "message": "{n, plural, one {# row} other {# rows}}", "args": { "n": 12000 }, "locale": "en", "expected": "12,000 rows" },
-    { "message": "It {tense, select, past {took} other {takes}} {share}", "args": { "tense": "past", "share": "5%" }, "locale": "en", "expected": "It took 5%" },
-    { "message": "It {tense, select, past {took} other {takes}} {share}", "args": { "tense": "now", "share": "5%" }, "locale": "en", "expected": "It takes 5%" },
-    { "message": "{n, plural, one {{who} waited once} other {{who} waited # times}}", "args": { "n": 3, "who": "The update" }, "locale": "en", "expected": "The update waited 3 times" },
-    { "message": "Missing {name} stays", "args": {}, "locale": "en", "expected": "Missing {name} stays" },
-    { "message": "Don't read # here", "args": {}, "locale": "en", "expected": "Don't read # here" }
+    {
+      "message": "Nothing to say",
+      "args": {},
+      "locale": "en",
+      "expected": "Nothing to say"
+    },
+    {
+      "message": "{handle} takes {share} of database time",
+      "args": {
+        "handle": "A read from orders",
+        "share": "23%"
+      },
+      "locale": "en",
+      "expected": "A read from orders takes 23% of database time"
+    },
+    {
+      "message": "{n} rows",
+      "args": {
+        "n": 1234567.5
+      },
+      "locale": "en",
+      "expected": "1,234,567.5 rows"
+    },
+    {
+      "message": "{n} lignes",
+      "args": {
+        "n": 1234567.5
+      },
+      "locale": "fr",
+      "expected": "1 234 567,5 lignes"
+    },
+    {
+      "message": "{n} Zeilen",
+      "args": {
+        "n": 1234.25
+      },
+      "locale": "de",
+      "expected": "1.234,25 Zeilen"
+    },
+    {
+      "message": "{n, plural, one {# row} other {# rows}}",
+      "args": {
+        "n": 1
+      },
+      "locale": "en",
+      "expected": "1 row"
+    },
+    {
+      "message": "{n, plural, one {# row} other {# rows}}",
+      "args": {
+        "n": 0
+      },
+      "locale": "en",
+      "expected": "0 rows"
+    },
+    {
+      "message": "{n, plural, one {# ligne} other {# lignes}}",
+      "args": {
+        "n": 0
+      },
+      "locale": "fr",
+      "expected": "0 ligne"
+    },
+    {
+      "message": "{n, plural, one {# ligne} other {# lignes}}",
+      "args": {
+        "n": 2
+      },
+      "locale": "fr",
+      "expected": "2 lignes"
+    },
+    {
+      "message": "{n, plural, =0 {no rows} one {one row} other {# rows}}",
+      "args": {
+        "n": 0
+      },
+      "locale": "en",
+      "expected": "no rows"
+    },
+    {
+      "message": "{n, plural, one {# row} other {# rows}}",
+      "args": {
+        "n": 12000
+      },
+      "locale": "en",
+      "expected": "12,000 rows"
+    },
+    {
+      "message": "It {tense, select, past {took} other {takes}} {share}",
+      "args": {
+        "tense": "past",
+        "share": "5%"
+      },
+      "locale": "en",
+      "expected": "It took 5%"
+    },
+    {
+      "message": "It {tense, select, past {took} other {takes}} {share}",
+      "args": {
+        "tense": "now",
+        "share": "5%"
+      },
+      "locale": "en",
+      "expected": "It takes 5%"
+    },
+    {
+      "message": "{n, plural, one {{who} waited once} other {{who} waited # times}}",
+      "args": {
+        "n": 3,
+        "who": "The update"
+      },
+      "locale": "en",
+      "expected": "The update waited 3 times"
+    },
+    {
+      "message": "Missing {name} stays",
+      "args": {},
+      "locale": "en",
+      "expected": "Missing {name} stays"
+    },
+    {
+      "message": "Don't read # here",
+      "args": {},
+      "locale": "en",
+      "expected": "Don't read # here"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1
+      },
+      "locale": "pl",
+      "expected": "one"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 2
+      },
+      "locale": "pl",
+      "expected": "few"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 5
+      },
+      "locale": "pl",
+      "expected": "many"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 12
+      },
+      "locale": "pl",
+      "expected": "many"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 22
+      },
+      "locale": "pl",
+      "expected": "few"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1.2
+      },
+      "locale": "pl",
+      "expected": "other"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1
+      },
+      "locale": "ru",
+      "expected": "one"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 2
+      },
+      "locale": "ru",
+      "expected": "few"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 5
+      },
+      "locale": "ru",
+      "expected": "many"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 11
+      },
+      "locale": "ru",
+      "expected": "many"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 21
+      },
+      "locale": "ru",
+      "expected": "one"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1.2
+      },
+      "locale": "ru",
+      "expected": "other"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1
+      },
+      "locale": "cs",
+      "expected": "one"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 3
+      },
+      "locale": "cs",
+      "expected": "few"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 5
+      },
+      "locale": "cs",
+      "expected": "other"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1.2
+      },
+      "locale": "cs",
+      "expected": "many"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 0
+      },
+      "locale": "ar",
+      "expected": "zero"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1
+      },
+      "locale": "ar",
+      "expected": "one"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 2
+      },
+      "locale": "ar",
+      "expected": "two"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 3
+      },
+      "locale": "ar",
+      "expected": "few"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 11
+      },
+      "locale": "ar",
+      "expected": "many"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 100
+      },
+      "locale": "ar",
+      "expected": "other"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1.2
+      },
+      "locale": "ar",
+      "expected": "other"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1
+      },
+      "locale": "ro",
+      "expected": "one"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 0
+      },
+      "locale": "ro",
+      "expected": "few"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 2
+      },
+      "locale": "ro",
+      "expected": "few"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 20
+      },
+      "locale": "ro",
+      "expected": "other"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1.2
+      },
+      "locale": "ro",
+      "expected": "few"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 0
+      },
+      "locale": "ja",
+      "expected": "other"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1
+      },
+      "locale": "ja",
+      "expected": "other"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 2
+      },
+      "locale": "ja",
+      "expected": "other"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": -1
+      },
+      "locale": "en",
+      "expected": "one"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1.001
+      },
+      "locale": "en",
+      "expected": "other"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1e-07
+      },
+      "locale": "en",
+      "expected": "other"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1.2
+      },
+      "locale": "fr",
+      "expected": "one"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1000000.0
+      },
+      "locale": "fr",
+      "expected": "many"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 0
+      },
+      "locale": "pt-PT",
+      "expected": "other"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1
+      },
+      "locale": "pt-PT",
+      "expected": "one"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1.2
+      },
+      "locale": "pt-PT",
+      "expected": "other"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1
+      },
+      "locale": "sr-Latn-RS",
+      "expected": "one"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 2
+      },
+      "locale": "sr-Latn-RS",
+      "expected": "few"
+    },
+    {
+      "message": "{n, plural, zero {zero} one {one} two {two} few {few} many {many} other {other}}",
+      "args": {
+        "n": 1.2
+      },
+      "locale": "sr-Latn-RS",
+      "expected": "few"
+    },
+    {
+      "message": "{n, plural, =1 {exact} one {one} other {other}}",
+      "args": {
+        "n": 1.001
+      },
+      "locale": "en",
+      "expected": "other"
+    }
   ],
-  "malformed": ["{n, plural, one {# row}}", "{n, choice, a {b} other {c}}", "unclosed {name", "stray } brace", "{n, plural, one # row other {x}}"]
+  "malformed": [
+    "{n, plural, one {# row}}",
+    "{n, choice, a {b} other {c}}",
+    "unclosed {name",
+    "stray } brace",
+    "{n, plural, one # row other {x}}"
+  ]
 }

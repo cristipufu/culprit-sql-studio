@@ -86,7 +86,11 @@ fn waits_window(snapshot: &Snapshot) -> (Option<f64>, bool) {
 
 /// A single sighting at the moment of the scan, with nothing on record: worth watching, not acting on.
 fn seen_once() -> String {
-    t!("common.caveat.seen_once")
+    t!(
+        "common.caveat.seen_once",
+        waits = culprit_core::t!("core.dashboard.tile.waits"),
+        now = culprit_core::t!("core.dashboard.tile.now")
+    )
 }
 
 /// How long the counters kept since the server started have counted, as a sentence says it mid-way: "since SQL Server

@@ -27,7 +27,7 @@ def write(path, value):
 
 
 def main():
-    run("cargo", "build", "-p", "culprit-cli")
+    run("cargo", "build", "--locked", "-p", "culprit-cli")
     paths = sorted(FIXTURES.glob("*.report.json"))
     # Read every input before replacing any report.
     reports = [(path, cli("analyze", path)) for path in paths]
@@ -50,10 +50,10 @@ def main():
             waits["reports"][report["snapshot"]["connection"]] = cli("waits", "--file", path)["waits"]
     # Preserve the captured sidecar's existing order and one-space indentation.
     waits_path.write_text(json.dumps(waits, indent=1, ensure_ascii=False) + "\n")
-    run("cargo", "test", "-p", "culprit-engine", "--test", "all", "insights::write_demo_sidecar", "--", "--ignored")
-    run("cargo", "run", "-p", "culprit-engine", "--example", "share_sample")
-    run("cargo", "run", "-p", "culprit-engine", "--example", "dashboard_live_sample")
-    run("cargo", "run", "-p", "culprit-engine", "--example", "plan_view_sample")
+    run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "insights_sample")
+    run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "share_sample")
+    run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "dashboard_live_sample")
+    run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "plan_view_sample")
 
 
 if __name__ == "__main__":

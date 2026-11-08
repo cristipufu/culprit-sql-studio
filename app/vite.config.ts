@@ -1,10 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
+import { uiCatalogs } from "./build/catalogs.ts";
 
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [uiCatalogs(fileURLToPath(new URL(".", import.meta.url)).replace(/\/$/, "")), react()],
   clearScreen: false,
   // CodeMirror breaks when two copies of its core load (instanceof checks); keep one of each.
   resolve: { dedupe: ["@codemirror/state", "@codemirror/view", "@codemirror/language", "@codemirror/autocomplete"] },

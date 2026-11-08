@@ -6,6 +6,7 @@ use super::{BLUE, BOLD, DIM, Format, GREEN, Out, RED, YELLOW, bar, kb, plan_kind
 impl Out {
     pub fn plan(&self, plan: &Plan) {
         let found = plan.insights.clone().unwrap_or_else(|| culprit_core::insights::PlanInsights {
+            scan_context: Some(false),
             items: culprit_core::insights::insights(plan),
             note: culprit_core::insights::coverage_note(plan),
         });

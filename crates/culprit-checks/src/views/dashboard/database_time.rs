@@ -230,7 +230,7 @@ pub(super) fn db_time(s: &Snapshot) -> Tile {
     tile.detail = match changes.first() {
         Some(c) if changes.len() == 1 => Some(t!(
             "view.dashboard.db_time.plan_change",
-            query = capitalized(&query_handle(c.query)),
+            query = crate::support::query_handle_of(c.query).leading_words(),
             share = format::percent(c.share)
         )),
         Some(c) => Some(t!(
@@ -240,7 +240,7 @@ pub(super) fn db_time(s: &Snapshot) -> Tile {
             share = format::percent(c.share)
         )),
         None if !w.is_windowed() && w.timeline.as_ref().is_none_or(|t| t.starts.len() < 2) => {
-            Some(t!("view.dashboard.db_time.running_totals", source = &w.source))
+            Some(t!("view.dashboard.db_time.running_totals", source = w.source_name()))
         }
         None => None,
     };

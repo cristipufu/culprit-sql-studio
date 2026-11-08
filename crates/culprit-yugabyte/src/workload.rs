@@ -22,7 +22,10 @@ async fn epochs(session: &ObservedSession, probe: &Probe, coverage: &mut Coverag
         match found {
             Some(relation) => relation,
             None => {
-                coverage.partial(&sources::EPOCHS, t!("provider.yugabyte.coverage.epochs_not_configured"));
+                coverage.partial(
+                    &sources::EPOCHS,
+                    culprit_core::message!("provider.yugabyte.coverage.epochs_not_configured"),
+                );
                 return result;
             }
         }
@@ -63,7 +66,7 @@ async fn epochs(session: &ObservedSession, probe: &Probe, coverage: &mut Coverag
         }
     }
     if !result.epochs_known() {
-        coverage.partial(&sources::EPOCHS, t!("provider.yugabyte.coverage.epochs_incomplete"));
+        coverage.partial(&sources::EPOCHS, culprit_core::message!("provider.yugabyte.coverage.epochs_incomplete"));
     }
     result
 }
@@ -153,14 +156,14 @@ pub(crate) async fn read(
     coverage: &mut Coverage,
 ) -> Option<Workload> {
     if !probe.statements {
-        coverage.recorded(
+        coverage.recorded_message(
             &sources::WORKLOAD,
             culprit_core::SourceState::Unavailable,
-            Some(t!("provider.yugabyte.coverage.statements_unavailable")),
+            culprit_core::message!("provider.yugabyte.coverage.statements_unavailable"),
         );
         coverage.lacking(
             culprit_core::Capability::PgStatStatements,
-            t!("provider.yugabyte.capability.statements.unavailable"),
+            culprit_core::message!("provider.yugabyte.capability.statements.unavailable"),
             Some(t!("provider.yugabyte.capability.statements.enable")),
         );
         return None;
@@ -178,25 +181,25 @@ pub(crate) async fn read(
     let truncated = result.as_ref().is_ok_and(|(_, truncated)| *truncated);
     let rows = coverage.read_rows(&sources::WORKLOAD, result.map(|(rows, _)| rows))?;
     if truncated {
-        coverage.partial(&sources::WORKLOAD, t!("provider.yugabyte.coverage.statements_budget"));
+        coverage.partial(&sources::WORKLOAD, culprit_core::message!("provider.yugabyte.coverage.statements_budget"));
         if rows.is_empty() {
             coverage.lacking(
                 culprit_core::Capability::PgStatStatements,
-                t!("provider.yugabyte.capability.statements.no_row"),
+                culprit_core::message!("provider.yugabyte.capability.statements.no_row"),
                 None,
             );
             return None;
         }
     }
     if rows.iter().any(|row| row.text("id").is_none()) {
-        coverage.recorded(
+        coverage.recorded_message(
             &sources::WORKLOAD,
             culprit_core::SourceState::Unavailable,
-            Some(t!("provider.yugabyte.coverage.visibility_changed")),
+            culprit_core::message!("provider.yugabyte.coverage.visibility_changed"),
         );
         coverage.lacking(
             culprit_core::Capability::PgStatStatements,
-            t!("provider.yugabyte.capability.statements.visibility_changed"),
+            culprit_core::message!("provider.yugabyte.capability.statements.visibility_changed"),
             Some(t!("provider.yugabyte.capability.statements.grant")),
         );
         return None;
@@ -205,23 +208,27 @@ pub(crate) async fn read(
     let after = epochs(session, probe, coverage).await;
     if counter_set != after || partial {
         counter_set.complete = false;
-        coverage.partial(&sources::WORKLOAD, t!("provider.yugabyte.coverage.contributors_changed"));
+        coverage.partial(&sources::WORKLOAD, culprit_core::message!("provider.yugabyte.coverage.contributors_changed"));
     }
     if !probe.cluster {
         let scope = match probe.node.as_deref() {
-            Some(node) => t!("provider.yugabyte.coverage.node_scope", node = node),
-            None => t!("provider.yugabyte.coverage.unknown_node_scope"),
+            Some(node) => culprit_core::message!("provider.yugabyte.coverage.node_scope", node = node),
+            None => culprit_core::message!("provider.yugabyte.coverage.unknown_node_scope"),
         };
         coverage.note("YSQL scope", scope);
     }
     if let Some(role) = probe.statement_role {
-        coverage.note("YSQL role scope", t!("provider.yugabyte.coverage.role_scope", role = role.to_string()));
+        coverage.note(
+            "YSQL role scope",
+            culprit_core::message!("provider.yugabyte.coverage.role_scope", role = role.to_string()),
+        );
     }
     let (metrics, rpc_metrics) = metric_settings(session, probe, coverage).await;
     let mut queries = Vec::new();
     for r in &rows {
         let Some(id) = r.text("id") else {
-            coverage.partial(&sources::WORKLOAD, t!("provider.yugabyte.coverage.identities_hidden"));
+            coverage
+                .partial(&sources::WORKLOAD, culprit_core::message!("provider.yugabyte.coverage.identities_hidden"));
             continue;
         };
         let (Some(calls), Some(ms)) = (r.number("calls").filter(|n| *n > 0.0), r.number("ms")) else { continue };
@@ -255,7 +262,8 @@ pub(crate) async fn read(
         match serde_json::from_value::<QueryStat>(value) {
             Ok(q) => queries.push(q),
             Err(_) => {
-                coverage.partial(&sources::WORKLOAD, t!("provider.yugabyte.coverage.row_unreadable"));
+                coverage
+                    .partial(&sources::WORKLOAD, culprit_core::message!("provider.yugabyte.coverage.row_unreadable"));
             }
         }
     }
@@ -300,25 +308,40 @@ pub(crate) async fn read(
         hourly_time_ms: None,
         min_logged_ms: None,
         history_inputs: vec![],
+        source_label: None,
+        source_message: Some(culprit_core::message!(
+            "model.workload.source.ysql",
+            scope = if probe.cluster {
+                "cluster"
+            } else if probe.node.is_some() {
+                "node"
+            } else {
+                "unknown"
+            },
+            node = probe.node.as_deref().unwrap_or_default(),
+            limited = if probe.statement_role.is_some() { "yes" } else { "no" },
+            role = probe.statement_role.map(|role| role.to_string()).unwrap_or_default()
+        )),
         counter_set: Some(counter_set),
     })
 }
 
 async fn metric_settings(session: &ObservedSession, probe: &Probe, coverage: &mut Coverage) -> (bool, bool) {
     if !probe.cluster {
-        coverage.recorded(
+        coverage.recorded_message(
             &sources::COSTS,
             if probe.metrics && probe.rpc_metrics {
                 culprit_core::SourceState::Collected
             } else {
                 culprit_core::SourceState::Partial
             },
-            Some(t!("provider.yugabyte.coverage.native_flags")),
+            culprit_core::message!("provider.yugabyte.coverage.native_flags"),
         );
         return (probe.metrics, probe.rpc_metrics);
     }
     let Some(relation) = crate::global::configured(&session.client, "pg_settings").await.ok().flatten() else {
-        coverage.partial(&sources::COSTS, t!("provider.yugabyte.coverage.costs_need_global_settings"));
+        coverage
+            .partial(&sources::COSTS, culprit_core::message!("provider.yugabyte.coverage.costs_need_global_settings"));
         return (false, false);
     };
     let before = session.notices();
@@ -339,12 +362,13 @@ async fn metric_settings(session: &ObservedSession, probe: &Probe, coverage: &mu
         && session.notices() == before
         && !rows.is_empty();
     if !complete {
-        coverage.partial(&sources::COSTS, t!("provider.yugabyte.coverage.costs_settings_incomplete"));
+        coverage
+            .partial(&sources::COSTS, culprit_core::message!("provider.yugabyte.coverage.costs_settings_incomplete"));
         return (false, false);
     }
     let flags = (rows.iter().all(|r| r.flag("metrics")), rows.iter().all(|r| r.flag("rpc_metrics")));
     if !flags.0 || !flags.1 {
-        coverage.partial(&sources::COSTS, t!("provider.yugabyte.coverage.costs_partial"));
+        coverage.partial(&sources::COSTS, culprit_core::message!("provider.yugabyte.coverage.costs_partial"));
     }
     flags
 }

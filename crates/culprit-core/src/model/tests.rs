@@ -1,6 +1,23 @@
 use super::*;
 
 #[test]
+fn blocking_completeness_uses_the_native_wait_fact() {
+    let mut live: LiveState = serde_json::from_value(serde_json::json!({
+        "taken_at": "2026-10-11T12:00:00Z", "notes": [], "waits": [], "session_actions": [],
+        "session_actions_note": null, "blocking": null,
+        "sessions": [{"id": "7", "state": "active", "wait": "verrou de transaction", "waiting_on_lock": true}]
+    }))
+    .unwrap();
+    assert!(live.blocking_incomplete());
+    live.sessions[0].waiting_on_lock = Some(false);
+    live.sessions[0].wait = Some("clock synchronization".into());
+    assert!(!live.blocking_incomplete(), "a description containing lock does not establish a lock wait");
+    live.sessions[0].waiting_on_lock = Some(true);
+    live.sessions[0].blocked_by = Some("8".into());
+    assert!(!live.blocking_incomplete());
+}
+
+#[test]
 fn a_scan_without_query_history_says_why() {
     let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
     assert_eq!(snapshot.no_workload_reason(), None);
@@ -8,6 +25,9 @@ fn a_scan_without_query_history_says_why() {
     snapshot.server.missing.retain(|m| m.capability != Capability::QueryStore);
     assert_eq!(snapshot.no_workload_reason().as_deref(), Some("This scan has no query history."));
     snapshot.server.missing.push(MissingCapability {
+        reason_message: None,
+        fix_message: None,
+        action: None,
         capability: Capability::QueryStore,
         reason: "Query Store is OFF on this database.".into(),
         fix: None,
@@ -87,6 +107,8 @@ fn statement_and_sampling_semantics_cover_every_engine_and_round_trip() {
 #[test]
 fn how_often_never_extrapolates_a_short_window() {
     let w = |hours: f64, windowed: bool| Workload {
+        source_label: None,
+        source_message: None,
         counter_set: None,
         history_inputs: Vec::new(),
         source: "Query Store".into(),
@@ -442,6 +464,9 @@ fn cached_plan_statistics_never_substitute_for_workload_variants() {
     assert!(q.captured_plan_variant().is_some());
     assert!(!q.workload_plans().is_empty());
     q.plan_history = Some(PlanHistory {
+        source_message: None,
+        note_message: None,
+
         source: "native plan cache".into(),
         kind: PlanHistoryKind::Cache,
         note: "Independent cache periods".into(),
@@ -519,4 +544,25 @@ fn the_workload_s_phrases_read_as_english_writes_them() {
     activity.runs = 1.0;
     assert_eq!(activity.runs_phrase(), "1 run observed over 12 hours of Culprit's scans on Oct 11, 00:00–12:00 UTC");
     assert_eq!(span_when("then", "now"), "between then and now");
+}
+#[test]
+fn source_labels_follow_the_reader_without_changing_counter_identity() {
+    let snapshot: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
+    let mut workload = snapshot.workload.unwrap();
+    workload.kind = Some(WorkloadKind::PlanCache);
+    workload.source = "Plan cache".into();
+    for language in ["en", "fr", "de", "es", "en"] {
+        crate::i18n::scope(language, || {
+            workload.refresh_language();
+            assert_eq!(workload.source, "Plan cache");
+            assert_eq!(workload.source_name(), crate::t!("model.workload.source.plan_cache"));
+            assert_eq!(workload.source_label.as_deref(), Some(workload.source_name().as_str()));
+        });
+    }
+    // A plugin's unclassified source is native text, never inferred from its spelling.
+    workload.kind = None;
+    workload.source = "private collector".into();
+    workload.refresh_language();
+    assert!(workload.source_label.is_none());
+    assert_eq!(workload.source_name(), "private collector");
 }

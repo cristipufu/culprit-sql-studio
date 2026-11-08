@@ -207,6 +207,14 @@ function importKey(c: ImportCandidate): string {
   return `${c.source}/${c.engine}/${target(c)}/${c.user ?? ""}`;
 }
 
+function importNote(candidate: ImportCandidate): string | null {
+  switch (candidate.notice) {
+    case "windows-authentication": return t("engine.import.windows_auth");
+    case "entra-from-another-host": return t("engine.import.entra_elsewhere");
+    default: return candidate.note;
+  }
+}
+
 /** Connections saved in Azure Data Studio, VS Code, DBeaver and DataGrip on this computer. Metadata only; never passwords. */
 export function ImportPanel({ onDone }: { onDone: () => void }) {
   const [state, setImport] = useState<ImportState>({ status: "busy" });
@@ -307,7 +315,7 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
                   </span>
                   <span className="muted">{c.saved_as ? t("ui.discover_panel.saved") : t("ui.common.environment", { environment: c.environment })}</span>
                 </label>
-                {c.note && !c.saved_as && <div className="import-note">{c.note}</div>}
+                {(c.notice || c.note) && !c.saved_as && <div className="import-note">{importNote(c)}</div>}
               </div>
             );
           })}

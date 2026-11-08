@@ -254,7 +254,7 @@ fn pressure_from(r: Readings) -> Pressure {
             p.signals.push(
                 Signal::new(
                     culprit_core::signal_id::BUFFER_POOL_HIT,
-                    &t!("provider.mysql.signal.buffer_pool_hit"),
+                    culprit_core::message!("provider.mysql.signal.buffer_pool_hit"),
                     (1.0 - reads / requests) * 100.0,
                     SignalUnit::Percent,
                     SignalScope::SinceStartup,
@@ -265,7 +265,7 @@ fn pressure_from(r: Readings) -> Pressure {
             if let Some(u) = uptime_s {
                 p.signals.push(Signal::new(
                     culprit_core::signal_id::BUFFER_POOL_READS,
-                    &t!("provider.mysql.signal.buffer_pool_reads"),
+                    culprit_core::message!("provider.mysql.signal.buffer_pool_reads"),
                     reads / u,
                     SignalUnit::PerSecond,
                     SignalScope::SinceStartup,
@@ -275,7 +275,7 @@ fn pressure_from(r: Readings) -> Pressure {
         if let Some(waits) = get("Innodb_buffer_pool_wait_free").filter(|w| *w > 0.0) {
             p.signals.push(Signal::new(
                 "buffer-pool-wait-free",
-                &t!("provider.mysql.signal.buffer_pool_wait_free"),
+                culprit_core::message!("provider.mysql.signal.buffer_pool_wait_free"),
                 waits,
                 SignalUnit::Count,
                 SignalScope::SinceStartup,
@@ -287,7 +287,7 @@ fn pressure_from(r: Readings) -> Pressure {
             p.signals.push(
                 Signal::new(
                     culprit_core::signal_id::TMP_DISK_TABLES,
-                    &t!("provider.mysql.signal.tmp_disk_tables"),
+                    culprit_core::message!("provider.mysql.signal.tmp_disk_tables"),
                     disk / all * 100.0,
                     SignalUnit::Percent,
                     SignalScope::SinceStartup,
@@ -298,7 +298,7 @@ fn pressure_from(r: Readings) -> Pressure {
         if let (Some(q), Some(u)) = (get("Questions"), uptime_s) {
             p.signals.push(Signal::new(
                 "questions",
-                &t!("provider.mysql.signal.statements"),
+                culprit_core::message!("provider.mysql.signal.statements"),
                 q / u,
                 SignalUnit::PerSecond,
                 SignalScope::SinceStartup,
@@ -308,7 +308,7 @@ fn pressure_from(r: Readings) -> Pressure {
         if let Some(running) = r.running.or_else(|| get("Threads_running").map(|r| (r - 1.0).max(0.0))) {
             p.signals.push(Signal::new(
                 "threads-running",
-                &t!("provider.mysql.signal.statements_running"),
+                culprit_core::message!("provider.mysql.signal.statements_running"),
                 running,
                 SignalUnit::Count,
                 SignalScope::Now,
@@ -318,9 +318,9 @@ fn pressure_from(r: Readings) -> Pressure {
             // Under an hour of uptime, a rate per hour would be an extrapolation: report the plain count.
             let hours = u / 3600.0;
             let (label, value, unit) = if hours >= 1.0 {
-                (t!("provider.mysql.signal.row_lock_waits"), waits / hours, SignalUnit::PerHour)
+                (culprit_core::message!("provider.mysql.signal.row_lock_waits"), waits / hours, SignalUnit::PerHour)
             } else {
-                (t!("provider.mysql.signal.row_lock_waits_since_start"), waits, SignalUnit::Count)
+                (culprit_core::message!("provider.mysql.signal.row_lock_waits_since_start"), waits, SignalUnit::Count)
             };
             p.signals.push(Signal::new(
                 culprit_core::signal_id::ROW_LOCK_WAITS,
@@ -334,7 +334,7 @@ fn pressure_from(r: Readings) -> Pressure {
         if let Some(total) = get("Innodb_row_lock_time") {
             p.signals.push(Signal::new(
                 culprit_core::signal_id::ROW_LOCK_TIME,
-                &t!("provider.mysql.signal.row_lock_time"),
+                culprit_core::message!("provider.mysql.signal.row_lock_time"),
                 total,
                 SignalUnit::Milliseconds,
                 SignalScope::SinceStartup,
@@ -344,7 +344,7 @@ fn pressure_from(r: Readings) -> Pressure {
             p.signals.push(
                 Signal::new(
                     culprit_core::signal_id::ROW_LOCK_AVG,
-                    &t!("provider.mysql.signal.row_lock_avg"),
+                    culprit_core::message!("provider.mysql.signal.row_lock_avg"),
                     avg,
                     SignalUnit::Milliseconds,
                     SignalScope::SinceStartup,
@@ -358,7 +358,7 @@ fn pressure_from(r: Readings) -> Pressure {
                 p.signals.push(
                     Signal::new(
                         culprit_core::signal_id::CONNECTIONS,
-                        &t!("provider.mysql.signal.connections"),
+                        culprit_core::message!("provider.mysql.signal.connections"),
                         used / max * 100.0,
                         SignalUnit::Percent,
                         SignalScope::Now,
@@ -370,7 +370,7 @@ fn pressure_from(r: Readings) -> Pressure {
                 p.signals.push(
                     Signal::new(
                         culprit_core::signal_id::MAX_USED_CONNECTIONS,
-                        &t!("provider.mysql.signal.max_used_connections"),
+                        culprit_core::message!("provider.mysql.signal.max_used_connections"),
                         peak / max * 100.0,
                         SignalUnit::Percent,
                         SignalScope::SinceStartup,
@@ -385,7 +385,7 @@ fn pressure_from(r: Readings) -> Pressure {
                 if let Some(ago) = peak_ago {
                     p.signals.push(Signal::new(
                         culprit_core::signal_id::MAX_USED_CONNECTIONS_AGO,
-                        &t!("provider.mysql.signal.max_used_connections_ago"),
+                        culprit_core::message!("provider.mysql.signal.max_used_connections_ago"),
                         ago,
                         SignalUnit::Seconds,
                         SignalScope::Now,
@@ -400,7 +400,7 @@ fn pressure_from(r: Readings) -> Pressure {
         p.signals.push(
             Signal::new(
                 culprit_core::signal_id::HISTORY_LENGTH,
-                &t!("provider.mysql.signal.history_length"),
+                culprit_core::message!("provider.mysql.signal.history_length"),
                 h,
                 SignalUnit::Count,
                 SignalScope::Now,
@@ -412,7 +412,7 @@ fn pressure_from(r: Readings) -> Pressure {
         p.signals.push(
             Signal::new(
                 culprit_core::signal_id::OLDEST_TRANSACTION,
-                &t!("provider.mysql.signal.oldest_transaction"),
+                culprit_core::message!("provider.mysql.signal.oldest_transaction"),
                 oldest.seconds,
                 SignalUnit::Seconds,
                 SignalScope::Now,
@@ -571,7 +571,7 @@ impl Sampled {
         if let Some(q) = rate("Questions") {
             signals.push(Signal::new(
                 "questions",
-                &t!("provider.mysql.signal.statements"),
+                culprit_core::message!("provider.mysql.signal.statements"),
                 q,
                 SignalUnit::PerSecond,
                 SignalScope::Sampled,
@@ -580,7 +580,7 @@ impl Sampled {
         if let Some(w) = delta("Innodb_row_lock_waits") {
             signals.push(Signal::new(
                 "row-lock-waits",
-                &t!("provider.mysql.signal.row_lock_waits_sampled"),
+                culprit_core::message!("provider.mysql.signal.row_lock_waits_sampled"),
                 w,
                 SignalUnit::Count,
                 SignalScope::Sampled,

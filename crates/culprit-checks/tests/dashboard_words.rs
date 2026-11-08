@@ -509,56 +509,56 @@ Health Good Health: All 2 graded signals look healthy.
   metric Bad: 0
   metric Watch: 0
   metric Healthy: 2
-  item Reads served from memory: 55.29%
-  item Temporary files written: 661 MB
+  item Reads served from shared_buffers: 55.29%
+  item Temporary files written since reset: 661 MB
 Health Good Health: The one graded signal looks healthy.
   detail: Each signal states the period it measures.
   metric Bad: 0
   metric Watch: 0
   metric Healthy: 1
-  item Reads served from memory: 55.29%
-Health Bad Health: Reads served from memory: 55.29%; Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
+  item Reads served from shared_buffers: 55.29%
+Health Bad Health: Reads served from shared_buffers: 55.29%; Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
   detail: 1 more signal also needs a look.
   metric Bad: 1
   metric Watch: 1
   metric Healthy: 0
-  item Reads served from memory: 55.29%
-  item Temporary files written: 661 MB
-Health Bad Health: Reads served from memory: 55.29%; Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
+  item Reads served from shared_buffers: 55.29%
+  item Temporary files written since reset: 661 MB
+Health Bad Health: Reads served from shared_buffers: 55.29%; Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
   detail: 2 more signals also need a look.
   metric Bad: 2
   metric Watch: 1
   metric Healthy: 0
-  item Reads served from memory: 55.29%
-  item Temporary files written: 661 MB
+  item Reads served from shared_buffers: 55.29%
+  item Temporary files written since reset: 661 MB
   item Commits: 0.7/s
 Health Info Health: 1 signal recorded; none has a threshold to grade.
   detail: Each signal states the period it measures.
   metric Bad: 0
   metric Watch: 0
   metric Healthy: 0
-  item Reads served from memory: 55.29%
+  item Reads served from shared_buffers: 55.29%
 Health Info Health: 2 signals recorded; none has a threshold to grade.
   detail: Each signal states the period it measures.
   metric Bad: 0
   metric Watch: 0
   metric Healthy: 0
-  item Reads served from memory: 55.29%
-  item Temporary files written: 661 MB
-Health Watch Health: Reads served from memory: 55.29%.
+  item Reads served from shared_buffers: 55.29%
+  item Temporary files written since reset: 661 MB
+Health Watch Health: Reads served from shared_buffers: 55.29%.
   detail: Each signal states the period it measures.
   metric Bad: 0
   metric Watch: 1
   metric Healthy: 0
-  item Reads served from memory: 55.29%
+  item Reads served from shared_buffers: 55.29%
 Health Info Health: 13 signals recorded; none has a threshold to grade.
   detail: Each signal states the period it measures.
   metric Bad: 0
   metric Watch: 0
   metric Healthy: 0
   item Oldest open transaction: 4.2 s · idle in transaction
-  item Reads served from memory: 55.29%
-  item Temporary files written: 661 MB
+  item Reads served from shared_buffers: 55.29%
+  item Temporary files written since reset: 661 MB
   item Commits: 0.7/s
   item Transactions rolled back: 0.25%
   item Deadlocks: 1
@@ -612,6 +612,9 @@ fn indexes_and_plans_say_what_they_said() {
         }
         out.push(said(s.clone(), TileKey::Plans));
         s.server.missing.push(culprit_core::MissingCapability {
+            reason_message: None,
+            fix_message: None,
+            action: None,
             capability: culprit_core::Capability::QueryPlans,
             reason: "The login can't read plans.".into(),
             fix: None,
@@ -748,7 +751,7 @@ Plans Info Plans: 13 application queries have plans, all historical or once-only
   metric All queries with plans: 13
 Plans Unavailable Plans: No plans were captured in this scan.
   detail: Open a query to plan it on demand, or paste a plan into Plans.
-Plans Unavailable Plans: No plans were captured: the login can't read plans.
+Plans Unavailable Plans: No plans were captured: The login can't read plans.
   detail: Open a query to plan it on demand, or paste a plan into Plans.
 Plans Watch Plans: One of the 1 current query plan has something to fix: an implicit conversion (7% of database time).
   detail: 1 current application queries have plans; 1 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.
@@ -788,7 +791,7 @@ Plans Info Plans: 12 application queries have plans, all historical or once-only
   metric All queries with plans: 12
 Plans Unavailable Plans: No plans were captured in this scan.
   detail: Open a query to plan it on demand, or paste a plan into Plans.
-Plans Unavailable Plans: No plans were captured: the login can't read plans.
+Plans Unavailable Plans: No plans were captured: The login can't read plans.
   detail: Open a query to plan it on demand, or paste a plan into Plans.
 Plans Good Plans: None of the 1 current query plan shows a known problem.
   detail: 1 current application queries have plans; 1 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.
@@ -824,7 +827,7 @@ Plans Info Plans: 8 application queries have plans, all historical or once-only;
   metric All queries with plans: 8
 Plans Unavailable Plans: No plans were captured in this scan.
   detail: Open a query to plan it on demand, or paste a plan into Plans.
-Plans Unavailable Plans: No plans were captured: the login can't read plans.
+Plans Unavailable Plans: No plans were captured: The login can't read plans.
   detail: Open a query to plan it on demand, or paste a plan into Plans.
 Plans Info Plans: No urgent plan change is established in this workload; 1 current query plan retains structural observations to review as the data or workload changes.
   detail: 1 current application queries have plans; 1 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.
@@ -861,6 +864,7 @@ fn session(id: &str, state: &str) -> Session {
         state: state.into(),
         command: None,
         wait: None,
+        waiting_on_lock: None,
         wait_ms: None,
         blocked_by: None,
         elapsed_ms: None,
@@ -985,7 +989,7 @@ Now Watch Right now: 2 sessions are waiting on another session's lock.
   item Session 52 · a read from orders: 4.0 s
   item Session 53 · active: 2.0 s
   item Session 54 · active: 2.0 s
-Now Unavailable Right now: Couldn't read sessions: permission denied for pg_stat_activity.
+Now Unavailable Right now: Couldn't read sessions: Permission denied for pg_stat_activity
   detail: Everything else here comes from the latest scan.
 headline: 14 opportunities; the top ones touch 2 min of database time over the 5 hours since statistics were reset (67%).
 headline: Nothing needs a look right now.
@@ -1056,6 +1060,7 @@ fn storage_connections_replication_failures_and_statistics_say_what_they_said() 
     let mut s = pg.clone();
     s.pressure.as_mut().unwrap().replicas.clear();
     s.notes.push(culprit_core::CollectorNote {
+        message_source: None,
         collector: culprit_core::source_id::REPLICATION.into(),
         message: "The login can't read pg_stat_replication.".into(),
         table: None,
@@ -1353,6 +1358,9 @@ fn top_queries_and_waits_say_what_they_said() {
     s.waits.clear();
     out.push(said(s.clone(), TileKey::Waits));
     s.server.missing.push(culprit_core::MissingCapability {
+        reason_message: None,
+        fix_message: None,
+        action: None,
         capability: culprit_core::Capability::WaitStats,
         reason: "The login lacks VIEW SERVER STATE".into(),
         fix: Some("GRANT VIEW SERVER STATE TO culprit;".into()),
@@ -1458,7 +1466,7 @@ Waits Info Where time goes: SQL Server doesn't break this waiting down by kind.
   item Everything else: 100%
 Waits Unavailable Where time goes: This scan recorded no waits.
   detail: Sample what it waits on right now instead.
-Waits Unavailable Where time goes: Waits aren't readable here: the login lacks VIEW SERVER STATE.
+Waits Unavailable Where time goes: Waits aren't readable here: The login lacks VIEW SERVER STATE
   detail: GRANT VIEW SERVER STATE TO culprit;
 Waits Unavailable Where time goes: PostgreSQL keeps no history of what sessions wait on.
   detail: Sample what it waits on right now to see where time goes.

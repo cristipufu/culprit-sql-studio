@@ -4,6 +4,7 @@ import type { Timeline } from "../gen/Timeline";
 import type { Workload } from "../gen/Workload";
 import { count, duration } from "../lib/format";
 import { t } from "../lib/i18n";
+import { workloadSource } from "../lib/rates";
 import { slot, withElements } from "../lib/message-parts";
 import { isPartial, TimeChart, VH, VW, when, type Bucket, type ChartEvent, type Flag, type Range } from "./TimeChart";
 
@@ -41,7 +42,7 @@ function coveredMs(b: Bucket): number {
 export function trendNote(workload: Workload): string | null {
   if (workload.timeline && workload.timeline.starts.length >= 2) return null;
   if (workload.windowed) return null;
-  return t("ui.trends.running_totals", { source: workload.source });
+  return t("ui.trends.running_totals", { source: workloadSource(workload) });
 }
 
 /** Plan changes worth a flag on the workload chart: new plans of the queries that matter most. */

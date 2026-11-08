@@ -168,6 +168,10 @@ def main():
     ui = ui_packages(allow, names)
     n_crates = len({c for _, users, _ in rust for c in users})
     n_packages = sum(len(users) for _, users, _ in ui)
+    if "Unicode-3.0" not in allow:
+        sys.exit("The CLDR data requires Unicode-3.0 in deny.toml")
+    with open(os.path.join(ROOT, "locales", ".cldr", "LICENSE"), encoding="utf-8") as f:
+        data = [("Unicode License v3", ["Unicode CLDR 49 cardinal rules"], f.read())]
     lines = [
         "Third-party software in Culprit",
         "",
@@ -179,6 +183,7 @@ def main():
         "",
         *section("Rust crates", rust),
         *section("Interface packages", ui),
+        *section("Bundled language data", data),
     ]
     path = os.path.join(OUT, "THIRD-PARTY-LICENSES.txt")
     with open(path, "w", encoding="utf-8", newline="\n") as f:

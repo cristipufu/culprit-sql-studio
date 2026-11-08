@@ -196,9 +196,9 @@ fn unread_finding(snapshot: &Snapshot, u: UnreadIndexes<'_>) -> Finding {
     .join(" ");
     f.severity = u.severity;
     f.impact.score = u.score;
-    f.impact.label = t!("check.unused_index.impact", size = &size);
+    f.impact.set_label(t!("check.unused_index.impact", size = &size));
     f.confidence = u.confidence;
-    f.metrics.push(Metric::new(t!("common.metric.size"), u.size, Unit::Bytes));
+    f.metrics.push(Metric::said(culprit_core::key!("common.metric.size"), u.size, Unit::Bytes));
     if let Some(w) = u.writes {
         let label = if u.index_counted {
             t!("check.unused_index.metric.index_writes")
@@ -208,7 +208,7 @@ fn unread_finding(snapshot: &Snapshot, u: UnreadIndexes<'_>) -> Finding {
         f.metrics.push(Metric::new(label, w, Unit::Count));
     }
     if let Some(d) = u.days {
-        f.metrics.push(Metric::new(t!("common.metric.counting_for"), d, Unit::Days));
+        f.metrics.push(Metric::said(culprit_core::key!("common.metric.counting_for"), d, Unit::Days));
     }
     let sql = u.indexes.iter().map(|i| crate::index_health::hide_index_sql(snapshot, i)).collect::<Vec<_>>().join("\n");
     let kind = snapshot.table(schema, table).and_then(|t| t.kind.as_deref());
@@ -315,17 +315,17 @@ fn invalid_finding(snapshot: &Snapshot, v: InvalidIndex<'_>) -> Finding {
     .join(" ");
     f.severity = v.severity;
     f.impact.score = v.score;
-    f.impact.label = if v.size > 0.0 {
+    f.impact.set_label(if v.size > 0.0 {
         t!("check.unused_index.impact.invalid", size = &size)
     } else {
         t!("check.unused_index.impact.invalid_unsized")
-    };
+    });
     f.confidence = v.confidence;
     if v.size > 0.0 {
-        f.metrics.push(Metric::new(t!("common.metric.size"), v.size, Unit::Bytes));
+        f.metrics.push(Metric::said(culprit_core::key!("common.metric.size"), v.size, Unit::Bytes));
     }
     if let Some(w) = v.writes {
-        f.metrics.push(Metric::new(t!("check.unused_index.metric.table_writes"), w, Unit::Count));
+        f.metrics.push(Metric::said(culprit_core::key!("check.unused_index.metric.table_writes"), w, Unit::Count));
     }
     f.fix = Some(Fix {
         summary: t!("check.unused_index.fix.invalid", table = &table_name),

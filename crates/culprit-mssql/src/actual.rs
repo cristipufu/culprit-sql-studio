@@ -43,6 +43,7 @@ pub(crate) fn needs_2019() -> Error {
 pub(crate) fn not_kept() -> Error {
     Error::new(ErrorCode::Unsupported, t!("provider.mssql.actual.not_kept"))
         .with_hint(t!("provider.mssql.actual.not_kept.hint", statement = TURN_ON))
+        .with_detail(culprit_core::ErrorDetail::ActualPlanStatisticsUnavailable)
 }
 
 /// The query's plan left the cache, and its last actual plan with it.

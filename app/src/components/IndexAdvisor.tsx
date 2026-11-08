@@ -10,7 +10,7 @@ import type { TableAdvice } from "../gen/TableAdvice";
 import { api, errorMessage, type ApiError } from "../lib/api";
 import { ago, bytes, count, percent, rowCount } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
-import { t } from "../lib/i18n";
+import { language as selectedLanguage, t, useLanguage } from "../lib/i18n";
 import { setState } from "../lib/store";
 import { Sql } from "./Sql";
 import { copyAndTell } from "../lib/clipboard";
@@ -22,7 +22,7 @@ type Item =
   | { kind: "cleanup"; key: string; cleanup: IndexCleanup }
   | { kind: "tables"; key: string; table: TableAdvice };
 
-/** Advice per report id: the advisor is pure over a report, so a re-open is instant. */
+/** Advice belongs to a connection, report and language. */
 const cache = new Map<string, IndexAdvice>();
 
 /** Where a candidate index comes from, in words. */
@@ -90,7 +90,8 @@ function tableOf(item: Item): string {
  */
 export default function IndexAdvisor({ report, onOpenTable }: { report: Report; onOpenTable: (key: string) => void }) {
   const id = report.snapshot.id;
-  const key = JSON.stringify([report.snapshot.connection, id]);
+  const language = useLanguage();
+  const key = JSON.stringify([report.snapshot.connection, id, language]);
   const [loaded, setLoaded] = useState<{ key: string; value: Load }>(() => ({ key, value: cache.has(key) ? { status: "ready", advice: cache.get(key)! } : { status: "loading" } }));
   const load: Load = loaded.key === key ? loaded.value : cache.has(key) ? { status: "ready", advice: cache.get(key)! } : { status: "loading" };
   const [filter, setFilter] = useState<Section | null>(null);
@@ -112,19 +113,20 @@ export default function IndexAdvisor({ report, onOpenTable }: { report: Report; 
       return;
     }
     let live = true;
+    const ownsRequest = () => live && selectedLanguage() === language;
     setLoaded({ key, value: { status: "loading" } });
     api()
-      .then((client) => client.indexAdvice(report.snapshot.connection, id))
+      .then((client) => ownsRequest() ? client.indexAdvice(report.snapshot.connection, id) : null)
       .then((advice) => {
+        if (!advice || !ownsRequest()) return;
         cache.set(key, advice);
-        if (!live) return;
         ready(advice);
       })
-      .catch((e) => live && setLoaded({ key, value: { status: "error", error: errorMessage(e) } }));
+      .catch((e) => ownsRequest() && setLoaded({ key, value: { status: "error", error: errorMessage(e) } }));
     return () => {
       live = false;
     };
-  }, [id, key, report.snapshot.connection]);
+  }, [id, key, language, report.snapshot.connection]);
 
   const advice = load.status === "ready" ? load.advice : null;
   const items = useMemo<Item[]>(() => {

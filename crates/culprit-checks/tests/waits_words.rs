@@ -247,6 +247,9 @@ fn sampled_activity_says_what_it_retained() {
     let mut s = snapshot("yugabyte-demo.json");
     s.waits.clear();
     let mut period = culprit_core::ActivityPeriod {
+        source_message: None,
+        note_messages: None,
+
         source: "Native recorded activity".into(),
         requested_start: "2026-10-01T00:00:00Z".into(),
         requested_end: "2026-10-08T00:00:00Z".into(),

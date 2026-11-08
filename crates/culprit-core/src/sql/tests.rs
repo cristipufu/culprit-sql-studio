@@ -3,6 +3,20 @@ use crate::sql::safety::MSSQL_STATEMENTS;
 use crate::sql::*;
 
 #[test]
+fn statement_problem_facts_do_not_depend_on_the_language() {
+    for language in crate::i18n::languages() {
+        crate::i18n::scope(&language.code, || {
+            let unclosed = check("SELECT 'unfinished", Engine::Postgres);
+            assert_eq!(unclosed.problem_kind, Some(StatementProblem::Lexical(LexError::UnclosedQuote)));
+            assert!(unclosed.problem_kind.unwrap().is_unclosed());
+            assert_eq!(check("SELECT 1; SELECT 2", Engine::Postgres).problem_kind, Some(StatementProblem::Multiple));
+            assert_eq!(check("-- only a comment", Engine::Postgres).problem_kind, Some(StatementProblem::Empty));
+            assert_eq!(check("SELECT 1", Engine::Postgres).problem_kind, None);
+        });
+    }
+}
+
+#[test]
 fn foreign_key_coverage_cannot_come_from_a_filtered_or_mixed_script() {
     for engine in [Engine::Mssql, Engine::Postgres, Engine::Mysql, Engine::Sqlite] {
         for sql in [

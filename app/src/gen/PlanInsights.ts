@@ -5,4 +5,4 @@ import type { PlanInsight } from "./PlanInsight";
  * Insights for one plan plus what this plan can't tell (an estimated plan has no actual rows; MySQL keeps no memory
  * grants), shown next to an empty list so "nothing found" is honest.
  */
-export type PlanInsights = { items: Array<PlanInsight>, note: string | null, };
+export type PlanInsights = { items: Array<PlanInsight>, note: string | null, scan_context?: boolean, };

@@ -215,10 +215,14 @@ pub(super) fn literal_filter_finding(snapshot: &Snapshot, l: LiteralFilter<'_>) 
     f.severity = l.severity;
     f.confidence = l.confidence;
     f.impact.score = l.score;
-    f.impact.label = t!("check.missing_index.impact.lookups", lookups = format::count(lookups));
+    f.impact.set_label(t!("check.missing_index.impact.lookups", lookups = format::count(lookups)));
     f.queries = query_refs(linked);
-    f.metrics.push(Metric::new(t!("check.missing_index.metric.lookups"), lookups, Unit::Count));
-    f.metrics.push(Metric::new(t!("check.missing_index.metric.improvement"), c.impact_pct / 100.0, Unit::Ratio));
+    f.metrics.push(Metric::said(culprit_core::key!("check.missing_index.metric.lookups"), lookups, Unit::Count));
+    f.metrics.push(Metric::said(
+        culprit_core::key!("check.missing_index.metric.improvement"),
+        c.impact_pct / 100.0,
+        Unit::Ratio,
+    ));
     let (summary, sql) = match (&l.remainder, miss.remainder_sql(snapshot, &l.remainder)) {
         (Remainder::Index { include, .. }, Some((sql, _))) => {
             let replaces = index_keys.len() == equality.len()

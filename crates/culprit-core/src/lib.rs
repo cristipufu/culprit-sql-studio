@@ -51,7 +51,9 @@ pub use advice::*;
 pub use blocking::{BlockNode, Blocking, BlockingChain, HeadKind, LockWait};
 pub use changes::{ChangeStatus, Changes, Period, PeriodStats, PlanSwitch, QueryChange};
 pub use check::{Check, CheckAssessment, CheckEvidence, CheckStatus, Diagnosis};
-pub use cloud::{CloudPoint, CloudProvider, CloudSeries, CloudSignals, CloudUnit, ThrottleEpisode, ThrottleKind};
+pub use cloud::{
+    CloudLimitKind, CloudPoint, CloudProvider, CloudSeries, CloudSignals, CloudUnit, ThrottleEpisode, ThrottleKind,
+};
 pub use connection::{
     AuthKind, ConnectionAttempt, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, SshConfig,
     aws_iam_host_allowed, entra_host_allowed, expand_home, is_local_host, transport_error,
@@ -72,7 +74,7 @@ pub use engines::{
     DatabaseProduct, EngineSpec, PlanningStep, ProductFacts, ProductSpec, ReadUnit, SettingChange, SqlSyntax, WriteLog,
     WriteRows, ysql_session_target,
 };
-pub use error::{Error, ErrorCode, Result};
+pub use error::{Error, ErrorCode, ErrorDetail, Result};
 pub use events::{ChangeEvent, EventAction, EventKind, EventLink, EventSource};
 pub use finding::*;
 pub use finding_facts::*;
@@ -89,7 +91,7 @@ pub use plan_diff::{
 };
 pub use plan_facts::{
     PlanAutomaticIndex, PlanChangedColumn, PlanConversion, PlanConversionIssue, PlanExecutionMode, PlanFacts,
-    PlanIndexColumns, PlanNodeFacts, PlanParentRelationship,
+    PlanIndexColumns, PlanNodeFacts, PlanParentRelationship, PlanSampleSource,
 };
 pub use plan_view::{PlanInsightShare, PlanOperatorView, PlanView};
 pub use platform::Platform;

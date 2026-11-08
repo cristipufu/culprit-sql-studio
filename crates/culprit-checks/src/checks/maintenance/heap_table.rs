@@ -104,14 +104,14 @@ fn heap_table_finding(snapshot: &Snapshot, heap: HeapTable<'_>) -> Finding {
     f.summary = summary.join(" ");
     f.severity = heap.severity;
     if let Some(d) = heap.said_per_day {
-        f.metrics.push(Metric::new(t!("check.heap_table.metric.forwarded_per_day"), d, Unit::Count));
+        f.metrics.push(Metric::said(culprit_core::key!("check.heap_table.metric.forwarded_per_day"), d, Unit::Count));
     }
     f.impact.score = base_score(f.severity);
-    f.impact.label = t!("check.heap_table.impact", rows = format::count(heap.rows));
+    f.impact.set_label(t!("check.heap_table.impact", rows = format::count(heap.rows)));
     f.confidence = Confidence::Medium;
-    f.metrics.push(Metric::new(t!("common.metric.rows"), heap.rows, Unit::Rows));
+    f.metrics.push(Metric::said(culprit_core::key!("common.metric.rows"), heap.rows, Unit::Rows));
     if let Some(b) = t.total_bytes {
-        f.metrics.push(Metric::new(t!("common.metric.size"), b, Unit::Bytes));
+        f.metrics.push(Metric::said(culprit_core::key!("common.metric.size"), b, Unit::Bytes));
     }
     f.fix = Some(Fix {
         summary: t!("check.heap_table.fix"),

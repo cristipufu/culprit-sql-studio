@@ -135,206 +135,12 @@ fn sarif_level(severity: Severity) -> &'static str {
     }
 }
 
-fn extract_summary_statement(summary: &str) -> Option<&str> {
-    if let Some(rest) =
-        summary.strip_prefix("The statement `").or_else(|| summary.strip_prefix("The migration statement `"))
-    {
-        const CLOSERS: &[&str] = &[
-            "` uses `CONCURRENTLY`",
-            "` drops `",
-            "` truncates ",
-            "` runs `",
-            "` rebuilds ",
-            "` builds an index ",
-            "` alters ",
-            "` adds ",
-            "` references ",
-        ];
-        if let Some(pos) = CLOSERS.iter().filter_map(|c| rest.find(c)).min() {
-            return Some(&rest[..pos]);
-        }
-        return rest.split('`').next();
-    }
-    summary.split('`').nth(1)
-}
-
 /// Find the 1-based line number in `sql` where the statement referenced by `f` starts.
 fn locate_finding_line(sql: &str, f: &Finding) -> Option<usize> {
-    let (norm_sql, byte_lines) = normalize_sql_with_lines(sql);
-    if let Some(after_tick) = extract_summary_statement(&f.summary) {
-        let full_needle = after_tick
-            .trim()
-            .trim_end_matches(';')
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .to_ascii_lowercase();
-        if !full_needle.is_empty()
-            && let Some(pos) = norm_sql.find(&full_needle)
-            && let Some(&line) = byte_lines.get(pos)
-        {
-            return Some(line);
-        }
-        let prefix = after_tick.split_whitespace().take(4).collect::<Vec<_>>().join(" ").to_ascii_lowercase();
-        if !prefix.is_empty()
-            && let Some(pos) = norm_sql.find(&prefix)
-            && let Some(&line) = byte_lines.get(pos)
-        {
-            return Some(line);
-        }
-    }
-    let leaf = f.subject.name.rsplit('.').next().unwrap_or(&f.subject.name).to_ascii_lowercase();
-    if !leaf.is_empty()
-        && let Some(pos) = norm_sql.find(&leaf)
-        && let Some(&line) = byte_lines.get(pos)
-    {
-        return Some(line);
-    }
-    None
-}
-
-fn parse_dollar_tag(sql: &str) -> Option<&str> {
-    let rest = sql.strip_prefix('$')?;
-    let end = rest.find('$')?;
-    let tag = &rest[..end];
-    if !tag.starts_with(|c: char| c.is_ascii_digit()) && tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        Some(&sql[..end + 2])
-    } else {
-        None
-    }
-}
-
-fn normalize_sql_with_lines(sql: &str) -> (String, Vec<usize>) {
-    let mut norm = String::with_capacity(sql.len());
-    let mut byte_lines = Vec::with_capacity(sql.len());
-    let mut line = 1usize;
-    let mut chars = sql.char_indices().peekable();
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut in_backtick = false;
-    let mut in_bracket = false;
-    let mut dollar_tag: Option<String> = None;
-    let mut last_was_space = true;
-
-    let push_lower = |ch: char, line_no: usize, norm: &mut String, byte_lines: &mut Vec<usize>| {
-        for lc in ch.to_lowercase() {
-            let len = lc.len_utf8();
-            norm.push(lc);
-            byte_lines.extend(std::iter::repeat_n(line_no, len));
-        }
-    };
-
-    while let Some((idx, c)) = chars.next() {
-        if c == '\n' {
-            line += 1;
-            if !last_was_space {
-                norm.push(' ');
-                byte_lines.push(line);
-                last_was_space = true;
-            }
-            continue;
-        }
-        if let Some(ref tag) = dollar_tag {
-            if c.is_whitespace() {
-                if !last_was_space {
-                    norm.push(' ');
-                    byte_lines.push(line);
-                    last_was_space = true;
-                }
-            } else {
-                push_lower(c, line, &mut norm, &mut byte_lines);
-                last_was_space = false;
-            }
-            if c == '$' && sql[idx..].starts_with(tag.as_str()) {
-                for _ in 0..tag.chars().count().saturating_sub(1) {
-                    if let Some((_, ch)) = chars.next() {
-                        push_lower(ch, line, &mut norm, &mut byte_lines);
-                    }
-                }
-                dollar_tag = None;
-            }
-            continue;
-        }
-        if in_single && c == '\\' {
-            push_lower(c, line, &mut norm, &mut byte_lines);
-            if let Some((_, next_c)) = chars.next() {
-                if next_c == '\n' {
-                    line += 1;
-                }
-                push_lower(next_c, line, &mut norm, &mut byte_lines);
-            }
-            last_was_space = false;
-            continue;
-        }
-        if !in_single && !in_double && !in_backtick && !in_bracket {
-            if c == '$'
-                && let Some(tag) = parse_dollar_tag(&sql[idx..])
-            {
-                push_lower(c, line, &mut norm, &mut byte_lines);
-                for _ in 0..tag.chars().count().saturating_sub(1) {
-                    if let Some((_, ch)) = chars.next() {
-                        push_lower(ch, line, &mut norm, &mut byte_lines);
-                    }
-                }
-                last_was_space = false;
-                dollar_tag = Some(tag.to_string());
-                continue;
-            }
-            if c == '-' && chars.peek().map(|(_, ch)| *ch) == Some('-') {
-                for (_, ch) in chars.by_ref() {
-                    if ch == '\n' {
-                        line += 1;
-                        break;
-                    }
-                }
-                if !last_was_space {
-                    norm.push(' ');
-                    byte_lines.push(line);
-                    last_was_space = true;
-                }
-                continue;
-            }
-            if c == '/' && chars.peek().map(|(_, ch)| *ch) == Some('*') {
-                chars.next();
-                while let Some((_, ch)) = chars.next() {
-                    if ch == '\n' {
-                        line += 1;
-                    } else if ch == '*' && chars.peek().map(|(_, next_ch)| *next_ch) == Some('/') {
-                        chars.next();
-                        break;
-                    }
-                }
-                if !last_was_space {
-                    norm.push(' ');
-                    byte_lines.push(line);
-                    last_was_space = true;
-                }
-                continue;
-            }
-        }
-        if c == '\'' && !in_double && !in_backtick && !in_bracket {
-            in_single = !in_single;
-        } else if c == '"' && !in_single && !in_backtick && !in_bracket {
-            in_double = !in_double;
-        } else if c == '`' && !in_single && !in_double && !in_bracket {
-            in_backtick = !in_backtick;
-        } else if c == '[' && !in_single && !in_double && !in_backtick && !in_bracket {
-            in_bracket = true;
-        } else if c == ']' && in_bracket {
-            in_bracket = false;
-        }
-        if c.is_whitespace() {
-            if !last_was_space {
-                norm.push(' ');
-                byte_lines.push(line);
-                last_was_space = true;
-            }
-        } else {
-            push_lower(c, line, &mut norm, &mut byte_lines);
-            last_was_space = false;
-        }
-    }
-    (norm, byte_lines)
+    let statement = f.facts.statement.as_ref()?;
+    let units: Vec<u16> =
+        sql.encode_utf16().skip(statement.start).take(statement.end.saturating_sub(statement.start)).collect();
+    (String::from_utf16_lossy(&units) == statement.sql).then_some(statement.line)
 }
 
 #[cfg(test)]
@@ -361,6 +167,12 @@ mod tests {
             "migrations/0042_add_idx.sql"
         );
         assert_eq!(result["locations"][0]["physicalLocation"]["region"]["startLine"], 3);
+
+        // Localized prose and repeated table names never select a source location.
+        let mut localized = findings.clone();
+        localized[0].summary = "Une autre phrase sans instruction SQL.".into();
+        assert_eq!(locate_finding_line(&sql, &localized[0]), Some(3));
+        assert_eq!(locate_finding_line(&format!("-- 😀\n{sql}"), &localized[0]), None);
 
         // Multi-file batches preserve each file's URI and line number independently.
         let sql2 = format!("-- second file\nCREATE INDEX idx_blocking_two ON {table} (created_at);\n");

@@ -210,9 +210,24 @@ textarea {
   height: 100%;
 }
 
+/* Technical text and coordinate systems retain their own direction inside a localized layout. */
+code, .mono, .sql, .cm-editor, .diagram-scroll, .tc-plot, .tc-axis, .tc-lane,
+.resource-plot, .resource-xaxis, .dash-ticks, .pstrip {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+:root[dir="rtl"][data-platform="mac"] .topbar {
+  padding-inline-end: 80px;
+}
+
+:root[dir="rtl"] .share-redact input[role="switch"]:checked::after {
+  transform: translateX(-12px);
+}
+
 .sidebar {
   background: var(--sidebar);
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   padding: 0 8px 10px;
@@ -237,7 +252,7 @@ textarea {
   width: 100%;
   padding: 7px 8px;
   border-radius: var(--radius);
-  text-align: left;
+  text-align: start;
   margin-bottom: 10px;
 }
 
@@ -261,7 +276,7 @@ textarea {
 }
 
 .conn-switch .chev {
-  margin-left: auto;
+  margin-inline-start: auto;
   color: var(--text-3);
   flex-shrink: 0;
 }
@@ -321,7 +336,7 @@ textarea {
 }
 
 .nav-item .count {
-  margin-left: auto;
+  margin-inline-start: auto;
   font-size: var(--fs-ui-sm);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
@@ -333,7 +348,7 @@ textarea {
 }
 
 .nav-item .key {
-  margin-left: auto;
+  margin-inline-start: auto;
   font-size: var(--fs-micro);
   color: var(--text-3);
   opacity: 0;
@@ -454,7 +469,7 @@ button.update-item:hover {
 .scan-error-popover {
   position: absolute;
   top: calc(100% + 6px);
-  right: 0;
+  inset-inline-end: 0;
   z-index: 50;
   width: min(420px, calc(100vw - 260px));
   padding: 10px 12px;
@@ -479,8 +494,8 @@ button.update-item:hover {
   content: "";
   position: absolute;
   top: -8px;
-  left: 0;
-  right: 0;
+  inset-inline-start: 0;
+  inset-inline-end: 0;
   height: 8px;
 }
 
@@ -563,7 +578,7 @@ button.update-item:hover {
 .menu {
   position: absolute;
   top: 32px;
-  left: 0;
+  inset-inline-start: 0;
   z-index: 40;
   width: 260px;
   padding: 5px;
@@ -581,7 +596,7 @@ button.update-item:hover {
   height: 30px;
   padding: 0 9px;
   border-radius: 6px;
-  text-align: left;
+  text-align: start;
 }
 
 .menu-item:hover,
@@ -675,8 +690,8 @@ button.update-item:hover {
 }
 
 .btn .kbd {
-  margin-left: 2px;
-  margin-right: -3px;
+  margin-inline-start: 2px;
+  margin-inline-end: -3px;
 }
 
 .btn.primary .kbd {
@@ -841,7 +856,7 @@ button.update-item:hover {
 }
 
 .ov-list {
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -931,7 +946,7 @@ button.update-item:hover {
 }
 
 .filters .search {
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 
 .list {
@@ -946,7 +961,7 @@ button.update-item:hover {
   gap: 4px 8px;
   align-items: start;
   width: 100%;
-  text-align: left;
+  text-align: start;
   padding: 9px 10px 10px;
   border-radius: var(--radius);
   border: 1px solid transparent;
@@ -1065,7 +1080,7 @@ button.update-item:hover {
 }
 
 .detail h3 .actions {
-  margin-left: auto;
+  margin-inline-start: auto;
   display: flex;
   gap: 6px;
 }
@@ -1166,7 +1181,7 @@ button.update-item:hover {
   color: var(--text-2);
   font-size: var(--fs-micro);
   font-weight: 500;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 
@@ -1190,7 +1205,7 @@ button.update-item:hover {
 }
 
 .qcard .qmeta .open {
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 
 .qcard:hover {
@@ -1260,7 +1275,7 @@ button.update-item:hover {
 .steps li {
   counter-increment: step;
   position: relative;
-  padding-left: 28px;
+  padding-inline-start: 28px;
   color: var(--text-2);
   line-height: 1.55;
 }
@@ -1272,7 +1287,7 @@ button.update-item:hover {
 .steps li::before {
   content: counter(step);
   position: absolute;
-  left: 0;
+  inset-inline-start: 0;
   top: 1px;
   width: 18px;
   height: 18px;
@@ -1392,7 +1407,7 @@ button.update-item:hover {
 }
 
 .plan-cols span:not(:first-child) {
-  text-align: right;
+  text-align: end;
 }
 
 .pnode {
@@ -1401,8 +1416,8 @@ button.update-item:hover {
   padding-top: 4px;
   padding-bottom: 4px;
   width: 100%;
-  text-align: left;
-  border-left: 2px solid transparent;
+  text-align: start;
+  border-inline-start: 2px solid transparent;
 }
 
 .pnode:hover {
@@ -1414,7 +1429,7 @@ button.update-item:hover {
 }
 
 .pnode.hot {
-  border-left-color: var(--brand);
+  border-inline-start-color: var(--brand);
 }
 
 .pnode .label {
@@ -1461,7 +1476,7 @@ button.update-item:hover {
 .pnode .twisty {
   width: 14px;
   height: 18px;
-  margin-right: 4px;
+  margin-inline-end: 4px;
   flex-shrink: 0;
   color: var(--text-3);
   display: inline-flex;
@@ -1486,7 +1501,7 @@ button.update-item:hover {
 
 .pnode .rows,
 .pnode .cost {
-  text-align: right;
+  text-align: end;
   font-variant-numeric: tabular-nums;
   font-size: var(--fs-meta);
   white-space: nowrap;
@@ -1542,7 +1557,7 @@ button.update-item:hover {
   font-weight: 600;
   background: var(--high-bg);
   color: var(--high-text);
-  margin-left: 4px;
+  margin-inline-start: 4px;
 }
 
 .node-props {
@@ -1587,7 +1602,7 @@ button.update-item:hover {
   padding: 7px 10px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  text-align: left;
+  text-align: start;
   font-size: var(--fs-meta);
 }
 
@@ -1689,7 +1704,7 @@ button.update-item:hover {
   flex-direction: column;
   gap: 2px;
   padding: 8px 10px 8px 12px;
-  text-align: left;
+  text-align: start;
   border-radius: 9px;
   border: 1px solid var(--border-strong);
   background:
@@ -1792,7 +1807,7 @@ table.grid th {
   top: 0;
   z-index: 1;
   background: var(--surface);
-  text-align: left;
+  text-align: start;
   font-weight: 600;
   font-size: var(--fs-ui-sm);
   color: var(--text-3);
@@ -1804,7 +1819,7 @@ table.grid th {
 
 table.grid th.r,
 table.grid td.r {
-  text-align: right;
+  text-align: end;
 }
 
 table.grid th.sortable:hover {
@@ -1866,7 +1881,7 @@ table.grid td.sqlcell {
 }
 
 .split > .pane + .pane {
-  border-left: 1px solid var(--border);
+  border-inline-start: 1px solid var(--border);
 }
 
 .toolbar {
@@ -2011,7 +2026,7 @@ table.grid td.sqlcell {
   align-items: center;
   gap: 10px;
   width: 100%;
-  text-align: left;
+  text-align: start;
   padding: 8px 10px;
   border-radius: 7px;
   color: var(--text-2);
@@ -2025,7 +2040,7 @@ table.grid td.sqlcell {
 }
 
 .palette .item .k {
-  margin-left: auto;
+  margin-inline-start: auto;
   font-size: var(--fs-ui-sm);
   color: var(--text-3);
   white-space: nowrap;
@@ -2251,8 +2266,8 @@ table.grid td.sqlcell {
 }
 .discovery-search .discovery-regions {
   flex: 0 0 190px;
-  border-left: 1px solid var(--border);
-  padding-left: 10px;
+  border-inline-start: 1px solid var(--border);
+  padding-inline-start: 10px;
 }
 .cloud-discovery .discover-row {
   grid-template-columns: auto auto minmax(100px, 240px) minmax(0, 1fr) auto;
@@ -2278,8 +2293,8 @@ table.grid td.sqlcell {
   }
   .discovery-search .discovery-regions {
     flex: 1;
-    border-left: 0;
-    padding-left: 0;
+    border-inline-start: 0;
+    padding-inline-start: 0;
   }
   .cloud-discovery .discover-row {
     grid-template-columns: auto auto minmax(0, 1fr) auto;
@@ -2544,8 +2559,8 @@ table.grid td.sqlcell {
 .editor-splitter::after {
   content: "";
   position: absolute;
-  left: 0;
-  right: 0;
+  inset-inline-start: 0;
+  inset-inline-end: 0;
   top: 3px;
   border-top: 1px solid var(--border);
 }
@@ -2593,7 +2608,7 @@ table.grid td.sqlcell {
 .editor-host .cm-completionDetail {
   color: var(--text-3);
   font-style: normal;
-  margin-left: 10px;
+  margin-inline-start: 10px;
 }
 
 /* saved queries */
@@ -2603,7 +2618,7 @@ table.grid td.sqlcell {
   flex: none;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
   background: var(--bg);
   min-height: 0;
 }
@@ -2668,7 +2683,7 @@ table.grid td.sqlcell {
   background: none;
   color: inherit;
   font: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 
@@ -2859,7 +2874,7 @@ table.grid td.sqlcell {
 
 .editor-host .cm-gutters {
   background: var(--surface);
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
   color: var(--text-3);
 }
 
@@ -2873,7 +2888,7 @@ table.grid td.sqlcell {
 }
 
 .editor-host .cm-cursor {
-  border-left-color: var(--text);
+  border-inline-start-color: var(--text);
 }
 
 .editor-host .cm-selectionBackground,
@@ -2912,7 +2927,7 @@ table.grid td.sqlcell {
 /* ───────── coding agents ───────── */
 
 .agent-select {
-  margin-left: 8px;
+  margin-inline-start: 8px;
   height: 22px;
   padding: 0 6px;
   border: 1px solid var(--border);
@@ -3091,7 +3106,7 @@ table.grid td.trendcell {
 /* ───────── time charts: gridlines, ticks, peak, flags, readout, brush ───────── */
 
 .trend-actions {
-  margin-left: auto;
+  margin-inline-start: auto;
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -3455,7 +3470,7 @@ table.grid th.col-query {
 
 .wc-period b {
   font-weight: 600;
-  margin-right: 4px;
+  margin-inline-end: 4px;
 }
 
 .wc-controls {
@@ -3629,7 +3644,7 @@ table.grid th.col-query {
   gap: 10px;
   width: 100%;
   padding: 8px 10px;
-  text-align: left;
+  text-align: start;
   border-radius: 8px;
 }
 
@@ -3711,8 +3726,8 @@ table.grid th.col-query {
 
 .db-track {
   position: absolute;
-  left: 0;
-  right: 0;
+  inset-inline-start: 0;
+  inset-inline-end: 0;
   top: 4.5px;
   height: 1px;
   background: var(--border);
@@ -3739,7 +3754,7 @@ table.grid th.col-query {
   top: 1px;
   width: 8px;
   height: 8px;
-  margin-left: -4px;
+  margin-inline-start: -4px;
   border-radius: 50%;
 }
 
@@ -3779,7 +3794,7 @@ table.grid th.col-query {
 .wc-table th,
 .wc-table td {
   padding: 3px 14px 3px 0;
-  text-align: left;
+  text-align: start;
 }
 
 .wc-table thead th {
@@ -3946,7 +3961,7 @@ table.grid th.col-query {
   top: 11px;
   height: 12px;
   width: 1.5px;
-  margin-left: -0.75px;
+  margin-inline-start: -0.75px;
   background: color-mix(in srgb, var(--lane) 70%, var(--text-3));
 }
 
@@ -3955,7 +3970,7 @@ table.grid th.col-query {
   top: 12px;
   width: 10px;
   height: 10px;
-  margin-left: -5px;
+  margin-inline-start: -5px;
   border-radius: 50%;
   background: var(--lane);
   border: 2px solid var(--surface);
@@ -4190,7 +4205,7 @@ table.grid th.col-query {
 }
 
 .drift-sql-head .actions {
-  margin-left: auto;
+  margin-inline-start: auto;
   display: flex;
   gap: 2px;
 }
@@ -4262,7 +4277,7 @@ table.grid tr.row.confirming td {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  margin-right: 12px;
+  margin-inline-end: 12px;
 }
 
 .import-sources {
@@ -4353,7 +4368,7 @@ table.grid tr.row.confirming td {
   flex-direction: column;
   align-items: center;
   padding-top: 8px;
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
 }
 
 .schema-list {
@@ -4361,7 +4376,7 @@ table.grid tr.row.confirming td {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
 }
 
 .schema-resizer {
@@ -4476,7 +4491,7 @@ body.resizing {
   height: 30px;
   padding: 0 8px;
   border-radius: 6px;
-  text-align: left;
+  text-align: start;
   overflow: hidden;
 }
 
@@ -4550,7 +4565,7 @@ body.resizing {
 .tl-metric {
   flex-shrink: 0;
   min-width: 48px;
-  text-align: right;
+  text-align: end;
   font-size: var(--fs-ui-sm);
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
@@ -4558,7 +4573,7 @@ body.resizing {
 
 .tl-size {
   position: absolute;
-  left: 8px;
+  inset-inline-start: 8px;
   bottom: 3px;
   max-width: calc(100% - 16px);
   height: 2px;
@@ -4636,7 +4651,7 @@ body.resizing {
 .td-chunks summary { cursor: pointer; color: var(--text-3); }
 .td-chunks p { margin: 8px 0 0; }
 .td-chunk-list { max-height: 240px; overflow: auto; margin-top: 8px; }
-.td-chunk-list table { width: 100%; border-collapse: collapse; text-align: left; }
+.td-chunk-list table { width: 100%; border-collapse: collapse; text-align: start; }
 .td-chunk-list th, .td-chunk-list td { padding: 5px 8px; white-space: nowrap; }
 
 .td-facts .fact {
@@ -4715,7 +4730,7 @@ body.resizing {
   min-width: 0;
   padding: 6px 10px;
   font-size: var(--fs-ui);
-  text-align: left;
+  text-align: start;
 }
 
 .td-finding:hover,
@@ -4734,7 +4749,7 @@ body.resizing {
 .td-more {
   flex-shrink: 0;
   padding: 0 12px;
-  border-left: 1px solid var(--border);
+  border-inline-start: 1px solid var(--border);
   font-size: var(--fs-meta);
   font-weight: 500;
   color: var(--text-2);
@@ -4898,8 +4913,8 @@ table.td-grid td {
 
 table.td-grid .num-col {
   width: 36px;
-  padding-right: 2px;
-  text-align: right;
+  padding-inline-end: 2px;
+  text-align: end;
   font-size: var(--fs-micro);
 }
 
@@ -5078,7 +5093,7 @@ table.ix-grid td {
 
 .ix-note button {
   color: inherit;
-  text-align: left;
+  text-align: start;
 }
 
 .ix-keys {
@@ -5108,7 +5123,7 @@ table.ix-grid td {
   border-radius: 5px;
   font-size: var(--fs-ui-sm);
   white-space: nowrap;
-  text-align: left;
+  text-align: start;
 }
 
 .used-btn:hover {
@@ -5196,7 +5211,7 @@ table.ix-grid tr.ix-notes td {
 .ix-notes-inner,
 .ix-uses-inner {
   position: sticky;
-  left: 10px;
+  inset-inline-start: 10px;
   width: min(100%, calc(100cqi - var(--detail-padding) - var(--detail-padding) - 22px));
   min-width: 0;
 }
@@ -5228,7 +5243,7 @@ table.ix-grid tr.ix-notes td {
   width: 100%;
   min-width: 0;
   padding: 10px;
-  text-align: left;
+  text-align: start;
 }
 
 .use-row + .use-row {
@@ -5311,7 +5326,7 @@ table.ix-grid tr.ix-notes td {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-align: left;
+  text-align: start;
 }
 
 .rel-columns {
@@ -5423,14 +5438,14 @@ table.rg {
   padding: 4px 10px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  border-right: 1px solid var(--border);
-  text-align: left;
+  border-inline-end: 1px solid var(--border);
+  text-align: start;
   white-space: nowrap;
   vertical-align: bottom;
 }
 
 .rg th.r {
-  text-align: right;
+  text-align: end;
 }
 
 .rg-name {
@@ -5450,7 +5465,7 @@ table.rg {
   height: 26px;
   padding: 0 10px;
   border-bottom: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5459,7 +5474,7 @@ table.rg {
 }
 
 .rg td.r {
-  text-align: right;
+  text-align: end;
   font-variant-numeric: tabular-nums;
 }
 
@@ -5479,11 +5494,11 @@ table.rg {
 
 .rg .rg-n {
   position: sticky;
-  left: 0;
+  inset-inline-start: 0;
   min-width: 34px;
   background: var(--surface);
   color: var(--text-3);
-  text-align: right;
+  text-align: end;
   font: var(--fs-micro) var(--font);
 }
 
@@ -5557,7 +5572,7 @@ table.rg {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
   background: var(--surface);
 }
 
@@ -5621,7 +5636,7 @@ table.rg {
   flex-direction: column;
   gap: 2px;
   padding: 8px 4px 9px 10px;
-  text-align: left;
+  text-align: start;
 }
 
 .plan-row-name {
@@ -5932,7 +5947,7 @@ table.rg {
   gap: 8px;
   padding: 5px 8px;
   border-radius: 6px;
-  text-align: left;
+  text-align: start;
   font-size: var(--fs-ui);
 }
 
@@ -6005,7 +6020,7 @@ table.rg {
 }
 
 .plan-head .side-badge {
-  margin-right: -2px;
+  margin-inline-end: -2px;
 }
 
 .plan-card.mark-changed {
@@ -6028,7 +6043,7 @@ table.rg {
   border-radius: 4px;
   font-size: var(--fs-2xs);
   letter-spacing: 0.02em;
-  margin-right: 4px;
+  margin-inline-end: 4px;
 }
 
 .pc-mark.changed {
@@ -6140,7 +6155,7 @@ table.rg {
   border: 1px solid var(--border);
   border-radius: var(--r-md, 8px);
   background: var(--surface);
-  text-align: left;
+  text-align: start;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
@@ -6246,7 +6261,7 @@ table.rg {
   gap: var(--s-3, 12px);
   width: 100%;
   padding: 10px var(--s-3, 12px);
-  text-align: left;
+  text-align: start;
   border-radius: var(--r-md, 8px);
 }
 
@@ -6372,7 +6387,7 @@ table.rg {
 }
 
 .live-calm .live-note {
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 
 .live-view .table-wrap {
@@ -6414,7 +6429,7 @@ table.rg {
 .block-card::before {
   content: "";
   position: absolute;
-  left: 0;
+  inset-inline-start: 0;
   top: 10px;
   bottom: 10px;
   width: 3px;
@@ -6460,7 +6475,7 @@ table.rg {
 }
 
 .fact-label {
-  margin-right: 5px;
+  margin-inline-end: 5px;
   font-size: var(--fs-micro);
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -6650,7 +6665,7 @@ table.rg {
   display: inline-block;
   width: 6px;
   height: 6px;
-  margin-right: 6px;
+  margin-inline-end: 6px;
   border-radius: 50%;
   vertical-align: 1px;
   background: var(--text-3);
@@ -6804,7 +6819,7 @@ table.rg {
   width: 100%;
   padding: 5px 6px;
   border-radius: var(--r-sm, 6px);
-  text-align: left;
+  text-align: start;
 }
 
 .ia-query:hover {
@@ -6917,7 +6932,7 @@ table.rg {
 
 .ia-verify {
   margin: 0;
-  padding-left: 18px;
+  padding-inline-start: 18px;
   font-size: var(--fs-meta);
   line-height: 1.55;
   color: var(--text-2);
@@ -7015,7 +7030,7 @@ table.rg {
   margin: 8px 4px 12px;
   padding: 12px 14px;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--focus);
+  border-inline-start: 3px solid var(--focus);
   border-radius: 8px;
   background: var(--surface);
   font-size: var(--fs-body);
@@ -7084,10 +7099,10 @@ table.rg {
   font-weight: 500;
 }
 
-.checked-head { text-align: left; }
+.checked-head { text-align: start; }
 .checked-head > svg { flex: none; }
 .checked-head > span { min-width: 0; }
-.checked-head .n { display: inline-block; margin-left: 4px; }
+.checked-head .n { display: inline-block; margin-inline-start: 4px; }
 .checked-fine details { margin-top: 12px; }
 .checked-fine summary { cursor: pointer; }
 .checked-fine li > svg { flex: none; margin-top: 2px; }
@@ -7123,7 +7138,7 @@ table.rg {
 
 .checked-fine li .t {
   font-weight: 500;
-  margin-right: 6px;
+  margin-inline-end: 6px;
 }
 
 .checked-fine li .d {
@@ -7190,7 +7205,7 @@ table.rg {
 }
 
 .palette .item .engine-badge {
-  margin-right: 8px;
+  margin-inline-end: 8px;
 }
 
 .saved-conn {
@@ -7219,11 +7234,11 @@ table.rg {
 .block-row:not(.head) .block-indent::after {
   content: "";
   position: absolute;
-  right: 4px;
+  inset-inline-end: 4px;
   top: -6px;
   width: 11px;
   height: calc(50% + 6px);
-  border-left: 1.5px solid var(--border-strong);
+  border-inline-start: 1.5px solid var(--border-strong);
   border-bottom: 1.5px solid var(--border-strong);
   border-bottom-left-radius: 5px;
 }
@@ -7358,7 +7373,7 @@ table.rg {
 }
 
 .dl-inline-note .btn {
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 
 .dl-split {
@@ -7373,7 +7388,7 @@ table.rg {
   flex-direction: column;
   gap: 4px;
   padding: 10px 8px;
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
   overflow-y: auto;
 }
 
@@ -7384,7 +7399,7 @@ table.rg {
   border: 1px solid transparent;
   border-radius: 8px;
   background: none;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 
@@ -7604,7 +7619,7 @@ table.rg {
 .dl-key {
   display: inline-block;
   width: 22px;
-  margin-right: 5px;
+  margin-inline-end: 5px;
   vertical-align: middle;
   border-top: 2px solid var(--text-3);
 }
@@ -7650,7 +7665,7 @@ table.rg {
   counter-increment: fix;
   content: counter(fix);
   position: absolute;
-  left: 14px;
+  inset-inline-start: 14px;
   top: 11px;
   display: grid;
   place-items: center;
@@ -7694,18 +7709,18 @@ table.rg {
 .dl-fix-sql .btn {
   position: absolute;
   top: 5px;
-  right: 6px;
+  inset-inline-end: 6px;
 }
 
 .dl-related {
   display: inline;
   margin-top: 8px;
-  text-align: left;
+  text-align: start;
   line-height: 1.5;
 }
 
 .dl-related svg {
-  margin-left: 3px;
+  margin-inline-start: 3px;
   vertical-align: -2px;
 }
 
@@ -7814,7 +7829,7 @@ table.rg {
   border: 1px dashed var(--border-strong);
   border-radius: 10px;
   background: var(--surface);
-  text-align: left;
+  text-align: start;
 }
 
 .dl-dropzone strong {
@@ -7892,7 +7907,7 @@ table.rg {
   .dl-list {
     flex-direction: row;
     overflow-x: auto;
-    border-right: 0;
+    border-inline-end: 0;
     border-bottom: 1px solid var(--border);
   }
 
@@ -8113,7 +8128,7 @@ table.rg {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-3);
-  margin-right: 2px;
+  margin-inline-end: 2px;
 }
 
 .health-pill {
@@ -8274,7 +8289,7 @@ button.health-pill:hover {
   flex-direction: column;
   gap: 2px;
   padding: 16px 12px 16px 18px;
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
   background: var(--bg);
 }
 
@@ -8297,7 +8312,7 @@ button.health-pill:hover {
   gap: 10px;
   padding: 8px 10px;
   border-radius: 8px;
-  text-align: left;
+  text-align: start;
   border: 1px solid transparent;
   transition: background 120ms var(--ease-out);
 }
@@ -8469,7 +8484,7 @@ button.health-pill:hover {
   row-gap: 2px;
   align-items: center;
   padding: 9px 12px;
-  text-align: left;
+  text-align: start;
   background: var(--surface);
   border-top: 1px solid var(--border);
   transition: background 120ms var(--ease-out);
@@ -8727,7 +8742,7 @@ button.health-pill:hover {
 .sample-row .num b {
   color: var(--text);
   font-size: var(--fs-body);
-  margin-right: 4px;
+  margin-inline-end: 4px;
 }
 
 .delta {
@@ -8921,7 +8936,7 @@ button.health-pill:hover {
 .resource-sentence {
   color: var(--text-2);
   font-size: var(--fs-meta);
-  text-align: right;
+  text-align: end;
 }
 
 .resource-plot {
@@ -9020,7 +9035,7 @@ button.health-pill:hover {
 .resource-xaxis {
   position: relative;
   height: 16px;
-  margin-left: 34px;
+  margin-inline-start: 34px;
 }
 
 .resource-xaxis span {
@@ -9046,7 +9061,7 @@ button.health-pill:hover {
   }
 
   .waits-list {
-    border-right: none;
+    border-inline-end: none;
     border-bottom: 1px solid var(--border);
   }
 
@@ -9174,7 +9189,7 @@ button.health-pill:hover {
 .compare-label {
   font-size: var(--fs-ui-sm);
   font-weight: 600;
-  text-align: right;
+  text-align: end;
 }
 
 /* The health line stays on one line: long labels give way, the values never do. */
@@ -9206,7 +9221,7 @@ button.health-pill:hover {
 }
 
 .resource-sentence {
-  text-align: left;
+  text-align: start;
 }
 
 .resource-canvas .readout {
@@ -9275,7 +9290,7 @@ button.health-pill:hover {
 .ins-counts {
   display: inline-flex;
   gap: 10px;
-  margin-left: 4px;
+  margin-inline-start: 4px;
 }
 
 .ins-count {
@@ -9336,7 +9351,7 @@ button.health-pill:hover {
   gap: 8px;
   width: 100%;
   padding: 9px 12px 9px 0;
-  text-align: left;
+  text-align: start;
   transition: background 120ms ease;
 }
 
@@ -9487,7 +9502,7 @@ button.health-pill:hover {
 .ins-copy {
   position: absolute;
   top: 6px;
-  right: 6px;
+  inset-inline-end: 6px;
 }
 
 .ins-more {
@@ -9549,7 +9564,7 @@ button.health-pill:hover {
 .plan-card::after {
   content: "";
   position: absolute;
-  left: 0;
+  inset-inline-start: 0;
   bottom: 0;
   height: 3px;
   width: var(--share, 0%);
@@ -9599,18 +9614,18 @@ button.health-pill:hover {
 }
 
 .pc-obj {
-  padding-left: 26px;
+  padding-inline-start: 26px;
 }
 
 .pc-rows {
-  padding-left: 26px;
+  padding-inline-start: 26px;
   font-size: var(--fs-micro);
 }
 
 .pc-flag {
   position: absolute;
   top: -7px;
-  right: -7px;
+  inset-inline-end: -7px;
   display: inline-grid;
   place-items: center;
   min-width: 17px;
@@ -9644,7 +9659,7 @@ button.health-pill:hover {
 .diagram-float {
   position: absolute;
   top: 8px;
-  right: 10px;
+  inset-inline-end: 10px;
   z-index: 2;
   padding: 2px;
   border-radius: 8px;
@@ -9712,7 +9727,7 @@ button.health-pill:hover {
   display: inline-grid;
   place-items: center;
   color: var(--text-3);
-  margin-right: 2px;
+  margin-inline-end: 2px;
 }
 
 .tree-flag {
@@ -9791,13 +9806,13 @@ button.health-pill:hover {
   font-size: var(--fs-ui-sm);
   font-weight: 600;
   color: var(--text-2);
-  text-align: left;
+  text-align: start;
   white-space: nowrap;
   user-select: none;
 }
 
 .ops-table th.r {
-  text-align: right;
+  text-align: end;
 }
 
 .ops-table th.sortable {
@@ -9810,7 +9825,7 @@ button.health-pill:hover {
 
 .ops-table th svg {
   vertical-align: -1px;
-  margin-left: 3px;
+  margin-inline-start: 3px;
 }
 
 .ops-table td {
@@ -9820,7 +9835,7 @@ button.health-pill:hover {
 }
 
 .ops-table td.r {
-  text-align: right;
+  text-align: end;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -10055,7 +10070,7 @@ button.health-pill:hover {
 
 .nd-card dd {
   margin: 0;
-  text-align: right;
+  text-align: end;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
@@ -10086,7 +10101,7 @@ button.health-pill:hover {
 
 .nd-ratio {
   display: inline-block;
-  margin-left: 6px;
+  margin-inline-start: 6px;
   padding: 1px 6px;
   border-radius: 4px;
   font-size: var(--fs-micro);
@@ -10135,7 +10150,7 @@ button.health-pill:hover {
   width: 7px;
   height: 7px;
   border-radius: 2px;
-  margin-right: 4px;
+  margin-inline-end: 4px;
 }
 
 .nd-split-legend i.cpu {
@@ -10156,7 +10171,7 @@ button.health-pill:hover {
 
 .nd-warn ul {
   margin: 0;
-  padding-left: 16px;
+  padding-inline-start: 16px;
   font-size: var(--fs-ui);
 }
 
@@ -10214,7 +10229,7 @@ button.health-pill:hover {
   margin: 0;
   font-family: var(--mono);
   font-size: var(--fs-ui-sm);
-  text-align: right;
+  text-align: end;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -10305,18 +10320,18 @@ button.health-pill:hover {
   padding: 10px 12px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--low);
+  border-inline-start: 3px solid var(--low);
   background: var(--surface);
-  text-align: left;
+  text-align: start;
   font-size: var(--fs-body);
 }
 
 .plan-teaser.high {
-  border-left-color: var(--high);
+  border-inline-start-color: var(--high);
 }
 
 .plan-teaser.medium {
-  border-left-color: var(--medium);
+  border-inline-start-color: var(--medium);
 }
 
 .plan-teaser:hover {
@@ -10399,8 +10414,8 @@ button.health-pill:hover {
 
 .ops-table th,
 .ops-table td {
-  padding-left: 8px;
-  padding-right: 8px;
+  padding-inline-start: 8px;
+  padding-inline-end: 8px;
 }
 
 .ops-op {
@@ -10492,7 +10507,7 @@ button.health-pill:hover {
 }
 
 .plan-head .zoom {
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 
 /* ───────── plan compare, sharing and verify ───────── */
@@ -10582,7 +10597,7 @@ button.health-pill:hover {
 
 .cmp-pill {
   display: inline-block;
-  margin-right: 9px;
+  margin-inline-end: 9px;
   padding: 2px 9px;
   border-radius: 999px;
   font-size: var(--fs-meta);
@@ -10620,7 +10635,7 @@ button.health-pill:hover {
 .cmp-more li::before {
   content: "";
   position: absolute;
-  left: 4px;
+  inset-inline-start: 4px;
   top: 10px;
   width: 5px;
   height: 5px;
@@ -10740,7 +10755,7 @@ button.health-pill:hover {
 
 .cmp-keys {
   font-size: var(--fs-ui-sm);
-  padding-right: 6px;
+  padding-inline-end: 6px;
 }
 
 .cmp-body {
@@ -10774,7 +10789,7 @@ button.health-pill:hover {
   gap: 12px;
   width: 100%;
   padding: 7px 16px;
-  text-align: left;
+  text-align: start;
   font-size: var(--fs-body);
   align-items: baseline;
 }
@@ -10885,7 +10900,7 @@ button.health-pill:hover {
 }
 
 .cmp-prop.head .side-badge {
-  margin-right: 4px;
+  margin-inline-end: 4px;
   vertical-align: 1px;
 }
 
@@ -10972,13 +10987,13 @@ button.health-pill:hover {
 
 .share-caret {
   opacity: 0.7;
-  margin-left: -2px;
+  margin-inline-start: -2px;
 }
 
 .share-menu {
   position: absolute;
   top: calc(100% + 6px);
-  right: 0;
+  inset-inline-end: 0;
   z-index: 40;
   width: 340px;
   padding: 6px;
@@ -11034,7 +11049,7 @@ button.health-pill:hover {
   content: "";
   position: absolute;
   top: 2px;
-  left: 2px;
+  inset-inline-start: 2px;
   width: 14px;
   height: 14px;
   border-radius: 50%;
@@ -11059,7 +11074,7 @@ button.health-pill:hover {
   width: 100%;
   padding: 8px 10px;
   border-radius: 8px;
-  text-align: left;
+  text-align: start;
 }
 
 .share-item:hover:not(:disabled),
@@ -11302,7 +11317,7 @@ button.health-pill:hover {
 }
 
 .as-when {
-  margin-left: auto;
+  margin-inline-start: auto;
   font-size: var(--fs-meta);
   color: var(--text-3);
 }
@@ -11364,7 +11379,7 @@ button.health-pill:hover {
   background: var(--surface);
   font-size: var(--fs-meta);
   color: var(--text-2);
-  text-align: left;
+  text-align: start;
 }
 
 button.as-callout:hover {
@@ -11515,7 +11530,7 @@ button.as-callout:hover {
   min-height: 0;
   overflow-y: auto;
   padding-bottom: 14px;
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
 }
 
 .qp-plan {
@@ -11553,7 +11568,7 @@ button.as-callout:hover {
     overflow-y: auto;
   }
   .qp-side {
-    border-right: 0;
+    border-inline-end: 0;
     overflow: visible;
   }
   .qp-plan .diagram-scroll {
@@ -11793,7 +11808,7 @@ button.as-callout:hover {
 .po-badge {
   position: absolute;
   top: -9px;
-  right: 8px;
+  inset-inline-end: 8px;
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -11823,8 +11838,8 @@ button.as-callout:hover {
 
 .po-track {
   position: absolute;
-  left: 1px;
-  right: 1px;
+  inset-inline-start: 1px;
+  inset-inline-end: 1px;
   bottom: 1px;
   height: 4px;
   border-radius: 0 0 8px 8px;
@@ -11936,7 +11951,7 @@ button.as-callout:hover {
   display: inline-block;
   width: 7px;
   height: 7px;
-  margin-right: 8px;
+  margin-inline-end: 8px;
   border-radius: 50%;
   vertical-align: 1px;
   background: var(--medium);
@@ -12252,7 +12267,7 @@ button.as-callout:hover {
 .nav > .nav-item.active::before {
   content: "";
   position: absolute;
-  left: -8px;
+  inset-inline-start: -8px;
   top: 7px;
   bottom: 7px;
   width: 3px;
@@ -12274,7 +12289,7 @@ button.as-callout:hover {
   color: var(--text-3);
   font-size: var(--fs-meta);
   width: 100%;
-  text-align: left;
+  text-align: start;
 }
 
 .side-search:hover {
@@ -12283,7 +12298,7 @@ button.as-callout:hover {
 }
 
 .side-search .kbd {
-  margin-left: auto;
+  margin-inline-start: auto;
   flex: none;
 }
 
@@ -12297,7 +12312,7 @@ button.as-callout:hover {
 
 .theme-seg {
   display: inline-flex;
-  margin-left: auto;
+  margin-inline-start: auto;
   padding: 2px;
   gap: 2px;
   border-radius: var(--r-sm);
@@ -12329,7 +12344,7 @@ button.as-callout:hover {
 }
 
 .language-select {
-  margin-left: auto;
+  margin-inline-start: auto;
   padding: 2px 6px;
   border: 0;
   border-radius: var(--r-sm);
@@ -12475,7 +12490,7 @@ button.as-callout:hover {
   padding: 5px 8px;
   border-radius: var(--r-sm);
   color: var(--text);
-  text-align: left;
+  text-align: start;
 }
 
 .editor-recent-item:hover {
@@ -12549,7 +12564,7 @@ button.as-callout:hover {
   gap: 8px 12px;
   width: 100%;
   padding: 16px;
-  text-align: left;
+  text-align: start;
   border-radius: var(--r-lg) var(--r-lg) 0 0;
   cursor: pointer;
 }
@@ -12658,7 +12673,7 @@ button.as-callout:hover {
   justify-content: flex-end;
   gap: 6px;
   min-width: 0;
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 .conn-tools .conn-key, .conn-tools .conn-log, .conn-tools .conn-rename, .conn-tools .conn-remove {
   width: 24px;
@@ -12754,7 +12769,7 @@ button.as-callout:hover {
 .agent-menu {
   position: absolute;
   top: calc(100% + 6px);
-  right: 0;
+  inset-inline-end: 0;
   z-index: 40;
   display: grid;
   width: 320px;
@@ -12782,7 +12797,7 @@ button.as-callout:hover {
   gap: 8px;
   padding: 8px 10px;
   border-radius: var(--r-md);
-  text-align: left;
+  text-align: start;
   font-size: var(--fs-meta);
 }
 
@@ -12877,7 +12892,7 @@ button.as-callout:hover {
 
 /* Runtime spread: the legend sits right-aligned under the values column. */
 .rs-legend {
-  text-align: right;
+  text-align: end;
 }
 
 /* The peak label sits on a chip so a gridline value under it never reads through. */
@@ -12921,7 +12936,7 @@ button.as-callout:hover {
   border-radius: 10px;
   background: var(--raised);
   font-size: var(--fs-ui);
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 .engine-trigger:hover {
@@ -12945,7 +12960,7 @@ button.as-callout:hover {
   position: absolute;
   z-index: 60;
   top: calc(100% + 6px);
-  left: 0;
+  inset-inline-start: 0;
   width: max(100%, 280px);
   max-width: calc(100vw - 40px);
   padding: 5px;
@@ -13049,7 +13064,7 @@ button.as-callout:hover {
 }
 
 .new-conn-help .read {
-  margin-right: 5px;
+  margin-inline-end: 5px;
   vertical-align: -2px;
   color: var(--good-text);
 }
@@ -13096,7 +13111,7 @@ button.as-callout:hover {
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--raised);
-  text-align: left;
+  text-align: start;
   transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 
@@ -13216,7 +13231,7 @@ li code,
   place-items: center;
   width: 20px;
   height: 20px;
-  margin-right: 2px;
+  margin-inline-end: 2px;
   border-radius: var(--r-xs);
   color: var(--text-3);
   opacity: 0;
@@ -13244,7 +13259,7 @@ li code,
 }
 
 .pc-rows .pc-mark {
-  margin-left: auto;
+  margin-inline-start: auto;
 }
 /* Separately recorded trigger work stays readable without competing with the plan operator grid. */
 .actual-triggers { width: 100%; min-width: 0; padding: 12px 0; }

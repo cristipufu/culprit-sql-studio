@@ -2,6 +2,7 @@
 import type { AuthKind } from "./AuthKind";
 import type { Engine } from "./Engine";
 import type { Environment } from "./Environment";
+import type { ImportNotice } from "./ImportNotice";
 import type { ImportSource } from "./ImportSource";
 
 /**
@@ -31,4 +32,4 @@ note: string | null,
 /**
  * The saved connection that already points at the same database, if any.
  */
-saved_as: string | null, };
+saved_as: string | null, notice?: ImportNotice, };

@@ -316,8 +316,10 @@ pub fn from_scans(history: &[Counters], baseline: &Period, recent: &Period) -> P
             meta.and_then(|m| m.first_seen.as_deref()).and_then(epoch).is_some_and(|t| t + 1.0 >= points[mid].0);
         let untracked = if stopped || (started && b.is_none()) { None } else { untracked };
 
-        let shape_before = latest_meta(&id, start, mid).and_then(|m| Some((m.shape.clone()?, m.hot.clone())));
-        let shape_after = latest_meta(&id, mid, end).and_then(|m| Some((m.shape.clone()?, m.hot.clone())));
+        let shape_before =
+            latest_meta(&id, start, mid).and_then(|m| Some((m.shape.clone()?, m.hot.as_ref().map(|hot| hot.label()))));
+        let shape_after =
+            latest_meta(&id, mid, end).and_then(|m| Some((m.shape.clone()?, m.hot.as_ref().map(|hot| hot.label()))));
         let first_after = shape_after.as_ref().and_then(|(shape, _)| {
             (mid..=end)
                 .find(|&i| meta_at(i, &id).and_then(|m| m.shape.as_ref()) == Some(shape))
@@ -442,7 +444,8 @@ mod tests {
                     let meta = QueryMeta {
                         text: format!("SELECT {id}"),
                         shape: shape.map(str::to_string),
-                        hot: shape.map(str::to_string),
+                        hot: shape
+                            .map(|operator| crate::trends::PlanHotspot { operator: operator.into(), object: None }),
                         ..Default::default()
                     };
                     (id.to_string(), meta)

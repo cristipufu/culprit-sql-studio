@@ -49,8 +49,9 @@ import type { StatementCheck } from "../gen/StatementCheck";
 import type { Verification } from "../gen/Verification";
 import type { SessionAction } from "../gen/SessionAction";
 import type { SignInEvent } from "../gen/SignInEvent";
+import type { ErrorDetail } from "../gen/ErrorDetail";
 
-export type ApiError = { code: string; message: string; hint: string | null };
+export type ApiError = { code: string; message: string; hint: string | null; detail?: ErrorDetail | null };
 
 /** A newer published release than the running app. */
 export type UpdateInfo = { version: string; current: string; notes: string | null };
@@ -178,7 +179,7 @@ async function desktopApi(): Promise<Api> {
   const discover = discoveryRequests(invoke);
   const preview = ownedRequests(invoke, "begin_preview", "cancel_preview");
   // Before anything is read: the backend words what it reads in the app's language.
-  await invoke("set_language", { code: language() }).catch(() => {});
+  await invoke("set_language", { code: language() });
   return {
     kind: "desktop",
     setLanguage: (code) => invoke("set_language", { code }),
@@ -262,7 +263,26 @@ async function desktopApi(): Promise<Api> {
   };
 }
 
-export const api = lazyResource<Api>(() => isDesktop() ? desktopApi() : import("./demo-api").then((m) => m.demoApi()));
+const loadApi = lazyResource<Api>(() => isDesktop() ? desktopApi() : import("./demo-api").then((m) => m.demoApi()));
+let languageApplication: Promise<void> = Promise.resolve();
+
+/** Apply choices in order; every subsequent API read waits for the latest choice. */
+export function applyApiLanguage(code: string): Promise<void> {
+  languageApplication = languageApplication.catch(() => {}).then(async () => {
+    const client = await loadApi();
+    await client.setLanguage(code);
+  });
+  return languageApplication;
+}
+
+export async function api(): Promise<Api> {
+  const client = await loadApi();
+  for (;;) {
+    const applying = languageApplication;
+    await applying;
+    if (applying === languageApplication) return client;
+  }
+}
 
 export async function copyText(text: string): Promise<void> {
   try {

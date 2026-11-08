@@ -4,7 +4,7 @@ use crate::{
     probe::{Probe, StatementsAccess},
     rows::{TAG, iso, query, query_one},
 };
-use culprit_core::format::digits;
+use culprit_core::i18n::{Message, MessageValue};
 use culprit_core::{
     Engine, PlanKind, QueryFamily, QueryStat, Result, Setting, SnapshotOptions, Spread, WaitStat, Workload, t,
 };
@@ -12,7 +12,7 @@ use tokio_postgres::Client;
 
 pub(crate) struct CollectedWorkload {
     pub(crate) workload: Workload,
-    pub(crate) plan_note: Option<String>,
+    pub(crate) plan_note: Option<Message>,
     /// Why no statement was planned, when the login may not plan here (`crate::trust`).
     pub(crate) plans_withheld: Option<culprit_core::Error>,
     pub(crate) families: Vec<QueryFamily>,
@@ -156,6 +156,8 @@ async fn collect_with_base(
 
     Ok(Some(CollectedWorkload {
         workload: Workload {
+            source_label: None,
+            source_message: None,
             counter_set: None,
             history_inputs: Vec::new(),
             source: "pg_stat_statements".into(),
@@ -339,7 +341,7 @@ async fn attach_plans(
     own: &std::collections::HashMap<String, String>,
     probe: &Probe,
     budget: u32,
-) -> Result<Option<String>> {
+) -> Result<Option<Message>> {
     // Planning runs the code a statement reaches with this login's privileges (`crate::trust`). A login that can do
     // more than read statistics plans only statements it ran itself, and none while another role's code is in reach;
     // each plan checks again, in its own read-only transaction. Statements are planned under Culprit's own
@@ -360,9 +362,9 @@ async fn attach_plans(
             if track.eq_ignore_ascii_case("all") {
                 return Err(culprit_core::Error::new(
                     culprit_core::ErrorCode::PermissionDenied,
-                    t!("provider.postgres.plans.track_all"),
+                    culprit_core::message!("provider.postgres.plans.track_all"),
                 )
-                .with_hint(t!("provider.postgres.plans.track_all_hint")));
+                .with_hint(culprit_core::message!("provider.postgres.plans.track_all_hint")));
             }
         }
     }
@@ -399,20 +401,24 @@ async fn attach_plans(
 }
 
 /// What a scan says about the heavy statements it didn't plan: those it tried and couldn't, and other roles' it left.
-fn plan_notes(planned: u32, attempted: u32, others: u32) -> Option<String> {
+fn plan_notes(planned: u32, attempted: u32, others: u32) -> Option<Message> {
     let mut notes = Vec::new();
     if planned < attempted {
-        notes.push(t!(
+        notes.push(culprit_core::message!(
             "provider.postgres.plans.some_failed",
-            planned = digits(planned.to_string()),
+            planned = MessageValue::Digits(planned.to_string()),
             n = attempted,
-            attempted = digits(attempted.to_string())
+            attempted = MessageValue::Digits(attempted.to_string())
         ));
     }
     if others > 0 {
-        notes.push(t!("provider.postgres.plans.others_unplanned", n = others, count = digits(others.to_string())));
+        notes.push(culprit_core::message!(
+            "provider.postgres.plans.others_unplanned",
+            n = others,
+            count = MessageValue::Digits(others.to_string())
+        ));
     }
-    (!notes.is_empty()).then(|| notes.join(" "))
+    (!notes.is_empty()).then(|| Message::paragraph(notes))
 }
 
 async fn generic_plan_json(client: &Client, statement: &str, probe: &Probe) -> Option<String> {
@@ -568,8 +574,8 @@ mod tests {
                       statistics, and planning a statement runs the functions it reaches with this login's privileges. \
                       A login with only pg_monitor, and SELECT on the tables, plans them.";
         assert_eq!(plan_notes(5, 5, 0), None);
-        assert_eq!(plan_notes(3, 5, 0).as_deref(), Some(failed));
-        assert_eq!(plan_notes(5, 5, 2).as_deref(), Some(others));
-        assert_eq!(plan_notes(3, 5, 2), Some(format!("{failed} {others}")));
+        assert_eq!(plan_notes(3, 5, 0).map(|note| note.render()).as_deref(), Some(failed));
+        assert_eq!(plan_notes(5, 5, 2).map(|note| note.render()).as_deref(), Some(others));
+        assert_eq!(plan_notes(3, 5, 2).map(|note| note.render()), Some(format!("{failed} {others}")));
     }
 }

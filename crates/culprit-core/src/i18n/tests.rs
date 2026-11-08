@@ -16,12 +16,10 @@ fn test_lang(meta: &serde_json::Value) -> Lang {
         code: "test".into(),
         name: "test".into(),
         english_name: "test".into(),
-        plural: match meta["plural"].as_str() {
-            Some("one_below_2") => PluralRule::OneBelow2,
-            _ => PluralRule::OneIs1,
-        },
+        plural: PluralRule::for_locale(meta["plural"].as_str().unwrap()).expect("a CLDR rule set"),
         decimal: meta["decimal"].as_str().unwrap().into(),
         group: meta["group"].as_str().unwrap().into(),
+        direction: meta["direction"].as_str().unwrap_or("ltr").into(),
         messages: Default::default(),
     }
 }
@@ -47,6 +45,44 @@ fn every_shared_case_formats_as_the_app_formats_it() {
     for malformed in v["malformed"].as_array().unwrap() {
         assert!(parse(malformed.as_str().unwrap()).is_err(), "{malformed}");
     }
+}
+
+#[test]
+fn every_cldr_sample_selects_its_recorded_category() {
+    let samples: Vec<(String, f64, String)> =
+        serde_json::from_str(include_str!("../../../../locales/.tests/plurals.json")).unwrap();
+    let data: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../locales/.cldr/cardinals.json")).unwrap();
+    let expected: BTreeSet<&str> = data["languages"].as_object().unwrap().keys().map(String::as_str).collect();
+    let covered: BTreeSet<&str> = samples.iter().map(|(language, _, _)| language.as_str()).collect();
+    assert_eq!(covered, expected, "every CLDR language has independent samples");
+    for (language, number, expected) in samples {
+        let rule = PluralRule::for_locale(&language).unwrap();
+        assert_eq!(rule.category(number), expected, "{language}: {number}");
+    }
+}
+
+#[test]
+fn catalog_tags_allow_scripts_regions_and_variants_with_canonical_spelling() {
+    let cases: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../locales/.tests/language-tags.json")).unwrap();
+    for (kind, valid) in [("valid", true), ("invalid", false)] {
+        for code in cases[kind].as_array().unwrap() {
+            let code = code.as_str().unwrap();
+            assert_eq!(is_language_code(code), valid, "{code}");
+        }
+    }
+}
+
+#[test]
+fn english_fallback_keeps_its_reading_direction_inside_an_rtl_language() {
+    let mut lang = test_lang(&serde_json::json!({ "plural": "ar", "decimal": ".", "group": ",", "direction": "rtl" }));
+    lang.messages.insert("ui.common.copy".into(), "نسخ".into());
+    scope("en", || {
+        CURRENT.with(|current| *current.borrow_mut() = Some(Arc::new(lang)));
+        assert_eq!(t("ui.common.copy", &[]), "نسخ");
+        assert_eq!(t("ui.sidebar.language", &[]), "\u{2066}Language\u{2069}");
+    });
 }
 
 // Every file in locales/ the build compiled in: each one reads, describes itself, and says what English says with the
@@ -117,7 +153,7 @@ fn keys_used() -> BTreeSet<String> {
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            for marker in ["t!(", "t(", "tx(", "key!(", "key("] {
+            for marker in ["t!(", "message!(", "t(", "tx(", "key!(", "key("] {
                 let mut from = 0;
                 while let Some(at) = code[from..].find(marker).map(|at| at + from) {
                     from = at + marker.len();

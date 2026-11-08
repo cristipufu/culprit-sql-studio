@@ -341,14 +341,17 @@ fn json_finding(json: JsonColumns<'_>) -> Finding {
     f.actionability = culprit_core::Actionability::OptionalImprovement;
     f.severity = Severity::Low;
     f.impact.score = base_score(Severity::Low);
-    f.impact.label = t!("check.large_rows.json.impact");
+    f.impact.set_label(t!("check.large_rows.json.impact"));
     f.confidence = Confidence::High;
     f.title =
         t!("check.large_rows.json.title", table = &t.name, columns = columns.join(", "), rows = format::count(rows));
     f.summary =
         t!("check.large_rows.json.summary", table = &qual, rows = format::count(rows), columns = columns.join("`, `"));
-    f.metrics.push(Metric::new(t!("check.large_rows.json.metric.rows"), rows, Unit::Rows));
-    f.metrics.push(Metric::text(t!("check.large_rows.json.metric.column"), format!("{}.{first_col} (json)", t.name)));
+    f.metrics.push(Metric::said(culprit_core::key!("check.large_rows.json.metric.rows"), rows, Unit::Rows));
+    f.metrics.push(Metric::said_text(
+        culprit_core::key!("check.large_rows.json.metric.column"),
+        format!("{}.{first_col} (json)", t.name),
+    ));
     let target = qualified(Engine::Postgres, &t.schema, &t.name);
     let col_ident = quote(Engine::Postgres, first_col);
     f.fix = Some(Fix {
@@ -438,7 +441,7 @@ fn large_table_finding(snapshot: &Snapshot, large: LargeTable<'_>) -> Finding {
         let when = crate::queries::when_phrase(&g.taken_at);
         let a_day = g.delta / g.days;
         summary.push(if g.delta >= MB && g.days >= 20.0 / 24.0 {
-            f.metrics.push(Metric::new(t!("check.large_rows.metric.growth"), a_day, Unit::Bytes));
+            f.metrics.push(Metric::said(culprit_core::key!("check.large_rows.metric.growth"), a_day, Unit::Bytes));
             t!(
                 "check.large_rows.summary.grew_a_day",
                 delta = format::bytes(g.delta),
@@ -467,15 +470,19 @@ fn large_table_finding(snapshot: &Snapshot, large: LargeTable<'_>) -> Finding {
         f.impact.time_ms_per_day = impact.per_day_ms;
     }
     severity_score(&mut f);
-    f.impact.label = t!("check.large_rows.impact", size = &size_said, average = &average_said);
+    f.impact.set_label(t!("check.large_rows.impact", size = &size_said, average = &average_said));
     let mut metrics = vec![
-        Metric::new(t!("check.large_rows.metric.table_data"), size, Unit::Bytes),
-        Metric::new(t!("common.metric.rows"), rows, Unit::Rows),
-        Metric::new(t!("check.large_rows.metric.average_row"), average, Unit::Bytes),
-        Metric::new(t!("check.large_rows.metric.large_pages"), share, Unit::Ratio),
+        Metric::said(culprit_core::key!("check.large_rows.metric.table_data"), size, Unit::Bytes),
+        Metric::said(culprit_core::key!("common.metric.rows"), rows, Unit::Rows),
+        Metric::said(culprit_core::key!("check.large_rows.metric.average_row"), average, Unit::Bytes),
+        Metric::said(culprit_core::key!("check.large_rows.metric.large_pages"), share, Unit::Ratio),
     ];
     if let Some(runs_a_day) = large.runs_a_day {
-        metrics.push(Metric::new(t!("check.large_rows.metric.whole_row_a_day"), runs_a_day, Unit::Count));
+        metrics.push(Metric::said(
+            culprit_core::key!("check.large_rows.metric.whole_row_a_day"),
+            runs_a_day,
+            Unit::Count,
+        ));
     }
     metrics.append(&mut f.metrics);
     f.metrics = metrics;

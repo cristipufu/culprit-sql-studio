@@ -42,6 +42,7 @@ export function useTabViews({
         doc: tab.sql,
         extensions: [
           basicSetup,
+          EditorView.contentAttributes.of({ dir: "ltr" }),
           Prec.high(sqlColors),
           lintField,
           compartment.current.of(language()),
@@ -90,12 +91,15 @@ export function useTabViews({
     };
   }, [rebuild]);
 
-  // New table and column names: the visible state takes them now, and the kept ones are rebuilt when their tab returns.
+  // Completion and UI language changes replace only the language compartment. Each tab owns its
+  // document, selection and history even while hidden, including during a background report refresh.
   useEffect(() => {
     const editor = view.current;
     if (!editor) return;
     editor.dispatch({ effects: compartment.current.reconfigure(language()) });
-    for (const id of [...kept.current.keys()]) if (id !== shown.current) kept.current.delete(id);
+    for (const [id, state] of kept.current) {
+      if (id !== shown.current) kept.current.set(id, state.update({ effects: compartment.current.reconfigure(language()) }).state);
+    }
   }, [language]);
 
   const focus = useCallback(() => view.current?.focus(), []);

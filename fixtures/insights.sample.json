@@ -2,7 +2,8 @@
   "mariadb-demo": {
     "258e3c9b580f1ecc": {
       "items": [],
-      "note": "MariaDB's EXPLAIN has no actual rows or timings; ANALYZE adds them, with pages read and sort spills."
+      "note": "MariaDB's EXPLAIN has no actual rows or timings; ANALYZE adds them, with pages read and sort spills.",
+      "scan_context": true
     },
     "375c64398248650e": {
       "items": [
@@ -17,42 +18,51 @@
             2
           ],
           "rule": "temp-table-sort",
+          "scan_context": true,
           "severity": "low",
           "title": "Groups 500K rows in an internal temporary table, then sorts them (filesort)",
           "verify": "Explain again: look for grouping in index order or fewer rows entering the temporary table. A temporary table and sort for a different ORDER BY can remain; compare on-disk temporary tables on new runs to check the spill itself."
         }
       ],
-      "note": "MariaDB's EXPLAIN has no actual rows or timings; ANALYZE adds them, with pages read and sort spills."
+      "note": "MariaDB's EXPLAIN has no actual rows or timings; ANALYZE adds them, with pages read and sort spills.",
+      "scan_context": true
     },
     "46db559fdff712fd": {
       "items": [],
-      "note": "MariaDB's EXPLAIN has no actual rows or timings; ANALYZE adds them, with pages read and sort spills."
+      "note": "MariaDB's EXPLAIN has no actual rows or timings; ANALYZE adds them, with pages read and sort spills.",
+      "scan_context": true
     },
     "d1f45c9664edccf9": {
       "items": [],
-      "note": "MariaDB's EXPLAIN has no actual rows or timings; ANALYZE adds them, with pages read and sort spills."
+      "note": "MariaDB's EXPLAIN has no actual rows or timings; ANALYZE adds them, with pages read and sort spills.",
+      "scan_context": true
     },
     "decf59629e790076": {
       "items": [],
-      "note": "MariaDB's EXPLAIN has no actual rows or timings; ANALYZE adds them, with pages read and sort spills."
+      "note": "MariaDB's EXPLAIN has no actual rows or timings; ANALYZE adds them, with pages read and sort spills.",
+      "scan_context": true
     }
   },
   "mssql-demo": {
     "10": {
       "items": [],
-      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+      "scan_context": true
     },
     "138": {
       "items": [],
-      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+      "scan_context": true
     },
     "143": {
       "items": [],
-      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+      "scan_context": true
     },
     "161": {
       "items": [],
-      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+      "scan_context": true
     },
     "249": {
       "items": [
@@ -76,16 +86,19 @@
             12
           ],
           "rule": "missing-index-hint",
+          "scan_context": true,
           "severity": "high",
           "title": "SQL Server estimates an index on shop.order_items (order_id) would make this 50% cheaper",
           "verify": "Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure."
         }
       ],
-      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+      "scan_context": true
     },
     "255": {
       "items": [],
-      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns."
+      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.",
+      "scan_context": true
     },
     "263": {
       "items": [
@@ -101,6 +114,7 @@
             4
           ],
           "rule": "nested-loops",
+          "scan_context": false,
           "severity": "medium",
           "title": "Compares each of 1.5M rows of order_items with 999 rows the Table Spool replays (1.5B pairs)",
           "verify": "Explain again without the hint: a hash or merge join instead of the loop."
@@ -116,24 +130,29 @@
             0
           ],
           "rule": "parallelism-blocked",
+          "scan_context": false,
           "severity": "medium",
           "title": "This plan runs on one CPU because its statement says OPTION (MAXDOP 1)",
           "verify": "Explain again: no NonParallelPlanReason, and Parallelism operators appear."
         }
       ],
-      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+      "scan_context": true
     },
     "35": {
       "items": [],
-      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+      "scan_context": true
     },
     "5": {
       "items": [],
-      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+      "scan_context": true
     },
     "6": {
       "items": [],
-      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+      "scan_context": true
     },
     "7": {
       "items": [
@@ -148,12 +167,14 @@
             2
           ],
           "rule": "implicit-conversion",
+          "scan_context": false,
           "severity": "high",
           "title": "A type mismatch on customers.email stops SQL Server from seeking an index",
           "verify": "Explain again: no CONVERT_IMPLICIT in the plan, and the scan became a seek."
         }
       ],
-      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+      "scan_context": true
     },
     "8": {
       "items": [
@@ -179,12 +200,14 @@
             1
           ],
           "rule": "missing-index-hint",
+          "scan_context": true,
           "severity": "high",
           "title": "SQL Server estimates an index on shop.orders (shipped_at) would make this 81% cheaper",
           "verify": "Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure."
         }
       ],
-      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+      "scan_context": true
     },
     "9": {
       "items": [
@@ -208,12 +231,14 @@
             1
           ],
           "rule": "missing-index-hint",
+          "scan_context": true,
           "severity": "high",
           "title": "SQL Server estimates an index on shop.order_items (order_id) would make this 99% cheaper",
           "verify": "Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure."
         }
       ],
-      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan."
+      "note": "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+      "scan_context": true
     }
   },
   "mssql-demo-staging": {},
@@ -231,40 +256,49 @@
             2
           ],
           "rule": "temp-table-sort",
+          "scan_context": true,
           "severity": "low",
           "title": "Groups 499K rows in an internal temporary table, then sorts them (filesort)",
           "verify": "Explain again: look for grouping in index order or fewer rows entering the temporary table. A temporary table and sort for a different ORDER BY can remain; compare on-disk temporary tables on new runs to check the spill itself."
         }
       ],
-      "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows."
+      "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+      "scan_context": true
     },
     "17f97e6ec7a22e0a": {
       "items": [],
-      "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows."
+      "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+      "scan_context": true
     },
     "19bd4ff468839ea3": {
       "items": [],
-      "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows."
+      "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+      "scan_context": true
     },
     "4167fe7f2c20deb7": {
       "items": [],
-      "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows."
+      "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+      "scan_context": true
     },
     "7f47c8550af0c644": {
       "items": [],
-      "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows."
+      "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+      "scan_context": true
     },
     "9b30e6ad79d940fe": {
       "items": [],
-      "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows."
+      "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+      "scan_context": true
     },
     "b4c0f3861e32013e": {
       "items": [],
-      "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows."
+      "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+      "scan_context": true
     },
     "c7b5ac9bb4bcecfe": {
       "items": [],
-      "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows."
+      "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+      "scan_context": true
     }
   },
   "pg-demo": {
@@ -281,52 +315,64 @@
             3
           ],
           "rule": "scan-filter",
+          "scan_context": true,
           "severity": "high",
           "title": "Reads 1.0M rows of public.order_items to keep 101",
           "verify": "Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure."
         }
       ],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+      "scan_context": true
     },
     "-463560455567765064": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.",
+      "scan_context": true
     },
     "-6576252161252119529": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.",
+      "scan_context": true
     },
     "-8886085649470066503": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.",
+      "scan_context": true
     },
     "-967240904657798800": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+      "scan_context": true
     },
     "2004611025554862962": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+      "scan_context": true
     },
     "2169115237613314459": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.",
+      "scan_context": true
     },
     "2885972271926804069": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+      "scan_context": true
     },
     "3432126458605143571": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+      "scan_context": true
     },
     "4911431806993420100": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.",
+      "scan_context": true
     },
     "5306524445554315840": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.",
+      "scan_context": true
     },
     "5308963031944094559": {
       "items": [
@@ -341,34 +387,41 @@
             3
           ],
           "rule": "scan-filter",
+          "scan_context": true,
           "severity": "high",
           "title": "Reads 2.0M rows of public.orders to keep 12",
           "verify": "Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure."
         }
       ],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+      "scan_context": true
     },
     "6425265648074738764": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+      "scan_context": true
     },
     "8465053948014496855": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.",
+      "scan_context": true
     },
     "9065391607317686058": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+      "scan_context": true
     }
   },
   "sqlite-demo": {
     "3c81e035bd6f73fa": {
       "items": [],
-      "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values."
+      "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values.",
+      "scan_context": true
     },
     "4971a2de8aecdcc6": {
       "items": [],
-      "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values."
+      "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values.",
+      "scan_context": true
     },
     "500217f7b40055be": {
       "items": [
@@ -383,48 +436,58 @@
             22
           ],
           "rule": "automatic-index",
+          "scan_context": true,
           "severity": "low",
           "title": "SQLite builds a temporary index on orders every time this runs",
           "verify": "Explain again: no AUTOMATIC INDEX, and a SEARCH using the new index."
         }
       ],
-      "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values."
+      "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values.",
+      "scan_context": true
     },
     "84456a5661cab4aa": {
       "items": [],
-      "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values."
+      "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values.",
+      "scan_context": true
     },
     "c1b0de997fac4faa": {
       "items": [],
-      "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values."
+      "note": "Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values.",
+      "scan_context": true
     }
   },
   "timescale-demo": {
     "-2225272007542897168": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. A filtered scan of a small table can be appropriate today. Track rows read and execution time as the table grows; low current cost does not establish that the access path will scale."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. A filtered scan of a small table can be appropriate today. Track rows read and execution time as the table grows; low current cost does not establish that the access path will scale.",
+      "scan_context": true
     },
     "-6927356924371546951": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+      "scan_context": true
     },
     "3152047327284928468": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+      "scan_context": true
     }
   },
   "yugabyte-demo": {
     "-1395695495724611761": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+      "scan_context": true
     },
     "-71879613880347319": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+      "scan_context": true
     },
     "4357247400045295631": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+      "scan_context": true
     },
     "466454478821061062": {
       "items": [
@@ -439,16 +502,19 @@
             1
           ],
           "rule": "scan-filter",
+          "scan_context": true,
           "severity": "low",
           "title": "Reads 20K rows of public.orders to keep 10",
           "verify": "Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure."
         }
       ],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. The selected workload does not establish material execution cost. Structural concerns remain relevant as table size or call volume grows; compare reads and time under representative load before changing an index."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. The selected workload does not establish material execution cost. Structural concerns remain relevant as table size or call volume grows; compare reads and time under representative load before changing an index.",
+      "scan_context": true
     },
     "8345917977273313509": {
       "items": [],
-      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+      "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+      "scan_context": true
     }
   }
 }

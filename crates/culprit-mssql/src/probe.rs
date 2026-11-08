@@ -46,6 +46,18 @@ impl QueryStoreState {
     pub(crate) fn readable(&self) -> bool {
         QUERY_STORE_READABLE.contains(&self.actual.as_str())
     }
+
+    pub(crate) fn unavailable_message(&self) -> culprit_core::i18n::Message {
+        culprit_core::message!(
+            "provider.mssql.capability.query_store_state",
+            state = &self.actual,
+            native = &self.actual
+        )
+    }
+
+    pub(crate) fn limited_history_message(&self) -> culprit_core::i18n::Message {
+        culprit_core::message!("provider.mssql.capability.query_store_off", state = &self.actual, native = &self.actual)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -162,24 +174,21 @@ pub(crate) fn expected_capabilities(p: &Probe) -> (Vec<Capability>, Vec<MissingC
 
     match &p.query_store {
         Some(qs) if qs.readable() && dmv => have.push(Capability::QueryStore),
-        Some(qs) if qs.readable() => missing.push(MissingCapability {
-            capability: Capability::QueryStore,
-            reason: t!("provider.mssql.capability.query_store_unreadable"),
-            fix: Some(grant.clone()),
-        }),
-        Some(qs) => missing.push(MissingCapability {
-            capability: Capability::QueryStore,
-            reason: t!(
-                "provider.mssql.capability.query_store_state",
-                state = qs.actual.to_ascii_lowercase().replace('_', " ")
-            ),
-            fix: Some("ALTER DATABASE CURRENT SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE);".into()),
-        }),
-        None => missing.push(MissingCapability {
-            capability: Capability::QueryStore,
-            reason: t!("provider.mssql.capability.query_store_options"),
-            fix: Some(grant.clone()),
-        }),
+        Some(qs) if qs.readable() => missing.push(MissingCapability::sql(
+            Capability::QueryStore,
+            culprit_core::message!("provider.mssql.capability.query_store_unreadable"),
+            grant.clone(),
+        )),
+        Some(qs) => missing.push(MissingCapability::sql(
+            Capability::QueryStore,
+            qs.unavailable_message(),
+            "ALTER DATABASE CURRENT SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE);",
+        )),
+        None => missing.push(MissingCapability::sql(
+            Capability::QueryStore,
+            culprit_core::message!("provider.mssql.capability.query_store_options"),
+            grant.clone(),
+        )),
     }
     if !p.query_store_readable() && dmv {
         have.push(Capability::PlanCache);
@@ -197,11 +206,11 @@ pub(crate) fn expected_capabilities(p: &Probe) -> (Vec<Capability>, Vec<MissingC
             have.push(capability);
             continue;
         }
-        missing.push(MissingCapability {
+        missing.push(MissingCapability::sql(
             capability,
-            reason: t!("provider.mssql.capability.no_server_state"),
-            fix: Some(grant.clone()),
-        });
+            culprit_core::message!("provider.mssql.capability.no_server_state"),
+            grant.clone(),
+        ));
     }
     have.push(Capability::Statistics);
     if dmv {
@@ -213,11 +222,11 @@ pub(crate) fn expected_capabilities(p: &Probe) -> (Vec<Capability>, Vec<MissingC
     if p.can_showplan {
         have.push(Capability::Showplan);
     } else {
-        missing.push(MissingCapability {
-            capability: Capability::Showplan,
-            reason: t!("provider.mssql.capability.no_showplan"),
-            fix: Some(format!("GRANT SHOWPLAN TO {};", bracket(&p.user))),
-        });
+        missing.push(MissingCapability::sql(
+            Capability::Showplan,
+            culprit_core::message!("provider.mssql.capability.no_showplan"),
+            format!("GRANT SHOWPLAN TO {};", bracket(&p.user)),
+        ));
     }
     (have, missing)
 }

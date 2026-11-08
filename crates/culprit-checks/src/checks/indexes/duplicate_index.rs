@@ -103,13 +103,13 @@ fn duplicate_index_finding(snapshot: &Snapshot, d: DuplicateIndex<'_>) -> Findin
     .join(" ");
     f.severity = d.severity;
     f.impact.score = d.score;
-    f.impact.label = t!("check.duplicate_index.impact", size = format::bytes(d.size));
+    f.impact.set_label(t!("check.duplicate_index.impact", size = format::bytes(d.size)));
     f.confidence = d.confidence;
-    f.metrics.push(Metric::new(t!("common.metric.size"), d.size, Unit::Bytes));
+    f.metrics.push(Metric::said(culprit_core::key!("common.metric.size"), d.size, Unit::Bytes));
     if let Some((reads, days)) = d.reads {
         f.metrics.push(Metric::new(t!("common.metric.reads_of", index = &a.name), reads, Unit::Count));
         if let Some(days) = days {
-            f.metrics.push(Metric::new(t!("common.metric.counting_for"), days, Unit::Days));
+            f.metrics.push(Metric::said(culprit_core::key!("common.metric.counting_for"), days, Unit::Days));
         }
     }
     f.fix = Some(Fix {

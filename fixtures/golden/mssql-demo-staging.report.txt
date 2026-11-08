@@ -13,7 +13,7 @@ metrics:
   - Peak: 100%
 fix: Batch small writes into fewer transactions and avoid row-by-row changes; then consider a tier with more log throughput.
 verify:
-  1. Re-scan: log writes should stay under 95% for most of the time (the Health strip on Overview shows it).
+  1. Re-scan: log writes should stay under 95% for most of the time (the Health strip on Dashboard shows it).
 brief:
     # Log writes reached 95% of the tier's limit in 38% of samples over the last 60 minutes
 
@@ -34,7 +34,7 @@ brief:
 
     ## How to verify
 
-    - Re-scan: log writes should stay under 95% for most of the time (the Health strip on Overview shows it).
+    - Re-scan: log writes should stay under 95% for most of the time (the Health strip on Dashboard shows it).
 
     ## What to do in the codebase
 

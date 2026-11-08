@@ -4,6 +4,7 @@ use crate::{
     rows::{query_one, query_with},
     vars,
 };
+use culprit_core::i18n::Message;
 use culprit_core::{Capability, Engine, Error, MissingCapability, Platform, Result, ServerInfo, t};
 use mysql_async::{Conn, Value};
 
@@ -69,19 +70,32 @@ impl Probe {
         (!parts.is_empty()).then(|| format!("SET {};", parts.join(", ")))
     }
 
-    fn performance_schema_restart(&self) -> String {
-        t!("provider.mysql.probe.performance_schema_restart", server = self.flavor.name())
+    fn performance_schema_restart(&self) -> Message {
+        culprit_core::message!("provider.mysql.probe.performance_schema_restart", server = self.flavor.name())
     }
 
     /// How to get statement statistics when performance_schema is off: the no-restart path first.
-    fn statements_fix(&self) -> String {
+    fn statements_fix(&self) -> Message {
         match self.unlock_statement() {
-            Some(sql) => [
-                t!("provider.mysql.probe.slow_log_now", sql = sql, server = self.flavor.name()),
+            Some(sql) => Message::paragraph(vec![
+                culprit_core::message!("provider.mysql.probe.slow_log_now", sql = sql, server = self.flavor.name()),
                 self.performance_schema_restart(),
-            ]
-            .join(" "),
+            ]),
             None => self.performance_schema_restart(),
+        }
+    }
+
+    fn statements_missing(&self, reason: Message) -> MissingCapability {
+        let missing = MissingCapability::new(Capability::PerformanceSchema, reason).with_fix(self.statements_fix());
+        match self.unlock_statement() {
+            Some(sql) => missing.with_action(
+                sql,
+                Some(Message::paragraph(vec![
+                    culprit_core::message!("provider.mysql.probe.slow_log_detail", server = self.flavor.name()),
+                    self.performance_schema_restart(),
+                ])),
+            ),
+            None => missing,
         }
     }
 
@@ -93,38 +107,36 @@ impl Probe {
         } else {
             // MariaDB ships with performance_schema off; MySQL with it on, so off there is someone's choice.
             let reason = match self.flavor {
-                Flavor::Mariadb => t!("provider.mysql.probe.no_statements.mariadb"),
-                Flavor::Mysql => t!("provider.mysql.probe.no_statements.mysql"),
+                Flavor::Mariadb => culprit_core::message!("provider.mysql.probe.no_statements.mariadb"),
+                Flavor::Mysql => culprit_core::message!("provider.mysql.probe.no_statements.mysql"),
             };
-            missing.push(MissingCapability {
-                capability: Capability::PerformanceSchema,
-                reason,
-                fix: Some(self.statements_fix()),
-            });
+            missing.push(self.statements_missing(reason));
             if self.userstat == Some(true) {
                 capabilities.push(Capability::IndexUsage);
             } else {
                 // MariaDB also counts index reads with userstat, which needs no restart; MySQL has no such setting.
                 let (reason, fix) = match self.flavor {
                     Flavor::Mariadb => (
-                        t!("provider.mysql.probe.no_index_usage.mariadb"),
-                        t!("provider.mysql.probe.no_index_usage.mariadb_fix", sql = "SET GLOBAL userstat = ON;"),
+                        culprit_core::message!("provider.mysql.probe.no_index_usage.mariadb"),
+                        culprit_core::message!(
+                            "provider.mysql.probe.no_index_usage.mariadb_fix",
+                            sql = "SET GLOBAL userstat = ON;"
+                        ),
                     ),
                     Flavor::Mysql => (
-                        t!("provider.mysql.probe.no_index_usage.mysql"),
-                        t!("provider.mysql.probe.no_index_usage.mysql_fix"),
+                        culprit_core::message!("provider.mysql.probe.no_index_usage.mysql"),
+                        culprit_core::message!("provider.mysql.probe.no_index_usage.mysql_fix"),
                     ),
                 };
-                missing.push(MissingCapability { capability: Capability::IndexUsage, reason, fix: Some(fix) });
+                missing.push(MissingCapability::new(Capability::IndexUsage, reason).with_fix(fix));
             }
             if self.slow_query_log && self.slow_log_table() {
                 capabilities.push(Capability::QueryPlans);
             } else {
-                missing.push(MissingCapability {
-                    capability: Capability::QueryPlans,
-                    reason: t!("provider.mysql.probe.no_recorded_statements"),
-                    fix: None,
-                });
+                missing.push(MissingCapability::new(
+                    Capability::QueryPlans,
+                    culprit_core::message!("provider.mysql.probe.no_recorded_statements"),
+                ));
             }
         }
         // Logged statements are a workload of their own without performance_schema, and samples to plan with it.

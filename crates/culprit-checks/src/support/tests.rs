@@ -819,3 +819,13 @@ fn support_phrases_read_as_english_writes_them() {
         .collect();
     assert!(differ.is_empty() && said.len() == expected.len(), "{}", differ.join("\n"));
 }
+#[test]
+fn sentence_initial_handles_preserve_native_session_text() {
+    let native = "set application_name = 'MixedCaseApp'";
+    for language in ["en", "de", "fr", "es"] {
+        culprit_core::i18n::scope(language, || {
+            let handle = super::Handle::Session(native.into());
+            assert_eq!(handle.leading_words(), native);
+        });
+    }
+}

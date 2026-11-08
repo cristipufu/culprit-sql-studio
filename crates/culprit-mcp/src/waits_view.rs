@@ -148,6 +148,9 @@ mod tests {
         let mut data: Report =
             serde_json::from_str(include_str!("../../../fixtures/yugabyte-demo.report.json")).unwrap();
         data.snapshot.operations.node_resources = Some(culprit_core::NodeResources {
+            source_message: None,
+            note_messages: None,
+
             source: "shared native nodes".into(),
             observed_from: "2026-10-01T00:00:00Z".into(),
             observed_until: "2026-10-01T00:00:01Z".into(),
@@ -190,6 +193,10 @@ mod tests {
         let mut data: Report =
             serde_json::from_str(include_str!("../../../fixtures/yugabyte-demo.report.json")).unwrap();
         data.snapshot.operations.termination_history = Some(culprit_core::TerminationHistory {
+            source_message: None,
+            visibility_message: None,
+            note_messages: None,
+
             source: "native termination buffer".into(),
             requested_start: "2026-10-01T00:00:00Z".into(),
             requested_end: "2026-10-08T00:00:00Z".into(),
@@ -234,6 +241,9 @@ mod tests {
             serde_json::from_str(include_str!("../../../fixtures/yugabyte-demo.report.json")).unwrap();
         data.snapshot.operations.activity_history = Some(culprit_core::ActivityHistory {
             period: culprit_core::ActivityPeriod {
+                source_message: None,
+                note_messages: None,
+
                 source: "native test samples".into(),
                 requested_start: "2026-10-01T00:00:00Z".into(),
                 requested_end: "2026-10-08T00:00:00Z".into(),

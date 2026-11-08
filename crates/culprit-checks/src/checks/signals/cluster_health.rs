@@ -75,13 +75,13 @@ fn cluster_health_finding(s: &Snapshot, node: ClusterNode<'_>) -> Finding {
     f.actionability = if node.unavailable { Actionability::NeedsAttention } else { Actionability::Information };
     f.confidence = Confidence::High;
     f.impact.score = base_score(f.severity);
-    f.impact.label = if node.unavailable {
+    f.impact.set_label(if node.unavailable {
         t!("check.cluster_health.impact.unavailable")
     } else {
         t!("check.cluster_health.impact.flow_control")
-    };
+    });
     if let Some(p) = node.paused {
-        f.metrics.push(Metric::new(t!("check.cluster_health.metric.paused"), p, Unit::Ratio));
+        f.metrics.push(Metric::said(culprit_core::key!("check.cluster_health.metric.paused"), p, Unit::Ratio));
     }
     f.fix = Some(Fix { summary: t!("check.cluster_health.fix"), sql: None, cost: None });
     f.verify = vec![t!("check.cluster_health.verify")];

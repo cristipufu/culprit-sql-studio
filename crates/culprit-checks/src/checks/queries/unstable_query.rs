@@ -130,11 +130,11 @@ fn unstable_query_finding(snapshot: &Snapshot, case: UnstableQuery<'_>) -> Findi
     f.impact.time_ms_per_day = case.time_ms_per_day;
     f.severity = case.severity;
     f.impact.score = score_for_share(case.slow_share);
-    f.impact.label = if slow_log_only(snapshot) {
+    f.impact.set_label(if slow_log_only(snapshot) {
         t!("check.unstable_query.impact.logged", share = format::percent(case.slow_share))
     } else {
         t!("check.unstable_query.impact", share = format::percent(case.slow_share))
-    };
+    });
     f.confidence = Confidence::Medium;
     // A statement that stopped running is told in the past. Its average as every surface states it (over Culprit's
     // scans where they measured it); the spread below is the source's own, over its totals.
@@ -180,8 +180,8 @@ fn unstable_query_finding(snapshot: &Snapshot, case: UnstableQuery<'_>) -> Findi
     // the spread's own (since the totals began), that one beside it.
     match case.scans {
         Some(s) => {
-            f.metrics.push(Metric::new(
-                t!("check.unstable_query.metric.average_scans"),
+            f.metrics.push(Metric::said(
+                culprit_core::key!("check.unstable_query.metric.average_scans"),
                 workload.statement_mean_ms(q),
                 Unit::Ms,
             ));
@@ -193,14 +193,14 @@ fn unstable_query_finding(snapshot: &Snapshot, case: UnstableQuery<'_>) -> Findi
                 ));
             }
         }
-        None => f.metrics.push(Metric::new(
-            t!("check.unstable_query.metric.average"),
+        None => f.metrics.push(Metric::said(
+            culprit_core::key!("check.unstable_query.metric.average"),
             workload.statement_mean_ms(q),
             Unit::Ms,
         )),
     }
-    f.metrics.push(Metric::new(t!("check.unstable_query.metric.slowest"), case.max, Unit::Ms));
-    f.metrics.push(Metric::new(t!("check.unstable_query.metric.stddev"), case.stddev, Unit::Ms));
+    f.metrics.push(Metric::said(culprit_core::key!("check.unstable_query.metric.slowest"), case.max, Unit::Ms));
+    f.metrics.push(Metric::said(culprit_core::key!("check.unstable_query.metric.stddev"), case.stddev, Unit::Ms));
     // A part of its time the source keeps only in its totals: over those, where the average beside it is the scans'.
     let extra = match crate::support::totals_basis(snapshot, q) {
         Some(basis) => t!("check.unstable_query.metric.extra_over", basis = basis),
@@ -208,7 +208,7 @@ fn unstable_query_finding(snapshot: &Snapshot, case: UnstableQuery<'_>) -> Findi
     };
     f.metrics.push(Metric::new(extra, case.excess, Unit::Ms));
     if let Some(io) = case.waited.as_ref().and_then(|w| w.io_ms) {
-        f.metrics.push(Metric::new(t!("check.unstable_query.metric.io"), io, Unit::Ms));
+        f.metrics.push(Metric::said(culprit_core::key!("check.unstable_query.metric.io"), io, Unit::Ms));
     }
     // The same ladders as `parameter-sensitive`: the cause is usually the same, only the evidence is coarser.
     f.fix = Some(match (&case.waited, snapshot.server.engine) {
@@ -267,7 +267,7 @@ fn verify_new_runs(snapshot: &Snapshot) -> String {
         Some(culprit_core::WorkloadKind::PlanCache) => [
             t!("check.unstable_query.verify.plan_cache"),
             compare,
-            t!("check.unstable_query.verify.plan_cache_totals", source = &workload.source),
+            t!("check.unstable_query.verify.plan_cache_totals", source = workload.source_name()),
         ]
         .join(" "),
         Some(culprit_core::WorkloadKind::SlowLog | culprit_core::WorkloadKind::QueryLog) => {
@@ -282,7 +282,7 @@ fn verify_new_runs(snapshot: &Snapshot) -> String {
             [
                 t!("check.unstable_query.verify.capture", log = log),
                 compare,
-                t!("check.unstable_query.verify.totals", source = &workload.source),
+                t!("check.unstable_query.verify.totals", source = workload.source_name()),
             ]
             .join(" ")
         }

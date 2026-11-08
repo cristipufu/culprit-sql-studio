@@ -156,16 +156,20 @@ fn hot_updates_finding(_: &Snapshot, cold: ColdUpdates<'_>) -> Finding {
         None => {}
     }
     severity_score(&mut f);
-    f.impact.label = t!("check.hot_updates.impact", share = &ratio);
+    f.impact.set_label(t!("check.hot_updates.impact", share = &ratio));
     f.confidence = if cold.moved.is_some() { Confidence::High } else { Confidence::Medium };
     f.metrics = vec![
-        Metric::new(t!("check.hot_updates.metric.updates"), cold.updates, Unit::Count),
-        Metric::new(t!("check.hot_updates.metric.hot"), cold.ratio, Unit::Ratio),
-        Metric::new(t!("check.hot_updates.metric.indexes"), cold.indexes as f64, Unit::Count),
-        Metric::new(t!("check.hot_updates.metric.fillfactor"), cold.fillfactor, Unit::Count),
+        Metric::said(culprit_core::key!("check.hot_updates.metric.updates"), cold.updates, Unit::Count),
+        Metric::said(culprit_core::key!("check.hot_updates.metric.hot"), cold.ratio, Unit::Ratio),
+        Metric::said(culprit_core::key!("check.hot_updates.metric.indexes"), cold.indexes as f64, Unit::Count),
+        Metric::said(culprit_core::key!("check.hot_updates.metric.fillfactor"), cold.fillfactor, Unit::Count),
     ];
     if cold.referencing > 0 {
-        f.metrics.push(Metric::new(t!("check.hot_updates.metric.referencing"), cold.referencing as f64, Unit::Count));
+        f.metrics.push(Metric::said(
+            culprit_core::key!("check.hot_updates.metric.referencing"),
+            cold.referencing as f64,
+            Unit::Count,
+        ));
     }
     f.fix = Some(Fix {
         summary: if cold.room {

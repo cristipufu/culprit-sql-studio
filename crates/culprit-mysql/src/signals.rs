@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use culprit_core::{
     ColumnHistogram, Coverage, FileIo, FileKind, Pressure, QueryStat, Replica, ReplicaCondition, ReplicaRole, Setting,
-    Signal, SignalScope, SignalUnit, Snapshot, i18n, key, t,
+    Signal, SignalScope, SignalUnit, Snapshot, key, t,
 };
 use mysql_async::{Conn, Value};
 
@@ -54,9 +54,9 @@ pub async fn collect(connector: &Connector, probe: &Probe, snapshot: &mut Snapsh
         coverage.read(&sources::SERVER_VARIABLES, server_variables(&mut conn).await).unwrap_or_else(HashMap::new);
     let writable = variables.get("read_only").map(|v| !is_on(v));
     // Product/version-specific monitoring privilege; only relevant when replication is configured.
-    let replicas = replica_status(&mut conn, writable, mariadb).await.map_err(|mut e| {
-        e.message = needs_replica_privilege(&e.message, mariadb, &probe.version);
-        e
+    let replicas = replica_status(&mut conn, writable, mariadb).await.map_err(|e| {
+        let message = needs_replica_privilege(&e.message, mariadb, &probe.version);
+        e.with_message(message)
     });
     if let Some(replicas) = coverage.read(&sources::REPLICATION, replicas) {
         pressure.replicas = replicas;
@@ -274,7 +274,7 @@ fn connection_signals(status: &HashMap<String, f64>) -> Vec<Signal> {
         out.push(
             Signal::new(
                 culprit_core::signal_id::NEW_CONNECTIONS,
-                &t!("provider.mysql.signal.new_connections"),
+                culprit_core::message!("provider.mysql.signal.new_connections"),
                 rate,
                 SignalUnit::PerSecond,
                 SignalScope::SinceStartup,
@@ -287,7 +287,7 @@ fn connection_signals(status: &HashMap<String, f64>) -> Vec<Signal> {
             out.push(
                 Signal::new(
                     culprit_core::signal_id::THREAD_CACHE_MISSES,
-                    &t!("provider.mysql.signal.thread_cache_misses"),
+                    culprit_core::message!("provider.mysql.signal.thread_cache_misses"),
                     created / connections * 100.0,
                     SignalUnit::Percent,
                     SignalScope::SinceStartup,
@@ -314,9 +314,21 @@ fn connection_signals(status: &HashMap<String, f64>) -> Vec<Signal> {
         if let Some(n) = get(name) {
             // Under an hour of uptime, a rate per hour would be an extrapolation: report the count.
             let signal = if hours >= 1.0 {
-                Signal::new(key, &i18n::t(per_hour, &[]), n / hours, SignalUnit::PerHour, SignalScope::SinceStartup)
+                Signal::new(
+                    key,
+                    culprit_core::i18n::Message::catalog(per_hour, &[]),
+                    n / hours,
+                    SignalUnit::PerHour,
+                    SignalScope::SinceStartup,
+                )
             } else {
-                Signal::new(key, &i18n::t(since_start, &[]), n, SignalUnit::Count, SignalScope::SinceStartup)
+                Signal::new(
+                    key,
+                    culprit_core::i18n::Message::catalog(since_start, &[]),
+                    n,
+                    SignalUnit::Count,
+                    SignalScope::SinceStartup,
+                )
             };
             out.push(signal);
         }

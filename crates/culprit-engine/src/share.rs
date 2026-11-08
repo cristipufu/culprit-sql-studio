@@ -170,7 +170,7 @@ mod context_tests {
         let path = saved.join(format!("{}.json", report.snapshot.id));
         let mut value: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         value["_culprit_store"] =
-            serde_json::json!({"version": 2, "input": {"changes": []}, "collected": null, "recorded_changes": []});
+            serde_json::json!({"version": 3, "input": {"changes": []}, "collected": null, "recorded_changes": []});
         std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
         assert!(workspace.latest_report(&report.snapshot.connection, None).is_err());
         let context = workspace.compare_context(&report.snapshot.connection);

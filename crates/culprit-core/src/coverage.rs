@@ -23,12 +23,15 @@ pub enum SourceState {
 }
 
 /// Source names are open identifiers so an embedding provider can declare its own sources.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SourceOutcome {
     pub source: String,
     pub state: SourceState,
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reason_message: Option<crate::i18n::Message>,
 }
 
 /// Canonical built-in source identifiers shared between engine collectors and check evidence contracts.
@@ -187,6 +190,12 @@ pub fn same_source(a: &str, b: &str) -> bool {
 }
 
 impl SourceOutcome {
+    pub fn refresh_language(&mut self) {
+        if let Some(message) = &self.reason_message {
+            self.reason = Some(message.render());
+        }
+    }
+
     /// Combine independently read parts conservatively. A successful part cannot erase a failed part.
     fn merge(&mut self, other: Self) {
         use SourceState::*;
@@ -196,14 +205,17 @@ impl SourceOutcome {
             _ => Partial,
         };
         if let Some(reason) = other.reason {
-            match &mut self.reason {
-                Some(existing) if existing != &reason => {
-                    existing.push(' ');
-                    existing.push_str(&reason);
+            use crate::i18n::Message;
+            let incoming = other.reason_message.unwrap_or_else(|| Message::from(reason));
+            let message = match self.reason.take() {
+                Some(existing) => {
+                    let existing = self.reason_message.take().unwrap_or_else(|| Message::from(existing));
+                    if existing == incoming { existing } else { Message::paragraph(vec![existing, incoming]) }
                 }
-                None => self.reason = Some(reason),
-                _ => {}
-            }
+                None => incoming,
+            };
+            self.reason = Some(message.render());
+            self.reason_message = message.is_translatable().then_some(message);
         }
     }
 }
@@ -211,14 +223,31 @@ impl SourceOutcome {
 /// One source a provider reads from its engine: a statistics view, the catalog, a log. Each provider declares its
 /// sources in one list (`<provider>/src/sources.rs`), so what a scan reads on an engine is a table anyone can read, and
 /// reading one goes through [`Coverage::read`], so what a failing source means is said once for every engine.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Source {
     /// Its name in the scan's notes: "tables", "query_store".
     pub name: &'static str,
-    /// What it reads, in a sentence: "Reading {reads} failed".
+    /// Catalog key describing what it reads, used in "Reading {reads} failed".
     pub reads: &'static str,
     /// What the checks get from it: the capabilities a failure locks. Empty for a source that only adds detail.
     pub delivers: &'static [Capability],
+}
+
+impl Source {
+    pub fn description(&self) -> String {
+        crate::i18n::t(self.reads, &[])
+    }
+}
+
+impl Serialize for Source {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut source = serializer.serialize_struct("Source", 3)?;
+        source.serialize_field("name", self.name)?;
+        source.serialize_field("reads", &self.description())?;
+        source.serialize_field("delivers", self.delivers)?;
+        source.end()
+    }
 }
 
 /// The capabilities a scan's sources delivered, the ones they couldn't (with why and how to fix it), and notes.
@@ -238,7 +267,16 @@ impl Coverage {
     }
 
     pub fn recorded(&mut self, source: &Source, state: SourceState, reason: Option<String>) {
-        self.record(SourceOutcome { source: source.name.into(), state, reason });
+        self.record(SourceOutcome { reason_message: None, source: source.name.into(), state, reason });
+    }
+
+    pub fn recorded_message(&mut self, source: &Source, state: SourceState, message: crate::i18n::Message) {
+        self.record(SourceOutcome {
+            source: source.name.into(),
+            state,
+            reason: Some(message.render()),
+            reason_message: message.is_translatable().then_some(message),
+        });
     }
 
     /// Finish decoding a successful read. A previous failure or partial result is never cleared by this update.
@@ -262,23 +300,24 @@ impl Coverage {
     }
 
     /// Some objects or measurements could not be read, though the source delivered useful data.
-    pub fn partial(&mut self, source: &Source, reason: impl Into<String>) {
+    pub fn partial(&mut self, source: &Source, reason: impl Into<crate::i18n::Message>) {
         let reason = reason.into();
         self.note(source.name, reason.clone());
-        self.recorded(source, SourceState::Partial, Some(reason));
+        self.recorded_message(source, SourceState::Partial, reason);
     }
 
     /// The engine or configuration does not have this source. This is different from an unreadable source.
-    pub fn not_applicable(&mut self, source: &Source, reason: impl Into<String>) {
+    pub fn not_applicable(&mut self, source: &Source, reason: impl Into<crate::i18n::Message>) {
         let reason = reason.into();
         if let Some(existing) = self.sources.iter_mut().find(|s| same_source(&s.source, source.name))
             && matches!(existing.state, SourceState::Collected | SourceState::Empty)
         {
             // A successful configuration probe may establish that the source does not apply.
             existing.state = SourceState::NotApplicable;
-            existing.reason = Some(reason);
+            existing.reason = Some(reason.render());
+            existing.reason_message = reason.is_translatable().then_some(reason);
         } else {
-            self.recorded(source, SourceState::NotApplicable, Some(reason));
+            self.recorded_message(source, SourceState::NotApplicable, reason);
         }
     }
 
@@ -321,19 +360,36 @@ impl Coverage {
 
     /// `capability` isn't available: the setting is off, the edition lacks it, the login can't read it. The first
     /// reason given for a capability is kept.
-    pub fn lacking(&mut self, capability: Capability, reason: impl Into<String>, fix: Option<String>) {
-        if !self.missing.iter().any(|m| m.capability == capability) {
-            self.missing.push(MissingCapability { capability, reason: reason.into(), fix });
+    pub fn lacking(&mut self, capability: Capability, reason: impl Into<crate::i18n::Message>, fix: Option<String>) {
+        let mut missing = MissingCapability::new(capability, reason);
+        if let Some(fix) = fix {
+            missing = missing.with_fix(fix);
+        }
+        self.missing_capability(missing);
+    }
+
+    /// Keep the provider's structured repair with its explanation. The first diagnosis owns the repair.
+    pub fn missing_capability(&mut self, missing: MissingCapability) {
+        if !self.missing.iter().any(|m| m.capability == missing.capability) {
+            self.missing.push(missing);
         }
     }
 
     /// A capability the probe expected that a source then couldn't deliver: no longer available, and missing with why.
     /// Unlike [`Coverage::lacking`], this overrides an earlier `delivered`, and its reason replaces one the probe gave:
     /// the source knows more about why.
-    pub fn lost(&mut self, capability: Capability, reason: impl Into<String>, fix: Option<String>) {
-        self.have.retain(|c| *c != capability);
-        self.missing.retain(|m| m.capability != capability);
-        self.lacking(capability, reason, fix);
+    pub fn lost(&mut self, capability: Capability, reason: impl Into<crate::i18n::Message>, fix: Option<String>) {
+        let mut missing = MissingCapability::new(capability, reason);
+        if let Some(fix) = fix {
+            missing = missing.with_fix(fix);
+        }
+        self.lost_capability(missing);
+    }
+
+    pub fn lost_capability(&mut self, missing: MissingCapability) {
+        self.have.retain(|c| *c != missing.capability);
+        self.missing.retain(|m| m.capability != missing.capability);
+        self.missing_capability(missing);
     }
 
     /// A capability the probe expected that turned out to hold nothing (no statement could be planned, nothing was timed),
@@ -343,39 +399,46 @@ impl Coverage {
     }
 
     /// Something the reader of the report should know about what `source` read, without a capability at stake.
-    pub fn note(&mut self, source: &str, message: impl Into<String>) {
-        self.notes.push(CollectorNote { collector: source.into(), message: message.into(), table: None });
+    pub fn note(&mut self, source: &str, message: impl Into<crate::i18n::Message>) {
+        self.notes.push(CollectorNote::recorded(source, message.into()));
     }
 
     /// `source` read part of what it should about one table (`schema.table`): a note about that table, and the
     /// source partial.
-    pub fn partial_table(&mut self, source: &Source, table: &str, reason: impl Into<String>) {
+    pub fn partial_table(&mut self, source: &Source, table: &str, reason: impl Into<crate::i18n::Message>) {
         let reason = reason.into();
-        self.notes.push(CollectorNote {
-            collector: source.name.into(),
-            message: reason.clone(),
-            table: Some(table.into()),
-        });
-        self.recorded(source, SourceState::Partial, Some(reason));
+        let mut note = CollectorNote::recorded(source.name, reason.clone());
+        note.table = Some(table.into());
+        self.notes.push(note);
+        self.recorded_message(source, SourceState::Partial, reason);
     }
 
     /// Reading `source` failed: a note with the error, and `capability` locked with why. A permission error says the
     /// login lacks the permission, and `grant` (the statement that gives it) becomes the fix.
     pub fn failed(&mut self, source: &str, capability: Capability, error: &Error, grant: Option<String>) {
         self.record(SourceOutcome {
+            reason_message: error.message_source().is_translatable().then(|| error.message_source()),
             source: source.into(),
             state: SourceState::Unavailable,
             reason: Some(error.message.clone()),
         });
-        self.note(source, error.message.clone());
+        self.note(source, error.message_source());
         let denied = error.code == ErrorCode::PermissionDenied;
         let reason = if denied {
-            crate::t!("model.source.no_permission")
+            crate::message!("model.source.no_permission")
         } else {
-            crate::t!("model.source.failed", error = &error.message)
+            crate::message!("model.source.failed", error = error.message_source())
         };
-        let fix = if denied { grant.or_else(|| error.hint.clone()) } else { error.hint.clone() };
-        self.lacking(capability, reason, fix);
+        let fix = if denied {
+            grant.map(crate::i18n::Message::from).or_else(|| error.hint_source())
+        } else {
+            error.hint_source()
+        };
+        let mut missing = MissingCapability::new(capability, reason);
+        if let Some(fix) = fix {
+            missing = missing.with_fix(fix);
+        }
+        self.missing_capability(missing);
     }
 
     /// What reading `source` gave: its value, or `None` with the failure recorded. A failing source never fails the scan:
@@ -410,15 +473,26 @@ impl Coverage {
 
     /// Record that reading `source` failed with `error` (see [`Coverage::read`]), for a source read in parts.
     pub fn source_failed(&mut self, source: &Source, error: &Error) {
-        self.recorded(source, SourceState::Unavailable, Some(error.message.clone()));
-        self.note(source.name, error.message.clone());
+        self.recorded_message(source, SourceState::Unavailable, error.message_source());
+        self.note(source.name, error.message_source());
         let reason = if error.code == ErrorCode::PermissionDenied {
-            crate::t!("model.source.no_permission_to_read", reads = source.reads)
+            crate::message!(
+                "model.source.no_permission_to_read",
+                reads = crate::i18n::Message::catalog(source.reads, &[])
+            )
         } else {
-            crate::t!("model.source.reading_failed", reads = source.reads, error = &error.message)
+            crate::message!(
+                "model.source.reading_failed",
+                reads = crate::i18n::Message::catalog(source.reads, &[]),
+                error = error.message_source()
+            )
         };
         for capability in source.delivers {
-            self.lost(*capability, reason.clone(), error.hint.clone());
+            let mut missing = MissingCapability::new(*capability, reason.clone());
+            if let Some(hint) = error.hint_source() {
+                missing = missing.with_fix(hint);
+            }
+            self.lost_capability(missing);
         }
     }
 
@@ -438,7 +512,7 @@ impl Coverage {
             self.delivered(capability);
         }
         for m in other.missing {
-            self.lacking(m.capability, m.reason, m.fix);
+            self.missing_capability(m);
         }
         self.notes.extend(other.notes);
     }
@@ -481,6 +555,87 @@ mod tests {
         reads: "index statistics",
         delivers: &[Capability::IndexUsage, Capability::TableStats],
     };
+
+    #[test]
+    fn merging_collection_parts_preserves_the_first_structured_repair() {
+        let mut first = Coverage::default();
+        first.missing_capability(MissingCapability::sql(
+            Capability::QueryStore,
+            "Une explication.",
+            "ALTER DATABASE CURRENT SET QUERY_STORE = ON;",
+        ));
+        let mut later = Coverage::default();
+        later.lacking(Capability::QueryStore, "Another diagnosis", None);
+        let mut combined = Coverage::default();
+        combined.merge(first);
+        combined.merge(later);
+        let (_, missing, _) = combined.finish();
+        assert_eq!(missing[0].reason, "Une explication.");
+        assert_eq!(missing[0].action.as_ref().unwrap().sql, "ALTER DATABASE CURRENT SET QUERY_STORE = ON;");
+    }
+
+    #[test]
+    fn partial_table_notes_and_merged_reasons_render_from_their_recorded_arguments() {
+        use crate::i18n::scope;
+        let first = crate::message!(
+            "provider.sqlite.catalog.columns_unavailable",
+            table = "docs",
+            error = "no such module: fts9"
+        );
+        let second = crate::message!("provider.sqlite.settings.partial");
+        let mut coverage = Coverage::default();
+        scope("fr", || {
+            coverage.partial_table(&INDEXES, "main.docs", first.clone());
+            let mut later = Coverage::default();
+            later.partial(&INDEXES, second.clone());
+            coverage.merge(later);
+            coverage.completed(&INDEXES, 5);
+        });
+        let outcomes = coverage.outcomes();
+        let (_, _, notes) = coverage.finish();
+        for language in ["en", "de", "fr", "es"] {
+            scope(language, || {
+                let mut outcome = outcomes[0].clone();
+                outcome.refresh_language();
+                assert_eq!(outcome.state, SourceState::Partial);
+                assert_eq!(outcome.reason, Some(format!("{} {}", first.render(), second.render())));
+                let mut note = notes[0].clone();
+                note.refresh_language();
+                assert_eq!(note.message, first.render());
+                assert_eq!(note.table.as_deref(), Some("main.docs"));
+            });
+        }
+    }
+
+    #[test]
+    fn source_failures_keep_catalog_errors_and_hints_for_the_reader() {
+        use crate::i18n::{MessageValue, scope};
+        let message = crate::message!("provider.mysql.workload.digests_full", time = MessageValue::Duration(1500.0));
+        let hint = crate::message!("provider.sqlite.error.interrupted.hint");
+        let mut coverage = Coverage::with(vec![Capability::IndexUsage], vec![]);
+        scope("fr", || {
+            let error = Error::internal(message.clone()).with_hint(hint.clone());
+            let json = serde_json::to_value(&error).unwrap();
+            assert_eq!(json.as_object().unwrap().len(), 3, "catalog references stay out of the error wire format");
+            coverage.source_failed(&INDEXES, &error);
+        });
+        let mut outcomes = coverage.outcomes();
+        let (have, mut missing, mut notes) = coverage.finish();
+        assert!(!have.contains(&Capability::IndexUsage));
+        for language in ["en", "de", "fr", "es"] {
+            scope(language, || {
+                outcomes[0].refresh_language();
+                notes[0].refresh_language();
+                assert_eq!(outcomes[0].reason.as_deref(), Some(message.render().as_str()));
+                assert_eq!(notes[0].message, message.render());
+                for missing in &mut missing {
+                    missing.render_messages();
+                    assert_eq!(missing.fix.as_deref(), Some(hint.render().as_str()));
+                    assert!(missing.reason.contains(&message.render()));
+                }
+            });
+        }
+    }
 
     #[test]
     fn empty_success_and_failure_have_different_outcomes() {

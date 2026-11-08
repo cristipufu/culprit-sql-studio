@@ -9,15 +9,22 @@
 //! shared cases in `locales/.tests/messages.json`: `{name}`, `{n, plural, =0 {..} one {# ..} other {..}}` and
 //! `{v, select, .. other {..}}`.
 
+mod language_code;
 mod message;
+mod plural;
+mod recorded;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
+pub use language_code::is_language_code;
 #[cfg(test)]
 pub(crate) use message::parse;
-pub use message::{Arg, PluralRule, argument_kinds, format_message, format_number};
+pub use message::{Arg, LabelPosition, argument_kinds, format_message, format_number};
+pub use plural::PluralRule;
+pub use recorded::{Message, MessageValue};
+pub(crate) use recorded::{render_notes, render_text};
 
 include!(concat!(env!("OUT_DIR"), "/catalogs.rs"));
 
@@ -32,6 +39,7 @@ pub struct Lang {
     pub plural: PluralRule,
     pub decimal: String,
     pub group: String,
+    pub direction: String,
     messages: HashMap<String, String>,
 }
 
@@ -56,11 +64,12 @@ impl Lang {
                 .map(str::to_string)
                 .ok_or_else(|| format!("{code}.json: _meta.{name}"))
         };
-        let plural = match field("plural")?.as_str() {
-            "one_is_1" => PluralRule::OneIs1,
-            "one_below_2" => PluralRule::OneBelow2,
-            other => return Err(format!("{code}.json: unknown plural rule {other}")),
-        };
+        let rule = field("plural")?;
+        let plural = PluralRule::for_locale(&rule).ok_or_else(|| format!("{code}.json: unknown plural rule {rule}"))?;
+        let direction = meta.get("direction").and_then(|v| v.as_str()).unwrap_or("ltr");
+        if !matches!(direction, "ltr" | "rtl") {
+            return Err(format!("{code}.json: unknown direction {direction}"));
+        }
         let mut messages = HashMap::new();
         for (key, message) in object.iter().filter(|(key, _)| key.as_str() != "_meta") {
             let message = message.as_str().ok_or_else(|| format!("{code}.json: {key} is not text"))?;
@@ -73,6 +82,7 @@ impl Lang {
             plural,
             decimal: field("decimal")?,
             group: field("group")?,
+            direction: direction.to_string(),
             messages,
         })
     }
@@ -154,7 +164,10 @@ pub fn t(key: &str, args: &[(&str, Arg)]) -> String {
         None => {
             let english = english();
             match english.message(key) {
-                Some(message) => format_message(message, args, &english),
+                Some(message) => {
+                    let rendered = format_message(message, args, &english);
+                    if lang.direction == "rtl" { format!("\u{2066}{rendered}\u{2069}") } else { rendered }
+                }
                 None => key.to_string(),
             }
         }

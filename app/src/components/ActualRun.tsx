@@ -101,7 +101,7 @@ export function LastActualRun(props: { connection: string; engine: Engine; query
     );
   }
 
-  const settingOff = engine === "mssql" && state.error.hint?.includes("LAST_QUERY_PLAN_STATS");
+  const settingOff = state.error.detail === "actual-plan-statistics-unavailable";
   const canRun = runnable(query.text);
   return (
     <div className="actual-missing">

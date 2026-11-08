@@ -104,7 +104,7 @@ pub fn dashboard(report: &Report) -> Dashboard {
         coverage: s
             .workload
             .as_ref()
-            .map(|w| t!("view.dashboard.coverage", source = &w.source, window = window_phrase(w))),
+            .map(|w| t!("view.dashboard.coverage", source = w.source_name(), window = window_phrase(w))),
         headline: String::new(),
         attention: Vec::new(),
         tiles,
@@ -125,11 +125,8 @@ pub fn with_now(d: &mut Dashboard, live: &LiveState) {
 
 /// Sessions couldn't be read: the tile says why and the rest of the dashboard stands.
 pub fn without_now(d: &mut Dashboard, reason: &str) {
-    let mut tile = Tile::new(
-        TileKey::Now,
-        TileStatus::Unavailable,
-        t!("view.dashboard.now.unreadable", reason = sentence(reason)),
-    );
+    let mut tile =
+        Tile::new(TileKey::Now, TileStatus::Unavailable, t!("view.dashboard.now.unreadable", reason = reason));
     tile.detail = Some(t!("view.dashboard.now.unreadable_detail"));
     match d.tiles.iter_mut().find(|t| t.key == TileKey::Now) {
         Some(slot) => *slot = tile,
@@ -224,16 +221,9 @@ fn span(hours: f64) -> String {
 /// A tile with nothing to show without query history: `takeaway` says what that leaves out.
 fn no_workload(key: TileKey, takeaway: String) -> Tile {
     let mut t = Tile::new(key, TileStatus::Unavailable, takeaway);
-    t.detail = Some(t!("view.dashboard.no_workload.detail"));
+    t.detail =
+        Some(t!("view.dashboard.no_workload.detail", statistics = culprit_core::t!("core.dashboard.tile.statistics")));
     t
-}
-
-fn capitalized(text: &str) -> String {
-    let mut chars = text.chars();
-    match chars.next() {
-        Some(c) => c.to_uppercase().chain(chars).collect(),
-        None => String::new(),
-    }
 }
 
 fn severity_status(s: Severity) -> TileStatus {
@@ -256,20 +246,6 @@ fn is_off(value: Option<&str>) -> bool {
     value.is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "off" | "0" | "false" | "no"))
 }
 
-/// A reason as the end of a sentence: first letter lowered, one full stop.
-fn sentence(text: &str) -> String {
-    let text = text.trim().trim_end_matches('.');
-    let mut chars = text.chars();
-    let lowered = match (chars.next(), chars.clone().next()) {
-        // Keep acronyms and names ("Query Store is OFF", "SQL Server …") as they are.
-        (Some(c), Some(n)) if c.is_uppercase() && n.is_lowercase() && !text.starts_with("Query ") => {
-            c.to_lowercase().chain(chars).collect()
-        }
-        _ => text.to_string(),
-    };
-    format!("{lowered}.")
-}
-
 /// A signal's value as a person reads it, with its unit.
 pub fn signal_value(s: &Signal) -> String {
     match s.unit {
@@ -290,25 +266,4 @@ fn signal_status(s: SignalStatus) -> TileStatus {
         SignalStatus::Good => TileStatus::Good,
         SignalStatus::Info => TileStatus::Info,
     }
-}
-
-/// The first SQL statement in a fix sentence ("Run CREATE EXTENSION pg_stat_statements; in this database…"): an
-/// upper-case verb up to its semicolon. "Set performance_schema = ON in the configuration" is advice, not SQL.
-fn fix_statement(fix: &str) -> Option<String> {
-    let start = ["CREATE ", "ALTER ", "GRANT ", "SET ", "UPDATE ", "CALL ", "EXEC ", "INSTALL "]
-        .iter()
-        .filter_map(|verb| {
-            let mut from = 0;
-            while let Some(at) = fix[from..].find(verb) {
-                let i = from + at;
-                if i == 0 || !fix.as_bytes()[i - 1].is_ascii_alphanumeric() {
-                    return Some(i);
-                }
-                from = i + verb.len();
-            }
-            None
-        })
-        .min()?;
-    let end = start + fix[start..].find(';')? + 1;
-    Some(fix[start..end].trim().to_string())
 }

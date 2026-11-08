@@ -3,7 +3,7 @@
 //! or rebuilt. Other schema changes carry no date in Postgres; Culprit's scans find those.
 
 use culprit_core::changes::epoch;
-use culprit_core::{ChangeEvent, EventAction, EventKind, EventSource, Result, t};
+use culprit_core::{ChangeEvent, EventAction, EventKind, EventSource, Result, message};
 use tokio_postgres::Client;
 
 use crate::rows::{iso, query, query_one};
@@ -34,10 +34,10 @@ pub async fn changes(client: &Client, since: &str) -> Result<Vec<ChangeEvent>> {
                 EventSource::Database,
                 "reload",
                 &reloaded,
-                t!("provider.postgres.change.reload"),
+                message!("provider.postgres.change.reload"),
             )
             .action(EventAction::Changed)
-            .detail(t!("provider.postgres.change.reload_detail")),
+            .detail(message!("provider.postgres.change.reload_detail")),
         );
     }
     if row.flag("commit_ts") {
@@ -74,7 +74,7 @@ pub async fn changes(client: &Client, since: &str) -> Result<Vec<ChangeEvent>> {
                     EventSource::Database,
                     &format!("{table}.{index}"),
                     &at,
-                    t!("provider.postgres.change.index", index = &index, table = &table),
+                    message!("provider.postgres.change.index", index = &index, table = &table),
                 )
                 .action(EventAction::Created)
                 .table(table)

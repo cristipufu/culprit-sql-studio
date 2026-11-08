@@ -573,12 +573,16 @@ fn filtered_scan_finding(snapshot: &Snapshot, s: FilteredScan<'_>) -> Finding {
         .iter()
         .map(|(q, node)| culprit_core::QueryRef { id: q.id.clone(), plan_node: Some(*node), note: None })
         .collect();
-    f.metrics.push(Metric::new(t!("common.metric.share_of_db_time"), s.impact.share, Unit::Ratio));
+    f.metrics.push(Metric::said(culprit_core::key!("common.metric.share_of_db_time"), s.impact.share, Unit::Ratio));
     if let Some(per_day_ms) = s.impact.per_day_ms {
-        f.metrics.push(Metric::new(t!("common.metric.db_time_per_day"), per_day_ms, Unit::Ms));
+        f.metrics.push(Metric::said(culprit_core::key!("common.metric.db_time_per_day"), per_day_ms, Unit::Ms));
     }
-    f.metrics.push(Metric::new(t!("check.filtered_scan.metric.size_basis"), g.rows, Unit::Rows));
-    f.metrics.push(Metric::new(t!("check.filtered_scan.metric.queries"), queries.len() as f64, Unit::Count));
+    f.metrics.push(Metric::said(culprit_core::key!("check.filtered_scan.metric.size_basis"), g.rows, Unit::Rows));
+    f.metrics.push(Metric::said(
+        culprit_core::key!("check.filtered_scan.metric.queries"),
+        queries.len() as f64,
+        Unit::Count,
+    ));
     if let Some(large) = &s.large {
         f.caveats.push(large.note(&g.schema, &g.table));
     }

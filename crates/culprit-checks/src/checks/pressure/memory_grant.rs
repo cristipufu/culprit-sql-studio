@@ -132,12 +132,12 @@ fn memory_grant_finding(_: &Snapshot, o: OversizedGrant<'_>) -> Finding {
     }
     f.severity = o.severity;
     f.impact.score = o.score;
-    f.impact.label = t!("check.memory_grant.impact", granted = &granted, used = &used);
+    f.impact.set_label(t!("check.memory_grant.impact", granted = &granted, used = &used));
     f.confidence = Confidence::High;
     f.metrics = vec![
-        Metric::new(t!("check.memory_grant.metric.reserved"), g.avg_granted_kb * 1024.0, Unit::Bytes),
-        Metric::new(t!("check.memory_grant.metric.used"), g.avg_used_kb * 1024.0, Unit::Bytes),
-        Metric::new(t!("check.memory_grant.metric.runs"), g.executions, Unit::Count),
+        Metric::said(culprit_core::key!("check.memory_grant.metric.reserved"), g.avg_granted_kb * 1024.0, Unit::Bytes),
+        Metric::said(culprit_core::key!("check.memory_grant.metric.used"), g.avg_used_kb * 1024.0, Unit::Bytes),
+        Metric::said(culprit_core::key!("check.memory_grant.metric.runs"), g.executions, Unit::Count),
     ];
     f.fix = Some(Fix {
         summary: t!("check.memory_grant.fix"),

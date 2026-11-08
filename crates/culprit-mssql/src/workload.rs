@@ -424,6 +424,8 @@ GROUP BY ws.wait_category_desc
     crate::spread::attach(client, window_minutes, &mut queries).await;
 
     let workload = Workload {
+        source_label: None,
+        source_message: None,
         counter_set: None,
         history_inputs: Vec::new(),
         source: "Query Store".into(),
@@ -752,6 +754,8 @@ pub(crate) async fn from_plan_cache(
         })
         .sum();
     let workload = Workload {
+        source_label: None,
+        source_message: None,
         counter_set: None,
         history_inputs: Vec::new(),
         source: "Plan cache".into(),

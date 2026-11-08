@@ -62,9 +62,9 @@ pub(super) fn render(snapshot: &Snapshot, case: Case<'_>) -> Finding {
             f.severity = Severity::Low;
             f.confidence = Confidence::High;
             f.impact.score = base_score(Severity::Low);
-            f.impact.label = t!("check.config.sqlite_index_statistics.impact", n = missing.len(), count = &count);
-            f.metrics.push(Metric::text(
-                t!("check.config.sqlite_index_statistics.metric.indexes"),
+            f.impact.set_label(t!("check.config.sqlite_index_statistics.impact", n = missing.len(), count = &count));
+            f.metrics.push(Metric::said_text(
+                culprit_core::key!("check.config.sqlite_index_statistics.metric.indexes"),
                 missing.iter().map(|i| i.name.as_str()).collect::<Vec<_>>().join(", "),
             ));
             f.fix = Some(Fix {
@@ -114,9 +114,13 @@ fn statistics_finding(s: &Snapshot, secondary: usize, rows_known: bool) -> Findi
     f.summary = summary.join(" ");
     f.severity = Severity::Low;
     f.impact.score = base_score(Severity::Low);
-    f.impact.label = t!("check.config.sqlite_statistics.impact");
+    f.impact.set_label(t!("check.config.sqlite_statistics.impact"));
     f.confidence = Confidence::High;
-    f.metrics.push(Metric::new(t!("check.config.sqlite_statistics.metric.secondary"), secondary as f64, Unit::Count));
+    f.metrics.push(Metric::said(
+        culprit_core::key!("check.config.sqlite_statistics.metric.secondary"),
+        secondary as f64,
+        Unit::Count,
+    ));
     f.fix = Some(Fix {
         summary: t!("check.config.sqlite_statistics.fix"),
         sql: Some("ANALYZE;".into()),
@@ -152,10 +156,14 @@ fn free_space_finding(s: &Snapshot, free_bytes: f64, share: f64, incremental: bo
     f.summary = t!("check.config.sqlite_free_pages.summary");
     f.severity = Severity::Low;
     f.impact.score = base_score(Severity::Low);
-    f.impact.label = t!("check.config.sqlite_free_pages.impact", size = &size);
+    f.impact.set_label(t!("check.config.sqlite_free_pages.impact", size = &size));
     f.confidence = Confidence::High;
-    f.metrics.push(Metric::new(t!("check.config.sqlite_free_pages.metric.free_pages"), free_bytes, Unit::Bytes));
-    f.metrics.push(Metric::new(t!("check.config.sqlite_free_pages.metric.share"), share, Unit::Ratio));
+    f.metrics.push(Metric::said(
+        culprit_core::key!("check.config.sqlite_free_pages.metric.free_pages"),
+        free_bytes,
+        Unit::Bytes,
+    ));
+    f.metrics.push(Metric::said(culprit_core::key!("check.config.sqlite_free_pages.metric.share"), share, Unit::Ratio));
     f.fix = Some(if incremental {
         Fix {
             summary: t!("check.config.sqlite_free_pages.fix.incremental"),
@@ -197,9 +205,13 @@ fn foreign_keys_off_finding(s: &Snapshot, count: usize) -> Finding {
     f.summary = t!("check.config.sqlite_foreign_keys.summary", n = count, count = &said);
     f.severity = Severity::Low;
     f.impact.score = base_score(Severity::Low);
-    f.impact.label = t!("check.config.sqlite_foreign_keys.impact", n = count, count = &said);
+    f.impact.set_label(t!("check.config.sqlite_foreign_keys.impact", n = count, count = &said));
     f.confidence = Confidence::High;
-    f.metrics.push(Metric::new(t!("check.config.sqlite_foreign_keys.metric.foreign_keys"), count as f64, Unit::Count));
+    f.metrics.push(Metric::said(
+        culprit_core::key!("check.config.sqlite_foreign_keys.metric.foreign_keys"),
+        count as f64,
+        Unit::Count,
+    ));
     f.fix = Some(Fix {
         summary: t!("check.config.sqlite_foreign_keys.fix"),
         sql: Some("PRAGMA foreign_key_check;\nPRAGMA foreign_keys = ON;".into()),

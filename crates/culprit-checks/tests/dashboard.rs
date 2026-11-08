@@ -34,6 +34,7 @@ fn session(id: &str, state: &str) -> Session {
         state: state.into(),
         command: None,
         wait: None,
+        waiting_on_lock: None,
         wait_ms: None,
         blocked_by: None,
         elapsed_ms: None,
@@ -238,7 +239,7 @@ fn a_live_read_puts_blocking_first() {
     without_now(&mut d, "The server closed the connection");
     let now = tile(&d, TileKey::Now);
     assert_eq!(now.status, TileStatus::Unavailable);
-    assert_eq!(now.takeaway, "Couldn't read sessions: the server closed the connection.");
+    assert_eq!(now.takeaway, "Couldn't read sessions: The server closed the connection");
 }
 
 #[test]
@@ -268,6 +269,9 @@ fn mariadb_is_called_mariadb() {
     r.snapshot.workload = None;
     r.snapshot.waits.clear();
     r.snapshot.server.missing.push(culprit_core::MissingCapability {
+        reason_message: None,
+        fix_message: None,
+        action: None,
         capability: culprit_core::Capability::PerformanceSchema,
         reason: "performance_schema is OFF on this server.".into(),
         fix: Some("Set performance_schema=ON in the server configuration and restart.".into()),
@@ -444,7 +448,7 @@ fn healthy_signals_are_shown_before_ungraded_ones() {
     for n in 0..9 {
         p.signals.push(culprit_core::waits::Signal::new(
             &format!("counter-{n}"),
-            &format!("Counter {n}"),
+            format!("Counter {n}"),
             1.0,
             culprit_core::waits::SignalUnit::Count,
             culprit_core::waits::SignalScope::SinceStartup,
@@ -453,7 +457,7 @@ fn healthy_signals_are_shown_before_ungraded_ones() {
     for n in 0..3 {
         let mut s = culprit_core::waits::Signal::new(
             &format!("healthy-{n}"),
-            &format!("Healthy {n}"),
+            format!("Healthy {n}"),
             1.0,
             culprit_core::waits::SignalUnit::Count,
             culprit_core::waits::SignalScope::SinceStartup,

@@ -1,0 +1,4 @@
+{
+  "valid": ["en", "pt-BR", "zh-Hans", "zh-Hant-HK", "sr-Latn-RS", "es-419", "de-CH-1901", "sl-rozaj", "en-US-u-nu-latn"],
+  "invalid": ["", "../en", "en_us", "en-us", "EN", "sr-latn-RS", "en--US", "en-ABCD", "a", "en-abcdefghijk"]
+}

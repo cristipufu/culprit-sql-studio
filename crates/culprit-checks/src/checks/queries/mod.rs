@@ -78,7 +78,7 @@ pub(crate) fn heavy_share(snapshot: &Snapshot, q: &QueryStat) -> f64 {
 /// otherwise its average. Every check that shows a statement's average beside its share says it this way.
 pub(crate) fn average_metrics(snapshot: &Snapshot, q: &QueryStat) -> Vec<Metric> {
     let Some(w) = snapshot.workload.as_ref() else {
-        return vec![Metric::new(t!("common.metric.average_duration"), q.mean_time_ms, Unit::Ms)];
+        return vec![Metric::said(culprit_core::key!("common.metric.average_duration"), q.mean_time_ms, Unit::Ms)];
     };
     match w.scans_of(q) {
         Some(s) => {
@@ -91,7 +91,9 @@ pub(crate) fn average_metrics(snapshot: &Snapshot, q: &QueryStat) -> Vec<Metric>
             }
             out
         }
-        None => vec![Metric::new(t!("common.metric.average_duration"), w.statement_mean_ms(q), Unit::Ms)],
+        None => {
+            vec![Metric::said(culprit_core::key!("common.metric.average_duration"), w.statement_mean_ms(q), Unit::Ms)]
+        }
     }
 }
 
@@ -202,8 +204,8 @@ pub(crate) fn what_changed_between_scans(snapshot: &Snapshot, queries: &str, bet
 /// change. A number it keeps beside runs and time (temp files, rows returned, WAL, planning time) isn't in What changed,
 /// so a finding says, in one sentence naming this source, to compare the two scans' totals by hand, with this scan's.
 /// `None` on a windowed source (Query Store, a log), whose next scan covers the runs since.
-pub(crate) fn running_totals(snapshot: &Snapshot) -> Option<&str> {
-    snapshot.workload.as_ref().filter(|w| !w.is_windowed()).map(|w| w.source.as_str())
+pub(crate) fn running_totals(snapshot: &Snapshot) -> Option<String> {
+    snapshot.workload.as_ref().filter(|w| !w.is_windowed()).map(|w| w.source_name())
 }
 
 /// What What changed shows of a fix to a statement, between a scan taken when it ships and a later one: only what it
@@ -259,7 +261,7 @@ pub(crate) fn share_metric_label(snapshot: &Snapshot) -> String {
 pub(crate) fn apply_impact(snapshot: &Snapshot, f: &mut Finding, impact: &QueryImpact) {
     apply_query_impact(f, impact);
     if slow_log_only(snapshot) {
-        f.impact.label = t!("queries.impact.slow_log_share", share = format::percent(impact.share));
+        f.impact.set_label(t!("queries.impact.slow_log_share", share = format::percent(impact.share)));
     }
 }
 

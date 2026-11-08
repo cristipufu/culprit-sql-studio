@@ -170,35 +170,33 @@ pub fn redact_plan(plan: &Plan) -> Plan {
         // withheld. Keep primary redaction by deriving prose from the redacted tree; catalog-specific fixes can't
         // be reconstructed from a standalone tree, so those require the original scan's catalog again.
         if let (Some(source), Some(target)) = (&plan.insights, &mut redacted.insights) {
-            let original = crate::insights::insights(plan);
-            let mut contextual = source.note != crate::insights::coverage_note(plan);
+            target.scan_context = source.scan_context;
+            let mut contextual = source.scan_context.unwrap_or(true);
             for i in &mut target.items {
                 if let Some(before) =
                     source.items.iter().find(|b| b.rule == i.rule && b.nodes == i.nodes && b.index_hint == i.index_hint)
                 {
+                    i.scan_context = before.scan_context;
                     i.severity = i.severity.min(before.severity);
                     i.fix_sql = before.fix_sql.as_deref().map(|sql| redact_sql(sql, plan.engine));
-                    if original.iter().any(|raw| {
-                        raw.rule == before.rule
-                            && raw.nodes == before.nodes
-                            && raw.index_hint == before.index_hint
-                            && raw.fix != before.fix
-                    }) {
+                    if before.scan_context.unwrap_or(true) {
                         contextual = true;
                         if i.area == crate::insights::InsightArea::Index {
-                            i.fix = "Check this observation against the selected scan's workload and current index definitions before changing an index. Prefer narrow projections and balance saved reads against storage and write cost; a full covering index is not automatically worthwhile.".into();
+                            i.fix = crate::t!("core.redact.plan.index_context");
                         }
-                        i.verify = "Compare a newly compiled plan, reads and time under equivalent parameters and load. Stored warnings and a changing share of database time alone do not verify improvement.".into();
+                        i.verify = crate::t!("core.redact.plan.verify_context");
                     }
                 }
             }
             if contextual {
-                let context = "Workload priority and SQL restrictions from the selected scan are retained. Historical or cheap statements can still have structural scaling risks; consult the selected scan for catalog-specific advice.";
+                target.scan_context = Some(true);
+                let context = crate::t!("core.redact.plan.scan_context");
                 target.note =
-                    Some(target.note.as_deref().map_or_else(|| context.to_string(), |n| format!("{n} {context}")));
+                    Some(target.note.as_deref().map_or_else(|| context.clone(), |n| format!("{n} {context}")));
             }
         }
     }
+    redacted.render_recorded_messages();
     redacted
 }
 

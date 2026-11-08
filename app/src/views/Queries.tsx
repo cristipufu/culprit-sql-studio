@@ -18,7 +18,7 @@ import { useHotkeys } from "../lib/hotkeys";
 import { t } from "../lib/i18n";
 import { addPlan, compare } from "../lib/plans";
 import { querySummary } from "../lib/query-summary";
-import { figures, honest, workloadKind, windowPhrase, type Figures } from "../lib/rates";
+import { workloadSource, figures, honest, workloadKind, windowPhrase, type Figures } from "../lib/rates";
 import { setState, toast, useStore } from "../lib/store";
 import { compareSince } from "./Overview";
 import { remember, rememberedChoice } from "../lib/prefs";
@@ -159,7 +159,7 @@ export function Queries({ report }: { report: Report }) {
           </label>
           <span className="spacer" />
           <span className="muted">
-            {t("ui.queries.shown", { n: workload.query_count, shown: String(rows.length), total: count(workload.query_count), source: workload.source })}
+            {t("ui.queries.shown", { n: workload.query_count, shown: String(rows.length), total: count(workload.query_count), source: workloadSource(workload) })}
           </span>
         </div>
         <div className="table-wrap" ref={tableRef}>
@@ -260,7 +260,7 @@ function QueryDetail({ report, query }: { report: Report; query: QueryStat }) {
   const share = stated.share;
   const rates = honest(w);
   // A burst, or fewer runs than days: its count and when it ran ("runs on Oct 11, 15:51–15:55 UTC").
-  const ran = stated.said?.replace(/^\S+ /, "");
+  const ran = stated.said;
   const related = report.findings.filter((f) => f.queries.some((r) => r.id === query.id));
   const focus = related.flatMap((f) => f.queries.filter((r) => r.id === query.id).map((r) => r.plan_node)).find((n) => n != null) ?? null;
   const [tab, setTab] = useState<DetailTab>(rememberedTab);
@@ -323,9 +323,9 @@ function QueryDetail({ report, query }: { report: Report; query: QueryStat }) {
                 {stated.activity ? (
                   <Metric value={`${stated.activity.incomplete ? "≥ " : ""}${count(stated.runs)}`} label={t("ui.queries.metric.runs_observed")} />
                 ) : ran != null ? (
-                  <Metric value={count(stated.runs)} label={ran} />
+                  <Metric label={ran} />
                 ) : stated.over ? (
-                  <Metric value={count(stated.runs)} label={stated.perDay ? t("ui.queries.metric.runs_per_day") : rates.runsHeader.toLowerCase()} />
+                  <Metric value={count(stated.runs)} label={stated.perDay ? t("ui.queries.metric.runs_per_day") : t("ui.queries.metric.runs_count", { n: stated.runs })} />
                 ) : (
                   <Metric value={count(rates.value(query.executions))} label={t("ui.queries.metric.runs_over", { suffix: rates.suffix })} />
                 )}
@@ -398,10 +398,10 @@ function QueryDetail({ report, query }: { report: Report; query: QueryStat }) {
   );
 }
 
-function Metric({ value, label }: { value: string; label: string }) {
+function Metric({ value, label }: { value?: string; label: string }) {
   return (
     <div className="metric">
-      <div className="value">{value}</div>
+      {value != null && <div className="value">{value}</div>}
       <div className="label">{label}</div>
     </div>
   );
@@ -541,7 +541,7 @@ function QueryPlans(props: { report: Report; query: QueryStat; focus: number | n
             {t("ui.queries.plans")} <span className="muted">{variants.length}</span>
           </>
         ) : (
-          <span className="muted plan-source">{query.plan?.kind === "actual" ? t("ui.queries.actual_plan") : report.snapshot.server.engine === "mssql" ? (report.snapshot.workload?.source ?? t("ui.queries.tab.plan")) : t("ui.queries.estimated_plan")}</span>
+          <span className="muted plan-source">{query.plan?.kind === "actual" ? t("ui.queries.actual_plan") : report.snapshot.server.engine === "mssql" ? (report.snapshot.workload ? workloadSource(report.snapshot.workload) : t("ui.queries.tab.plan")) : t("ui.queries.estimated_plan")}</span>
         )}
         <span className="actions">
           {variants.length > 1 && (

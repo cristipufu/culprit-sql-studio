@@ -1,7 +1,7 @@
 //! Unexpected backend terminations are an evictable record set, not an error rate or a complete SQL error log.
 use crate::{global, probe::Probe, sources};
 use culprit_core::{
-    CounterScope, Coverage, Error, QueryTermination, Result, SnapshotOptions, TerminationHistory, TerminationReason, t,
+    CounterScope, Coverage, Error, QueryTermination, Result, SnapshotOptions, TerminationHistory, TerminationReason,
 };
 use culprit_postgres::wire::{ObservedSession, query_bounded, query_one};
 use std::collections::BTreeSet;
@@ -19,7 +19,8 @@ pub(crate) async fn collect(
     let history = coverage.read(&sources::TERMINATIONS, result)?;
     coverage.completed(&sources::TERMINATIONS, history.events.len());
     if history.partial {
-        coverage.partial(&sources::TERMINATIONS, t!("provider.yugabyte.coverage.terminations_partial"));
+        coverage
+            .partial(&sources::TERMINATIONS, culprit_core::message!("provider.yugabyte.coverage.terminations_partial"));
     }
     Some(history)
 }
@@ -31,7 +32,7 @@ pub(crate) async fn read(
     limit: usize,
 ) -> Result<TerminationHistory> {
     let end = culprit_core::format::epoch_seconds(&probe.now)
-        .ok_or_else(|| Error::invalid(t!("provider.yugabyte.error.invalid_termination_time")))?;
+        .ok_or_else(|| Error::invalid(culprit_core::message!("provider.yugabyte.error.invalid_termination_time")))?;
     let minutes = options.window_in_minutes().min(culprit_core::MAX_WINDOW_MINUTES);
     let start = end - f64::from(minutes) * 60.0;
     let before = session.notices();
@@ -118,41 +119,56 @@ pub(crate) async fn read(
         ),
     )
     .await?
-    .ok_or_else(|| Error::invalid(t!("provider.yugabyte.error.no_termination_bounds")))?;
+    .ok_or_else(|| Error::invalid(culprit_core::message!("provider.yugabyte.error.no_termination_bounds")))?;
     if !window.flag("allowed") {
         return Err(Error::new(
             culprit_core::ErrorCode::PermissionDenied,
-            t!("provider.yugabyte.error.privilege_changed_terminations"),
+            culprit_core::message!("provider.yugabyte.error.privilege_changed_terminations"),
         ));
     }
     partial |= session.notices() != before;
     let mut notes = vec![
-        t!("provider.yugabyte.terminations.scope"),
-        t!("provider.yugabyte.terminations.dates"),
-        t!("provider.yugabyte.terminations.sigkill"),
+        culprit_core::message!("provider.yugabyte.terminations.scope"),
+        culprit_core::message!("provider.yugabyte.terminations.dates"),
+        culprit_core::message!("provider.yugabyte.terminations.sigkill"),
     ];
     if probe.global && !cluster {
-        notes.push(t!("provider.yugabyte.terminations.local"));
+        notes.push(culprit_core::message!("provider.yugabyte.terminations.local"));
     }
+    let source_message = culprit_core::message!(
+        "model.observation.source.ysql",
+        relation = "yb_terminated_queries",
+        scope = if cluster {
+            "cluster"
+        } else if probe.node.is_some() {
+            "node"
+        } else {
+            "unknown"
+        },
+        node = probe.node.as_deref().unwrap_or_default(),
+        limited = "no",
+        role = ""
+    );
+    let source = source_message.render();
+    let rendered_notes = notes.iter().map(culprit_core::i18n::Message::render).collect();
+    let visibility_message = match probe.statement_role {
+        None => culprit_core::message!("provider.yugabyte.terminations.complete_visibility"),
+        Some(role) => culprit_core::message!("provider.yugabyte.terminations.role_visibility", role = role.to_string()),
+    };
+    let visibility = visibility_message.render();
     Ok(TerminationHistory {
-        source: format!(
-            "yb_terminated_queries ({})",
-            if cluster {
-                "configured cluster views".into()
-            } else {
-                format!("node {}", probe.node.as_deref().unwrap_or("unknown"))
-            }
-        ),
+        source_message: Some(source_message),
+        visibility_message: Some(visibility_message),
+        note_messages: Some(notes),
+
+        source,
         requested_start: window.string("start"),
         requested_end: window.string("end"),
         scope: if cluster { CounterScope::Cluster } else { CounterScope::Node },
         nodes: nodes.into_iter().collect(),
-        visibility: probe.statement_role.map_or_else(
-            || t!("provider.yugabyte.terminations.complete_visibility"),
-            |id| format!("Native visibility for login role {id}; inherited privileges may expose other roles' records"),
-        ),
+        visibility,
         partial,
-        notes,
+        notes: rendered_notes,
         events,
     })
 }

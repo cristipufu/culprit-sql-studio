@@ -18,6 +18,32 @@ fn demo() -> Snapshot {
 }
 
 #[test]
+fn saved_events_render_for_the_reader_without_changing_their_evidence() {
+    let dir = std::env::temp_dir().join(format!("culprit-history-language-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let current = demo();
+    let mut previous = current.clone();
+    previous.taken_at = "2026-10-01T00:00:00Z".into();
+    previous.indexes.pop();
+    let events = culprit_core::i18n::scope("fr", || diff(Some(&previous), &current, Vec::new()));
+    assert!(!events.is_empty());
+    keep_scan(&dir, &current, Some(&previous), &events);
+    let stored: serde_json::Value = serde_json::from_slice(&std::fs::read(path(&dir, &current.id)).unwrap()).unwrap();
+    assert!(stored["events"].as_array().unwrap().iter().all(|e| e["title"] == ""));
+    let en = culprit_core::i18n::scope("en", || read(&dir, &current.id).unwrap().events);
+    let fr = culprit_core::i18n::scope("fr", || read(&dir, &current.id).unwrap().events);
+    assert_eq!(en.len(), fr.len());
+    assert!(en.iter().zip(&fr).any(|(en, fr)| en.title != fr.title));
+    for (mut en, mut fr) in en.into_iter().zip(fr) {
+        en.clear_rendered_text();
+        fr.clear_rendered_text();
+        assert_eq!(en, fr);
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn a_scan_dates_the_index_it_saw_appear() {
     let dir = std::env::temp_dir().join(format!("culprit-history-new-index-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -272,7 +298,7 @@ fn a_replicas_usage_counters_are_set_aside() {
 
     s.settings.push(culprit_core::Setting {
         name: culprit_core::REPLICA_SETTING.into(),
-        value: "readable secondary".into(),
+        value: "readable-secondary".into(),
         default_value: None,
         scope: "database".into(),
     });

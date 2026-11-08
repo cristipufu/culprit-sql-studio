@@ -115,7 +115,7 @@ pub(super) fn check_alter_table(
         f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
         f.impact.score = base_score(f.severity);
         let size = table_size_label(rows, bytes);
-        f.impact.label = size.clone();
+        f.impact.set_label(size.clone());
         f.title = t!("view.sql_lint.mysql_online_ddl.title", table = &table.name, size = &size);
         f.summary = t!("view.sql_lint.mysql_online_ddl.summary", sql = compact_sql(stmt), table = &qual, size = size);
         let can_append = !upper.iter().any(|t| matches!(t.as_str(), "ALGORITHM" | "LOCK"));
@@ -320,7 +320,7 @@ fn check_add_not_null_without_default(
         f.severity = Severity::High;
         f.impact.score = base_score(f.severity);
         let size = table_size_label(rows, bytes);
-        f.impact.label = t!("view.sql_lint.not_null_without_default.impact");
+        f.impact.set_label(t!("view.sql_lint.not_null_without_default.impact"));
         f.title = t!(
             "view.sql_lint.not_null_without_default.title",
             column = format!("{}.{col_name}", table.name),
@@ -381,7 +381,7 @@ fn check_postgres_constraint_additions(
         f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
         f.impact.score = base_score(f.severity);
         let size = table_size_label(rows, bytes);
-        f.impact.label = size.clone();
+        f.impact.set_label(size.clone());
         f.title = t!("view.sql_lint.unvalidated_constraint.title", kind = kind, table = &table.name, size = &size);
         f.summary = t!(
             "view.sql_lint.unvalidated_constraint.summary",
@@ -421,7 +421,7 @@ fn check_postgres_constraint_additions(
         f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
         f.impact.score = base_score(f.severity);
         let size = table_size_label(rows, bytes);
-        f.impact.label = size.clone();
+        f.impact.set_label(size.clone());
         f.title = t!("view.sql_lint.blocking_unique.title", kind = kind, table = &table.name, size = &size);
         f.summary = t!(
             "view.sql_lint.blocking_unique.summary",
@@ -492,7 +492,7 @@ fn check_add_volatile_default(
         f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
         f.impact.score = base_score(f.severity);
         let size = table_size_label(rows, bytes);
-        f.impact.label = size.clone();
+        f.impact.set_label(size.clone());
         f.title = t!(
             "view.sql_lint.volatile_default.title",
             column = format!("{}.{col_name}", table.name),
@@ -584,7 +584,7 @@ fn check_column_type_or_set_not_null(
         f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
         f.impact.score = base_score(f.severity);
         let size = table_size_label(rows, bytes);
-        f.impact.label = size.clone();
+        f.impact.set_label(size.clone());
         f.title = t!("view.sql_lint.table_rewrite.title", table = &table.name, size = &size);
         f.summary = t!(
             "view.sql_lint.table_rewrite.summary",
@@ -613,7 +613,7 @@ fn check_column_type_or_set_not_null(
         f.severity = Severity::Medium;
         f.impact.score = base_score(f.severity);
         let size = table_size_label(rows, bytes);
-        f.impact.label = size.clone();
+        f.impact.set_label(size.clone());
         f.title = t!("view.sql_lint.set_not_null.title", table = &table.name, size = &size);
         f.summary = t!("view.sql_lint.set_not_null.summary", sql = compact_sql(scope.stmt), table = &qual, size = size);
         f.fix = Some(Fix { summary: t!("view.sql_lint.set_not_null.fix"), sql: None, cost: None });
@@ -678,7 +678,7 @@ fn check_foreign_key_addition(
         f.confidence = Confidence::High;
         f.severity = if is_large_table(child_table) { Severity::High } else { Severity::Medium };
         f.impact.score = base_score(f.severity);
-        f.impact.label = t!("view.sql_lint.unindexed_fk.impact");
+        f.impact.set_label(t!("view.sql_lint.unindexed_fk.impact"));
         f.title = t!("view.sql_lint.unindexed_fk.title", table = &child_table.name, columns = &cols_label);
         f.summary = t!(
             "view.sql_lint.unindexed_fk.summary",
@@ -727,8 +727,11 @@ fn check_foreign_key_addition(
                 f.impact.score = base_score(f.severity);
                 let (child, parent) =
                     (format!("{child_qual}.{}", c.name), format!("{}.{}", parent_table.qualified(), p.name));
-                f.impact.label =
-                    t!("view.sql_lint.fk_type_mismatch.impact", child_type = &c.data_type, parent_type = &p.data_type);
+                f.impact.set_label(t!(
+                    "view.sql_lint.fk_type_mismatch.impact",
+                    child_type = &c.data_type,
+                    parent_type = &p.data_type
+                ));
                 f.title = t!(
                     "view.sql_lint.fk_type_mismatch.title",
                     child = format!("{}.{}", child_table.name, c.name),

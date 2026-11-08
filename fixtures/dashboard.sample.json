@@ -1435,7 +1435,7 @@
     "taken_at": "2026-10-11T12:15:12Z",
     "tiles": [
       {
-        "detail": "Query statistics shows how to get them.",
+        "detail": "The Query statistics tile shows how to get them.",
         "fix_sql": null,
         "items": [],
         "key": "db-time",
@@ -1510,7 +1510,7 @@
         "title": "Findings"
       },
       {
-        "detail": "Query statistics shows how to get them.",
+        "detail": "The Query statistics tile shows how to get them.",
         "fix_sql": null,
         "items": [],
         "key": "top-queries",
@@ -1792,7 +1792,7 @@
         "title": "Indexes"
       },
       {
-        "detail": "Query statistics shows how to get them.",
+        "detail": "The Query statistics tile shows how to get them.",
         "fix_sql": null,
         "items": [],
         "key": "plans",
@@ -1836,7 +1836,7 @@
         "title": "Replication"
       },
       {
-        "detail": "Query statistics shows how to get them.",
+        "detail": "The Query statistics tile shows how to get them.",
         "fix_sql": null,
         "items": [],
         "key": "failures",
@@ -2838,7 +2838,7 @@
             "finding_id": null,
             "id": "cache-hit",
             "kind": "signal",
-            "label": "Reads served from memory",
+            "label": "Reads served from shared_buffers",
             "query_id": null,
             "share": null,
             "status": "info",
@@ -2849,7 +2849,7 @@
             "finding_id": null,
             "id": "temp-bytes",
             "kind": "signal",
-            "label": "Temporary files written",
+            "label": "Temporary files written since reset",
             "query_id": null,
             "share": null,
             "status": "info",

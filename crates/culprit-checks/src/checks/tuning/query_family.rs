@@ -181,13 +181,17 @@ fn copies_finding(snapshot: &Snapshot, copies: Copies<'_>) -> Finding {
     let share = share.unwrap_or(0.0);
     f.severity = severity;
     f.impact.score = base_score(f.severity) + family.variants.log10().max(0.0) * 3.0 + share * 20.0;
-    f.impact.label = t!("check.query_family.impact", count = &variants);
+    f.impact.set_label(t!("check.query_family.impact", count = &variants));
     f.impact.db_time_share = (share > 0.0).then_some(share);
     f.confidence = Confidence::High;
-    f.metrics.push(Metric::new(t!("check.query_family.metric.variants"), family.variants, Unit::Count));
-    f.metrics.push(Metric::new(t!("common.metric.executions"), family.executions, Unit::Count));
+    f.metrics.push(Metric::said(
+        culprit_core::key!("check.query_family.metric.variants"),
+        family.variants,
+        Unit::Count,
+    ));
+    f.metrics.push(Metric::said(culprit_core::key!("common.metric.executions"), family.executions, Unit::Count));
     if let Some(b) = family.cached_bytes {
-        f.metrics.push(Metric::new(t!("check.query_family.metric.plan_cache"), b, Unit::Bytes));
+        f.metrics.push(Metric::said(culprit_core::key!("check.query_family.metric.plan_cache"), b, Unit::Bytes));
     }
     f.queries = family
         .query_ids
@@ -259,19 +263,19 @@ fn single_use_finding(snapshot: &Snapshot, plans: SingleUsePlans<'_>) -> Finding
     f.summary = summary.join(" ");
     f.severity = severity;
     f.impact.score = base_score(f.severity) + share * 10.0;
-    f.impact.label = t!("check.query_family.plan_cache.impact", size = &bytes);
+    f.impact.set_label(t!("check.query_family.plan_cache.impact", size = &bytes));
     f.confidence = Confidence::High;
-    f.metrics.push(Metric::new(
-        t!("check.query_family.plan_cache.metric.single_use_plans"),
+    f.metrics.push(Metric::said(
+        culprit_core::key!("check.query_family.plan_cache.metric.single_use_plans"),
         cache.single_use_plans,
         Unit::Count,
     ));
-    f.metrics.push(Metric::new(
-        t!("check.query_family.plan_cache.metric.their_memory"),
+    f.metrics.push(Metric::said(
+        culprit_core::key!("check.query_family.plan_cache.metric.their_memory"),
         cache.single_use_bytes,
         Unit::Bytes,
     ));
-    f.metrics.push(Metric::new(t!("check.query_family.plan_cache.metric.share"), share, Unit::Ratio));
+    f.metrics.push(Metric::said(culprit_core::key!("check.query_family.plan_cache.metric.share"), share, Unit::Ratio));
     // Where the setting lives: per database on Azure SQL Database, a server option elsewhere (the DB parameter
     // group on RDS, which refuses sp_configure).
     f.fix = Some(if ad_hoc_on {

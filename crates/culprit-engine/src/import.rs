@@ -68,6 +68,26 @@ pub struct ImportCandidate {
     pub note: Option<String>,
     /// The saved connection that already points at the same database, if any.
     pub saved_as: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub notice: Option<ImportNotice>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum ImportNotice {
+    WindowsAuthentication,
+    EntraFromAnotherHost,
+}
+
+impl ImportNotice {
+    fn message(self) -> String {
+        match self {
+            Self::WindowsAuthentication => culprit_core::t!("engine.import.windows_auth"),
+            Self::EntraFromAnotherHost => culprit_core::t!("engine.import.entra_elsewhere"),
+        }
+    }
 }
 
 /// Where each tool keeps its connections on this machine. DataGrip also reads `.idea/` in the current directory (project data
@@ -257,7 +277,7 @@ fn ads_profile(source: ImportSource, file: &str, provider: &str, o: &Value) -> O
     spec.auth = if auth_type.starts_with("azure") || auth_type.starts_with("activedirectory") {
         AuthKind::Entra
     } else if auth_type == "integrated" {
-        note = Some(culprit_core::t!("engine.import.windows_auth"));
+        note = Some(ImportNotice::WindowsAuthentication);
         AuthKind::Password
     } else {
         AuthKind::Password
@@ -566,7 +586,7 @@ fn candidate(
     origin: Option<&str>,
     spec: ConnectionSpec,
     environment: Option<Environment>,
-    mut note: Option<String>,
+    mut note: Option<ImportNotice>,
 ) -> Option<ImportCandidate> {
     let engine = spec.engine?;
     let host = spec.host.trim().to_string();
@@ -576,7 +596,7 @@ fn candidate(
     let mut auth = spec.auth;
     if auth == AuthKind::Entra && !entra_host_allowed(engine, &host) {
         auth = AuthKind::Password;
-        note = Some(culprit_core::t!("engine.import.entra_elsewhere"));
+        note = Some(ImportNotice::EntraFromAnotherHost);
     }
     let options: BTreeMap<String, String> = spec
         .options
@@ -609,7 +629,8 @@ fn candidate(
         user,
         auth,
         options,
-        note,
+        note: note.map(ImportNotice::message),
+        notice: note,
         saved_as: None,
     })
 }

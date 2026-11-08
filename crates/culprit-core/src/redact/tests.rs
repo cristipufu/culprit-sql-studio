@@ -2,12 +2,77 @@ use super::plan::is_measurement;
 use super::*;
 
 #[test]
+fn recorded_messages_and_capability_actions_do_not_retain_private_collector_details() {
+    let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
+    let message = crate::message!("engine.query_log.stopped", why = "private-collector-canary");
+    snapshot.notes.push(crate::CollectorNote::recorded("query log", message.clone()));
+    snapshot.sources.push(crate::SourceOutcome {
+        source: "query log".into(),
+        state: crate::SourceState::Partial,
+        reason: Some(message.render()),
+        reason_message: Some(message),
+    });
+    snapshot.server.missing.push(crate::MissingCapability::sql(
+        crate::Capability::Showplan,
+        crate::message!("engine.query_log.stopped", why = "private-collector-canary"),
+        "SELECT 'private-collector-canary'",
+    ));
+    let mut shared = redact_snapshot(&snapshot);
+    shared.render_recorded_messages();
+    assert!(!serde_json::to_string(&shared).unwrap().contains("private-collector-canary"));
+    assert!(shared.server.missing.iter().all(|m| m.action.is_none()));
+}
+
+#[test]
+fn plan_redaction_keeps_scan_restrictions_from_facts_even_when_the_prose_matches() {
+    let snapshot: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
+    let mut plan = snapshot
+        .queries()
+        .iter()
+        .filter_map(|q| q.plan.clone())
+        .find(|p| crate::insights::insights(p).iter().any(|i| i.area == crate::insights::InsightArea::Index))
+        .expect("a plan with index advice");
+    crate::insights::annotate(&mut plan);
+    let source = plan.insights.as_mut().unwrap();
+    source.scan_context = Some(true);
+    for item in &mut source.items {
+        item.scan_context = Some(true);
+        item.severity = crate::Severity::Low;
+        item.fix_sql = None;
+    }
+    for language in ["en", "fr", "de"] {
+        crate::i18n::scope(language, || {
+            let redacted = redact_plan(&plan);
+            let insights = redacted.insights.unwrap();
+            assert_eq!(insights.scan_context, Some(true));
+            assert!(insights.note.unwrap().contains(&crate::t!("core.redact.plan.scan_context")));
+            for item in &insights.items {
+                assert_eq!(item.severity, crate::Severity::Low);
+                assert!(item.fix_sql.is_none());
+                assert_eq!(item.verify, crate::t!("core.redact.plan.verify_context"));
+                if item.area == crate::insights::InsightArea::Index {
+                    assert_eq!(item.fix, crate::t!("core.redact.plan.index_context"));
+                }
+            }
+        });
+    }
+}
+
+#[test]
 fn distributed_scope_redaction_is_complete_correlated_and_idempotent() {
     let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/yugabyte-demo.json")).unwrap();
     let node = snapshot.operations.node_resources.as_ref().unwrap().nodes[0].node.clone();
     let scope = format!("node {node}, role 4294000001 only");
     let w = snapshot.workload.as_mut().unwrap();
     w.source = scope.clone();
+    w.source_message = Some(crate::message!(
+        "model.workload.source.ysql",
+        scope = "node",
+        node = &node,
+        limited = "yes",
+        role = "4294000001"
+    ));
+    crate::i18n::scope("fr", || w.refresh_language());
     for q in &mut w.queries {
         if let Some(h) = &mut q.plan_history {
             h.source = scope.clone();
@@ -15,9 +80,19 @@ fn distributed_scope_redaction_is_complete_correlated_and_idempotent() {
     }
     let h = snapshot.operations.activity_history.as_mut().unwrap();
     h.period.source = scope.clone();
+    h.period.source_message = Some(crate::message!(
+        "model.observation.source.ysql",
+        relation = "yb_active_session_history",
+        scope = "node",
+        node = &node,
+        limited = "yes",
+        role = "4294000001"
+    ));
     let h = snapshot.operations.termination_history.as_mut().unwrap();
     h.source = scope.clone();
     h.visibility = scope;
+    h.visibility_message = Some(crate::message!("provider.yugabyte.terminations.role_visibility", role = "4294000001"));
+    crate::i18n::scope("fr", || snapshot.operations.render_recorded_messages());
     snapshot.bind_identity(crate::DatabaseIdentity::server(
         Engine::Yugabyte,
         &snapshot.server.database.clone(),
@@ -31,6 +106,7 @@ fn distributed_scope_redaction_is_complete_correlated_and_idempotent() {
     let masked = &shared.operations.node_resources.as_ref().unwrap().nodes[0].node;
     assert!(masked.starts_with("redacted-"));
     let w = shared.workload.as_ref().unwrap();
+    assert!(w.source_message.is_none() && w.source_label.is_none());
     assert!(w.counter_set.as_ref().unwrap().members.contains_key(masked));
     assert!(w.source.contains(masked) && w.source.contains("role [redacted] only"));
     let h = shared.operations.activity_history.as_ref().unwrap();
@@ -68,6 +144,9 @@ fn retained_plan_bodies_are_redacted_with_their_parent_snapshot() {
     cached.statement = Some("SELECT 'PLANTED-cache-value'".into());
     cached.raw = Some("PLANTED-cache-native-text".into());
     q.plan_history = Some(crate::PlanHistory {
+        source_message: None,
+        note_message: None,
+
         source: "native plan cache".into(),
         kind: crate::PlanHistoryKind::Cache,
         note: "Independent cache periods".into(),
@@ -432,13 +511,17 @@ fn plan_facts_and_plugin_fix_sql_share_the_same_redaction_boundary() {
     assert!(!redacted.contains("plan-database-canary"));
     assert!(!redacted.contains("literal-value-canary"));
     let finding = &mut report.findings[0];
+    finding.facts.statement =
+        Some(crate::StatementEvidence { sql: "SELECT 'literal-value-canary'".into(), start: 0, end: 29, line: 1 });
     finding.title = "Value 'literal-value-canary'".into();
     finding.fix = Some(crate::Fix {
         summary: "Use the predicate".into(),
         sql: Some("CREATE INDEX ix ON dbo.t (x) WHERE tenant = 'literal-value-canary'".into()),
         cost: None,
     });
-    assert!(!serde_json::to_string(&redact_finding(finding, Engine::Mssql)).unwrap().contains("literal-value-canary"));
+    let shared = redact_finding(finding, Engine::Mssql);
+    assert!(shared.facts.statement.is_none());
+    assert!(!serde_json::to_string(&shared).unwrap().contains("literal-value-canary"));
 }
 
 #[test]

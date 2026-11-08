@@ -1,7 +1,7 @@
 {
   // The browser tests run under Playwright's runner, against the demo: they see its API, never the app's internals.
   "extends": "./tsconfig.json",
-  "compilerOptions": { "types": ["bun"] },
+  "compilerOptions": { "types": ["bun", "vite/client"] },
   "include": ["e2e", "playwright.config.ts"],
   "exclude": []
 }

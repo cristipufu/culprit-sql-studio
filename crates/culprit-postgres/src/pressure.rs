@@ -91,7 +91,7 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
                 Signal::new(
                     culprit_core::signal_id::CACHE_HIT,
                     // shared_buffers only: a read the operating system's cache serves counts as a miss here.
-                    &t!("provider.postgres.signal.cache_hit"),
+                    culprit_core::message!("provider.postgres.signal.cache_hit"),
                     hit / (hit + read) * 100.0,
                     SignalUnit::Percent,
                     SignalScope::SinceStartup,
@@ -105,7 +105,7 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
             Some(h) if h >= 1.0 => p.signals.push(
                 Signal::new(
                     culprit_core::signal_id::TEMP_BYTES,
-                    &t!("provider.postgres.signal.temp_per_hour"),
+                    culprit_core::message!("provider.postgres.signal.temp_per_hour"),
                     temp / h,
                     SignalUnit::Bytes,
                     SignalScope::SinceStartup,
@@ -120,14 +120,14 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
             // Under an hour, or since an unknown time: the total, which no rate threshold applies to.
             Some(_) => p.signals.push(Signal::new(
                 culprit_core::signal_id::TEMP_BYTES,
-                &t!("provider.postgres.signal.temp_since_reset"),
+                culprit_core::message!("provider.postgres.signal.temp_since_reset"),
                 temp,
                 SignalUnit::Bytes,
                 SignalScope::SinceStartup,
             )),
             None => p.signals.push(Signal::new(
                 culprit_core::signal_id::TEMP_BYTES,
-                &t!("provider.postgres.signal.temp_since_began"),
+                culprit_core::message!("provider.postgres.signal.temp_since_began"),
                 temp,
                 SignalUnit::Bytes,
                 SignalScope::SinceStartup,
@@ -136,7 +136,7 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
         if let Some(h) = hours {
             p.signals.push(Signal::new(
                 "commits",
-                &t!("provider.postgres.signal.commits"),
+                culprit_core::message!("provider.postgres.signal.commits"),
                 r.number("xact_commit").unwrap_or(0.0) / (h * 3600.0),
                 SignalUnit::PerSecond,
                 SignalScope::SinceStartup,
@@ -147,7 +147,7 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
             p.signals.push(
                 Signal::new(
                     "rollbacks",
-                    &t!("provider.postgres.signal.rollbacks"),
+                    culprit_core::message!("provider.postgres.signal.rollbacks"),
                     rollbacks / (commits + rollbacks) * 100.0,
                     SignalUnit::Percent,
                     SignalScope::SinceStartup,
@@ -158,7 +158,7 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
         p.signals.push(
             Signal::new(
                 "deadlocks",
-                &t!("provider.postgres.signal.deadlocks"),
+                culprit_core::message!("provider.postgres.signal.deadlocks"),
                 r.number("deadlocks").unwrap_or(0.0),
                 SignalUnit::Count,
                 SignalScope::SinceStartup,
@@ -176,7 +176,7 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
         if timed + requested > 0.0 {
             p.signals.push(Signal::new(
                 culprit_core::signal_id::CHECKPOINTS,
-                &t!("provider.postgres.signal.checkpoints"),
+                culprit_core::message!("provider.postgres.signal.checkpoints"),
                 timed + requested,
                 SignalUnit::Count,
                 SignalScope::SinceStartup,
@@ -184,7 +184,7 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
             p.signals.push(
                 Signal::new(
                     culprit_core::signal_id::CHECKPOINTS_REQUESTED,
-                    &t!("provider.postgres.signal.checkpoints_requested"),
+                    culprit_core::message!("provider.postgres.signal.checkpoints_requested"),
                     requested / (timed + requested) * 100.0,
                     SignalUnit::Percent,
                     SignalScope::SinceStartup,
@@ -204,7 +204,7 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
     {
         p.signals.push(Signal::new(
             "wal-buffers-full",
-            &t!("provider.postgres.signal.wal_buffers_full"),
+            culprit_core::message!("provider.postgres.signal.wal_buffers_full"),
             full,
             SignalUnit::Count,
             SignalScope::SinceStartup,
@@ -222,7 +222,7 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
         p.signals.push(
             Signal::new(
                 culprit_core::signal_id::CONNECTIONS,
-                &t!("provider.postgres.signal.connections"),
+                culprit_core::message!("provider.postgres.signal.connections"),
                 used / max * 100.0,
                 SignalUnit::Percent,
                 SignalScope::Now,
@@ -237,7 +237,7 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
             p.signals.push(
                 Signal::new(
                     culprit_core::signal_id::OLDEST_TRANSACTION,
-                    &t!("provider.postgres.signal.oldest_transaction"),
+                    culprit_core::message!("provider.postgres.signal.oldest_transaction"),
                     t.seconds,
                     SignalUnit::Seconds,
                     SignalScope::Now,
@@ -427,7 +427,7 @@ pub async fn sample(client: &Client, seconds: u32) -> Result<WaitSample> {
     if let (Some(a), Some(b)) = (before, after) {
         signals.push(Signal::new(
             "commits",
-            &t!("provider.postgres.signal.transactions"),
+            culprit_core::message!("provider.postgres.signal.transactions"),
             ((b - a) / elapsed).max(0.0),
             SignalUnit::PerSecond,
             SignalScope::Sampled,

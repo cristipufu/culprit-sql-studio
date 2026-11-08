@@ -283,18 +283,21 @@
           "value": 43.0
         },
         {
+          "key": "check.failing_query.metric.unfinished",
           "label": "Didn't finish",
           "text": null,
           "unit": "ratio",
           "value": 0.27906976744186046
         },
         {
+          "key": "check.failing_query.metric.errors",
           "label": "Errors",
           "text": null,
           "unit": "count",
           "value": 12.0
         },
         {
+          "key": "check.failing_query.metric.recent_error",
           "label": "Recent error",
           "text": "1205 lock wait timeout",
           "unit": "text",
@@ -360,18 +363,21 @@
       "last_seen": "2026-10-11T16:00:37Z",
       "metrics": [
         {
+          "key": "check.lock_time.metric.lock_wait",
           "label": "Lock wait",
           "text": null,
           "unit": "ms",
           "value": 115298.819
         },
         {
+          "key": "check.lock_time.metric.share",
           "label": "Share of its time",
           "text": null,
           "unit": "ratio",
           "value": 0.9999855691410966
         },
         {
+          "key": "check.lock_time.metric.per_run",
           "label": "Per run",
           "text": null,
           "unit": "ms",
@@ -432,6 +438,7 @@
           "value": 0.7470119521912351
         },
         {
+          "key": "common.metric.average_duration",
           "label": "Average duration",
           "text": null,
           "unit": "ms",
@@ -472,6 +479,7 @@
       "impact": {
         "db_time_share": 0.11989445082158064,
         "label": "12% of DB time",
+        "label_key": "support.impact.share",
         "score": 34.62577808823661,
         "time_ms_per_day": null
       },
@@ -485,6 +493,7 @@
           "value": 1.0
         },
         {
+          "key": "common.metric.average_duration",
           "label": "Average duration",
           "text": null,
           "unit": "ms",
@@ -527,6 +536,7 @@
       "impact": {
         "db_time_share": 0.014800847333966714,
         "label": "1% of DB time",
+        "label_key": "support.impact.share",
         "score": 12.165873307727116,
         "time_ms_per_day": null
       },
@@ -534,18 +544,21 @@
       "last_seen": "2026-10-11T12:07:17Z",
       "metrics": [
         {
+          "key": "check.scan_heavy.metric.full_reads",
           "label": "Full reads",
           "text": null,
           "unit": "count",
           "value": 81.0
         },
         {
+          "key": "check.scan_heavy.metric.rows_read",
           "label": "Rows read without an index",
           "text": null,
           "unit": "rows",
           "value": 40500000.0
         },
         {
+          "key": "common.metric.rows_in_table",
           "label": "Rows in table",
           "text": null,
           "unit": "rows",
@@ -596,6 +609,7 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "common.metric.size",
           "label": "Size",
           "text": null,
           "unit": "bytes",
@@ -638,6 +652,7 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "common.metric.size",
           "label": "Size",
           "text": null,
           "unit": "bytes",
@@ -682,6 +697,7 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "check.row_lock_waits.metric.waits",
           "label": "Lock waits since start",
           "text": null,
           "unit": "count",
@@ -695,6 +711,7 @@
           "value": 87138.0
         },
         {
+          "key": "check.row_lock_waits.metric.average",
           "label": "Average wait",
           "text": null,
           "unit": "ms",
@@ -717,7 +734,7 @@
       "title": "Transactions on this server waited 1 min 27 s for row locks since MySQL started 80 minutes ago, 14.5 s each on average",
       "verification_basis": "rescan",
       "verify": [
-        "Sample Waits → Right now during normal load: it counts row-lock waits over the sample, which should be rare and short."
+        "Sample Where time goes → Right now during normal load: it counts row-lock waits over the sample, which should be rare and short."
       ]
     },
     {
@@ -742,6 +759,7 @@
       "last_seen": "2026-10-11T16:00:35Z",
       "metrics": [
         {
+          "key": "check.big_result.metric.rows_per_run",
           "label": "Rows per run",
           "text": null,
           "unit": "rows",
@@ -906,6 +924,7 @@
         "last-actual-plans"
       ],
       "prepare": [
+        "retained observations are worded for this reader",
         "measurement context identifies this database and its clock",
         "index availability and maintenance follow the engine",
         "CTE writes named for their base table",
@@ -947,7 +966,7 @@
         "query-driven index changes need measured work",
         "query evidence leads with absolute cost and period",
         "names without the database",
-        "a caveat repeats nothing the summary or the fix says"
+        "identical complete caveats are shown once"
       ]
     },
     "previous_analyzer": {
@@ -2174,6 +2193,21 @@
           "healthy": "The share of reads served by InnoDB's buffer pool across the whole server. A miss ratio alone does not establish a memory shortage in this database.",
           "key": "buffer-pool-hit",
           "label": "Reads served from memory (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.mysql.signal.buffer_pool_hit",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "percent",
@@ -2183,6 +2217,21 @@
           "healthy": "The share of internal temporary tables written to disk across the whole server. Table sizes and the statements' measured cost determine whether this needs work.",
           "key": "tmp-disk-tables",
           "label": "Temporary tables on disk (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.mysql.signal.tmp_disk_tables",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "percent",
@@ -2192,6 +2241,21 @@
           "healthy": null,
           "key": "questions",
           "label": "Statements (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.mysql.signal.statements",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "per-second",
@@ -2201,6 +2265,21 @@
           "healthy": null,
           "key": "threads-running",
           "label": "Statements running now (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.mysql.signal.statements_running",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "now",
           "status": "info",
           "unit": "count",
@@ -2210,6 +2289,21 @@
           "healthy": null,
           "key": "row-lock-waits",
           "label": "Row-lock waits (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.mysql.signal.row_lock_waits",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "per-hour",
@@ -2219,6 +2313,12 @@
           "healthy": null,
           "key": "row-lock-time",
           "label": "Time waiting for row locks since start (whole server)",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.mysql.signal.row_lock_time",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "milliseconds",
@@ -2228,6 +2328,21 @@
           "healthy": "An average across the whole server's recorded row-lock waits, not a current wait. The lock findings use the amount of waiting too.",
           "key": "row-lock-avg",
           "label": "Average row-lock wait (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.mysql.signal.row_lock_avg",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "milliseconds",
@@ -2237,6 +2352,21 @@
           "healthy": "under 80% of max_connections is healthy",
           "key": "connections",
           "label": "Connections in use (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.mysql.signal.connections",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "now",
           "status": "info",
           "unit": "percent",
@@ -2246,6 +2376,21 @@
           "healthy": "The busiest moment since these counters started, compared with today's limit. This does not establish a connection shortage now.",
           "key": "max-used-connections",
           "label": "Busiest moment (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.mysql.signal.max_used_connections",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "percent",
@@ -2254,7 +2399,13 @@
         {
           "healthy": "Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.",
           "key": "history-length",
-          "label": "Undo history (whole server)",
+          "label": "Undo logs not yet purged (whole server)",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.mysql.signal.history_length",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "now",
           "status": "info",
           "unit": "count",
@@ -2263,7 +2414,13 @@
         {
           "healthy": "A cleanup holder observed at the scan's instant; no long-held-cleanup finding is supported by this scan.",
           "key": "oldest-transaction",
-          "label": "Oldest open transaction",
+          "label": "Oldest transaction to inspect for locks or a retained read view",
+          "label_message": {
+            "arguments": {},
+            "key": "provider.mysql.signal.oldest_transaction",
+            "kind": "catalog"
+          },
+          "measurement_scope": "database",
           "scope": "now",
           "status": "info",
           "unit": "seconds",
@@ -2273,6 +2430,21 @@
           "healthy": "The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.",
           "key": "new-connections",
           "label": "New connections (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.mysql.signal.new_connections",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "per-second",
@@ -2281,7 +2453,22 @@
         {
           "healthy": null,
           "key": "aborted-connects",
-          "label": "Failed connection attempts, per hour (whole server)",
+          "label": "Failed connection attempts (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.mysql.signal.aborted_connects",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "per-hour",
@@ -2290,7 +2477,22 @@
         {
           "healthy": null,
           "key": "aborted-clients",
-          "label": "Connections dropped without closing, per hour (whole server)",
+          "label": "Connections dropped without closing (whole server)",
+          "label_message": {
+            "arguments": {
+              "label": {
+                "kind": "message",
+                "value": {
+                  "arguments": {},
+                  "key": "provider.mysql.signal.aborted_clients",
+                  "kind": "catalog"
+                }
+              }
+            },
+            "key": "health.label.whole_server",
+            "kind": "catalog"
+          },
+          "measurement_scope": "server",
           "scope": "since-startup",
           "status": "info",
           "unit": "per-hour",
@@ -2646,12 +2848,14 @@
                     2
                   ],
                   "rule": "temp-table-sort",
+                  "scan_context": true,
                   "severity": "low",
                   "title": "Groups 499K rows in an internal temporary table, then sorts them (filesort)",
                   "verify": "Explain again: look for grouping in index order or fewer rows entering the temporary table. A temporary table and sort for a different ORDER BY can remain; compare on-disk temporary tables on new runs to check the spill itself."
                 }
               ],
-              "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows."
+              "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -3079,7 +3283,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows."
+              "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -3459,7 +3664,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows."
+              "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -3836,7 +4042,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows."
+              "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -4224,7 +4431,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows."
+              "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -4606,7 +4814,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows."
+              "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -5086,7 +5295,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows."
+              "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -5487,7 +5697,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows."
+              "note": "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+              "scan_context": true
             },
             "kind": "estimated",
             "props": {
@@ -5913,6 +6124,70 @@
       }
     ],
     "headline": "10 opportunities. The top ones touch 4 min of database time over the 2 minutes since statistics were reset (85%).",
+    "headline_message": {
+      "kind": "sequence",
+      "messages": [
+        {
+          "arguments": {
+            "count": {
+              "kind": "digits",
+              "value": "10"
+            },
+            "n": {
+              "kind": "number",
+              "value": 10.0
+            }
+          },
+          "key": "summary.headline.opportunities",
+          "kind": "catalog"
+        },
+        {
+          "arguments": {
+            "cost": {
+              "kind": "message",
+              "value": {
+                "arguments": {
+                  "of": {
+                    "kind": "text",
+                    "value": "database"
+                  },
+                  "share": {
+                    "kind": "percent",
+                    "value": 0.8473893165714874
+                  },
+                  "span": {
+                    "kind": "message",
+                    "value": {
+                      "arguments": {
+                        "count": {
+                          "kind": "digits",
+                          "value": "2"
+                        },
+                        "n": {
+                          "kind": "number",
+                          "value": 2.0
+                        }
+                      },
+                      "key": "model.window.since_reset_minutes",
+                      "kind": "catalog"
+                    }
+                  },
+                  "time": {
+                    "kind": "duration",
+                    "value": 243708.913802
+                  }
+                },
+                "key": "support.cost.time_over",
+                "kind": "catalog"
+              }
+            }
+          },
+          "key": "summary.headline.top_cost",
+          "kind": "catalog"
+        }
+      ],
+      "separator": " "
+    },
     "index_counting": "since the server started or its performance_schema counters were last reset",
     "index_notes": [
       {
@@ -5960,6 +6235,57 @@
     "opportunities": 10,
     "over_scans": [],
     "runs_said": [],
+    "takeaway": "The top ones touch 4 min of database time over the 2 minutes since statistics were reset (85%).",
+    "takeaway_message": {
+      "kind": "sequence",
+      "messages": [
+        {
+          "arguments": {
+            "cost": {
+              "kind": "message",
+              "value": {
+                "arguments": {
+                  "of": {
+                    "kind": "text",
+                    "value": "database"
+                  },
+                  "share": {
+                    "kind": "percent",
+                    "value": 0.8473893165714874
+                  },
+                  "span": {
+                    "kind": "message",
+                    "value": {
+                      "arguments": {
+                        "count": {
+                          "kind": "digits",
+                          "value": "2"
+                        },
+                        "n": {
+                          "kind": "number",
+                          "value": 2.0
+                        }
+                      },
+                      "key": "model.window.since_reset_minutes",
+                      "kind": "catalog"
+                    }
+                  },
+                  "time": {
+                    "kind": "duration",
+                    "value": 243708.913802
+                  }
+                },
+                "key": "support.cost.time_over",
+                "kind": "catalog"
+              }
+            }
+          },
+          "key": "summary.headline.top_cost",
+          "kind": "catalog"
+        }
+      ],
+      "separator": " "
+    },
     "top_share": 0.8473893165714874
   }
 }

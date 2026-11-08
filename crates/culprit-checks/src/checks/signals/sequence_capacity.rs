@@ -137,15 +137,15 @@ fn sequence_capacity_finding(s: &Snapshot, case: NearLimit<'_>) -> Finding {
             f.severity = severity;
             f.confidence = Confidence::High;
             f.impact.score = base_score(f.severity);
-            f.impact.label = t!("check.sequence_capacity.impact", steps = &steps);
+            f.impact.set_label(t!("check.sequence_capacity.impact", steps = &steps));
             f.metrics = vec![
-                Metric::text(t!("check.sequence_capacity.metric.recorded"), &seq.current),
-                Metric::text(t!("check.sequence_capacity.metric.minimum"), &seq.minimum),
-                Metric::text(t!("check.sequence_capacity.metric.maximum"), &seq.maximum),
-                Metric::new(t!("check.sequence_capacity.metric.steps"), remaining as f64, Unit::Count),
+                Metric::said_text(culprit_core::key!("check.sequence_capacity.metric.recorded"), &seq.current),
+                Metric::said_text(culprit_core::key!("check.sequence_capacity.metric.minimum"), &seq.minimum),
+                Metric::said_text(culprit_core::key!("check.sequence_capacity.metric.maximum"), &seq.maximum),
+                Metric::said(culprit_core::key!("check.sequence_capacity.metric.steps"), remaining as f64, Unit::Count),
             ];
             if let Some(table) = &seq.table {
-                f.metrics.push(Metric::text(t!("check.sequence_capacity.metric.table"), table));
+                f.metrics.push(Metric::said_text(culprit_core::key!("check.sequence_capacity.metric.table"), table));
             }
             f.fix = Some(Fix {
                 summary: t!("check.sequence_capacity.fix"),
@@ -169,7 +169,7 @@ fn sequence_capacity_finding(s: &Snapshot, case: NearLimit<'_>) -> Finding {
             f.confidence = Confidence::High;
             f.impact.score = base_score(f.severity);
             let count = format::count(rows);
-            f.impact.label = t!("check.sequence_capacity.int32.impact", rows = &count);
+            f.impact.set_label(t!("check.sequence_capacity.int32.impact", rows = &count));
             f.title = t!("check.sequence_capacity.int32.title", table = &t.name, column = &col.name, rows = &count);
             f.summary = t!(
                 "check.sequence_capacity.int32.summary",
@@ -179,12 +179,12 @@ fn sequence_capacity_finding(s: &Snapshot, case: NearLimit<'_>) -> Finding {
                 rows = &count
             );
             f.metrics = vec![
-                Metric::new(t!("check.sequence_capacity.int32.metric.rows"), rows, Unit::Rows),
-                Metric::text(
-                    t!("check.sequence_capacity.int32.metric.column"),
+                Metric::said(culprit_core::key!("check.sequence_capacity.int32.metric.rows"), rows, Unit::Rows),
+                Metric::said_text(
+                    culprit_core::key!("check.sequence_capacity.int32.metric.column"),
                     format!("{}.{} ({})", t.name, col.name, col.data_type),
                 ),
-                Metric::text(t!("check.sequence_capacity.int32.metric.limit"), "2,147,483,647"),
+                Metric::said_text(culprit_core::key!("check.sequence_capacity.int32.metric.limit"), "2,147,483,647"),
             ];
             f.fix = Some(Fix {
                 summary: t!("check.sequence_capacity.int32.fix", table = &qual, column = &col.name),

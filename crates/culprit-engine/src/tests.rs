@@ -332,6 +332,7 @@ async fn what_cannot_be_done_with_a_connection_says_why_in_english() {
     assert_eq!(said(ws.set_query_log("file", Some(&home))).0, format!("{} isn't a file", folder.display()));
 
     let candidate = ImportCandidate {
+        notice: None,
         alias: "shop".into(),
         source: ImportSource::Ads,
         origin: "shop".into(),

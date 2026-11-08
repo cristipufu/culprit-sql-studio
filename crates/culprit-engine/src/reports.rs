@@ -47,6 +47,45 @@ pub struct ReportSummary {
     pub product: Option<String>,
     /// Why the scan has no query history ("Query Store is OFF on this database."); `None` when it has one.
     pub no_workload: Option<String>,
+    #[serde(default)]
+    pub takeaway: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub headline_message: Option<culprit_core::i18n::Message>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub takeaway_message: Option<culprit_core::i18n::Message>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub no_workload_message: Option<culprit_core::i18n::Message>,
+}
+
+impl ReportSummary {
+    fn render_messages(&mut self) {
+        if let Some(message) = &self.no_workload_message {
+            self.no_workload = Some(message.render());
+        }
+        if let Some(message) = &self.headline_message {
+            self.headline = message.render();
+        }
+        if let Some(message) = &self.takeaway_message {
+            self.takeaway = Some(message.render());
+        }
+    }
+
+    fn for_storage(&self) -> Self {
+        let mut stored = self.clone();
+        if stored.no_workload_message.is_some() {
+            stored.no_workload = None;
+        }
+        if stored.headline_message.is_some() {
+            stored.headline.clear();
+        }
+        if stored.takeaway_message.is_some() {
+            stored.takeaway = None;
+        }
+        stored
+    }
 }
 
 /// The pointer to the latest scan with a window (`latest-7d.json`, `latest-6h.json`), or to the latest of any.
@@ -67,6 +106,10 @@ fn summary_of(report: &Report) -> ReportSummary {
         window_minutes: report.snapshot.options.as_ref().map(|o| o.window_in_minutes()),
         product: Some(report.snapshot.server.product.clone()),
         no_workload: report.snapshot.no_workload_reason(),
+        takeaway: report.summary.takeaway.clone(),
+        headline_message: report.summary.headline_message.clone(),
+        takeaway_message: report.summary.takeaway_message.clone(),
+        no_workload_message: report.snapshot.no_workload_message(),
     }
 }
 
@@ -81,7 +124,7 @@ pub fn save(dir: &Path, report: &Report) -> Result<()> {
         write_atomic(&counters_path(dir, &report.snapshot.id), &json)?;
     }
     let summary = summary_of(report);
-    let json = serde_json::to_vec_pretty(&summary).map_err(|e| Error::internal(e.to_string()))?;
+    let json = serde_json::to_vec_pretty(&summary.for_storage()).map_err(|e| Error::internal(e.to_string()))?;
     write_atomic(&dir.join(format!("{}.summary.json", report.snapshot.id)), &json)?;
     if latest_summary(dir, None).is_none_or(|old| may_replace_latest(&old, &summary)) {
         write_atomic(&summary_path(dir, None), &json)?;
@@ -374,7 +417,12 @@ pub fn latest_summary(dir: &Path, window_minutes: Option<u32>) -> Option<ReportS
 /// A summary this version wrote, of a report it reads; `None` for one another version left behind.
 fn read_summary(path: &Path) -> Option<ReportSummary> {
     let bytes = fs::read(path).ok()?;
-    serde_json::from_slice::<ReportSummary>(&bytes).ok().filter(|s| s.format == culprit_core::SNAPSHOT_FORMAT)
+    let mut summary: ReportSummary = serde_json::from_slice(&bytes).ok()?;
+    if summary.format != culprit_core::SNAPSHOT_FORMAT {
+        return None;
+    }
+    summary.render_messages();
+    Some(summary)
 }
 
 /// The most recent report, or the most recent one taken with a given window (in minutes).
@@ -427,6 +475,10 @@ pub fn load_snapshot(path: &Path) -> Result<culprit_core::Snapshot> {
             } else {
                 Err(e)
             }
+        })
+        .map(|mut snapshot| {
+            snapshot.render_recorded_messages();
+            snapshot
         })
         .map_err(|e| not_a_snapshot(path, &e))
 }
@@ -504,6 +556,193 @@ mod tests {
     use culprit_core::SnapshotOptions;
 
     use super::*;
+
+    #[test]
+    fn plan_sample_provenance_is_saved_as_a_fact_and_worded_when_read() {
+        use culprit_core::{PlanSampleSource, i18n::scope};
+        let dir = std::env::temp_dir().join(format!("culprit-sample-language-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mut snapshot: culprit_core::Snapshot =
+            serde_json::from_str(include_str!("../../../fixtures/mysql-demo.json")).unwrap();
+        let query = snapshot.workload.as_mut().unwrap().queries.iter_mut().find(|q| q.plan.is_some()).unwrap();
+        let query_id = query.id.clone();
+        query.plan.as_mut().unwrap().facts.sample_source = Some(PlanSampleSource::Digest);
+        scope("fr", || save(&dir, &culprit_checks::analyze(snapshot.clone())).unwrap());
+        let path = dir.join(format!("{}.json", snapshot.id));
+        for language in ["en", "fr", "de", "es"] {
+            scope(language, || {
+                let restored = load_snapshot(&path).unwrap();
+                let plan = restored.queries().iter().find(|q| q.id == query_id).unwrap().plan.as_ref().unwrap();
+                assert_eq!(plan.facts.sample_source, Some(PlanSampleSource::Digest));
+                assert_eq!(plan.props.get("Sample"), Some(&PlanSampleSource::Digest.sentence()));
+            });
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn saved_source_labels_render_for_the_reader_and_keep_counter_identity() {
+        use culprit_core::i18n::scope;
+        let dir = std::env::temp_dir().join(format!("culprit-source-language-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mut snapshot: culprit_core::Snapshot =
+            serde_json::from_str(include_str!("../../../fixtures/yugabyte-demo.json")).unwrap();
+        let workload = snapshot.workload.as_mut().unwrap();
+        let source = workload.source.clone();
+        let message = culprit_core::message!(
+            "model.workload.source.ysql",
+            scope = "node",
+            node = "native-node",
+            limited = "yes",
+            role = "42"
+        );
+        workload.source_message = Some(message.clone());
+        let history_source = culprit_core::message!(
+            "model.observation.source.ysql",
+            relation = "yb_pg_stat_plans",
+            scope = "node",
+            node = "native-node",
+            limited = "no",
+            role = ""
+        );
+        let initial_history_note = culprit_core::message!("provider.yugabyte.plan_history.note");
+        let partial_history_note = culprit_core::message!("provider.yugabyte.plan_history.partial");
+        let history_note =
+            culprit_core::i18n::Message::paragraph(vec![initial_history_note.clone(), partial_history_note.clone()]);
+        let query_id = workload.queries[0].id.clone();
+        workload.queries[0].plan_history = Some(culprit_core::PlanHistory {
+            source: String::new(),
+            source_message: Some(history_source.clone()),
+            note: String::new(),
+            note_message: Some(initial_history_note),
+            kind: culprit_core::PlanHistoryKind::Cache,
+            captured_plan_id: None,
+            captured_plan: None,
+        });
+        workload.queries[0].plan_history.as_mut().unwrap().append_note(partial_history_note);
+        let activity_source = culprit_core::message!(
+            "model.observation.source.ysql",
+            relation = "yb_active_session_history",
+            scope = "node",
+            node = "native-node",
+            limited = "yes",
+            role = "42"
+        );
+        let weights = culprit_core::message!("provider.yugabyte.activity.weights");
+        let visibility = culprit_core::message!("provider.yugabyte.terminations.role_visibility", role = "42");
+        let resources_source = culprit_core::message!("provider.yugabyte.resources.source");
+        let tracker_name = culprit_core::message!("provider.yugabyte.resources.root_tracker");
+        let activity = snapshot.operations.activity_history.as_mut().unwrap();
+        activity.period.source_message = Some(activity_source.clone());
+        activity.period.note_messages = Some(vec![weights.clone()]);
+        snapshot.operations.termination_history.as_mut().unwrap().visibility_message = Some(visibility.clone());
+        let resources = snapshot.operations.node_resources.as_mut().unwrap();
+        resources.source_message = Some(resources_source.clone());
+        resources.nodes[0].process_memory.as_mut().unwrap().name_message = Some(tracker_name.clone());
+        scope("fr", || save(&dir, &culprit_checks::analyze(snapshot.clone())).unwrap());
+        let stored: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.join(format!("{}.json", snapshot.id))).unwrap()).unwrap();
+        assert_eq!(stored["snapshot"]["operations"]["activity_history"]["period"]["source"], "");
+        assert_eq!(stored["snapshot"]["operations"]["activity_history"]["period"]["notes"], serde_json::json!([]));
+        for language in ["en", "fr", "de", "es"] {
+            scope(language, || {
+                let restored = load_snapshot(&dir.join(format!("{}.json", snapshot.id))).unwrap();
+                let workload = restored.workload.as_ref().unwrap();
+                assert_eq!(workload.source, source);
+                assert_eq!(workload.source_name(), message.render());
+                assert_eq!(workload.source_label.as_deref(), Some(message.render().as_str()));
+                let history =
+                    workload.queries.iter().find(|q| q.id == query_id).unwrap().plan_history.as_ref().unwrap();
+                assert_eq!(history.source, history_source.render());
+                assert_eq!(history.note, history_note.render());
+                let activity = restored.operations.activity_history.as_ref().unwrap();
+                assert_eq!(activity.period.source, activity_source.render());
+                assert_eq!(activity.period.notes, vec![weights.render()]);
+                assert_eq!(restored.operations.termination_history.as_ref().unwrap().visibility, visibility.render());
+                let resources = restored.operations.node_resources.as_ref().unwrap();
+                assert_eq!(resources.source, resources_source.render());
+                assert_eq!(resources.nodes[0].process_memory.as_ref().unwrap().name, tracker_name.render());
+            });
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn compact_summaries_render_nested_cost_and_period_arguments_for_the_reader() {
+        use culprit_core::i18n::scope;
+        let dir = std::env::temp_dir().join(format!("culprit-summary-language-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let snapshot: culprit_core::Snapshot =
+            serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
+        let french = scope("fr", || culprit_checks::analyze(snapshot.clone()));
+        save(&dir, &french).unwrap();
+        let stored: serde_json::Value = serde_json::from_slice(&fs::read(summary_path(&dir, None)).unwrap()).unwrap();
+        assert_eq!(stored["headline"], "");
+        assert!(stored["takeaway"].is_null());
+        for language in ["en", "de", "fr", "es"] {
+            scope(language, || {
+                let expected = culprit_checks::analyze(snapshot.clone()).summary;
+                let summary = latest_summary(&dir, None).unwrap();
+                assert_eq!(summary.headline, expected.headline);
+                assert_eq!(summary.takeaway, expected.takeaway);
+                assert_eq!(summary.opportunities, expected.opportunities);
+            });
+        }
+        // The count has its own card field; a count-only headline has no invented takeaway.
+        let mut count_only = french.clone();
+        count_only.summary.headline_message =
+            Some(culprit_core::message!("summary.headline.opportunities", n = 1, count = "1"));
+        count_only.summary.takeaway = None;
+        count_only.summary.takeaway_message = None;
+        let mut summary = summary_of(&count_only).for_storage();
+        summary.render_messages();
+        assert!(summary.takeaway.is_none());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn saved_capability_reasons_and_actions_follow_the_reader_while_sql_stays_exact() {
+        use culprit_core::i18n::scope;
+        let dir = std::env::temp_dir().join(format!("culprit-capability-language-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mut snapshot: culprit_core::Snapshot =
+            serde_json::from_str(include_str!("../../../fixtures/postgres-demo.json")).unwrap();
+        snapshot.workload = None;
+        snapshot.server.capabilities.retain(|c| !c.is_workload_source());
+        snapshot.server.missing.retain(|m| !m.capability.is_workload_source());
+        let sql = "CREATE EXTENSION pg_stat_statements;";
+        scope("fr", || {
+            snapshot.server.missing.push(
+                culprit_core::MissingCapability::new(
+                    culprit_core::Capability::PgStatStatements,
+                    culprit_core::message!("provider.postgres.capability.statements.not_installed"),
+                )
+                .with_fix(culprit_core::message!("provider.postgres.capability.statements.create", sql = sql))
+                .with_action(sql, Some(culprit_core::message!("provider.postgres.capability.statements.preloaded"))),
+            );
+            save(&dir, &culprit_checks::analyze(snapshot.clone())).unwrap();
+        });
+        for language in ["en", "fr", "de"] {
+            scope(language, || {
+                let summary = latest_summary(&dir, None).unwrap();
+                assert_eq!(
+                    summary.no_workload,
+                    Some(culprit_core::t!("provider.postgres.capability.statements.not_installed"))
+                );
+                let restored = load_snapshot(&dir.join(format!("{}.json", snapshot.id))).unwrap();
+                let missing = restored.missing_workload().unwrap();
+                assert_eq!(missing.reason, summary.no_workload.unwrap());
+                assert_eq!(
+                    missing.fix,
+                    Some(culprit_core::t!("provider.postgres.capability.statements.create", sql = sql))
+                );
+                let action = missing.action.as_ref().unwrap();
+                assert_eq!(action.sql, sql);
+                assert_eq!(action.detail, Some(culprit_core::t!("provider.postgres.capability.statements.preloaded")));
+            });
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     fn fixture_report(id: &str, window_minutes: u32) -> Report {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/mssql-demo.report.json");

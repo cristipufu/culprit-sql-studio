@@ -204,15 +204,15 @@ fn log_volume_finding(snapshot: &Snapshot, w: LogWrites<'_>) -> Finding {
     with_query(snapshot, &mut f, q);
     let a_day = window_rate_per_day(snapshot, q, bytes).unwrap_or(0.0);
     f.impact.score = base_score(f.severity) + (a_day / MB).max(1.0).log10().min(4.0) * 3.0;
-    f.impact.label = t!("check.log_volume.impact", bytes = format::bytes(bytes), log = log);
+    f.impact.set_label(t!("check.log_volume.impact", bytes = format::bytes(bytes), log = log));
     f.confidence = Confidence::High;
     f.metrics = vec![
-        Metric::new(t!("check.log_volume.metric.written"), bytes, Unit::Bytes),
-        Metric::new(t!("check.log_volume.metric.share"), share, Unit::Ratio),
+        Metric::said(culprit_core::key!("check.log_volume.metric.written"), bytes, Unit::Bytes),
+        Metric::said(culprit_core::key!("check.log_volume.metric.share"), share, Unit::Ratio),
     ];
     f.facts.log_write = Some(culprit_core::FindingLogWrite { bytes, per_row });
     if let Some(b) = per_row {
-        f.metrics.push(Metric::new(t!("check.log_volume.metric.per_row"), b, Unit::Bytes));
+        f.metrics.push(Metric::said(culprit_core::key!("check.log_volume.metric.per_row"), b, Unit::Bytes));
     }
     let drop_unread = w.unread_on.map(|t| t!("check.log_volume.fix.drop_unread", log = log, table = &t.name));
     let mut fix = Vec::new();

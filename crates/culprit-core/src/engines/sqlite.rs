@@ -26,6 +26,10 @@ impl EngineSpec for Sqlite {
             )
         }
     }
+    fn signal_scope(&self, _server: &ServerInfo, _key: &str) -> crate::MeasurementScope {
+        crate::MeasurementScope::Database
+    }
+
     fn wait_sampling(&self) -> Option<WaitSampling> {
         None
     }

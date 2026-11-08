@@ -48,6 +48,7 @@ Baseline, Dashboard, Live, Cache, Latch, Flush, Query Store, JIT, HOT, Tablet, S
 | workload | Workload (die) | |
 | query | Abfrage | |
 | statement | Anweisung | „SQL-Anweisung“ when ambiguous |
+| table-valued parameter, bulk insert, array | tabellenwertiger Parameter, Masseneinfügung, Array | SQL syntax stays unchanged |
 | plan | Plan / Ausführungsplan | „Plan“ in labels, „Ausführungsplan“ when introducing it |
 | estimated / actual plan | geschätzter / tatsächlicher Plan | |
 | operator | Operator | |
@@ -56,6 +57,7 @@ Baseline, Dashboard, Live, Cache, Latch, Flush, Query Store, JIT, HOT, Tablet, S
 | run (v.) | ausführen | button: „Ausführen“ |
 | execution count / calls | Ausführungen / Aufrufe | |
 | compile / compilation | kompilieren / Kompilierung | |
+| thread scheduling | Einplanung von Threads | Zuteilung bereiter Threads zur CPU |
 | wait (n.) | Wartezeit (time), Wartevorgang (one wait) | headings: „Wartezeiten“ |
 | wait type | Wartetyp | |
 | wait event (PostgreSQL) | Warteereignis | |

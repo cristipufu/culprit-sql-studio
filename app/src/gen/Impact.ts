@@ -16,4 +16,4 @@ time_ms_per_day: number | null,
 /**
  * Short human label for the impact column, e.g. "31% of DB time" or "6.1 GB unused".
  */
-label: string, };
+label: string, label_key?: string, };

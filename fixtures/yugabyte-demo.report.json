@@ -121,6 +121,7 @@
       "impact": {
         "db_time_share": 0.4713046123353097,
         "label": "253 ms of database time over the 1 minute since statistics were reset (47%)",
+        "label_key": "support.impact.share",
         "score": 68.65162870138695,
         "time_ms_per_day": null
       },
@@ -134,6 +135,7 @@
           "value": 0.4713046123353097
         },
         {
+          "key": "common.metric.average_duration",
           "label": "Average duration",
           "text": null,
           "unit": "ms",
@@ -194,6 +196,7 @@
       "impact": {
         "db_time_share": 0.21223372725547016,
         "label": "21% of DB time",
+        "label_key": "support.impact.share",
         "score": 46.068831899177795,
         "time_ms_per_day": null
       },
@@ -201,12 +204,14 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "common.metric.rows_in_table",
           "label": "Rows in table",
           "text": null,
           "unit": "rows",
           "value": 20000.0
         },
         {
+          "key": "check.unindexed_fk.metric.foreign_key",
           "label": "Foreign key",
           "text": "orders_customer_id_fkey",
           "unit": "text",
@@ -249,6 +254,7 @@
       "impact": {
         "db_time_share": 0.19968633007435768,
         "label": "107 ms of database time over the 1 minute since statistics were reset (20%)",
+        "label_key": "support.impact.share",
         "score": 44.686276425135006,
         "time_ms_per_day": null
       },
@@ -262,6 +268,7 @@
           "value": 0.19968633007435768
         },
         {
+          "key": "common.metric.average_duration",
           "label": "Average duration",
           "text": null,
           "unit": "ms",
@@ -308,6 +315,7 @@
       "impact": {
         "db_time_share": 0.0965762311226704,
         "label": "52 ms of database time over the 1 minute since statistics were reset (10%)",
+        "label_key": "support.impact.share",
         "score": 31.076716545135586,
         "time_ms_per_day": null
       },
@@ -321,6 +329,7 @@
           "value": 0.0965762311226704
         },
         {
+          "key": "common.metric.average_duration",
           "label": "Average duration",
           "text": null,
           "unit": "ms",
@@ -381,6 +390,7 @@
       "impact": {
         "db_time_share": 0.21223372725547016,
         "label": "114 ms of database time over the 1 minute since statistics were reset (21%)",
+        "label_key": "support.impact.share",
         "score": 46.068831899177795,
         "time_ms_per_day": null
       },
@@ -388,18 +398,21 @@
       "last_seen": null,
       "metrics": [
         {
+          "key": "common.metric.share_of_db_time",
           "label": "Share of DB time",
           "text": null,
           "unit": "ratio",
           "value": 0.21223372725547016
         },
         {
+          "key": "check.filtered_scan.metric.size_basis",
           "label": "Captured scan size basis",
           "text": null,
           "unit": "rows",
           "value": 20000.0
         },
         {
+          "key": "check.filtered_scan.metric.queries",
           "label": "Queries",
           "text": null,
           "unit": "count",
@@ -563,6 +576,7 @@
         "last-actual-plans"
       ],
       "prepare": [
+        "retained observations are worded for this reader",
         "measurement context identifies this database and its clock",
         "index availability and maintenance follow the engine",
         "CTE writes named for their base table",
@@ -604,7 +618,7 @@
         "query-driven index changes need measured work",
         "query evidence leads with absolute cost and period",
         "names without the database",
-        "a caveat repeats nothing the summary or the fix says"
+        "identical complete caveats are shown once"
       ]
     },
     "previous_analyzer": {
@@ -5276,7 +5290,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -5546,7 +5561,8 @@
               "index_hints": [],
               "insights": {
                 "items": [],
-                "note": "Retained plan-cache entries have their own first/last-use dates, resets and evictions. Their calls and timings are independent of this statement's statistics window; a cache entry's first use does not prove when its plan was introduced."
+                "note": "Retained plan-cache entries have their own first/last-use dates, resets and evictions. Their calls and timings are independent of this statement's statistics window; a cache entry's first use does not prove when its plan was introduced.",
+                "scan_context": true
               },
               "kind": "estimated",
               "props": {},
@@ -5883,12 +5899,14 @@
                     1
                   ],
                   "rule": "scan-filter",
+                  "scan_context": true,
                   "severity": "low",
                   "title": "Reads 20K rows of public.orders to keep 10",
                   "verify": "Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure."
                 }
               ],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. The selected workload does not establish material execution cost. Structural concerns remain relevant as table size or call volume grows; compare reads and time under representative load before changing an index."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values. The selected workload does not establish material execution cost. Structural concerns remain relevant as table size or call volume grows; compare reads and time under representative load before changing an index.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -6101,7 +6119,8 @@
               "index_hints": [],
               "insights": {
                 "items": [],
-                "note": "Retained plan-cache entries have their own first/last-use dates, resets and evictions. Their calls and timings are independent of this statement's statistics window; a cache entry's first use does not prove when its plan was introduced."
+                "note": "Retained plan-cache entries have their own first/last-use dates, resets and evictions. Their calls and timings are independent of this statement's statistics window; a cache entry's first use does not prove when its plan was introduced.",
+                "scan_context": true
               },
               "kind": "estimated",
               "props": {},
@@ -6366,7 +6385,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -6575,7 +6595,8 @@
               "index_hints": [],
               "insights": {
                 "items": [],
-                "note": "Retained plan-cache entries have their own first/last-use dates, resets and evictions. Their calls and timings are independent of this statement's statistics window; a cache entry's first use does not prove when its plan was introduced."
+                "note": "Retained plan-cache entries have their own first/last-use dates, resets and evictions. Their calls and timings are independent of this statement's statistics window; a cache entry's first use does not prove when its plan was introduced.",
+                "scan_context": true
               },
               "kind": "estimated",
               "props": {},
@@ -6844,7 +6865,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -7194,7 +7216,8 @@
               "index_hints": [],
               "insights": {
                 "items": [],
-                "note": "Retained plan-cache entries have their own first/last-use dates, resets and evictions. Their calls and timings are independent of this statement's statistics window; a cache entry's first use does not prove when its plan was introduced."
+                "note": "Retained plan-cache entries have their own first/last-use dates, resets and evictions. Their calls and timings are independent of this statement's statistics window; a cache entry's first use does not prove when its plan was introduced.",
+                "scan_context": true
               },
               "kind": "estimated",
               "props": {},
@@ -7534,7 +7557,8 @@
             "index_hints": [],
             "insights": {
               "items": [],
-              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values."
+              "note": "This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+              "scan_context": true
             },
             "kind": "generic",
             "props": {
@@ -7659,7 +7683,8 @@
               "index_hints": [],
               "insights": {
                 "items": [],
-                "note": "Retained plan-cache entries have their own first/last-use dates, resets and evictions. Their calls and timings are independent of this statement's statistics window; a cache entry's first use does not prove when its plan was introduced."
+                "note": "Retained plan-cache entries have their own first/last-use dates, resets and evictions. Their calls and timings are independent of this statement's statistics window; a cache entry's first use does not prove when its plan was introduced.",
+                "scan_context": true
               },
               "kind": "estimated",
               "props": {},
@@ -7862,12 +7887,127 @@
       }
     ],
     "headline": "4 opportunities. The top ones touch 474 ms of database time over the 1 minute since statistics were reset (88%).",
+    "headline_message": {
+      "kind": "sequence",
+      "messages": [
+        {
+          "arguments": {
+            "count": {
+              "kind": "digits",
+              "value": "4"
+            },
+            "n": {
+              "kind": "number",
+              "value": 4.0
+            }
+          },
+          "key": "summary.headline.opportunities",
+          "kind": "catalog"
+        },
+        {
+          "arguments": {
+            "cost": {
+              "kind": "message",
+              "value": {
+                "arguments": {
+                  "of": {
+                    "kind": "text",
+                    "value": "database"
+                  },
+                  "share": {
+                    "kind": "percent",
+                    "value": 0.8832246696651375
+                  },
+                  "span": {
+                    "kind": "message",
+                    "value": {
+                      "arguments": {
+                        "count": {
+                          "kind": "digits",
+                          "value": "1"
+                        },
+                        "n": {
+                          "kind": "number",
+                          "value": 1.0
+                        }
+                      },
+                      "key": "model.window.since_reset_minutes",
+                      "kind": "catalog"
+                    }
+                  },
+                  "time": {
+                    "kind": "duration",
+                    "value": 473.87449000000004
+                  }
+                },
+                "key": "support.cost.time_over",
+                "kind": "catalog"
+              }
+            }
+          },
+          "key": "summary.headline.top_cost",
+          "kind": "catalog"
+        }
+      ],
+      "separator": " "
+    },
     "index_counting": "",
     "index_notes": [],
     "no_workload": null,
     "opportunities": 4,
     "over_scans": [],
     "runs_said": [],
+    "takeaway": "The top ones touch 474 ms of database time over the 1 minute since statistics were reset (88%).",
+    "takeaway_message": {
+      "kind": "sequence",
+      "messages": [
+        {
+          "arguments": {
+            "cost": {
+              "kind": "message",
+              "value": {
+                "arguments": {
+                  "of": {
+                    "kind": "text",
+                    "value": "database"
+                  },
+                  "share": {
+                    "kind": "percent",
+                    "value": 0.8832246696651375
+                  },
+                  "span": {
+                    "kind": "message",
+                    "value": {
+                      "arguments": {
+                        "count": {
+                          "kind": "digits",
+                          "value": "1"
+                        },
+                        "n": {
+                          "kind": "number",
+                          "value": 1.0
+                        }
+                      },
+                      "key": "model.window.since_reset_minutes",
+                      "kind": "catalog"
+                    }
+                  },
+                  "time": {
+                    "kind": "duration",
+                    "value": 473.87449000000004
+                  }
+                },
+                "key": "support.cost.time_over",
+                "kind": "catalog"
+              }
+            }
+          },
+          "key": "summary.headline.top_cost",
+          "kind": "catalog"
+        }
+      ],
+      "separator": " "
+    },
     "top_share": 0.8832246696651375
   }
 }

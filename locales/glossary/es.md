@@ -76,6 +76,7 @@ the choice and the reason are given.
 | workload | carga de trabajo (f) | |
 | query | consulta (f) | |
 | statement | instrucción (f) | Microsoft (*instrucción SELECT*); never *sentencia* |
+| table-valued parameter, bulk insert, array | parámetro con valores de tabla, inserción masiva, array | La sintaxis SQL no se traduce. |
 | run (one execution), to run | ejecución (f), ejecutar | *ejecuciones/día*, *por ejecución* |
 | plan, estimated / actual / generic plan | plan, plan estimado / real / genérico | |
 | operator | operador (m) | |
@@ -127,6 +128,7 @@ the choice and the reason are given.
 | CPU, memory, I/O | CPU, memoria, E/S | Microsoft writes *E/S* |
 | worker thread | subproceso de trabajo | Microsoft; *subproceso* for short |
 | compile, compilation | compilar, compilación | |
+| thread scheduling | programación de subprocesos | asignación de CPU a subprocesos listos para ejecutarse |
 | log (transaction log, application log) | registro (m) | *registro de transacciones*; an application's log: *el registro de Rails* |
 | replica, replication, replication slot | réplica, replicación, slot de replicación | |
 | fill factor | factor de relleno | the setting `fillfactor` stays as is |

@@ -59,6 +59,21 @@ impl EngineSpec for Mysql {
             ..StatementMetrics::new(PlanningStep::Planning, ReadUnit::RowsExamined, None, WriteLog::TransactionLog)
         }
     }
+    fn signal_scope(&self, _server: &ServerInfo, key: &str) -> crate::MeasurementScope {
+        if key == "oldest-transaction" { crate::MeasurementScope::Database } else { crate::MeasurementScope::Server }
+    }
+
+    fn scoped_signal_label(&self, signal: &crate::Signal) -> Option<crate::i18n::Message> {
+        Some(match signal.key.as_str() {
+            "history-length" => crate::message!("provider.mysql.signal.history_length"),
+            "row-lock-time" => crate::message!("provider.mysql.signal.row_lock_time"),
+            "row-lock-waits" if signal.scope == crate::SignalScope::Sampled => {
+                crate::message!("provider.mysql.signal.row_lock_waits_sampled")
+            }
+            _ => return None,
+        })
+    }
+
     fn wait_sampling(&self) -> Option<WaitSampling> {
         Some(WaitSampling::Counters)
     }

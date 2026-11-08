@@ -100,7 +100,7 @@ pub(crate) fn compile_signals(compiles: f64, ms: f64, first: &str, last: &str) -
             healthy: Some(context.clone()),
             ..Signal::new(
                 culprit_core::signal_id::DATABASE_COMPILES,
-                &culprit_core::t!("provider.mssql.signal.compiles_recorded"),
+                culprit_core::message!("provider.mssql.signal.compiles_recorded"),
                 compiles,
                 SignalUnit::Count,
                 SignalScope::QueryHistory,
@@ -110,7 +110,7 @@ pub(crate) fn compile_signals(compiles: f64, ms: f64, first: &str, last: &str) -
             healthy: Some(context),
             ..Signal::new(
                 culprit_core::signal_id::DATABASE_COMPILE_TIME,
-                &culprit_core::t!("provider.mssql.signal.compile_time"),
+                culprit_core::message!("provider.mssql.signal.compile_time"),
                 ms,
                 SignalUnit::Milliseconds,
                 SignalScope::QueryHistory,
@@ -502,7 +502,7 @@ pub(crate) fn login_signals(
         out.push(grade(
             Signal::new(
                 culprit_core::signal_id::NEW_CONNECTIONS,
-                &culprit_core::t!("provider.mssql.signal.new_connections", whole = whole),
+                culprit_core::message!("provider.mssql.signal.new_connections", whole = whole),
                 logins / seconds,
                 SignalUnit::PerSecond,
                 SignalScope::SinceStartup,
@@ -518,7 +518,7 @@ pub(crate) fn login_signals(
             out.push(grade(
                 Signal::new(
                     culprit_core::signal_id::POOLED_REUSE,
-                    &culprit_core::t!("provider.mssql.signal.pooled_reuse", whole = whole),
+                    culprit_core::message!("provider.mssql.signal.pooled_reuse", whole = whole),
                     resets / (logins + resets) * 100.0,
                     SignalUnit::Percent,
                     SignalScope::SinceStartup,

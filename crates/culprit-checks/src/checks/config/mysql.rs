@@ -244,10 +244,14 @@ pub(super) fn render(snapshot: &Snapshot, case: Case<'_>) -> Finding {
             // Digests lost is a status counter: a restart starts it over; after a truncate alone, its growth is what
             // tells.
             f.verify = vec![t!("check.config.digests_lost.verify")];
-            f.metrics.push(Metric::new(t!("check.config.digests_lost.metric.lost"), lost, Unit::Count));
+            f.metrics.push(Metric::said(
+                culprit_core::key!("check.config.digests_lost.metric.lost"),
+                lost,
+                Unit::Count,
+            ));
             if untracked_share > 0.0 {
-                f.metrics.push(Metric::new(
-                    t!("check.config.digests_lost.metric.untracked"),
+                f.metrics.push(Metric::said(
+                    culprit_core::key!("check.config.digests_lost.metric.untracked"),
                     untracked_share,
                     Unit::Ratio,
                 ));
@@ -290,7 +294,11 @@ pub(super) fn render(snapshot: &Snapshot, case: Case<'_>) -> Finding {
                 Fix { summary: t!("check.config.buffer_pool_wait_free.fix"), sql: None, cost: None },
             );
             f.confidence = Confidence::Medium;
-            f.metrics.push(Metric::new(t!("check.config.buffer_pool_wait_free.metric.waits"), waits, Unit::Count));
+            f.metrics.push(Metric::said(
+                culprit_core::key!("check.config.buffer_pool_wait_free.metric.waits"),
+                waits,
+                Unit::Count,
+            ));
             f.verify = vec![t!("check.config.buffer_pool_wait_free.verify")];
             f
         }
@@ -330,9 +338,13 @@ fn buffer_pool_finding(snapshot: &Snapshot, pool: f64, data: f64, hit: f64, read
     );
     // The hit ratio counts since the server started: a pool resized online still carries its misses from before.
     f.verify = vec![t!("check.config.buffer_pool.verify", hit = format::percent(hit / 100.0), server = name)];
-    f.metrics.push(Metric::new(t!("check.config.buffer_pool.metric.from_memory"), hit / 100.0, Unit::Ratio));
+    f.metrics.push(Metric::said(
+        culprit_core::key!("check.config.buffer_pool.metric.from_memory"),
+        hit / 100.0,
+        Unit::Ratio,
+    ));
     if let Some(r) = reads {
-        f.metrics.push(Metric::new(t!("check.config.buffer_pool.metric.from_disk"), r, Unit::Count));
+        f.metrics.push(Metric::said(culprit_core::key!("check.config.buffer_pool.metric.from_disk"), r, Unit::Count));
     }
     f.confidence = Confidence::Medium;
     f

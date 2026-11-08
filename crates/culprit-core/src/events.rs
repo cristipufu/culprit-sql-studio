@@ -108,11 +108,24 @@ pub struct ChangeEvent {
     pub minor: bool,
     /// Marks: who put it there ("cli", "app" or the coding agent's name).
     pub by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub title_message: Option<crate::i18n::Message>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub detail_message: Option<crate::i18n::Message>,
 }
 
 impl ChangeEvent {
     /// An event at an exact time from `source`; `subject` makes the id unique among events of its kind.
-    pub fn new(kind: EventKind, source: EventSource, subject: &str, at: &str, title: impl Into<String>) -> ChangeEvent {
+    pub fn new(
+        kind: EventKind,
+        source: EventSource,
+        subject: &str,
+        at: &str,
+        title: impl Into<crate::i18n::Message>,
+    ) -> ChangeEvent {
+        let message = title.into();
         ChangeEvent {
             id: format!("{}:{}:{at}", kind.slug(), subject.to_ascii_lowercase()),
             kind,
@@ -121,12 +134,14 @@ impl ChangeEvent {
             at: at.to_string(),
             after: None,
             until: None,
-            title: title.into(),
+            title: message.render(),
             detail: None,
             table: None,
             object: None,
             minor: false,
             by: None,
+            title_message: message.is_translatable().then_some(message),
+            detail_message: None,
         }
     }
 
@@ -145,9 +160,29 @@ impl ChangeEvent {
         self
     }
 
-    pub fn detail(mut self, detail: impl Into<String>) -> ChangeEvent {
-        self.detail = Some(detail.into());
+    pub fn detail(mut self, detail: impl Into<crate::i18n::Message>) -> ChangeEvent {
+        let message = detail.into();
+        self.detail = Some(message.render());
+        self.detail_message = message.is_translatable().then_some(message);
         self
+    }
+
+    pub fn refresh_language(&mut self) {
+        if let Some(message) = &self.title_message {
+            self.title = message.render();
+        }
+        if let Some(message) = &self.detail_message {
+            self.detail = Some(message.render());
+        }
+    }
+
+    pub fn clear_rendered_text(&mut self) {
+        if self.title_message.is_some() {
+            self.title.clear();
+        }
+        if self.detail_message.is_some() {
+            self.detail = None;
+        }
     }
 
     pub fn minor(mut self) -> ChangeEvent {

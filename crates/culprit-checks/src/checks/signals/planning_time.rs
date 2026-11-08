@@ -120,12 +120,12 @@ fn planning_time_finding(snapshot: &Snapshot, case: PlanningTime<'_>) -> Finding
     f.severity = case.severity;
     with_query(snapshot, &mut f, q);
     severity_score(&mut f);
-    f.impact.label = t!("check.planning_time.impact", share = format::percent(share));
+    f.impact.set_label(t!("check.planning_time.impact", share = format::percent(share)));
     f.confidence = if pg { Confidence::High } else { Confidence::Medium };
     f.metrics = vec![
-        Metric::new(t!("check.planning_time.metric.share"), share, Unit::Ratio),
-        Metric::new(t!("check.planning_time.metric.per_plan"), per_plan, Unit::Ms),
-        Metric::new(t!("check.planning_time.metric.plans"), plans, Unit::Count),
+        Metric::said(culprit_core::key!("check.planning_time.metric.share"), share, Unit::Ratio),
+        Metric::said(culprit_core::key!("check.planning_time.metric.per_plan"), per_plan, Unit::Ms),
+        Metric::said(culprit_core::key!("check.planning_time.metric.plans"), plans, Unit::Count),
         Metric::said(key!("common.metric.runs"), q.executions, Unit::Count),
     ];
     f.fix = Some(if pg {

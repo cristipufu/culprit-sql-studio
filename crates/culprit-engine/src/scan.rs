@@ -68,15 +68,23 @@ impl<'a> Scan<'a> {
         match deadlocks {
             Ok(found) => snapshot.deadlocks = Some(found),
             Err(e) if e.code == ErrorCode::Unsupported => {}
-            Err(e) => {
-                snapshot.notes.push(CollectorNote { collector: "deadlocks".into(), message: e.message, table: None })
-            }
+            Err(e) => snapshot.notes.push(CollectorNote {
+                message_source: None,
+                collector: "deadlocks".into(),
+                message: e.message,
+                table: None,
+            }),
         }
         let recorded = match recorded {
             Ok(found) => found,
             Err(e) if e.code == ErrorCode::Unsupported => Vec::new(),
             Err(e) => {
-                snapshot.notes.push(CollectorNote { collector: "changes".into(), message: e.message, table: None });
+                snapshot.notes.push(CollectorNote {
+                    message_source: None,
+                    collector: "changes".into(),
+                    message: e.message,
+                    table: None,
+                });
                 Vec::new()
             }
         };

@@ -44,7 +44,8 @@ accent: « État », « Événements étendus ».
 
 ## Plurals
 
-French's plural rule is `one_below_2`: 0 and 1 are singular (« 0 ligne », « 1 ligne », « 2 lignes »). Every `plural`
+French uses the CLDR `fr` cardinal rules: 0 and 1 are singular (« 0 ligne », « 1 ligne », « 2 lignes »), including
+decimals whose integer part is 0 or 1. CLDR also defines `many` for whole millions. Every `plural`
 whose words change with the number has a `one` case, even where English has only `other`. English's `=0` and `=1` cases
 are always kept (they win over `one`).
 
@@ -76,6 +77,7 @@ say in English (Query Store, autovacuum, tempdb, buffer pool, DocDB, tablet, tab
 | workload | charge de travail (f.) | |
 | query | requête (f.) | |
 | statement | instruction (f.) | |
+| table-valued parameter, bulk insert, array | paramètre table, insertion en masse, tableau | La syntaxe SQL reste inchangée. |
 | batch | lot (m.) | |
 | call | appel (m.) | |
 | execution / run | exécution (f.) ; exécuter | |
@@ -141,6 +143,7 @@ say in English (Query Store, autovacuum, tempdb, buffer pool, DocDB, tablet, tab
 | worker (thread) | worker (m.) | parallel workers |
 | parallelism | parallélisme (m.) | |
 | compile / compilation | compilation (f.) | |
+| thread scheduling | ordonnancement | attribution du CPU aux workers prêts à s’exécuter |
 | transaction | transaction (f.) | commit: valider ; roll back: annuler |
 | cancelled | annulé | timeout: délai d'attente dépassé |
 | production | production (f.) | |

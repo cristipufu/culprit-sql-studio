@@ -84,7 +84,7 @@ pub(crate) fn setting_finding(key: &str, severity: Severity, title: String, summ
     let mut f = finding("config", key, Category::Configuration, subject(SubjectKind::Setting, key));
     f.severity = severity;
     f.impact.score = base_score(severity) * 0.8;
-    f.impact.label = t!("common.impact.setting");
+    f.impact.set_label(t!("common.impact.setting"));
     f.confidence = Confidence::Medium;
     f.title = title;
     f.summary = summary;

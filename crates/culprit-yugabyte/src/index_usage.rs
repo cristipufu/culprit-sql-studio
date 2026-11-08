@@ -32,14 +32,14 @@ async fn epochs(session: &ObservedSession, probe: &Probe) -> Result<Epochs> {
 
 pub(crate) async fn read(session: &ObservedSession, probe: &Probe, snapshot: &mut Snapshot, coverage: &mut Coverage) {
     if !probe.global {
-        coverage.recorded(
+        coverage.recorded_message(
             &sources::INDEX_USAGE,
             SourceState::Unavailable,
-            Some(t!("provider.yugabyte.coverage.index_usage_local")),
+            culprit_core::message!("provider.yugabyte.coverage.index_usage_local"),
         );
         coverage.lacking(
             Capability::IndexUsage,
-            t!("provider.yugabyte.capability.index_usage.local"),
+            culprit_core::message!("provider.yugabyte.capability.index_usage.local"),
             Some(t!("provider.yugabyte.capability.index_usage.global_views")),
         );
         return;
@@ -70,8 +70,13 @@ pub(crate) async fn read(session: &ObservedSession, probe: &Probe, snapshot: &mu
         })
         && session.notices() == notices;
     let Some(rows) = rows.filter(|_| complete) else {
-        coverage.partial(&sources::INDEX_USAGE, t!("provider.yugabyte.coverage.index_usage_changed"));
-        coverage.lacking(Capability::IndexUsage, t!("provider.yugabyte.capability.index_usage.contributors"), None);
+        coverage
+            .partial(&sources::INDEX_USAGE, culprit_core::message!("provider.yugabyte.coverage.index_usage_changed"));
+        coverage.lacking(
+            Capability::IndexUsage,
+            culprit_core::message!("provider.yugabyte.capability.index_usage.contributors"),
+            None,
+        );
         return;
     };
     let epochs = before.unwrap_or_default();
@@ -103,8 +108,13 @@ pub(crate) async fn read(session: &ObservedSession, probe: &Probe, snapshot: &mu
         }
     }
     if partial {
-        coverage.partial(&sources::INDEX_USAGE, t!("provider.yugabyte.coverage.index_usage_partial"));
-        coverage.lacking(Capability::IndexUsage, t!("provider.yugabyte.capability.index_usage.partial"), None);
+        coverage
+            .partial(&sources::INDEX_USAGE, culprit_core::message!("provider.yugabyte.coverage.index_usage_partial"));
+        coverage.lacking(
+            Capability::IndexUsage,
+            culprit_core::message!("provider.yugabyte.capability.index_usage.partial"),
+            None,
+        );
     } else {
         coverage.delivered(Capability::IndexUsage);
     }
@@ -117,6 +127,6 @@ pub(crate) async fn read(session: &ObservedSession, probe: &Probe, snapshot: &mu
     {
         snapshot.pressure.get_or_insert_with(Pressure::default).uptime_hours = Some(hours);
     } else {
-        coverage.note("YSQL index history", t!("provider.yugabyte.coverage.index_usage_epochs"));
+        coverage.note("YSQL index history", culprit_core::message!("provider.yugabyte.coverage.index_usage_epochs"));
     }
 }

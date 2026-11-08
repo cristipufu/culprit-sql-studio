@@ -161,8 +161,8 @@ fn plan_line(out: &mut String, finding: &Finding, r: &QueryRef, q: &QueryStat, p
         node.op,
         node.predicate.as_deref().map(|p| format!(" filtering `{}`", format::predicate(p))).unwrap_or_default()
     );
-    if let Some(why) = finding_no_share_reason(plan, node, Some(q))
-        .filter(|_| plan.uncosted_steps().is_empty() || !finding.summary.contains("no cost"))
+    if let Some(why) =
+        finding_no_share_reason(plan, node, Some(q)).filter(|_| finding.facts.uncosted_plan_explained != Some(true))
     {
         let why = if plan.uncosted_steps().is_empty() {
             why.as_str()

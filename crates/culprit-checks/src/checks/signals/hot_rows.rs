@@ -237,24 +237,24 @@ fn hot_rows_finding(_: &Snapshot, hot: ContendedTable<'_>) -> Finding {
     f.severity = hot.severity;
     severity_score(&mut f);
     f.actionability = hot.actionability;
-    f.impact.label = if hot.unchanged {
+    f.impact.set_label(if hot.unchanged {
         t!("check.hot_rows.impact.unchanged")
     } else {
         t!("check.hot_rows.impact.waiting", time = total_wait(shown_ms))
-    };
+    });
     f.confidence = Confidence::High;
     f.metrics = vec![
-        Metric::new(t!("check.hot_rows.metric.historical_waits"), waits, Unit::Count),
-        Metric::new(t!("check.hot_rows.metric.historical_time"), wait_ms, Unit::Ms),
-        Metric::new(t!("check.hot_rows.metric.historical_average"), per_run(wait_ms, waits), Unit::Ms),
+        Metric::said(culprit_core::key!("check.hot_rows.metric.historical_waits"), waits, Unit::Count),
+        Metric::said(culprit_core::key!("check.hot_rows.metric.historical_time"), wait_ms, Unit::Ms),
+        Metric::said(culprit_core::key!("check.hot_rows.metric.historical_average"), per_run(wait_ms, waits), Unit::Ms),
     ];
     if let Some((_, h, n, ms)) = measured {
-        f.metrics.push(Metric::new(t!("check.hot_rows.metric.waits_since"), n, Unit::Count));
-        f.metrics.push(Metric::new(t!("check.hot_rows.metric.time_since"), ms, Unit::Ms));
-        f.metrics.push(Metric::new(t!("check.hot_rows.metric.interval"), h / 24.0, Unit::Days));
+        f.metrics.push(Metric::said(culprit_core::key!("check.hot_rows.metric.waits_since"), n, Unit::Count));
+        f.metrics.push(Metric::said(culprit_core::key!("check.hot_rows.metric.time_since"), ms, Unit::Ms));
+        f.metrics.push(Metric::said(culprit_core::key!("check.hot_rows.metric.interval"), h / 24.0, Unit::Days));
     }
     if let Some(r) = hot.per_day {
-        f.metrics.push(Metric::new(t!("check.hot_rows.metric.per_day"), r, Unit::Ms));
+        f.metrics.push(Metric::said(culprit_core::key!("check.hot_rows.metric.per_day"), r, Unit::Ms));
     }
     if escalations > 0.0 {
         f.metrics.push(Metric::said(super::ESCALATIONS_METRIC, escalations, Unit::Count));

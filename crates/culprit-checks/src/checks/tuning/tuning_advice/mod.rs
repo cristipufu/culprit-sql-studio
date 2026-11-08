@@ -279,18 +279,18 @@ fn force_plan_finding(_snapshot: &Snapshot, p: ForcePlan<'_>) -> Finding {
         Some(impact) => apply_query_impact(&mut f, impact),
         None => {
             f.impact.score = base_score(f.severity);
-            f.impact.label = t!("check.tuning_advice.force.impact");
+            f.impact.set_label(t!("check.tuning_advice.force.impact"));
         }
     }
     f.confidence = Confidence::High;
     if let Some(g) = r.estimated_gain {
-        f.metrics.push(Metric::new(t!("check.tuning_advice.metric.cpu_saved"), g, Unit::Ratio));
+        f.metrics.push(Metric::said(culprit_core::key!("check.tuning_advice.metric.cpu_saved"), g, Unit::Ratio));
     }
-    f.metrics.push(Metric::text(t!("check.tuning_advice.metric.recommended_plan"), plan_id));
+    f.metrics.push(Metric::said_text(culprit_core::key!("check.tuning_advice.metric.recommended_plan"), plan_id));
     f.facts.recommended_plan =
         Some(culprit_core::FindingPlanRecommendation { plan: plan_id.to_string(), cpu_saved_share: r.estimated_gain });
     if let Some(bad) = &r.regressed_plan_id {
-        f.metrics.push(Metric::text(t!("check.tuning_advice.metric.current_plan"), bad.clone()));
+        f.metrics.push(Metric::said_text(culprit_core::key!("check.tuning_advice.metric.current_plan"), bad.clone()));
     }
     if let Some(q) = query {
         f.queries = vec![QueryRef { id: q.id.clone(), plan_node: None, note: None }];
@@ -350,10 +350,14 @@ fn forcing_fails_finding(_snapshot: &Snapshot, failing: ForcingFails<'_>) -> Fin
     .join(" ");
     f.severity = failing.severity;
     f.impact.score = base_score(f.severity) + p.failures.log10().max(0.0);
-    f.impact.label = t!("check.tuning_advice.forcing_fails.impact", n = p.failures, count = &count);
+    f.impact.set_label(t!("check.tuning_advice.forcing_fails.impact", n = p.failures, count = &count));
     f.confidence = Confidence::High;
-    f.metrics.push(Metric::new(t!("check.tuning_advice.metric.forcing_failures"), p.failures, Unit::Count));
-    f.metrics.push(Metric::text(t!("check.tuning_advice.metric.last_reason"), reason));
+    f.metrics.push(Metric::said(
+        culprit_core::key!("check.tuning_advice.metric.forcing_failures"),
+        p.failures,
+        Unit::Count,
+    ));
+    f.metrics.push(Metric::said_text(culprit_core::key!("check.tuning_advice.metric.last_reason"), reason));
     if let Some(q) = failing.query {
         f.queries = vec![QueryRef { id: q.id.clone(), plan_node: None, note: None }];
     } else if let Some(gone) = failing.gone {
@@ -393,7 +397,7 @@ fn hint_fails_finding(h: &QueryHint) -> Finding {
     );
     f.severity = Severity::Low;
     f.impact.score = base_score(f.severity);
-    f.impact.label = t!("check.tuning_advice.hint_fails.impact", n = h.failures, count = &count);
+    f.impact.set_label(t!("check.tuning_advice.hint_fails.impact", n = h.failures, count = &count));
     f.confidence = Confidence::High;
     f.fix = Some(Fix {
         summary: t!("check.tuning_advice.hint_fails.fix"),
@@ -411,7 +415,7 @@ fn correction_finding() -> Finding {
         Category::Configuration,
         subject(SubjectKind::Setting, "FORCE_LAST_GOOD_PLAN"),
     );
-    f.impact.label = t!("common.impact.setting");
+    f.impact.set_label(t!("common.impact.setting"));
     f
 }
 

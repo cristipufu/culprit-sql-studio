@@ -88,7 +88,7 @@ pub fn explain(snapshot: &Snapshot) -> Option<WaitsReport> {
             notes.push(t!("view.waits.note.yugabyte"));
         }
         Engine::Postgres => {
-            notes.push(t!("view.waits.note.postgres"));
+            notes.push(t!("view.waits.note.postgres", now = culprit_core::t!("core.dashboard.tile.now")));
             // The setting says whether disk time is measured; a cached database reads nothing from disk with it on.
             // Without the setting in the scan, no disk time at all is the hint.
             let timing_off = match snapshot.setting("track_io_timing") {
@@ -106,7 +106,11 @@ pub fn explain(snapshot: &Snapshot) -> Option<WaitsReport> {
             }
         }
         Engine::Mysql if !snapshot.server.has(Capability::PerformanceSchema) => {
-            notes.push(t!("view.waits.note.mysql_no_performance_schema", server = snapshot.server.name()));
+            notes.push(t!(
+                "view.waits.note.mysql_no_performance_schema",
+                server = snapshot.server.name(),
+                now = culprit_core::t!("core.dashboard.tile.now")
+            ));
         }
         Engine::Mysql => {
             notes.push(t!("view.waits.note.mysql", server = snapshot.server.name()));
@@ -470,6 +474,9 @@ mod tests {
         let query = snapshot.queries()[0].id.clone();
         snapshot.operations.activity_history = Some(culprit_core::ActivityHistory {
             period: culprit_core::ActivityPeriod {
+                source_message: None,
+                note_messages: None,
+
                 source: "Native recorded activity".into(),
                 requested_start: "2026-10-01T00:00:00Z".into(),
                 requested_end: "2026-10-08T00:00:00Z".into(),

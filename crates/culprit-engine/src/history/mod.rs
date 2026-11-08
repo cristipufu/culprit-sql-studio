@@ -50,7 +50,11 @@ pub(super) struct EventRecord {
 }
 
 pub(super) fn read(dir: &Path, id: &str) -> Option<EventRecord> {
-    std::fs::read(path(dir, id)).ok().and_then(|b| serde_json::from_slice(&b).ok())
+    let mut record: EventRecord = std::fs::read(path(dir, id)).ok().and_then(|b| serde_json::from_slice(&b).ok())?;
+    for event in &mut record.events {
+        event.refresh_language();
+    }
+    Some(record)
 }
 
 fn event_inputs(current: &Snapshot, previous: Option<&Snapshot>) -> Vec<culprit_core::ScanReference> {
@@ -66,7 +70,11 @@ fn event_inputs(current: &Snapshot, previous: Option<&Snapshot>) -> Vec<culprit_
 /// Keep a scan's changes ([`diff`]) next to its report. Never fails a scan: problems leave no file, and the scan is
 /// compared again the first time it is read.
 pub(crate) fn keep_scan(dir: &Path, current: &Snapshot, previous: Option<&Snapshot>, events: &[ChangeEvent]) {
-    let record = EventRecord { inputs: event_inputs(current, previous), events: events.to_vec() };
+    let mut events = events.to_vec();
+    for event in &mut events {
+        event.clear_rendered_text();
+    }
+    let record = EventRecord { inputs: event_inputs(current, previous), events };
     if let Ok(json) = serde_json::to_vec(&record) {
         let _ = private_fs::write_atomic(&path(dir, &current.id), &json);
     }

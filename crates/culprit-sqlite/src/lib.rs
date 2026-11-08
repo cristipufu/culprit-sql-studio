@@ -66,8 +66,8 @@ fn open(path: &PathBuf) -> Result<Connection> {
 
 pub(crate) fn map_error(e: &rusqlite::Error) -> Error {
     if e.sqlite_error_code() == Some(rusqlite::ErrorCode::OperationInterrupted) {
-        return Error::new(ErrorCode::Timeout, t!("provider.sqlite.error.interrupted"))
-            .with_hint(t!("provider.sqlite.error.interrupted.hint"));
+        return Error::new(ErrorCode::Timeout, culprit_core::message!("provider.sqlite.error.interrupted"))
+            .with_hint(culprit_core::message!("provider.sqlite.error.interrupted.hint"));
     }
     let message = e.to_string();
     let code = match e.sqlite_error_code() {
@@ -79,8 +79,8 @@ pub(crate) fn map_error(e: &rusqlite::Error) -> Error {
     };
     let error = Error::new(code, message);
     match code {
-        ErrorCode::Timeout => error.with_hint(t!("provider.sqlite.error.busy.hint")),
-        ErrorCode::PermissionDenied => error.with_hint(t!("provider.sqlite.error.read_only.hint")),
+        ErrorCode::Timeout => error.with_hint(culprit_core::message!("provider.sqlite.error.busy.hint")),
+        ErrorCode::PermissionDenied => error.with_hint(culprit_core::message!("provider.sqlite.error.read_only.hint")),
         _ => error,
     }
 }

@@ -178,6 +178,7 @@ pub(crate) fn late_filter_rewrite(
             }
         };
         return Some(culprit_core::insights::PlanInsight {
+            scan_context: Some(true),
             rule: "cross-table-or".into(),
             area: culprit_core::insights::InsightArea::Query,
             severity: Severity::Low,

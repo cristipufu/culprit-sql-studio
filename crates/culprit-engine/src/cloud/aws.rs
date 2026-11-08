@@ -188,7 +188,7 @@ pub(super) fn rds_judge(
 
     let cpu = CloudSeries::new("CPUUtilization", &t!("engine.cloud.series.cpu"), CloudUnit::Percent, take("cpu"));
     let cpu = match baseline {
-        Some(b) => cpu.limit(b, t!("engine.cloud.rds.limit.cpu_baseline", percent = whole(b))),
+        Some(b) => cpu.baseline(b, t!("engine.cloud.rds.limit.cpu_baseline", percent = whole(b))),
         None => cpu,
     };
     let saturated = |worst: f64, lasted: &str| t!("engine.cloud.rds.detail.cpu", lasted = lasted, worst = whole(worst));
@@ -254,7 +254,7 @@ pub(super) fn rds_judge(
             }
             (None, "gp2") if gb > 0.0 => {
                 let base = gp2_baseline_iops(gb);
-                iops.limit(base, t!("engine.cloud.rds.limit.gp2_baseline", iops = format::count(base)))
+                iops.baseline(base, t!("engine.cloud.rds.limit.gp2_baseline", iops = format::count(base)))
             }
             _ => iops,
         };

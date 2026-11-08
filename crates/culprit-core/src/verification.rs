@@ -210,7 +210,7 @@ fn still_present_note(was: &Finding, now: &Finding, after: &Report) -> Option<St
             // The connection's name in the command, or its placeholder (command syntax, said as it is).
             let connection =
                 if after.snapshot.connection.trim().is_empty() { "<connection>" } else { &after.snapshot.connection };
-            t!("model.verify.still_in_the_totals", source = &w.source, span = span, connection = connection)
+            t!("model.verify.still_in_the_totals", source = w.source_name(), span = span, connection = connection)
         });
     }
     let (b, a) = (was.impact.score, now.impact.score);

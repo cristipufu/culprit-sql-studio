@@ -215,7 +215,7 @@ function LiveSessions({ connection }: { connection: string }) {
       ) : (
         <div className="live-calm good">
           <span className="pulse" aria-hidden />{" "}
-          {state?.sessions.some((s) => s.wait?.toLowerCase().includes("lock"))
+          {state?.sessions.some((s) => s.waiting_on_lock)
             ? t("ui.live.lock_waits")
             : state?.notes?.length
               ? t("ui.live.limited")

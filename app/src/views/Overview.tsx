@@ -5,7 +5,7 @@ import type { ChangeRequest } from "../gen/ChangeRequest";
 import type { Finding } from "../gen/Finding";
 import type { Report } from "../gen/Report";
 import { ago, byPeriod, bytes, count, duration, percent } from "../lib/format";
-import { windowPhrase, windowUnknown } from "../lib/rates";
+import { workloadSource, windowPhrase, windowUnknown } from "../lib/rates";
 import { useHotkeys } from "../lib/hotkeys";
 import { key, t } from "../lib/i18n";
 import { changeRequest, setState, useStore } from "../lib/store";
@@ -314,7 +314,7 @@ function headlineTail(report: Report): string {
   const span = w ? windowPhrase(w) : "";
   if (report.summary.opportunities === 0) return w ? t("ui.overview.headline.nothing_over", { span }) : t("ui.overview.headline.nothing");
   if (w && share != null && share >= 0.05) return t("ui.overview.headline.top_share", { share: percent(share), span });
-  if (w) return t("ui.overview.headline.based_on", { source: w.source, span });
+  if (w) return t("ui.overview.headline.based_on", { source: workloadSource(w), span });
   return t("ui.overview.headline.no_workload");
 }
 

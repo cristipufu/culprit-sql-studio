@@ -109,6 +109,11 @@ pub(crate) fn run(ws: &Workspace, args: LintSqlArgs, out: &Out) -> culprit_core:
         index_notes: Vec::new(),
         index_counting: String::new(),
         foreign_key_indexes: Vec::new(),
+        no_workload_capability: None,
+        takeaway: None,
+        headline_message: None,
+        takeaway_message: None,
+        no_workload_message: None,
     };
     base_report.findings = all_findings;
     base_report.locked.clear();

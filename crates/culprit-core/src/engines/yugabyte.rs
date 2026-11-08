@@ -46,6 +46,10 @@ impl EngineSpec for Yugabyte {
             ..StatementMetrics::pg_stat_statements(WriteLog::TransactionLog)
         }
     }
+    fn signal_scope(&self, _server: &ServerInfo, key: &str) -> crate::MeasurementScope {
+        if key == "oldest-transaction" { crate::MeasurementScope::Database } else { crate::MeasurementScope::Server }
+    }
+
     fn wait_sampling(&self) -> Option<WaitSampling> {
         Some(WaitSampling::Sessions)
     }

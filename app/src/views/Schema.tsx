@@ -182,9 +182,10 @@ export function Schema({ report }: { report: Report }) {
     e.preventDefault();
     const startX = e.clientX;
     const startW = width;
+    const direction = getComputedStyle(e.currentTarget).direction === "rtl" ? -1 : 1;
     let last = startW;
     const onMove = (ev: PointerEvent) => {
-      last = Math.min(MAX_W, Math.max(MIN_W, startW + ev.clientX - startX));
+      last = Math.min(MAX_W, Math.max(MIN_W, startW + direction * (ev.clientX - startX)));
       setWidth(last);
     };
     const onUp = () => {

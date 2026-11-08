@@ -190,23 +190,35 @@ fn over_indexed_finding(snapshot: &Snapshot, o: OverIndexed<'_>) -> Finding {
     f.summary = [upkeep, start].join(" ");
     f.severity = o.severity;
     f.impact.score = o.score;
-    f.impact.label = match (w.statements, o.measured) {
+    f.impact.set_label(match (w.statements, o.measured) {
         (true, true) => {
             t!("check.over_indexed.impact.statements_per_day", count = &count, writes = format::count(writes))
         }
         (false, true) => t!("check.over_indexed.impact.rows_per_day", count = &count, writes = format::count(writes)),
         (true, false) => t!("check.over_indexed.impact.statements", count = &count, writes = format::count(total)),
         (false, false) => t!("check.over_indexed.impact.rows", count = &count, writes = format::count(total)),
-    };
-    f.confidence = o.confidence;
-    f.metrics.push(Metric::new(t!("check.over_indexed.metric.secondary"), o.secondary as f64, Unit::Count));
-    f.metrics.push(match (w.statements, o.measured) {
-        (true, true) => Metric::new(t!("check.over_indexed.metric.statements_per_day"), writes, Unit::Count),
-        (false, true) => Metric::new(t!("check.over_indexed.metric.rows_per_day"), writes, Unit::Count),
-        (true, false) => Metric::new(t!("check.over_indexed.metric.statements"), total, Unit::Count),
-        (false, false) => Metric::new(t!("check.over_indexed.metric.rows"), total, Unit::Count),
     });
-    f.metrics.push(Metric::new(t!("check.over_indexed.metric.idle"), o.idle.len() as f64, Unit::Count));
+    f.confidence = o.confidence;
+    f.metrics.push(Metric::said(
+        culprit_core::key!("check.over_indexed.metric.secondary"),
+        o.secondary as f64,
+        Unit::Count,
+    ));
+    f.metrics.push(match (w.statements, o.measured) {
+        (true, true) => {
+            Metric::said(culprit_core::key!("check.over_indexed.metric.statements_per_day"), writes, Unit::Count)
+        }
+        (false, true) => {
+            Metric::said(culprit_core::key!("check.over_indexed.metric.rows_per_day"), writes, Unit::Count)
+        }
+        (true, false) => Metric::said(culprit_core::key!("check.over_indexed.metric.statements"), total, Unit::Count),
+        (false, false) => Metric::said(culprit_core::key!("check.over_indexed.metric.rows"), total, Unit::Count),
+    });
+    f.metrics.push(Metric::said(
+        culprit_core::key!("check.over_indexed.metric.idle"),
+        o.idle.len() as f64,
+        Unit::Count,
+    ));
     f.fix = Some(Fix {
         summary: if o.idle.is_empty() {
             t!("check.over_indexed.fix.review")

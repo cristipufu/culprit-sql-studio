@@ -99,6 +99,10 @@ pub struct PlanInsight {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub index_hint: Option<crate::plan::PlanIndexHint>,
+    // Advice restricted or rewritten using a selected scan. Missing provenance is treated conservatively.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub scan_context: Option<bool>,
 }
 
 /// The table an index insight is about, where it is gone from the database: there is nothing to create, whatever the
@@ -118,6 +122,9 @@ pub fn table_gone(plan: &Plan, insight: &PlanInsight) -> Option<String> {
 pub struct PlanInsights {
     pub items: Vec<PlanInsight>,
     pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub scan_context: Option<bool>,
 }
 
 /// Every rule, for docs and `culprit checks`-style listings: (id, engines, one line).
@@ -196,7 +203,7 @@ fn statistics_note() -> String {
 
 /// Compute and attach insights (and the coverage note) to a plan.
 pub fn annotate(plan: &mut Plan) {
-    plan.insights = Some(PlanInsights { items: insights(plan), note: coverage_note(plan) });
+    plan.insights = Some(PlanInsights { scan_context: Some(false), items: insights(plan), note: coverage_note(plan) });
 }
 
 /// Whether a plan builds or changes the schema rather than answering a query: a CREATE, ALTER or DROP (an index build
@@ -541,6 +548,7 @@ impl Draft {
             severity = severity.min(Severity::Low);
         }
         PlanInsight {
+            scan_context: Some(false),
             rule: self.rule.into(),
             area: self.area,
             severity,

@@ -6,12 +6,33 @@ use std::collections::BTreeSet;
 
 static CLUSTER: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const WORK: &str = "/* native-cluster-workload */ SELECT sum(id) FROM public.cluster_probe WHERE id>0";
+const POOLED_OBSERVATION_BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
+
+#[derive(Clone, Copy)]
+enum Endpoint {
+    First,
+    Second,
+    Third,
+    Pool,
+}
+
+impl Endpoint {
+    fn port(self) -> u16 {
+        let (variable, default) = match self {
+            Self::First => ("CULPRIT_YSQL_CLUSTER_PORT_1", 55436),
+            Self::Second => ("CULPRIT_YSQL_CLUSTER_PORT_2", 55437),
+            Self::Third => ("CULPRIT_YSQL_CLUSTER_PORT_3", 55438),
+            Self::Pool => ("CULPRIT_YSQL_CLUSTER_PORT_POOL", 55439),
+        };
+        std::env::var(variable).map_or(default, |port| port.parse().expect("the owned fixture's loopback port"))
+    }
+}
 
 #[tokio::test]
 #[ignore = "requires the seeded disposable three-node cluster and CULPRIT_YSQL_CLUSTER_TEST=1"]
 async fn live_cluster_virtual_indexes_refuse_pooled_backend_memory_before_extension_calls() {
     let _fixture = CLUSTER.lock().await;
-    let provider = YugabyteProvider::new(&spec(55439, "culprit_cluster_app")).unwrap();
+    let provider = YugabyteProvider::new(&spec(Endpoint::Pool, "culprit_cluster_app")).unwrap();
     let error = provider
         .explain_hypothetical(
             "SELECT * FROM public.cluster_probe WHERE payload='fixture'",
@@ -24,7 +45,7 @@ async fn live_cluster_virtual_indexes_refuse_pooled_backend_memory_before_extens
     assert!(error.hint.as_deref().unwrap().contains("No virtual index was registered"));
 }
 
-fn spec(port: u16, user: &str) -> ConnectionSpec {
+fn spec(endpoint: Endpoint, user: &str) -> ConnectionSpec {
     assert_eq!(
         std::env::var("CULPRIT_YSQL_CLUSTER_TEST").as_deref(),
         Ok("1"),
@@ -33,7 +54,7 @@ fn spec(port: u16, user: &str) -> ConnectionSpec {
     let mut spec = ConnectionSpec {
         engine: Some(Engine::Yugabyte),
         host: "127.0.0.1".into(),
-        port: Some(port),
+        port: Some(endpoint.port()),
         user: Some(user.into()),
         database: Some("culprit_cluster".into()),
         environment: culprit_core::Environment::Local,
@@ -44,7 +65,11 @@ fn spec(port: u16, user: &str) -> ConnectionSpec {
 }
 
 async fn reader() -> culprit_postgres::wire::ObservedSession {
-    Connector::new(&spec(55436, "culprit_cluster_monitor")).unwrap().connect_observed(COLLECTOR).await.unwrap()
+    Connector::new(&spec(Endpoint::First, "culprit_cluster_monitor"))
+        .unwrap()
+        .connect_observed(COLLECTOR)
+        .await
+        .unwrap()
 }
 
 async fn workload(session: &culprit_postgres::wire::ObservedSession) -> culprit_core::Workload {
@@ -59,8 +84,8 @@ async fn workload(session: &culprit_postgres::wire::ObservedSession) -> culprit_
 async fn live_cluster_aggregation_resets_resources_and_pooled_session_guards() {
     let _fixture = CLUSTER.lock().await;
     let mut nodes = Vec::new();
-    for port in [55436, 55437, 55438] {
-        let session = Connector::new(&spec(port, "yugabyte")).unwrap().connect_observed(COLLECTOR).await.unwrap();
+    for endpoint in [Endpoint::First, Endpoint::Second, Endpoint::Third] {
+        let session = Connector::new(&spec(endpoint, "yugabyte")).unwrap().connect_observed(COLLECTOR).await.unwrap();
         session
             .client
             .batch_execute(&tagged("SET default_transaction_read_only=off; SELECT pg_stat_statements_reset()"))
@@ -98,8 +123,13 @@ async fn live_cluster_aggregation_resets_resources_and_pooled_session_guards() {
     assert_eq!(epochs.members.keys().collect::<Vec<_>>(), later.members.keys().collect::<Vec<_>>());
     assert_eq!(epochs.members.iter().filter(|(node, at)| later.members.get(*node) != Some(*at)).count(), 1);
     assert_eq!(after.queries.iter().find(|q| &q.id == id).unwrap().executions, 5.0);
-    let identity =
-        culprit_core::DatabaseIdentity::server(Engine::Yugabyte, "culprit_cluster", "127.0.0.1", 55436, None);
+    let identity = culprit_core::DatabaseIdentity::server(
+        Engine::Yugabyte,
+        "culprit_cluster",
+        "127.0.0.1",
+        Endpoint::First.port(),
+        None,
+    );
     let measurement = |w: &culprit_core::Workload| {
         culprit_core::MeasurementContext::workload(identity.clone(), w, w.window_end.as_deref().unwrap(), None)
     };
@@ -110,13 +140,21 @@ async fn live_cluster_aggregation_resets_resources_and_pooled_session_guards() {
     assert!(resources.nodes.iter().all(|n| n.available));
 
     // A pooled physical backend must never be signaled or planned as a logical client.
-    let pool = Connector::new(&spec(55439, "culprit_cluster_app")).unwrap().connect(INTERACTIVE).await.unwrap();
-    pool.batch_execute(&tagged("SET application_name='culprit_cluster_pooled_client'")).await.unwrap();
-    let provider = YugabyteProvider::new(&spec(55436, "culprit_cluster_monitor")).unwrap();
-    let observe = async {
+    let pool =
+        Connector::new(&spec(Endpoint::Pool, "culprit_cluster_app")).unwrap().connect(INTERACTIVE).await.unwrap();
+    pool.batch_execute(&tagged(
+        "SET application_name='culprit_cluster_pooled_client'; SET default_transaction_read_only=off; SET statement_timeout=0"
+    )).await.unwrap();
+    // Keep the owned command active until both observations finish. A four-second sleep could end between the
+    // global activity lookup and progress lookup. No COPY rows are sent; the enclosing observation has a deadline.
+    let copy =
+        pool.copy_in::<_, &'static [u8]>(&tagged("COPY public.cluster_probe(id,payload) FROM STDIN")).await.unwrap();
+    tokio::pin!(copy);
+    let provider = YugabyteProvider::new(&spec(Endpoint::First, "culprit_cluster_monitor")).unwrap();
+    let observed = tokio::time::timeout(POOLED_OBSERVATION_BUDGET, async {
         let mut found = None;
         for _ in 0..40 {
-            let live = provider.live().await.unwrap();
+            let live = provider.live().await?;
             if let Some(session) = live
                 .sessions
                 .into_iter()
@@ -127,20 +165,32 @@ async fn live_cluster_aggregation_resets_resources_and_pooled_session_guards() {
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        let session = found.expect("pooled application backend was not visible through global views");
-        let progress = provider.query_progress(&session.id, true).await.unwrap();
-        assert!(progress.running && progress.plan.is_none() && progress.phase.is_none());
-        assert!(progress.note.as_deref().unwrap().contains("reusable Connection Manager worker"));
+        let session =
+            found.ok_or_else(|| Error::internal("pooled application backend was not visible through global views"))?;
+        let progress = provider.query_progress(&session.id, true).await?;
         // Connect directly to that same node, so a wrong-node guard cannot hide a missing worker guard.
-        let local = YugabyteProvider::new(&spec(55438, "yugabyte")).unwrap();
-        assert_eq!(
-            local.interrupt_session(&session.id, culprit_core::SessionAction::Cancel).await.unwrap_err().code,
-            culprit_core::ErrorCode::NotFound
-        );
-    };
-    let sleep = tagged("SELECT pg_sleep(4)");
-    let (done, ()) = tokio::join!(pool.batch_execute(&sleep), observe);
-    done.unwrap();
+        let local = YugabyteProvider::new(&spec(Endpoint::Third, "yugabyte")).unwrap();
+        let interrupted = local.interrupt_session(&session.id, culprit_core::SessionAction::Cancel).await;
+        Ok::<_, Error>((progress, interrupted))
+    })
+    .await;
+    let copied = tokio::time::timeout(POOLED_OBSERVATION_BUDGET, copy.as_mut().finish()).await;
+    let (progress, interrupted) = observed.expect("pooled worker observation exceeded its budget").unwrap();
+    assert!(
+        progress.running && progress.plan.is_none() && progress.phase.is_none(),
+        "running={}, state={:?}, phase={:?}, note={:?}",
+        progress.running,
+        progress.state,
+        progress.phase,
+        progress.note
+    );
+    assert!(progress.note.as_deref().unwrap().contains("reusable Connection Manager worker"));
+    assert_eq!(interrupted.unwrap_err().code, culprit_core::ErrorCode::NotFound);
+    assert_eq!(
+        copied.expect("pooled COPY completion exceeded its budget").unwrap(),
+        0,
+        "observing a pooled worker must leave its empty COPY intact"
+    );
     assert!(query_one(&pool, "SELECT 1 AS still_connected").await.unwrap().is_some());
     let snapshot =
         provider.snapshot("cluster-verification", &SnapshotOptions { plans: 0, ..Default::default() }).await.unwrap();
@@ -169,20 +219,23 @@ impl Drop for PausedNode {
 }
 
 fn pause_fixture_node() -> PausedNode {
-    let result = std::process::Command::new("docker")
-        .args([
-            "ps",
-            "--filter",
-            "label=com.docker.compose.project=culprit-yugabyte-cluster",
-            "--filter",
-            "label=com.docker.compose.service=yb3",
-            "--filter",
-            "label=dev.culprit.fixture=yugabyte-cluster",
-            "--format",
-            "{{.ID}}",
-        ])
-        .output()
-        .unwrap();
+    let project = std::env::var("CULPRIT_YSQL_CLUSTER_PROJECT").unwrap_or_else(|_| "culprit-yugabyte-cluster".into());
+    let mut command = std::process::Command::new("docker");
+    command.args([
+        "ps",
+        "--filter",
+        &format!("label=com.docker.compose.project={project}"),
+        "--filter",
+        "label=com.docker.compose.service=yb3",
+        "--filter",
+        "label=dev.culprit.fixture=yugabyte-cluster",
+        "--format",
+        "{{.ID}}",
+    ]);
+    if let Ok(owner) = std::env::var("CULPRIT_YSQL_CLUSTER_OWNER") {
+        command.args(["--filter", &format!("label=dev.culprit.smoke={owner}")]);
+    }
+    let result = command.output().unwrap();
     assert!(result.status.success());
     let id = String::from_utf8(result.stdout).unwrap().trim().to_string();
     assert!(id.len() >= 12 && id.bytes().all(|b| b.is_ascii_hexdigit()), "exactly one owned fixture must match");
@@ -196,7 +249,8 @@ fn pause_fixture_node() -> PausedNode {
 async fn live_cluster_single_session_progress_does_not_contact_an_unrelated_failed_node() {
     let _fixture = CLUSTER.lock().await;
     let monitor = reader().await;
-    let active = Connector::new(&spec(55436, "culprit_cluster_app")).unwrap().connect(INTERACTIVE).await.unwrap();
+    let active =
+        Connector::new(&spec(Endpoint::First, "culprit_cluster_app")).unwrap().connect(INTERACTIVE).await.unwrap();
     let identity=query_one(&active,&format!("SELECT replace(yb_get_local_tserver_uuid()::text,'-','') AS node,pid::text,{} AS started FROM pg_stat_activity WHERE pid=pg_backend_pid()",probe::timestamp("backend_start"))).await.unwrap().unwrap();
     let id = format!("{}/{}/{}", identity.string("node"), identity.string("pid"), identity.string("started"));
     active.batch_execute(&tagged("SET default_transaction_read_only=off")).await.unwrap();
@@ -233,11 +287,11 @@ async fn live_cluster_skipped_node_withdraws_complete_counters_and_marks_native_
     let _fixture = CLUSTER.lock().await;
     let monitor = reader().await;
     assert_eq!(global::nodes(&monitor).await.unwrap().len(), 3);
-    let connected = Connector::new(&spec(55436, "yugabyte")).unwrap().connect(INTERACTIVE).await.unwrap();
+    let connected = Connector::new(&spec(Endpoint::First, "yugabyte")).unwrap().connect(INTERACTIVE).await.unwrap();
     connected.simple_query(WORK).await.unwrap();
     let healthy = workload(&monitor).await;
     assert!(healthy.counter_set.as_ref().unwrap().epochs_known());
-    let provider = YugabyteProvider::new(&spec(55436, "culprit_cluster_monitor")).unwrap();
+    let provider = YugabyteProvider::new(&spec(Endpoint::First, "culprit_cluster_monitor")).unwrap();
     let mut snapshot = provider
         .snapshot("cluster-failure-verification", &SnapshotOptions { plans: 0, ..Default::default() })
         .await

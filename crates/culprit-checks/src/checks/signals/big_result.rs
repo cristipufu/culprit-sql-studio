@@ -155,14 +155,14 @@ fn big_result_finding(snapshot: &Snapshot, big: BigResult<'_>) -> Finding {
     f.severity = big.severity;
     with_query(snapshot, &mut f, q);
     severity_score(&mut f);
-    f.impact.label = t!("check.big_result.impact", n = rows, rows = format::count(rows));
+    f.impact.set_label(t!("check.big_result.impact", n = rows, rows = format::count(rows)));
     f.confidence = if width.is_some() { Confidence::High } else { Confidence::Medium };
     f.metrics = vec![
-        Metric::new(t!("check.big_result.metric.rows_per_run"), rows, Unit::Rows),
+        Metric::said(culprit_core::key!("check.big_result.metric.rows_per_run"), rows, Unit::Rows),
         Metric::said(key!("common.metric.runs"), q.executions, Unit::Count),
     ];
     if let Some(b) = bytes {
-        f.metrics.push(Metric::new(t!("check.big_result.metric.bytes_per_run"), b, Unit::Bytes));
+        f.metrics.push(Metric::said(culprit_core::key!("check.big_result.metric.bytes_per_run"), b, Unit::Bytes));
     }
     f.fix = Some(Fix {
         summary: if export { t!("check.big_result.fix.export") } else { t!("check.big_result.fix.return_used") },

@@ -331,7 +331,7 @@ fn slow_storage_finding(snapshot: &Snapshot, slow: SlowFiles) -> Finding {
     f.summary = summary.join(" ");
     f.severity = slow.severity;
     severity_score(&mut f);
-    f.impact.label = t!("check.slow_storage.impact", average = &avg, operation = op);
+    f.impact.set_label(t!("check.slow_storage.impact", average = &avg, operation = op));
     f.confidence = Confidence::Medium;
     f.metrics = vec![
         Metric::new(t!("check.slow_storage.metric.average", operation = op), slow.avg_ms, Unit::Ms),
@@ -345,13 +345,25 @@ fn slow_storage_finding(snapshot: &Snapshot, slow: SlowFiles) -> Finding {
     f.facts.storage_files =
         slow.files.iter().flat_map(|merged| culprit_core::signals::merged_from(merged, snapshot_files)).collect();
     if let Some(b) = slow.avg_bytes.filter(|_| slow.operation == Operation::Read) {
-        f.metrics.push(Metric::new(t!("check.slow_storage.metric.read_size"), b, Unit::Bytes));
+        f.metrics.push(Metric::said(culprit_core::key!("check.slow_storage.metric.read_size"), b, Unit::Bytes));
     }
     f.fix = Some(Fix {
         summary: match slow.host {
-            StorageHost::AzureSqlDatabase => t!("check.slow_storage.fix.azure_sql_database"),
-            StorageHost::ManagedInstance => t!("check.slow_storage.fix.managed_instance"),
-            StorageHost::Volume => t!("check.slow_storage.fix.volume"),
+            StorageHost::AzureSqlDatabase => t!(
+                "check.slow_storage.fix.azure_sql_database",
+                waits = culprit_core::t!("core.dashboard.tile.waits"),
+                now = culprit_core::t!("core.dashboard.tile.now")
+            ),
+            StorageHost::ManagedInstance => t!(
+                "check.slow_storage.fix.managed_instance",
+                waits = culprit_core::t!("core.dashboard.tile.waits"),
+                now = culprit_core::t!("core.dashboard.tile.now")
+            ),
+            StorageHost::Volume => t!(
+                "check.slow_storage.fix.volume",
+                waits = culprit_core::t!("core.dashboard.tile.waits"),
+                now = culprit_core::t!("core.dashboard.tile.now")
+            ),
         },
         sql: None,
         cost: None,

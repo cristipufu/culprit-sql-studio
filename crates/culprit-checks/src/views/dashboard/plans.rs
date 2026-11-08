@@ -26,7 +26,7 @@ pub(super) fn plans(s: &Snapshot) -> Tile {
         let reason = [Capability::QueryPlans, Capability::Showplan, Capability::GenericPlans]
             .into_iter()
             .find_map(|c| missing_reason(s, c))
-            .map(|m| sentence(&m.reason));
+            .map(|m| m.reason.clone());
         let mut t = Tile::new(
             TileKey::Plans,
             TileStatus::Unavailable,
@@ -98,7 +98,7 @@ pub(super) fn plans(s: &Snapshot) -> Tile {
             } else {
                 TileStatus::Info
             };
-            let what = short_rule(rule);
+            let what = short_rule(rule, culprit_core::i18n::LabelPosition::Inline);
             let share = format::percent(g.share.min(1.0));
             let (flagged_count, captured_count) = (flagged.to_string(), captured.to_string());
             let takeaway = if flagged == 1 {
@@ -156,7 +156,11 @@ pub(super) fn plans(s: &Snapshot) -> Tile {
         .iter()
         .take(4)
         .map(|(rule, g)| {
-            let mut item = TileItem::new(ItemKind::Rule, rule.clone(), capitalized(&short_rule(rule)));
+            let mut item = TileItem::new(
+                ItemKind::Rule,
+                rule.clone(),
+                short_rule(rule, culprit_core::i18n::LabelPosition::Initial),
+            );
             item.value = Some(t!("view.dashboard.plans.count", n = g.plans, count = g.plans.to_string()));
             item.share = Some(g.share.min(1.0));
             item.status = Some(severity_status(g.severity));
@@ -168,42 +172,42 @@ pub(super) fn plans(s: &Snapshot) -> Tile {
 }
 
 /// A rule as a few words for a sentence: "a large sort", "key lookups".
-pub(super) fn short_rule(rule: &str) -> String {
+pub(super) fn short_rule(rule: &str, position: culprit_core::i18n::LabelPosition) -> String {
     match rule {
-        "cross-table-or" => t!("view.dashboard.plans.rule.cross_table_or"),
-        "key-lookups" => t!("view.dashboard.plans.rule.key_lookups"),
-        "scan-filter" => t!("view.dashboard.plans.rule.scan_filter"),
-        "missing-index-hint" => t!("view.dashboard.plans.rule.missing_index_hint"),
-        "implicit-conversion" => t!("view.dashboard.plans.rule.implicit_conversion"),
-        "non-sargable" => t!("view.dashboard.plans.rule.non_sargable"),
-        "leading-wildcard" => t!("view.dashboard.plans.rule.leading_wildcard"),
-        "not-in" => t!("view.dashboard.plans.rule.not_in"),
-        "scalar-udf" => t!("view.dashboard.plans.rule.scalar_udf"),
-        "table-variable" => t!("view.dashboard.plans.rule.table_variable"),
-        "parallelism-blocked" => t!("view.dashboard.plans.rule.parallelism_blocked"),
-        "parallel-skew" => t!("view.dashboard.plans.rule.parallel_skew"),
-        "eager-spool" => t!("view.dashboard.plans.rule.eager_spool"),
-        "spill" => t!("view.dashboard.plans.rule.spill"),
-        "memory-grant" => t!("view.dashboard.plans.rule.memory_grant"),
-        "misestimate" => t!("view.dashboard.plans.rule.misestimate"),
-        "nested-loops" => t!("view.dashboard.plans.rule.nested_loops"),
-        "big-sort" => t!("view.dashboard.plans.rule.big_sort"),
-        "no-join-predicate" => t!("view.dashboard.plans.rule.no_join_predicate"),
-        "missing-statistics" => t!("view.dashboard.plans.rule.missing_statistics"),
-        "optimizer-timeout" => t!("view.dashboard.plans.rule.optimizer_timeout"),
-        "legacy-ce" => t!("view.dashboard.plans.rule.legacy_ce"),
-        "slow-compile" => t!("view.dashboard.plans.rule.slow_compile"),
-        "many-to-many" => t!("view.dashboard.plans.rule.many_to_many"),
-        "remote-query" => t!("view.dashboard.plans.rule.remote_query"),
-        "heap-fetches" => t!("view.dashboard.plans.rule.heap_fetches"),
-        "lossy-bitmap" => t!("view.dashboard.plans.rule.lossy_bitmap"),
-        "workers-short" => t!("view.dashboard.plans.rule.workers_short"),
-        "jit" => t!("view.dashboard.plans.rule.jit"),
-        "correlated-subquery" => t!("view.dashboard.plans.rule.correlated_subquery"),
-        "join-buffer" => t!("view.dashboard.plans.rule.join_buffer"),
-        "temp-table-sort" => t!("view.dashboard.plans.rule.temp_table_sort"),
-        "index-ignored" => t!("view.dashboard.plans.rule.index_ignored"),
-        // A rule this list doesn't know yet: its id, as words.
-        other => other.replace('-', " "),
+        "cross-table-or" => t!("view.dashboard.plans.rule.cross_table_or", position = position),
+        "key-lookups" => t!("view.dashboard.plans.rule.key_lookups", position = position),
+        "scan-filter" => t!("view.dashboard.plans.rule.scan_filter", position = position),
+        "missing-index-hint" => t!("view.dashboard.plans.rule.missing_index_hint", position = position),
+        "implicit-conversion" => t!("view.dashboard.plans.rule.implicit_conversion", position = position),
+        "non-sargable" => t!("view.dashboard.plans.rule.non_sargable", position = position),
+        "leading-wildcard" => t!("view.dashboard.plans.rule.leading_wildcard", position = position),
+        "not-in" => t!("view.dashboard.plans.rule.not_in", position = position),
+        "scalar-udf" => t!("view.dashboard.plans.rule.scalar_udf", position = position),
+        "table-variable" => t!("view.dashboard.plans.rule.table_variable", position = position),
+        "parallelism-blocked" => t!("view.dashboard.plans.rule.parallelism_blocked", position = position),
+        "parallel-skew" => t!("view.dashboard.plans.rule.parallel_skew", position = position),
+        "eager-spool" => t!("view.dashboard.plans.rule.eager_spool", position = position),
+        "spill" => t!("view.dashboard.plans.rule.spill", position = position),
+        "memory-grant" => t!("view.dashboard.plans.rule.memory_grant", position = position),
+        "misestimate" => t!("view.dashboard.plans.rule.misestimate", position = position),
+        "nested-loops" => t!("view.dashboard.plans.rule.nested_loops", position = position),
+        "big-sort" => t!("view.dashboard.plans.rule.big_sort", position = position),
+        "no-join-predicate" => t!("view.dashboard.plans.rule.no_join_predicate", position = position),
+        "missing-statistics" => t!("view.dashboard.plans.rule.missing_statistics", position = position),
+        "optimizer-timeout" => t!("view.dashboard.plans.rule.optimizer_timeout", position = position),
+        "legacy-ce" => t!("view.dashboard.plans.rule.legacy_ce", position = position),
+        "slow-compile" => t!("view.dashboard.plans.rule.slow_compile", position = position),
+        "many-to-many" => t!("view.dashboard.plans.rule.many_to_many", position = position),
+        "remote-query" => t!("view.dashboard.plans.rule.remote_query", position = position),
+        "heap-fetches" => t!("view.dashboard.plans.rule.heap_fetches", position = position),
+        "lossy-bitmap" => t!("view.dashboard.plans.rule.lossy_bitmap", position = position),
+        "workers-short" => t!("view.dashboard.plans.rule.workers_short", position = position),
+        "jit" => t!("view.dashboard.plans.rule.jit", position = position),
+        "correlated-subquery" => t!("view.dashboard.plans.rule.correlated_subquery", position = position),
+        "join-buffer" => t!("view.dashboard.plans.rule.join_buffer", position = position),
+        "temp-table-sort" => t!("view.dashboard.plans.rule.temp_table_sort", position = position),
+        "index-ignored" => t!("view.dashboard.plans.rule.index_ignored", position = position),
+        // An external rule keeps its native identifier until it supplies a label.
+        other => other.to_string(),
     }
 }
