@@ -73,6 +73,11 @@ pub fn words(f: &culprit_core::Finding) -> String {
     out.join("\n")
 }
 
+/// What the built-in check `id` finds in `s` on its own, before the report refines its findings.
+pub fn run(id: &str, s: &culprit_core::Snapshot) -> Vec<culprit_core::Finding> {
+    culprit_checks::all().into_iter().find(|c| c.info().id == id).expect("a built-in check").run(s)
+}
+
 /// A check's title and description, as `culprit checks` lists them.
 pub fn info(check: &str) -> String {
     let info = culprit_checks::infos().into_iter().find(|i| i.id == check).expect("a built-in check");

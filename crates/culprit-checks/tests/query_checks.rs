@@ -280,6 +280,140 @@ fn a_plan_regression_says_what_changed_in_english() {
     );
 }
 
+// ── regression ───────────────────────────────────────────────────────────────────────────────────
+
+/// The SQL Server demo with its Query Store timeline's 15-minute buckets made `hours` long: query 8 gets slower at
+/// the start of bucket 13, and its plan 47 first runs a minute into it, after plan 8.
+fn stretched(hours: f64) -> Snapshot {
+    use culprit_core::format::{epoch_seconds, iso_from_epoch};
+    let mut s = snapshot("mssql-demo.json");
+    let w = s.workload.as_mut().unwrap();
+    let t = w.timeline.as_mut().unwrap();
+    let base = epoch_seconds(&t.starts[0]).unwrap();
+    let at = |i: usize| base + i as f64 * hours * 3600.0;
+    for (i, start) in t.starts.iter_mut().enumerate() {
+        *start = iso_from_epoch(at(i));
+    }
+    let n = t.starts.len();
+    t.end = iso_from_epoch(at(n));
+    (w.window_start, w.window_end, w.window_hours) =
+        (Some(iso_from_epoch(at(0))), Some(t.end.clone()), n as f64 * hours);
+    let q = query(&mut s, "8");
+    for p in &mut q.plans {
+        (p.first_seen, p.last_seen) = match p.id.as_str() {
+            "47" => (Some(iso_from_epoch(at(13) + 60.0)), Some(iso_from_epoch(at(n) - 60.0))),
+            _ => (Some(iso_from_epoch(at(0) + 60.0)), Some(iso_from_epoch(at(13) - 60.0))),
+        };
+    }
+    s
+}
+
+// What regression says, word for word, beyond the demo's (a plan change on SQL Server, over 89 minutes): over hours
+// and over a day, with SQL Server correcting plans itself, a plan change it can't force, no plan change among several
+// plans or with one, a server that had just started, a trend from Culprit's own scans, and a slow query log's time.
+// Its messages come from locales/en.json.
+#[test]
+fn a_regression_says_when_and_how_much_in_english() {
+    assert_eq!(
+        crate::info("regression"),
+        "Queries that got slower\n\
+        Queries whose runs became much slower at some point in the window, with when it started and whether a plan change coincides. Needs Query Store history or a few earlier scans."
+    );
+    let mut automatic = stretched(4.0);
+    automatic.tuning = Some(TuningAdvice {
+        automatic_tuning: vec![culprit_core::AutomaticTuningOption {
+            name: "FORCE_LAST_GOOD_PLAN".into(),
+            desired: "ON".into(),
+            actual: "ON".into(),
+            reason: None,
+        }],
+        ..Default::default()
+    });
+    let mut unforceable = stretched(1.0);
+    query(&mut unforceable, "8").plans.iter_mut().find(|p| p.id == "8").unwrap().id = "a8".into();
+    let mut no_new_plan = snapshot("mssql-demo.json");
+    query(&mut no_new_plan, "8").plans.iter_mut().find(|p| p.id == "47").unwrap().first_seen =
+        Some("2026-10-11T07:40:00Z".into());
+    no_new_plan.server.started_at = Some("2026-10-11T10:00:00Z".into());
+    let mut one_plan = snapshot("mssql-demo.json");
+    query(&mut one_plan, "8").plans.retain(|p| p.id == "8");
+    one_plan.workload.as_mut().unwrap().timeline.as_mut().unwrap().source = culprit_core::TimelineSource::Scans;
+    let mut slow_log = snapshot("mssql-demo.json");
+    slow_log.workload.as_mut().unwrap().min_logged_ms = Some(100.0);
+    let said = |s: Snapshot| {
+        let found = crate::run("regression", &s);
+        crate::words(found.iter().find(|f| f.id == "regression:8").expect("query 8 got slower"))
+    };
+    assert_eq!(
+        [said(stretched(1.0)), said(automatic), said(unforceable), said(no_new_plan), said(one_plan), said(slow_log),],
+        [
+            "A read from orders got 3.4× slower on Oct 11 at 20:30 UTC, when its plan changed · Low · High\n\
+                Until Oct 11, 20:30 UTC it averaged 9.5 ms per run; since then 32 ms, over 93 runs: 2.1 s of extra database time in 6 hours. Plan 47 first ran on Oct 11 at 20:31 UTC and averages 32 ms; plan 8 averaged 9.5 ms.\n\
+                impact: 3.4× slower\n\
+                metric: Before\n\
+                metric: Since then\n\
+                metric: Extra time\n\
+                metric: Started: Oct 11, 20:30 UTC\n\
+                metric: Plan change: 8 → 47\n\
+                fix: Force plan 8 to stop the bleeding, then find out why the optimizer switched (statistics, parameter values, schema). Unforce once the cause is fixed.\n\
+                sql: EXEC sp_query_store_force_plan @query_id = 8, @plan_id = 8;\n\
+                verify: Re-scan after the fix: this query's trend in Queries should drop back to about 9.5 ms per run.",
+            "A read from orders got 3.4× slower on Oct 13 at 11:30 UTC, when its plan changed · Low · High\n\
+                Until Oct 13, 11:30 UTC it averaged 9.5 ms per run; since then 32 ms, over 93 runs: about 2.1 s of extra database time a day. Plan 47 first ran on Oct 13 at 11:31 UTC and averages 32 ms; plan 8 averaged 9.5 ms.\n\
+                impact: 3.4× slower\n\
+                metric: Before\n\
+                metric: Since then\n\
+                metric: Extra time per day\n\
+                metric: Started: Oct 13, 11:30 UTC\n\
+                metric: Plan change: 8 → 47\n\
+                fix: Force plan 8 to stop the bleeding, then find out why the optimizer switched (statistics, parameter values, schema). Unforce once the cause is fixed. Automatic plan correction (FORCE_LAST_GOOD_PLAN) is on for this database: SQL Server forces the last good plan itself once it is sure a regression costs enough (sys.dm_db_tuning_recommendations lists the ones it found), and unforces a plan it forced that turns out slower. A plan forced by hand stays forced until someone unforces it, whatever changes after.\n\
+                sql: EXEC sp_query_store_force_plan @query_id = 8, @plan_id = 8;\n\
+                verify: Re-scan after the fix: this query's trend in Queries should drop back to about 9.5 ms per run.",
+            "A read from orders got 3.4× slower on Oct 11 at 20:30 UTC, when its plan changed · Low · High\n\
+                Until Oct 11, 20:30 UTC it averaged 9.5 ms per run; since then 32 ms, over 93 runs: 2.1 s of extra database time in 6 hours. Plan 47 first ran on Oct 11 at 20:31 UTC and averages 32 ms; plan a8 averaged 9.5 ms.\n\
+                impact: 3.4× slower\n\
+                metric: Before\n\
+                metric: Since then\n\
+                metric: Extra time\n\
+                metric: Started: Oct 11, 20:30 UTC\n\
+                metric: Plan change: a8 → 47\n\
+                fix: The plan changed when it got slower. Compare the two plans (Queries → Plans), refresh statistics on the tables it reads, and check the parameter values the slow runs use.\n\
+                verify: Re-scan after the fix: this query's trend in Queries should drop back to about 9.5 ms per run.",
+            "A read from orders got 3.4× slower on Oct 11 at 10:45 UTC · Low · Low\n\
+                Until Oct 11, 10:45 UTC it averaged 9.5 ms per run; since then 32 ms, over 93 runs: 2.1 s of extra database time in 89 minutes. No new plan started when it got slower, so look at what else changed then: a deploy that changed this statement or its parameters, a jump in data volume, a statistics update, or new blocking.\n\
+                impact: 3.4× slower\n\
+                metric: Before\n\
+                metric: Since then\n\
+                metric: Extra time\n\
+                metric: Started: Oct 11, 10:45 UTC\n\
+                fix: Find what changed on Oct 11 at 10:45 UTC: a deploy touching this statement, its parameters or its indexes; data growth in the tables it reads; a statistics update; or blocking (Live shows current waits). Open the query to compare its plan with what you expect.\n\
+                verify: Re-scan after the fix: this query's trend in Queries should drop back to about 9.5 ms per run.\n\
+                caveat: SQL Server started on Oct 11 at 10:00 UTC, just before it got slower: the first hours after a start read from disk what was in memory before. If it stays slow once the cache is warm, it's a real change.",
+            "A read from orders got 3.4× slower on Oct 11 at 10:45 UTC · Low · Medium\n\
+                Until Oct 11, 10:45 UTC it averaged 9.5 ms per run; since then 32 ms, over 93 runs: 2.1 s of extra database time in 89 minutes. This scan does not establish which plan the earlier and later runs used, so a plan change remains possible. Compare plans and parameter values, and check for changed data volume, statistics, blocking or application code around that time.\n\
+                impact: 3.4× slower\n\
+                metric: Before\n\
+                metric: Since then\n\
+                metric: Extra time\n\
+                metric: Started: Oct 11, 10:45 UTC\n\
+                fix: Find what changed on Oct 11 at 10:45 UTC: a deploy touching this statement, its parameters or its indexes; data growth in the tables it reads; a statistics update; or blocking (Live shows current waits). Open the query to compare its plan with what you expect.\n\
+                verify: Re-scan after the fix: this query's trend in Queries should drop back to about 9.5 ms per run.\n\
+                caveat: Culprit built this trend from its own scans. Each point covers the time between two scans, so the start time is only as precise as how often you scan.",
+            "A read from orders got 3.4× slower on Oct 11 at 10:45 UTC, when its plan changed · Low · High\n\
+                Until Oct 11, 10:45 UTC it averaged 9.5 ms per run; since then 32 ms, over 93 runs: 2.1 s of extra logged slow-run time in 89 minutes. Plan 47 first ran on Oct 11 at 10:46 UTC and averages 32 ms; plan 8 averaged 9.5 ms.\n\
+                impact: 3.4× slower\n\
+                metric: Before\n\
+                metric: Since then\n\
+                metric: Extra time\n\
+                metric: Started: Oct 11, 10:45 UTC\n\
+                metric: Plan change: 8 → 47\n\
+                fix: Force plan 8 to stop the bleeding, then find out why the optimizer switched (statistics, parameter values, schema). Unforce once the cause is fixed.\n\
+                sql: EXEC sp_query_store_force_plan @query_id = 8, @plan_id = 8;\n\
+                verify: Re-scan after the fix: this query's trend in Queries should drop back to about 9.5 ms per run.",
+        ]
+    );
+}
+
 // ── one plan story per query ─────────────────────────────────────────────────────────────────────
 
 fn recommend(query: &str, good: &str, bad: &str) -> TuningAdvice {

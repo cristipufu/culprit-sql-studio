@@ -3,14 +3,11 @@
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
 use culprit_core::{
     Category, CheckInfo, Confidence, Engine, Finding, Fix, Metric, PlanVariant, QueryStat, QueryTrend, Severity,
-    Snapshot, SubjectKind, Timeline, TimelineSource, Unit, format,
+    Snapshot, SubjectKind, Timeline, TimelineSource, Unit, format, t,
 };
 
 use crate::queries::{apply_impact, time_noun};
 use crate::support::*;
-
-/// The metric a regression carries when a plan change coincides with it: "815 → 685".
-pub(crate) const PLAN_CHANGE: &str = "Plan change";
 
 /// "Much slower": the average run takes at least twice as long as before, and a few milliseconds more.
 const MIN_FACTOR: f64 = 2.0;
@@ -25,15 +22,21 @@ const MIN_RECENT_RUNS: f64 = 10.0;
 pub fn regression_info() -> CheckInfo {
     CheckInfo {
         id: "regression".into(),
-        title: "Queries that got slower".into(),
+        title: t!("check.regression.info.title"),
         category: Category::Queries,
         engines: vec![Engine::Mssql, Engine::Postgres, Engine::Yugabyte, Engine::Mysql],
         requires: vec![],
-        description: "Queries whose runs became much slower at some point in the window, with when it started and whether a plan change coincides. Needs Query Store history or a few earlier scans.".into(),
+        description: t!("check.regression.info.description"),
     }
 }
 
-check!(RegressionCheck: regression_info, regression, &[Evidence::Query(QueryMeasure::Timeline)]);
+check!(
+    RegressionCheck: regression_info,
+    decide = regressions,
+    render = regression_finding,
+    case<'s> = Regression<'s>,
+    evidence = &[Evidence::Query(QueryMeasure::Timeline)],
+);
 
 /// Where a query's average duration stepped up and stayed up.
 #[derive(Debug, PartialEq)]
@@ -97,7 +100,27 @@ pub(crate) fn shift(trend: &QueryTrend, buckets: usize) -> Option<Shift> {
     best
 }
 
-pub fn regression(snapshot: &Snapshot) -> Vec<Finding> {
+/// A statement whose runs got much slower at a point in the timeline and stayed slower, and what that establishes.
+pub struct Regression<'s> {
+    query: &'s QueryStat,
+    timeline: &'s Timeline,
+    shift: Shift,
+    /// When the slow period began: the start of its first bucket.
+    since: &'s str,
+    /// Hours from then to the timeline's end.
+    after_hours: f64,
+    /// A slower plan that first ran when it got slower, and the faster one before it.
+    plan: Option<PlanChange<'s>>,
+    impact: Option<QueryImpact>,
+    score: f64,
+    severity: Severity,
+    confidence: Confidence,
+    /// The server started just before the step, with no plan change to explain it: a cold cache may.
+    restarted: bool,
+}
+
+/// The six statements that got slower by the most, of those whose step is a real part of the workload.
+fn regressions(snapshot: &Snapshot) -> Vec<Regression<'_>> {
     let Some(workload) = &snapshot.workload else { return Vec::new() };
     let Some(timeline) = workload.timeline.as_ref().filter(|t| t.len() >= 4) else { return Vec::new() };
     // A bucket of the slow query log averages the runs it kept, the slow ones: a wider tail (one lock episode) reads as
@@ -105,7 +128,7 @@ pub fn regression(snapshot: &Snapshot) -> Vec<Finding> {
     if timeline.source == TimelineSource::SlowLog && crate::queries::logs_slow_runs_only(snapshot) {
         return Vec::new();
     }
-    let mut findings: Vec<Finding> = app_queries(snapshot)
+    let mut cases: Vec<Regression> = app_queries(snapshot)
         .filter_map(|q| {
             // Only the buckets that account for the statement (`Timeline::statement_bucket`): never one the source
             // can't account for in full, nor one where it ran more than the whole database did.
@@ -114,15 +137,20 @@ pub fn regression(snapshot: &Snapshot) -> Vec<Finding> {
                 .map(|i| timeline.statement_bucket(trend, i).map_or((None, None), |(t, r)| (Some(t), Some(r))))
                 .unzip();
             let s = shift(&QueryTrend { time_ms, executions }, timeline.len())?;
-            regression_finding(snapshot, timeline, q, &s)
+            regression_of(snapshot, timeline, q, s)
         })
         .collect();
-    findings.sort_by(|a, b| b.impact.score.total_cmp(&a.impact.score));
-    findings.truncate(6);
-    findings
+    cases.sort_by(|a, b| b.score.total_cmp(&a.score));
+    cases.truncate(6);
+    cases
 }
 
-fn regression_finding(snapshot: &Snapshot, timeline: &Timeline, q: &QueryStat, s: &Shift) -> Option<Finding> {
+fn regression_of<'s>(
+    snapshot: &Snapshot,
+    timeline: &'s Timeline,
+    q: &'s QueryStat,
+    s: Shift,
+) -> Option<Regression<'s>> {
     let (since, _) = timeline.bounds(s.start);
     let since_epoch = parse_epoch_seconds(since)?;
     let end_epoch = parse_epoch_seconds(&timeline.end)?;
@@ -136,27 +164,16 @@ fn regression_finding(snapshot: &Snapshot, timeline: &Timeline, q: &QueryStat, s
     if extra_share < 0.01 && share_after < 0.03 {
         return None;
     }
-    let plan = plan_change(timeline, q, s);
-    let when = when_phrase(since);
+    let plan = plan_change(timeline, q, &s);
     let factor = s.factor();
-
-    let mut f = finding("regression", &q.id, Category::Queries, subject(SubjectKind::Query, &q.id));
-    if let Some(impact) = query_impact(snapshot, &[q]) {
-        apply_impact(snapshot, &mut f, &impact);
-    }
-    let time = time_noun(snapshot);
-    let extra_per_day = s.extra_ms() * 24.0 / after_hours;
-    // A day's worth only when the slow period covers most of one; under that it would be an extrapolation.
-    f.impact.time_ms_per_day = (after_hours >= culprit_core::PER_DAY_MIN_HOURS).then_some(extra_per_day);
-    f.impact.score = score_for_share(share_after.max(extra_share));
-    f.impact.label = format!("{} slower", times(factor));
     // Runs that came in bursts are graded on their total, never extrapolated to a day.
     let amount = severity_for_recent_time(burst_hours(snapshot, q, after_hours), s.after_time_ms, 1.0);
-    f.severity = severity_for_share(share_after).min(amount);
+    let mut severity = severity_for_share(share_after).min(amount);
     if factor >= 3.0 && extra_share >= 0.05 {
-        f.severity = f.severity.max(Severity::Medium.min(amount));
+        severity = severity.max(Severity::Medium.min(amount));
     }
-    f.confidence = if timeline.source == TimelineSource::QueryStore { Confidence::High } else { Confidence::Medium };
+    let mut confidence =
+        if timeline.source == TimelineSource::QueryStore { Confidence::High } else { Confidence::Medium };
     // A server that started just before the step runs its first hours on a cold cache: slower, and not for good. Under
     // a day of slow runs since then it is something to watch, not a regression yet.
     let restarted = snapshot
@@ -164,93 +181,134 @@ fn regression_finding(snapshot: &Snapshot, timeline: &Timeline, q: &QueryStat, s
         .started_at
         .as_deref()
         .and_then(parse_epoch_seconds)
-        .filter(|at| (since_epoch - 2.0 * 3600.0..=since_epoch + 3600.0).contains(at));
-    if restarted.is_some() && after_hours < 24.0 && plan.is_none() {
-        f.severity = Severity::Low;
-        f.confidence = Confidence::Low;
-        f.caveats.push(format!(
-            "{} started {}, just before it got slower: the first hours after a start read from disk what was in memory before. If it stays slow once the cache is warm, it's a real change.",
-            snapshot.server.name(),
-            snapshot.server.started_at.as_deref().map(when_phrase).unwrap_or_default()
+        .filter(|at| (since_epoch - 2.0 * 3600.0..=since_epoch + 3600.0).contains(at))
+        .is_some()
+        && after_hours < 24.0
+        && plan.is_none();
+    if restarted {
+        severity = Severity::Low;
+        confidence = Confidence::Low;
+    }
+    Some(Regression {
+        query: q,
+        timeline,
+        since,
+        after_hours,
+        plan,
+        impact: query_impact(snapshot, &[q]),
+        score: score_for_share(share_after.max(extra_share)),
+        severity,
+        confidence,
+        restarted,
+        shift: s,
+    })
+}
+
+fn regression_finding(snapshot: &Snapshot, regression: Regression<'_>) -> Finding {
+    let Regression { query: q, shift: s, since, after_hours, .. } = &regression;
+    let (q, since, after_hours) = (*q, *since, *after_hours);
+    let when = when_phrase(since);
+    let mut f = finding("regression", &q.id, Category::Queries, subject(SubjectKind::Query, &q.id));
+    if let Some(impact) = &regression.impact {
+        apply_impact(snapshot, &mut f, impact);
+    }
+    let time = time_noun(snapshot);
+    let extra_per_day = s.extra_ms() * 24.0 / after_hours;
+    // A day's worth only when the slow period covers most of one; under that it would be an extrapolation.
+    f.impact.time_ms_per_day = (after_hours >= culprit_core::PER_DAY_MIN_HOURS).then_some(extra_per_day);
+    f.impact.score = regression.score;
+    let factor = times(s.factor());
+    f.impact.label = t!("common.impact.times_slower", factor = factor.clone());
+    f.severity = regression.severity;
+    f.confidence = regression.confidence;
+    if regression.restarted {
+        f.caveats.push(t!(
+            "check.regression.caveat.restarted",
+            server = snapshot.server.name(),
+            when = snapshot.server.started_at.as_deref().map(when_phrase).unwrap_or_default()
         ));
     }
-    f.title = format!(
-        "{} got {} slower {when}{}",
-        capitalize(&query_handle(q)),
-        times(factor),
-        if plan.is_some() { ", when its plan changed" } else { "" }
-    );
-    let extra = if after_hours >= 20.0 {
-        format!("about {} of extra {time} a day", format::duration(extra_per_day))
-    } else {
-        format!("{} of extra {time} in {}", format::duration(s.extra_ms()), hours_phrase(after_hours))
+    let query = capitalize(&query_handle(q));
+    f.title = match &regression.plan {
+        Some(_) => t!("check.regression.title.plan_changed", query = query, factor = factor, when = when.clone()),
+        None => t!("check.regression.title", query = query, factor = factor, when = when.clone()),
     };
-    let mut summary = format!(
-        "Until {} it averaged {} per run; since then {}, over {} runs: {extra}.",
-        short_when(since),
-        format::duration(s.before_ms),
-        format::duration(s.after_ms),
-        format::count(s.after_runs),
-    );
-    match &plan {
-        Some(change) => summary.push_str(&format!(
-            " Plan {} first ran {} and averages {}; plan {} averaged {}.",
-            change.new.id,
-            change.new.first_seen.as_deref().map(when_phrase).unwrap_or_else(|| when.clone()),
-            format::duration(change.new.mean_time_ms),
-            change.old.id,
-            format::duration(change.old.mean_time_ms)
-        )),
-        // Several plans, none new around the step: it didn't come with a plan change, which isn't "the plan never changed".
-        None if q.workload_plans().len() > 1 => summary.push_str(" No new plan started when it got slower, so look at what else changed then: a deploy that changed this statement or its parameters, a jump in data volume, a statistics update, or new blocking."),
-        None => summary.push_str(" This scan does not establish which plan the earlier and later runs used, so a plan change remains possible. Compare plans and parameter values, and check for changed data volume, statistics, blocking or application code around that time."),
-    }
-    f.summary = summary;
-    f.queries = query_refs(&[q]);
-    f.metrics.push(Metric::new("Before", s.before_ms, Unit::Ms));
-    f.metrics.push(Metric::new("Since then", s.after_ms, Unit::Ms));
-    if after_hours >= 20.0 {
-        f.metrics.push(Metric::new("Extra time per day", extra_per_day, Unit::Ms));
+    let (until, before, after, runs) =
+        (short_when(since), format::duration(s.before_ms), format::duration(s.after_ms), format::count(s.after_runs));
+    let mut summary = vec![if after_hours >= 20.0 {
+        t!(
+            "check.regression.summary.per_day",
+            until = until,
+            before = before.clone(),
+            after = after,
+            runs = runs,
+            extra = format::duration(extra_per_day),
+            time = time
+        )
     } else {
-        f.metrics.push(Metric::new("Extra time", s.extra_ms(), Unit::Ms));
+        t!(
+            "check.regression.summary.total",
+            until = until,
+            before = before.clone(),
+            after = after,
+            runs = runs,
+            extra = format::duration(s.extra_ms()),
+            time = time,
+            span = hours_phrase(after_hours)
+        )
+    }];
+    summary.push(match &regression.plan {
+        Some(change) => t!(
+            "check.regression.summary.plan_change",
+            new = &change.new.id,
+            first = change.new.first_seen.as_deref().map(when_phrase).unwrap_or_else(|| when.clone()),
+            new_ms = format::duration(change.new.mean_time_ms),
+            old = &change.old.id,
+            old_ms = format::duration(change.old.mean_time_ms)
+        ),
+        // Several plans, none new around the step: it didn't come with a plan change, which isn't "the plan never changed".
+        None if q.workload_plans().len() > 1 => t!("check.regression.summary.no_new_plan"),
+        None => t!("check.regression.summary.plan_unknown"),
+    });
+    f.summary = summary.join(" ");
+    f.queries = query_refs(&[q]);
+    f.metrics.push(Metric::new(t!("check.regression.metric.before"), s.before_ms, Unit::Ms));
+    f.metrics.push(Metric::new(t!("check.regression.metric.since_then"), s.after_ms, Unit::Ms));
+    if after_hours >= 20.0 {
+        f.metrics.push(Metric::new(t!("common.metric.extra_time_per_day"), extra_per_day, Unit::Ms));
+    } else {
+        f.metrics.push(Metric::new(t!("common.metric.extra_time"), s.extra_ms(), Unit::Ms));
     }
-    f.metrics.push(Metric::text("Started", short_when(since)));
-    if let Some(change) = &plan {
-        f.metrics.push(Metric::text(PLAN_CHANGE, format!("{} → {}", change.old.id, change.new.id)));
+    f.metrics.push(Metric::text(t!("check.regression.metric.started"), short_when(since)));
+    if let Some(change) = &regression.plan {
+        f.metrics.push(Metric::text(
+            t!("check.regression.metric.plan_change"),
+            t!("check.regression.plan_change", from = &change.old.id, to = &change.new.id),
+        ));
         f.facts.plan_change =
             Some(culprit_core::FindingPlanChange { from: change.old.id.clone(), to: change.new.id.clone() });
     }
-    f.fix = Some(match (&plan, snapshot.server.engine) {
-        (Some(change), Engine::Mssql) if numeric(&q.id) && numeric(&change.old.id) => Fix {
-            summary: format!(
-                "Force plan {} to stop the bleeding, then find out why the optimizer switched (statistics, parameter values, schema). Unforce once the cause is fixed.{}",
-                change.old.id,
-                crate::tuning::hand_forcing_note(snapshot).map(|n| format!(" {n}")).unwrap_or_default()
-            ),
-            sql: Some(format!("EXEC sp_query_store_force_plan @query_id = {}, @plan_id = {};", q.id, change.old.id)),
-            cost: None,
-        },
-        (Some(_), Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite) => Fix {
-            summary: "The plan changed when it got slower. Compare the two plans (Queries → Plans), refresh statistics on the tables it reads, and check the parameter values the slow runs use.".into(),
-            sql: None,
-            cost: None,
-        },
-        (None, Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite) => Fix {
-            summary: format!(
-                "Find what changed {when}: a deploy touching this statement, its parameters or its indexes; data growth in the tables it reads; a statistics update; or blocking (Live shows current waits). Open the query to compare its plan with what you expect."
-            ),
-            sql: None,
-            cost: None,
-        },
+    f.fix = Some(match &regression.plan {
+        Some(change) if snapshot.server.engine == Engine::Mssql && numeric(&q.id) && numeric(&change.old.id) => {
+            let mut fix = vec![t!("check.regression.fix.force", plan = &change.old.id)];
+            fix.extend(crate::tuning::hand_forcing_note(snapshot));
+            Fix {
+                summary: fix.join(" "),
+                sql: Some(format!(
+                    "EXEC sp_query_store_force_plan @query_id = {}, @plan_id = {};",
+                    q.id, change.old.id
+                )),
+                cost: None,
+            }
+        }
+        Some(_) => Fix { summary: t!("check.regression.fix.compare_plans"), sql: None, cost: None },
+        None => Fix { summary: t!("check.regression.fix.find_change", when = when), sql: None, cost: None },
     });
-    f.verify = vec![format!(
-        "Re-scan after the fix: this query's trend in Queries should drop back to about {} per run.",
-        format::duration(s.before_ms)
-    )];
-    if timeline.source == TimelineSource::Scans {
-        f.caveats.push("Culprit built this trend from its own scans. Each point covers the time between two scans, so the start time is only as precise as how often you scan.".into());
+    f.verify = vec![t!("check.regression.verify", before = before)];
+    if regression.timeline.source == TimelineSource::Scans {
+        f.caveats.push(t!("check.regression.caveat.scans"));
     }
-    Some(f)
+    f
 }
 
 struct PlanChange<'a> {
@@ -312,9 +370,9 @@ pub(crate) fn when_phrase(iso: &str) -> String {
 
 fn hours_phrase(hours: f64) -> String {
     if hours >= 1.5 {
-        format!("{} hours", hours.round())
+        t!("check.regression.span.hours", n = hours.round())
     } else {
-        format!("{} minutes", (hours * 60.0).round().max(1.0))
+        t!("check.regression.span.minutes", n = (hours * 60.0).round().max(1.0))
     }
 }
 
