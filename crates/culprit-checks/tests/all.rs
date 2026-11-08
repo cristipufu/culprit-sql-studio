@@ -3,6 +3,7 @@
 //! listed here, or `every_test_file_is_listed` fails.
 
 mod actionability;
+mod actual_words;
 mod brief;
 mod bursts;
 mod chatty;
@@ -18,6 +19,7 @@ mod multi_tenant;
 mod old_versions;
 mod one_off;
 mod partitions;
+mod pins;
 mod plan_cache;
 mod plan_warnings;
 mod plugin;
