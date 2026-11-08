@@ -25,8 +25,22 @@ accent: « État », « Événements étendus ».
 - A no-break space (U+00A0) before `:`; a narrow no-break space (U+202F) before `;`, `!` and `?`.
 - The apostrophe is typographic: `’` (U+2019).
 - Keep `…` where English has it, and the middle dot `·` separators.
-- Numbers, sizes, durations and percentages come formatted from code (`1 234,5`): never write digits into a message.
+- Numbers, sizes, durations and percentages come formatted from code (`1 234,5`); a fixed number English writes
+  (« 95 % », « 200 lignes ») keeps French spacing.
+- Units: `o`, `Ko`, `Mo`, `Go`, `To`; counts `k`, `M`, `Md` after a space (« 1,2 k »); `h`, `min`, `s`, `ms`, `µs`;
+  a narrow no-break space before `%` (« 23 % »).
 - Keyboard keys are written as English shows them: `Enter`, `Esc`, `⌘`.
+
+## Dates and periods
+
+- A moment: « aujourd'hui à 12:13 », « hier à 09:02 », « 7 oct. à 12:13 »; « il y a 3 h », « à l'instant ».
+- Two short moments from code (`{from}`, `{to}` from `when().short`) read « entre {from} et {to} », never « du {from}
+  au {to} », which breaks on « aujourd'hui ». A full date (`when().full`, « samedi 8 novembre 2026 à 12:13 ») takes
+  « du … au … ».
+- A period phrase (`{window}`, `{span}` from `ui.rates.window.*` and `ui.format.window.*`) starts with its article
+  (« les 7 derniers jours », « la période que couvre le journal… »): put it after « sur », « couvre » or a colon, never
+  after « de » or « à », which would need « des » or « aux ». A bare length (`{span}` = « 7 jours », « 5 h ») has no
+  gender to agree with: « sur {span} », « les {span} précédant l'analyse ».
 
 ## Plurals
 
@@ -146,5 +160,21 @@ say in English (Query Store, autovacuum, tempdb, buffer pool, DocDB, tablet, tab
 | mark (a finding) | marquer | dismissed: écarté ; resolved: résolu ; fixed: corrigé |
 | copy / paste / drop | copier / coller / déposer | |
 | share | partager ; share of time: part (f.) | |
-| database time | temps de base de données | |
+| database time | temps de base de données | « temps BD » in a table column |
 | uptime | temps de fonctionnement (m.) | |
+| Explain / Analyze (editor buttons) | Expliquer / Mesurer | « Analyser » is Culprit's scan |
+| measure (a run) | mesurer ; exécution mesurée | |
+| request (HTTP, in an app log) | requête HTTP (f.) | « requête » alone is a query |
+| latch | latch (m.) | « attentes de latch de page » |
+| flush (log) | vidage (m.) | |
+| version store | banque des versions (f.) | Microsoft Learn |
+| staging | préproduction (f.) | |
+| scratch tab | onglet de brouillon (m.) | |
+| placeholder (`?`, `$1`) | paramètre fictif (m.) | |
+| keychain | trousseau (m.) du système | |
+| jump host | hôte de rebond (m.) | |
+| coding agent | agent de code (m.) | |
+| brief (for an agent) | synthèse (f.) | |
+| timeline | chronologie (f.) | |
+| chunk, hypertable, columnstore, rowstore | kept | TimescaleDB and SQL Server names |
+| needs attention / worth a look | à traiter / à surveiller | status labels |
