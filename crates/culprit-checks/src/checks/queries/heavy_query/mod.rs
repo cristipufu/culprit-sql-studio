@@ -10,10 +10,10 @@ use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
 use fix::*;
 pub(super) use idle::idle_time;
+use idle::{DominantWait, Idle, NOTHING_READS, WaitOn, dominant_wait};
 pub(crate) use idle::{IdleKind, idle_kind};
-use idle::{NOTHING_READS, WaitKind, dominant_wait};
 pub(crate) use rewrite::late_filter_rewrite;
-use rewrite::{ancestors, narrowed_later_fix};
+use rewrite::{Narrowing, narrowed_later_fix, narrowing_above};
 
 pub fn heavy_query_info() -> CheckInfo {
     CheckInfo {
@@ -56,23 +56,108 @@ pub fn heavy_query(snapshot: &Snapshot) -> Vec<Finding> {
 const HEAVY_QUERIES: usize = 6;
 
 pub(super) fn heavy_query_finding(snapshot: &Snapshot, q: &QueryStat) -> Finding {
-    // Weighed, rated and graded on what Culprit's scans measured of it where they did (`query_impact`), the same
-    // figures the title, the summary and every list of statements state.
+    render(snapshot, q, &decide(snapshot, q))
+}
+
+/// What a heavy statement's finding concludes ([`decide`]), before a word of it is written ([`render`]): what explains
+/// its time, how it is graded, the advice the evidence permits, what a later scan shows of it, and the step it is about.
+struct HeavyCase<'a> {
+    /// Weighed, rated and graded on what Culprit's scans measured of it where they did (`query_impact`), the same
+    /// figures the title, the summary and every list of statements state.
+    impact: QueryImpact,
+    severity: Severity,
+    /// Its score held to a low finding's: a deliberate pause holds a connection, not the server's resources.
+    ranked_low: bool,
+    confidence: Confidence,
+    actionability: culprit_core::Actionability,
+    kind: StatementKind,
+    /// It stopped running: told in the past.
+    stopped: bool,
+    /// What Culprit's own scans measured of it, and that measure again where its entry is recent ([`recent_entry`]).
+    scans: Option<culprit_core::ScanSpan>,
+    recent: Option<culprit_core::ScanSpan>,
+    title: TitleForm,
+    /// What explains its time, said after its share.
+    lead: Lead<'a>,
+    /// The wait that takes most of its time, where the time is not idle.
+    wait: Option<DominantWait<'a>>,
+    /// The triggers a write fires on its table, whose work runs inside its time: (table, event, names).
+    triggers: Option<(&'a str, &'static str, Vec<String>)>,
+    /// It is optimizer statistics maintenance, not an update of application rows.
+    statistics_maintenance: bool,
+    remedy: Remedy<'a>,
+    verify: Verify,
+    /// The plan step the finding points at.
+    plan_node: Option<u32>,
+}
+
+/// What a heavy statement's title says of it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum TitleForm {
+    /// Its share of database time, and, where its time is idle ([`Lead::Idle`]), what it does instead.
+    Share,
+    /// A read whose runs return less than a row: the pages (rows examined, MySQL) a run reads to return that.
+    ReadsForNothing { reads: f64, returns: Returns },
+    /// A read that reads at least [`MANY_READS_PER_ROW`] for every row it returns: that many.
+    ManyReadsPerRow(f64),
+}
+
+/// What a read's runs return, where it is less than a row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Returns {
+    Nothing,
+    LessThanARow,
+}
+
+impl Returns {
+    fn words(self) -> &'static str {
+        match self {
+            Returns::Nothing => "nothing",
+            Returns::LessThanARow => "less than a row",
+        }
+    }
+}
+
+/// What explains a heavy statement's time, the first of these that applies.
+enum Lead<'a> {
+    /// Its time isn't work: it sleeps, or waits.
+    Idle(Idle),
+    /// The step of its plan that does the work, with the share of the plan's estimated cost on it where the plan can
+    /// state one: beside a step it puts no cost on, a scan would read as "100%".
+    Step { plan: &'a Plan, node: &'a PlanNode, share: Option<f64> },
+    /// A seek's residual filter may explain the reads, but only an actual plan can establish its row counts.
+    Lookups(ResidualRead<'a>),
+    /// A write whose plan costs next to nothing whatever its runs cost: the time is the write itself.
+    CheapWrite,
+    /// A plan that does no real work (a point lookup), run cheaply as measured: its time is the call itself, so no
+    /// step of it is the lead. Where its time waits for storage, with the pages a run reads (`storage_reads`): the few
+    /// it reads come from disk, so it isn't how often it runs alone.
+    CheapPlan { storage_reads: Option<f64> },
+    /// Costed under the bar every step's share needs, yet not cheap because a step reads a whole table: no share of
+    /// the time is put on that step, but it is the one the fix is about.
+    WholeScan { plan: &'a Plan, node: &'a PlanNode },
+    /// Nothing the plan or the statement's waits show.
+    Unexplained,
+}
+
+/// How the verify step checks the change.
+enum Verify {
+    /// By what a later scan shows ([`verify_line`]).
+    Scan(Expect),
+    /// The rewrite's own comparison of the original and the rewritten query, quoted from its observation.
+    Quoted(String),
+    /// By later statistics refreshes under comparable load.
+    StatisticsRefreshes,
+}
+
+/// What a heavy statement's finding concludes, from the evidence alone: nothing here is worded.
+fn decide<'a>(snapshot: &'a Snapshot, q: &'a QueryStat) -> HeavyCase<'a> {
     let impact = query_impact(snapshot, &[q]).expect("workload present");
-    let handle = query_handle(q);
-    let time = time_noun(snapshot);
-    let mut f = finding("heavy-query", &q.id, Category::Queries, subject(SubjectKind::Query, &q.id));
     let scans = snapshot.workload.as_ref().and_then(|w| w.scans_of(q));
-    let recent = recent_entry(snapshot, q);
-    apply_impact(snapshot, &mut f, &impact);
-    f.severity = severity_for_impact(snapshot, &[q], &impact);
-    f.confidence = Confidence::High;
     // Runs a day at the pace it ran: over Culprit's scans where they measured it, a burst's own total, never
     // extrapolated to a day.
     let per_day_runs = scans.map(|s| s.per_day(s.runs)).or_else(|| rate_per_day_of(snapshot, &[q], q.executions));
     let kind = kind_of(q);
-    // A statement that stopped running is told in the past.
-    let stopped = crate::query_stopped(snapshot, q).is_some();
     // Rows returned measure waste only for a read that returns what it finds: an aggregate returns one row per group
     // whatever it reads, and a write returns none.
     let reads_per_row = match (q.reads_per_execution(), q.rows_per_execution()) {
@@ -83,48 +168,170 @@ pub(super) fn heavy_query_finding(snapshot: &Snapshot, q: &QueryStat) -> Finding
     // so they're said per run, once they are more than a lookup that finds nothing reads.
     let reads_for_nothing = match (q.reads_per_execution(), q.rows_per_execution()) {
         (Some(reads), Some(rows)) if kind == StatementKind::Read && rows < 1.0 && reads >= NOTHING_READS => {
-            Some((reads, if rows <= 0.0 { "nothing" } else { "less than a row" }))
+            Some((reads, if rows <= 0.0 { Returns::Nothing } else { Returns::LessThanARow }))
         }
         _ => None,
     };
     let idle = idle_time(snapshot, q);
     let hot =
         q.plan.as_ref().and_then(|p| Some((p, culprit_core::insights::working_step(p)?))).filter(|_| idle.is_none());
-    // A plan that does no real work (a point lookup), run cheaply as measured: its time is the call itself, so no step
-    // of it is the lead.
+    // A plan that does no real work (a point lookup), run cheaply as measured.
     let cheap_plan = q.plan.as_ref().is_some_and(|p| culprit_core::insights::runs_cheaply(p, q));
     // A residual filter may explain the reads, but only an actual plan can establish its row counts.
     let lookups = reads_for_nothing
         .filter(|_| hot.is_none() && idle.is_none())
-        .and_then(|(reads, nothing)| residual_read(q.plan.as_ref()?, reads, nothing));
-    // Costed under the bar every step's share needs, yet not cheap because a step reads a whole table: no share of the
-    // time is put on that step, but it is the one the fix is about.
+        .and_then(|(reads, returns)| residual_read(q.plan.as_ref()?, reads, returns));
+    // Costed under the bar every step's share needs, yet not cheap because a step reads a whole table.
     let whole_scan = q
         .plan
         .as_ref()
         .filter(|_| hot.is_none() && idle.is_none() && lookups.is_none() && !cheap_plan)
         .and_then(|p| Some((p, whole_table_scan(p)?)));
-    let share = format::percent(impact.share);
+    let wait = dominant_wait(q).filter(|_| idle.is_none());
+    let title = match (&idle, reads_per_row, reads_for_nothing) {
+        (Some(_), _, _) => TitleForm::Share,
+        (None, _, Some((reads, returns))) => TitleForm::ReadsForNothing { reads, returns },
+        (None, Some(r), _) if r >= MANY_READS_PER_ROW => TitleForm::ManyReadsPerRow(r),
+        _ => TitleForm::Share,
+    };
+    let mut severity = severity_for_impact(snapshot, &[q], &impact);
+    let mut ranked_low = false;
+    let mut confidence = Confidence::High;
+    let mut plan_node = hot.map(|(_, n)| n.id);
+    let (mut remedy, mut verify) = match &idle {
+        Some(idle) => {
+            if idle.kind == IdleKind::Sleep || idle.kind == IdleKind::AppLock {
+                // A deliberate pause holds a connection, not the server's resources: listed, ranked low.
+                severity = Severity::Low;
+                ranked_low = true;
+            }
+            confidence = idle.confidence;
+            (Remedy::Idle(idle.kind), Verify::Scan(idle.verify()))
+        }
+        None => {
+            // The next steps tied to one operator: measure a seek's residual filter, or inspect a whole-table read.
+            let step = match (&lookups, whole_scan) {
+                (Some(lookups), _) => Some((
+                    lookups.check.id,
+                    Remedy::Measure { schema: lookups.schema.clone(), table: lookups.table.clone() },
+                )),
+                (None, Some((plan, node))) => {
+                    scan_step(snapshot, plan, node, q, kind).map(|step| (node.id, Remedy::ScanStep(step)))
+                }
+                _ => None,
+            };
+            let (remedy, lever) = match step {
+                Some((node, remedy)) => {
+                    plan_node = Some(node);
+                    (remedy, Shows::CheaperRuns)
+                }
+                None => heavy_remedy(snapshot, hot, per_day_runs, q, kind, cheap_plan),
+            };
+            let expect = match (&lookups, &wait) {
+                (Some(_), _) => Expect::Measure,
+                // A read that waits for storage: what the change shortens is the wait, not the pages a run reads.
+                (None, Some(wait))
+                    if wait.on == WaitOn::Storage && matches!(kind, StatementKind::Read | StatementKind::Aggregate) =>
+                {
+                    Expect::Storage(wait.share)
+                }
+                _ if culprit_core::sql::is_session_statement(&q.text) => Expect::Session,
+                // A fix that cuts runs leaves what one run reads as it was (or more, once the cheap runs are skipped
+                // or a batch carries more rows): what moves is how often it runs, and its time with it.
+                _ if super::chatty_query::counter_advice(snapshot, q).is_some() => Expect::Counter,
+                _ if lever == Shows::FewerRuns => Expect::FewerRuns,
+                _ => Expect::CheaperRuns,
+            };
+            (remedy, Verify::Scan(expect))
+        }
+    };
+    let statistics_maintenance = statistics_maintenance_table(&q.text).is_some();
+    if statistics_maintenance {
+        (remedy, verify) = (Remedy::StatisticsMaintenance, Verify::StatisticsRefreshes);
+    }
+    let mut actionability = culprit_core::Actionability::default();
+    if let Some(rewrite) = q.plan.as_ref().and_then(|p| late_filter_rewrite(snapshot, q, p)) {
+        plan_node = rewrite.nodes.first().copied();
+        verify = Verify::Quoted(rewrite.verify.clone());
+        remedy = Remedy::Rewrite(rewrite);
+        if !index_work_is_material(snapshot, &[q]) {
+            actionability = culprit_core::Actionability::Information;
+        }
+    }
+    let lead = match (idle, hot, lookups) {
+        (Some(idle), _, _) => Lead::Idle(idle),
+        (None, Some((plan, node)), _) => Lead::Step { plan, node, share: plan.step_share(node) },
+        (None, None, Some(lookups)) => Lead::Lookups(lookups),
+        _ if cheap_plan && kind == StatementKind::Write => Lead::CheapWrite,
+        _ if cheap_plan => Lead::CheapPlan {
+            storage_reads: wait.as_ref().filter(|w| w.on == WaitOn::Storage).and(q.reads_per_execution()),
+        },
+        _ => match whole_scan {
+            Some((plan, node)) => Lead::WholeScan { plan, node },
+            None => Lead::Unexplained,
+        },
+    };
+    HeavyCase {
+        impact,
+        severity,
+        ranked_low,
+        confidence,
+        actionability,
+        kind,
+        stopped: crate::query_stopped(snapshot, q).is_some(),
+        scans,
+        recent: recent_entry(snapshot, q),
+        title,
+        lead,
+        wait,
+        triggers: (kind == StatementKind::Write).then(|| target_table_triggers(snapshot, q)).flatten(),
+        statistics_maintenance,
+        remedy,
+        verify,
+        plan_node,
+    }
+}
+
+/// A heavy statement's finding, worded from what [`decide`] concluded. Only phrasing is chosen here: the tense of a
+/// statement that stopped, what the engine counts (MySQL's rows examined, the others' pages), the source's names.
+fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
+    let handle = query_handle(q);
+    let time = time_noun(snapshot);
+    let mut f = finding("heavy-query", &q.id, Category::Queries, subject(SubjectKind::Query, &q.id));
+    apply_impact(snapshot, &mut f, &case.impact);
+    f.severity = case.severity;
+    if case.ranked_low {
+        f.impact.score = f.impact.score.min(base_score(Severity::Low));
+    }
+    f.confidence = case.confidence;
+    f.actionability = case.actionability;
+    let share = format::percent(case.impact.share);
     let mysql = snapshot.server.engine == Engine::Mysql;
     let (reads_verb, reads_unit) = if mysql { ("examines", "rows") } else { ("reads", "pages") };
-    let (takes, read, returns) = match (stopped, mysql) {
+    let (takes, read, returns) = match (case.stopped, mysql) {
         (true, true) => ("took", "examined", "returned"),
         (true, false) => ("took", "read", "returned"),
         (false, _) => ("takes", reads_verb, "returns"),
     };
     // A statement that stopped running took its share until it stopped, whatever it spent the time on.
-    let until = if stopped { " until it stopped" } else { "" };
-    f.title = match (&idle, reads_per_row, reads_for_nothing) {
-        (Some(idle), _, _) => {
-            format!("{} {takes} {share} of {time}{until}, {}", capitalize(&handle), idle.title_tail())
+    let until = if case.stopped { " until it stopped" } else { "" };
+    f.title = match case.title {
+        TitleForm::Share => {
+            let idle = match &case.lead {
+                Lead::Idle(idle) => format!(", {}", idle.title_tail()),
+                _ => String::new(),
+            };
+            format!("{} {takes} {share} of {time}{until}{idle}", capitalize(&handle))
         }
-        (None, _, Some((reads, nothing))) => {
-            format!("{} {read} {} {reads_unit} a run to return {nothing}", capitalize(&handle), format::count(reads))
-        }
-        (None, Some(r), _) if r >= MANY_READS_PER_ROW => {
+        TitleForm::ReadsForNothing { reads, returns: nothing } => format!(
+            "{} {read} {} {reads_unit} a run to return {}",
+            capitalize(&handle),
+            format::count(reads),
+            nothing.words()
+        ),
+        TitleForm::ManyReadsPerRow(r) => {
             format!("{} {read} {} {reads_unit} for every row it {returns}", capitalize(&handle), format::count(r))
         }
-        _ => format!("{} {takes} {share} of {time}{until}", capitalize(&handle)),
     };
     // With time the source couldn't attribute, the share is of what it could.
     let of = if snapshot.workload.as_ref().is_some_and(|w| w.untracked_time_ms.is_some()) {
@@ -133,7 +340,7 @@ pub(super) fn heavy_query_finding(snapshot: &Snapshot, q: &QueryStat) -> Finding
         format!("of all {time}")
     };
     let window = snapshot.workload.as_ref().map(window_phrase).unwrap_or_default();
-    let mut summary = match &recent {
+    let mut summary = match &case.recent {
         Some(s) => format!(
             "Its entry in {} is recent: {} of its {} runs came during {} of Culprit's own scans, where it ran about {} times a day at {} on average and took {share} of database time. Over {window} it is {}, a share diluted by all the time before its entry began counting.",
             snapshot.workload.as_ref().map_or("the statistics", |w| w.source.as_str()),
@@ -160,58 +367,63 @@ pub(super) fn heavy_query_finding(snapshot: &Snapshot, q: &QueryStat) -> Finding
             format!("It ran {runs}{at}{when}: {share} {of} in {window}.")
         }),
     };
-    let wait = dominant_wait(snapshot, q).filter(|_| idle.is_none());
-    if let Some(idle) = &idle {
-        summary.push(' ');
-        summary.push_str(&idle.evidence);
-    } else if let Some((plan, node)) = hot {
-        // MySQL counts the rows a statement examined: what the step reads, measured, when it is the plan's only table.
-        let examined = q.reads_per_execution().filter(|_| mysql);
-        let step = describe_node(plan, node, examined);
-        // A share only where the plan can state one: beside a step it puts no cost on, a scan reads as "100%".
-        match plan.step_share(node) {
-            Some(s) => summary.push_str(&format!(" {} of its estimated cost is {step}.", format::percent(s))),
-            None => summary.push_str(&uncosted_step(snapshot, plan, &step)),
+    match &case.lead {
+        Lead::Idle(idle) => {
+            summary.push(' ');
+            summary.push_str(&idle.evidence(snapshot, q));
         }
-    } else if let Some(lookups) = &lookups {
-        summary.push(' ');
-        summary.push_str(&lookups.evidence);
-    } else if cheap_plan && kind == StatementKind::Write {
-        // A write's plan costs next to nothing whatever its runs cost: the time is the write itself.
-        summary.push(' ');
-        summary.push_str(&write_cost(snapshot, q));
-    } else if cheap_plan {
-        match (&wait, q.reads_per_execution()) {
-            // Time spent waiting for storage isn't how often it runs alone: the few pages it reads come from disk.
-            (Some((WaitKind::Storage, ..)), Some(reads)) => summary.push_str(&format!(
-                " Its plan is cheap: each run {reads_verb} about {} {reads_unit}, and no step of it is where the time goes.",
-                format::count(reads.round().max(1.0))
-            )),
-            _ => summary
-                .push_str(" Its plan is cheap, so the share comes from how often it runs, not from any step of it."),
+        Lead::Step { plan, node, share } => {
+            // MySQL counts the rows a statement examined: what the step reads, measured, when it is the plan's only
+            // table.
+            let examined = q.reads_per_execution().filter(|_| mysql);
+            let step = describe_node(plan, node, examined);
+            match share {
+                Some(s) => summary.push_str(&format!(" {} of its estimated cost is {step}.", format::percent(*s))),
+                None => summary.push_str(&uncosted_step(snapshot, plan, &step)),
+            }
         }
-    } else if let Some((plan, node)) = whole_scan {
-        // No share of the cost is put on the scan under the bar, but that every run reads its table is the plan's own.
-        let step = describe_node(plan, node, q.reads_per_execution().filter(|_| mysql));
-        summary.push_str(&format!(
-            " Every run includes {step}: a scan reads the whole table, and costs more as the table grows."
-        ));
+        Lead::Lookups(lookups) => {
+            summary.push(' ');
+            summary.push_str(&lookups.evidence());
+        }
+        Lead::CheapWrite => {
+            summary.push(' ');
+            summary.push_str(&write_cost(snapshot, q));
+        }
+        Lead::CheapPlan { storage_reads: Some(reads) } => summary.push_str(&format!(
+            " Its plan is cheap: each run {reads_verb} about {} {reads_unit}, and no step of it is where the time goes.",
+            format::count(reads.round().max(1.0))
+        )),
+        Lead::CheapPlan { storage_reads: None } => {
+            summary.push_str(" Its plan is cheap, so the share comes from how often it runs, not from any step of it.")
+        }
+        Lead::WholeScan { plan, node } => {
+            // No share of the cost is put on the scan under the bar, but that every run reads its table is the plan's
+            // own.
+            let step = describe_node(plan, node, q.reads_per_execution().filter(|_| mysql));
+            summary.push_str(&format!(
+                " Every run includes {step}: a scan reads the whole table, and costs more as the table grows."
+            ));
+        }
+        Lead::Unexplained => {}
     }
-    if let Some((_, _, wait)) = &wait {
+    if let Some(wait) = &case.wait {
         summary.push(' ');
-        summary.push_str(wait);
+        summary.push_str(&wait.sentence(snapshot, q));
     }
-    let trigger_info = (kind == StatementKind::Write).then(|| target_table_triggers(snapshot, q)).flatten();
-    if let Some((table_name, event_noun, ref names)) = trigger_info {
+    if let Some((table_name, event_noun, names)) = &case.triggers {
         summary.push_str(&format!(
             " {table_name} also fires {} on {event_noun} ({}), whose work runs inside this statement's time.",
             if names.len() == 1 { "a trigger" } else { "triggers" },
             names.join(", ")
         ));
     }
+    if case.statistics_maintenance {
+        summary.push_str(" This is optimizer statistics maintenance, not an update of application rows.");
+    }
     f.summary = summary;
     let workload = snapshot.workload.as_ref();
-    match (workload, &scans) {
+    match (workload, &case.scans) {
         // What the scans measured, and the totals since the source began counting where they differ twofold (never
         // for a recent entry, whose totals are those runs diluted by the time before it began).
         (Some(w), Some(s)) => {
@@ -235,7 +447,7 @@ pub(super) fn heavy_query_finding(snapshot: &Snapshot, q: &QueryStat) -> Finding
             f.metrics.extend(average_metrics(snapshot, q));
         }
         _ => {
-            f.metrics.push(Metric::new(share_metric_label(snapshot), impact.share, Unit::Ratio));
+            f.metrics.push(Metric::new(share_metric_label(snapshot), case.impact.share, Unit::Ratio));
             match workload.and_then(|w| Some((w.runs_per_day_of(q), w.per_day_measured(q.executions)?))) {
                 Some((Some(runs), _)) => f.metrics.push(Metric::new("Runs per day", runs, Unit::Count)),
                 // A day or more of window, but not runs that came a day at a time: what was counted.
@@ -253,7 +465,7 @@ pub(super) fn heavy_query_finding(snapshot: &Snapshot, q: &QueryStat) -> Finding
             .map_or_else(|| label.to_string(), |basis| format!("{label} over {basis}"));
         f.metrics.push(Metric::new(label, r, unit));
     }
-    if let (Some(r), Some(label)) = (q.rows_per_execution(), rows_label(snapshot.server.engine, kind)) {
+    if let (Some(r), Some(label)) = (q.rows_per_execution(), rows_label(snapshot.server.engine, case.kind)) {
         let mut metric = rows_metric(&label, r, q.executions);
         if let Some(basis) = crate::support::totals_basis(snapshot, q) {
             metric.label.push_str(&format!(" over {basis}"));
@@ -263,77 +475,27 @@ pub(super) fn heavy_query_finding(snapshot: &Snapshot, q: &QueryStat) -> Finding
     if let Some(cpu) = q.cpu_time_ms.filter(|_| q.total_time_ms > 0.0) {
         f.metrics.push(Metric::new("CPU share of its time", (cpu / q.total_time_ms).min(1.0), Unit::Ratio));
     }
-    if let Some((_, _, names)) = trigger_info {
+    if let Some((_, _, names)) = &case.triggers {
         f.metrics.push(Metric::text("Triggers on table", names.join(", ")));
     }
-    let mut plan_node = hot.map(|(_, n)| n.id);
-    match &idle {
-        Some(idle) => {
-            if idle.kind == IdleKind::Sleep || idle.kind == IdleKind::AppLock {
-                // A deliberate pause holds a connection, not the server's resources: listed, ranked low.
-                f.severity = Severity::Low;
-                f.impact.score = f.impact.score.min(base_score(Severity::Low));
-            }
-            f.confidence = idle.confidence;
-            f.fix = Some(idle.fix(snapshot, q));
-            f.verify = vec![verify_line(snapshot, q, idle.verify())];
-        }
-        None => {
-            // The next steps tied to one operator: measure a seek's residual filter, or inspect a whole-table read.
-            let step_fix = match (&lookups, whole_scan) {
-                (Some(lookups), _) => Some((lookups.check.id, lookups.fix(snapshot))),
-                (None, Some((plan, node))) => scan_step_fix(snapshot, plan, node, q, kind).map(|fix| (node.id, fix)),
-                _ => None,
-            };
-            let (fix, lever) = match step_fix {
-                Some((node, fix)) => {
-                    plan_node = Some(node);
-                    (fix, Shows::CheaperRuns)
-                }
-                None => heavy_fix_and_lever(snapshot, hot, per_day_runs, q, kind, cheap_plan),
-            };
-            f.fix = Some(fix);
-            let expect = match (&lookups, &wait) {
-                (Some(_), _) => Expect::Measure,
-                // A read that waits for storage: what the change shortens is the wait, not the pages a run reads.
-                (None, Some((WaitKind::Storage, wait_share, _)))
-                    if matches!(kind, StatementKind::Read | StatementKind::Aggregate) =>
-                {
-                    Expect::Storage(if *wait_share >= 1.0 { "most".to_string() } else { format::percent(*wait_share) })
-                }
-                _ if culprit_core::sql::is_session_statement(&q.text) => Expect::Session,
-                // A fix that cuts runs leaves what one run reads as it was (or more, once the cheap runs are skipped
-                // or a batch carries more rows): what moves is how often it runs, and its time with it.
-                _ if super::chatty_query::counter_advice(snapshot, q).is_some() => Expect::Counter,
-                _ if lever == Shows::FewerRuns => Expect::FewerRuns,
-                _ => Expect::CheaperRuns,
-            };
-            f.verify = vec![verify_line(snapshot, q, expect)];
-        }
-    }
-    if statistics_maintenance_table(&q.text).is_some() {
-        f.summary.push_str(" This is optimizer statistics maintenance, not an update of application rows.");
-        f.fix = Some(advice("Check whether this was an automatic refresh or scheduled maintenance. Keep necessary statistics current; review an unnecessarily frequent schedule or full scan only with evidence of its cost.".into()));
-        f.verify = vec!["Compare the frequency and duration of subsequent statistics refreshes under comparable load, together with query performance. A completed maintenance operation can remain in Query Store's history after any scheduling change.".into()];
-    }
-    if let Some(rewrite) = q.plan.as_ref().and_then(|p| late_filter_rewrite(snapshot, q, p)) {
-        plan_node = rewrite.nodes.first().copied();
-        f.fix = Some(advice(rewrite.fix));
-        f.verify = vec![rewrite.verify];
-        if !index_work_is_material(snapshot, &[q]) {
-            f.actionability = culprit_core::Actionability::Information;
-        }
-    }
-    f.queries = vec![QueryRef { id: q.id.clone(), plan_node, note: None }];
+    f.fix = Some(case.remedy.fix(snapshot, q));
+    f.verify = vec![match &case.verify {
+        Verify::Scan(expect) => verify_line(snapshot, q, *expect),
+        Verify::Quoted(line) => line.clone(),
+        Verify::StatisticsRefreshes => "Compare the frequency and duration of subsequent statistics refreshes under comparable load, together with query performance. A completed maintenance operation can remain in Query Store's history after any scheduling change.".into(),
+    }];
+    f.queries = vec![QueryRef { id: q.id.clone(), plan_node: case.plan_node, note: None }];
     f
 }
 
 /// What a change shows in a later scan, for the verify step ([`verify_line`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Expect {
     /// The cause is not known yet: get operator measurements before prescribing a change.
     Measure,
-    /// Less of its time waiting for storage, which is this share of it now.
-    Storage(String),
+    /// Less of its time waiting for storage, which is this share of it now (Query Store sums a parallel plan's waits
+    /// over its threads, which can pass the whole).
+    Storage(f64),
     /// A fix that makes each run cheaper: its reads and time per run drop.
     CheaperRuns,
     /// A fix that cuts runs (a cache, a skipped or batched call, a rarer poll): fewer runs and less time in all, while
@@ -360,9 +522,12 @@ fn verify_line(snapshot: &Snapshot, q: &QueryStat, expect: Expect) -> String {
             "Use an actual plan to check row counts, and collect IO measurements for the same run to locate the reads. After a change supported by that evidence, compare equivalent runs: {reads} and time per run should fall without changing the result."
         );
     }
-    let between = match &expect {
+    // The storage wait's share now: "most" where a parallel plan's waits pass the whole.
+    let storage_now = |share: f64| if share >= 1.0 { "most".to_string() } else { format::percent(share) };
+    let between = match expect {
         Expect::Measure => unreachable!(),
-        Expect::Storage(now) => {
+        Expect::Storage(share) => {
+            let now = storage_now(share);
             format!("its time per run should drop, as less of it waits for storage ({now} of it now)")
         }
         Expect::CheaperRuns => Shows::CheaperRuns.between().to_string(),
@@ -378,9 +543,12 @@ fn verify_line(snapshot: &Snapshot, q: &QueryStat, expect: Expect) -> String {
     let time = time_noun(snapshot);
     match expect {
         Expect::Measure => unreachable!(),
-        Expect::Storage(now) => format!(
-            "Compare equivalent runs before and after a justified change: time per run and storage wait time per run should fall ({now} of elapsed time was storage waiting). If the change avoids calls instead, compare total runs and total database time for the same useful work."
-        ),
+        Expect::Storage(share) => {
+            let now = storage_now(share);
+            format!(
+                "Compare equivalent runs before and after a justified change: time per run and storage wait time per run should fall ({now} of elapsed time was storage waiting). If the change avoids calls instead, compare total runs and total database time for the same useful work."
+            )
+        }
         Expect::CheaperRuns => format!(
             "After the change ships, re-scan: this query's {reads} and time per run should drop, and its share of {time} with them."
         ),

@@ -89,7 +89,8 @@ fn scan_fix_on(snapshot: &Snapshot, rows: f64) -> Fix {
     q.rows = Some(rows * q.executions);
     q.plan = Some(plan.clone());
     let scan = plan.nodes().into_iter().find(|n| n.id == 7).expect("the scan of apps");
-    heavy_fix_and_lever(snapshot, Some((&plan, scan)), None, &q, statement_kind(&q.text), false).0
+    let (remedy, _) = heavy_remedy(snapshot, Some((&plan, scan)), None, &q, statement_kind(&q.text), false);
+    remedy.fix(snapshot, &q)
 }
 
 fn scan_fix(rows: f64) -> String {
@@ -324,4 +325,64 @@ fn write_row_labels_use_the_declared_counter_meaning() {
         assert_eq!(rows_label(engine, StatementKind::Write).as_deref(), expected);
         assert_eq!(rows_label(engine, StatementKind::Read).as_deref(), Some("Rows returned per run"));
     }
+}
+
+// The decision a finding is worded from, without its words.
+
+#[test]
+fn a_statement_that_sleeps_is_decided_by_its_idle_time() {
+    let s = postgres_demo();
+    let mut q = s.queries()[0].clone();
+    q.text = "SELECT pg_sleep($1)".into();
+    q.plan = None;
+    let case = decide(&s, &q);
+    assert!(matches!(&case.lead, Lead::Idle(idle) if idle.kind == IdleKind::Sleep), "the pause leads");
+    assert_eq!(case.title, TitleForm::Share, "its share, then what it does instead");
+    assert!(matches!(case.remedy, Remedy::Idle(IdleKind::Sleep)));
+    assert!(matches!(case.verify, Verify::Scan(Expect::TimeOrStops)));
+    // A deliberate pause holds a connection, not the server's resources: listed, ranked low.
+    assert_eq!(case.severity, Severity::Low);
+    assert!(case.ranked_low);
+    assert!(case.wait.is_none() && case.plan_node.is_none());
+}
+
+#[test]
+fn a_cheap_plan_run_often_is_decided_by_how_often_it_runs() {
+    // A point lookup through indexes, a millisecond a run: no step of it is the lead, and the fix cuts runs.
+    let s = postgres_demo();
+    let mut plan = apps_plan();
+    (plan.total_cost, plan.root.subtree_cost) = (100.0, 100.0);
+    fn seek(n: &mut PlanNode) {
+        if n.kind == NodeKind::Scan {
+            n.kind = NodeKind::Seek;
+        }
+        n.children.iter_mut().for_each(seek);
+    }
+    seek(&mut plan.root);
+    let mut q = s.queries()[0].clone();
+    q.text = "SELECT a.id, a.name FROM apps a WHERE a.owner_id = $1".into();
+    (q.mean_time_ms, q.logical_reads, q.rows) = (1.0, Some(20.0 * q.executions), Some(2.0 * q.executions));
+    q.waits.clear();
+    q.plan = Some(plan);
+    let case = decide(&s, &q);
+    assert!(matches!(case.lead, Lead::CheapPlan { storage_reads: None }));
+    assert!(matches!(case.remedy, Remedy::FewerRuns { cheap_plan: true, lever: RunsLever::Cache }));
+    assert!(matches!(case.verify, Verify::Scan(Expect::FewerRuns)));
+    assert_eq!(case.title, TitleForm::Share);
+    assert_eq!(case.plan_node, None, "no step of a cheap plan is pointed at");
+}
+
+#[test]
+fn a_late_filter_rewrite_overrides_the_remedy_and_the_step() {
+    let s = postgres_demo();
+    let mut q = s.queries()[0].clone();
+    q.text = APPS_QUERY.into();
+    (q.executions, q.rows, q.total_time_ms, q.mean_time_ms) = (1000.0, Some(2000.0), 1.0, 0.001);
+    q.plan = Some(apps_plan());
+    let case = decide(&s, &q);
+    assert!(matches!(&case.remedy, Remedy::Rewrite(i) if i.rule == "cross-table-or"));
+    assert!(matches!(&case.verify, Verify::Quoted(line) if line.contains("rewritten query")));
+    assert_eq!(case.plan_node, Some(7), "the scan of apps the OR across tables narrows");
+    // Index work this small is not worth acting on: the rewrite is information.
+    assert_eq!(case.actionability, culprit_core::Actionability::Information);
 }

@@ -15,6 +15,27 @@ fn index_leading_with<'a>(
     leading.iter().find(|i| i.filter.is_none()).or_else(|| leading.first()).copied()
 }
 
+/// Where a plan narrows the rows a scan keeps: the nearest condition above the scan ([`narrowing_above`]).
+#[derive(Clone, Copy)]
+pub(super) enum Narrowing<'a> {
+    /// A condition that ORs comparisons on different tables ([`or_across_tables`]): an index on either table serves
+    /// only its own side.
+    OrAcrossTables(&'a str),
+    /// A condition an index on the columns it compares can serve, where it applies to the scanned table.
+    Condition(&'a str),
+    /// No condition above the scan: a join or a limit.
+    Unseen,
+}
+
+/// The nearest condition above the step with `id`: where the plan narrows what that step keeps.
+pub(super) fn narrowing_above(plan: &Plan, id: u32) -> Narrowing<'_> {
+    match ancestors(plan, id).into_iter().find_map(|n| n.predicate.as_deref()) {
+        Some(condition) if or_across_tables(condition) => Narrowing::OrAcrossTables(condition),
+        Some(condition) => Narrowing::Condition(condition),
+        None => Narrowing::Unseen,
+    }
+}
+
 /// Advice for a scan that keeps most of its table while the statement returns far fewer rows: a condition later in the
 /// plan narrows them, so the index belongs to that condition, not to the scan's filter. An OR across two tables can use
 /// an index on neither; written as a UNION of two queries, each side can use one of its own: the one its table has, or
@@ -22,11 +43,10 @@ fn index_leading_with<'a>(
 pub(super) fn narrowed_later_fix(
     snapshot: &Snapshot,
     plan: &Plan,
-    _q: &QueryStat,
     table: &str,
     kept: f64,
     returned: f64,
-    narrowing: Option<&str>,
+    narrowing: Narrowing,
 ) -> Fix {
     // Rounded as the evidence rounds it: 2.5 rows a run are "about 2.5", not "about 3".
     let rows = if returned < 1.0 {
@@ -41,12 +61,12 @@ pub(super) fn narrowed_later_fix(
         format::percent(kept)
     );
     match narrowing {
-        Some(condition) if or_across_tables(condition) => or_rewrite_fix(snapshot, plan, condition, &start),
-        Some(condition) => advice(format!(
+        Narrowing::OrAcrossTables(condition) => or_rewrite_fix(snapshot, plan, condition, &start),
+        Narrowing::Condition(condition) => advice(format!(
             "{start}, by `{}`. Where that condition can be applied to {table} itself, an index on the columns it compares lets the plan read only the rows needed.",
             super::super::plan_warnings::truncate(condition, 140)
         )),
-        None => advice(format!(
+        Narrowing::Unseen => advice(format!(
             "{start} (by a join or a limit). Open the plan to see where; a condition on {table} itself, with an index on the columns it compares, lets the plan read only the rows needed."
         )),
     }
@@ -126,7 +146,9 @@ pub(crate) fn late_filter_rewrite(
         };
         let table = node.object.as_deref()?;
         let fix = match returned {
-            Some(returned) => narrowed_later_fix(snapshot, plan, q, table, kept, returned, Some(condition)),
+            Some(returned) => {
+                narrowed_later_fix(snapshot, plan, table, kept, returned, Narrowing::OrAcrossTables(condition))
+            }
             None => or_rewrite_fix(
                 snapshot,
                 plan,
@@ -214,7 +236,7 @@ fn table_named<'a>(plan: &'a Plan, name: &str) -> Option<&'a PlanNode> {
 }
 
 /// The steps above the one with `id`, nearest first.
-pub(super) fn ancestors(plan: &Plan, id: u32) -> Vec<&PlanNode> {
+fn ancestors(plan: &Plan, id: u32) -> Vec<&PlanNode> {
     fn path<'a>(n: &'a PlanNode, id: u32, out: &mut Vec<&'a PlanNode>) -> bool {
         if n.id == id {
             return true;
