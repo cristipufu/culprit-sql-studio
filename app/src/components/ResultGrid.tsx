@@ -3,6 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ResultSet } from "../gen/ResultSet";
 import type { ColumnSort } from "../gen/ColumnSort";
 import { copyAndTell } from "../lib/clipboard";
+import { t, useLanguage } from "../lib/i18n";
 import { cellText, columnType, resultPageSize, rowTsv, valuePreview, type ResultCell } from "../lib/result-values";
 import { ResultInspector } from "./ResultInspector";
 import { ResultExportMenu } from "./ResultExportMenu";
@@ -32,15 +33,18 @@ export function ResultGrid({ result, types, summary, order, onSort, sortDisabled
   const end = Math.min(start + pageSize, result.rows.length);
   const numeric = useMemo(() => result.columns.map((column, col) => NUMERIC.test(columnType(types, column) ?? "") ||
     (result.rows.some((row) => row[col] != null) && result.rows.every((row) => row[col] == null || typeof row[col] === "number"))), [result, types]);
+  // The titles of cells cut short are worded in the app's language.
+  const language = useLanguage();
   const rows = useMemo(() => result.rows.slice(start, end).map((row) => result.columns.map((_, col) => {
     const value = row[col];
     const text = cellText(value);
-    return { text: valuePreview(text, 320), title: text.length > 40 ? valuePreview(text, 1024) + (text.length > 1024 ? "… · Double-click to inspect" : "") : undefined, isNull: value == null };
-  })), [result, start, end]);
+    const title = text.length > 1024 ? t("ui.result_grid.cell_cut", { preview: valuePreview(text, 1024) }) : valuePreview(text, 1024);
+    return { text: valuePreview(text, 320), title: text.length > 40 ? title : undefined, isNull: value == null };
+  })), [result, start, end, language]);
   const select = (cell: ResultCell, inspecting = current.inspecting) => setSelection({ result, cell, page: Math.floor(cell.row / pageSize), inspecting });
   const inspect = () => { if (result.rows.length && result.columns.length) select(selected ?? { row: start, col: 0 }, true); };
   const header = result.columns.join("\t");
-  const copyValue = () => selected && copyAndTell(cellText(result.rows[selected.row]?.[selected.col]), "Value copied");
+  const copyValue = () => selected && copyAndTell(cellText(result.rows[selected.row]?.[selected.col]), t("ui.result_grid.value_copied"));
   const changePage = (page: number) => setSelection({ result, page, inspecting: false, cell: selected ? { row: page * pageSize, col: selected.col } : null });
   const selectedRow = selected?.row;
   const selectedCol = selected?.col;
@@ -60,14 +64,14 @@ export function ResultGrid({ result, types, summary, order, onSort, sortDisabled
 
   return <div className="result-grid">
     <div className="rg-bar">
-      <span className="muted rg-summary" title={summary}>{summary ?? `${result.rows.length.toLocaleString()} row${result.rows.length === 1 ? "" : "s"}${result.truncated ? " (more exist)" : ""}`}</span>
+      <span className="muted rg-summary" title={summary}>{summary ?? (result.truncated ? t("ui.result_grid.rows_more", { count: result.rows.length }) : t("ui.result_grid.rows", { count: result.rows.length }))}</span>
       <div className="rg-actions">
-        <button type="button" className="btn ghost" disabled={!result.rows.length || !result.columns.length} onClick={inspect} title="Inspect a value (Enter or double-click)"><PanelRightOpen size={13} /> Inspect</button>
+        <button type="button" className="btn ghost" disabled={!result.rows.length || !result.columns.length} onClick={inspect} title={t("ui.result_grid.inspect_title")}><PanelRightOpen size={13} /> {t("ui.result_grid.inspect")}</button>
         {selected && <>
-          <button type="button" className="btn ghost" onClick={() => void copyValue()}><Copy size={12} /> Value</button>
-          <button type="button" className="btn ghost" onClick={() => void copyAndTell(header + "\n" + rowTsv(result, selected.row), "Row copied as TSV")}><Copy size={12} /> Row</button>
+          <button type="button" className="btn ghost" onClick={() => void copyValue()}><Copy size={12} /> {t("ui.result_grid.copy_value")}</button>
+          <button type="button" className="btn ghost" onClick={() => void copyAndTell(header + "\n" + rowTsv(result, selected.row), t("ui.result_grid.row_copied"))}><Copy size={12} /> {t("ui.result_grid.copy_row")}</button>
         </>}
-        <button type="button" className="btn ghost" onClick={() => void copyAndTell([header, ...result.rows.map((_, row) => rowTsv(result, row))].join("\n"), `${result.rows.length.toLocaleString()} rows copied as TSV`)}><Copy size={12} /> All as TSV</button>
+        <button type="button" className="btn ghost" onClick={() => void copyAndTell([header, ...result.rows.map((_, row) => rowTsv(result, row))].join("\n"), t("ui.result_grid.all_copied", { count: result.rows.length }))}><Copy size={12} /> {t("ui.result_grid.copy_all")}</button>
         <ResultExportMenu result={result} />
       </div>
     </div>
@@ -89,7 +93,7 @@ export function ResultGrid({ result, types, summary, order, onSort, sortDisabled
         className="rg"
         // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: ARIA in HTML allows role="grid" on a table; arrow keys move the selected cell
         role="grid"
-        tabIndex={0} aria-label="Query results" aria-rowcount={result.rows.length + 1} aria-colcount={result.columns.length + 1} aria-activedescendant={selected ? `${id}-${selected.row}-${selected.col}` : undefined} onFocus={(event) => {
+        tabIndex={0} aria-label={t("ui.result_grid.label")} aria-rowcount={result.rows.length + 1} aria-colcount={result.columns.length + 1} aria-activedescendant={selected ? `${id}-${selected.row}-${selected.col}` : undefined} onFocus={(event) => {
         if (event.target !== event.currentTarget) return;
         if (result.rows.length && result.columns.length) setSelection((previous) => previous.result === result && previous.cell ? previous : { result, page: current.page, inspecting: false, cell: { row: start, col: 0 } });
       }}>
@@ -99,7 +103,7 @@ export function ResultGrid({ result, types, summary, order, onSort, sortDisabled
           return <th key={col} className={numeric[col] ? "r" : ""} title={columnType(types, column) ? `${column} · ${columnType(types, column)}` : column}
             aria-sort={onSort ? direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none" : undefined}>
             {onSort ? <button type="button" className={`rg-sort ${direction ? "on" : ""}`} aria-disabled={sortDisabled} onClick={() => { if (!sortDisabled) onSort(column); }}
-              title={direction === "desc" ? "Clear sorting" : `Sort ${direction === "asc" ? "descending" : "ascending"}`} aria-label={`Sort by ${column}`}>
+              title={direction === "desc" ? t("ui.result_grid.sort_clear") : direction === "asc" ? t("ui.result_grid.sort_descending") : t("ui.result_grid.sort_ascending")} aria-label={t("ui.result_grid.sort_by", { column })}>
               <span className="rg-sort-label">{label}</span>{direction === "asc" ? <ArrowUp size={13} /> : direction === "desc" ? <ArrowDown size={13} /> : <ArrowUpDown size={13} />}
             </button> : label}
           </th>;
@@ -136,12 +140,12 @@ export function ResultGrid({ result, types, summary, order, onSort, sortDisabled
           );
         })}</tbody>
       </table>
-      {!result.rows.length && <div className="rg-empty">No rows returned</div>}
+      {!result.rows.length && <div className="rg-empty">{t("ui.result_grid.empty")}</div>}
     </div>
     <footer className="rg-footer">
-      <span className="muted">{result.rows.length ? `${(start + 1).toLocaleString()}–${end.toLocaleString()} of ${result.rows.length.toLocaleString()} rows` : "0 rows"}{result.truncated && " · partial result"}</span>
-      <span className="rg-hint">Double-click a cell to inspect</span>
-      {result.rows.length > pageSize && <div className="rg-pages"><button type="button" className="icon-btn" aria-label="Previous result page" disabled={current.page === 0} onClick={() => changePage(current.page - 1)}><ChevronLeft size={14} /></button><span>{current.page + 1} / {Math.ceil(result.rows.length / pageSize)}</span><button type="button" className="icon-btn" aria-label="Next result page" disabled={end === result.rows.length} onClick={() => changePage(current.page + 1)}><ChevronRight size={14} /></button></div>}
+      <span className="muted">{result.rows.length ? t("ui.result_grid.range", { first: start + 1, last: end, count: result.rows.length }) : t("ui.result_grid.zero_rows")}{result.truncated && ` · ${t("ui.result_grid.partial")}`}</span>
+      <span className="rg-hint">{t("ui.result_grid.hint")}</span>
+      {result.rows.length > pageSize && <div className="rg-pages"><button type="button" className="icon-btn" aria-label={t("ui.result_grid.previous_page")} disabled={current.page === 0} onClick={() => changePage(current.page - 1)}><ChevronLeft size={14} /></button><span>{current.page + 1} / {Math.ceil(result.rows.length / pageSize)}</span><button type="button" className="icon-btn" aria-label={t("ui.result_grid.next_page")} disabled={end === result.rows.length} onClick={() => changePage(current.page + 1)}><ChevronRight size={14} /></button></div>}
     </footer>
     {current.inspecting && selected && <ResultInspector result={result} cell={selected} types={types} onSelect={(cell) => select(cell, true)} onClose={() => setSelection({ ...current, inspecting: false })} />}
   </div>;

@@ -1,5 +1,6 @@
 import { ChevronDown, Share2, ShieldCheck } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { t } from "../lib/i18n";
 import { rememberRedact, rememberedRedact } from "../lib/share";
 
 export type ShareAction = {
@@ -19,7 +20,7 @@ export type ShareAction = {
  * "Share" button with a small menu: what to export and how. Redaction of literal values is a visible switch, on by
  * default and remembered. Arrow keys move, Enter runs, Escape closes.
  */
-export function ShareMenu({ actions, label = "Share", primary = false }: { actions: ShareAction[]; label?: string; primary?: boolean }) {
+export function ShareMenu({ actions, label = t("ui.share_menu.share"), primary = false }: { actions: ShareAction[]; label?: string; primary?: boolean }) {
   const [open, setOpen] = useState(false);
   const [redact, setRedact] = useState(rememberedRedact);
   const [busy, setBusy] = useState<string | null>(null);
@@ -70,7 +71,7 @@ export function ShareMenu({ actions, label = "Share", primary = false }: { actio
         aria-expanded={open}
         aria-controls={menuId}
         onClick={() => setOpen((o) => !o)}
-        title="Copy for a pull request, save an HTML page or the original plan"
+        title={t("ui.share_menu.title")}
         aria-label={label}
       >
         <Share2 size={13} /> <span className="btn-label">{label}</span> <ChevronDown size={12} className="share-caret" />
@@ -81,8 +82,8 @@ export function ShareMenu({ actions, label = "Share", primary = false }: { actio
             <label className="share-redact">
               <ShieldCheck size={14} />
               <span>
-                <b>Redact values</b>
-                <span className="muted">Strings and numbers in SQL become ? · names stay</span>
+                <b>{t("ui.share_menu.redact")}</b>
+                <span className="muted">{t("ui.share_menu.redact_hint")}</span>
               </span>
               <input
                 type="checkbox"
@@ -115,7 +116,7 @@ export function ShareMenu({ actions, label = "Share", primary = false }: { actio
               </span>
             </button>
           ))}
-          <div className="share-foot">Exports never include connection names, hosts or passwords.</div>
+          <div className="share-foot">{t("ui.share_menu.foot")}</div>
         </div>
       )}
     </div>

@@ -6,7 +6,9 @@ import { api, errorMessage } from "../lib/api";
 import { serverName } from "../lib/engines";
 import { loadSaved, toast, useStore } from "../lib/store";
 import { EngineBadge } from "./EngineBadge";
+import { Rich, slot } from "./Prose";
 import { keys } from "../lib/keys";
+import { t } from "../lib/i18n";
 
 type Props = {
   current: ConnectionInfo;
@@ -66,7 +68,7 @@ export function SavedRail({ current, saved, active, onOpen, onRenamed, onDeleted
       onDeleted(name);
       setDeleting(null);
       await loadSaved();
-      toast(`Deleted “${name}”`);
+      toast(t("ui.saved_rail.deleted", { name }));
     } catch (e) {
       toast(errorMessage(e).message);
     }
@@ -76,15 +78,15 @@ export function SavedRail({ current, saved, active, onOpen, onRenamed, onDeleted
     <aside className="saved-rail">
       <div className="saved-head">
         <span className="saved-title">
-          <Bookmark size={12} /> Saved
+          <Bookmark size={12} /> {t("ui.saved_rail.title")}
         </span>
         {saved && saved.length > 0 && (
-          <span className="seg saved-scope" role="radiogroup" aria-label="Which saved queries to show">
-            <button type="button" role="radio" aria-checked={scope === "here"} className={scope === "here" ? "on" : ""} onClick={() => setScope("here")} title={`Saved for ${current.name} or another ${current.engine} connection`}>
+          <span className="seg saved-scope" role="radiogroup" aria-label={t("ui.saved_rail.scope_label")}>
+            <button type="button" role="radio" aria-checked={scope === "here"} className={scope === "here" ? "on" : ""} onClick={() => setScope("here")} title={t("ui.saved_rail.scope_here_title", { connection: current.name, engine: current.engine })}>
               {serverName(current.engine, current.last_report?.product)}
             </button>
             <button type="button" role="radio" aria-checked={scope === "all"} className={scope === "all" ? "on" : ""} onClick={() => setScope("all")}>
-              All {saved.length}
+              {t("ui.saved_rail.scope_all", { count: String(saved.length) })}
             </button>
           </span>
         )}
@@ -92,14 +94,14 @@ export function SavedRail({ current, saved, active, onOpen, onRenamed, onDeleted
       {saved && saved.length > 4 && (
         <label className="search saved-search">
           <Search size={12} />
-          <input value={filter} placeholder="Find a query" onChange={(e) => setFilter(e.target.value)} />
+          <input value={filter} placeholder={t("ui.saved_rail.find")} onChange={(e) => setFilter(e.target.value)} />
         </label>
       )}
       <div className="saved-list">
-        {saved === null && <div className="muted saved-empty">Loading…</div>}
+        {saved === null && <div className="muted saved-empty">{t("ui.saved_rail.loading")}</div>}
         {saved?.length === 0 && (
           <div className="saved-empty">
-            Save the query in a tab with <span className="kbd">{keys("⌘S")}</span> to keep it here and rerun it in one click.
+            <Rich text={t("ui.saved_rail.empty", { shortcut: slot("shortcut") })} parts={{ shortcut: <span className="kbd">{keys("⌘S")}</span> }} />
           </div>
         )}
         {list.map((q) => (
@@ -124,7 +126,7 @@ export function SavedRail({ current, saved, active, onOpen, onRenamed, onDeleted
             )}
             <div className="saved-meta">
               {q.connection && (
-                <span className={`saved-conn ${q.connection === current.name ? "here" : ""} ${engineOf(connections, q.connection) && engineOf(connections, q.connection) !== current.engine ? "other-engine" : ""}`} title={engineOf(connections, q.connection) && engineOf(connections, q.connection) !== current.engine ? `Saved for a different engine than ${current.name}` : undefined}>
+                <span className={`saved-conn ${q.connection === current.name ? "here" : ""} ${engineOf(connections, q.connection) && engineOf(connections, q.connection) !== current.engine ? "other-engine" : ""}`} title={engineOf(connections, q.connection) && engineOf(connections, q.connection) !== current.engine ? t("ui.saved_rail.other_engine", { connection: current.name }) : undefined}>
                   {engineOf(connections, q.connection) && (
                     <EngineBadge engine={engineOf(connections, q.connection)!} product={connections.find((c) => c.name === q.connection)?.last_report?.product} />
                   )}
@@ -134,23 +136,23 @@ export function SavedRail({ current, saved, active, onOpen, onRenamed, onDeleted
               <span className="spacer" />
               {deleting === q.name ? (
                 <span className="saved-confirm">
-                  Delete?
+                  {t("ui.saved_rail.confirm_delete")}
                   <button type="button" className="link danger" onClick={() => remove(q.name)}>
-                    Yes
+                    {t("ui.common.yes")}
                   </button>
                   <button type="button" className="link" onClick={() => setDeleting(null)}>
-                    No
+                    {t("ui.common.no")}
                   </button>
                 </span>
               ) : (
                 <span className="saved-actions">
-                  <button type="button" className="icon-btn" title={`Run on ${current.name}`} onClick={() => onOpen(q, true)}>
+                  <button type="button" className="icon-btn" title={t("ui.saved_rail.run_on", { connection: current.name })} onClick={() => onOpen(q, true)}>
                     <Play size={12} />
                   </button>
-                  <button type="button" className="icon-btn" title="Rename" onClick={() => setRenaming({ from: q.name, to: q.name })}>
+                  <button type="button" className="icon-btn" title={t("ui.common.rename")} onClick={() => setRenaming({ from: q.name, to: q.name })}>
                     <Pencil size={12} />
                   </button>
-                  <button type="button" className="icon-btn" title="Delete" onClick={() => setDeleting(q.name)}>
+                  <button type="button" className="icon-btn" title={t("ui.common.delete")} onClick={() => setDeleting(q.name)}>
                     <Trash2 size={12} />
                   </button>
                 </span>

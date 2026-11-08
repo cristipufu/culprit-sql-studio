@@ -3,6 +3,7 @@ import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ResultSet } from "../gen/ResultSet";
 import { api, errorMessage } from "../lib/api";
+import { t } from "../lib/i18n";
 import { resultFile, type ResultFileFormat } from "../lib/result-export";
 import { toast } from "../lib/store";
 
@@ -49,7 +50,7 @@ export function ResultExportMenu({ result }: { result: ResultSet }) {
       const file = await resultFile(result, format);
       const where = await (await api()).saveFile(file.name, file.contents);
       const shown = where.split(/[\\/]/).slice(-2).join("/");
-      toast(`Saved ${shown}${file.protectedCells ? ` · ${file.protectedCells} formula-like text cells escaped` : ""}`);
+      toast(file.protectedCells ? t("ui.result_export_menu.saved_escaped", { file: shown, count: file.protectedCells }) : t("ui.result_export_menu.saved", { file: shown }));
     } catch (error) {
       toast(errorMessage(error).message);
     } finally {
@@ -64,8 +65,8 @@ export function ResultExportMenu({ result }: { result: ResultSet }) {
   return <>
     <button type="button" ref={trigger} className="btn ghost" disabled={!result.columns.length} aria-disabled={busy} aria-haspopup="menu" aria-expanded={current.open} aria-controls={current.open ? id : undefined} onClick={() => { if (!busy) setState({ ...current, open: !current.open }); }} onKeyDown={(event) => {
       if (event.key === "ArrowDown") { event.preventDefault(); event.stopPropagation(); if (!busy) setState({ ...current, open: true }); }
-    }}><Download size={13} /> {busy ? "Exporting…" : "Export"} <ChevronDown size={11} /></button>
-    {current.open && createPortal(<div ref={menu} id={id} className="rg-export-menu" role="menu" aria-label="Export query results" style={position} onKeyDown={(event) => {
+    }}><Download size={13} /> {busy ? t("ui.result_export_menu.exporting") : t("ui.result_export_menu.export")} <ChevronDown size={11} /></button>
+    {current.open && createPortal(<div ref={menu} id={id} className="rg-export-menu" role="menu" aria-label={t("ui.result_export_menu.title")} style={position} onKeyDown={(event) => {
       event.stopPropagation();
       if (event.key === "Escape") { event.preventDefault(); close(true); }
       else if (event.key === "Tab") close(true);
@@ -78,10 +79,10 @@ export function ResultExportMenu({ result }: { result: ResultSet }) {
         items[next]?.focus();
       }
     }}>
-      <div className="rg-export-head"><b>Export query results</b><span>{result.rows.length.toLocaleString()} loaded rows · {result.columns.length.toLocaleString()} columns</span></div>
-      <button type="button" role="menuitem" disabled={busy} onClick={() => void save("csv")}><span className="rg-export-symbol"><FileSpreadsheet size={17} /></span><span><b>CSV file</b><small>UTF-8 · formula-like text escaped</small></span></button>
-      <button type="button" role="menuitem" disabled={busy} onClick={() => void save("json")}><span className="rg-export-symbol"><Braces size={17} /></span><span><b>JSON file</b><small>Column names, rows and original types</small></span></button>
-      <div className="rg-export-foot">{result.truncated ? "Partial result: only the loaded rows are included." : "Includes every loaded row, across all pages."}<span>CSV prefixes formula-like text with a tab. JSON keeps the loaded values.</span></div>
+      <div className="rg-export-head"><b>{t("ui.result_export_menu.title")}</b><span>{t("ui.result_export_menu.loaded", { rows: result.rows.length, columns: result.columns.length })}</span></div>
+      <button type="button" role="menuitem" disabled={busy} onClick={() => void save("csv")}><span className="rg-export-symbol"><FileSpreadsheet size={17} /></span><span><b>{t("ui.result_export_menu.csv")}</b><small>{t("ui.result_export_menu.csv_hint")}</small></span></button>
+      <button type="button" role="menuitem" disabled={busy} onClick={() => void save("json")}><span className="rg-export-symbol"><Braces size={17} /></span><span><b>{t("ui.result_export_menu.json")}</b><small>{t("ui.result_export_menu.json_hint")}</small></span></button>
+      <div className="rg-export-foot">{result.truncated ? t("ui.result_export_menu.partial") : t("ui.result_export_menu.complete")}<span>{t("ui.result_export_menu.foot")}</span></div>
     </div>, document.body)}
   </>;
 }
