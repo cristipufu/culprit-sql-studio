@@ -65,9 +65,13 @@ pub trait Provider: Send + Sync {
 
     /// Collect a normalized snapshot. Reads statistics views only; must be safe on production. Bind the database's
     /// identity on it (`Snapshot::bind_identity`, with `DatabaseLocation::Unknown` when the location can't be told): a
-    /// scan without identity compares with no other.
+    /// scan without identity compares with no other. Its query plans carry their facts, as [`Provider::explain`]'s do.
     async fn snapshot(&self, connection: &str, options: &SnapshotOptions) -> Result<Snapshot>;
 
+    /// The plan of `sql`. A plan carries its facts (`Plan::facts`, each step's `PlanNode::facts`): the inputs every
+    /// check and insight reads. A provider for an engine Culprit parses hands the engine's native plan text to
+    /// `culprit_engine::plans::parse_plan`; one for another engine fills the facts in, leaving unknown what it doesn't
+    /// know. The plan's display properties are for reading and stand in for no fact.
     async fn explain(&self, sql: &str, mode: ExplainMode) -> Result<Plan>;
 
     /// The estimated plan of a statement someone else's session recorded (a query from a scan, a session's current

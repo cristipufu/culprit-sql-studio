@@ -195,6 +195,75 @@ impl Provider for Explains {
     }
 }
 
+/// [`Replay`], explaining with the engine's own text: what a provider wrapping a driver Culprit doesn't ship returns
+/// for PostgreSQL, a sort that spilled to disk, handed to Culprit's parser.
+#[cfg(feature = "postgres")]
+struct NativeText;
+
+#[cfg(feature = "postgres")]
+const SPILLED_SORT: &str = r#"[{"Plan": {
+    "Node Type": "Sort", "Total Cost": 500.0, "Plan Rows": 100, "Actual Rows": 90000, "Actual Loops": 1,
+    "Actual Total Time": 812.5, "Sort Key": ["created_at DESC"], "Sort Method": "external merge",
+    "Sort Space Used": 20480, "Sort Space Type": "Disk",
+    "Plans": [{"Node Type": "Seq Scan", "Relation Name": "events", "Total Cost": 400.0, "Plan Rows": 100,
+        "Actual Rows": 90000, "Actual Loops": 1, "Actual Total Time": 300.0, "Filter": "(kind = 'click'::text)",
+        "Rows Removed by Filter": 1910000}]
+}, "Planning Time": 0.2, "Execution Time": 815.1}]"#;
+
+#[cfg(feature = "postgres")]
+#[async_trait]
+impl Provider for NativeText {
+    fn engine(&self) -> Engine {
+        Engine::Postgres
+    }
+
+    async fn probe(&self) -> Result<ServerInfo> {
+        Replay.probe().await
+    }
+
+    async fn snapshot(&self, connection: &str, options: &SnapshotOptions) -> Result<Snapshot> {
+        Replay.snapshot(connection, options).await
+    }
+
+    async fn explain(&self, _: &str, _: ExplainMode) -> Result<Plan> {
+        culprit_engine::plans::parse_plan(SPILLED_SORT)
+    }
+
+    async fn live(&self) -> Result<LiveState> {
+        Replay.live().await
+    }
+
+    async fn run(&self, sql: &str, limit: usize) -> Result<ResultSet> {
+        Replay.run(sql, limit).await
+    }
+}
+
+// A plan carries its facts, whoever provides it: a plugin's native text goes through the parser a built-in provider
+// uses, so its plan is read by the same facts (the sort's spill), never by its display properties.
+#[cfg(feature = "postgres")]
+#[tokio::test]
+async fn a_plugin_hands_the_engines_plan_text_to_the_built_in_parser() {
+    let home = temp_home("native-text");
+    let ws = Workspace::open_in(&home)
+        .with_provider(Engine::Postgres, Arc::new(|_| Ok(Box::new(NativeText) as Box<dyn Provider>)));
+    ws.add_connection(NewConnection {
+        name: "wrapped".into(),
+        input: "postgres://reader@replay.invalid:5432/demo".into(),
+        auth: Some(AuthKind::None),
+        ..Default::default()
+    })
+    .expect("save connection");
+    let plan = ws
+        .explain("wrapped", "SELECT * FROM events ORDER BY created_at DESC", ExplainMode::Estimated, true)
+        .await
+        .expect("explained");
+    assert_eq!((plan.root.facts().sort_space_kb, plan.root.facts().sort_on_disk), (Some(20480.0), Some(true)));
+    assert_eq!(plan.facts().elapsed_ms, Some(815.1));
+    let spill = culprit_core::insights::insights(&plan).into_iter().find(|i| i.rule == "spill").expect("the spill");
+    assert!(spill.title.contains("writes 20.0 MB to disk"), "{}", spill.title);
+    let _ = std::fs::remove_dir_all(home);
+}
+
 fn recorded() -> Snapshot {
     serde_json::from_slice(&std::fs::read(fixture()).expect("fixture")).expect("snapshot")
 }
