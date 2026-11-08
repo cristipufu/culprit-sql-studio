@@ -85,8 +85,9 @@ fn waits_window(snapshot: &Snapshot) -> (Option<f64>, bool) {
 }
 
 /// A single sighting at the moment of the scan, with nothing on record: worth watching, not acting on.
-const SEEN_ONCE: &str = "Seen once, when the scan ran, with nothing on record before it: sample Waits → Right now a few \
-                         times before acting on it.";
+fn seen_once() -> String {
+    t!("common.caveat.seen_once")
+}
 
 /// How long the counters kept since the server started have counted, as a sentence says it mid-way: "since SQL Server
 /// started 3 days ago".

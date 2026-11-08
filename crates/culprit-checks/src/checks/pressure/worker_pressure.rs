@@ -102,7 +102,7 @@ pub fn worker_pressure(snapshot: &Snapshot) -> Vec<Finding> {
                 _ => Confidence::Low,
             };
             if !history {
-                f.caveats.push(SEEN_ONCE.into());
+                f.caveats.push(seen_once());
             }
             if let Some(t) = total.filter(|t| *t > 0.0) {
                 f.metrics.push(Metric::new("Waited since start", t, Unit::Ms));
