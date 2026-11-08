@@ -12,6 +12,7 @@ use crate::model::{Engine, StatisticsInfo};
 use crate::plan::{NodeKind, Plan, PlanKind, PlanNode, PlanWarning};
 use crate::plan_diff::PlanDiff;
 use crate::redact::redact_sql;
+use crate::t;
 
 /// Estimates must differ by this factor, and the larger reach this many rows, to be a scenario.
 const ESTIMATE_FACTOR: f64 = 10.0;
@@ -91,11 +92,8 @@ pub(crate) fn scenarios(
     {
         out.push(Scenario {
             kind: ScenarioKind::Statement,
-            title: "These plans are for different statements.".into(),
-            detail: Some(
-                "Some differences may come from the SQL itself (another filter, join or column), not from the optimizer."
-                    .into(),
-            ),
+            title: t!("core.plan_compare.statement.title"),
+            detail: Some(t!("core.plan_compare.statement.detail")),
             a: None,
             b: None,
         });
@@ -104,16 +102,20 @@ pub(crate) fn scenarios(
     if a.kind != b.kind {
         let (actual, other) = if a.kind == PlanKind::Actual { (name_a, name_b) } else { (name_b, name_a) };
         let title = if a.kind == PlanKind::Actual || b.kind == PlanKind::Actual {
-            format!("{} is an actual plan and {} isn't.", cap(actual), other)
+            t!("core.plan_compare.plan_kind.actual", plan = cap(actual), other = other)
         } else {
-            format!("{} is a {} plan and {} a {} plan.", cap(name_a), kind_word(a.kind), name_b, kind_word(b.kind))
+            t!(
+                "core.plan_compare.plan_kind.kinds",
+                plan = cap(name_a),
+                kind = kind_word(a.kind),
+                other = name_b,
+                other_kind = kind_word(b.kind)
+            )
         };
         out.push(Scenario {
             kind: ScenarioKind::PlanKind,
             title,
-            detail: Some(
-                "Compare estimates with estimates; actual rows and times only exist on the executed plan.".into(),
-            ),
+            detail: Some(t!("core.plan_compare.plan_kind.detail")),
             a: None,
             b: None,
         });
@@ -125,13 +127,8 @@ pub(crate) fn scenarios(
     {
         out.push(Scenario {
             kind: ScenarioKind::Estimator,
-            title: format!("Different cardinality estimators: version {x} in {name_a}, {y} in {name_b}."),
-            detail: Some(
-                "SQL Server estimates rows differently per estimator version. It follows the database's compatibility \
-                 level unless a hint or LEGACY_CARDINALITY_ESTIMATION overrides it, so a compatibility-level change \
-                 alone can change the plan."
-                    .into(),
-            ),
+            title: t!("core.plan_compare.estimator.title", version = x, plan = name_a, other_version = y, other = name_b),
+            detail: Some(t!("core.plan_compare.estimator.detail")),
             a: None,
             b: None,
         });
@@ -144,12 +141,8 @@ pub(crate) fn scenarios(
     {
         out.push(Scenario {
             kind: ScenarioKind::Parameters,
-            title: format!("Compiled for different parameter values: {name_a} for {x}; {name_b} for {y}."),
-            detail: Some(
-                "A plan is optimized for the values it was first compiled with. When some values match a few rows and \
-                 others many, the same query gets very different plans (parameter sensitivity)."
-                    .into(),
-            ),
+            title: t!("core.plan_compare.parameters.title", plan = name_a, values = x, other = name_b, other_values = y),
+            detail: Some(t!("core.plan_compare.parameters.detail")),
             a: None,
             b: None,
         });
@@ -163,23 +156,27 @@ pub(crate) fn scenarios(
         if in_a == in_b {
             continue;
         }
-        let uses = |list: &[String]| if list.is_empty() { "no index".to_string() } else { format::list(list) };
+        let uses = |list: &[String]| if list.is_empty() { t!("core.plan_compare.index.none") } else { format::list(list) };
         lines.push((
             table_name.clone(),
-            format!("{table_name}: {name_a} uses {}, {name_b} uses {}.", uses(&in_a), uses(&in_b)),
+            t!(
+                "core.plan_compare.index.line",
+                table = &table_name,
+                plan = name_a,
+                indexes = uses(&in_a),
+                other = name_b,
+                other_indexes = uses(&in_b)
+            ),
         ));
     }
     if !lines.is_empty() {
         let tables: Vec<String> = lines.iter().map(|(t, _)| t.clone()).collect();
-        let detail: Vec<String> = lines.iter().map(|(_, l)| l.clone()).collect();
+        let mut detail: Vec<String> = lines.into_iter().map(|(_, l)| l).collect();
+        detail.push(t!("core.plan_compare.index.detail"));
         out.push(Scenario {
             kind: ScenarioKind::Index,
-            title: format!("Different indexes on {}.", format::list(&tables)),
-            detail: Some(format!(
-                "{} If an index was added, dropped or rebuilt between the two plans, that explains it; otherwise the \
-                 optimizer chose differently because it expected a different number of rows.",
-                detail.join(" ")
-            )),
+            title: t!("core.plan_compare.index.title", tables = format::list(&tables)),
+            detail: Some(detail.join(" ")),
             a: None,
             b: None,
         });
@@ -204,20 +201,17 @@ pub(crate) fn scenarios(
     let (ca, cb) = (converts(a), converts(b));
     if ca.is_some() != cb.is_some() {
         let (who, other, what) = if cb.is_some() { (name_b, name_a, cb) } else { (name_a, name_b, ca) };
+        let mut detail = vec![t!("core.plan_compare.conversion.detail")];
+        if let Some(w) = what {
+            // SQL Server prefixes each issue with its effect ("Seek Plan: …", "Cardinality Estimate: …").
+            let expr = w.split_once(": ").filter(|(k, _)| k.len() < 30).map_or(w.as_str(), |(_, e)| e);
+            detail.push(t!("core.plan_compare.conversion.here", expression = format::predicate(expr)));
+        }
+        detail.push(t!("core.plan_compare.conversion.cause"));
         out.push(Scenario {
             kind: ScenarioKind::Conversion,
-            title: format!("{} converts a column's type before comparing it; {other} doesn't.", cap(who)),
-            detail: Some(format!(
-                "A converted column can't be searched through its index, so the plan reads every entry instead.{} \
-                 This usually means the application sent the parameter with a different type (e.g. nvarchar for a \
-                 varchar column).",
-                what.map(|w| {
-                    // SQL Server prefixes each issue with its effect ("Seek Plan: …", "Cardinality Estimate: …").
-                    let expr = w.split_once(": ").filter(|(k, _)| k.len() < 30).map_or(w.as_str(), |(_, e)| e);
-                    format!(" Here: {}.", format::predicate(expr))
-                })
-                .unwrap_or_default()
-            )),
+            title: t!("core.plan_compare.conversion.title", plan = cap(who), other = other),
+            detail: Some(detail.join(" ")),
             a: None,
             b: None,
         });
@@ -228,15 +222,16 @@ pub(crate) fn scenarios(
         let (yes, no, plan_no, dop) =
             if let Some(d) = pa { (name_a, name_b, b, d) } else { (name_b, name_a, a, pb.unwrap_or(0)) };
         let reason = plan_no.facts().parallelism_blocker.as_ref().map(|r| humanize(r));
-        let dop = if dop > 1 { format!(" ({dop} threads)") } else { String::new() };
         out.push(Scenario {
             kind: ScenarioKind::Parallelism,
-            title: format!("{} runs in parallel{dop}; {no} runs on one thread.", cap(yes)),
+            title: if dop > 1 {
+                t!("core.plan_compare.parallelism.title_threads", plan = cap(yes), threads = dop.to_string(), other = no)
+            } else {
+                t!("core.plan_compare.parallelism.title", plan = cap(yes), other = no)
+            },
             detail: Some(match reason {
-                Some(r) => format!("{} couldn't go parallel: {r}.", cap(no)),
-                None => "Parallelism helps large scans and joins and costs more CPU; the optimizer only chooses it \
-                         when the estimated cost passes the server's threshold."
-                    .into(),
+                Some(r) => t!("core.plan_compare.parallelism.blocked", plan = cap(no), reason = r),
+                None => t!("core.plan_compare.parallelism.detail"),
             }),
             a: None,
             b: None,
@@ -251,12 +246,14 @@ pub(crate) fn scenarios(
         let (more, less, big, small) = if gb > ga { (name_b, name_a, gb, ga) } else { (name_a, name_b, ga, gb) };
         out.push(Scenario {
             kind: ScenarioKind::Memory,
-            title: format!("{} reserves {} of memory per run; {less} {}.", cap(more), kb(big), kb(small)),
-            detail: Some(
-                "Sorts and hashes get memory sized from the row estimates. A large grant on a busy server makes other \
-                 queries wait for memory; a small one spills to tempdb."
-                    .into(),
+            title: t!(
+                "core.plan_compare.memory.title",
+                plan = cap(more),
+                memory = kb(big),
+                other = less,
+                other_memory = kb(small)
             ),
+            detail: Some(t!("core.plan_compare.memory.detail")),
             a: None,
             b: None,
         });
@@ -266,12 +263,8 @@ pub(crate) fn scenarios(
         let (yes, no) = if spills(b) { (name_b, name_a) } else { (name_a, name_b) };
         out.push(Scenario {
             kind: ScenarioKind::Memory,
-            title: format!("{} spills to disk; {no} doesn't.", cap(yes)),
-            detail: Some(
-                "Its sort or hash got less memory than the rows needed, usually because it expected fewer rows than it \
-                 read."
-                    .into(),
-            ),
+            title: t!("core.plan_compare.spill.title", plan = cap(yes), other = no),
+            detail: Some(t!("core.plan_compare.spill.detail")),
             a: None,
             b: None,
         });
@@ -307,29 +300,36 @@ fn estimate_scenarios(
             continue;
         }
         let why = if parameters_differ {
-            Some("The parameter values they were compiled for likely match very different numbers of rows.".to_string())
+            Some(t!("core.plan_compare.estimates.parameters"))
         } else {
             stale(ctx, x)
-                .map(|s| format!("{s} The two plans may have been compiled before and after an update."))
-                .or_else(|| {
-                    Some(
-                        "Different row estimates lead the optimizer to different joins and access paths. They come from \
-                         different parameter values, newer statistics or a different estimator."
-                            .into(),
-                    )
-                })
+                .map(|s| [s, t!("core.plan_compare.estimates.compiled_around_update")].join(" "))
+                .or_else(|| Some(t!("core.plan_compare.estimates.detail")))
         };
+        let (expected, other_expected) = (rows(ea), rows(eb));
         found.push((
             ratio(ea, eb),
             Scenario {
                 kind: ScenarioKind::Estimates,
-                title: format!(
-                    "On {}, {name_a} expects {} and {name_b} expects {}{}.",
-                    table(y),
-                    rows(ea),
-                    rows(eb),
-                    if repeats { " per execution" } else { "" }
-                ),
+                title: if repeats {
+                    t!(
+                        "core.plan_compare.estimates.title_per_execution",
+                        table = table(y),
+                        plan = name_a,
+                        rows = expected,
+                        other = name_b,
+                        other_rows = other_expected
+                    )
+                } else {
+                    t!(
+                        "core.plan_compare.estimates.title",
+                        table = table(y),
+                        plan = name_a,
+                        rows = expected,
+                        other = name_b,
+                        other_rows = other_expected
+                    )
+                },
                 detail: why,
                 a: Some(x.id),
                 b: Some(y.id),
@@ -346,16 +346,14 @@ fn estimate_scenarios(
             // Data access only: the operators above repeat the same misestimate.
             let (Some(actual), Some(_)) = (node.act_rows, &node.object) else { continue };
             let estimated = node.est_rows_for_runs();
-            let title = format!(
-                "{}: estimated {} from {}, got {}.",
-                cap(name),
-                rows(estimated),
-                table(node),
-                format::count(actual)
+            let title = t!(
+                "core.plan_compare.estimates.misestimate",
+                plan = cap(name),
+                rows = rows(estimated),
+                table = table(node),
+                actual = format::count(actual)
             );
-            let detail = stale(ctx, node).or_else(|| {
-                Some("Estimates this far off lead to the wrong join type, too little memory or a needless scan.".into())
-            });
+            let detail = stale(ctx, node).or_else(|| Some(t!("core.plan_compare.estimates.misestimate_detail")));
             let (ia, ib) = if side_a { (Some(node.id), None) } else { (None, Some(node.id)) };
             found.push((factor.abs(), Scenario { kind: ScenarioKind::Estimates, title, detail, a: ia, b: ib }));
         }
@@ -420,15 +418,15 @@ fn stale(ctx: &CompareContext, node: &PlanNode) -> Option<String> {
         return None;
     }
     let age = match (&worst.1.last_updated, &ctx.taken_at) {
-        (Some(updated), Some(now)) => format::age_between(updated, now).map(|a| format!(", {a} before the scan")),
+        (Some(updated), Some(now)) => format::age_between(updated, now),
         _ => None,
-    }
-    .unwrap_or_default();
-    Some(format!(
-        "Statistics on {} are stale: {} of the table changed since they were updated{age}.",
-        unquote(object.rsplit('.').next().unwrap_or(object)),
-        format::percent(worst.0.min(9.99))
-    ))
+    };
+    let table = unquote(object.rsplit('.').next().unwrap_or(object));
+    let share = format::percent(worst.0.min(9.99));
+    Some(match age {
+        Some(age) => t!("core.plan_compare.stale_age", table = table, share = share, age = age),
+        None => t!("core.plan_compare.stale", table = table, share = share),
+    })
 }
 
 /// The statement with literals replaced and whitespace and case folded, so the same query with other values compares
@@ -459,15 +457,14 @@ fn humanize(reason: &str) -> String {
 }
 
 fn rows(n: f64) -> String {
-    let rounded = n.round();
-    format!("{} row{}", format::count(n), if rounded == 1.0 { "" } else { "s" })
+    t!("core.plan_compare.rows", n = n.round(), count = format::count(n))
 }
 
-fn kind_word(kind: PlanKind) -> &'static str {
+fn kind_word(kind: PlanKind) -> String {
     match kind {
-        PlanKind::Estimated => "estimated",
-        PlanKind::Generic => "generic",
-        PlanKind::Actual => "actual",
+        PlanKind::Estimated => t!("core.plan_compare.kind.estimated"),
+        PlanKind::Generic => t!("core.plan_compare.kind.generic"),
+        PlanKind::Actual => t!("core.plan_compare.kind.actual"),
     }
 }
 
@@ -494,7 +491,7 @@ fn kb(value: f64) -> String {
 }
 
 /// Capitalize a generic name at the start of a sentence ("plan A" → "Plan A"); names people chose keep their case.
-fn cap(s: &str) -> String {
+pub(crate) fn cap(s: &str) -> String {
     if !["plan ", "query ", "these "].iter().any(|w| s.starts_with(w)) {
         return s.to_string();
     }
@@ -654,6 +651,134 @@ mod tests {
         );
         let e = diff.scenarios.iter().find(|s| s.kind == ScenarioKind::Estimates).unwrap();
         assert!(e.detail.as_deref().unwrap().contains("parameter values"));
+    }
+
+    // Every scenario, word for word, as two plans and what Culprit knows about their tables raise it: the messages come
+    // from locales/en.json.
+    #[test]
+    fn scenarios_say_why_plans_differ_in_english() {
+        let seek = || node("Index Seek", NodeKind::Seek, Some("dbo.orders"), Some("ix_status"), 12.0, vec![]);
+        let scan = || node("Clustered Index Scan", NodeKind::Scan, Some("dbo.orders"), Some("pk_orders"), 140_000.0, vec![]);
+        let facts = crate::PlanFacts::default;
+        let stats = |taken_at: Option<&str>| CompareContext {
+            statistics: vec![StatisticsInfo {
+                schema: "dbo".into(),
+                table: "orders".into(),
+                name: "ix_status".into(),
+                last_updated: Some("2026-10-05T00:00:00Z".into()),
+                rows: Some(1_000_000.0),
+                rows_sampled: None,
+                modifications: Some(230_000.0),
+                auto_created: false,
+            }],
+            taken_at: taken_at.map(str::to_string),
+        };
+        let kind = |mut p: Plan, kind: PlanKind| {
+            p.kind = kind;
+            p
+        };
+        let mut other_statement = plan(seek(), facts());
+        other_statement.statement = Some("SELECT * FROM orders WHERE region = @p1".into());
+        let mut converts = plan(seek(), facts());
+        converts.root.warnings = vec![PlanWarning::ImplicitConversion];
+        converts.root.predicate = Some("CONVERT_IMPLICIT(nvarchar(64),[dbo].[orders].[status],0)=[@p1]".into());
+        let parallel = |dop: Option<u32>, blocker: Option<&str>| {
+            let mut p = plan(seek(), crate::PlanFacts { degree_of_parallelism: dop, ..facts() });
+            p.facts_mut().parallelism_blocker = blocker.map(str::to_string);
+            p
+        };
+        let gathered = plan(node("Parallelism", NodeKind::Parallelism, None, None, 12.0, vec![seek()]), facts());
+        let granted = |kb: f64| plan(seek(), crate::PlanFacts { memory_granted_kb: Some(kb), ..facts() });
+        let misestimated = |rows: f64| {
+            let mut root = seek();
+            root.act_rows = Some(rows);
+            root.act_executions = Some(1.0);
+            kind(plan(root, facts()), PlanKind::Actual)
+        };
+        let ctx = CompareContext::default();
+        let cases: Vec<(&str, Plan, Plan, CompareContext)> = vec![
+            ("statements", plan(seek(), facts()), other_statement, ctx.clone()),
+            ("actual and estimated", kind(plan(seek(), facts()), PlanKind::Actual), plan(seek(), facts()), ctx.clone()),
+            ("estimated and actual", plan(seek(), facts()), kind(plan(seek(), facts()), PlanKind::Actual), ctx.clone()),
+            ("estimated and generic", plan(seek(), facts()), kind(plan(seek(), facts()), PlanKind::Generic), ctx.clone()),
+            (
+                "estimator and parameters",
+                plan(
+                    seek(),
+                    crate::PlanFacts {
+                        cardinality_estimator: Some(70),
+                        compiled_parameters: Some("@p1 = N'rare'".into()),
+                        ..facts()
+                    },
+                ),
+                plan(
+                    scan(),
+                    crate::PlanFacts {
+                        cardinality_estimator: Some(160),
+                        compiled_parameters: Some("@p1 = N'common'".into()),
+                        ..facts()
+                    },
+                ),
+                ctx.clone(),
+            ),
+            ("stale", plan(seek(), facts()), plan(scan(), facts()), stats(Some("2026-10-11T00:00:00Z"))),
+            ("stale, no age", plan(seek(), facts()), plan(scan(), facts()), stats(None)),
+            ("estimates", plan(seek(), facts()), plan(scan(), facts()), ctx.clone()),
+            ("misestimate", misestimated(40_000.0), misestimated(12.0), ctx.clone()),
+            ("misestimate, stale", misestimated(12.0), misestimated(40_000.0), stats(Some("2026-10-11T00:00:00Z"))),
+            ("converts", plan(seek(), facts()), converts.clone(), ctx.clone()),
+            ("converts no more", converts, plan(seek(), facts()), ctx.clone()),
+            ("parallel", parallel(Some(8), None), parallel(Some(1), Some("CouldNotGenerateValidParallelPlan")), ctx.clone()),
+            ("serial", parallel(None, None), gathered, ctx.clone()),
+            ("memory", granted(40_000.0), granted(1_024.0), ctx.clone()),
+            ("memory, less", granted(1_024.0), granted(40_000.0), ctx.clone()),
+        ];
+        let mut out = Vec::new();
+        for (name, a, b, ctx) in cases {
+            out.push(format!("## {name}"));
+            for s in plan_diff_in(&a, "plan A", &b, "Plan 2", &ctx).scenarios {
+                out.push(format!("{:?}: {} | {}", s.kind, s.title, s.detail.as_deref().unwrap_or("-")));
+            }
+        }
+        let got = out.join("\n");
+        assert_eq!(got, r#"## statements
+Statement: These plans are for different statements. | Some differences may come from the SQL itself (another filter, join or column), not from the optimizer.
+## actual and estimated
+PlanKind: Plan A is an actual plan and Plan 2 isn't. | Compare estimates with estimates; actual rows and times only exist on the executed plan.
+## estimated and actual
+PlanKind: Plan 2 is an actual plan and plan A isn't. | Compare estimates with estimates; actual rows and times only exist on the executed plan.
+## estimated and generic
+PlanKind: Plan A is a estimated plan and Plan 2 a generic plan. | Compare estimates with estimates; actual rows and times only exist on the executed plan.
+## estimator and parameters
+Estimator: Different cardinality estimators: version 70 in plan A, 160 in Plan 2. | SQL Server estimates rows differently per estimator version. It follows the database's compatibility level unless a hint or LEGACY_CARDINALITY_ESTIMATION overrides it, so a compatibility-level change alone can change the plan.
+Parameters: Compiled for different parameter values: plan A for @p1 = N'rare'; Plan 2 for @p1 = N'common'. | A plan is optimized for the values it was first compiled with. When some values match a few rows and others many, the same query gets very different plans (parameter sensitivity).
+Estimates: On orders, plan A expects 12 rows and Plan 2 expects 140K rows. | The parameter values they were compiled for likely match very different numbers of rows.
+Index: Different indexes on orders. | orders: plan A uses ix_status, Plan 2 uses pk_orders. If an index was added, dropped or rebuilt between the two plans, that explains it; otherwise the optimizer chose differently because it expected a different number of rows.
+## stale
+Estimates: On orders, plan A expects 12 rows and Plan 2 expects 140K rows. | Statistics on orders are stale: 23% of the table changed since they were updated, 6.0 days before the scan. The two plans may have been compiled before and after an update.
+Index: Different indexes on orders. | orders: plan A uses ix_status, Plan 2 uses pk_orders. If an index was added, dropped or rebuilt between the two plans, that explains it; otherwise the optimizer chose differently because it expected a different number of rows.
+## stale, no age
+Estimates: On orders, plan A expects 12 rows and Plan 2 expects 140K rows. | Statistics on orders are stale: 23% of the table changed since they were updated. The two plans may have been compiled before and after an update.
+Index: Different indexes on orders. | orders: plan A uses ix_status, Plan 2 uses pk_orders. If an index was added, dropped or rebuilt between the two plans, that explains it; otherwise the optimizer chose differently because it expected a different number of rows.
+## estimates
+Estimates: On orders, plan A expects 12 rows and Plan 2 expects 140K rows. | Different row estimates lead the optimizer to different joins and access paths. They come from different parameter values, newer statistics or a different estimator.
+Index: Different indexes on orders. | orders: plan A uses ix_status, Plan 2 uses pk_orders. If an index was added, dropped or rebuilt between the two plans, that explains it; otherwise the optimizer chose differently because it expected a different number of rows.
+## misestimate
+Estimates: Plan A: estimated 12 rows from orders, got 40K. | Estimates this far off lead to the wrong join type, too little memory or a needless scan.
+## misestimate, stale
+Estimates: Plan 2: estimated 12 rows from orders, got 40K. | Statistics on orders are stale: 23% of the table changed since they were updated, 6.0 days before the scan.
+## converts
+Conversion: Plan 2 converts a column's type before comparing it; plan A doesn't. | A converted column can't be searched through its index, so the plan reads every entry instead. Here: CONVERT_IMPLICIT(nvarchar(64),status,0) = @p1. This usually means the application sent the parameter with a different type (e.g. nvarchar for a varchar column).
+## converts no more
+Conversion: Plan A converts a column's type before comparing it; Plan 2 doesn't. | A converted column can't be searched through its index, so the plan reads every entry instead. Here: CONVERT_IMPLICIT(nvarchar(64),status,0) = @p1. This usually means the application sent the parameter with a different type (e.g. nvarchar for a varchar column).
+## parallel
+Parallelism: Plan A runs in parallel (8 threads); Plan 2 runs on one thread. | Plan 2 couldn't go parallel: could not generate valid parallel plan.
+## serial
+Parallelism: Plan 2 runs in parallel; plan A runs on one thread. | Parallelism helps large scans and joins and costs more CPU; the optimizer only chooses it when the estimated cost passes the server's threshold.
+## memory
+Memory: Plan A reserves 39.1 MB of memory per run; Plan 2 1.0 MB. | Sorts and hashes get memory sized from the row estimates. A large grant on a busy server makes other queries wait for memory; a small one spills to tempdb.
+## memory, less
+Memory: Plan 2 reserves 39.1 MB of memory per run; plan A 1.0 MB. | Sorts and hashes get memory sized from the row estimates. A large grant on a busy server makes other queries wait for memory; a small one spills to tempdb."#);
     }
 
     fn estimate_titles(a: &Plan, b: &Plan) -> Vec<String> {

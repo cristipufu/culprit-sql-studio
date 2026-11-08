@@ -65,6 +65,19 @@ impl PlanWarning {
             PlanWarning::ResidualPredicate => crate::t!("core.plan.warning.residual_predicate"),
         }
     }
+
+    /// Its name inside a sentence ("No longer: spills to disk"), where [`PlanWarning::label`] stands alone.
+    pub fn phrase(self) -> String {
+        match self {
+            PlanWarning::ImplicitConversion => crate::t!("core.plan.warning_phrase.implicit_conversion"),
+            PlanWarning::Spill => crate::t!("core.plan.warning_phrase.spill"),
+            PlanWarning::NoJoinPredicate => crate::t!("core.plan.warning_phrase.no_join_predicate"),
+            PlanWarning::MissingStatistics => crate::t!("core.plan.warning_phrase.missing_statistics"),
+            PlanWarning::MemoryGrant => crate::t!("core.plan.warning_phrase.memory_grant"),
+            PlanWarning::Misestimate => crate::t!("core.plan.warning_phrase.misestimate"),
+            PlanWarning::ResidualPredicate => crate::t!("core.plan.warning_phrase.residual_predicate"),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]

@@ -6,9 +6,10 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::format;
+use crate::format::{self, digits};
 use crate::plan::{NodeKind, Plan, PlanNode, PlanWarning};
-use crate::plan_compare::{CompareContext, Scenario, scenarios};
+use crate::plan_compare::{CompareContext, Scenario, cap, scenarios};
+use crate::t;
 
 /// A cost-share move smaller than this (10 points of the plan's cost) is noise.
 const SHARE_SHIFT: f64 = 0.10;
@@ -164,7 +165,12 @@ pub fn verify_hypothetical_index(baseline: Plan, hypothetical: Plan) -> Hypothet
         }
     }
     let uses_virtual_index = !used_virtual_indexes.is_empty();
-    let diff = plan_diff_named(&baseline, "Current plan", &hypothetical, "With virtual index");
+    let diff = plan_diff_named(
+        &baseline,
+        &t!("core.plan_diff.name.current"),
+        &hypothetical,
+        &t!("core.plan_diff.name.virtual_index"),
+    );
     HypotheticalIndexVerification {
         baseline,
         hypothetical,
@@ -177,7 +183,7 @@ pub fn verify_hypothetical_index(baseline: Plan, hypothetical: Plan) -> Hypothet
 
 /// Compare plan `b` against plan `a` (the baseline), naming them "plan A" and "plan B" in the headlines.
 pub fn plan_diff(a: &Plan, b: &Plan) -> PlanDiff {
-    plan_diff_named(a, "plan A", b, "plan B")
+    plan_diff_named(a, &t!("core.plan_diff.name.plan_a"), b, &t!("core.plan_diff.name.plan_b"))
 }
 
 /// Compare plan `b` against plan `a` (the baseline); headlines refer to them by the given names ("Plan 815", "staging").
@@ -212,7 +218,12 @@ pub fn plan_diff_in(a: &Plan, name_a: &str, b: &Plan, name_b: &str, context: &Co
                 kind: ChangeKind::Cost,
                 a: Some(na.id),
                 b: Some(nb.id),
-                title: format!("{}: {} → {} of the plan's cost", label(nb), format::percent(sa), format::percent(sb)),
+                title: t!(
+                    "core.plan_diff.change.cost_share",
+                    step = label(nb),
+                    before = format::percent(sa),
+                    after = format::percent(sb)
+                ),
                 detail: None,
                 weight: (sb - sa).abs(),
             });
@@ -226,8 +237,13 @@ pub fn plan_diff_in(a: &Plan, name_a: &str, b: &Plan, name_b: &str, context: &Co
                 kind: ChangeKind::Cost,
                 a: Some(na.id),
                 b: Some(nb.id),
-                title: format!("{}: {} → {}", label(nb), format::duration(ta), format::duration(tb)),
-                detail: Some("Actual time, across all executions".into()),
+                title: t!(
+                    "core.plan_diff.change.time",
+                    step = label(nb),
+                    before = format::duration(ta),
+                    after = format::duration(tb)
+                ),
+                detail: Some(t!("core.plan_diff.change.time_detail")),
                 weight: (fa.time_share(na) - fb.time_share(nb)).abs().max(0.05),
             });
         }
@@ -384,6 +400,17 @@ impl<'a> Flat<'a> {
         (index..index + self.size[index]).filter(|d| matched[*d].is_none()).collect()
     }
 
+    /// [`Flat::branch`] of the operator with `id`, where `only` lists the operators only this plan has.
+    fn branch_of(&self, id: u32, only: &[u32]) -> Vec<usize> {
+        let Some(start) = self.nodes.iter().position(|n| n.id == id) else { return Vec::new() };
+        (start..start + self.size[start]).filter(|d| only.contains(&self.nodes[*d].id)).collect()
+    }
+
+    /// The share of the plan's cost a branch carries.
+    fn branch_share(&self, branch: &[usize]) -> f64 {
+        branch.iter().map(|d| self.nodes[*d].self_cost).sum::<f64>() / self.total
+    }
+
     fn time_share(&self, node: &PlanNode) -> f64 {
         node.act_time_ms.unwrap_or(0.0) / self.total_time
     }
@@ -515,10 +542,13 @@ fn same_kind(x: &PlanNode, y: &PlanNode) -> bool {
 
 fn reshape_change(na: &PlanNode, nb: &PlanNode, sa: f64, sb: f64, comparable: bool) -> PlanChange {
     let access = na.object.is_some() && nb.object.is_some();
-    let title =
-        if access { format!("{}: {} → {}", table(nb), how(na), how(nb)) } else { format!("{} → {}", na.op, nb.op) };
+    let title = if access {
+        t!("core.plan_diff.change.access", table = table(nb), before = how(na), after = how(nb))
+    } else {
+        t!("core.plan_diff.change.operator", before = &na.op, after = &nb.op)
+    };
     let detail = (comparable && sa.max(sb) >= 0.01)
-        .then(|| format!("{} of the plan's cost in A, {} in B", format::percent(sa), format::percent(sb)));
+        .then(|| t!("core.plan_diff.change.share_detail", a = format::percent(sa), b = format::percent(sb)));
     PlanChange {
         kind: if access { ChangeKind::Access } else { ChangeKind::Operator },
         a: Some(na.id),
@@ -540,7 +570,12 @@ fn rows_change(changes: &mut Vec<PlanChange>, na: &PlanNode, nb: &PlanNode, shar
             kind: ChangeKind::Rows,
             a: Some(na.id),
             b: Some(nb.id),
-            title: format!("{}: estimated rows {} → {}", label(nb), format::count(ea), format::count(eb)),
+            title: t!(
+                "core.plan_diff.change.estimated_rows",
+                step = label(nb),
+                before = format::count(ea),
+                after = format::count(eb)
+            ),
             detail: None,
             weight: share * 0.5 + 0.01,
         });
@@ -553,7 +588,12 @@ fn rows_change(changes: &mut Vec<PlanChange>, na: &PlanNode, nb: &PlanNode, shar
             kind: ChangeKind::Rows,
             a: Some(na.id),
             b: Some(nb.id),
-            title: format!("{}: actual rows {} → {}", label(nb), format::count(ra), format::count(rb)),
+            title: t!(
+                "core.plan_diff.change.actual_rows",
+                step = label(nb),
+                before = format::count(ra),
+                after = format::count(rb)
+            ),
             detail: None,
             weight: share * 0.5 + 0.01,
         });
@@ -573,9 +613,9 @@ fn warning_change(
         a,
         b,
         title: if added {
-            format!("{} on {}", w.label(), label(node))
+            t!("core.plan_diff.change.warning", warning = w.label(), step = label(node))
         } else {
-            format!("No longer: {} on {}", w.label().to_lowercase(), label(node))
+            t!("core.plan_diff.change.warning_gone", warning = w.phrase(), step = label(node))
         },
         detail: None,
         weight: share * 0.5 + if added { 0.03 } else { 0.015 },
@@ -588,9 +628,9 @@ fn plan_warning_change(w: PlanWarning, added: bool) -> PlanChange {
         a: None,
         b: None,
         title: if added {
-            format!("Plan warning: {}", w.label())
+            t!("core.plan_diff.change.plan_warning", warning = w.label())
         } else {
-            format!("No longer: {}", w.label().to_lowercase())
+            t!("core.plan_diff.change.plan_warning_gone", warning = w.phrase())
         },
         detail: None,
         weight: if added { 0.03 } else { 0.015 },
@@ -600,24 +640,30 @@ fn plan_warning_change(w: PlanWarning, added: bool) -> PlanChange {
 fn presence_change(kind: ChangeKind, flat: &Flat, index: usize, matched: &[Option<usize>]) -> PlanChange {
     let node = flat.nodes[index];
     let branch = flat.branch(index, matched);
-    let share = branch.iter().map(|d| flat.nodes[*d].self_cost).sum::<f64>() / flat.total;
-    let (a, b, side) = match kind {
-        ChangeKind::Removed => (Some(node.id), None, "Only in A"),
-        _ => (None, Some(node.id), "Only in B"),
-    };
-    let names: Vec<String> = branch.iter().map(|d| label(flat.nodes[*d])).collect();
-    let title = if names.len() <= 3 {
-        format!("{side}: {}", format::list(&names))
-    } else {
-        format!("{side}: {} and {} operators below it", names[0], names.len() - 1)
+    let share = flat.branch_share(&branch);
+    let steps = branch_words(flat, &branch);
+    let (a, b, title) = match kind {
+        ChangeKind::Removed => (Some(node.id), None, t!("core.plan_diff.change.only_in_a", steps = steps)),
+        _ => (None, Some(node.id), t!("core.plan_diff.change.only_in_b", steps = steps)),
     };
     PlanChange {
         kind,
         a,
         b,
         title,
-        detail: Some(format!("{} of that plan's cost", format::percent(share))),
+        detail: Some(t!("core.plan_diff.change.plan_share", share = format::percent(share))),
         weight: share + 0.05,
+    }
+}
+
+/// The operators of a branch only one plan has: "Sort and Compute Scalar", or the first and how many are below it.
+fn branch_words(flat: &Flat, branch: &[usize]) -> String {
+    let names: Vec<String> = branch.iter().map(|d| label(flat.nodes[*d])).collect();
+    if names.len() <= 3 {
+        format::list(&names)
+    } else {
+        let below = names.len() - 1;
+        t!("core.plan_diff.branch", first = &names[0], n = below, count = below.to_string())
     }
 }
 
@@ -636,12 +682,10 @@ fn rank(kind: ChangeKind) -> u8 {
 fn headlines(diff: &PlanDiff, a: &Plan, b: &Plan, fa: &Flat, fb: &Flat, name_a: &str, name_b: &str) -> Vec<String> {
     let mut out = Vec::new();
     if !diff.comparable {
-        out.push(format!(
-            "These plans come from different engines ({} and {}), so their costs aren't comparable.",
-            a.engine.label(),
-            b.engine.label()
-        ));
+        out.push(t!("core.plan_diff.headline.engines", a = a.engine.label(), b = b.engine.label()));
     }
+    // Every other sentence opens with plan B's name.
+    let plan = cap(name_b);
     let node_a = |id: Option<u32>| id.and_then(|id| fa.nodes.iter().find(|n| n.id == id).copied());
     let node_b = |id: Option<u32>| id.and_then(|id| fb.nodes.iter().find(|n| n.id == id).copied());
     let mut explained: Vec<String> = Vec::new();
@@ -657,27 +701,55 @@ fn headlines(diff: &PlanDiff, a: &Plan, b: &Plan, fa: &Flat, fb: &Flat, name_a: 
             let because = if change.kind == ChangeKind::Access {
                 explained.push(normalize(&table(x)));
                 if m.b_worse {
-                    format!(
-                        "because it {} ({} of its cost) where {name_a} {}",
-                        verb(y, &fb.nodes),
-                        format::percent(fb.share(y)),
-                        verb(x, &fa.nodes)
+                    t!(
+                        "core.plan_diff.because.access_worse",
+                        verb = verb(y, &fb.nodes),
+                        share = format::percent(fb.share(y)),
+                        other = name_a,
+                        other_verb = verb(x, &fa.nodes)
                     )
                 } else {
-                    format!(
-                        "because it {} where {name_a} {} ({} of {name_a}'s cost)",
-                        verb(y, &fb.nodes),
-                        verb(x, &fa.nodes),
-                        format::percent(fa.share(x))
+                    t!(
+                        "core.plan_diff.because.access_better",
+                        verb = verb(y, &fb.nodes),
+                        other = name_a,
+                        other_verb = verb(x, &fa.nodes),
+                        share = format::percent(fa.share(x))
                     )
                 }
             } else {
-                format!("because it uses {} where {name_a} uses {}", y.op, x.op)
+                t!("core.plan_diff.because.operator", op = &y.op, other = name_a, other_op = &x.op)
             };
-            out.push(format!("{name_b} {} {because}.", m.phrase));
+            let key = match (m.by_time, m.b_worse) {
+                (true, true) => crate::key!("core.plan_diff.headline.took_longer_because"),
+                (true, false) => crate::key!("core.plan_diff.headline.took_less_time_because"),
+                (false, true) => crate::key!("core.plan_diff.headline.more_expensive_because"),
+                (false, false) => crate::key!("core.plan_diff.headline.cheaper_because"),
+            };
+            out.push(crate::i18n::t(
+                key,
+                &[("plan", plan.as_str().into()), ("factor", m.factor.into()), ("because", because.into())],
+            ));
             used_lead = true;
         }
-        (Some(m), None) => out.push(format!("{name_b} {} than {name_a} {}.", m.phrase, m.numbers)),
+        (Some(m), None) => {
+            let key = match (m.by_time, m.b_worse) {
+                (true, true) => crate::key!("core.plan_diff.headline.took_longer_than"),
+                (true, false) => crate::key!("core.plan_diff.headline.took_less_time_than"),
+                (false, true) => crate::key!("core.plan_diff.headline.more_expensive_than"),
+                (false, false) => crate::key!("core.plan_diff.headline.cheaper_than"),
+            };
+            out.push(crate::i18n::t(
+                key,
+                &[
+                    ("plan", plan.as_str().into()),
+                    ("factor", m.factor.into()),
+                    ("other", name_a.into()),
+                    ("before", m.before.into()),
+                    ("after", m.after.into()),
+                ],
+            ));
+        }
         _ => {}
     }
 
@@ -691,7 +763,13 @@ fn headlines(diff: &PlanDiff, a: &Plan, b: &Plan, fa: &Flat, fb: &Flat, name_a: 
         let sentence = match (change.kind, node_a(change.a), node_b(change.b)) {
             (ChangeKind::Access, Some(x), Some(y)) => {
                 explained.push(normalize(&table(x)));
-                format!("{name_b} {} where {name_a} {}.", verb(y, &fb.nodes), verb(x, &fa.nodes))
+                t!(
+                    "core.plan_diff.headline.access",
+                    plan = &plan,
+                    verb = verb(y, &fb.nodes),
+                    other = name_a,
+                    other_verb = verb(x, &fa.nodes)
+                )
             }
             (ChangeKind::Added | ChangeKind::Removed, x, y)
                 if {
@@ -711,43 +789,59 @@ fn headlines(diff: &PlanDiff, a: &Plan, b: &Plan, fa: &Flat, fb: &Flat, name_a: 
                 continue;
             }
             (ChangeKind::Operator, Some(x), Some(y)) if x.kind == NodeKind::Join || y.kind == NodeKind::Join => {
-                format!("{name_b} joins with {} where {name_a} uses {}.", y.op, x.op)
+                t!("core.plan_diff.headline.join", plan = &plan, op = &y.op, other = name_a, other_op = &x.op)
             }
-            (ChangeKind::Operator, Some(x), Some(y)) => format!("{name_b} uses {} where {name_a} uses {}.", y.op, x.op),
+            (ChangeKind::Operator, Some(x), Some(y)) => {
+                t!("core.plan_diff.headline.operator", plan = &plan, op = &y.op, other = name_a, other_op = &x.op)
+            }
             (ChangeKind::Added, _, Some(y)) => {
-                let what = change.title.trim_start_matches("Only in B: ");
-                let share = change.detail.as_deref().and_then(|d| d.split(' ').next()).unwrap_or("");
-                format!("{name_b} adds {} {what} ({share} of its cost).", article(&y.op))
+                let branch = fb.branch_of(y.id, &diff.only_b);
+                t!(
+                    "core.plan_diff.headline.adds",
+                    plan = &plan,
+                    initial = initial(&y.op),
+                    steps = branch_words(fb, &branch),
+                    share = format::percent(fb.branch_share(&branch))
+                )
             }
-            (ChangeKind::Removed, Some(_), _) => {
-                format!("{name_b} has no {} ({name_a} has).", change.title.trim_start_matches("Only in A: "))
+            (ChangeKind::Removed, Some(x), _) => {
+                let steps = branch_words(fa, &fa.branch_of(x.id, &diff.only_a));
+                t!("core.plan_diff.headline.has_no", plan = &plan, steps = steps, other = name_a)
             }
             _ => continue,
         };
         out.push(sentence);
     }
     if out.len() < MAX_HEADLINES && !diff.warnings_added.is_empty() {
-        let names: Vec<String> = diff.warnings_added.iter().map(|w| w.label().to_lowercase()).collect();
-        let noun = if names.len() == 1 { "a plan warning" } else { "plan warnings" };
-        out.push(format!("{name_b} has {noun} {name_a} doesn't: {}.", format::list(&names)));
+        let names: Vec<String> = diff.warnings_added.iter().map(|w| w.phrase()).collect();
+        out.push(t!(
+            "core.plan_diff.headline.warnings",
+            n = names.len(),
+            plan = &plan,
+            other = name_a,
+            warnings = format::list(&names)
+        ));
     }
     if out.is_empty() || (out.len() == 1 && !diff.comparable) {
         out.push(if diff.same_shape {
-            format!("{name_b} runs the same steps as {name_a}.")
+            t!("core.plan_diff.headline.same_steps", plan = &plan, other = name_a)
         } else {
-            format!("{name_b} differs from {name_a} only in minor steps.")
+            t!("core.plan_diff.headline.minor_steps", plan = &plan, other = name_a)
         });
     }
-    out.into_iter().map(capitalize).collect()
+    out
 }
 
 /// How much slower or faster B is: by actual time when both plans ran, else by estimated cost.
 struct Magnitude {
     b_worse: bool,
-    /// "took 3.4× longer", "is estimated 6.7× more expensive".
-    phrase: String,
-    /// "(12 ms → 41 ms)", "(cost 0.600 → 4.000)".
-    numbers: String,
+    /// Measured by the plans' actual times, rather than their estimated costs.
+    by_time: bool,
+    /// "3.4×".
+    factor: String,
+    /// Plan A's and plan B's time ("12 ms") or cost ("0.600").
+    before: String,
+    after: String,
 }
 
 fn magnitude_of(diff: &PlanDiff) -> Option<Magnitude> {
@@ -756,22 +850,24 @@ fn magnitude_of(diff: &PlanDiff) -> Option<Magnitude> {
         && tb > 0.0
         && ratio(ta, tb) >= COST_RATIO
     {
-        let (word, r) = if tb > ta { ("longer", tb / ta) } else { ("less time", ta / tb) };
         return Some(Magnitude {
             b_worse: tb > ta,
-            phrase: format!("took {} {word}", times(r)),
-            numbers: format!("({} → {})", format::duration(ta), format::duration(tb)),
+            by_time: true,
+            factor: times(if tb > ta { tb / ta } else { ta / tb }),
+            before: format::duration(ta),
+            after: format::duration(tb),
         });
     }
     let r = diff.cost_ratio?;
     if ratio(1.0, r) < COST_RATIO {
         return None;
     }
-    let (word, factor) = if r > 1.0 { ("more expensive", r) } else { ("cheaper", 1.0 / r) };
     Some(Magnitude {
         b_worse: r > 1.0,
-        phrase: format!("is estimated {} {word}", times(factor)),
-        numbers: format!("(cost {} → {})", cost(diff.cost_a?), cost(diff.cost_b?)),
+        by_time: false,
+        factor: times(if r > 1.0 { r } else { 1.0 / r }),
+        before: cost(diff.cost_a?),
+        after: cost(diff.cost_b?),
     })
 }
 
@@ -781,20 +877,20 @@ fn verb(node: &PlanNode, plan: &[&PlanNode]) -> String {
     let table = table(node);
     match node.kind {
         NodeKind::Seek => match node.index.as_deref() {
-            Some(index) => format!("seeks {index}"),
-            None => format!("seeks into {table}"),
+            Some(index) => t!("core.plan_diff.verb.seeks", index = index),
+            None => t!("core.plan_diff.verb.seeks_into", table = table),
         },
-        NodeKind::Scan => format!("scans {table}"),
+        NodeKind::Scan => t!("core.plan_diff.verb.scans", table = table),
         NodeKind::Lookup => {
             let feeder = plan.iter().find(|n| {
                 n.kind == NodeKind::Seek && n.index.is_some() && same_name(n.object.as_deref(), node.object.as_deref())
             });
             match feeder.and_then(|n| n.index.as_deref()) {
-                Some(index) => format!("seeks {index} and looks up the rows in {table}"),
-                None => format!("looks up rows in {table}"),
+                Some(index) => t!("core.plan_diff.verb.seeks_and_looks_up", index = index, table = table),
+                None => t!("core.plan_diff.verb.looks_up", table = table),
             }
         }
-        _ => format!("uses {} on {table}", node.op),
+        _ => t!("core.plan_diff.verb.uses_on", op = &node.op, table = table),
     }
 }
 
@@ -811,7 +907,7 @@ fn branch_tables(flat: &Flat, id: u32, only: &[u32]) -> Vec<String> {
 /// "Index Seek (ix_customers_email)" for the change list, where the table is already named.
 fn how(node: &PlanNode) -> String {
     match node.index.as_deref() {
-        Some(index) => format!("{} ({index})", node.op),
+        Some(index) => t!("core.plan_diff.step_index", op = &node.op, index = index),
         None => node.op.clone(),
     }
 }
@@ -819,7 +915,7 @@ fn how(node: &PlanNode) -> String {
 /// "Key Lookup on customers", "Sort".
 fn label(node: &PlanNode) -> String {
     match node.object.as_deref() {
-        Some(_) => format!("{} on {}", node.op, table(node)),
+        Some(_) => t!("core.plan_diff.step_on", op = &node.op, table = table(node)),
         None => node.op.clone(),
     }
 }
@@ -875,27 +971,18 @@ fn ratio(a: f64, b: f64) -> f64 {
 }
 
 fn times(r: f64) -> String {
-    if r >= 10.0 { format!("{}×", format::count(r.round())) } else { format!("{r:.1}×") }
+    let n = if r >= 10.0 { format::count(r.round()) } else { digits(format!("{r:.1}")) };
+    t!("common.factor", n = n)
 }
 
 fn cost(value: f64) -> String {
-    if value < 10.0 { format!("{value:.3}") } else { format::count(value) }
+    if value < 10.0 { digits(format!("{value:.3}")) } else { format::count(value) }
 }
 
-fn article(word: &str) -> &'static str {
-    if word.chars().next().is_some_and(|c| "AEIOUaeiou".contains(c)) { "an" } else { "a" }
-}
-
-/// Sentences open with a plan's name; only Culprit's own lowercase names ("plan A", "query 7") get a capital.
-fn capitalize(sentence: String) -> String {
-    if !["plan ", "query ", "these "].iter().any(|w| sentence.starts_with(w)) {
-        return sentence;
-    }
-    let mut chars = sentence.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().chain(chars).collect(),
-        None => sentence,
-    }
+/// Whether an operator's name (`Index Spool`, `Sort`) starts with a vowel: English says "an" before it. Names are the
+/// engine's, in English in every language; each language's message decides what, if anything, this changes.
+fn initial(op: &str) -> &'static str {
+    if op.chars().next().is_some_and(|c| "AEIOUaeiou".contains(c)) { "vowel" } else { "consonant" }
 }
 
 #[cfg(test)]
@@ -978,6 +1065,296 @@ mod tests {
                 ],
             ),
         )
+    }
+
+    /// Everything a comparison says: its headlines, each change and each scenario.
+    fn said(diff: &PlanDiff) -> String {
+        let mut out = diff.headlines.clone();
+        for c in &diff.changes {
+            out.push(format!("  {:?}: {} | {}", c.kind, c.title, c.detail.as_deref().unwrap_or("-")));
+        }
+        for s in &diff.scenarios {
+            out.push(format!("  ? {:?}: {} | {}", s.kind, s.title, s.detail.as_deref().unwrap_or("-")));
+        }
+        out.join("\n")
+    }
+
+    /// `plan` with actual times on its root and every step, as an executed plan carries them.
+    fn timed(mut p: Plan, ms: f64) -> Plan {
+        fn visit(n: &mut PlanNode, ms: f64) {
+            n.act_time_ms = Some(ms);
+            n.act_rows = Some(n.est_rows);
+            n.act_executions = Some(1.0);
+            n.children.iter_mut().for_each(|c| visit(c, ms / 2.0));
+        }
+        visit(&mut p.root, ms);
+        p.kind = PlanKind::Actual;
+        p
+    }
+
+    // What a comparison of two plans says, word for word, for every kind of headline and change: from locales/en.json.
+    #[test]
+    fn comparisons_say_what_changed_in_english() {
+        let mut out = Vec::new();
+        let scan = || {
+            plan(
+                Engine::Mssql,
+                node("Clustered Index Scan", NodeKind::Scan, Some("shop.orders"), Some("pk_orders"), 4.0, vec![]),
+            )
+        };
+        let hash = || {
+            plan(
+                Engine::Mssql,
+                node(
+                    "Hash Match",
+                    NodeKind::Join,
+                    None,
+                    None,
+                    2.0,
+                    vec![
+                        node("Index Seek", NodeKind::Seek, Some("shop.orders"), Some("ix_orders_customer"), 0.2, vec![]),
+                        node("Key Lookup", NodeKind::Lookup, Some("shop.orders"), Some("pk_orders"), 0.3, vec![]),
+                    ],
+                ),
+            )
+        };
+        let sorted = plan(
+            Engine::Mssql,
+            node(
+                "Sort",
+                NodeKind::Sort,
+                None,
+                None,
+                2.0,
+                vec![node("Compute Scalar", NodeKind::Compute, None, None, 0.5, vec![seek_plan().root])],
+            ),
+        );
+        let spooled = plan(
+            Engine::Mssql,
+            node(
+                "Index Spool",
+                NodeKind::Other,
+                None,
+                None,
+                2.0,
+                vec![node(
+                    "Eager Spool",
+                    NodeKind::Other,
+                    None,
+                    None,
+                    1.0,
+                    vec![node(
+                        "Filter",
+                        NodeKind::Other,
+                        None,
+                        None,
+                        1.0,
+                        vec![node("Top", NodeKind::Other, None, None, 1.0, vec![seek_plan().root])],
+                    )],
+                )],
+            ),
+        );
+        let mut warned = seek_plan();
+        warned.root.children[0].warnings = vec![PlanWarning::ImplicitConversion, PlanWarning::Spill];
+        warned.warnings = vec![PlanWarning::NoJoinPredicate];
+        let mut one_warning = seek_plan();
+        one_warning.warnings = vec![PlanWarning::MissingStatistics];
+        let mut rows = seek_plan();
+        rows.root.children[0].est_rows = 5_000.0;
+        let mut acted = timed(seek_plan(), 40.0);
+        acted.root.children[0].act_rows = Some(4_000.0);
+        let mut cheap = seek_plan();
+        cheap.root.children[1].self_cost = 0.0;
+        cheap.root.children[0].op = "Index Seek (minor)".into();
+        let pg = plan(Engine::Postgres, node("Seq Scan", NodeKind::Scan, Some("public.orders"), None, 50.0, vec![]));
+        let sort = |engine: Engine, op: &str, scan: &str| {
+            plan(
+                engine,
+                node(op, NodeKind::Sort, None, None, 2.0, vec![node(scan, NodeKind::Scan, Some("dbo.orders"), None, 5.0, vec![])]),
+            )
+        };
+        for (name, a, b) in [
+            ("added, timed", timed(seek_plan(), 10.0), timed(sorted.clone(), 400.0)),
+            ("removed, timed", timed(sorted.clone(), 400.0), timed(seek_plan(), 10.0)),
+            ("operators", sort(Engine::Mssql, "Sort", "Table Scan"), sort(Engine::Postgres, "Incremental Sort", "Seq Scan")),
+            ("same", seek_plan(), seek_plan()),
+            ("seek to scan", seek_plan(), scan()),
+            ("scan to seek", scan(), seek_plan()),
+            ("seek to scan, timed", timed(seek_plan(), 10.0), timed(scan(), 400.0)),
+            ("scan to seek, timed", timed(scan(), 400.0), timed(seek_plan(), 10.0)),
+            ("join", seek_plan(), hash()),
+            ("join, timed", timed(seek_plan(), 10.0), timed(hash(), 30.0)),
+            ("added", seek_plan(), sorted.clone()),
+            ("removed", sorted.clone(), seek_plan()),
+            ("added, many", seek_plan(), spooled.clone()),
+            ("removed, many", spooled, seek_plan()),
+            ("warnings", seek_plan(), warned.clone()),
+            ("warnings gone", warned, seek_plan()),
+            ("one warning", seek_plan(), one_warning),
+            ("rows", seek_plan(), rows),
+            ("actual rows", timed(seek_plan(), 40.0), acted),
+            ("minor", seek_plan(), cheap),
+            ("engines", seek_plan(), pg),
+        ] {
+            out.push(format!("## {name}\n{}", said(&plan_diff(&a, &b))));
+        }
+        let named = plan_diff_named(&seek_plan(), "staging", &scan(), "query 7");
+        out.push(format!("## named\n{}", said(&named)));
+        let verified = verify_hypothetical_index(scan(), seek_plan());
+        out.push(format!("## hypothetical\n{}", said(&verified.diff)));
+        // A different shape whose every change is too small to tell.
+        let (a, b) = (seek_plan(), seek_plan());
+        let mut minor = plan_diff(&a, &b);
+        minor.same_shape = false;
+        let (fa, fb) = (Flat::new(&a), Flat::new(&b));
+        out.push(format!("## minor steps\n{}", headlines(&minor, &a, &b, &fa, &fb, "plan A", "plan B").join("\n")));
+        // How each kind of step reads its table.
+        for (op, kind, index) in [
+            ("Index Seek", NodeKind::Seek, None),
+            ("Key Lookup", NodeKind::Lookup, Some("pk")),
+            ("Bitmap Heap Scan", NodeKind::Other, None),
+        ] {
+            out.push(verb(&node(op, kind, Some("dbo.orders"), index, 1.0, vec![]), &[]));
+        }
+        let got = out.join("\n");
+        assert_eq!(got, r#"## added, timed
+Plan B took 40× longer than plan A (10 ms → 400 ms).
+Plan B adds a Sort and Compute Scalar (81% of its cost).
+  Added: Only in B: Sort and Compute Scalar | 81% of that plan's cost
+  Cost: Nested Loops: 10 ms → 100 ms | Actual time, across all executions
+  Cost: Key Lookup on orders: 50% → 10% of the plan's cost | -
+  Cost: Index Seek on orders: 5 ms → 50 ms | Actual time, across all executions
+  Cost: Key Lookup on orders: 5 ms → 50 ms | Actual time, across all executions
+  Cost: Index Seek on orders: 33% → 6% of the plan's cost | -
+  Cost: Nested Loops: 17% → 3% of the plan's cost | -
+## removed, timed
+Plan B took 40× less time than plan A (400 ms → 10 ms).
+Plan B has no Sort and Compute Scalar (plan A has).
+  Removed: Only in A: Sort and Compute Scalar | 81% of that plan's cost
+  Cost: Nested Loops: 100 ms → 10 ms | Actual time, across all executions
+  Cost: Key Lookup on orders: 10% → 50% of the plan's cost | -
+  Cost: Index Seek on orders: 50 ms → 5 ms | Actual time, across all executions
+  Cost: Key Lookup on orders: 50 ms → 5 ms | Actual time, across all executions
+  Cost: Index Seek on orders: 6% → 33% of the plan's cost | -
+  Cost: Nested Loops: 3% → 17% of the plan's cost | -
+## operators
+These plans come from different engines (SQL Server and PostgreSQL), so their costs aren't comparable.
+Plan B scans orders where plan A scans orders.
+Plan B uses Incremental Sort where plan A uses Sort.
+  Access: orders: Table Scan → Seq Scan | -
+  Operator: Sort → Incremental Sort | -
+## same
+Plan B runs the same steps as plan A.
+## seek to scan
+Plan B is estimated 6.7× more expensive because it scans orders (100% of its cost) where plan A seeks ix_orders_customer and looks up the rows in orders.
+  Access: orders: Key Lookup (pk_orders) → Clustered Index Scan (pk_orders) | 50% of the plan's cost in A, 100% in B
+  Removed: Only in A: Nested Loops and Index Seek on orders | 50% of that plan's cost
+  ? Index: Different indexes on orders. | orders: plan A uses ix_orders_customer and pk_orders, plan B uses pk_orders. If an index was added, dropped or rebuilt between the two plans, that explains it; otherwise the optimizer chose differently because it expected a different number of rows.
+## scan to seek
+Plan B is estimated 6.7× cheaper because it seeks ix_orders_customer and looks up the rows in orders where plan A scans orders (100% of plan A's cost).
+  Access: orders: Clustered Index Scan (pk_orders) → Key Lookup (pk_orders) | 100% of the plan's cost in A, 50% in B
+  Added: Only in B: Nested Loops and Index Seek on orders | 50% of that plan's cost
+  ? Index: Different indexes on orders. | orders: plan A uses pk_orders, plan B uses ix_orders_customer and pk_orders. If an index was added, dropped or rebuilt between the two plans, that explains it; otherwise the optimizer chose differently because it expected a different number of rows.
+## seek to scan, timed
+Plan B took 40× longer because it scans orders (100% of its cost) where plan A seeks ix_orders_customer and looks up the rows in orders.
+  Access: orders: Key Lookup (pk_orders) → Clustered Index Scan (pk_orders) | 50% of the plan's cost in A, 100% in B
+  Removed: Only in A: Nested Loops and Index Seek on orders | 50% of that plan's cost
+  ? Index: Different indexes on orders. | orders: plan A uses ix_orders_customer and pk_orders, plan B uses pk_orders. If an index was added, dropped or rebuilt between the two plans, that explains it; otherwise the optimizer chose differently because it expected a different number of rows.
+## scan to seek, timed
+Plan B took 40× less time because it seeks ix_orders_customer and looks up the rows in orders where plan A scans orders (100% of plan A's cost).
+  Access: orders: Clustered Index Scan (pk_orders) → Key Lookup (pk_orders) | 100% of the plan's cost in A, 50% in B
+  Added: Only in B: Nested Loops and Index Seek on orders | 50% of that plan's cost
+  ? Index: Different indexes on orders. | orders: plan A uses pk_orders, plan B uses ix_orders_customer and pk_orders. If an index was added, dropped or rebuilt between the two plans, that explains it; otherwise the optimizer chose differently because it expected a different number of rows.
+## join
+Plan B is estimated 4.2× more expensive because it uses Hash Match where plan A uses Nested Loops.
+  Operator: Nested Loops → Hash Match | 17% of the plan's cost in A, 80% in B
+  Cost: Key Lookup on orders: 50% → 12% of the plan's cost | -
+  Cost: Index Seek on orders: 33% → 8% of the plan's cost | -
+## join, timed
+Plan B took 3.0× longer because it uses Hash Match where plan A uses Nested Loops.
+  Operator: Nested Loops → Hash Match | 17% of the plan's cost in A, 80% in B
+  Cost: Key Lookup on orders: 50% → 12% of the plan's cost | -
+  Cost: Index Seek on orders: 33% → 8% of the plan's cost | -
+  Cost: Index Seek on orders: 5 ms → 15 ms | Actual time, across all executions
+  Cost: Key Lookup on orders: 5 ms → 15 ms | Actual time, across all executions
+## added
+Plan B is estimated 5.2× more expensive than plan A (cost 0.600 → 3.100).
+Plan B adds a Sort and Compute Scalar (81% of its cost).
+  Added: Only in B: Sort and Compute Scalar | 81% of that plan's cost
+  Cost: Key Lookup on orders: 50% → 10% of the plan's cost | -
+  Cost: Index Seek on orders: 33% → 6% of the plan's cost | -
+  Cost: Nested Loops: 17% → 3% of the plan's cost | -
+## removed
+Plan B is estimated 5.2× cheaper than plan A (cost 3.100 → 0.600).
+Plan B has no Sort and Compute Scalar (plan A has).
+  Removed: Only in A: Sort and Compute Scalar | 81% of that plan's cost
+  Cost: Key Lookup on orders: 10% → 50% of the plan's cost | -
+  Cost: Index Seek on orders: 6% → 33% of the plan's cost | -
+  Cost: Nested Loops: 3% → 17% of the plan's cost | -
+## added, many
+Plan B is estimated 9.3× more expensive than plan A (cost 0.600 → 5.600).
+Plan B adds an Index Spool and 3 operators below it (89% of its cost).
+  Added: Only in B: Index Spool and 3 operators below it | 89% of that plan's cost
+  Cost: Key Lookup on orders: 50% → 5% of the plan's cost | -
+  Cost: Index Seek on orders: 33% → 4% of the plan's cost | -
+  Cost: Nested Loops: 17% → 2% of the plan's cost | -
+## removed, many
+Plan B is estimated 9.3× cheaper than plan A (cost 5.600 → 0.600).
+Plan B has no Index Spool and 3 operators below it (plan A has).
+  Removed: Only in A: Index Spool and 3 operators below it | 89% of that plan's cost
+  Cost: Key Lookup on orders: 5% → 50% of the plan's cost | -
+  Cost: Index Seek on orders: 4% → 33% of the plan's cost | -
+  Cost: Nested Loops: 2% → 17% of the plan's cost | -
+## warnings
+Plan B has plan warnings plan A doesn't: no join predicate, implicit conversion and spills to disk.
+  Warning: Implicit conversion on Index Seek on orders | -
+  Warning: Spills to disk on Index Seek on orders | -
+  Warning: Plan warning: No join predicate | -
+  ? Memory: Plan B spills to disk; plan A doesn't. | Its sort or hash got less memory than the rows needed, usually because it expected fewer rows than it read.
+## warnings gone
+Plan B runs the same steps as plan A.
+  Warning: No longer: implicit conversion on Index Seek on orders | -
+  Warning: No longer: spills to disk on Index Seek on orders | -
+  Warning: No longer: no join predicate | -
+  ? Memory: Plan A spills to disk; plan B doesn't. | Its sort or hash got less memory than the rows needed, usually because it expected fewer rows than it read.
+## one warning
+Plan B has a plan warning plan A doesn't: missing statistics.
+  Warning: Plan warning: Missing statistics | -
+## rows
+Plan B runs the same steps as plan A.
+  Rows: Index Seek on orders: estimated rows 10 → 5.0K | -
+  ? Estimates: On orders, plan A expects 10 rows and plan B expects 5.0K rows. | Different row estimates lead the optimizer to different joins and access paths. They come from different parameter values, newer statistics or a different estimator.
+## actual rows
+Plan B runs the same steps as plan A.
+  Rows: Index Seek on orders: actual rows 10 → 4.0K | -
+  ? Estimates: Plan B: estimated 10 rows from orders, got 4.0K. | Estimates this far off lead to the wrong join type, too little memory or a needless scan.
+## minor
+Plan B seeks ix_orders_customer where plan A seeks ix_orders_customer.
+  Access: orders: Index Seek (ix_orders_customer) → Index Seek (minor) (ix_orders_customer) | 33% of the plan's cost in A, 33% in B
+  Cost: Key Lookup on orders: 50% → 0% of the plan's cost | -
+## engines
+These plans come from different engines (SQL Server and PostgreSQL), so their costs aren't comparable.
+Plan B joins with Seq Scan where plan A uses Nested Loops.
+Plan B has no Key Lookup on orders (plan A has).
+  Operator: Nested Loops → Seq Scan | -
+  Removed: Only in A: Key Lookup on orders | 50% of that plan's cost
+  Removed: Only in A: Index Seek on orders | 33% of that plan's cost
+  ? Index: Different indexes on orders. | orders: plan A uses ix_orders_customer and pk_orders, plan B uses no index. If an index was added, dropped or rebuilt between the two plans, that explains it; otherwise the optimizer chose differently because it expected a different number of rows.
+## named
+Query 7 is estimated 6.7× more expensive because it scans orders (100% of its cost) where staging seeks ix_orders_customer and looks up the rows in orders.
+  Access: orders: Key Lookup (pk_orders) → Clustered Index Scan (pk_orders) | 50% of the plan's cost in A, 100% in B
+  Removed: Only in A: Nested Loops and Index Seek on orders | 50% of that plan's cost
+  ? Index: Different indexes on orders. | orders: staging uses ix_orders_customer and pk_orders, query 7 uses pk_orders. If an index was added, dropped or rebuilt between the two plans, that explains it; otherwise the optimizer chose differently because it expected a different number of rows.
+## hypothetical
+With virtual index is estimated 6.7× cheaper because it seeks ix_orders_customer and looks up the rows in orders where Current plan scans orders (100% of Current plan's cost).
+  Access: orders: Clustered Index Scan (pk_orders) → Key Lookup (pk_orders) | 100% of the plan's cost in A, 50% in B
+  Added: Only in B: Nested Loops and Index Seek on orders | 50% of that plan's cost
+  ? Index: Different indexes on orders. | orders: Current plan uses pk_orders, With virtual index uses ix_orders_customer and pk_orders. If an index was added, dropped or rebuilt between the two plans, that explains it; otherwise the optimizer chose differently because it expected a different number of rows.
+## minor steps
+Plan B differs from plan A only in minor steps.
+seeks into orders
+looks up rows in orders
+uses Bitmap Heap Scan on orders"#);
     }
 
     #[test]
