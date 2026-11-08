@@ -109,9 +109,9 @@ impl MysqlProvider {
                     Err(e) if WRITES.contains(&verb.as_str()) && e.message.contains("READ ONLY") => {
                         return Err(no_plan_for_write(flavor, &verb, lower_starts_values(statement)));
                     }
-                    result => result?.ok_or_else(|| no_plan(Explain::Explain))?,
+                    result => result?.ok_or_else(|| no_plan(PlanCommand::Explain))?,
                 };
-                let json = row.text("explain").ok_or_else(|| no_plan(Explain::Explain))?;
+                let json = row.text("explain").ok_or_else(|| no_plan(PlanCommand::Explain))?;
                 plan_json::parse(&json, PlanKind::Estimated, Some(statement), schema).map(|plan| self.versioned(plan))
             }
             ExplainMode::Analyze => {
@@ -129,15 +129,15 @@ impl MysqlProvider {
                 conn.query_drop(tagged("START TRANSACTION READ ONLY")).await.map_err(map_error)?;
                 let result = explain_one(&mut conn, &sql).await;
                 let rollback = conn.query_drop(tagged("ROLLBACK")).await;
-                let row = result?.ok_or_else(|| no_plan(Explain::Analyze))?;
+                let row = result?.ok_or_else(|| no_plan(PlanCommand::Analyze))?;
                 rollback.map_err(map_error)?;
                 match flavor {
                     Flavor::Mysql => {
-                        let tree = row.text("explain").ok_or_else(|| no_plan(Explain::ExplainAnalyze))?;
+                        let tree = row.text("explain").ok_or_else(|| no_plan(PlanCommand::ExplainAnalyze))?;
                         plan_tree::parse(&tree, Some(statement), schema)
                     }
                     Flavor::Mariadb => {
-                        let json = row.first_text().ok_or_else(|| no_plan(Explain::Analyze))?;
+                        let json = row.first_text().ok_or_else(|| no_plan(PlanCommand::Analyze))?;
                         plan_json::parse(&json, PlanKind::Actual, Some(statement), schema)
                     }
                 }
@@ -436,17 +436,17 @@ fn no_plan_for_write(flavor: Flavor, verb: &str, values: bool) -> Error {
 
 /// The command that returned no plan.
 #[derive(Clone, Copy, Debug)]
-enum Explain {
+enum PlanCommand {
     Explain,
     Analyze,
     ExplainAnalyze,
 }
 
-fn no_plan(command: Explain) -> Error {
+fn no_plan(command: PlanCommand) -> Error {
     Error::internal(match command {
-        Explain::Explain => t!("provider.mysql.explain.no_plan.explain"),
-        Explain::Analyze => t!("provider.mysql.explain.no_plan.analyze"),
-        Explain::ExplainAnalyze => t!("provider.mysql.explain.no_plan.explain_analyze"),
+        PlanCommand::Explain => t!("provider.mysql.explain.no_plan.explain"),
+        PlanCommand::Analyze => t!("provider.mysql.explain.no_plan.analyze"),
+        PlanCommand::ExplainAnalyze => t!("provider.mysql.explain.no_plan.explain_analyze"),
     })
 }
 
@@ -707,9 +707,9 @@ mod tests {
             no_plan_for_write(Flavor::Mysql, "replace", true).message,
             "MySQL won't plan a REPLACE in a read-only session, and Culprit's sessions are always read-only"
         );
-        assert_eq!(no_plan(Explain::Explain).message, "EXPLAIN returned no plan");
-        assert_eq!(no_plan(Explain::Analyze).message, "ANALYZE returned no plan");
-        assert_eq!(no_plan(Explain::ExplainAnalyze).message, "EXPLAIN ANALYZE returned no plan");
+        assert_eq!(no_plan(PlanCommand::Explain).message, "EXPLAIN returned no plan");
+        assert_eq!(no_plan(PlanCommand::Analyze).message, "ANALYZE returned no plan");
+        assert_eq!(no_plan(PlanCommand::ExplainAnalyze).message, "EXPLAIN ANALYZE returned no plan");
         assert_eq!(
             said(cant_measure("8.0.17-log")),
             (
