@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use culprit_core::waits::{category_info, category_key};
 use culprit_core::{
     ActivityCategory, ActivityQuery, ActivityReport, Capability, Engine, QueryStat, Snapshot, WaitCategory, WaitQuery,
-    WaitScope, WaitsReport, format,
+    WaitScope, WaitsReport, format, span_words, t,
 };
 
 use crate::support::{app_queries, setting_change};
@@ -40,11 +40,11 @@ pub fn explain(snapshot: &Snapshot) -> Option<WaitsReport> {
         return Some(WaitsReport {
             engine,
             scope: WaitScope::Sampled,
-            source: format!(
-                "{}; retained observations {} to {}",
-                activity.period.source,
-                activity.period.first_sample.as_deref().unwrap_or("unavailable"),
-                activity.period.last_sample.as_deref().unwrap_or("unavailable")
+            source: t!(
+                "view.waits.source.sampled",
+                source = &activity.period.source,
+                first = activity.period.first_sample.clone().unwrap_or_else(|| t!("view.waits.source.unavailable")),
+                last = activity.period.last_sample.clone().unwrap_or_else(|| t!("view.waits.source.unavailable"))
             ),
             total_ms: None,
             categories: vec![],
@@ -84,10 +84,10 @@ pub fn explain(snapshot: &Snapshot) -> Option<WaitsReport> {
     let mut notes = Vec::new();
     match engine {
         Engine::Yugabyte => {
-            notes.push("DocDB storage timings and RPC times can overlap; they are not exclusive shares of statement time. Use native metrics or sample YSQL sessions.".into());
+            notes.push(t!("view.waits.note.yugabyte"));
         }
         Engine::Postgres => {
-            notes.push("PostgreSQL keeps no history of what sessions waited on. These totals come from per-statement timing; use Right now to sample what sessions wait on at this moment.".into());
+            notes.push(t!("view.waits.note.postgres"));
             // The setting says whether disk time is measured; a cached database reads nothing from disk with it on.
             // Without the setting in the scan, no disk time at all is the hint.
             let timing_off = match snapshot.setting("track_io_timing") {
@@ -96,18 +96,19 @@ pub fn explain(snapshot: &Snapshot) -> Option<WaitsReport> {
             };
             if timing_off {
                 let change = setting_change(&snapshot.server, "track_io_timing", "on");
-                notes.push(format!(
-                    "Turn on track_io_timing so time spent reading from disk is measured per statement. {}{}",
-                    change.how,
-                    change.sql.map(|sql| format!(" ({})", sql.replace('\n', " "))).unwrap_or_default()
-                ));
+                notes.push(match change.sql {
+                    Some(sql) => {
+                        t!("view.waits.note.track_io_timing_sql", how = &change.how, sql = sql.replace('\n', " "))
+                    }
+                    None => t!("view.waits.note.track_io_timing", how = &change.how),
+                });
             }
         }
         Engine::Mysql if !snapshot.server.has(Capability::PerformanceSchema) => {
-            notes.push(format!("performance_schema is off, so {} times no waits; the slow query log keeps each statement's lock time. Right now samples what sessions are doing.", snapshot.server.name()));
+            notes.push(t!("view.waits.note.mysql_no_performance_schema", server = snapshot.server.name()));
         }
         Engine::Mysql => {
-            notes.push(format!("{} counts waits since it started, only for enabled performance_schema instruments. Lock time is attributed to statements; the rest is a server-wide total.", snapshot.server.name()));
+            notes.push(t!("view.waits.note.mysql", server = snapshot.server.name()));
         }
         Engine::Mssql if scope == WaitScope::SinceStartup => notes.push(waits_capture_note(snapshot)),
         Engine::Mssql | Engine::Sqlite => {}
@@ -198,66 +199,66 @@ fn activity(snapshot: &Snapshot) -> Option<ActivityReport> {
 /// Why SQL Server's waits aren't tied to queries, and what would tie them. Query Store captures waits per query from
 /// SQL Server 2017 (and on Azure SQL); it has to be on for that, and on 2016 it can't.
 fn waits_capture_note(snapshot: &Snapshot) -> String {
-    const TOTALS: &str = "These are server totals since startup and can't be tied to queries.";
+    let totals = t!("view.waits.query_store.totals");
     let state = snapshot.setting("query_store_options.actual_state_desc").map(|s| s.value.to_ascii_uppercase());
     let on = state.as_deref().is_some_and(|s| s == "READ_WRITE" || s == "READ_ONLY");
     let azure = snapshot.server.platform().is_some_and(|p| p.is_azure_sql());
     let major: u32 = snapshot.server.version.split('.').next().and_then(|v| v.parse().ok()).unwrap_or(0);
-    if !azure && major > 0 && major < 14 {
-        return format!(
-            "{TOTALS} Query Store on {} doesn't record waits per query; SQL Server 2017 and later do.",
-            snapshot.server.product
-        );
-    }
-    if !on {
-        return format!(
-            "{TOTALS} Query Store is off; with it on (and recording waits, the default from SQL Server 2017), Culprit can tie waits to queries: ALTER DATABASE CURRENT SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE, WAIT_STATS_CAPTURE_MODE = ON);"
-        );
-    }
-    let capturing = snapshot
+    let sentences = if !azure && major > 0 && major < 14 {
+        vec![totals, t!("view.waits.query_store.old_version", product = &snapshot.server.product)]
+    } else if !on {
+        let sql =
+            "ALTER DATABASE CURRENT SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE, WAIT_STATS_CAPTURE_MODE = ON);";
+        vec![totals, t!("view.waits.query_store.off", sql = sql)]
+    } else if snapshot
         .setting("query_store_options.wait_stats_capture_mode_desc")
-        .is_some_and(|s| s.value.eq_ignore_ascii_case("ON"));
-    if capturing {
-        return format!("Query Store recorded no waits for this database's queries in the window. {TOTALS}");
-    }
-    format!(
-        "Query Store isn't capturing waits. {TOTALS} Turn it on: ALTER DATABASE CURRENT SET QUERY_STORE (WAIT_STATS_CAPTURE_MODE = ON);"
-    )
+        .is_some_and(|s| s.value.eq_ignore_ascii_case("ON"))
+    {
+        vec![t!("view.waits.query_store.no_waits"), totals]
+    } else {
+        let sql = "ALTER DATABASE CURRENT SET QUERY_STORE (WAIT_STATS_CAPTURE_MODE = ON);";
+        vec![t!("view.waits.query_store.not_capturing"), totals, t!("view.waits.query_store.turn_on", sql = sql)]
+    };
+    sentences.join(" ")
 }
 
 fn scope_and_source(snapshot: &Snapshot) -> (WaitScope, String) {
     let engine = snapshot.server.engine;
-    let window = snapshot.workload.as_ref().map(|w| span(w.measurement_hours())).unwrap_or_default();
-    let uptime = snapshot.pressure.as_ref().and_then(|p| p.uptime_hours).map(span);
+    // The workload's period in words; none without a workload.
+    let window = snapshot.workload.as_ref().map(|w| span_words(w.measurement_hours()));
+    let uptime = snapshot.pressure.as_ref().and_then(|p| p.uptime_hours).map(span_words);
     let attributed = app_queries(snapshot).any(|q| q.waits.iter().any(|w| w.wait_ms > 0.0));
     match engine {
-        Engine::Yugabyte => (WaitScope::Statements, "YSQL native metrics in their recorded node/cluster scope".into()),
-        Engine::Sqlite => (WaitScope::SinceStartup, "SQLite keeps no waits".into()),
-        Engine::Mssql if attributed => (WaitScope::Window, format!("Query Store, last {window}")),
+        Engine::Yugabyte => (WaitScope::Statements, t!("view.waits.source.yugabyte")),
+        Engine::Sqlite => (WaitScope::SinceStartup, t!("view.waits.source.sqlite")),
+        Engine::Mssql if attributed => {
+            (WaitScope::Window, t!("view.waits.source.query_store", window = window.unwrap_or_default()))
+        }
         Engine::Mssql => (
             WaitScope::SinceStartup,
-            uptime
-                .map(|u| format!("Server totals since SQL Server started {u} ago"))
-                .unwrap_or_else(|| "Server totals since SQL Server started".into()),
+            match uptime {
+                Some(uptime) => t!("view.waits.source.server_totals_uptime", uptime = uptime),
+                None => t!("view.waits.source.server_totals"),
+            },
         ),
         Engine::Postgres => (
             WaitScope::Statements,
-            if window.is_empty() {
-                "Statement timing from pg_stat_statements".into()
-            } else {
-                format!("Statement timing from pg_stat_statements, the {window} since statistics were reset")
+            match window {
+                Some(window) => t!("view.waits.source.pg_stat_statements_window", window = window),
+                None => t!("view.waits.source.pg_stat_statements"),
             },
         ),
         Engine::Mysql if !snapshot.server.has(Capability::PerformanceSchema) => {
-            (WaitScope::Statements, format!("Lock time per statement from the slow query log, the last {window}"))
+            (WaitScope::Statements, t!("view.waits.source.slow_log", window = window.unwrap_or_default()))
         }
         Engine::Mysql => {
             let name = snapshot.server.name();
             (
                 WaitScope::SinceStartup,
-                uptime
-                    .map(|u| format!("performance_schema totals since {name} started {u} ago"))
-                    .unwrap_or_else(|| format!("performance_schema totals since {name} started")),
+                match uptime {
+                    Some(uptime) => t!("view.waits.source.performance_schema_uptime", server = name, uptime = uptime),
+                    None => t!("view.waits.source.performance_schema", server = name),
+                },
             )
         }
     }
@@ -309,46 +310,47 @@ fn fill_queries(category: &mut WaitCategory, contributors: &[(&QueryStat, f64)])
 /// One sentence about what this database's numbers say for the category.
 fn detail(snapshot: &Snapshot, category: &WaitCategory, contributors: &[(&QueryStat, f64)]) -> Option<String> {
     let top = category.queries.first();
-    let lead = |q: &WaitQuery| {
-        format!("{} accounts for {} of it", capitalize(&handle(snapshot, &q.id)), format::percent(q.share_of_category))
-    };
+    // The statement that waited most here, and its share of the category: the start of each sentence about it.
+    let query = |q: &WaitQuery| capitalize(&handle(snapshot, &q.id));
+    let share = |q: &WaitQuery| format::percent(q.share_of_category);
     match category.key.as_str() {
         "network" => {
             let big: Vec<f64> =
                 category.queries.iter().filter_map(|q| q.rows_per_run).filter(|r| *r >= BIG_RESULT_ROWS).collect();
             match (big.len(), top) {
-                (0, Some(q)) => Some(format!(
-                    "{}; it returns {} rows per call, so look at how the application reads them.",
-                    lead(q),
-                    q.rows_per_run.map(format::count).unwrap_or_else(|| "?".into())
+                (0, Some(q)) => Some(t!(
+                    "view.waits.detail.rows_per_call",
+                    query = query(q),
+                    share = share(q),
+                    rows = q.rows_per_run.map(format::count).unwrap_or_else(|| "?".into())
                 )),
                 (n, _) if n > 0 => {
                     let smallest = big.iter().cloned().fold(f64::INFINITY, f64::min);
-                    Some(format!(
-                        "{} {} return{} {}+ rows per call: page or filter them, or stream them without per-row work in the application.",
-                        n,
-                        if n == 1 { "query" } else { "queries" },
-                        if n == 1 { "s" } else { "" },
-                        format::count(smallest)
+                    Some(t!(
+                        "view.waits.detail.big_results",
+                        n = n,
+                        count = n.to_string(),
+                        rows = format::count(smallest)
                     ))
                 }
                 _ => None,
             }
         }
-        "lock" => top.map(|q| format!("{}. Live shows who blocks whom right now.", lead(q))),
+        "lock" => top.map(|q| t!("view.waits.detail.lock", query = query(q), share = share(q))),
         "memory" => {
             let grant = top.and_then(|q| {
                 let hash = contributors.iter().find(|(s, _)| s.id == q.id).and_then(|(s, _)| s.query_hash.clone())?;
                 snapshot.pressure.as_ref()?.grants.iter().find(|g| g.query_hash.eq_ignore_ascii_case(&hash)).cloned()
             });
             match (top, grant) {
-                (Some(q), Some(g)) => Some(format!(
-                    "{}; it reserves {} per run and uses {}.",
-                    lead(q),
-                    format::bytes(g.avg_granted_kb * 1024.0),
-                    format::bytes(g.avg_used_kb * 1024.0)
+                (Some(q), Some(g)) => Some(t!(
+                    "view.waits.detail.grant",
+                    query = query(q),
+                    share = share(q),
+                    granted = format::bytes(g.avg_granted_kb * 1024.0),
+                    used = format::bytes(g.avg_used_kb * 1024.0)
                 )),
-                (Some(q), None) => Some(format!("{}.", lead(q))),
+                (Some(q), None) => Some(t!("view.waits.detail.share", query = query(q), share = share(q))),
                 _ => pending_grants(snapshot),
             }
         }
@@ -358,22 +360,24 @@ fn detail(snapshot: &Snapshot, category: &WaitCategory, contributors: &[(&QueryS
                 .find(|(s, _)| s.id == q.id)
                 .and_then(|(s, _)| (s.executions > 0.0).then(|| s.physical_reads.map(|p| p / s.executions)).flatten());
             match reads {
-                Some(r) if r >= 1.0 => format!("{}, reading {} pages from disk per run.", lead(q), format::count(r)),
-                _ => format!("{}.", lead(q)),
+                Some(r) if r >= 1.0 => {
+                    t!("view.waits.detail.disk_reads", query = query(q), share = share(q), pages = format::count(r))
+                }
+                _ => t!("view.waits.detail.share", query = query(q), share = share(q)),
             }
         }),
-        "parallelism" => top.map(|q| format!("{}. Check its plan for a large scan an index would avoid.", lead(q))),
+        "parallelism" => top.map(|q| t!("view.waits.detail.parallelism", query = query(q), share = share(q))),
         "compilation" => match top {
-            Some(q) => Some(format!("{}.", lead(q))),
-            None => Some("Compiling is a sign of one-off statements; see the compile findings.".into()),
+            Some(q) => Some(t!("view.waits.detail.share", query = query(q), share = share(q))),
+            None => Some(t!("view.waits.detail.compiling")),
         },
-        _ => top.map(|q| format!("{}.", lead(q))),
+        _ => top.map(|q| t!("view.waits.detail.share", query = query(q), share = share(q))),
     }
 }
 
 fn pending_grants(snapshot: &Snapshot) -> Option<String> {
     let pending = snapshot.pressure.as_ref()?.signal(culprit_core::signal_id::MEMORY_GRANTS_PENDING)?.value;
-    (pending > 0.0).then(|| format!("{} queries were waiting for memory when the scan ran.", format::count(pending)))
+    (pending > 0.0).then(|| t!("view.waits.detail.grants_pending", n = pending, count = format::count(pending)))
 }
 
 fn capitalize(s: &str) -> String {
@@ -387,7 +391,7 @@ fn handle(snapshot: &Snapshot, id: &str) -> String {
         .as_ref()
         .and_then(|w| w.query(id))
         .map(crate::support::query_handle)
-        .unwrap_or_else(|| format!("query {id}"))
+        .unwrap_or_else(|| t!("view.waits.query", id = id))
 }
 
 fn one_line(text: &str, max: usize) -> String {
@@ -397,17 +401,6 @@ fn one_line(text: &str, max: usize) -> String {
     }
     let cut: String = flat.chars().take(max - 1).collect();
     format!("{}…", cut.trim_end())
-}
-
-fn span(hours: f64) -> String {
-    if hours >= 47.0 {
-        return format!("{} days", (hours / 24.0).round());
-    }
-    if hours >= 1.5 {
-        return format!("{} hours", hours.round());
-    }
-    let minutes = (hours * 60.0).round().max(1.0);
-    if minutes == 1.0 { "1 minute".into() } else { format!("{minutes} minutes") }
 }
 
 /// Fixture snapshots for tests, one per engine.
