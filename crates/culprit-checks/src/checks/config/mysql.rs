@@ -170,13 +170,16 @@ pub(super) fn render(snapshot: &Snapshot, case: Case<'_>) -> Finding {
                 (Severity::High, t!("check.config.performance_schema.summary", server = name))
             };
             let restart = restart_change(snapshot, &[("performance_schema", "ON")]);
+            // In the server's configuration file (the change with SQL, [`restart_change`]) the sentence is one message;
+            // a managed service's own sentence about its control still follows the colon lowercased.
+            let at_next_restart = if restart.sql.is_some() {
+                t!("check.config.performance_schema.fix.at_next_restart_my_cnf")
+            } else {
+                t!("check.config.performance_schema.fix.at_next_restart", how = lowercase_first(&restart.how))
+            };
             let (fix_summary, sql) = match slow_log_change(snapshot).filter(|_| !logged) {
                 Some(now) => (
-                    [
-                        t!("check.config.performance_schema.fix.slow_log_first"),
-                        now.how,
-                        t!("check.config.performance_schema.fix.at_next_restart", how = lowercase_first(&restart.how)),
-                    ]
+                    [t!("check.config.performance_schema.fix.slow_log_first"), now.how, at_next_restart]
                     .join(" "),
                     match (now.sql, restart.sql) {
                         (Some(now), Some(restart)) => Some(format!(

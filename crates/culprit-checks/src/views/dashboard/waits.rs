@@ -116,13 +116,13 @@ pub(super) fn waits(s: &Snapshot) -> Tile {
         match r.categories.get(1).filter(|c| c.share >= 0.05) {
             Some(next) => t!(
                 "view.dashboard.waits.most_then",
-                top = lower_label(&top.label),
+                top = in_sentence(&top.key),
                 top_share = format::percent(top.share),
-                next = lower_label(&next.label),
+                next = in_sentence(&next.key),
                 next_share = format::percent(next.share)
             ),
             None => {
-                t!("view.dashboard.waits.most", top = lower_label(&top.label), top_share = format::percent(top.share))
+                t!("view.dashboard.waits.most", top = in_sentence(&top.key), top_share = format::percent(top.share))
             }
         }
     };
@@ -174,16 +174,24 @@ pub(super) fn waits(s: &Snapshot) -> Tile {
     tile
 }
 
-/// Labels like "CPU" keep their case; "Disk reads" reads as "disk reads" mid-sentence.
-pub(super) fn lower_label(label: &str) -> String {
-    let mut words = label.split(' ');
-    let first = words.next().unwrap_or_default();
-    let first = if first.len() > 1 && first.chars().all(|c| c.is_ascii_uppercase()) {
-        first.to_string()
-    } else {
-        first.to_lowercase()
-    };
-    std::iter::once(first).chain(words.map(str::to_string)).collect::<Vec<_>>().join(" ")
+/// A kind of waiting (its key, `culprit_core::waits::category_key`) as a sentence names it after its first word: "Most
+/// time goes to disk reads". Its own message, never its label lowercased: a language that capitalizes nouns keeps them.
+pub(super) fn in_sentence(key: &str) -> String {
+    match key {
+        "rpc" => t!("view.dashboard.waits.category.rpc"),
+        "storage" => t!("view.dashboard.waits.category.storage"),
+        "cpu" => t!("view.dashboard.waits.category.cpu"),
+        "io" => t!("view.dashboard.waits.category.io"),
+        "rows" => t!("view.dashboard.waits.category.rows"),
+        "lock" => t!("view.dashboard.waits.category.lock"),
+        "latch" => t!("view.dashboard.waits.category.latch"),
+        "log" => t!("view.dashboard.waits.category.log"),
+        "network" => t!("view.dashboard.waits.category.network"),
+        "parallelism" => t!("view.dashboard.waits.category.parallelism"),
+        "memory" => t!("view.dashboard.waits.category.memory"),
+        "compilation" => t!("view.dashboard.waits.category.compilation"),
+        _ => t!("view.dashboard.waits.category.other"),
+    }
 }
 
 pub(super) fn first_sentence(text: &str) -> Option<String> {

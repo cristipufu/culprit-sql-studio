@@ -70,12 +70,6 @@ fn the_first_of_equally_severe_findings_leads() {
     assert_eq!(worst_finding(&report, "failing-query").map(|f| f.title.as_str()), Some("first fails"));
 }
 
-#[test]
-fn labels_keep_acronyms() {
-    assert_eq!(lower_label("CPU"), "CPU");
-    assert_eq!(lower_label("Disk reads"), "disk reads");
-}
-
 // Each kind of waiting as the waits tile names it mid-sentence ("Most time goes to disk reads (40%)"), word for word.
 #[test]
 fn wait_categories_read_mid_sentence() {
@@ -94,8 +88,7 @@ fn wait_categories_read_mid_sentence() {
         "compilation",
         "other",
     ];
-    let said: Vec<String> =
-        keys.iter().map(|k| lower_label(culprit_core::waits::category_info(k, Engine::Postgres).0)).collect();
+    let said: Vec<String> = keys.iter().map(|k| in_sentence(k)).collect();
     assert_eq!(
         said,
         [
