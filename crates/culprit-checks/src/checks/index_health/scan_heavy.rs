@@ -2,19 +2,26 @@
 
 use super::*;
 use crate::evidence::Requirement as Evidence;
+use culprit_core::t;
 
 pub fn scan_heavy_info() -> CheckInfo {
     CheckInfo {
         id: "scan-heavy".into(),
-        title: "Tables read in full over and over".into(),
+        title: t!("check.scan_heavy.info.title"),
         category: Category::Indexes,
         engines: vec![Engine::Postgres, Engine::Mysql],
         requires: vec![Capability::TableStats],
-        description: "Large tables that queries read in full many times a day, from the table scan counters.".into(),
+        description: t!("check.scan_heavy.info.description"),
     }
 }
 
-check!(ScanHeavyCheck: scan_heavy_info, scan_heavy, &[Evidence::Tables(crate::evidence::TableMeasure::Scans)]);
+check!(
+    ScanHeavyCheck: scan_heavy_info,
+    decide = scan_heavy_tables,
+    render = scan_heavy_finding,
+    case<'s> = ScanHeavy<'s>,
+    evidence = &[Evidence::Tables(crate::evidence::TableMeasure::Scans)],
+);
 
 /// Full-table reads and rows read without an index since the counters started, and the days that covers. A full read
 /// is the table's rows read once: PostgreSQL's `seq_scan` counts a scan once for every process that runs it (each
@@ -80,28 +87,66 @@ fn examined_reads_whole(snapshot: &Snapshot, q: &QueryStat, table_rows: f64) -> 
 
 /// The sentence for statements with no WHERE that read the table in full: on purpose, and nothing an index on a
 /// filter changes. They aren't listed with the finding (its fix is about filters), so it names them.
-fn on_purpose(whole: &[&QueryStat]) -> String {
+fn on_purpose(whole: &[&QueryStat]) -> Option<String> {
     let ids: Vec<String> = whole.iter().map(|q| q.id.clone()).collect();
-    match whole.len() {
-        0 => String::new(),
-        1 => {
-            let handle = query_handle(whole[0]);
+    match whole {
+        [] => None,
+        [one] => {
+            let handle = query_handle(one);
             let mut chars = handle.chars();
             let handle =
                 chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default();
-            format!(
-                " {handle} (query {}) reads it in full too, on purpose: it has no WHERE clause, so no index on a filter changes that.",
-                ids[0]
-            )
+            Some(t!("check.scan_heavy.summary.whole_one", handle = handle, id = &ids[0]))
         }
-        n => format!(
-            " {n} statements with no WHERE clause (queries {}) read it in full too, on purpose: no index on a filter changes that.",
-            format::list(&ids)
-        ),
+        many => {
+            Some(t!("check.scan_heavy.summary.whole_many", count = many.len().to_string(), ids = format::list(&ids)))
+        }
     }
 }
 
-pub fn scan_heavy(snapshot: &Snapshot) -> Vec<Finding> {
+/// A large table read in full over and over, and what its finding concludes.
+pub struct ScanHeavy<'s> {
+    table: &'s culprit_core::TableStat,
+    /// Full reads, and rows read without an index, since the counters started, over these days.
+    full_reads: f64,
+    rows_read: f64,
+    days: f64,
+    /// Said a day (over 20 hours of counters), otherwise as counted.
+    measured: bool,
+    /// The statements listed with it all stopped running: told in the past.
+    stopped: bool,
+    /// The captured statements shown reading it in full, and how they show it.
+    proven: Vec<&'s QueryStat>,
+    shown: Option<Shown>,
+    /// Statements without a captured plan that may read it in full.
+    unplanned: Vec<&'s QueryStat>,
+    /// Statements with no WHERE: they read it in full on purpose.
+    whole: Vec<&'s QueryStat>,
+    /// Some captured statement names it (and reaches it through an index).
+    named: bool,
+    /// The share of database time of the statements behind the full reads, where it comes to something.
+    impact: Option<QueryImpact>,
+    severity: Severity,
+    /// Its score without such a share.
+    score: f64,
+    confidence: Confidence,
+}
+
+/// How the captured statements show they read a table in full.
+enum Shown {
+    /// One plan scans it.
+    Plan,
+    /// Their plans scan it.
+    Plans,
+    /// One statement examines about the whole table a run: these rows.
+    Rows(f64),
+    /// Each examines half its rows or more a run.
+    ManyRows,
+    /// By their plans, or by the rows they examine.
+    Both,
+}
+
+fn scan_heavy_tables(snapshot: &Snapshot) -> Vec<ScanHeavy<'_>> {
     let planned: Vec<(String, String)> = scan_groups(snapshot)
         .into_iter()
         .map(|g| (g.schema.to_ascii_lowercase(), g.table.to_ascii_lowercase()))
@@ -121,7 +166,6 @@ pub fn scan_heavy(snapshot: &Snapshot) -> Vec<Finding> {
         if planned.contains(&(t.schema.to_ascii_lowercase(), t.name.to_ascii_lowercase())) {
             continue;
         }
-        let table_name = t.qualified();
         let touching: Vec<&QueryStat> =
             queries_touching(snapshot, &t.schema, &t.name).into_iter().filter(|q| !is_monitoring_query(q)).collect();
         let (whole, scanning): (Vec<&QueryStat>, Vec<&QueryStat>) =
@@ -138,15 +182,13 @@ pub fn scan_heavy(snapshot: &Snapshot) -> Vec<Finding> {
             .partition(|q| examined_reads_whole(snapshot, q, table_rows) == Some(true));
         let proven: Vec<&QueryStat> = by_plan.iter().chain(&by_rows).copied().collect();
         // How the proven ones show it: their plans, the rows they examine, or both.
-        let shown = match (by_plan.is_empty(), by_rows.as_slice()) {
-            (false, []) => if proven.len() == 1 { "its plan scans it" } else { "their plans scan it" }.to_string(),
-            (true, [q]) => format!(
-                "it examines {} rows a run, about the whole table",
-                format::count(q.reads_per_execution().unwrap_or(0.0))
-            ),
-            (true, _) => "each examines half its rows or more a run".to_string(),
-            (false, _) => "by their plans, or by the rows they examine a run".to_string(),
-        };
+        let shown = (!proven.is_empty()).then(|| match (by_plan.is_empty(), by_rows.as_slice()) {
+            (false, []) if proven.len() == 1 => Shown::Plan,
+            (false, []) => Shown::Plans,
+            (true, [q]) => Shown::Rows(q.reads_per_execution().unwrap_or(0.0)),
+            (true, _) => Shown::ManyRows,
+            (false, _) => Shown::Both,
+        });
         // Statements with no WHERE are behind full reads too, but on purpose. When the query history has nothing else
         // that reads it in full and their plans read it whole as often as it was read in full, the reads are theirs, and
         // no index on a filter has anything to remove.
@@ -154,134 +196,174 @@ pub fn scan_heavy(snapshot: &Snapshot) -> Vec<Finding> {
         if scanning.is_empty() && !whole.is_empty() && whole_runs >= scans_total {
             continue;
         }
-        let mut f = finding("scan-heavy", &table_name, Category::Indexes, subject(SubjectKind::Table, &table_name));
-        let rows_text = if measured {
-            format!("{} rows a day", format::count(rows_read))
-        } else {
-            format!("{} rows", format::count(read_total))
-        };
         // Read in full by statements that all stopped running: told in the past, as the finding then is.
         let listed: Vec<&QueryStat> = proven.iter().chain(&unplanned).copied().take(5).collect();
-        f.title = format!(
-            "{} {} read in full {} ({rows_text})",
-            t.name,
-            if crate::all_stopped(snapshot, &listed) { "was" } else { "is" },
-            how_many(snapshot, scans_total, days, culprit_core::key!("common.noun.time"))
-        );
-        f.summary = format!(
-            "{} has {} rows, and queries have read all of it {}{}: {rows_text} read without an index. {}",
-            table_name,
-            format::count(t.rows.unwrap_or(0.0)),
-            how_many(snapshot, scans_total, days, culprit_core::key!("common.noun.time")),
-            if measured { format!(" {}", since_phrase(snapshot)) } else { String::new() },
-            if !proven.is_empty() {
-                format!(
-                    "{} of the captured statements {} it in full ({shown}){}; explain {} to check the access path, then measure rows kept in representative runs.{}",
-                    proven.len(),
-                    if proven.len() == 1 { "reads" } else { "read" },
-                    if unplanned.is_empty() {
-                        String::new()
-                    } else {
-                        format!(", and {} more without a captured plan may", unplanned.len())
-                    },
-                    if proven.len() + unplanned.len() == 1 { "it" } else { "them" },
-                    on_purpose(&whole)
-                )
-            } else if !unplanned.is_empty() {
-                format!(
-                    "{} of the captured statements {} or {} it without a captured plan; explain {} to see whether {} it in full.{}",
-                    unplanned.len(),
-                    if unplanned.len() == 1 { "reads" } else { "read" },
-                    if unplanned.len() == 1 { "changes" } else { "change" },
-                    if unplanned.len() == 1 { "it" } else { "them" },
-                    if unplanned.len() == 1 { "it reads" } else { "they read" },
-                    on_purpose(&whole)
-                )
-            } else if !whole.is_empty() {
-                format!(
-                    "{} The rest come from statements outside the top of the workload.",
-                    on_purpose(&whole).trim_start()
-                )
-            } else if !touching.is_empty() {
-                "The captured statements that name it reach it through an index, so the full reads come from \
-                 statements outside the top of the workload."
-                    .to_string()
-            } else {
-                "None of the captured statements names it, so the scans come from statements outside the top of the workload."
-                    .to_string()
-            }
-        );
         // Only the statements whose plans read it in full are behind the scans, and their time is the cost.
-        let impact = query_impact(snapshot, &proven);
-        match &impact {
-            Some(i) if i.share >= 0.005 => {
-                apply_query_impact(&mut f, i);
-                // Their share and the amount it comes to, on one basis (Culprit's scans where they measured them).
-                f.severity = severity_for_statement_share(snapshot, &proven, i.share);
-            }
-            _ => {
-                f.severity = if rows_read >= 1e9 { Severity::Medium } else { Severity::Low };
-                f.impact.score = base_score(f.severity) + (rows_read.log10() - 6.0).max(0.0) * 3.0;
-                f.impact.label = if measured {
-                    format!("{} rows scanned/day", format::count(rows_read))
-                } else {
-                    format!("{} rows scanned", format::count(read_total))
-                };
-            }
-        }
-        f.confidence = if proven.is_empty() { Confidence::Low } else { Confidence::Medium };
-        f.queries = query_refs(&proven.iter().chain(&unplanned).copied().take(5).collect::<Vec<_>>());
-        if measured {
-            f.metrics.push(Metric::new("Full reads per day", scans, Unit::Count));
-            f.metrics.push(Metric::new("Rows read without an index per day", rows_read, Unit::Rows));
-        } else {
-            f.metrics.push(Metric::new("Full reads", scans_total, Unit::Count));
-            f.metrics.push(Metric::new("Rows read without an index", read_total, Unit::Rows));
-        }
-        if let Some(rows) = t.rows {
-            f.metrics.push(Metric::new("Rows in table", rows, Unit::Rows));
-        }
-        let explain = if f.queries.is_empty() {
-            "Find the statements that read it in full (they aren't among the heaviest this scan captured), explain them"
-        } else {
-            "Explain the statements listed with this finding"
+        let impact = query_impact(snapshot, &proven).filter(|i| i.share >= 0.005);
+        let severity = match &impact {
+            // Their share and the amount it comes to, on one basis (Culprit's scans where they measured them).
+            Some(i) => severity_for_statement_share(snapshot, &proven, i.share),
+            None if rows_read >= 1e9 => Severity::Medium,
+            None => Severity::Low,
         };
-        f.fix = Some(Fix {
-            summary: format!(
-                "{explain}{} to check their access paths. To measure each filter, capture an actual plan with \
-                 representative values in a controlled environment: this runs the statement. Compare rows kept \
-                 with rows read. If a filter keeps at most {} of the rows read, consider an index on the columns \
-                 it searches by; if it keeps more, read fewer rows or columns instead. Small lookup tables are fine to scan.",
-                if snapshot.server.engine == Engine::Postgres {
-                    " (Culprit can show a generic plan, which does not measure actual rows)"
-                } else {
-                    ""
-                },
-                format::percent(culprit_core::plan::INDEX_KEEPS_AT_MOST)
-            ),
-            sql: None,
-            // No SQL creates an index here: the cost line names the one the reader would add.
-            cost: crate::indexes::write_cost_of(snapshot, &t.schema, &t.name, "any index you add"),
+        out.push(ScanHeavy {
+            table: t,
+            full_reads: scans_total,
+            rows_read: read_total,
+            days,
+            measured,
+            stopped: crate::all_stopped(snapshot, &listed),
+            confidence: if proven.is_empty() { Confidence::Low } else { Confidence::Medium },
+            shown,
+            proven,
+            unplanned,
+            whole,
+            named: !touching.is_empty(),
+            impact,
+            severity,
+            score: base_score(severity) + (rows_read.log10() - 6.0).max(0.0) * 3.0,
         });
-        // The counters keep totals since they started, so a day moves a rate over weeks by a hair: what shows the
-        // change is what they grow by between two scans.
-        f.verify = vec![format!(
-            "After adding an index for a selective filter, the full reads of {} should grow far slower. Compare how much its scan counters grow between a scan taken once the change is live and one a day or more later ({} full reads{} in this scan).",
-            t.name,
-            format::count(scans_total),
-            t.index_scans.map(|n| format!(" and {} index scans", format::count(n))).unwrap_or_default()
-        )];
-        if !f.queries.is_empty() {
-            let (queries, their) = if f.queries.len() == 1 { ("the query", "its") } else { ("the queries", "their") };
-            let cheaper = format!("{their} time per run should drop");
-            let verify = crate::queries::what_changed_between_scans(snapshot, queries, &cheaper)
-                .unwrap_or_else(|| format!("Re-scan after the workload has run: {cheaper}."));
-            f.verify.push(format!("Whether the fix adds an index or reads fewer rows or columns: {verify}"));
-        }
-        f.caveats.push(
-            "Counters accumulate since statistics were last reset; one nightly report can make up much of them.".into(),
-        );
-        out.push(f);
     }
     out
+}
+
+fn scan_heavy_finding(snapshot: &Snapshot, s: ScanHeavy<'_>) -> Finding {
+    let t = s.table;
+    let table_name = t.qualified();
+    let (scans, rows_read) = (s.full_reads / s.days, s.rows_read / s.days);
+    let mut f = finding("scan-heavy", &table_name, Category::Indexes, subject(SubjectKind::Table, &table_name));
+    let how_often = how_many(snapshot, s.full_reads, s.days, culprit_core::key!("common.noun.time"));
+    let tense = if s.stopped { "past" } else { "present" };
+    f.title = if s.measured {
+        t!(
+            "check.scan_heavy.title.per_day",
+            table = &t.name,
+            tense = tense,
+            how_many = &how_often,
+            rows_read = format::count(rows_read)
+        )
+    } else {
+        t!(
+            "check.scan_heavy.title.counted",
+            table = &t.name,
+            tense = tense,
+            how_many = &how_often,
+            rows_read = format::count(s.rows_read)
+        )
+    };
+    let read = if s.measured {
+        t!(
+            "check.scan_heavy.summary.read_per_day",
+            table = &table_name,
+            rows = format::count(t.rows.unwrap_or(0.0)),
+            how_many = &how_often,
+            since = since_phrase(snapshot),
+            rows_read = format::count(rows_read)
+        )
+    } else {
+        t!(
+            "check.scan_heavy.summary.read",
+            table = &table_name,
+            rows = format::count(t.rows.unwrap_or(0.0)),
+            how_many = &how_often,
+            rows_read = format::count(s.rows_read)
+        )
+    };
+    let mut summary = vec![read];
+    let on_purpose = on_purpose(&s.whole);
+    if let Some(shown) = &s.shown {
+        let shown = match shown {
+            Shown::Plan => t!("check.scan_heavy.shown.plan"),
+            Shown::Plans => t!("check.scan_heavy.shown.plans"),
+            Shown::Rows(rows) => t!("check.scan_heavy.shown.rows", rows = format::count(*rows)),
+            Shown::ManyRows => t!("check.scan_heavy.shown.many_rows"),
+            Shown::Both => t!("check.scan_heavy.shown.both"),
+        };
+        let proven = s.proven.len().to_string();
+        summary.push(if s.unplanned.is_empty() {
+            t!("check.scan_heavy.summary.proven", proven = proven, shown = shown)
+        } else {
+            t!(
+                "check.scan_heavy.summary.proven_and_unplanned",
+                proven = proven,
+                shown = shown,
+                unplanned = s.unplanned.len().to_string()
+            )
+        });
+        summary.extend(on_purpose);
+    } else if !s.unplanned.is_empty() {
+        summary.push(t!("check.scan_heavy.summary.unplanned", unplanned = s.unplanned.len().to_string()));
+        summary.extend(on_purpose);
+    } else if let Some(on_purpose) = on_purpose {
+        summary.push(on_purpose);
+        summary.push(t!("check.scan_heavy.summary.rest_elsewhere"));
+    } else if s.named {
+        summary.push(t!("check.scan_heavy.summary.through_index"));
+    } else {
+        summary.push(t!("check.scan_heavy.summary.unnamed"));
+    }
+    f.summary = summary.join(" ");
+    match &s.impact {
+        Some(i) => apply_query_impact(&mut f, i),
+        None => {
+            f.impact.score = s.score;
+            f.impact.label = if s.measured {
+                t!("check.scan_heavy.impact.rows_per_day", rows = format::count(rows_read))
+            } else {
+                t!("check.scan_heavy.impact.rows", rows = format::count(s.rows_read))
+            };
+        }
+    }
+    f.severity = s.severity;
+    f.confidence = s.confidence;
+    f.queries = query_refs(&s.proven.iter().chain(&s.unplanned).copied().take(5).collect::<Vec<_>>());
+    if s.measured {
+        f.metrics.push(Metric::new(t!("check.scan_heavy.metric.full_reads_per_day"), scans, Unit::Count));
+        f.metrics.push(Metric::new(t!("check.scan_heavy.metric.rows_read_per_day"), rows_read, Unit::Rows));
+    } else {
+        f.metrics.push(Metric::new(t!("check.scan_heavy.metric.full_reads"), s.full_reads, Unit::Count));
+        f.metrics.push(Metric::new(t!("check.scan_heavy.metric.rows_read"), s.rows_read, Unit::Rows));
+    }
+    if let Some(rows) = t.rows {
+        f.metrics.push(Metric::new(t!("common.metric.rows_in_table"), rows, Unit::Rows));
+    }
+    let generic = if snapshot.server.engine == Engine::Postgres { "yes" } else { "no" };
+    let explain = if f.queries.is_empty() {
+        t!("check.scan_heavy.fix.unlisted", generic = generic)
+    } else {
+        t!("check.scan_heavy.fix.listed", generic = generic)
+    };
+    f.fix = Some(Fix {
+        summary: [
+            explain,
+            t!("check.scan_heavy.fix.measure", share = format::percent(culprit_core::plan::INDEX_KEEPS_AT_MOST)),
+        ]
+        .join(" "),
+        sql: None,
+        // No SQL creates an index here: the cost line names the one the reader would add.
+        cost: crate::indexes::write_cost_of(snapshot, &t.schema, &t.name, &t!("check.scan_heavy.fix_cost_index")),
+    });
+    // The counters keep totals since they started, so a day moves a rate over weeks by a hair: what shows the
+    // change is what they grow by between two scans.
+    f.verify = vec![match t.index_scans {
+        Some(n) => t!(
+            "check.scan_heavy.verify.counters_with_index_scans",
+            table = &t.name,
+            full_reads = format::count(s.full_reads),
+            index_scans = format::count(n)
+        ),
+        None => t!("check.scan_heavy.verify.counters", table = &t.name, full_reads = format::count(s.full_reads)),
+    }];
+    if !f.queries.is_empty() {
+        let n = f.queries.len();
+        let verify = crate::queries::what_changed_between_scans(
+            snapshot,
+            &t!("check.scan_heavy.verify.queries", n = n),
+            &t!("check.scan_heavy.verify.cheaper", n = n),
+        )
+        .unwrap_or_else(|| t!("check.scan_heavy.verify.rescan", n = n));
+        f.verify.push(t!("check.scan_heavy.verify.either_fix", verify = verify));
+    }
+    f.caveats.push(t!("check.scan_heavy.caveat.counters"));
+    f
 }
