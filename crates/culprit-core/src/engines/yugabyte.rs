@@ -58,6 +58,10 @@ impl EngineSpec for Yugabyte {
     fn abilities(&self) -> EngineAbilities {
         EngineAbilities { deadlocks: false, ..SERVER }
     }
+    // What it has always been called here, though YSQL asks for one with EXPLAIN.
+    fn estimated_plans_label(&self) -> &'static str {
+        key!("core.model.capability.showplan")
+    }
     fn session_actions(&self) -> Vec<SessionAction> {
         vec![SessionAction::Cancel, SessionAction::Terminate]
     }

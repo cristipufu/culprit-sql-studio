@@ -87,6 +87,10 @@ impl EngineSpec for Mysql {
         SERVER
     }
 
+    fn estimated_plans_label(&self) -> &'static str {
+        key!("core.engines.estimated_plans.explain")
+    }
+
     fn session_actions(&self) -> Vec<SessionAction> {
         vec![SessionAction::Cancel, SessionAction::Terminate]
     }

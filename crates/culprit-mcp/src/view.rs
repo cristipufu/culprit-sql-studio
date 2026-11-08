@@ -276,16 +276,16 @@ fn plan_summary(plan: &Plan) -> Value {
     })
 }
 
-fn warnings(plan: &Plan) -> Vec<&'static str> {
-    let mut all: Vec<&'static str> = plan.warnings.iter().map(|w| w.label()).collect();
+fn warnings(plan: &Plan) -> Vec<String> {
+    let mut all = plan.warnings.clone();
     for node in plan.nodes() {
         for w in &node.warnings {
-            if !all.contains(&w.label()) {
-                all.push(w.label());
+            if !all.contains(w) {
+                all.push(*w);
             }
         }
     }
-    all
+    all.into_iter().map(|w| w.label()).collect()
 }
 
 /// Where the plan's work is, measured the way `share` measures it: the step with the most time of its own in an actual
@@ -353,7 +353,7 @@ pub fn plan_tree(plan: &Plan) -> String {
             line.push_str(&format!("  filter: {}", clip(filter, 160)));
         }
         if !node.warnings.is_empty() {
-            let labels: Vec<&str> = node.warnings.iter().map(|w| w.label()).collect();
+            let labels: Vec<String> = node.warnings.iter().map(|w| w.label()).collect();
             line.push_str(&format!("  ⚠ {}", labels.join(", ")));
         }
         out.push_str(&line);

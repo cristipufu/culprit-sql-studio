@@ -595,10 +595,11 @@ pub(super) fn statistics(report: &Report) -> Tile {
     tile.metrics.push(TileMetric::new("locked", "Locked checks", Some(locked as f64), locked.to_string()));
     if locked > 0 && tile.detail.is_none() {
         let needs: Vec<String> = {
-            let mut caps: Vec<&str> = report.locked.iter().flat_map(|l| l.missing.iter().map(|c| c.label())).collect();
+            let mut caps: Vec<String> =
+                report.locked.iter().flat_map(|l| l.missing.iter().map(|c| c.label())).collect();
             caps.sort_unstable();
             caps.dedup();
-            caps.into_iter().map(str::to_string).collect()
+            caps
         };
         tile.detail = Some(format!(
             "{} locked: {} need{} {}.",

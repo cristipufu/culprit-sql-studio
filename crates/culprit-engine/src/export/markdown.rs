@@ -141,7 +141,7 @@ fn plan_body(out: &mut String, plan: &Plan, notes: &[ExportNote]) {
         let _ = writeln!(out, "**Predicates on the expensive steps**\n\n{}\n", predicates.join("\n"));
     }
     if !plan.warnings.is_empty() {
-        let names: Vec<&str> = plan.warnings.iter().map(|w| w.label()).collect();
+        let names: Vec<String> = plan.warnings.iter().map(|w| w.label()).collect();
         let _ = writeln!(out, "**Plan warnings:** {}\n", names.join(", "));
     }
     if !plan.index_hints.is_empty() {

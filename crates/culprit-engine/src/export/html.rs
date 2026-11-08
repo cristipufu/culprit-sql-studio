@@ -205,7 +205,7 @@ fn steps(plan: &Plan) -> String {
         // No share where the plan can't state one (no costs, a step it doesn't cost, a default guess).
         let stated = share(plan, n);
         let s = stated.unwrap_or(0.0);
-        let warnings: Vec<&str> = n.warnings.iter().map(|w| w.label()).collect();
+        let warnings: Vec<String> = n.warnings.iter().map(|w| w.label()).collect();
         let _ = write!(
             out,
             r#"<tr{}><td class="op" style="padding-left:{}px">{}</td><td class="obj">{}</td><td class="r"><span class="pctbar"><i class="{}" style="width:{:.0}%"></i></span>{}</td><td class="r">{}</td><td class="warnings">{}</td></tr>"#,

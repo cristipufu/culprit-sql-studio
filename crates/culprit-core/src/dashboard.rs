@@ -79,22 +79,23 @@ pub enum TileKey {
 }
 
 impl TileKey {
-    pub fn label(self) -> &'static str {
+    /// The tile's title, in the current language.
+    pub fn label(self) -> String {
         match self {
-            TileKey::DbTime => "Database time",
-            TileKey::Findings => "Findings",
-            TileKey::TopQueries => "Top queries",
-            TileKey::Waits => "Where time goes",
-            TileKey::Now => "Right now",
-            TileKey::Health => "Health",
-            TileKey::Deadlocks => "Deadlocks",
-            TileKey::Indexes => "Indexes",
-            TileKey::Plans => "Plans",
-            TileKey::Statistics => "Query statistics",
-            TileKey::Storage => "Storage",
-            TileKey::Connections => "Connections",
-            TileKey::Replication => "Replication",
-            TileKey::Failures => "Failing queries",
+            TileKey::DbTime => crate::t!("core.dashboard.tile.db_time"),
+            TileKey::Findings => crate::t!("core.dashboard.tile.findings"),
+            TileKey::TopQueries => crate::t!("core.dashboard.tile.top_queries"),
+            TileKey::Waits => crate::t!("core.dashboard.tile.waits"),
+            TileKey::Now => crate::t!("core.dashboard.tile.now"),
+            TileKey::Health => crate::t!("core.dashboard.tile.health"),
+            TileKey::Deadlocks => crate::t!("core.dashboard.tile.deadlocks"),
+            TileKey::Indexes => crate::t!("core.dashboard.tile.indexes"),
+            TileKey::Plans => crate::t!("core.dashboard.tile.plans"),
+            TileKey::Statistics => crate::t!("core.dashboard.tile.statistics"),
+            TileKey::Storage => crate::t!("core.dashboard.tile.storage"),
+            TileKey::Connections => crate::t!("core.dashboard.tile.connections"),
+            TileKey::Replication => crate::t!("core.dashboard.tile.replication"),
+            TileKey::Failures => crate::t!("core.dashboard.tile.failures"),
         }
     }
 }
@@ -134,7 +135,7 @@ impl Tile {
     pub fn new(key: TileKey, status: TileStatus, takeaway: impl Into<String>) -> Tile {
         Tile {
             key,
-            title: key.label().to_string(),
+            title: key.label(),
             status,
             takeaway: takeaway.into(),
             detail: None,

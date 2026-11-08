@@ -68,6 +68,10 @@ impl EngineSpec for Sqlite {
         }
     }
 
+    fn estimated_plans_label(&self) -> &'static str {
+        key!("core.engines.estimated_plans.explain_query_plan")
+    }
+
     fn refusal(&self, ability: Ability) -> Refusal {
         match ability {
             Ability::Sessions | Ability::OperatorProgress => Refusal::new(

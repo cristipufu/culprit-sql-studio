@@ -93,6 +93,10 @@ pub trait EngineSpec: Send + Sync {
     /// What it can answer: sessions, wait samples, measured runs… (see [`EngineAbilities`]).
     fn abilities(&self) -> EngineAbilities;
 
+    /// Message key: what estimated plans are called here, by the command that asks for one ("Estimated plans
+    /// (EXPLAIN)"): the label of [`crate::model::Capability::Showplan`] on this engine.
+    fn estimated_plans_label(&self) -> &'static str;
+
     /// How it spells the SQL Culprit suggests.
     fn dialect(&self) -> &'static dyn Dialect;
 

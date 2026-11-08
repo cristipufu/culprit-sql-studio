@@ -603,7 +603,7 @@ impl Out {
         for (engine, sources) in engines.iter().filter(|(_, s)| !s.is_empty()) {
             println!("{}", self.paint(BOLD, engine.label()));
             for s in *sources {
-                let delivers: Vec<&str> = s.delivers.iter().map(|c| c.label_for(*engine)).collect();
+                let delivers: Vec<String> = s.delivers.iter().map(|c| c.label_for(*engine)).collect();
                 println!(
                     "  {:<26}{}",
                     s.name,
@@ -754,7 +754,7 @@ pub(super) fn markdown_report(report: &Report) -> String {
             out.push_str(&format!(
                 "| {} | {} | {} | {} | `{}` |\n",
                 from + i + 1,
-                if f.inactive { "Stopped running" } else { f.actionability.label() },
+                if f.inactive { "Stopped running".to_string() } else { f.actionability.label() },
                 md_cell(&f.title),
                 md_cell(&f.impact.label),
                 f.id.replace('`', "'")

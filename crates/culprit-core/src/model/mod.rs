@@ -192,10 +192,9 @@ pub enum Capability {
 
 impl Capability {
     /// The label in `engine`'s own words: estimated plans are SHOWPLAN on SQL Server and EXPLAIN elsewhere.
-    pub fn label_for(self, engine: Engine) -> &'static str {
-        match (self, engine) {
-            (Capability::Showplan, Engine::Postgres | Engine::Mysql) => "Estimated plans (EXPLAIN)",
-            (Capability::Showplan, Engine::Sqlite) => "Estimated plans (EXPLAIN QUERY PLAN)",
+    pub fn label_for(self, engine: Engine) -> String {
+        match self {
+            Capability::Showplan => crate::i18n::t(engine.spec().estimated_plans_label(), &[]),
             _ => self.label(),
         }
     }
@@ -218,24 +217,25 @@ impl Capability {
         )
     }
 
-    pub fn label(self) -> &'static str {
+    /// What it is, as a person reads it, in the current language.
+    pub fn label(self) -> String {
         match self {
-            Capability::QueryStore => "Query Store",
-            Capability::PlanCache => "Plan cache statistics",
-            Capability::PgStatStatements => "pg_stat_statements",
-            Capability::PerformanceSchema => "performance_schema statement digests",
-            Capability::QueryPlans => "Query plans",
-            Capability::GenericPlans => "Generic plans (PostgreSQL 12+)",
-            Capability::TableStats => "Table statistics",
-            Capability::IndexUsage => "Index usage statistics",
-            Capability::MissingIndexes => "Missing-index suggestions",
-            Capability::Statistics => "Optimizer statistics",
-            Capability::WaitStats => "Wait statistics",
-            Capability::ResourceUsage => "Resource usage",
-            Capability::Sessions => "Sessions and blocking",
-            Capability::Showplan => "Estimated plans (SHOWPLAN)",
-            Capability::SlowLog => "Slow query log table",
-            Capability::QueryLog => "Application query log",
+            Capability::QueryStore => crate::t!("core.model.capability.query_store"),
+            Capability::PlanCache => crate::t!("core.model.capability.plan_cache"),
+            Capability::PgStatStatements => crate::t!("core.model.capability.pg_stat_statements"),
+            Capability::PerformanceSchema => crate::t!("core.model.capability.performance_schema"),
+            Capability::QueryPlans => crate::t!("core.model.capability.query_plans"),
+            Capability::GenericPlans => crate::t!("core.model.capability.generic_plans"),
+            Capability::TableStats => crate::t!("core.model.capability.table_stats"),
+            Capability::IndexUsage => crate::t!("core.model.capability.index_usage"),
+            Capability::MissingIndexes => crate::t!("core.model.capability.missing_indexes"),
+            Capability::Statistics => crate::t!("core.model.capability.statistics"),
+            Capability::WaitStats => crate::t!("core.model.capability.wait_stats"),
+            Capability::ResourceUsage => crate::t!("core.model.capability.resource_usage"),
+            Capability::Sessions => crate::t!("core.model.capability.sessions"),
+            Capability::Showplan => crate::t!("core.model.capability.showplan"),
+            Capability::SlowLog => crate::t!("core.model.capability.slow_log"),
+            Capability::QueryLog => crate::t!("core.model.capability.query_log"),
         }
     }
 }

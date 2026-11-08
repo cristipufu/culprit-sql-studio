@@ -187,7 +187,7 @@ impl Out {
             _ => "   ·".to_string(),
         };
         let pct_text = if weighed && pct.is_some_and(|p| p >= 0.3) { self.paint(RED, &pct_text) } else { pct_text };
-        let warnings: Vec<&str> = node.warnings.iter().map(|w| w.label()).collect();
+        let warnings: Vec<String> = node.warnings.iter().map(|w| w.label()).collect();
         let timing =
             own_ms.filter(|ms| *ms >= 0.5).map(|ms| format!(" · {}", format::duration(ms))).unwrap_or_default();
         println!(

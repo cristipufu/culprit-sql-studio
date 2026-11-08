@@ -53,15 +53,16 @@ pub enum PlanWarning {
 }
 
 impl PlanWarning {
-    pub fn label(self) -> &'static str {
+    /// The warning's label, in the current language.
+    pub fn label(self) -> String {
         match self {
-            PlanWarning::ImplicitConversion => "Implicit conversion",
-            PlanWarning::Spill => "Spills to disk",
-            PlanWarning::NoJoinPredicate => "No join predicate",
-            PlanWarning::MissingStatistics => "Missing statistics",
-            PlanWarning::MemoryGrant => "Memory grant issue",
-            PlanWarning::Misestimate => "Row estimate off",
-            PlanWarning::ResidualPredicate => "Filters after reading",
+            PlanWarning::ImplicitConversion => crate::t!("core.plan.warning.implicit_conversion"),
+            PlanWarning::Spill => crate::t!("core.plan.warning.spill"),
+            PlanWarning::NoJoinPredicate => crate::t!("core.plan.warning.no_join_predicate"),
+            PlanWarning::MissingStatistics => crate::t!("core.plan.warning.missing_statistics"),
+            PlanWarning::MemoryGrant => crate::t!("core.plan.warning.memory_grant"),
+            PlanWarning::Misestimate => crate::t!("core.plan.warning.misestimate"),
+            PlanWarning::ResidualPredicate => crate::t!("core.plan.warning.residual_predicate"),
         }
     }
 }

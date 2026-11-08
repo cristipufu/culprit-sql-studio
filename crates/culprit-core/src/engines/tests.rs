@@ -159,7 +159,7 @@ fn every_engine_declares_its_vocabulary_as_messages_and_ids() {
             .map(|k| k.to_string())
             .chain(notes.into_iter().flatten().map(|k| k.to_string()))
             .chain(facts.products.iter().map(|p| p.plan_format.clone()))
-            .chain([facts.connect.accepts.clone()])
+            .chain([facts.connect.accepts.clone(), engine.spec().estimated_plans_label().to_string()])
             .chain(facts.limitations.iter().cloned())
             .chain(facts.refusals.values().flat_map(|r| [Some(r.message.clone()), r.hint.clone()]).flatten());
         for key in keys {

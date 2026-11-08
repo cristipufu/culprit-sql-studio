@@ -61,12 +61,13 @@ impl Actionability {
         matches!(self, Self::NeedsAttention | Self::OptionalImprovement)
     }
 
-    pub fn label(self) -> &'static str {
+    /// What it asks of a person, in the current language.
+    pub fn label(self) -> String {
         match self {
-            Self::NeedsAttention => "Needs attention",
-            Self::OptionalImprovement => "Optional improvement",
-            Self::Information => "Information",
-            Self::History => "History",
+            Self::NeedsAttention => t!("core.finding.actionability.needs_attention"),
+            Self::OptionalImprovement => t!("core.finding.actionability.optional_improvement"),
+            Self::Information => t!("core.finding.actionability.information"),
+            Self::History => t!("core.finding.actionability.history"),
         }
     }
 }

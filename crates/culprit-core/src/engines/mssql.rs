@@ -65,6 +65,10 @@ impl EngineSpec for Mssql {
         EngineAbilities { last_actual_plan: true, operator_progress: true, ..SERVER }
     }
 
+    fn estimated_plans_label(&self) -> &'static str {
+        key!("core.model.capability.showplan")
+    }
+
     fn session_actions(&self) -> Vec<SessionAction> {
         vec![SessionAction::Terminate]
     }
