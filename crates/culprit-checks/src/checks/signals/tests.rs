@@ -330,7 +330,7 @@ fn lock_escalations_add_up_per_table_and_name_the_write_that_changes_the_most_ro
     q.executions = 4.0;
     q.rows = Some(40_000.0);
     let id = q.id.clone();
-    let f = lock_escalations(&s);
+    let f = LockEscalationsCheck.run(&s);
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].id, "lock-escalations:dbo.orders");
     assert_eq!(f[0].title, "Row locks on orders escalated to a table lock 5 times since SQL Server started (Oct 11)");
@@ -353,15 +353,15 @@ fn lock_escalations_add_up_per_table_and_name_the_write_that_changes_the_most_ro
 #[test]
 fn lock_escalation_attempts_alone_are_not_a_finding() {
     let s = escalations_on("audit_archive", escalating(0.0, 24.0, 0.0), escalating(0.0, 24.0, 0.0));
-    assert!(lock_escalations(&s).is_empty());
+    assert!(LockEscalationsCheck.run(&s).is_empty());
     let s = escalations_on("orders", escalating(0.0, 0.0, 90_000.0), IndexContention::default());
-    assert!(lock_escalations(&s).is_empty());
+    assert!(LockEscalationsCheck.run(&s).is_empty());
 }
 
 #[test]
 fn a_table_with_no_statement_writing_to_it_says_where_to_look() {
     let s = escalations_on("audit_archive", escalating(2.0, 0.0, 0.0), IndexContention::default());
-    let f = lock_escalations(&s);
+    let f = LockEscalationsCheck.run(&s);
     assert_eq!(
         f[0].title,
         "Row locks on audit_archive escalated to a table lock 2 times since SQL Server started (Oct 11)"
@@ -374,7 +374,7 @@ fn a_table_with_no_statement_writing_to_it_says_where_to_look() {
 #[test]
 fn a_single_lock_escalation_is_high() {
     let s = escalations_on("orders", escalating(1.0, 1.0, 0.0), IndexContention::default());
-    let f = lock_escalations(&s);
+    let f = LockEscalationsCheck.run(&s);
     assert_eq!(f[0].title, "Row locks on orders escalated to a table lock once since SQL Server started (Oct 11)");
     assert_eq!(f[0].severity, Severity::High);
 }
@@ -403,7 +403,7 @@ fn with_earlier_scan(mut s: Snapshot, counts: &[(&str, f64)], started_at: Option
 #[test]
 fn escalations_without_an_earlier_scan_are_graded_on_their_rate_since_the_start() {
     let mut s = escalations_on("orders", escalating(2.0, 0.0, 0.0), IndexContention::default());
-    let f = &lock_escalations(&s)[0];
+    let f = &LockEscalationsCheck.run(&s)[0];
     assert_eq!(f.severity, Severity::High);
     assert!(f.is_actionable());
     // Counted for 12 hours: none of them is older than that (the fresh SQL Server reading said "they may be old" three
@@ -420,7 +420,7 @@ fn escalations_without_an_earlier_scan_are_graded_on_their_rate_since_the_start(
     assert_eq!(f.metrics.len(), 1);
     // Counted for days, they may be old.
     s.server.started_at = Some("2026-10-08T00:13:03Z".into());
-    let f = &lock_escalations(&s)[0];
+    let f = &LockEscalationsCheck.run(&s)[0];
     assert_eq!(f.severity, Severity::Medium);
     assert!(f.is_actionable());
     assert!(
@@ -438,18 +438,18 @@ fn escalations_without_an_earlier_scan_are_graded_on_their_rate_since_the_start(
 fn one_escalation_in_six_months_is_low_history_on_a_first_scan() {
     let mut s = escalations_on("orders", escalating(1.0, 0.0, 0.0), IndexContention::default());
     s.server.started_at = Some("2026-04-11T12:00:00Z".into());
-    let f = &lock_escalations(&s)[0];
+    let f = &LockEscalationsCheck.run(&s)[0];
     assert_eq!(f.severity, Severity::Low);
     assert_eq!(f.actionability, culprit_core::Actionability::Information);
     assert!(f.summary.contains("less than once a week on average since then: they may all be old"), "{}", f.summary);
     // A few a week since the start is Medium: likely to happen again.
     s.server.started_at = Some("2026-10-01T12:00:00Z".into());
     s.indexes.iter_mut().filter_map(|i| i.contention.as_mut()).for_each(|c| c.lock_escalations = 3.0);
-    assert_eq!(lock_escalations(&s)[0].severity, Severity::Medium);
-    assert!(lock_escalations(&s)[0].is_actionable());
+    assert_eq!(LockEscalationsCheck.run(&s)[0].severity, Severity::Medium);
+    assert!(LockEscalationsCheck.run(&s)[0].is_actionable());
     // Minutes of counting make no rate: the demo's server started 44 seconds before the scan.
     s.server.started_at = Some("2026-10-11T12:13:03Z".into());
-    let f = &lock_escalations(&s)[0];
+    let f = &LockEscalationsCheck.run(&s)[0];
     assert_eq!(f.severity, Severity::Low);
     assert_eq!(f.actionability, culprit_core::Actionability::Information);
     assert!(f.summary.contains("started too recently to tell how often"), "{}", f.summary);
@@ -458,7 +458,7 @@ fn one_escalation_in_six_months_is_low_history_on_a_first_scan() {
 #[test]
 fn escalations_since_the_previous_scan_are_high_and_counted() {
     let s = escalations_on("orders", escalating(3.0, 0.0, 0.0), escalating(2.0, 0.0, 0.0));
-    let f = &lock_escalations(&with_earlier_scan(s, &[("orders", 4.0)], None))[0];
+    let f = &LockEscalationsCheck.run(&with_earlier_scan(s, &[("orders", 4.0)], None))[0];
     assert_eq!(f.severity, Severity::High);
     assert_eq!(f.title, "Row locks on orders escalated to a table lock once since Oct 11, 06:00 UTC");
     assert!(
@@ -471,7 +471,7 @@ fn escalations_since_the_previous_scan_are_high_and_counted() {
     );
     assert_eq!(f.impact.label, "1 new table lock");
     assert_eq!((f.metrics[0].label.as_str(), f.metrics[0].value), (ESCALATIONS_METRIC, 5.0));
-    assert_eq!((f.metrics[1].label.as_str(), f.metrics[1].value), (ESCALATIONS_SINCE_METRIC, 1.0));
+    assert_eq!((f.metrics[1].label.as_str(), f.metrics[1].value), ("Escalations since the previous scan", 1.0));
 }
 
 // The false flag: a rebuilt index (or a dropped partition) takes its own count with it, so the table's total falls with
@@ -480,7 +480,7 @@ fn escalations_since_the_previous_scan_are_high_and_counted() {
 fn a_count_that_fell_without_a_restart_is_not_new_escalations() {
     let s = escalations_on("orders", escalating(2.0, 0.0, 0.0), IndexContention::default());
     let s = with_earlier_scan(s, &[("orders", 5.0)], None);
-    let f = &lock_escalations(&s)[0];
+    let f = &LockEscalationsCheck.run(&s)[0];
     assert!(!f.title.contains("since Oct 11, 06:00"), "{}", f.title);
     assert!(f.summary.contains("since it started"), "{}", f.summary);
 }
@@ -494,7 +494,7 @@ fn escalations_with_none_since_the_previous_scan_are_low_history() {
     q.text = "UPDATE TOP (1000) dbo.orders SET archived = 1 WHERE archived = 0".into();
     q.plan = None;
     q.rows = Some(q.executions * 900.0);
-    let f = &lock_escalations(&with_earlier_scan(s, &[("orders", 2.0)], None))[0];
+    let f = &LockEscalationsCheck.run(&with_earlier_scan(s, &[("orders", 2.0)], None))[0];
     assert_eq!(f.severity, Severity::Low);
     assert_eq!(
         f.title,
@@ -534,14 +534,14 @@ fn all_timespan_windows_require_baseline_to_cover_the_window_before_silencing_es
 
         // A baseline covering only a fraction of the selected window must never silence escalations into History.
         s.escalations_before.as_mut().unwrap().taken_at = partial_at.into();
-        let f = &lock_escalations(&s)[0];
+        let f = &LockEscalationsCheck.run(&s)[0];
         assert_eq!(f.severity, Severity::High, "window {window_minutes}m should keep active escalations High");
         assert!(f.is_actionable(), "window {window_minutes}m");
         assert!(!f.title.contains(", none since "), "window {window_minutes}m: {}", f.title);
 
         // When the baseline covers the full selected window with zero delta, it is History.
         s.escalations_before.as_mut().unwrap().taken_at = full_at.into();
-        let f = &lock_escalations(&s)[0];
+        let f = &LockEscalationsCheck.run(&s)[0];
         assert_eq!(f.severity, Severity::Low, "window {window_minutes}m with full baseline should be Low");
         assert_eq!(f.actionability, culprit_core::Actionability::History, "window {window_minutes}m");
         assert!(f.title.contains(", none since "), "window {window_minutes}m: {}", f.title);
@@ -555,7 +555,7 @@ fn after_a_restart_every_escalation_counted_is_new() {
     // The earlier scan counted more, before the server restarted at 12:13 and started the count again.
     let s = with_earlier_scan(s, &[("orders", 9.0)], Some("2026-10-01T00:00:00Z"));
     assert!(s.escalations_before.as_ref().unwrap().restarted);
-    let f = &lock_escalations(&s)[0];
+    let f = &LockEscalationsCheck.run(&s)[0];
     assert_eq!(f.severity, Severity::High);
     assert_eq!(f.title, "Row locks on orders escalated to a table lock 2 times since Oct 11, 06:00 UTC");
     assert!(
@@ -569,7 +569,7 @@ fn after_a_restart_every_escalation_counted_is_new() {
 #[test]
 fn the_fix_starts_an_event_session_that_keeps_the_statement() {
     let s = escalations_on("orders", escalating(2.0, 0.0, 0.0), IndexContention::default());
-    let sql = lock_escalations(&s)[0].fix.clone().unwrap().sql.unwrap();
+    let sql = LockEscalationsCheck.run(&s)[0].fix.clone().unwrap().sql.unwrap();
     assert!(sql.contains("CREATE EVENT SESSION culprit_lock_escalation ON SERVER"), "{sql}");
     assert!(sql.contains("WHERE sqlserver.database_name = N'culprit_demo')"), "{sql}");
     assert!(sql.contains("FROM sys.dm_xe_session_targets t"), "{sql}");
@@ -597,12 +597,12 @@ fn the_fix_starts_an_event_session_that_keeps_the_statement() {
         "{sql}"
     );
     let other = escalations_on("customers", escalating(2.0, 0.0, 0.0), IndexContention::default());
-    let again = lock_escalations(&other)[0].fix.clone().unwrap().sql.unwrap();
+    let again = LockEscalationsCheck.run(&other)[0].fix.clone().unwrap().sql.unwrap();
     let start = |sql: &str| sql[..sql.find("-- Then read").unwrap()].to_string();
     assert_eq!(start(&sql), start(&again), "one session, defined one way for every table");
     let mut azure = escalations_on("orders", escalating(2.0, 0.0, 0.0), IndexContention::default());
     azure.server.set_platform(Some(culprit_core::Platform::AzureSqlDatabase));
-    let sql = lock_escalations(&azure)[0].fix.clone().unwrap().sql.unwrap();
+    let sql = LockEscalationsCheck.run(&azure)[0].fix.clone().unwrap().sql.unwrap();
     assert!(sql.contains("CREATE EVENT SESSION culprit_lock_escalation ON DATABASE"), "{sql}");
     assert!(sql.contains("FROM sys.dm_xe_database_session_targets t"), "{sql}");
     assert!(!sql.contains("STARTUP_STATE") && !sql.contains("database_name ="), "{sql}");
