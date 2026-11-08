@@ -7,7 +7,9 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::format::{self, digits};
 use crate::model::{Engine, TimelineSource};
+use crate::{key, t};
 
 /// A span of time, UTC ISO 8601, as the source could actually measure it (snapped to Query Store intervals or scans).
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
@@ -127,15 +129,15 @@ pub enum ChangeStatus {
 }
 
 impl ChangeStatus {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            ChangeStatus::Regressed => "Got slower",
-            ChangeStatus::New => "New",
-            ChangeStatus::Improved => "Got faster",
-            ChangeStatus::Stopped => "Stopped running",
-            ChangeStatus::LowSample => "Too few runs",
-            ChangeStatus::NotComparable => "Not comparable",
-            ChangeStatus::Unchanged => "About the same",
+            ChangeStatus::Regressed => t!("core.changes.status.regressed"),
+            ChangeStatus::New => t!("core.changes.status.new"),
+            ChangeStatus::Improved => t!("core.changes.status.improved"),
+            ChangeStatus::Stopped => t!("core.changes.status.stopped"),
+            ChangeStatus::LowSample => t!("core.changes.status.low_sample"),
+            ChangeStatus::NotComparable => t!("core.changes.status.not_comparable"),
+            ChangeStatus::Unchanged => t!("core.changes.status.unchanged"),
         }
     }
 }
@@ -249,24 +251,16 @@ pub fn compare(connection: &str, engine: Engine, data: PeriodData, options: &Com
     let mut notes = data.notes;
     // A comparison that couldn't be made has no coverage to describe: its reason leads the summary instead.
     if data.unavailable.is_none() && data.baseline_coverage < 0.999 && data.baseline.hours() > 0.0 {
+        let share = format::percent(data.baseline_coverage);
         notes.push(match data.source {
-            TimelineSource::QueryStore => format!(
-                "Query Store has data for {} of the baseline period; queries missing from it may not have been recorded.",
-                crate::format::percent(data.baseline_coverage)
-            ),
-            TimelineSource::Scans => format!(
-                "Culprit's scans cover {} of the baseline period; it follows the scans it has.",
-                crate::format::percent(data.baseline_coverage)
-            ),
-            TimelineSource::SlowLog => format!(
-                "The slow query log covers {} of the baseline period; statements missing from it may not have been logged.",
-                crate::format::percent(data.baseline_coverage)
-            ),
+            TimelineSource::QueryStore => t!("core.changes.coverage.query_store", share = share),
+            TimelineSource::Scans => t!("core.changes.coverage.scans", share = share),
+            TimelineSource::SlowLog => t!("core.changes.coverage.slow_log", share = share),
         });
     }
     // A comparison that couldn't be made says so first, rather than "no queries ran".
     let summary = match &data.unavailable {
-        Some(why) => format!("Can't compare yet. {why}"),
+        Some(why) => [t!("core.changes.unavailable"), why.clone()].join(" "),
         None => summarize(&judged, &data.baseline, &data.recent, &data.baseline_total, &data.recent_total),
     };
     Changes {
@@ -334,9 +328,9 @@ fn judge(
     let (plan_switch, same_plan) = plan_switch(&q.plans);
     let reason = match status {
         ChangeStatus::NotComparable => Some(q.untracked.clone().unwrap_or_else(|| match source {
-            TimelineSource::QueryStore => "Query Store has no data for the baseline period".to_string(),
-            TimelineSource::Scans => "Culprit has no scan covering the baseline period".to_string(),
-            TimelineSource::SlowLog => "The slow query log has no runs of it in the baseline period".to_string(),
+            TimelineSource::QueryStore => t!("core.changes.reason.query_store"),
+            TimelineSource::Scans => t!("core.changes.reason.scans"),
+            TimelineSource::SlowLog => t!("core.changes.reason.slow_log"),
         })),
         _ => None,
     };
@@ -396,76 +390,109 @@ fn share(part: f64, whole: f64) -> f64 {
 
 /// "4.1×" for a ratio.
 pub fn times(ratio: f64) -> String {
-    if ratio >= 10.0 { format!("{ratio:.0}×") } else { format!("{ratio:.1}×") }
+    let n = if ratio >= 10.0 { format!("{ratio:.0}") } else { format!("{ratio:.1}") };
+    t!("common.factor", n = digits(n))
 }
 
 /// Plain-language sentence for one query. Times are UTC here; the app shows them in local time.
 pub fn headline(c: &QueryChange, engine: Engine, source: TimelineSource, min: f64) -> String {
     use crate::format::{count, percent};
-    let per_run =
-        |b: &PeriodStats, r: &PeriodStats| format!("{} → {} per run", run_time(b.mean_ms), run_time(r.mean_ms));
+    let per_run = |b: &PeriodStats, r: &PeriodStats| {
+        t!("core.changes.per_run", before = run_time(b.mean_ms), after = run_time(r.mean_ms))
+    };
+    // What switched: SQL Server's Query Store numbers its plans; elsewhere it is the plan Culprit captured.
     let switch_words = |s: &PlanSwitch| -> String {
-        let when = s.at.as_deref().map(|t| format!(" on {}", short_time(t))).unwrap_or_default();
-        let what = s.what.as_deref().map(|w| format!(" ({w})")).unwrap_or_default();
-        match (engine, source) {
-            (Engine::Mssql, TimelineSource::QueryStore) => {
-                format!("{when}, when SQL Server switched from plan {} to plan {}{what}", s.from, s.to)
+        match ((engine, source), s.what.as_deref()) {
+            ((Engine::Mssql, TimelineSource::QueryStore), None) => {
+                t!("core.changes.switch.query_store", from = &s.from, to = &s.to)
             }
-            _ => format!("{when}, when the plan Culprit captured for it changed{what}"),
+            ((Engine::Mssql, TimelineSource::QueryStore), Some(what)) => {
+                t!("core.changes.switch.query_store_what", from = &s.from, to = &s.to, what = what)
+            }
+            (_, None) => t!("core.changes.switch.captured"),
+            (_, Some(what)) => t!("core.changes.switch.captured_what", what = what),
         }
     };
     match (c.status, &c.baseline, &c.recent) {
         (ChangeStatus::Regressed, Some(b), Some(r)) => {
-            let ratio = c.ratio.map(times).unwrap_or_else(|| "much".to_string());
+            let ratio = c.ratio.map(times).unwrap_or_else(|| t!("core.changes.much"));
             match &c.plan_switch {
-                Some(s) => format!("Got {ratio} slower ({}){}.", per_run(b, r), switch_words(s)),
-                None if c.same_plan => {
-                    let plan =
-                        if source == TimelineSource::Scans { "the same estimated plan" } else { "the same plan" };
-                    format!(
-                        "Got {ratio} slower ({}) with {plan}: more data, blocking or a busier server.",
-                        per_run(b, r)
-                    )
+                Some(s) => match s.at.as_deref() {
+                    Some(at) => t!(
+                        "core.changes.headline.slower_switch_at",
+                        ratio = ratio,
+                        per_run = per_run(b, r),
+                        at = short_time(at),
+                        switch = switch_words(s)
+                    ),
+                    None => t!(
+                        "core.changes.headline.slower_switch",
+                        ratio = ratio,
+                        per_run = per_run(b, r),
+                        switch = switch_words(s)
+                    ),
+                },
+                None if c.same_plan && source == TimelineSource::Scans => {
+                    t!("core.changes.headline.slower_same_estimated_plan", ratio = ratio, per_run = per_run(b, r))
                 }
-                None => format!("Got {ratio} slower ({}).", per_run(b, r)),
+                None if c.same_plan => {
+                    t!("core.changes.headline.slower_same_plan", ratio = ratio, per_run = per_run(b, r))
+                }
+                None => t!("core.changes.headline.slower", ratio = ratio, per_run = per_run(b, r)),
             }
         }
         (ChangeStatus::Improved, Some(b), Some(r)) => {
             let ratio = c.ratio.map(|x| times(1.0 / x)).unwrap_or_default();
             match &c.plan_switch {
-                Some(s) => format!("Got {ratio} faster ({}){}.", per_run(b, r), switch_words(s)),
-                None => format!("Got {ratio} faster ({}).", per_run(b, r)),
+                Some(s) => match s.at.as_deref() {
+                    Some(at) => t!(
+                        "core.changes.headline.faster_switch_at",
+                        ratio = ratio,
+                        per_run = per_run(b, r),
+                        at = short_time(at),
+                        switch = switch_words(s)
+                    ),
+                    None => t!(
+                        "core.changes.headline.faster_switch",
+                        ratio = ratio,
+                        per_run = per_run(b, r),
+                        switch = switch_words(s)
+                    ),
+                },
+                None => t!("core.changes.headline.faster", ratio = ratio, per_run = per_run(b, r)),
             }
         }
-        (ChangeStatus::New, _, Some(r)) => format!(
-            "Started running: {} runs averaging {}, {} of recent database time.",
-            count(r.executions),
-            run_time(r.mean_ms),
-            percent(c.recent_share)
+        (ChangeStatus::New, _, Some(r)) => t!(
+            "core.changes.headline.new",
+            n = r.executions,
+            count = count(r.executions),
+            mean = run_time(r.mean_ms),
+            share = percent(c.recent_share)
         ),
         (ChangeStatus::Stopped, Some(b), _) => {
-            format!("Stopped running: it ran {} before, averaging {}.", times_word(b.executions), run_time(b.mean_ms))
+            t!("core.changes.headline.stopped", times = times_word(b.executions), mean = run_time(b.mean_ms))
         }
-        (ChangeStatus::LowSample, b, r) => format!(
-            "Too few runs to compare: {} before and {} after (Culprit needs {} in each).",
-            count(b.as_ref().map(|s| s.executions).unwrap_or(0.0)),
-            count(r.as_ref().map(|s| s.executions).unwrap_or(0.0)),
-            count(min)
+        (ChangeStatus::LowSample, b, r) => t!(
+            "core.changes.headline.low_sample",
+            before = count(b.as_ref().map(|s| s.executions).unwrap_or(0.0)),
+            after = count(r.as_ref().map(|s| s.executions).unwrap_or(0.0)),
+            min = count(min)
         ),
         (ChangeStatus::NotComparable, b, r) => {
-            let why = c.reason.as_deref().unwrap_or("there is no data for the other period");
+            let why = c.reason.clone().unwrap_or_else(|| t!("core.changes.reason.no_data"));
             match (b, r) {
                 (Some(b), None) => {
-                    format!("Ran {} before; can't tell whether it still runs: {why}.", times_word(b.executions))
+                    t!("core.changes.headline.not_comparable_before", times = times_word(b.executions), why = why)
                 }
-                (_, r) => format!(
-                    "Ran {} recently, but can't be compared: {why}.",
-                    times_word(r.as_ref().map(|s| s.executions).unwrap_or(0.0))
+                (_, r) => t!(
+                    "core.changes.headline.not_comparable_recent",
+                    times = times_word(r.as_ref().map(|s| s.executions).unwrap_or(0.0)),
+                    why = why
                 ),
             }
         }
-        (_, Some(b), Some(r)) => format!("About the same ({}).", per_run(b, r)),
-        _ => c.status.label().to_string(),
+        (_, Some(b), Some(r)) => t!("core.changes.headline.unchanged", per_run = per_run(b, r)),
+        _ => c.status.label(),
     }
 }
 
@@ -486,90 +513,144 @@ fn summarize(
         (count(ChangeStatus::Regressed), count(ChangeStatus::New), count(ChangeStatus::Improved));
     let workload = if before > 0.0 && after > 0.0 {
         let ratio = after / before;
-        let trend = if ratio >= 1.15 {
-            format!("rose {}", times(ratio))
-        } else if ratio <= 1.0 / 1.15 {
-            format!("fell to {}", crate::format::percent(ratio))
-        } else {
-            "stayed about the same".to_string()
-        };
+        let (rose, fell) = (ratio >= 1.15, ratio <= 1.0 / 1.15);
         if short {
-            format!(
-                "Database time {trend} for the time covered: {} over {} before, {} over {} since.",
-                duration(baseline_total.total_ms),
-                span_words(baseline.hours()),
-                duration(recent_total.total_ms),
-                span_words(recent.hours())
+            let (before, before_span) = (duration(baseline_total.total_ms), span_words(baseline.hours()));
+            let (after, after_span) = (duration(recent_total.total_ms), span_words(recent.hours()));
+            if rose {
+                t!(
+                    "core.changes.workload.covered_rose",
+                    factor = times(ratio),
+                    before = before,
+                    before_span = before_span,
+                    after = after,
+                    after_span = after_span
+                )
+            } else if fell {
+                t!(
+                    "core.changes.workload.covered_fell",
+                    share = format::percent(ratio),
+                    before = before,
+                    before_span = before_span,
+                    after = after,
+                    after_span = after_span
+                )
+            } else {
+                t!(
+                    "core.changes.workload.covered_same",
+                    before = before,
+                    before_span = before_span,
+                    after = after,
+                    after_span = after_span
+                )
+            }
+        } else if rose {
+            t!("core.changes.workload.per_hour_rose", factor = times(ratio), before = duration(before), after = duration(after))
+        } else if fell {
+            t!(
+                "core.changes.workload.per_hour_fell",
+                share = format::percent(ratio),
+                before = duration(before),
+                after = duration(after)
             )
         } else {
-            format!("Database time per hour {trend}: {} → {}.", duration(before), duration(after))
+            t!("core.changes.workload.per_hour_same", before = duration(before), after = duration(after))
         }
     } else if after > 0.0 {
-        format!("Database time per hour: {} recently; nothing to compare it with before.", duration(after))
+        t!("core.changes.workload.recent_only", after = duration(after))
     } else {
-        "No queries ran in the recent period.".to_string()
+        t!("core.changes.workload.none")
     };
-    let plural = |n: usize, one: &str, many: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {many}") };
     let parts: Vec<String> = [
-        (slower, "query got slower", "queries got slower"),
-        (new, "query is new", "queries are new"),
-        (faster, "query got faster", "queries got faster"),
+        (slower, key!("core.changes.counts.slower")),
+        (new, key!("core.changes.counts.new")),
+        (faster, key!("core.changes.counts.faster")),
     ]
     .into_iter()
-    .filter(|(n, _, _)| *n > 0)
-    .map(|(n, one, many)| plural(n, one, many))
+    .filter(|(n, _)| *n > 0)
+    .map(|(n, key)| crate::i18n::t(key, &[("n", n.into()), ("count", n.to_string().into())]))
     .collect();
-    if parts.is_empty() {
-        format!("{workload} No query changed by more than the threshold.")
+    let changed = if parts.is_empty() {
+        t!("core.changes.counts.none")
     } else {
-        format!("{workload} {}.", join_words(&parts))
-    }
+        t!("core.changes.counts.changed", changes = format::list(&parts))
+    };
+    [workload, changed].join(" ")
 }
 
 /// "3 s", "12 min", "5 h".
 fn span_words(hours: f64) -> String {
-    crate::format::duration(hours * 3_600_000.0)
-}
-
-fn join_words(parts: &[String]) -> String {
-    match parts {
-        [] => String::new(),
-        [one] => capitalize(one),
-        [rest @ .., last] => format!("{} and {last}", capitalize(&rest.join(", "))),
-    }
-}
-
-fn capitalize(text: &str) -> String {
-    let mut chars = text.chars();
-    chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
+    format::duration(hours * 3_600_000.0)
 }
 
 /// A single run's duration with enough precision to compare two of them ("8.2 ms", not "8 ms").
 pub fn run_time(ms: f64) -> String {
-    if (1.0..10.0).contains(&ms) { format!("{ms:.1} ms") } else { crate::format::duration(ms) }
+    if (1.0..10.0).contains(&ms) {
+        t!("common.duration.ms", n = digits(format!("{ms:.1}")))
+    } else {
+        format::duration(ms)
+    }
 }
 
 /// "once", "twice", "1,240 times".
 fn times_word(n: f64) -> String {
-    match n.round() as i64 {
-        1 => "once".into(),
-        2 => "twice".into(),
-        _ => format!("{} times", crate::format::count(n)),
-    }
+    t!("core.changes.times", n = n.round(), count = format::count(n))
 }
 
 /// "Tue 14:05 UTC".
 pub fn short_time(iso: &str) -> String {
     chrono::DateTime::parse_from_rfc3339(iso)
-        .map(|t| t.with_timezone(&chrono::Utc).format("%a %H:%M UTC").to_string())
+        .map(|t| {
+            let t = t.with_timezone(&chrono::Utc);
+            t!("core.changes.time.short", weekday = weekday(&t), time = t.format("%H:%M").to_string())
+        })
         .unwrap_or_else(|_| iso.to_string())
 }
 
 /// "Sun Oct 4 18:00 UTC": [`short_time`] with the date, for ranges longer than a day.
 pub fn dated_time(iso: &str) -> String {
+    use chrono::Datelike;
+    // Each month's short name.
+    const MONTHS: [&str; 12] = [
+        key!("common.month.jan"),
+        key!("common.month.feb"),
+        key!("common.month.mar"),
+        key!("common.month.apr"),
+        key!("common.month.may"),
+        key!("common.month.jun"),
+        key!("common.month.jul"),
+        key!("common.month.aug"),
+        key!("common.month.sep"),
+        key!("common.month.oct"),
+        key!("common.month.nov"),
+        key!("common.month.dec"),
+    ];
     chrono::DateTime::parse_from_rfc3339(iso)
-        .map(|t| t.with_timezone(&chrono::Utc).format("%a %b %-d %H:%M UTC").to_string())
+        .map(|t| {
+            let t = t.with_timezone(&chrono::Utc);
+            t!(
+                "core.changes.time.dated",
+                weekday = weekday(&t),
+                month = crate::i18n::t(MONTHS[t.month0() as usize], &[]),
+                day = t.day().to_string(),
+                time = t.format("%H:%M").to_string()
+            )
+        })
         .unwrap_or_else(|_| iso.to_string())
+}
+
+/// A day of the week's short name: "Tue".
+fn weekday(t: &chrono::DateTime<chrono::Utc>) -> String {
+    use chrono::{Datelike, Weekday};
+    match t.weekday() {
+        Weekday::Mon => t!("common.weekday.mon"),
+        Weekday::Tue => t!("common.weekday.tue"),
+        Weekday::Wed => t!("common.weekday.wed"),
+        Weekday::Thu => t!("common.weekday.thu"),
+        Weekday::Fri => t!("common.weekday.fri"),
+        Weekday::Sat => t!("common.weekday.sat"),
+        Weekday::Sun => t!("common.weekday.sun"),
+    }
 }
 
 /// Both ends of a range: weekday and time within a day, with dates once it spans more than one.
@@ -697,6 +778,217 @@ mod tests {
         let changes = compare("shop", Engine::Postgres, d, &CompareOptions::default());
         assert!(changes.summary.contains("for the time covered"), "{}", changes.summary);
         assert!(!changes.summary.contains("per hour"), "{}", changes.summary);
+    }
+
+    // What a comparison says about every kind of query and the whole workload, word for word: from locales/en.json.
+    #[test]
+    fn changes_say_what_happened_in_english() {
+        let mut out = Vec::new();
+        for status in [
+            ChangeStatus::Regressed,
+            ChangeStatus::New,
+            ChangeStatus::Improved,
+            ChangeStatus::Stopped,
+            ChangeStatus::LowSample,
+            ChangeStatus::NotComparable,
+            ChangeStatus::Unchanged,
+        ] {
+            out.push(format!("{status:?}: {}", status.label()));
+        }
+        let change = |status, b: Option<PeriodStats>, r: Option<PeriodStats>, ratio: Option<f64>| QueryChange {
+            query_id: "q".into(),
+            text: "SELECT 1".into(),
+            object_name: None,
+            status,
+            baseline: b,
+            recent: r,
+            ratio,
+            impact_ms: 0.0,
+            recent_share: 0.123,
+            plan_switch: None,
+            same_plan: false,
+            headline: String::new(),
+            reason: None,
+            context: vec![],
+        };
+        let switch = |at: Option<&str>, what: Option<&str>| PlanSwitch {
+            from: "815".into(),
+            to: "685".into(),
+            from_label: None,
+            to_label: None,
+            at: at.map(str::to_string),
+            what: what.map(str::to_string),
+        };
+        let (b, r) = (Some(stats(100.0, 2.0)), Some(stats(1500.0, 0.4)));
+        let mut cases = vec![
+            change(ChangeStatus::Regressed, b.clone(), r.clone(), Some(4.13)),
+            change(ChangeStatus::Regressed, b.clone(), r.clone(), Some(41.3)),
+            change(ChangeStatus::Regressed, b.clone(), r.clone(), None),
+            QueryChange { same_plan: true, ..change(ChangeStatus::Regressed, b.clone(), r.clone(), Some(2.0)) },
+            change(ChangeStatus::Improved, b.clone(), r.clone(), Some(0.2)),
+            change(ChangeStatus::Improved, b.clone(), r.clone(), None),
+            change(ChangeStatus::New, None, r.clone(), None),
+            change(ChangeStatus::Stopped, Some(stats(1.0, 2.0)), None, None),
+            change(ChangeStatus::Stopped, Some(stats(2.0, 2.0)), None, None),
+            change(ChangeStatus::Stopped, Some(stats(1240.0, 0.004)), None, None),
+            change(ChangeStatus::LowSample, Some(stats(3.0, 2.0)), r.clone(), None),
+            change(ChangeStatus::LowSample, None, None, None),
+            change(ChangeStatus::NotComparable, Some(stats(30.0, 2.0)), None, None),
+            change(ChangeStatus::NotComparable, None, r.clone(), None),
+            QueryChange {
+                reason: Some("Query Store has no data for the baseline period".into()),
+                ..change(ChangeStatus::NotComparable, None, Some(stats(1.0, 2.0)), None)
+            },
+            change(ChangeStatus::Unchanged, b.clone(), Some(stats(100.0, 2_500.0)), Some(1.0)),
+            change(ChangeStatus::Unchanged, None, None, None),
+        ];
+        for (at, what) in [(Some("2026-10-13T14:05:00Z"), Some("Index Seek → Index Scan")), (None, None)] {
+            for status in [ChangeStatus::Regressed, ChangeStatus::Improved] {
+                let ratio = if status == ChangeStatus::Regressed { 3.0 } else { 0.5 };
+                cases.push(QueryChange {
+                    plan_switch: Some(switch(at, what)),
+                    ..change(status, b.clone(), r.clone(), Some(ratio))
+                });
+            }
+        }
+        for (engine, source) in [
+            (Engine::Mssql, TimelineSource::QueryStore),
+            (Engine::Postgres, TimelineSource::Scans),
+            (Engine::Mysql, TimelineSource::SlowLog),
+        ] {
+            for c in &cases {
+                out.push(format!("{engine:?} {source:?} {:?}: {}", c.status, headline(c, engine, source, 10.0)));
+            }
+        }
+        // The whole workload, with each source's coverage and each trend.
+        for source in [TimelineSource::QueryStore, TimelineSource::Scans, TimelineSource::SlowLog] {
+            let mut d = data(vec![query("q", Some(stats(100.0, 1.0)), Some(stats(100.0, 3.0)))], 0.4);
+            d.source = source;
+            let c = compare("shop", Engine::Postgres, d, &CompareOptions::default());
+            out.push(format!("{source:?}: {} | {}", c.summary, c.notes.join(" | ")));
+        }
+        let mut d = data(vec![], 1.0);
+        d.unavailable = Some("Culprit has one scan in the baseline period; it needs two.".into());
+        out.push(compare("shop", Engine::Postgres, d, &CompareOptions::default()).summary);
+        out.push(compare("shop", Engine::Postgres, data(vec![], 1.0), &CompareOptions::default()).summary);
+        let only_recent = vec![query("n", None, Some(stats(100.0, 3.0)))];
+        out.push(compare("shop", Engine::Postgres, data(only_recent, 1.0), &CompareOptions::default()).summary);
+        let mut queries = vec![
+            query("s1", Some(stats(100.0, 2.0)), Some(stats(100.0, 8.0))),
+            query("s2", Some(stats(100.0, 2.0)), Some(stats(100.0, 9.0))),
+            query("f1", Some(stats(100.0, 40.0)), Some(stats(100.0, 10.0))),
+            query("n1", None, Some(stats(100.0, 3.0))),
+        ];
+        out.push(compare("shop", Engine::Postgres, data(queries.clone(), 1.0), &CompareOptions::default()).summary);
+        queries.push(query("n2", None, Some(stats(100.0, 3.0))));
+        queries.remove(1);
+        out.push(compare("shop", Engine::Postgres, data(queries.clone(), 1.0), &CompareOptions::default()).summary);
+        let falls = vec![query("f", Some(stats(100.0, 40.0)), Some(stats(100.0, 4.0)))];
+        out.push(compare("shop", Engine::Postgres, data(falls, 1.0), &CompareOptions::default()).summary);
+        let steady = vec![query("u", Some(stats(100.0, 4.0)), Some(stats(100.0, 4.2)))];
+        out.push(compare("shop", Engine::Postgres, data(steady, 1.0), &CompareOptions::default()).summary);
+        let mut short = data(vec![query("q", Some(stats(100.0, 1.0)), Some(stats(100.0, 3.0)))], 1.0);
+        short.baseline = Period { start: "2026-10-11T10:00:00Z".into(), end: "2026-10-11T10:00:02Z".into() };
+        short.recent = Period { start: "2026-10-11T10:00:02Z".into(), end: "2026-10-11T10:40:05Z".into() };
+        out.push(compare("shop", Engine::Postgres, short, &CompareOptions::default()).summary);
+        for ms in [0.004, 0.5, 5.0, 50.0, 5_000.0] {
+            out.push(format!("{ms}: {}", run_time(ms)));
+        }
+        for iso in ["2026-10-13T14:05:00Z", "2026-01-04T08:00:00+02:00", "not a time"] {
+            out.push(format!("{iso}: {} | {}", short_time(iso), dated_time(iso)));
+        }
+        out.push(format!("{} {} {}", times(4.13), times(41.3), times(1.0)));
+        let got = out.join("\n");
+        assert_eq!(got, r#"Regressed: Got slower
+New: New
+Improved: Got faster
+Stopped: Stopped running
+LowSample: Too few runs
+NotComparable: Not comparable
+Unchanged: About the same
+Mssql QueryStore Regressed: Got 4.1× slower (2.0 ms → 0.40 ms per run).
+Mssql QueryStore Regressed: Got 41× slower (2.0 ms → 0.40 ms per run).
+Mssql QueryStore Regressed: Got much slower (2.0 ms → 0.40 ms per run).
+Mssql QueryStore Regressed: Got 2.0× slower (2.0 ms → 0.40 ms per run) with the same plan: more data, blocking or a busier server.
+Mssql QueryStore Improved: Got 5.0× faster (2.0 ms → 0.40 ms per run).
+Mssql QueryStore Improved: Got  faster (2.0 ms → 0.40 ms per run).
+Mssql QueryStore New: Started running: 1.5K runs averaging 0.40 ms, 12% of recent database time.
+Mssql QueryStore Stopped: Stopped running: it ran once before, averaging 2.0 ms.
+Mssql QueryStore Stopped: Stopped running: it ran twice before, averaging 2.0 ms.
+Mssql QueryStore Stopped: Stopped running: it ran 1.2K times before, averaging 4 µs.
+Mssql QueryStore LowSample: Too few runs to compare: 3 before and 1.5K after (Culprit needs 10 in each).
+Mssql QueryStore LowSample: Too few runs to compare: 0 before and 0 after (Culprit needs 10 in each).
+Mssql QueryStore NotComparable: Ran 30 times before; can't tell whether it still runs: there is no data for the other period.
+Mssql QueryStore NotComparable: Ran 1.5K times recently, but can't be compared: there is no data for the other period.
+Mssql QueryStore NotComparable: Ran once recently, but can't be compared: Query Store has no data for the baseline period.
+Mssql QueryStore Unchanged: About the same (2.0 ms → 2.5 s per run).
+Mssql QueryStore Unchanged: About the same
+Mssql QueryStore Regressed: Got 3.0× slower (2.0 ms → 0.40 ms per run) on Tue 14:05 UTC, when SQL Server switched from plan 815 to plan 685 (Index Seek → Index Scan).
+Mssql QueryStore Improved: Got 2.0× faster (2.0 ms → 0.40 ms per run) on Tue 14:05 UTC, when SQL Server switched from plan 815 to plan 685 (Index Seek → Index Scan).
+Mssql QueryStore Regressed: Got 3.0× slower (2.0 ms → 0.40 ms per run), when SQL Server switched from plan 815 to plan 685.
+Mssql QueryStore Improved: Got 2.0× faster (2.0 ms → 0.40 ms per run), when SQL Server switched from plan 815 to plan 685.
+Postgres Scans Regressed: Got 4.1× slower (2.0 ms → 0.40 ms per run).
+Postgres Scans Regressed: Got 41× slower (2.0 ms → 0.40 ms per run).
+Postgres Scans Regressed: Got much slower (2.0 ms → 0.40 ms per run).
+Postgres Scans Regressed: Got 2.0× slower (2.0 ms → 0.40 ms per run) with the same estimated plan: more data, blocking or a busier server.
+Postgres Scans Improved: Got 5.0× faster (2.0 ms → 0.40 ms per run).
+Postgres Scans Improved: Got  faster (2.0 ms → 0.40 ms per run).
+Postgres Scans New: Started running: 1.5K runs averaging 0.40 ms, 12% of recent database time.
+Postgres Scans Stopped: Stopped running: it ran once before, averaging 2.0 ms.
+Postgres Scans Stopped: Stopped running: it ran twice before, averaging 2.0 ms.
+Postgres Scans Stopped: Stopped running: it ran 1.2K times before, averaging 4 µs.
+Postgres Scans LowSample: Too few runs to compare: 3 before and 1.5K after (Culprit needs 10 in each).
+Postgres Scans LowSample: Too few runs to compare: 0 before and 0 after (Culprit needs 10 in each).
+Postgres Scans NotComparable: Ran 30 times before; can't tell whether it still runs: there is no data for the other period.
+Postgres Scans NotComparable: Ran 1.5K times recently, but can't be compared: there is no data for the other period.
+Postgres Scans NotComparable: Ran once recently, but can't be compared: Query Store has no data for the baseline period.
+Postgres Scans Unchanged: About the same (2.0 ms → 2.5 s per run).
+Postgres Scans Unchanged: About the same
+Postgres Scans Regressed: Got 3.0× slower (2.0 ms → 0.40 ms per run) on Tue 14:05 UTC, when the plan Culprit captured for it changed (Index Seek → Index Scan).
+Postgres Scans Improved: Got 2.0× faster (2.0 ms → 0.40 ms per run) on Tue 14:05 UTC, when the plan Culprit captured for it changed (Index Seek → Index Scan).
+Postgres Scans Regressed: Got 3.0× slower (2.0 ms → 0.40 ms per run), when the plan Culprit captured for it changed.
+Postgres Scans Improved: Got 2.0× faster (2.0 ms → 0.40 ms per run), when the plan Culprit captured for it changed.
+Mysql SlowLog Regressed: Got 4.1× slower (2.0 ms → 0.40 ms per run).
+Mysql SlowLog Regressed: Got 41× slower (2.0 ms → 0.40 ms per run).
+Mysql SlowLog Regressed: Got much slower (2.0 ms → 0.40 ms per run).
+Mysql SlowLog Regressed: Got 2.0× slower (2.0 ms → 0.40 ms per run) with the same plan: more data, blocking or a busier server.
+Mysql SlowLog Improved: Got 5.0× faster (2.0 ms → 0.40 ms per run).
+Mysql SlowLog Improved: Got  faster (2.0 ms → 0.40 ms per run).
+Mysql SlowLog New: Started running: 1.5K runs averaging 0.40 ms, 12% of recent database time.
+Mysql SlowLog Stopped: Stopped running: it ran once before, averaging 2.0 ms.
+Mysql SlowLog Stopped: Stopped running: it ran twice before, averaging 2.0 ms.
+Mysql SlowLog Stopped: Stopped running: it ran 1.2K times before, averaging 4 µs.
+Mysql SlowLog LowSample: Too few runs to compare: 3 before and 1.5K after (Culprit needs 10 in each).
+Mysql SlowLog LowSample: Too few runs to compare: 0 before and 0 after (Culprit needs 10 in each).
+Mysql SlowLog NotComparable: Ran 30 times before; can't tell whether it still runs: there is no data for the other period.
+Mysql SlowLog NotComparable: Ran 1.5K times recently, but can't be compared: there is no data for the other period.
+Mysql SlowLog NotComparable: Ran once recently, but can't be compared: Query Store has no data for the baseline period.
+Mysql SlowLog Unchanged: About the same (2.0 ms → 2.5 s per run).
+Mysql SlowLog Unchanged: About the same
+Mysql SlowLog Regressed: Got 3.0× slower (2.0 ms → 0.40 ms per run) on Tue 14:05 UTC, when the plan Culprit captured for it changed (Index Seek → Index Scan).
+Mysql SlowLog Improved: Got 2.0× faster (2.0 ms → 0.40 ms per run) on Tue 14:05 UTC, when the plan Culprit captured for it changed (Index Seek → Index Scan).
+Mysql SlowLog Regressed: Got 3.0× slower (2.0 ms → 0.40 ms per run), when the plan Culprit captured for it changed.
+Mysql SlowLog Improved: Got 2.0× faster (2.0 ms → 0.40 ms per run), when the plan Culprit captured for it changed.
+QueryStore: Database time per hour rose 3.0×: 25 ms → 75 ms. 1 query got slower. | Query Store has data for 40% of the baseline period; queries missing from it may not have been recorded.
+Scans: Database time per hour rose 3.0×: 25 ms → 75 ms. 1 query got slower. | Culprit's scans cover 40% of the baseline period; it follows the scans it has.
+SlowLog: Database time per hour rose 3.0×: 25 ms → 75 ms. 1 query got slower. | The slow query log covers 40% of the baseline period; statements missing from it may not have been logged.
+Can't compare yet. Culprit has one scan in the baseline period; it needs two.
+No queries ran in the recent period. No query changed by more than the threshold.
+Database time per hour: 75 ms recently; nothing to compare it with before. 1 query is new.
+Database time per hour fell to 68%: 1.1 s → 750 ms. 2 queries got slower, 1 query is new and 1 query got faster.
+Database time per hour fell to 57%: 1.1 s → 600 ms. 1 query got slower, 2 queries are new and 1 query got faster.
+Database time per hour fell to 10%: 1.0 s → 100 ms. 1 query got faster.
+Database time per hour stayed about the same: 100 ms → 105 ms. No query changed by more than the threshold.
+Database time fell to <1% for the time covered: 100 ms over 2.0 s before, 300 ms over 40 min since. 1 query got slower.
+0.004: 4 µs
+0.5: 0.50 ms
+5: 5.0 ms
+50: 50 ms
+5000: 5.0 s
+2026-10-13T14:05:00Z: Tue 14:05 UTC | Tue Oct 13 14:05 UTC
+2026-01-04T08:00:00+02:00: Sun 06:00 UTC | Sun Jan 4 06:00 UTC
+not a time: not a time | not a time
+4.1× 41× 1.0×"#);
     }
 
     #[test]

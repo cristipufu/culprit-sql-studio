@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::changes::{ChangeStatus, Changes, QueryChange, epoch, short_time};
+use crate::{format, key, t};
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(rename_all = "kebab-case")]
@@ -179,11 +180,9 @@ impl ChangeEvent {
     /// CLI read UTC; the app formats the same fields in local time.
     pub fn when(&self) -> String {
         match (&self.after, &self.until) {
-            (Some(after), _) => {
-                format!("between the {} and {} scans", short_time(after), clock(&self.at))
-            }
-            (None, Some(until)) => format!("from {} to {}", short_time(&self.at), clock(until)),
-            (None, None) => format!("at {}", short_time(&self.at)),
+            (Some(after), _) => t!("core.events.when.between_scans", from = short_time(after), to = clock(&self.at)),
+            (None, Some(until)) => t!("core.events.when.from_to", from = short_time(&self.at), to = clock(until)),
+            (None, None) => t!("core.events.when.at", time = short_time(&self.at)),
         }
     }
 }
@@ -191,7 +190,7 @@ impl ChangeEvent {
 /// "14:05 UTC".
 fn clock(iso: &str) -> String {
     chrono::DateTime::parse_from_rfc3339(iso)
-        .map(|t| t.with_timezone(&chrono::Utc).format("%H:%M UTC").to_string())
+        .map(|t| t!("core.events.clock", time = t.with_timezone(&chrono::Utc).format("%H:%M").to_string()))
         .unwrap_or_else(|_| iso.to_string())
 }
 
@@ -244,7 +243,8 @@ pub fn correlate(changes: &mut Changes, events: Vec<ChangeEvent>) {
         links.sort_by(|a, b| b.0.total_cmp(&a.0));
         links.truncate(3);
         if let Some((_, e, l)) = links.first().filter(|(_, _, l)| l.strong) {
-            q.headline = format!("{} Around then: {} {} ({}).", q.headline, e.title, e.when(), l.why);
+            let around = t!("core.events.around_then.query", event = &e.title, when = e.when(), why = &l.why);
+            q.headline = [q.headline.clone(), around].join(" ");
         }
         for (_, e, _) in &links {
             used.insert(e.id.clone());
@@ -253,7 +253,7 @@ pub fn correlate(changes: &mut Changes, events: Vec<ChangeEvent>) {
     }
     let events: Vec<ChangeEvent> = events.into_iter().filter(|e| !e.minor || used.contains(&e.id)).collect();
     if let Some(words) = around_then(&events) {
-        changes.summary = format!("{} Around then: {words}.", changes.summary);
+        changes.summary = [changes.summary.clone(), t!("core.events.around_then.summary", events = words)].join(" ");
     }
     changes.events = events;
 }
@@ -279,7 +279,7 @@ fn link(
     use ChangeStatus::{Improved, New, Regressed, Stopped};
     let touched = e.table.as_deref().and_then(|t| tables.iter().find(|q| same_table(q, t)).map(|_| t));
     let own_object = e.object.as_deref().zip(q.object_name.as_deref()).is_some_and(|(a, b)| same_table(a, b));
-    let reads = |t: &str| format!("this query uses {t}");
+    let reads = |t: &str| t!("core.events.why.uses", table = t);
     let (score, why, strong) = match (e.kind, q.status) {
         (EventKind::Index, status) => {
             let table = touched?;
@@ -303,38 +303,32 @@ fn link(
             };
             (score, reads(table), score >= 0.7)
         }
-        (EventKind::Code, _) if own_object => (0.95, "it's this query's procedure or function".to_string(), true),
+        (EventKind::Code, _) if own_object => (0.95, t!("core.events.why.own_procedure"), true),
         (EventKind::Code, _) => match touched {
             // A trigger runs with every write to its table.
-            Some(table) => (0.7, format!("a trigger on {table} runs with this query"), true),
+            Some(table) => (0.7, t!("core.events.why.trigger", table = table), true),
             None => {
                 let object = e.object.as_deref().filter(|o| tables.iter().any(|t| same_table(t, o)))?;
-                (0.8, format!("this query reads {}", leaf(object)), true)
+                (0.8, t!("core.events.why.reads", object = leaf(object)), true)
             }
         },
         // Fresh statistics are the usual reason a plan changes; without a plan change they rarely matter.
         (EventKind::Statistics, Regressed | Improved) if q.plan_switch.is_some() => {
             let table = touched?;
-            (0.85, format!("statistics on {table} feed this query's plan, which changed"), true)
+            (0.85, t!("core.events.why.statistics", table = table), true)
         }
         (EventKind::Statistics, _) => return None,
-        (EventKind::Mark, New | Stopped) => {
-            (0.8, "queries that start or stop usually ship with a deploy".to_string(), true)
-        }
-        (EventKind::Mark, _) => (0.6, "marked on the timeline".to_string(), true),
-        (EventKind::Setting, Regressed | Improved) => (0.5, "settings apply to every query".to_string(), false),
-        (EventKind::Version, Regressed | Improved) => {
-            (0.6, "a new version can plan queries differently".to_string(), true)
-        }
-        (EventKind::Restart, Regressed) => {
-            (0.4, "after a restart caches are cold and plans compile again".to_string(), false)
-        }
+        (EventKind::Mark, New | Stopped) => (0.8, t!("core.events.why.deploy"), true),
+        (EventKind::Mark, _) => (0.6, t!("core.events.why.marked"), true),
+        (EventKind::Setting, Regressed | Improved) => (0.5, t!("core.events.why.setting"), false),
+        (EventKind::Version, Regressed | Improved) => (0.6, t!("core.events.why.version"), true),
+        (EventKind::Restart, Regressed) => (0.4, t!("core.events.why.restart"), false),
         // Throttling slows queries without changing their plans; it has to overlap the recent period to matter.
         (EventKind::Throttle, Regressed) if q.plan_switch.is_none() => {
             if e.end() < recent.0 || e.start() > recent.1 {
                 return None;
             }
-            (0.75, "the cloud held the server back while this query ran slower".to_string(), true)
+            (0.75, t!("core.events.why.throttle"), true)
         }
         _ => return None,
     };
@@ -358,38 +352,33 @@ fn link(
 
 /// "1 mark (\"deploy v1.4.2\"), 2 index changes and a restart".
 fn around_then(events: &[ChangeEvent]) -> Option<String> {
-    let count = |kind: EventKind| events.iter().filter(|e| e.kind == kind).count();
-    let plural = |n: usize, one: &str, many: &str| match n {
+    // How many of a kind, as its message says them: "an index change", "2 index changes".
+    let counted = |kind: EventKind, key: &str| match events.iter().filter(|e| e.kind == kind).count() {
         0 => None,
-        1 => Some(one.to_string()),
-        n => Some(format!("{n} {many}")),
+        n => Some(crate::i18n::t(key, &[("n", n.into()), ("count", n.to_string().into())])),
     };
     let marks: Vec<&ChangeEvent> = events.iter().filter(|e| e.kind == EventKind::Mark).collect();
     let mark_words = match marks.as_slice() {
         [] => None,
-        [one] => Some(format!("a mark (\"{}\")", clip(&one.title, 60))),
-        many => Some(format!("{} marks", many.len())),
+        [one] => Some(t!("core.events.around.mark", title = clip(&one.title, 60))),
+        many => Some(t!("core.events.around.marks", n = many.len(), count = many.len().to_string())),
     };
     let parts: Vec<String> = [
         mark_words,
-        plural(count(EventKind::Index), "an index change", "index changes"),
-        plural(count(EventKind::Table), "a table change", "table changes"),
-        plural(count(EventKind::Code), "a procedure or view change", "procedure or view changes"),
-        plural(count(EventKind::Setting), "a setting change", "setting changes"),
-        plural(count(EventKind::Version), "an upgrade", "upgrades"),
-        plural(count(EventKind::Restart), "a restart", "restarts"),
-        plural(count(EventKind::StatsReset), "a statistics reset", "statistics resets"),
-        plural(count(EventKind::Statistics), "a statistics update", "statistics updates"),
-        plural(count(EventKind::Throttle), "cloud throttling", "throttling episodes"),
+        counted(EventKind::Index, key!("core.events.around.index")),
+        counted(EventKind::Table, key!("core.events.around.table")),
+        counted(EventKind::Code, key!("core.events.around.code")),
+        counted(EventKind::Setting, key!("core.events.around.setting")),
+        counted(EventKind::Version, key!("core.events.around.version")),
+        counted(EventKind::Restart, key!("core.events.around.restart")),
+        counted(EventKind::StatsReset, key!("core.events.around.stats_reset")),
+        counted(EventKind::Statistics, key!("core.events.around.statistics")),
+        counted(EventKind::Throttle, key!("core.events.around.throttle")),
     ]
     .into_iter()
     .flatten()
     .collect();
-    match parts.as_slice() {
-        [] => None,
-        [one] => Some(one.clone()),
-        [rest @ .., last] => Some(format!("{} and {last}", rest.join(", "))),
-    }
+    (!parts.is_empty()).then(|| format::list(&parts))
 }
 
 fn clip(text: &str, max: usize) -> String {
@@ -517,6 +506,133 @@ mod tests {
         assert!(same.headline.contains("CPU credits ran out from Sun 13:00 UTC to 14:10 UTC"), "{}", same.headline);
         let switched = c.queries.iter().find(|q| q.query_id == "switched").unwrap();
         assert!(switched.context.is_empty(), "a plan change is the better explanation");
+    }
+
+    // When an event happened, why it may explain a query and what changed around then, word for word: the messages
+    // come from locales/en.json.
+    #[test]
+    fn events_say_what_changed_in_english() {
+        let at = "2026-10-11T12:00:00Z";
+        let kinds = [
+            EventKind::Mark,
+            EventKind::Index,
+            EventKind::Table,
+            EventKind::Code,
+            EventKind::Setting,
+            EventKind::Version,
+            EventKind::Restart,
+            EventKind::StatsReset,
+            EventKind::Statistics,
+            EventKind::Throttle,
+        ];
+        let mark = ChangeEvent::new(EventKind::Mark, EventSource::Mark, "m", at, "deploy");
+        let mut out = vec![
+            mark.when(),
+            mark.clone().between("2026-10-11T11:00:00Z").when(),
+            mark.clone().until("2026-10-11T14:10:00Z").when(),
+        ];
+        let mut whys = BTreeSet::new();
+        let tables = vec!["public.orders".to_string()];
+        for kind in kinds {
+            for status in [ChangeStatus::Regressed, ChangeStatus::Improved, ChangeStatus::New, ChangeStatus::Stopped] {
+                for action in [None, Some(EventAction::Created), Some(EventAction::Dropped), Some(EventAction::Changed)] {
+                    for (table, object) in [(Some("public.orders"), None), (None, Some("dbo.p")), (None, Some("orders"))] {
+                        for switched in [false, true] {
+                            let mut e = ChangeEvent::new(kind, EventSource::Database, "s", at, "t");
+                            e.action = action;
+                            e.table = table.map(str::to_string);
+                            e.object = object.map(str::to_string);
+                            let q = QueryChange {
+                                query_id: "q".into(),
+                                text: "SELECT * FROM public.orders".into(),
+                                object_name: Some("dbo.p".into()),
+                                status,
+                                baseline: None,
+                                recent: None,
+                                ratio: None,
+                                impact_ms: 0.0,
+                                recent_share: 0.0,
+                                plan_switch: switched.then(|| crate::changes::PlanSwitch {
+                                    from: "a".into(),
+                                    to: "b".into(),
+                                    from_label: None,
+                                    to_label: None,
+                                    at: None,
+                                    what: None,
+                                }),
+                                same_plan: false,
+                                headline: String::new(),
+                                reason: None,
+                                context: vec![],
+                            };
+                            if let Some((_, l)) = link(&e, &q, &tables, None, (0.0, f64::MAX)) {
+                                whys.insert(format!("{} ({})", l.why, l.strong));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        out.extend(whys);
+        let event = |kind: EventKind, title: &str| ChangeEvent::new(kind, EventSource::Database, title, at, title);
+        for kind in kinds {
+            out.push(around_then(&[event(kind, "deploy v1.4.2")]).unwrap_or_default());
+            out.push(around_then(&[event(kind, "a"), event(kind, "b")]).unwrap_or_default());
+        }
+        let long = "a mark whose title goes on and on well past the sixty characters a summary quotes";
+        out.push(around_then(&[event(EventKind::Mark, long)]).unwrap_or_default());
+        out.push(around_then(&kinds.map(|k| event(k, "x"))).unwrap_or_default());
+        out.push(around_then(&[event(EventKind::Index, "x"), event(EventKind::Restart, "y")]).unwrap_or_default());
+        let mut c = changes(vec![query(
+            "orders",
+            "SELECT * FROM public.orders o WHERE o.status = $1",
+            Some(stats(100.0, 2.0)),
+            Some(stats(100.0, 9.0)),
+        )]);
+        correlate(&mut c, vec![dropped("public.orders", "2026-10-11T12:00:00Z")]);
+        out.push(c.queries[0].headline.clone());
+        out.push(c.summary.clone());
+        let got = out.join("\n");
+        assert_eq!(got, r#"at Sun 12:00 UTC
+between the Sun 11:00 UTC and 12:00 UTC scans
+from Sun 12:00 UTC to 14:10 UTC
+a new version can plan queries differently (true)
+a trigger on public.orders runs with this query (true)
+after a restart caches are cold and plans compile again (false)
+it's this query's procedure or function (true)
+marked on the timeline (true)
+queries that start or stop usually ship with a deploy (true)
+settings apply to every query (false)
+statistics on public.orders feed this query's plan, which changed (true)
+the cloud held the server back while this query ran slower (true)
+this query reads orders (true)
+this query uses public.orders (false)
+this query uses public.orders (true)
+a mark ("deploy v1.4.2")
+2 marks
+an index change
+2 index changes
+a table change
+2 table changes
+a procedure or view change
+2 procedure or view changes
+a setting change
+2 setting changes
+an upgrade
+2 upgrades
+a restart
+2 restarts
+a statistics reset
+2 statistics resets
+a statistics update
+2 statistics updates
+cloud throttling
+2 throttling episodes
+a mark ("a mark whose title goes on and on well past the sixty chara…")
+a mark ("x"), an index change, a table change, a procedure or view change, a setting change, an upgrade, a restart, a statistics reset, a statistics update and cloud throttling
+an index change and a restart
+Got 4.5× slower (2.0 ms → 9.0 ms per run). Around then: Index ix was dropped from public.orders between the Sun 11:00 UTC and 12:00 UTC scans (this query uses public.orders).
+Database time per hour rose 4.5×: 50 ms → 225 ms. 1 query got slower. Around then: an index change."#);
     }
 
     #[test]
