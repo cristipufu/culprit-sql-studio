@@ -708,11 +708,11 @@ fn hot_updates_say_why() {
         ..Default::default()
     });
     let name = t.name.clone();
-    let f = hot_updates(&s);
+    let f = HotUpdatesCheck.run(&s);
     assert_eq!(f[0].title, format!("Only 10% of updates to {name} are HOT: the rest rewrite every index"));
     assert!(f[0].fix.as_ref().unwrap().sql.as_ref().unwrap().contains("fillfactor = 85"));
     s.tables[0].storage.as_mut().unwrap().new_page_updates = Some(1_000.0);
-    let f = hot_updates(&s);
+    let f = HotUpdatesCheck.run(&s);
     assert!(f[0].fix.as_ref().unwrap().sql.is_none());
     assert!(f[0].summary.contains("changed an indexed column"));
 }
@@ -1152,7 +1152,7 @@ fn postgres_non_hot_updates_on_referenced_parent_escalate_fk_lock_contention() {
     st.hot_updates = Some(10_000.0);
     st.counter_hours = Some(24.0);
 
-    let hot = hot_updates(&s);
+    let hot = HotUpdatesCheck.run(&s);
     let f = hot.iter().find(|f| f.id == "hot-updates:public.orders").expect("orders hot-updates finding");
     assert_eq!(f.severity, Severity::Medium, "referencing FKs lower the non-HOT Medium threshold");
     assert!(f.summary.contains("FOR KEY SHARE"), "{}", f.summary);

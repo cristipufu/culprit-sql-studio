@@ -6,21 +6,48 @@ use crate::evidence::Requirement as Evidence;
 pub fn hot_updates_info() -> CheckInfo {
     CheckInfo {
         id: "hot-updates".into(),
-        title: "Updates that rewrite every index".into(),
+        title: t!("check.hot_updates.info.title"),
         category: Category::Maintenance,
         engines: vec![Engine::Postgres],
         requires: vec![],
-        description: "Tables where few updates are HOT (heap-only): each other update writes a new entry in every index and leaves cleanup for VACUUM. Says whether pages are too full (fillfactor) or an indexed column changes (PostgreSQL 16+ tells them apart).".into(),
+        description: t!("check.hot_updates.info.description"),
     }
 }
 
-check!(HotUpdatesCheck: hot_updates_info, hot_updates, &[Evidence::IndexCatalog, Evidence::Tables(crate::evidence::TableMeasure::HotUpdates)]);
+check!(
+    HotUpdatesCheck: hot_updates_info,
+    decide = cold_updates,
+    render = hot_updates_finding,
+    case<'s> = ColdUpdates<'s>,
+    evidence = &[Evidence::IndexCatalog, Evidence::Tables(crate::evidence::TableMeasure::HotUpdates)],
+);
 
 /// Non-HOT updates a day to one table that make hot-updates Medium.
 pub(super) const COLD_UPDATES_MEDIUM_PER_DAY: f64 = 1_000_000.0;
 
-pub fn hot_updates(snapshot: &Snapshot) -> Vec<Finding> {
-    let mut findings: Vec<Finding> = snapshot
+/// A table with indexes where fewer than half of 10,000 or more updates were HOT.
+pub struct ColdUpdates<'s> {
+    table: &'s TableStat,
+    updates: f64,
+    hot: f64,
+    ratio: f64,
+    indexes: usize,
+    fillfactor: f64,
+    /// The share of the non-HOT updates that moved to another page for lack of room (PostgreSQL 16+).
+    moved: Option<f64>,
+    /// Foreign keys that reference the table, and the child tables they are on.
+    referencing: usize,
+    children: Vec<String>,
+    severity: Severity,
+    /// Without a rate high enough to grade, the caveat on how long the counts have run: `Some(None)` when that isn't
+    /// known.
+    counted_for: Option<Option<f64>>,
+    /// Leaving room on the page is the fix (the pages are full, or the cause isn't known and fillfactor is 100).
+    room: bool,
+}
+
+fn cold_updates(snapshot: &Snapshot) -> Vec<ColdUpdates<'_>> {
+    let mut cases: Vec<ColdUpdates<'_>> = snapshot
         .tables
         .iter()
         .filter_map(|t| {
@@ -33,110 +60,124 @@ pub fn hot_updates(snapshot: &Snapshot) -> Vec<Finding> {
             (ratio < 0.5 && indexes > 0).then_some((t, s, updates, hot, ratio, indexes))
         })
         .map(|(t, s, updates, hot, ratio, indexes)| {
-            let name = t.qualified();
-            let mut f = finding("hot-updates", &name, Category::Maintenance, subject(SubjectKind::Table, &name));
             let cold = updates - hot;
-            f.title = if hot < 1.0 {
-                format!("No update to {} is HOT: each one rewrites every index", t.name)
-            } else {
-                format!("Only {} of updates to {} are HOT: the rest rewrite every index", format::percent(ratio), t.name)
-            };
-            let every_index = match indexes {
-                1 => "its only index".to_string(),
-                2 => "both of its indexes".to_string(),
-                n => format!("all {n} of its indexes"),
-            };
             let fillfactor = s.fillfactor.unwrap_or(100.0);
             let moved = s.new_page_updates.map(|n| (n / cold.max(1.0)).min(1.0));
-            let cause = match moved {
-                Some(m) if m >= 0.5 => format!(
-                    " {} of them moved to another page because their own was full (fillfactor {fillfactor:.0}).",
-                    format::percent(m)
-                ),
-                Some(m) => format!(
-                    " Only {} of them lacked room on the page; the rest changed an indexed column, which rules HOT out.",
-                    format::percent(m)
-                ),
-                None => " Either the pages are full (fillfactor {ff}) or the updates change an indexed column.".replace("{ff}", &format!("{fillfactor:.0}")),
-            };
-            let how_many = if hot < 1.0 {
-                format!("None of {}'s {} updates were", t.name, format::count(updates))
-            } else {
-                format!("{} of {}'s {} updates weren't", format::count(cold), t.name, format::count(updates))
-            };
-            f.summary = format!(
-                "An update that changes no indexed column and finds room on the same page is HOT: it writes no index entries and its old version is cleaned up without VACUUM. {how_many}, so each wrote a new entry in {every_index}.{cause}"
-            );
-            let referencing_fks: Vec<&culprit_core::ForeignKey> = crate::checks::indexes::enforced_foreign_keys(snapshot)
+            let referencing: Vec<&culprit_core::ForeignKey> = crate::checks::indexes::enforced_foreign_keys(snapshot)
                 .filter(|fk| {
-                    fk.ref_schema.eq_ignore_ascii_case(&t.schema)
-                        && fk.ref_table.eq_ignore_ascii_case(&t.name)
+                    fk.ref_schema.eq_ignore_ascii_case(&t.schema) && fk.ref_table.eq_ignore_ascii_case(&t.name)
                 })
                 .collect();
-            if !referencing_fks.is_empty() {
-                let child_tables: Vec<String> = referencing_fks
-                    .iter()
-                    .map(|fk| format!("{}.{}", fk.schema, fk.table))
-                    .collect::<std::collections::BTreeSet<_>>()
-                    .into_iter()
-                    .collect();
-                f.summary.push_str(&format!(
-                    " {} foreign {} (on {}) {} {}: in PostgreSQL, non-HOT updates on a referenced parent table write new index tuples and contend with FOR KEY SHARE tuple locks taken by concurrent inserts and updates on the child {}.",
-                    referencing_fks.len(),
-                    if referencing_fks.len() == 1 { "key" } else { "keys" },
-                    format::list(&child_tables),
-                    if referencing_fks.len() == 1 { "references" } else { "reference" },
-                    t.name,
-                    if child_tables.len() == 1 { "table" } else { "tables" },
-                ));
-            }
+            let children: Vec<String> = referencing
+                .iter()
+                .map(|fk| format!("{}.{}", fk.schema, fk.table))
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
             // The counts run from the database's last statistics reset, which PostgreSQL 15+ leaves empty until the first
             // one: then their age is unknown (the counters outlive restarts), and so is any rate. A one-time backfill
             // keeps the share low long after it ran, so only a measured rate raises it.
             let hours = s.counter_hours.filter(|h| *h >= culprit_core::RATE_MIN_HOURS);
             let per_day = hours.map(|h| cold / h * 24.0);
-            let medium_threshold = if !referencing_fks.is_empty() {
-                COLD_UPDATES_MEDIUM_PER_DAY / 10.0
-            } else {
-                COLD_UPDATES_MEDIUM_PER_DAY
-            };
-            f.severity = since_start_severity(per_day, f64::INFINITY, medium_threshold);
-            if per_day.is_none_or(|d| d < medium_threshold) {
-                f.caveats.push(match s.counter_hours {
-                    Some(h) => format!(
-                        "The counts cover the {} since the statistics were last reset: one large update or backfill in that time keeps the share low long after it ran. Compare how n_tup_hot_upd grows against n_tup_upd over a few days before changing the table.",
-                        culprit_core::span_words(h)
-                    ),
-                    None => "How long these counts have run isn't known (PostgreSQL 15+ records no start until its statistics are first reset, and the counts outlive restarts): one large update or backfill long ago would keep the share low. Compare how n_tup_hot_upd grows against n_tup_upd over a few days before changing the table.".into(),
-                });
+            let medium_threshold =
+                if !referencing.is_empty() { COLD_UPDATES_MEDIUM_PER_DAY / 10.0 } else { COLD_UPDATES_MEDIUM_PER_DAY };
+            ColdUpdates {
+                table: t,
+                updates,
+                hot,
+                ratio,
+                indexes,
+                fillfactor,
+                moved,
+                referencing: referencing.len(),
+                children,
+                severity: since_start_severity(per_day, f64::INFINITY, medium_threshold),
+                counted_for: per_day.is_none_or(|d| d < medium_threshold).then_some(s.counter_hours),
+                room: moved.is_none_or(|m| m >= 0.5) && fillfactor >= 100.0,
             }
-            severity_score(&mut f);
-            f.impact.label = format!("{} HOT", format::percent(ratio));
-            f.confidence = if moved.is_some() { Confidence::High } else { Confidence::Medium };
-            f.metrics = vec![
-                Metric::new("Updates", updates, Unit::Count),
-                Metric::new("HOT", ratio, Unit::Ratio),
-                Metric::new("Indexes", indexes as f64, Unit::Count),
-                Metric::new("Fillfactor", fillfactor, Unit::Count),
-            ];
-            if !referencing_fks.is_empty() {
-                f.metrics.push(Metric::new("Referencing foreign keys", referencing_fks.len() as f64, Unit::Count));
-            }
-            let room = moved.is_none_or(|m| m >= 0.5) && fillfactor >= 100.0;
-            f.fix = Some(Fix {
-                summary: if room {
-                    "Leave room on each page so updated rows fit next to the old version: a fillfactor of 85–90 is typical for tables updated often. It applies to pages written from now on; existing pages get the room as rows move (pg_repack rewrites the table online if you want it at once). If an index covers a column that changes on every update (updated_at, status, counters), dropping it makes those updates HOT too.".into()
-                } else {
-                    "The updates change an indexed column. Find the index on a column that changes often (updated_at, status, counters) and drop it if reads don't need it; every update that touches it can then be HOT.".into()
-                },
-                sql: room.then(|| format!("ALTER TABLE {} SET (fillfactor = 85);", qualified(Engine::Postgres, &t.schema, &t.name))),
-                cost: None,
-            });
-            f.verify = vec!["Re-scan a few days later: the HOT share counts since the last statistics reset, so compare how n_tup_hot_upd grows against n_tup_upd.".into()];
-            f
         })
         .collect();
-    findings.sort_by(|a, b| b.impact.score.total_cmp(&a.impact.score));
-    findings.truncate(5);
-    findings
+    // Ranked by severity alone (they carry no statement), keeping their order within one.
+    cases.sort_by(|a, b| base_score(b.severity).total_cmp(&base_score(a.severity)));
+    cases.truncate(5);
+    cases
+}
+
+fn hot_updates_finding(_: &Snapshot, cold: ColdUpdates<'_>) -> Finding {
+    let t = cold.table;
+    let name = t.qualified();
+    let mut f = finding("hot-updates", &name, Category::Maintenance, subject(SubjectKind::Table, &name));
+    let ratio = format::percent(cold.ratio);
+    let fillfactor = format!("{:.0}", cold.fillfactor);
+    f.title = if cold.hot < 1.0 {
+        t!("check.hot_updates.title.none", table = &t.name)
+    } else {
+        t!("check.hot_updates.title.some", share = &ratio, table = &t.name)
+    };
+    let mut summary = vec![if cold.hot < 1.0 {
+        t!(
+            "check.hot_updates.summary.none_hot",
+            table = &t.name,
+            updates = format::count(cold.updates),
+            indexes = cold.indexes
+        )
+    } else {
+        t!(
+            "check.hot_updates.summary.some_hot",
+            cold = format::count(cold.updates - cold.hot),
+            table = &t.name,
+            updates = format::count(cold.updates),
+            indexes = cold.indexes
+        )
+    }];
+    summary.push(match cold.moved {
+        Some(m) if m >= 0.5 => {
+            t!("check.hot_updates.summary.pages_full", share = format::percent(m), fillfactor = &fillfactor)
+        }
+        Some(m) => t!("check.hot_updates.summary.indexed_column", share = format::percent(m)),
+        None => t!("check.hot_updates.summary.either", fillfactor = &fillfactor),
+    });
+    if cold.referencing > 0 {
+        summary.push(t!(
+            "check.hot_updates.summary.referenced",
+            fks = cold.referencing,
+            children = format::list(&cold.children),
+            table = &t.name,
+            tables = cold.children.len()
+        ));
+    }
+    f.summary = summary.join(" ");
+    f.severity = cold.severity;
+    match cold.counted_for {
+        Some(Some(hours)) => {
+            f.caveats.push(t!("check.hot_updates.caveat.counted_for", span = culprit_core::span_words(hours)))
+        }
+        Some(None) => f.caveats.push(t!("check.hot_updates.caveat.unknown_start")),
+        None => {}
+    }
+    severity_score(&mut f);
+    f.impact.label = t!("check.hot_updates.impact", share = &ratio);
+    f.confidence = if cold.moved.is_some() { Confidence::High } else { Confidence::Medium };
+    f.metrics = vec![
+        Metric::new(t!("check.hot_updates.metric.updates"), cold.updates, Unit::Count),
+        Metric::new(t!("check.hot_updates.metric.hot"), cold.ratio, Unit::Ratio),
+        Metric::new(t!("check.hot_updates.metric.indexes"), cold.indexes as f64, Unit::Count),
+        Metric::new(t!("check.hot_updates.metric.fillfactor"), cold.fillfactor, Unit::Count),
+    ];
+    if cold.referencing > 0 {
+        f.metrics.push(Metric::new(t!("check.hot_updates.metric.referencing"), cold.referencing as f64, Unit::Count));
+    }
+    f.fix = Some(Fix {
+        summary: if cold.room {
+            t!("check.hot_updates.fix.fillfactor")
+        } else {
+            t!("check.hot_updates.fix.indexed_column")
+        },
+        sql: cold
+            .room
+            .then(|| format!("ALTER TABLE {} SET (fillfactor = 85);", qualified(Engine::Postgres, &t.schema, &t.name))),
+        cost: None,
+    });
+    f.verify = vec![t!("check.hot_updates.verify")];
+    f
 }

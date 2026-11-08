@@ -906,3 +906,108 @@ sql: ALTER TABLE shop.orders VALIDATE CONSTRAINT fk_orders_customers;
 verify: Re-scan: the constraint should no longer be listed."#,
     );
 }
+
+// ── hot-updates ────────────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn updates_that_are_not_hot() {
+    let mut s = fixture("postgres-demo");
+    let mut fk = s.foreign_keys.iter().find(|f| f.ref_table == "products").expect("a key").clone();
+    fk.name = "fk_events_products".into();
+    fk.table = "events".into();
+    s.foreign_keys.push(fk);
+    let plant = |s: &mut Snapshot, table: &str, updates: f64, storage: culprit_core::TableStorage| {
+        let t = s.tables.iter_mut().find(|t| t.name == table).expect("a table");
+        t.updates = Some(updates);
+        t.storage = Some(storage);
+    };
+    use culprit_core::TableStorage;
+    plant(&mut s, "events", 10_000.0, TableStorage { hot_updates: Some(0.0), ..Default::default() });
+    plant(
+        &mut s,
+        "order_items",
+        10_000.0,
+        TableStorage {
+            hot_updates: Some(3_000.0),
+            new_page_updates: Some(6_000.0),
+            counter_hours: Some(48.0),
+            ..Default::default()
+        },
+    );
+    plant(
+        &mut s,
+        "orders",
+        10_000_000.0,
+        TableStorage {
+            hot_updates: Some(2_000_000.0),
+            new_page_updates: Some(1_000_000.0),
+            fillfactor: Some(90.0),
+            counter_hours: Some(24.0),
+            ..Default::default()
+        },
+    );
+    plant(
+        &mut s,
+        "products",
+        20_000.0,
+        TableStorage {
+            hot_updates: Some(5_000.0),
+            new_page_updates: Some(7_500.0),
+            counter_hours: Some(2.0),
+            ..Default::default()
+        },
+    );
+    says(
+        &run("hot-updates", &s),
+        r#"id: hot-updates:public.orders
+title: Only 20% of updates to orders are HOT: the rest rewrite every index
+summary: An update that changes no indexed column and finds room on the same page is HOT: it writes no index entries and its old version is cleaned up without VACUUM. 8.0M of orders's 10.0M updates weren't, so each wrote a new entry in all 3 of its indexes. Only 12% of them lacked room on the page; the rest changed an indexed column, which rules HOT out. 1 foreign key (on public.order_items) references orders: in PostgreSQL, non-HOT updates on a referenced parent table write new index tuples and contend with FOR KEY SHARE tuple locks taken by concurrent inserts and updates on the child table.
+impact: 20% HOT
+metric: Updates
+metric: HOT
+metric: Indexes
+metric: Fillfactor
+metric: Referencing foreign keys
+fix: The updates change an indexed column. Find the index on a column that changes often (updated_at, status, counters) and drop it if reads don't need it; every update that touches it can then be HOT.
+verify: Re-scan a few days later: the HOT share counts since the last statistics reset, so compare how n_tup_hot_upd grows against n_tup_upd.
+
+id: hot-updates:public.products
+title: Only 25% of updates to products are HOT: the rest rewrite every index
+summary: An update that changes no indexed column and finds room on the same page is HOT: it writes no index entries and its old version is cleaned up without VACUUM. 15K of products's 20K updates weren't, so each wrote a new entry in all 3 of its indexes. 50% of them moved to another page because their own was full (fillfactor 100). 2 foreign keys (on public.events and public.order_items) reference products: in PostgreSQL, non-HOT updates on a referenced parent table write new index tuples and contend with FOR KEY SHARE tuple locks taken by concurrent inserts and updates on the child tables.
+impact: 25% HOT
+metric: Updates
+metric: HOT
+metric: Indexes
+metric: Fillfactor
+metric: Referencing foreign keys
+fix: Leave room on each page so updated rows fit next to the old version: a fillfactor of 85–90 is typical for tables updated often. It applies to pages written from now on; existing pages get the room as rows move (pg_repack rewrites the table online if you want it at once). If an index covers a column that changes on every update (updated_at, status, counters), dropping it makes those updates HOT too.
+sql: ALTER TABLE public.products SET (fillfactor = 85);
+verify: Re-scan a few days later: the HOT share counts since the last statistics reset, so compare how n_tup_hot_upd grows against n_tup_upd.
+
+id: hot-updates:public.order_items
+title: Only 30% of updates to order_items are HOT: the rest rewrite every index
+summary: An update that changes no indexed column and finds room on the same page is HOT: it writes no index entries and its old version is cleaned up without VACUUM. 7.0K of order_items's 10K updates weren't, so each wrote a new entry in its only index. 86% of them moved to another page because their own was full (fillfactor 100).
+impact: 30% HOT
+metric: Updates
+metric: HOT
+metric: Indexes
+metric: Fillfactor
+fix: Leave room on each page so updated rows fit next to the old version: a fillfactor of 85–90 is typical for tables updated often. It applies to pages written from now on; existing pages get the room as rows move (pg_repack rewrites the table online if you want it at once). If an index covers a column that changes on every update (updated_at, status, counters), dropping it makes those updates HOT too.
+sql: ALTER TABLE public.order_items SET (fillfactor = 85);
+verify: Re-scan a few days later: the HOT share counts since the last statistics reset, so compare how n_tup_hot_upd grows against n_tup_upd.
+caveat: The counts cover the 2 days since the statistics were last reset: one large update or backfill in that time keeps the share low long after it ran. Compare how n_tup_hot_upd grows against n_tup_upd over a few days before changing the table.
+
+id: hot-updates:public.events
+title: No update to events is HOT: each one rewrites every index
+summary: An update that changes no indexed column and finds room on the same page is HOT: it writes no index entries and its old version is cleaned up without VACUUM. None of events's 10K updates were, so each wrote a new entry in both of its indexes. Either the pages are full (fillfactor 100) or the updates change an indexed column.
+impact: 0% HOT
+metric: Updates
+metric: HOT
+metric: Indexes
+metric: Fillfactor
+fix: Leave room on each page so updated rows fit next to the old version: a fillfactor of 85–90 is typical for tables updated often. It applies to pages written from now on; existing pages get the room as rows move (pg_repack rewrites the table online if you want it at once). If an index covers a column that changes on every update (updated_at, status, counters), dropping it makes those updates HOT too.
+sql: ALTER TABLE public.events SET (fillfactor = 85);
+verify: Re-scan a few days later: the HOT share counts since the last statistics reset, so compare how n_tup_hot_upd grows against n_tup_upd.
+caveat: How long these counts have run isn't known (PostgreSQL 15+ records no start until its statistics are first reset, and the counts outlive restarts): one large update or backfill long ago would keep the share low. Compare how n_tup_hot_upd grows against n_tup_upd over a few days before changing the table."#,
+    );
+}
