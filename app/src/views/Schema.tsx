@@ -309,7 +309,7 @@ export function Schema({ report }: { report: Report }) {
                 onClick={() => setAdvising(true)}
               >
                 <Lightbulb size={13} className="tl-advisor-icon" />
-                <span className="tl-name">{t("ui.schema.advisor")}</span>
+                <span className="tl-name">{t("ui.common.index_advisor")}</span>
                 <span className="tl-badges">
                   {toAdd > 0 && <span className="tl-count medium" title={t("ui.schema.to_add", { count: String(toAdd) })}>{toAdd}</span>}
                 </span>

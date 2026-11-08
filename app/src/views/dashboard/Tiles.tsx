@@ -8,10 +8,12 @@ import { copyAndTell } from "../../lib/clipboard";
 import { STATUS_LABEL } from "../../lib/dashboard";
 import { canOpenFixInEditor } from "../../lib/editor-sql";
 import { percent, when } from "../../lib/format";
+import { t } from "../../lib/i18n";
 import { keys } from "../../lib/keys";
 import { querySummary } from "../../lib/query-summary";
 import { scan, setState } from "../../lib/store";
 import { openLive } from "../Live";
+import { slot, withElements } from "../message-parts";
 import { rememberQueryTab } from "../Queries";
 
 /** Open a query in Queries, on one of its tabs. */
@@ -90,8 +92,8 @@ export function Fix({ sql }: { sql: string }) {
   return (
     <div className="dash-fix" data-own-click>
       <code>{sql}</code>
-      <button type="button" className="btn small" onClick={() => copyAndTell(sql, "Copied")} aria-label="Copy the statement">
-        <Copy size={12} /> Copy
+      <button type="button" className="btn small" onClick={() => copyAndTell(sql, t("ui.common.copied"))} aria-label={t("ui.dashboard.copy_statement")}>
+        <Copy size={12} /> {t("ui.common.copy")}
       </button>
     </div>
   );
@@ -119,8 +121,8 @@ export function HealthTile({ tile, onOpen }: { tile: Tile; onOpen: () => void })
   const notable = tile.items.filter((i) => i.status === "bad" || i.status === "watch");
   const rows = [...notable.slice(1), ...tile.items.filter((i) => i.status !== "bad" && i.status !== "watch")].slice(0, 3);
   return (
-    <Frame tile={tile} action="All signals" onOpen={onOpen}>
-      <div className="dash-signals" role="img" aria-label={`${tile.items.length} signals`}>
+    <Frame tile={tile} action={t("ui.dashboard.action.all_signals")} onOpen={onOpen}>
+      <div className="dash-signals" role="img" aria-label={t("ui.dashboard.health.signals", { n: tile.items.length, count: String(tile.items.length) })}>
         {tile.items.map((i) => (
           <span key={i.id} className={`dash-signal ${i.status ?? "info"}`} title={`${i.label}: ${i.value ?? ""}`} />
         ))}
@@ -194,10 +196,10 @@ export function DeadlocksTile({ tile, report }: { tile: Tile; report: Report }) 
   const open = () => openLive("deadlocks");
   if (d.counted != null && d.deadlocks.length === 0) {
     return (
-      <Frame tile={tile} action="Deadlocks" onOpen={open} foot={<p className="dash-detail">Paste the server log's lines into Live → Deadlocks to have one explained.</p>}>
+      <Frame tile={tile} action={t("ui.dashboard.action.deadlocks")} onOpen={open} foot={<p className="dash-detail">{t("ui.dashboard.deadlocks.paste")}</p>}>
         <div className="dash-big">
           <b>{d.counted}</b>
-          <span title={d.counted_since ? when(d.counted_since).full : undefined}>counted{d.counted_since ? ` since ${when(d.counted_since).short}` : ""}</span>
+          <span title={d.counted_since ? when(d.counted_since).full : undefined}>{d.counted_since ? t("ui.dashboard.deadlocks.counted_since", { time: when(d.counted_since).short }) : t("ui.dashboard.deadlocks.counted")}</span>
         </div>
       </Frame>
     );
@@ -205,16 +207,16 @@ export function DeadlocksTile({ tile, report }: { tile: Tile; report: Report }) 
   const end = Date.parse(report.snapshot.taken_at);
   const start = end - d.since_hours * 3_600_000;
   return (
-    <Frame tile={tile} action="Deadlocks" onOpen={open}>
-      <div className="dash-ticks" role="img" aria-label={`${d.deadlocks.length} deadlocks over the last ${d.since_hours} hours`}>
+    <Frame tile={tile} action={t("ui.dashboard.action.deadlocks")} onOpen={open}>
+      <div className="dash-ticks" role="img" aria-label={t("ui.dashboard.deadlocks.over", { n: d.deadlocks.length, count: String(d.deadlocks.length), hours: String(d.since_hours) })}>
         {d.deadlocks.map((dl) => {
           const at = dl.at ? Date.parse(dl.at) : NaN;
           if (!Number.isFinite(at)) return null;
           const left = Math.min(100, Math.max(0, ((at - start) / (end - start)) * 100));
           return <span key={dl.id} style={{ left: `${left}%` }} title={`${dl.headline}${dl.at ? ` · ${new Date(dl.at).toLocaleString()}` : ""}`} />;
         })}
-        <em>{d.since_hours >= 23.5 ? "24 h ago" : `${Math.round(d.since_hours)} h ago`}</em>
-        <em className="end">now</em>
+        <em>{t("ui.dashboard.hours_ago", { hours: String(d.since_hours >= 23.5 ? 24 : Math.round(d.since_hours)) })}</em>
+        <em className="end">{t("ui.dashboard.now")}</em>
       </div>
       {tile.items.length > 0 && (
         <ul className="dash-rows compact">
@@ -238,16 +240,20 @@ export function IndexesTile({ tile }: { tile: Tile }) {
   const cleanups = metricValue(tile, "cleanup");
   const candidate = tile.items.find((i) => i.kind === "index-add");
   return (
-    <Frame tile={tile} action="Index advisor" onOpen={open}>
+    <Frame tile={tile} action={t("ui.common.index_advisor")} onOpen={open}>
       {(adds > 0 || cleanups > 0) && (
         <div className="dash-pair">
           <div className={`dash-big ${adds > 0 ? "" : "zero"}`}>
             <b>{adds}</b>
-            <span>to add</span>
+            <span>{t("ui.dashboard.indexes.to_add")}</span>
           </div>
           <div className={`dash-big ${cleanups > 0 ? "" : "zero"}`}>
             <b>{cleanups}</b>
-            <span>to clean up{cleanups > 0 && metricValue(tile, "reclaim") > 0 ? ` · ${metricText(tile, "reclaim")}` : ""}</span>
+            <span>
+              {cleanups > 0 && metricValue(tile, "reclaim") > 0
+                ? t("ui.dashboard.indexes.to_clean_up_reclaim", { reclaim: metricText(tile, "reclaim") ?? "" })
+                : t("ui.dashboard.indexes.to_clean_up")}
+            </span>
           </div>
         </div>
       )}
@@ -274,8 +280,8 @@ export function PlansTile({ tile }: { tile: Tile }) {
   const flagged = metricValue(tile, "flagged");
   const top = tile.items[0]?.query_id;
   return (
-    <Frame tile={tile} action="Plans" onOpen={() => (top ? openQuery(top, "plan") : setState({ view: "queries" }))}>
-      <div className="dash-meter" role="img" aria-label={`${flagged} of ${captured} plans have something to fix`}>
+    <Frame tile={tile} action={t("ui.common.view.plans")} onOpen={() => (top ? openQuery(top, "plan") : setState({ view: "queries" }))}>
+      <div className="dash-meter" role="img" aria-label={t("ui.dashboard.plans.flagged", { n: flagged, flagged: String(flagged), captured: String(captured) })}>
         {Array.from({ length: Math.min(captured, 40) }, (_, i) => (
           <span key={i} className={i < Math.round((flagged / Math.max(captured, 1)) * Math.min(captured, 40)) ? "on" : ""} />
         ))}
@@ -284,7 +290,7 @@ export function PlansTile({ tile }: { tile: Tile }) {
         <ul className="dash-rows compact">
           {tile.items.slice(0, 2).map((i) => (
             <li key={i.id}>
-              <button type="button" className="dash-row" onClick={() => i.query_id && openQuery(i.query_id, "plan")} title={`Open the costliest plan with this (${percent(i.share)} of database time)`}>
+              <button type="button" className="dash-row" onClick={() => i.query_id && openQuery(i.query_id, "plan")} title={t("ui.dashboard.plans.open", { share: percent(i.share) })}>
                 <span className={`sev ${severityOf(i.status)}`} aria-hidden />
                 <span className="dash-row-label">{i.label}</span>
                 <span className="dash-row-value">{i.value}</span>
@@ -303,9 +309,9 @@ export function StatisticsTile({ tile, report }: { tile: Tile; report: Report })
     return (
       <Frame tile={tile} className="unlocking">
         <div className="dash-actions">
-          <span className="muted">Culprit reads the log file only; nothing changes in the application.</span>
+          <span className="muted">{t("ui.dashboard.statistics.log_only")}</span>
           <button type="button" className="btn small" onClick={() => setState({ view: "connections" })}>
-            <FileText size={12} /> Add query log
+            <FileText size={12} /> {t("ui.dashboard.statistics.add_log")}
           </button>
         </div>
       </Frame>
@@ -318,20 +324,20 @@ export function StatisticsTile({ tile, report }: { tile: Tile; report: Report })
         {sql && (
           <div className="dash-fix" data-own-click>
             <code>{sql}</code>
-            <button type="button" className="btn small" onClick={() => copyAndTell(sql, "Copied")} aria-label="Copy the statement">
-              <Copy size={12} /> Copy
+            <button type="button" className="btn small" onClick={() => copyAndTell(sql, t("ui.common.copied"))} aria-label={t("ui.dashboard.copy_statement")}>
+              <Copy size={12} /> {t("ui.common.copy")}
             </button>
             {canOpenFixInEditor(sql, report.snapshot.server.engine) && (
-              <button type="button" className="btn small" onClick={() => setState({ view: "editor", editorSql: sql })} title="Opens in the editor; production asks before it runs">
-                <SquarePen size={12} /> Open in editor
+              <button type="button" className="btn small" onClick={() => setState({ view: "editor", editorSql: sql })} title={t("ui.common.open_in_editor_title")}>
+                <SquarePen size={12} /> {t("ui.common.open_in_editor")}
               </button>
             )}
           </div>
         )}
         <div className="dash-actions">
-          <span className="muted">Culprit only reads statistics; it never changes the database for you.</span>
-          <button type="button" className="btn small" onClick={() => scan(report.snapshot.connection)} title={keys("Scan again once it's on (⌘R)")}>
-            <RefreshCw size={12} /> Done, re-scan
+          <span className="muted">{t("ui.dashboard.statistics.reads_only")}</span>
+          <button type="button" className="btn small" onClick={() => scan(report.snapshot.connection)} title={t("ui.dashboard.statistics.rescan_title", { key: keys("⌘R") })}>
+            <RefreshCw size={12} /> {t("ui.dashboard.statistics.rescan")}
           </button>
         </div>
       </Frame>
@@ -340,12 +346,12 @@ export function StatisticsTile({ tile, report }: { tile: Tile; report: Report })
   const finding = tile.items.find((i) => i.finding_id);
   const chips = tile.metrics.filter((m) => m.key !== "locked" || (m.value ?? 0) > 0);
   return (
-    <Frame tile={tile} action={finding ? "Open finding" : "Queries"} onOpen={() => (finding?.finding_id ? openFinding(finding.finding_id) : setState({ view: "queries" }))}>
+    <Frame tile={tile} action={finding ? t("ui.dashboard.action.open_finding") : t("ui.common.view.queries")} onOpen={() => (finding?.finding_id ? openFinding(finding.finding_id) : setState({ view: "queries" }))}>
       <div className="dash-chips">
         {chips.map((m) =>
           m.key === "window-hours" ? (
             <span key={m.key}>
-              covers <b>{m.text}</b>
+              {withElements(t("ui.dashboard.statistics.covers", { window: slot(0) }), [<b key="window">{m.text}</b>])}
             </span>
           ) : (
             <span key={m.key} className={m.key === "locked" ? "warn" : ""}>

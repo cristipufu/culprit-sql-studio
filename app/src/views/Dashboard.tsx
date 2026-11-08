@@ -18,6 +18,7 @@ import { useEvents } from "../lib/events";
 import { isActionable } from "../lib/findings";
 import { ago, duration } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
+import { t } from "../lib/i18n";
 import { figures } from "../lib/rates";
 import { changeRequest, setState, useStore } from "../lib/store";
 import { waitColor } from "../lib/waits";
@@ -81,11 +82,11 @@ export default function Dashboard({ report, connection }: { report: Report; conn
   if (loaded.status === "error" && loaded.scope === scope) {
     return (
       <div className="empty">
-        <h3>Couldn't build the dashboard</h3>
+        <h3>{t("ui.dashboard.failed")}</h3>
         <p>{loaded.error.message}</p>
         {loaded.error.hint && <p className="muted">{loaded.error.hint}</p>}
         <button type="button" className="btn" onClick={() => setState({ view: "overview" })}>
-          Open findings
+          {t("ui.dashboard.open_findings")}
         </button>
       </div>
     );
@@ -125,7 +126,7 @@ export default function Dashboard({ report, connection }: { report: Report; conn
         </div>
         <div className="dash-sub">
           {keys.length > 0 && (
-            <div className="dash-attn" role="group" aria-label="Needs a look">
+            <div className="dash-attn" role="group" aria-label={t("ui.dashboard.needs_a_look")}>
               {keys.map((k) => (
                 <button type="button" key={k} className={`dash-chip ${tile(k).status}`} onClick={() => focusTile(k)} title={tile(k).takeaway}>
                   <i aria-hidden /> {tile(k).title}
@@ -134,8 +135,9 @@ export default function Dashboard({ report, connection }: { report: Report; conn
             </div>
           )}
           <span className="dash-meta">
-            {model.coverage ? `${model.coverage} · ` : ""}scanned {ago(model.taken_at)}
-            {scanning ? " · scanning…" : ""}
+            {model.coverage ? `${model.coverage} · ` : ""}
+            {t("ui.dashboard.scanned", { ago: ago(model.taken_at) })}
+            {scanning ? ` · ${t("ui.dashboard.scanning")}` : ""}
           </span>
         </div>
       </header>
@@ -150,13 +152,13 @@ export default function Dashboard({ report, connection }: { report: Report; conn
         <DeadlocksTile tile={tile("deadlocks")} report={report} />
         <IndexesTile tile={tile("indexes")} />
         <PlansTile tile={tile("plans")} />
-        <SignalsTile tile={tile("storage")} action="Storage" onOpen={() => openWaits("health")} />
-        <SignalsTile tile={tile("connections")} action="All signals" onOpen={() => openWaits("health")} />
-        <SignalsTile tile={tile("replication")} action="Replication" onOpen={() => openWaits("health")} />
+        <SignalsTile tile={tile("storage")} action={t("ui.dashboard.action.storage")} onOpen={() => openWaits("health")} />
+        <SignalsTile tile={tile("connections")} action={t("ui.dashboard.action.all_signals")} onOpen={() => openWaits("health")} />
+        <SignalsTile tile={tile("replication")} action={t("ui.dashboard.action.replication")} onOpen={() => openWaits("health")} />
         <SignalsTile
           tile={tile("failures")}
           report={report}
-          action={report.snapshot.operations.termination_history ? "Recorded terminations" : "Findings"}
+          action={report.snapshot.operations.termination_history ? t("ui.dashboard.action.terminations") : t("ui.common.view.findings")}
           onOpen={() => report.snapshot.operations.termination_history ? openWaits("health") : setState({ view: "overview" })}
           onRow={(item) => report.snapshot.operations.termination_history ? openWaits("health") : item.query_id ? openQuery(item.query_id) : setState({ view: "overview" })}
         />
@@ -234,7 +236,7 @@ function DbTimeTile({ tile, report }: { tile: Tile; report: Report }) {
   const hasTrend = !!w.timeline && w.timeline.starts.length >= 2;
   const stats = tile.metrics.filter((m) => m.key !== "window-hours");
   return (
-    <Frame tile={tile} action={periods ? "What changed" : undefined} onOpen={periods ? compare : undefined} foot={tile.items.length > 0 || !hasTrend ? null : undefined}>
+    <Frame tile={tile} action={periods ? t("ui.dashboard.action.what_changed") : undefined} onOpen={periods ? compare : undefined} foot={tile.items.length > 0 || !hasTrend ? null : undefined}>
       <div className="dash-stats">
         {stats.map((m) => (
           <div key={m.key} className="dash-stat">
@@ -265,11 +267,13 @@ function DbTimeTile({ tile, report }: { tile: Tile; report: Report }) {
         <div className="dash-chart-empty">
           <p>
             {tile.detail ??
-              (periods ? (trendNote(w) ?? "Not enough history for a trend yet.") : `${serverName(report.snapshot.server.engine)} keeps no history to chart: the log Culprit read is one period.`)}
+              (periods
+                ? (trendNote(w) ?? t("ui.dashboard.db_time.no_trend"))
+                : t("ui.dashboard.db_time.no_history", { server: serverName(report.snapshot.server.engine) }))}
           </p>
           {periods && (
-            <button type="button" className="btn small" onClick={compare} title="Compare two periods (V)">
-              <GitCompareArrows size={12} /> What changed?
+            <button type="button" className="btn small" onClick={compare} title={t("ui.dashboard.db_time.compare_title", { key: "V" })}>
+              <GitCompareArrows size={12} /> {t("ui.dashboard.db_time.compare")}
             </button>
           )}
         </div>
@@ -278,10 +282,10 @@ function DbTimeTile({ tile, report }: { tile: Tile; report: Report }) {
         <ul className="dash-rows compact">
           {tile.items.slice(0, 2).map((item) => (
             <li key={item.id + item.query_id}>
-              <button type="button" className="dash-row" onClick={() => item.query_id && openQuery(item.query_id, "history")} title="Open the query's plan history">
+              <button type="button" className="dash-row" onClick={() => item.query_id && openQuery(item.query_id, "history")} title={t("ui.dashboard.db_time.plan_history")}>
                 <i className="dash-flag" aria-hidden />
                 <span className="dash-row-label">
-                  {queryLabel(item, report)} <span className="muted">switched plans{item.at ? ` ${ago(item.at)}` : ""}</span>
+                  {queryLabel(item, report)} <span className="muted">{item.at ? t("ui.dashboard.db_time.switched_ago", { ago: ago(item.at) }) : t("ui.dashboard.db_time.switched")}</span>
                 </span>
                 <span className="dash-row-value">{item.value}</span>
               </button>
@@ -315,16 +319,16 @@ function FindingsTile({ tile, report }: { tile: Tile; report: Report }) {
         }))
       : tile.items.map((i) => ({ id: i.id, label: i.label, value: i.value, status: i.status }));
   return (
-    <Frame tile={tile} action="All findings" onOpen={() => setState({ view: "overview", changes: null })}>
+    <Frame tile={tile} action={t("ui.dashboard.action.all_findings")} onOpen={() => setState({ view: "overview", changes: null })}>
       {total > 0 && (
-        <div className="dash-sevbar" role="img" aria-label={counts.map((c) => `${c.n} ${c.s}`).join(", ")}>
+        <div className="dash-sevbar" role="img" aria-label={counts.map((c) => t("ui.dashboard.findings.severity_count", { severity: c.s, count: String(c.n) })).join(", ")}>
           <div className="dash-sevbar-track">
             {counts.map((c) => (c.n > 0 ? <span key={c.s} className={c.s} style={{ flexGrow: c.n }} /> : null))}
           </div>
           <div className="dash-sevbar-legend">
             {counts.map((c) => (
               <span key={c.s} className={c.n === 0 ? "zero" : ""}>
-                <i className={`sev ${c.s}`} /> {c.n} {c.s}
+                <i className={`sev ${c.s}`} /> {t("ui.dashboard.findings.severity_count", { severity: c.s, count: String(c.n) })}
               </span>
             ))}
           </div>
@@ -345,7 +349,7 @@ function FindingsTile({ tile, report }: { tile: Tile; report: Report }) {
           ))}
         </ul>
       )}
-      {hidden > 0 && <p className="dash-detail">{hidden === 1 ? "1 dismissed finding is" : `${hidden} dismissed findings are`} left out here.</p>}
+      {hidden > 0 && <p className="dash-detail">{t("ui.dashboard.findings.dismissed", { n: hidden, count: String(hidden) })}</p>}
     </Frame>
   );
 }
@@ -355,7 +359,9 @@ function FindingsTile({ tile, report }: { tile: Tile; report: Report }) {
 /** "2.5 ms per run over 89 hours of Culprit's scans": a statement's average as the report states it (`figures`). */
 function perRun(report: Report, q: QueryStat): string {
   const f = figures(report, q);
-  return `${duration(f.mean)} per run${f.over ? ` over ${f.over}` : ""}`;
+  return f.over
+    ? t("ui.dashboard.top_queries.per_run_over", { duration: duration(f.mean), over: f.over })
+    : t("ui.dashboard.top_queries.per_run", { duration: duration(f.mean) });
 }
 
 function TopQueriesTile({ tile, report }: { tile: Tile; report: Report }) {
@@ -364,7 +370,7 @@ function TopQueriesTile({ tile, report }: { tile: Tile; report: Report }) {
   const byId = new Map<string, QueryStat>(w.queries.map((q) => [q.id, q]));
   const top = tile.items[0]?.query_id;
   return (
-    <Frame tile={tile} action="All queries" onOpen={() => (top ? openQuery(top) : setState({ view: "queries" }))}>
+    <Frame tile={tile} action={t("ui.dashboard.action.all_queries")} onOpen={() => (top ? openQuery(top) : setState({ view: "queries" }))}>
       <ul className="dash-rows">
         {tile.items.map((item) => {
           const q = item.query_id ? byId.get(item.query_id) : undefined;
@@ -396,10 +402,10 @@ function WaitsTile({ tile, onOpen, sample }: { tile: Tile; onOpen: (tab: WaitsTa
   }
   if (tile.status === "unavailable") {
     return (
-      <Frame tile={tile} action="Sample now" onOpen={() => onOpen("now")}>
+      <Frame tile={tile} action={t("ui.dashboard.action.sample_now")} onOpen={() => onOpen("now")}>
         <div className="dash-actions">
           <button type="button" className="btn small" onClick={() => onOpen("now")}>
-            <Radio size={12} /> Sample what it waits on now
+            <Radio size={12} /> {t("ui.dashboard.waits.sample")}
           </button>
         </div>
         {tile.fix_sql && <Fix sql={tile.fix_sql} />}

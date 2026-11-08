@@ -4,6 +4,7 @@ import type { DashboardLive } from "../../gen/DashboardLive";
 import type { LiveState } from "../../gen/LiveState";
 import type { Tile } from "../../gen/Tile";
 import { api, errorMessage, type ApiError } from "../../lib/api";
+import { t } from "../../lib/i18n";
 import { openLive } from "../Live";
 import { Frame, metricText, metricValue } from "./Tiles";
 
@@ -86,25 +87,25 @@ export function NowTile({ tile, live, sessions }: { tile: Tile; live: LiveNow; s
   // An engine without sessions (SQLite): the scan's own word on it, with no live read to wait for.
   if (!sessions) return <Frame tile={tile} />;
   const freshness = live.hidden
-    ? "Paused while hidden"
+    ? t("ui.dashboard.now_tile.paused")
     : live.error && !live.state
-      ? "Couldn't read"
+      ? t("ui.dashboard.now_tile.read_failed")
       : live.age == null
-        ? "Reading…"
+        ? t("ui.dashboard.now_tile.reading")
         : live.age <= 1
-          ? "Updated just now"
-          : `Updated ${live.age} s ago`;
+          ? t("ui.dashboard.now_tile.updated_now")
+          : t("ui.dashboard.now_tile.updated_ago", { seconds: String(live.age) });
   const blocking = tile.items.filter((i) => i.status === "bad");
   const foot = (
-    <p className={`dash-live ${live.hidden || (live.error && !live.state) ? "paused" : ""}`} title={live.state ? `Read at ${new Date(live.state.taken_at).toLocaleTimeString()}` : undefined}>
-      <span className="live-dot" aria-hidden /> Live · {freshness}
+    <p className={`dash-live ${live.hidden || (live.error && !live.state) ? "paused" : ""}`} title={live.state ? t("ui.dashboard.now_tile.read_at", { time: new Date(live.state.taken_at).toLocaleTimeString() }) : undefined}>
+      <span className="live-dot" aria-hidden /> {t("ui.dashboard.now_tile.live", { freshness })}
     </p>
   );
   if (!live.state && !live.error) {
     return (
-      <Frame tile={{ ...tile, takeaway: "Reading sessions…", status: "info" }} foot={foot}>
+      <Frame tile={{ ...tile, takeaway: t("ui.dashboard.now_tile.reading_sessions"), status: "info" }} foot={foot}>
         <div className="dash-counts">
-          {["Running", "Blocked", "Idle in tx"].map((l) => (
+          {[t("ui.dashboard.now_tile.running"), t("ui.dashboard.now_tile.blocked"), t("ui.dashboard.now_tile.idle_in_tx")].map((l) => (
             <div key={l} className="dash-count">
               <b className="skeleton" style={{ width: 18, height: 18, display: "block" }} />
               <span>{l}</span>
@@ -116,27 +117,27 @@ export function NowTile({ tile, live, sessions }: { tile: Tile; live: LiveNow; s
   }
   if (live.error && tile.status !== "unavailable") {
     return (
-      <Frame tile={{ ...tile, status: "unavailable", takeaway: "Couldn't refresh sessions.", detail: null }} foot={foot}>
+      <Frame tile={{ ...tile, status: "unavailable", takeaway: t("ui.dashboard.now_tile.refresh_failed"), detail: null }} foot={foot}>
         <p className="dash-detail">{live.error.message}</p>
       </Frame>
     );
   }
   return (
-    <Frame tile={tile} action={blocking.length ? "Blocking" : "Sessions"} onOpen={() => openLive("sessions")} foot={foot}>
+    <Frame tile={tile} action={blocking.length ? t("ui.dashboard.action.blocking") : t("ui.dashboard.action.sessions")} onOpen={() => openLive("sessions")} foot={foot}>
       {tile.status !== "unavailable" && (
         <>
           <div className="dash-counts">
             <div className="dash-count">
               <b>{metricText(tile, "active") ?? "0"}</b>
-              <span>Running</span>
+              <span>{t("ui.dashboard.now_tile.running")}</span>
             </div>
             <div className={`dash-count ${metricValue(tile, "blocked") > 0 && (tile.status === "bad" || tile.status === "watch") ? tile.status : ""}`}>
               <b>{metricText(tile, "blocked") ?? "0"}</b>
-              <span>Blocked</span>
+              <span>{t("ui.dashboard.now_tile.blocked")}</span>
             </div>
             <div className={`dash-count ${metricValue(tile, "long-idle-in-transaction") > 0 ? "watch" : ""}`}>
               <b>{metricText(tile, "idle-in-transaction") ?? "0"}</b>
-              <span>Idle in tx</span>
+              <span>{t("ui.dashboard.now_tile.idle_in_tx")}</span>
             </div>
           </div>
           <Activity samples={live.history} />
@@ -153,7 +154,7 @@ function Activity({ samples }: { samples: Sample[] }) {
     return (
       <>
         <div className="dash-activity empty" aria-hidden />
-        <div className="dash-activity-cap">Sampling every {REFRESH_MS / 1000} s</div>
+        <div className="dash-activity-cap">{t("ui.dashboard.now_tile.sampling", { seconds: String(REFRESH_MS / 1000) })}</div>
       </>
     );
   }
@@ -185,7 +186,9 @@ function Activity({ samples }: { samples: Sample[] }) {
   const filling = offset > 0;
   return (
     <>
-      <svg className="dash-activity" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" role="img" aria-label={`Running sessions over the last ${minutes} min${blocked ? ", some blocked" : ""}`}>
+      <svg className="dash-activity" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" role="img" aria-label={blocked
+        ? t("ui.dashboard.now_tile.activity_blocked", { minutes: String(minutes) })
+        : t("ui.dashboard.now_tile.activity", { minutes: String(minutes) })}>
         {/* A baseline across the whole window, dashed where no sample has arrived yet, so a young chart reads as filling. */}
         {filling && <line className="pending" x1={0} x2={x(offset)} y1={h - 0.5} y2={h - 0.5} />}
         <line className="base" x1={x(offset)} x2={w} y1={h - 0.5} y2={h - 0.5} />
@@ -194,8 +197,8 @@ function Activity({ samples }: { samples: Sample[] }) {
         {blocked && <path className="blocked" d={line("blocked")} />}
       </svg>
       <div className="dash-activity-cap">
-        <span>{filling ? `${minutes} of ${span} min so far` : `Last ${span} min`}</span>
-        <span>now</span>
+        <span>{filling ? t("ui.dashboard.now_tile.filling", { minutes: String(minutes), span: String(span) }) : t("ui.dashboard.now_tile.last", { span: String(span) })}</span>
+        <span>{t("ui.dashboard.now")}</span>
       </div>
     </>
   );
