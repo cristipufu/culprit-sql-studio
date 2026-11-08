@@ -55,17 +55,7 @@ pub async fn collect(connector: &Connector, probe: &Probe, snapshot: &mut Snapsh
     let writable = variables.get("read_only").map(|v| !is_on(v));
     // Product/version-specific monitoring privilege; only relevant when replication is configured.
     let replicas = replica_status(&mut conn, writable, mariadb).await.map_err(|mut e| {
-        let permission = if mariadb && culprit_core::version_at_least(&probe.version, [10, 5, 9]) {
-            "REPLICA MONITOR"
-        } else if mariadb && culprit_core::version_at_least(&probe.version, [10, 5, 2]) {
-            "REPLICATION SLAVE ADMIN"
-        } else {
-            "REPLICATION CLIENT"
-        };
-        e.message = format!(
-            "{} Reading replica status needs the {permission} privilege; it only matters if this server is a replica.",
-            e.message
-        );
+        e.message = needs_replica_privilege(&e.message, mariadb, &probe.version);
         e
     });
     if let Some(replicas) = coverage.read(&sources::REPLICATION, replicas) {
@@ -83,6 +73,21 @@ pub async fn collect(connector: &Connector, probe: &Probe, snapshot: &mut Snapsh
         });
     }
     coverage.append_to(snapshot);
+}
+
+/// The server's `message` on failing to read replica status, and the privilege that reading it needs on this product
+/// and version.
+fn needs_replica_privilege(message: &str, mariadb: bool, version: &str) -> String {
+    let permission = if mariadb && culprit_core::version_at_least(version, [10, 5, 9]) {
+        "REPLICA MONITOR"
+    } else if mariadb && culprit_core::version_at_least(version, [10, 5, 2]) {
+        "REPLICATION SLAVE ADMIN"
+    } else {
+        "REPLICATION CLIENT"
+    };
+    format!(
+        "{message} Reading replica status needs the {permission} privilege; it only matters if this server is a replica."
+    )
 }
 
 // ── per statement ──────────────────────────────────────────────────────────────────────────────────
@@ -111,6 +116,14 @@ pub fn error_name(code: u32) -> Option<&'static str> {
         1206 => "lock table full",
         _ => return None,
     })
+}
+
+/// An error as a statement's costs and a replica name it: its code first (checks read it), then its name.
+fn error_label(code: u32) -> String {
+    match error_name(code) {
+        Some(name) => format!("{code} {name}"),
+        None => format!("error {code}"),
+    }
 }
 
 async fn attach_errors(conn: &mut Conn, database: &str, queries: &mut [QueryStat]) -> culprit_core::Result<()> {
@@ -160,10 +173,7 @@ async fn attach_errors(conn: &mut Conn, database: &str, queries: &mut [QueryStat
         costs.warnings = r.number("warnings");
         costs.top_error = codes.get(&digest).and_then(|by_code| {
             let (code, _) = by_code.iter().max_by(|a, b| a.1.total_cmp(b.1))?;
-            Some(match error_name(*code) {
-                Some(name) => format!("{code} {name}"),
-                None => format!("error {code}"),
-            })
+            Some(error_label(*code))
         });
         q.costs = (!costs.is_empty()).then_some(costs);
     }
@@ -379,13 +389,7 @@ fn replica(r: ChannelRow, writable: Option<bool>) -> Option<Replica> {
         // Seconds_Behind_Source counts the configured delay too: only what is beyond it is lag.
         lag_seconds: r.behind.map(|s| (s - r.delay.unwrap_or(0.0)).max(0.0)),
         delay_seconds: r.delay,
-        error: error.map(|n| {
-            let code = n as u32;
-            match error_name(code) {
-                Some(name) => format!("{code} {name}"),
-                None => format!("error {code}"),
-            }
-        }),
+        error: error.map(|n| error_label(n as u32)),
         ..Replica::new(
             match r.channel {
                 Some(c) => format!("{c} (from {})", r.source),
@@ -585,8 +589,105 @@ mod tests {
 
     #[test]
     fn error_codes_have_fixed_names() {
-        assert_eq!(error_name(1205), Some("lock wait timeout"));
-        assert_eq!(error_name(1969), Some("statement timeout (max_statement_time)"));
+        assert_eq!(error_name(1205).as_deref(), Some("lock wait timeout"));
+        assert_eq!(error_name(1969).as_deref(), Some("statement timeout (max_statement_time)"));
         assert_eq!(error_name(4242), None);
+    }
+
+    // What the connection signals, the errors' names and a replica's status say, word for word: their messages come
+    // from locales/en.json.
+    #[test]
+    fn signals_and_errors_say_what_they_are_in_english() {
+        let status = |uptime: f64| -> HashMap<String, f64> {
+            [
+                ("Uptime", uptime),
+                ("Connections", 30_000.0),
+                ("Aborted_connects", 20.0),
+                ("Aborted_clients", 5.0),
+                ("Threads_created", 5_000.0),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect()
+        };
+        let words = |signals: Vec<Signal>| -> Vec<(String, String, Option<String>)> {
+            signals.into_iter().map(|s| (s.key, s.label, s.healthy)).collect()
+        };
+        assert_eq!(
+            words(connection_signals(&status(7_200.0))),
+            [
+                (
+                    "new-connections".into(),
+                    "New connections".into(),
+                    Some("under 5 a second: pooled connections are opened once".into())
+                ),
+                (
+                    "thread-cache-misses".into(),
+                    "Connections that needed a new thread".into(),
+                    Some("under 10%: thread_cache_size covers new connections".into())
+                ),
+                ("aborted-connects".into(), "Failed connection attempts".into(), None),
+                ("aborted-clients".into(), "Connections dropped without closing".into(), None),
+            ]
+        );
+        let early = words(connection_signals(&status(600.0)));
+        assert_eq!(
+            early[2..],
+            [
+                ("aborted-connects".into(), "Failed connection attempts since start".into(), None),
+                ("aborted-clients".into(), "Connections dropped without closing since start".into(), None),
+            ]
+        );
+        let names: Vec<(u32, String)> =
+            [1205, 1213, 3024, 1969, 1317, 3572, 1062, 1451, 1452, 1048, 1406, 1264, 1690, 1292, 1366, 1064, 1054]
+                .into_iter()
+                .chain([1146, 1114, 1206, 4242])
+                .map(|code| (code, error_label(code)))
+                .collect();
+        assert_eq!(
+            names,
+            [
+                (1205, "1205 lock wait timeout".to_string()),
+                (1213, "1213 deadlock".into()),
+                (3024, "3024 statement timeout (max_execution_time)".into()),
+                (1969, "1969 statement timeout (max_statement_time)".into()),
+                (1317, "1317 query interrupted".into()),
+                (3572, "3572 lock not available (NOWAIT)".into()),
+                (1062, "1062 duplicate key".into()),
+                (1451, "1451 row is referenced by a foreign key".into()),
+                (1452, "1452 foreign key has no parent row".into()),
+                (1048, "1048 column cannot be null".into()),
+                (1406, "1406 data too long".into()),
+                (1264, "1264 value out of range".into()),
+                (1690, "1690 value out of range".into()),
+                (1292, "1292 incorrect value".into()),
+                (1366, "1366 incorrect value".into()),
+                (1064, "1064 syntax error".into()),
+                (1054, "1054 unknown column".into()),
+                (1146, "1146 table doesn't exist".into()),
+                (1114, "1114 table is full".into()),
+                (1206, "1206 lock table full".into()),
+                (4242, "error 4242".into()),
+            ]
+        );
+        assert_eq!(
+            replica(ChannelRow { io_errno: Some(2003.0), ..channel("No", "Yes") }, None).unwrap().error.as_deref(),
+            Some("error 2003")
+        );
+        assert_eq!(
+            needs_replica_privilege("Access denied.", true, "10.11.6-MariaDB"),
+            "Access denied. Reading replica status needs the REPLICA MONITOR privilege; it only matters if this server \
+             is a replica."
+        );
+        assert_eq!(
+            needs_replica_privilege("Access denied.", true, "10.5.4-MariaDB"),
+            "Access denied. Reading replica status needs the REPLICATION SLAVE ADMIN privilege; it only matters if \
+             this server is a replica."
+        );
+        assert_eq!(
+            needs_replica_privilege("Access denied.", false, "8.4.3"),
+            "Access denied. Reading replica status needs the REPLICATION CLIENT privilege; it only matters if this \
+             server is a replica."
+        );
     }
 }

@@ -10,10 +10,36 @@ use crate::connect::{Connector, Flavor, Scope};
 use crate::rows::{explain_one, query_one};
 use crate::{plan_json, plan_maria};
 
-pub(crate) const NO_OPERATOR_PROGRESS: &str = "MySQL doesn't report how far a running query has got, operator by \
+/// What MySQL can say about a running statement, where it says no more.
+fn no_operator_progress() -> String {
+    "MySQL doesn't report how far a running query has got, operator by \
 operator. Culprit shows the plan MySQL is executing, how long it has run and, for plans MySQL counts as it goes, how \
 many rows it has examined so far. \
-ALTER TABLE and other long statements report stage progress when performance_schema stage events are on.";
+ALTER TABLE and other long statements report stage progress when performance_schema stage events are on."
+        .into()
+}
+
+/// [`no_operator_progress`], when the plan it is executing couldn't be read either (the server's `error`).
+fn plan_unavailable(error: &str) -> String {
+    format!("{} Its plan couldn't be shown: {error}", no_operator_progress())
+}
+
+fn stage_progress_basis() -> String {
+    "MySQL's own stage progress (WORK_COMPLETED of WORK_ESTIMATED)".into()
+}
+
+fn mariadb_progress_basis() -> String {
+    "MariaDB's own progress report for this statement".into()
+}
+
+/// The phase a MariaDB statement that reports its progress is in: its `state` and its stage of `stages`.
+fn mariadb_phase(state: Option<&str>, stage: f64, stages: f64) -> String {
+    match (state, stages > 1.0) {
+        (Some(state), true) => format!("{state} (stage {stage:.0} of {stages:.0})"),
+        (Some(state), false) => state.to_string(),
+        (None, _) => format!("stage {stage:.0} of {stages:.0}"),
+    }
+}
 
 /// TIMER_* columns are picoseconds; for a statement still running, TIMER_WAIT is the time so far.
 const STATEMENT_SQL: &str = r#"
@@ -36,9 +62,13 @@ const MARIADB_SQL: &str =
        EXAMINED_ROWS AS rows_examined, PROGRESS AS progress, STAGE AS stage, MAX_STAGE AS max_stage
   FROM information_schema.PROCESSLIST WHERE ID = {id}";
 
-const MARIADB_NO_ANALYZE: &str = "MariaDB reports a running statement's operators through SHOW ANALYZE, which needs \
+/// What a MariaDB before 10.9 can say about a running statement.
+fn mariadb_no_analyze() -> String {
+    "MariaDB reports a running statement's operators through SHOW ANALYZE, which needs \
 MariaDB 10.9 or newer. Culprit shows how long it has run and, for plans MariaDB counts as it goes, how many rows it \
-has examined so far.";
+has examined so far."
+        .into()
+}
 
 pub(crate) async fn query_progress(connector: &Connector, session: &str, with_plan: bool) -> Result<QueryProgress> {
     let id = session_number(session)?;
@@ -90,7 +120,7 @@ pub(crate) async fn query_progress(connector: &Connector, session: &str, with_pl
             let fraction = (done / total).clamp(0.0, 1.0);
             progress.phase_percent = Some(fraction);
             progress.percent = Some(fraction);
-            progress.percent_basis = Some("MySQL's own stage progress (WORK_COMPLETED of WORK_ESTIMATED)".into());
+            progress.percent_basis = Some(stage_progress_basis());
         }
     }
     if with_plan {
@@ -110,11 +140,11 @@ pub(crate) async fn query_progress(connector: &Connector, session: &str, with_pl
                 }
             }
             Ok(None) => {}
-            Err(e) => progress.note = Some(format!("{NO_OPERATOR_PROGRESS} Its plan couldn't be shown: {}", e.message)),
+            Err(e) => progress.note = Some(plan_unavailable(&e.message)),
         }
     }
     if progress.note.is_none() && progress.percent.is_none() {
-        progress.note = Some(NO_OPERATOR_PROGRESS.to_string());
+        progress.note = Some(no_operator_progress());
     }
     let _ = conn.disconnect().await;
     Ok(progress)
@@ -137,14 +167,10 @@ async fn mariadb(conn: &mut Conn, id: u64, with_plan: bool, mut progress: QueryP
     if let Some(percent) = row.number("progress").filter(|p| *p > 0.0) {
         let fraction = (percent / 100.0).clamp(0.0, 1.0);
         let (stage, stages) = (row.number("stage").unwrap_or(1.0).max(1.0), row.number("max_stage").unwrap_or(1.0));
-        progress.phase = Some(match (progress.state.as_deref(), stages > 1.0) {
-            (Some(state), true) => format!("{state} (stage {stage:.0} of {stages:.0})"),
-            (Some(state), false) => state.to_string(),
-            (None, _) => format!("stage {stage:.0} of {stages:.0}"),
-        });
+        progress.phase = Some(mariadb_phase(progress.state.as_deref(), stage, stages));
         progress.phase_percent = Some(fraction);
         progress.percent = Some((((stage - 1.0) + fraction) / stages.max(1.0)).clamp(0.0, 1.0));
-        progress.percent_basis = Some("MariaDB's own progress report for this statement".into());
+        progress.percent_basis = Some(mariadb_progress_basis());
     }
     // The session id is digits only (session_number), so splicing it in is safe. SHOW ANALYZE never runs anything.
     match explain_one(conn, &format!("SHOW ANALYZE FORMAT=JSON FOR {id}")).await {
@@ -162,7 +188,7 @@ async fn mariadb(conn: &mut Conn, id: u64, with_plan: bool, mut progress: QueryP
                     let percent = progress.percent;
                     progress.summarize_nodes();
                     progress.percent = percent;
-                    progress.percent_basis = Some("MariaDB's own progress report for this statement".into());
+                    progress.percent_basis = Some(mariadb_progress_basis());
                 }
                 if !with_plan {
                     // Node ids come from the plan's shape, so they match the plan sent with the first reading.
@@ -172,8 +198,38 @@ async fn mariadb(conn: &mut Conn, id: u64, with_plan: bool, mut progress: QueryP
         }
         Ok(None) => {}
         // The statement finished between the two reads, or the server is older than 10.9.
-        Err(e) if e.message.to_ascii_lowercase().contains("syntax") => progress.note = Some(MARIADB_NO_ANALYZE.into()),
+        Err(e) if e.message.to_ascii_lowercase().contains("syntax") => progress.note = Some(mariadb_no_analyze()),
         Err(_) => {}
     }
     Ok(progress)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // What a running statement's progress says, word for word: its messages come from locales/en.json.
+    #[test]
+    fn progress_says_what_it_can_in_english() {
+        let mysql = "MySQL doesn't report how far a running query has got, operator by operator. Culprit shows the plan \
+                     MySQL is executing, how long it has run and, for plans MySQL counts as it goes, how many rows it \
+                     has examined so far. ALTER TABLE and other long statements report stage progress when \
+                     performance_schema stage events are on.";
+        assert_eq!(no_operator_progress(), mysql);
+        assert_eq!(
+            plan_unavailable("Unknown thread id: 42"),
+            format!("{mysql} Its plan couldn't be shown: Unknown thread id: 42")
+        );
+        assert_eq!(
+            mariadb_no_analyze(),
+            "MariaDB reports a running statement's operators through SHOW ANALYZE, which needs MariaDB 10.9 or newer. \
+             Culprit shows how long it has run and, for plans MariaDB counts as it goes, how many rows it has examined \
+             so far."
+        );
+        assert_eq!(stage_progress_basis(), "MySQL's own stage progress (WORK_COMPLETED of WORK_ESTIMATED)");
+        assert_eq!(mariadb_progress_basis(), "MariaDB's own progress report for this statement");
+        assert_eq!(mariadb_phase(Some("altering table"), 2.0, 3.0), "altering table (stage 2 of 3)");
+        assert_eq!(mariadb_phase(Some("copy to tmp table"), 1.0, 1.0), "copy to tmp table");
+        assert_eq!(mariadb_phase(None, 1.0, 2.0), "stage 1 of 2");
+    }
 }

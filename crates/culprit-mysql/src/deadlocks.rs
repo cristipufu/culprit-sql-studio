@@ -51,7 +51,7 @@ pub(crate) async fn blocking_evidence(
     if let Some(Some(instrument)) = coverage.read(&crate::sources::METADATA_LOCKS, query_one(conn, "SELECT ENABLED AS enabled FROM performance_schema.setup_instruments WHERE NAME = 'wait/lock/metadata/sql/mdl'").await)
         && instrument.text("enabled").as_deref() != Some("YES")
     {
-        coverage.note("metadata_locks", "Metadata-lock instrumentation is disabled; absence of a chain does not establish absence of metadata blocking.");
+        coverage.note("metadata_locks", metadata_instrument_off());
     }
     let pairs = rows.iter().map(|r| (r.string("session"), r.string("blocking"))).collect::<Vec<_>>();
     let locks = rows
@@ -137,11 +137,7 @@ pub(crate) async fn recent(conn: &mut Conn, since_hours: f64) -> Result<Deadlock
     let status = match query_one(conn, "SHOW ENGINE INNODB STATUS").await {
         Ok(row) => row.and_then(|r| r.text("Status").or_else(|| r.text("status"))).unwrap_or_default(),
         Err(_) => {
-            report.note = Some(
-                "Reading InnoDB's deadlock report needs the PROCESS privilege. Paste the LATEST DETECTED DEADLOCK section \
-                 of SHOW ENGINE INNODB STATUS to have it explained."
-                    .into(),
-            );
+            report.note = Some(needs_process_privilege());
             return Ok(report);
         }
     };
@@ -177,15 +173,31 @@ pub(crate) async fn recent(conn: &mut Conn, since_hours: f64) -> Result<Deadlock
     });
     let undated = found.iter().any(|d| d.at.is_none());
     report.deadlocks = found;
-    report.note = Some(format!(
+    report.note = Some(only_the_latest(undated));
+    Ok(report)
+}
+
+fn metadata_instrument_off() -> String {
+    "Metadata-lock instrumentation is disabled; absence of a chain does not establish absence of metadata blocking."
+        .into()
+}
+
+fn needs_process_privilege() -> String {
+    "Reading InnoDB's deadlock report needs the PROCESS privilege. Paste the LATEST DETECTED DEADLOCK section \
+     of SHOW ENGINE INNODB STATUS to have it explained."
+        .into()
+}
+
+/// InnoDB keeps one deadlock; `undated`: its time couldn't be converted from the server's time zone.
+fn only_the_latest(undated: bool) -> String {
+    format!(
         "InnoDB keeps only its most recent deadlock{}. Turn on innodb_print_all_deadlocks to write every one to the error log.",
         if undated {
             ", and Culprit couldn't convert its time from the server's time zone, so when it happened is unknown (it may be from long ago)"
         } else {
             ""
         }
-    ));
-    Ok(report)
+    )
 }
 
 /// The time on the LATEST DETECTED DEADLOCK section, as InnoDB printed it (`2026-10-11 13:48:08`, the server's local
@@ -554,6 +566,39 @@ TRANSACTIONS
             Some("2026-10-11T11:48:08Z")
         );
         assert!(parse_at(STATUS, None)[0].at.is_none());
+    }
+
+    // What the deadlock report and lock waits say, word for word: their messages come from locales/en.json.
+    #[test]
+    fn deadlock_notes_and_lock_modes_say_what_they_are_in_english() {
+        assert_eq!(
+            only_the_latest(false),
+            "InnoDB keeps only its most recent deadlock. Turn on innodb_print_all_deadlocks to write every one to the \
+             error log."
+        );
+        assert_eq!(
+            only_the_latest(true),
+            "InnoDB keeps only its most recent deadlock, and Culprit couldn't convert its time from the server's time \
+             zone, so when it happened is unknown (it may be from long ago). Turn on innodb_print_all_deadlocks to \
+             write every one to the error log."
+        );
+        assert_eq!(
+            needs_process_privilege(),
+            "Reading InnoDB's deadlock report needs the PROCESS privilege. Paste the LATEST DETECTED DEADLOCK section of \
+             SHOW ENGINE INNODB STATUS to have it explained."
+        );
+        assert_eq!(
+            metadata_instrument_off(),
+            "Metadata-lock instrumentation is disabled; absence of a chain does not establish absence of metadata \
+             blocking."
+        );
+        assert_eq!(mode_label("X locks rec but not gap"), "X (row)");
+        assert_eq!(mode_label("X locks gap before rec"), "X (gap)");
+        assert_eq!(mode_label("X locks gap before rec insert intention"), "X (gap)");
+        assert_eq!(mode_label("X insert intention"), "X (insert intention)");
+        assert_eq!(mode_label("S"), "S (row and gap)");
+        assert_eq!(mode_label("IX"), "IX");
+        assert_eq!(mode_label("AUTO-INC"), "AUTO-INC (row and gap)");
     }
 
     #[test]

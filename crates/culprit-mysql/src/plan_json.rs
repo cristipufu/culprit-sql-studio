@@ -559,6 +559,20 @@ fn tokenize(sql: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    // What a plan the server returned in a shape Culprit can't read says, word for word: the messages come from
+    // locales/en.json.
+    #[test]
+    fn unreadable_plans_say_why_in_english() {
+        let error = parse("{\"query_block\":", PlanKind::Estimated, None, None).unwrap_err();
+        assert!(error.message.starts_with("The server returned a plan Culprit cannot read: "), "{}", error.message);
+        assert_eq!(parse("{}", PlanKind::Estimated, None, None).unwrap_err().message, "MySQL plan has no query_block");
+        let maria = serde_json::json!({"query_optimization": {"r_total_time_ms": 0.1}});
+        assert_eq!(
+            crate::plan_maria::parse(&maria, "{}", PlanKind::Actual, None, None).unwrap_err().message,
+            "MariaDB plan has no query_block"
+        );
+    }
+
     #[test]
     fn structural_advice_survives_removing_raw_display_properties() {
         let json = r#"{"query_block":{"nested_loop":[

@@ -174,12 +174,77 @@ async fn running_statements(conn: &mut Conn) -> Option<f64> {
     rows.first().and_then(|r| r.number("n"))
 }
 
+/// What [`collect`] read: global status, and what the signals beyond it need.
+#[derive(Default)]
+struct Readings {
+    /// SHOW GLOBAL STATUS, when it could be read.
+    status: Option<HashMap<String, f64>>,
+    /// Other sessions' statements running now.
+    running: Option<f64>,
+    connections: Option<ConnectionLimit>,
+    /// Undo logs purge hasn't removed yet (the history list length).
+    history: Option<f64>,
+    oldest: Option<OpenTransaction>,
+}
+
+/// max_connections, with what the connection signals set against it.
+struct ConnectionLimit {
+    max: f64,
+    /// Culprit's own sessions: this scan opens several.
+    own: f64,
+    /// Seconds since connections peaked, where the server keeps when.
+    peak_ago: Option<f64>,
+}
+
 /// The pressure counters, each source read through `Coverage::read` (`crate::sources`).
 pub async fn collect(conn: &mut Conn) -> (Pressure, Coverage) {
-    let running = running_statements(conn).await;
-    let mut p = Pressure::default();
     let mut coverage = Coverage::default();
-    if let Some(s) = coverage.read(&sources::GLOBAL_STATUS, status(conn).await) {
+    let mut r = Readings { running: running_statements(conn).await, ..Readings::default() };
+    r.status = coverage.read(&sources::GLOBAL_STATUS, status(conn).await);
+    if let Some(s) = &r.status
+        && let Ok(Some(row)) = query_one(conn, "SELECT @@max_connections AS max").await
+        && let Some(max) = row.number("max").filter(|m| *m > 0.0)
+    {
+        let own = own_sessions(conn).await;
+        let peak_ago = if s.contains_key("Max_used_connections") { peak_connections_ago(conn).await } else { None };
+        r.connections = Some(ConnectionLimit { max, own, peak_ago });
+    }
+    r.history = query_one(
+        conn,
+        "SELECT `COUNT` AS n FROM information_schema.INNODB_METRICS WHERE NAME = 'trx_rseg_history_len'",
+    )
+    .await
+    .ok()
+    .flatten()
+    .and_then(|r| r.number("n"));
+    // The program name comes from performance_schema's connection attributes, which a server without it lacks.
+    let oldest = match query_one(conn, &oldest_sql(true)).await {
+        Ok(found) => Ok(found),
+        Err(_) => query_one(conn, &oldest_sql(false)).await,
+    };
+    if let Some(Some(row)) = coverage.read(&sources::OPEN_TRANSACTIONS, oldest) {
+        r.oldest = Some(OpenTransaction {
+            session: row.string("session"),
+            seconds: row.number("seconds").unwrap_or(0.0),
+            program: row.text("program").filter(|s| !s.is_empty()),
+            state: Some(if row.text("command").as_deref() == Some("Sleep") {
+                "idle in transaction".into()
+            } else {
+                "running".into()
+            }),
+            holder: CleanupHolder::Session,
+            wrote: row.number("modified").map(|m| m > 0.0),
+            database: row.text("db").filter(|d| !d.is_empty()),
+            ..OpenTransaction::default()
+        });
+    }
+    (pressure_from(r), coverage)
+}
+
+/// The pressure signals from what [`collect`] read.
+fn pressure_from(r: Readings) -> Pressure {
+    let mut p = Pressure::default();
+    if let Some(s) = &r.status {
         let get = |k: &str| s.get(k).copied();
         let uptime_s = get("Uptime").filter(|u| *u > 0.0);
         p.uptime_hours = uptime_s.map(|u| u / 3600.0);
@@ -240,7 +305,7 @@ pub async fn collect(conn: &mut Conn) -> (Pressure, Coverage) {
             ));
         }
         // The process list without Culprit's sessions; the counter (minus this session) if it can't be read.
-        if let Some(running) = running.or_else(|| get("Threads_running").map(|r| (r - 1.0).max(0.0))) {
+        if let Some(running) = r.running.or_else(|| get("Threads_running").map(|r| (r - 1.0).max(0.0))) {
             p.signals.push(Signal::new(
                 "threads-running",
                 "Statements running now",
@@ -287,11 +352,8 @@ pub async fn collect(conn: &mut Conn) -> (Pressure, Coverage) {
                 .graded("under 50 ms is healthy", 50.0, 500.0, true),
             );
         }
-        if let Ok(Some(r)) = query_one(conn, "SELECT @@max_connections AS max").await
-            && let Some(max) = r.number("max").filter(|m| *m > 0.0)
-        {
+        if let Some(ConnectionLimit { max, own, peak_ago }) = r.connections {
             // The application's connections: Culprit's own (this scan opens several) don't count.
-            let own = own_sessions(conn).await;
             if let Some(used) = get("Threads_connected").map(|u| (u - own).max(0.0)) {
                 p.signals.push(
                     Signal::new(
@@ -315,7 +377,7 @@ pub async fn collect(conn: &mut Conn) -> (Pressure, Coverage) {
                     )
                     .graded("under 90% of max_connections is healthy", 90.0, 100.0, true),
                 );
-                if let Some(ago) = peak_connections_ago(conn).await {
+                if let Some(ago) = peak_ago {
                     p.signals.push(Signal::new(
                         culprit_core::signal_id::MAX_USED_CONNECTIONS_AGO,
                         "Since the busiest moment",
@@ -327,17 +389,9 @@ pub async fn collect(conn: &mut Conn) -> (Pressure, Coverage) {
             }
         }
     }
-    let history = query_one(
-        conn,
-        "SELECT `COUNT` AS n FROM information_schema.INNODB_METRICS WHERE NAME = 'trx_rseg_history_len'",
-    )
-    .await
-    .ok()
-    .flatten()
-    .and_then(|r| r.number("n"));
     // Its own signal, not the oldest transaction's: the history list is the whole server's, and it counts the undo
     // logs of committed transactions purge hasn't removed yet (each one any number of rows), not row versions.
-    if let Some(h) = history {
+    if let Some(h) = r.history {
         p.signals.push(
             Signal::new(
                 culprit_core::signal_id::HISTORY_LENGTH,
@@ -354,40 +408,20 @@ pub async fn collect(conn: &mut Conn) -> (Pressure, Coverage) {
             ),
         );
     }
-    // The program name comes from performance_schema's connection attributes, which a server without it lacks.
-    let oldest = match query_one(conn, &oldest_sql(true)).await {
-        Ok(found) => Ok(found),
-        Err(_) => query_one(conn, &oldest_sql(false)).await,
-    };
-    if let Some(Some(r)) = coverage.read(&sources::OPEN_TRANSACTIONS, oldest) {
-        let seconds = r.number("seconds").unwrap_or(0.0);
-        p.oldest_transaction = Some(OpenTransaction {
-            session: r.string("session"),
-            seconds,
-            program: r.text("program").filter(|s| !s.is_empty()),
-            state: Some(if r.text("command").as_deref() == Some("Sleep") {
-                "idle in transaction".into()
-            } else {
-                "running".into()
-            }),
-            holder: CleanupHolder::Session,
-            wrote: r.number("modified").map(|m| m > 0.0),
-            database: r.text("db").filter(|d| !d.is_empty()),
-            ..OpenTransaction::default()
-        });
+    if let Some(oldest) = r.oldest {
         p.signals.push(
             Signal::new(
                 culprit_core::signal_id::OLDEST_TRANSACTION,
                 "Oldest transaction to inspect for locks or a retained read view",
-                seconds,
+                oldest.seconds,
                 SignalUnit::Seconds,
                 SignalScope::Now,
             )
             .graded("seconds or minutes, not hours", 600.0, 1800.0, true),
         );
+        p.oldest_transaction = Some(oldest);
     }
-
-    (p, coverage)
+    p
 }
 
 /// What each busy session is doing, from the process list: the state text and whether InnoDB has it waiting for a lock.
@@ -432,14 +466,7 @@ pub async fn sample(conn: &mut Conn, seconds: u32) -> Result<WaitSample> {
     let ticks = seconds.max(1) + 1;
     for tick in 0..ticks {
         for r in query(conn, SESSIONS_SQL).await? {
-            let state = r.text("state").filter(|s| !s.is_empty()).unwrap_or_else(|| "executing".into());
-            let lock_wait = r.text("trx_state").is_some_and(|t| t.eq_ignore_ascii_case("LOCK WAIT"));
-            let label = if lock_wait && !state.to_ascii_lowercase().contains("lock") {
-                format!("row lock wait ({state})")
-            } else {
-                state.clone()
-            };
-            *observed.entry((state_category(&state, lock_wait), label)).or_default() += 1.0;
+            *observed.entry(observation(r.text("state"), r.text("trx_state"))).or_default() += 1.0;
         }
         if tick + 1 < ticks {
             tokio::time::sleep(Duration::from_secs(1)).await;
@@ -447,90 +474,136 @@ pub async fn sample(conn: &mut Conn, seconds: u32) -> Result<WaitSample> {
     }
     let second = if instruments_on { wait_totals(conn).await.ok() } else { None };
     let status_after = status(conn).await.unwrap_or_default();
-    let elapsed = started.elapsed().as_secs_f64().max(1.0);
-    let instrumented = match (&first, &second) {
-        (Some(first), Some(second)) => fold(second.iter().filter_map(|(event, (ms, n))| {
-            let (ms0, n0) = first.get(event).copied().unwrap_or((0.0, 0.0));
-            let delta = ms - ms0;
-            (delta > 0.0).then(|| (event.clone(), delta, (n - n0).max(0.0)))
-        })),
-        _ => Vec::new(),
-    };
-    let samples = f64::from(ticks);
-    let busy: f64 = observed.values().sum();
-    let mut notes = vec!["These wait and connection counters cover the whole server, including other databases. They do not establish pressure in the selected database.".into()];
-    let (categories, method) = if instrumented.iter().map(|c| c.wait_ms).sum::<f64>() > 0.0 {
-        (
-            instrumented,
-            format!(
-                "Whole-server difference of two readings of performance_schema.events_waits_summary_global_by_event_name {seconds} s apart"
-            ),
-        )
-    } else {
-        // Each observation stands for one second of one session's time.
-        let mut by_category: BTreeMap<&'static str, (f64, String, f64)> = BTreeMap::new();
-        for ((category, label), n) in &observed {
-            let entry = by_category.entry(category).or_default();
-            entry.0 += n;
-            if *n > entry.2 {
-                entry.1 = label.clone();
-                entry.2 = *n;
-            }
-        }
-        let mut sampled: Vec<WaitStat> = by_category
-            .into_iter()
-            .map(|(category, (n, top, _))| WaitStat {
-                category: category.into(),
-                wait_type: Some(top),
-                wait_ms: n / samples * elapsed * 1000.0,
-                tasks: Some(n),
-            })
-            .collect();
-        sampled.sort_by(|a, b| b.wait_ms.total_cmp(&a.wait_ms));
-        notes.push(match first {
-            Some(_) => "No enabled performance_schema wait instrument recorded anything, so these come from sampling what each busy session was doing once a second.".to_string(),
-            None => "performance_schema is off, so the server times no waits; these come from sampling what each busy session was doing once a second.".to_string(),
-        });
-        (
-            sampled,
-            format!(
-                "The whole server's process list sampled once a second for {seconds} s; observations are weighted over the measured sample duration"
-            ),
-        )
-    };
-    let total_ms: f64 = categories.iter().map(|c| c.wait_ms).sum();
-    let delta = |k: &str| {
-        let d = status_after.get(k)? - status_before.get(k)?;
-        (d >= 0.0).then_some(d)
-    };
-    let rate = |k: &str| delta(k).map(|d| d / elapsed);
-    let mut signals = Vec::new();
-    if let Some(q) = rate("Questions") {
-        signals.push(Signal::new("questions", "Statements", q, SignalUnit::PerSecond, SignalScope::Sampled));
-    }
-    if let Some(w) = delta("Innodb_row_lock_waits") {
-        signals.push(Signal::new(
-            "row-lock-waits",
-            "Row-lock waits during sample (whole server)",
-            w,
-            SignalUnit::Count,
-            SignalScope::Sampled,
-        ));
-    }
-    if total_ms == 0.0 {
-        notes.push("No enabled wait instrument recorded anything and no session was busy. Many instruments are off by default; enable them in performance_schema.setup_instruments to see more.".into());
-    }
-    Ok(WaitSample {
-        engine: Engine::Mysql,
+    Ok(Sampled {
         taken_at,
-        seconds: elapsed,
-        method,
-        total_ms,
-        categories,
-        signals,
-        active_sessions: Some(busy / samples),
-        notes,
-    })
+        seconds,
+        elapsed: started.elapsed().as_secs_f64().max(1.0),
+        ticks,
+        observed,
+        first,
+        second,
+        status_before,
+        status_after,
+    }
+    .summary())
+}
+
+/// One busy session's sample: its category and what it was doing, from its process-list state and whether InnoDB has
+/// it waiting for a row lock.
+fn observation(state: Option<String>, trx_state: Option<String>) -> (&'static str, String) {
+    let state = state.filter(|s| !s.is_empty()).unwrap_or_else(|| "executing".into());
+    let lock_wait = trx_state.is_some_and(|t| t.eq_ignore_ascii_case("LOCK WAIT"));
+    let label = if lock_wait && !state.to_ascii_lowercase().contains("lock") {
+        format!("row lock wait ({state})")
+    } else {
+        state.clone()
+    };
+    (state_category(&state, lock_wait), label)
+}
+
+/// What [`sample`] read: two readings of the wait totals and of global status, and the busy sessions it saw between.
+struct Sampled {
+    taken_at: String,
+    seconds: u32,
+    /// Seconds the sample took, measured.
+    elapsed: f64,
+    /// How many times the process list was read.
+    ticks: u32,
+    /// Busy sessions seen, by (category, what they were doing).
+    observed: BTreeMap<(&'static str, String), f64>,
+    first: Option<HashMap<String, (f64, f64)>>,
+    second: Option<HashMap<String, (f64, f64)>>,
+    status_before: HashMap<String, f64>,
+    status_after: HashMap<String, f64>,
+}
+
+impl Sampled {
+    fn summary(self) -> WaitSample {
+        let Sampled { taken_at, seconds, elapsed, ticks, observed, first, second, status_before, status_after } = self;
+        let instrumented = match (&first, &second) {
+            (Some(first), Some(second)) => fold(second.iter().filter_map(|(event, (ms, n))| {
+                let (ms0, n0) = first.get(event).copied().unwrap_or((0.0, 0.0));
+                let delta = ms - ms0;
+                (delta > 0.0).then(|| (event.clone(), delta, (n - n0).max(0.0)))
+            })),
+            _ => Vec::new(),
+        };
+        let samples = f64::from(ticks);
+        let busy: f64 = observed.values().sum();
+        let mut notes = vec!["These wait and connection counters cover the whole server, including other databases. They do not establish pressure in the selected database.".into()];
+        let (categories, method) = if instrumented.iter().map(|c| c.wait_ms).sum::<f64>() > 0.0 {
+            (
+                instrumented,
+                format!(
+                    "Whole-server difference of two readings of performance_schema.events_waits_summary_global_by_event_name {seconds} s apart"
+                ),
+            )
+        } else {
+            // Each observation stands for one second of one session's time.
+            let mut by_category: BTreeMap<&'static str, (f64, String, f64)> = BTreeMap::new();
+            for ((category, label), n) in &observed {
+                let entry = by_category.entry(category).or_default();
+                entry.0 += n;
+                if *n > entry.2 {
+                    entry.1 = label.clone();
+                    entry.2 = *n;
+                }
+            }
+            let mut sampled: Vec<WaitStat> = by_category
+                .into_iter()
+                .map(|(category, (n, top, _))| WaitStat {
+                    category: category.into(),
+                    wait_type: Some(top),
+                    wait_ms: n / samples * elapsed * 1000.0,
+                    tasks: Some(n),
+                })
+                .collect();
+            sampled.sort_by(|a, b| b.wait_ms.total_cmp(&a.wait_ms));
+            notes.push(match first {
+                Some(_) => "No enabled performance_schema wait instrument recorded anything, so these come from sampling what each busy session was doing once a second.".to_string(),
+                None => "performance_schema is off, so the server times no waits; these come from sampling what each busy session was doing once a second.".to_string(),
+            });
+            (
+                sampled,
+                format!(
+                    "The whole server's process list sampled once a second for {seconds} s; observations are weighted over the measured sample duration"
+                ),
+            )
+        };
+        let total_ms: f64 = categories.iter().map(|c| c.wait_ms).sum();
+        let delta = |k: &str| {
+            let d = status_after.get(k)? - status_before.get(k)?;
+            (d >= 0.0).then_some(d)
+        };
+        let rate = |k: &str| delta(k).map(|d| d / elapsed);
+        let mut signals = Vec::new();
+        if let Some(q) = rate("Questions") {
+            signals.push(Signal::new("questions", "Statements", q, SignalUnit::PerSecond, SignalScope::Sampled));
+        }
+        if let Some(w) = delta("Innodb_row_lock_waits") {
+            signals.push(Signal::new(
+                "row-lock-waits",
+                "Row-lock waits during sample (whole server)",
+                w,
+                SignalUnit::Count,
+                SignalScope::Sampled,
+            ));
+        }
+        if total_ms == 0.0 {
+            notes.push("No enabled wait instrument recorded anything and no session was busy. Many instruments are off by default; enable them in performance_schema.setup_instruments to see more.".into());
+        }
+        WaitSample {
+            engine: Engine::Mysql,
+            taken_at,
+            seconds: elapsed,
+            method,
+            total_ms,
+            categories,
+            signals,
+            active_sessions: Some(busy / samples),
+            notes,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -562,5 +635,168 @@ mod tests {
         assert_eq!(folded[0].category, "IO");
         assert_eq!(folded[0].wait_ms, 80.0);
         assert_eq!(folded[0].wait_type.as_deref(), Some("wait/io/file/sql/binlog"));
+    }
+
+    fn map(pairs: &[(&str, f64)]) -> HashMap<String, f64> {
+        pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect()
+    }
+
+    /// Each signal's key, label and healthy range, as a person reads them.
+    fn words(signals: &[Signal]) -> Vec<(String, String, Option<String>)> {
+        signals.iter().map(|s| (s.key.clone(), s.label.clone(), s.healthy.clone())).collect()
+    }
+
+    // What the pressure signals and the wait sample say, word for word: their messages come from locales/en.json.
+    #[test]
+    fn pressure_signals_say_what_they_measure_in_english() {
+        let status = map(&[
+            ("Uptime", 7_200.0),
+            ("Innodb_buffer_pool_reads", 10.0),
+            ("Innodb_buffer_pool_read_requests", 1_000.0),
+            ("Innodb_buffer_pool_wait_free", 3.0),
+            ("Created_tmp_disk_tables", 1.0),
+            ("Created_tmp_tables", 10.0),
+            ("Questions", 72_000.0),
+            ("Innodb_row_lock_waits", 20.0),
+            ("Innodb_row_lock_time", 900.0),
+            ("Innodb_row_lock_time_avg", 45.0),
+            ("Threads_connected", 12.0),
+            ("Max_used_connections", 40.0),
+        ]);
+        let p = pressure_from(Readings {
+            status: Some(status),
+            running: Some(2.0),
+            connections: Some(ConnectionLimit { max: 151.0, own: 2.0, peak_ago: Some(600.0) }),
+            history: Some(1_200.0),
+            oldest: Some(OpenTransaction { session: "42".into(), seconds: 90.0, ..OpenTransaction::default() }),
+        });
+        let healthy = |s: &str| Some(s.to_string());
+        assert_eq!(
+            words(&p.signals),
+            [
+                (
+                    "buffer-pool-hit".into(),
+                    "Reads served from memory".into(),
+                    healthy("above 99% is healthy for most workloads")
+                ),
+                ("buffer-pool-reads".into(), "Pages read from disk".into(), None),
+                ("buffer-pool-wait-free".into(), "Buffer pool free-page waits".into(), None),
+                (
+                    "tmp-disk-tables".into(),
+                    "Temporary tables on disk".into(),
+                    healthy("under 10% of temporary tables is healthy")
+                ),
+                ("questions".into(), "Statements".into(), None),
+                ("threads-running".into(), "Statements running now".into(), None),
+                ("row-lock-waits".into(), "Row-lock waits".into(), None),
+                ("row-lock-time".into(), "Time waiting for row locks since start (whole server)".into(), None),
+                ("row-lock-avg".into(), "Average row-lock wait".into(), healthy("under 50 ms is healthy")),
+                ("connections".into(), "Connections in use".into(), healthy("under 80% of max_connections is healthy")),
+                (
+                    "max-used-connections".into(),
+                    "Busiest moment".into(),
+                    healthy("under 90% of max_connections is healthy")
+                ),
+                ("max-used-connections-ago".into(), "Since the busiest moment".into(), None),
+                (
+                    "history-length".into(),
+                    "Undo logs not yet purged (whole server)".into(),
+                    healthy(
+                        "under 100K is healthy; a long history means purge is behind or a long transaction holds it"
+                    )
+                ),
+                (
+                    "oldest-transaction".into(),
+                    "Oldest transaction to inspect for locks or a retained read view".into(),
+                    healthy("seconds or minutes, not hours")
+                ),
+            ]
+        );
+        assert_eq!(p.oldest_transaction.map(|t| t.session), Some("42".into()));
+        // Under an hour of uptime, row-lock waits are a count since start.
+        let early = pressure_from(Readings {
+            status: Some(map(&[("Uptime", 600.0), ("Innodb_row_lock_waits", 4.0)])),
+            ..Readings::default()
+        });
+        assert_eq!(words(&early.signals), [("row-lock-waits".into(), "Row-lock waits since start".into(), None)]);
+    }
+
+    #[test]
+    fn a_wait_sample_says_how_it_was_taken_in_english() {
+        assert_eq!(observation(Some("Sending data".into()), None), ("Running", "Sending data".into()));
+        assert_eq!(
+            observation(Some("updating".into()), Some("LOCK WAIT".into())),
+            ("Lock", "row lock wait (updating)".into())
+        );
+        assert_eq!(observation(None, Some("LOCK WAIT".into())), ("Lock", "row lock wait (executing)".into()));
+        assert_eq!(observation(Some(String::new()), None), ("Running", "executing".into()));
+        assert_eq!(
+            observation(Some("Waiting for table metadata lock".into()), Some("LOCK WAIT".into())),
+            ("Lock", "Waiting for table metadata lock".into())
+        );
+        let whole_server = "These wait and connection counters cover the whole server, including other databases. \
+                            They do not establish pressure in the selected database.";
+        let observed: BTreeMap<(&'static str, String), f64> =
+            [(("Lock", "row lock wait (updating)".to_string()), 3.0)].into();
+        let sampled = |first: Option<HashMap<String, (f64, f64)>>,
+                       second: Option<HashMap<String, (f64, f64)>>,
+                       observed: BTreeMap<(&'static str, String), f64>| {
+            Sampled {
+                taken_at: "2026-11-08T10:00:00Z".into(),
+                seconds: 5,
+                elapsed: 6.0,
+                ticks: 6,
+                observed,
+                first,
+                second,
+                status_before: map(&[("Questions", 100.0), ("Innodb_row_lock_waits", 1.0)]),
+                status_after: map(&[("Questions", 160.0), ("Innodb_row_lock_waits", 4.0)]),
+            }
+            .summary()
+        };
+        let timed = sampled(
+            Some([("wait/lock/table/sql/handler".to_string(), (10.0, 1.0))].into()),
+            Some([("wait/lock/table/sql/handler".to_string(), (30.0, 3.0))].into()),
+            observed.clone(),
+        );
+        assert_eq!(
+            timed.method,
+            "Whole-server difference of two readings of performance_schema.events_waits_summary_global_by_event_name \
+             5 s apart"
+        );
+        assert_eq!(timed.notes, [whole_server]);
+        assert_eq!(
+            words(&timed.signals),
+            [
+                ("questions".into(), "Statements".into(), None),
+                ("row-lock-waits".into(), "Row-lock waits during sample (whole server)".into(), None),
+            ]
+        );
+        let untimed = sampled(Some(HashMap::new()), Some(HashMap::new()), observed.clone());
+        assert_eq!(
+            untimed.method,
+            "The whole server's process list sampled once a second for 5 s; observations are weighted over the \
+             measured sample duration"
+        );
+        assert_eq!(
+            untimed.notes,
+            [
+                whole_server,
+                "No enabled performance_schema wait instrument recorded anything, so these come from sampling what \
+                 each busy session was doing once a second."
+            ]
+        );
+        assert_eq!(untimed.categories[0].wait_type.as_deref(), Some("row lock wait (updating)"));
+        let off = sampled(None, None, BTreeMap::new());
+        assert_eq!(
+            off.notes,
+            [
+                whole_server,
+                "performance_schema is off, so the server times no waits; these come from sampling what each busy \
+                 session was doing once a second.",
+                "No enabled wait instrument recorded anything and no session was busy. Many instruments are off by \
+                 default; enable them in performance_schema.setup_instruments to see more."
+            ]
+        );
     }
 }

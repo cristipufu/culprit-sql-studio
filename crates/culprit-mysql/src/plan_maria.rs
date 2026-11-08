@@ -653,6 +653,10 @@ mod tests {
           "filtered": 100}}]}}}}"#;
         let plan = crate::plan_json::parse(json, PlanKind::Estimated, None, Some("shop")).unwrap();
         assert!(plan.props.contains_key("cost_basis"));
+        // What the plan says its costs are, word for word: the message comes from locales/en.json.
+        let basis = "Rows examined: this MariaDB version reports no optimizer costs, so the costs shown are row counts";
+        assert_eq!(plan.props.get("cost_basis").map(String::as_str), Some(basis));
+        assert_eq!(plan.facts().cost_basis.as_deref(), Some(basis));
         assert_eq!(plan.total_cost, 498_315.0);
         let temp = &plan.root.children[0].children[0];
         assert_eq!(temp.op, "Temporary table");

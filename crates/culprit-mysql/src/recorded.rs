@@ -35,23 +35,11 @@ pub async fn changes(conn: &mut Conn, database: &str, since: &str) -> Result<Vec
         let (Some(at), table) = (r.text("at"), format!("{}.{}", r.string("s"), r.string("n"))) else { continue };
         let view = r.string("kind").eq_ignore_ascii_case("VIEW");
         let event = if view {
-            ChangeEvent::new(
-                EventKind::Code,
-                EventSource::Database,
-                &table,
-                &at,
-                format!("View {table} was created or altered"),
-            )
-            .object(table)
+            ChangeEvent::new(EventKind::Code, EventSource::Database, &table, &at, table_title(&table, true))
+                .object(table)
         } else {
-            ChangeEvent::new(
-                EventKind::Table,
-                EventSource::Database,
-                &table,
-                &at,
-                format!("Table {table} was created or altered (its columns or indexes)"),
-            )
-            .table(table)
+            ChangeEvent::new(EventKind::Table, EventSource::Database, &table, &at, table_title(&table, false))
+                .table(table)
         };
         out.push(event.action(EventAction::Changed));
     }
@@ -70,22 +58,19 @@ pub async fn changes(conn: &mut Conn, database: &str, since: &str) -> Result<Vec
     .unwrap_or_default();
     for r in routines {
         let name = format!("{}.{}", r.string("s"), r.string("n"));
-        let what = if r.string("kind").eq_ignore_ascii_case("PROCEDURE") { "Procedure" } else { "Function" };
+        let procedure = r.string("kind").eq_ignore_ascii_case("PROCEDURE");
         let (created, altered) = (r.text("created"), r.text("altered"));
         let new = created
             .as_deref()
             .and_then(epoch)
             .zip(altered.as_deref().and_then(epoch))
             .is_some_and(|(c, a)| a - c < 2.0);
-        let (Some(at), action, verb) = (
-            altered.or(created),
-            if new { EventAction::Created } else { EventAction::Changed },
-            if new { "was created" } else { "was altered" },
-        ) else {
+        let (Some(at), action) = (altered.or(created), if new { EventAction::Created } else { EventAction::Changed })
+        else {
             continue;
         };
         out.push(
-            ChangeEvent::new(EventKind::Code, EventSource::Database, &name, &at, format!("{what} {name} {verb}"))
+            ChangeEvent::new(EventKind::Code, EventSource::Database, &name, &at, routine_title(&name, procedure, new))
                 .action(action)
                 .object(name),
         );
@@ -107,16 +92,10 @@ pub async fn changes(conn: &mut Conn, database: &str, since: &str) -> Result<Vec
             continue;
         };
         out.push(
-            ChangeEvent::new(
-                EventKind::Code,
-                EventSource::Database,
-                &name,
-                &at,
-                format!("Trigger {name} on {table} was created"),
-            )
-            .action(EventAction::Created)
-            .table(table)
-            .object(name),
+            ChangeEvent::new(EventKind::Code, EventSource::Database, &name, &at, trigger_title(&name, &table))
+                .action(EventAction::Created)
+                .table(table)
+                .object(name),
         );
     }
     // MySQL 8 dates every runtime SET; MariaDB has no such table. These only date setting changes the scans saw.
@@ -133,10 +112,55 @@ pub async fn changes(conn: &mut Conn, database: &str, since: &str) -> Result<Vec
     for r in settings {
         let (Some(at), name) = (r.text("at"), r.string("n")) else { continue };
         out.push(
-            ChangeEvent::new(EventKind::Setting, EventSource::Database, &name, &at, format!("{name} was set"))
+            ChangeEvent::new(EventKind::Setting, EventSource::Database, &name, &at, setting_title(&name))
                 .action(EventAction::Changed)
                 .object(name),
         );
     }
     Ok(out)
+}
+
+/// A table (or `view`) whose CREATE_TIME moved.
+fn table_title(table: &str, view: bool) -> String {
+    if view {
+        format!("View {table} was created or altered")
+    } else {
+        format!("Table {table} was created or altered (its columns or indexes)")
+    }
+}
+
+/// A stored procedure (or function) that was created (`new`) or altered.
+fn routine_title(name: &str, procedure: bool, new: bool) -> String {
+    let what = if procedure { "Procedure" } else { "Function" };
+    let verb = if new { "was created" } else { "was altered" };
+    format!("{what} {name} {verb}")
+}
+
+fn trigger_title(name: &str, table: &str) -> String {
+    format!("Trigger {name} on {table} was created")
+}
+
+fn setting_title(name: &str) -> String {
+    format!("{name} was set")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // What a recorded change says, word for word: its messages come from locales/en.json.
+    #[test]
+    fn recorded_changes_say_what_changed_in_english() {
+        assert_eq!(
+            table_title("shop.orders", false),
+            "Table shop.orders was created or altered (its columns or indexes)"
+        );
+        assert_eq!(table_title("shop.open_orders", true), "View shop.open_orders was created or altered");
+        assert_eq!(routine_title("shop.archive", true, true), "Procedure shop.archive was created");
+        assert_eq!(routine_title("shop.archive", true, false), "Procedure shop.archive was altered");
+        assert_eq!(routine_title("shop.total", false, true), "Function shop.total was created");
+        assert_eq!(routine_title("shop.total", false, false), "Function shop.total was altered");
+        assert_eq!(trigger_title("orders_audit", "shop.orders"), "Trigger orders_audit on shop.orders was created");
+        assert_eq!(setting_title("max_connections"), "max_connections was set");
+    }
 }
