@@ -144,9 +144,8 @@ fn planning_time_finding(snapshot: &Snapshot, case: PlanningTime<'_>) -> Finding
     // On running totals the planning time holds every plan from before the change: two scans show it.
     let now =
         t!("check.planning_time.verify.now", plan_ms = format::duration(plan_ms), runs = format::count(q.executions));
-    let counted = t!("check.planning_time.verify.counted");
-    f.verify = vec![match crate::queries::verify_counts_between_scans(snapshot, &counted, &now) {
-        Some(compare) => t!("check.planning_time.verify.between_scans", compare = compare),
+    f.verify = vec![match crate::queries::running_totals(snapshot) {
+        Some(source) => t!("check.planning_time.verify.between_scans", source = source, now = now),
         None => t!("check.planning_time.verify.rescan"),
     }];
     if case.recompile_hint {

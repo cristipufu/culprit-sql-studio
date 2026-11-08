@@ -279,18 +279,14 @@ enum Counted {
 /// How a later scan shows the spill gone. A windowed source drops the runs from before the change once its window has
 /// passed them. A source of running totals keeps them, and this finding with them: what shows it is the statement's
 /// count staying as it is while its runs go on, between a scan taken when the change is live and a later one, said
-/// with this scan's numbers (`now`) ([`verify_counts_between_scans`]).
+/// with this scan's numbers (`now`) ([`running_totals`]).
 fn spill_verify(snapshot: &Snapshot, live: String, counted: Counted, now: String) -> String {
-    let what = match counted {
-        Counted::TempFiles => t!("check.temp_spill.counted.temp_files"),
-        Counted::DiskTables => t!("check.temp_spill.counted.disk_tables"),
-    };
-    match (verify_counts_between_scans(snapshot, &what, &now), counted) {
-        (Some(compare), Counted::TempFiles) => {
-            t!("check.temp_spill.verify.temp_files", live = live, compare = compare)
+    match (running_totals(snapshot), counted) {
+        (Some(source), Counted::TempFiles) => {
+            t!("check.temp_spill.verify.temp_files", live = live, source = source, now = now)
         }
-        (Some(compare), Counted::DiskTables) => {
-            t!("check.temp_spill.verify.disk_tables", live = live, compare = compare)
+        (Some(source), Counted::DiskTables) => {
+            t!("check.temp_spill.verify.disk_tables", live = live, source = source, now = now)
         }
         (None, _) => t!("check.temp_spill.verify.windowed", live = live),
     }

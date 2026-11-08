@@ -588,7 +588,7 @@ fn write_fix(snapshot: &Snapshot, q: &QueryStat, cheap: bool, lever: &WriteLever
             let how = match verb {
                 WriteVerb::Update => many_keys(engine, "UPDATE"),
                 WriteVerb::Delete => many_keys(engine, "DELETE"),
-                _ => bulk_insert(engine).to_string(),
+                _ => bulk_insert(engine),
             };
             t!(
                 "check.heavy_query.fix.write.batch",

@@ -8,7 +8,7 @@ use culprit_core::{
     PlanWarning, QueryRef, QueryStat, Severity, Snapshot, SubjectKind, Unit, format,
 };
 
-use culprit_core::Check;
+use culprit_core::{Check, t};
 
 use crate::indexes::scan_groups;
 use crate::support::*;
@@ -78,40 +78,40 @@ pub(crate) fn heavy_share(snapshot: &Snapshot, q: &QueryStat) -> f64 {
 /// otherwise its average. Every check that shows a statement's average beside its share says it this way.
 pub(crate) fn average_metrics(snapshot: &Snapshot, q: &QueryStat) -> Vec<Metric> {
     let Some(w) = snapshot.workload.as_ref() else {
-        return vec![Metric::new("Average duration", q.mean_time_ms, Unit::Ms)];
+        return vec![Metric::new(t!("common.metric.average_duration"), q.mean_time_ms, Unit::Ms)];
     };
     match w.scans_of(q) {
         Some(s) => {
-            let mut out = vec![Metric::new("Average duration over Culprit's scans", w.statement_mean_ms(q), Unit::Ms)];
+            let label = t!("common.metric.average_duration_over_scans");
+            let mut out = vec![Metric::new(label, w.statement_mean_ms(q), Unit::Ms)];
             if !s.is_recent(q) && s.mean_differs(q) {
-                out.push(Metric::new(format!("Average duration over {}", w.window_phrase()), q.mean_time_ms, Unit::Ms));
+                let label =
+                    t!("common.metric.over", label = t!("common.metric.average_duration"), span = w.window_phrase());
+                out.push(Metric::new(label, q.mean_time_ms, Unit::Ms));
             }
             out
         }
-        None => vec![Metric::new("Average duration", w.statement_mean_ms(q), Unit::Ms)],
+        None => vec![Metric::new(t!("common.metric.average_duration"), w.statement_mean_ms(q), Unit::Ms)],
     }
 }
 
-/// How one statement changes many rows by their keys, in the engine's terms.
+/// How one statement changes many rows by their keys (`verb` is the SQL keyword, UPDATE or DELETE), in the engine's
+/// terms.
 pub(super) fn many_keys(engine: Engine, verb: &str) -> String {
     match engine {
-        Engine::Mssql => format!("an {verb} over a list of keys, or joined to a table-valued parameter"),
-        Engine::Postgres | Engine::Yugabyte => {
-            format!("an {verb} over an array of keys (`= ANY($1)`), or joined to a VALUES list")
-        }
-        Engine::Mysql | Engine::Sqlite => {
-            format!("an {verb} over a list of keys (`IN (…)`), or joined to a temporary table of the changes")
-        }
+        Engine::Mssql => t!("queries.many_keys.mssql", verb = verb),
+        Engine::Postgres | Engine::Yugabyte => t!("queries.many_keys.postgres", verb = verb),
+        Engine::Mysql | Engine::Sqlite => t!("queries.many_keys.mysql", verb = verb),
     }
 }
 
 /// How one statement writes many rows, in the engine's terms.
-pub(super) fn bulk_insert(engine: Engine) -> &'static str {
+pub(super) fn bulk_insert(engine: Engine) -> String {
     match engine {
-        Engine::Mssql => "a multi-row VALUES, a table-valued parameter, or a bulk insert",
-        Engine::Postgres | Engine::Yugabyte => "a multi-row VALUES, arrays unnested into rows, or COPY",
-        Engine::Mysql => "a multi-row VALUES, or LOAD DATA",
-        Engine::Sqlite => "a multi-row VALUES",
+        Engine::Mssql => t!("queries.bulk_insert.mssql"),
+        Engine::Postgres | Engine::Yugabyte => t!("queries.bulk_insert.postgres"),
+        Engine::Mysql => t!("queries.bulk_insert.mysql"),
+        Engine::Sqlite => t!("queries.bulk_insert.sqlite"),
     }
 }
 
@@ -177,36 +177,33 @@ pub(super) fn inserted_unique_key<'a>(
 /// rewritten statement is a new entry there, the old one then stopped running. `None` on a windowed source (Query
 /// Store, a log), whose next scan covers the runs since.
 pub(crate) fn verify_between_scans(snapshot: &Snapshot, q: &QueryStat, between: &str) -> Option<String> {
-    let line = what_changed_between_scans(snapshot, "this query", between)?;
-    let rewritten = if culprit_core::sql::is_session_statement(&q.text) {
-        ""
+    let line = what_changed_between_scans(snapshot, &t!("queries.verify.this_query"), between)?;
+    Some(if culprit_core::sql::is_session_statement(&q.text) {
+        line
     } else {
-        " A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running."
-    };
-    Some(line + rewritten)
+        [line, t!("queries.verify.rewritten")].join(" ")
+    })
 }
 
-/// [`verify_between_scans`] for a change that leaves the statements as they are (an index): `queries` names them
-/// ("this query", "these queries").
+/// [`verify_between_scans`] for a change that leaves the statements as they are (an index): `queries` names them, a
+/// phrase from the catalog ("the query", "the queries listed").
 pub(crate) fn what_changed_between_scans(snapshot: &Snapshot, queries: &str, between: &str) -> Option<String> {
-    let w = snapshot.workload.as_ref().filter(|w| !w.is_windowed())?;
-    Some(format!(
-        "{} keeps running totals, so a later scan's runs, share and averages for {queries} still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`{WHAT_CHANGED_COMMAND}`): there {between}.",
-        w.source
-    ))
+    let source = running_totals(snapshot)?;
+    Some(
+        [
+            t!("queries.verify.running_totals", source = source, queries = queries),
+            t!("queries.verify.what_changed", command = WHAT_CHANGED_COMMAND, between = between),
+        ]
+        .join(" "),
+    )
 }
 
-/// How a later scan shows a change in a number the source keeps for a statement beside its runs and time (its temp
-/// files, the rows it returns, its WAL, its planning time), on a source of running totals: What changed doesn't carry
-/// it, so the two scans' totals are compared by hand. `counted` names them ("temp files and runs"), `now` gives this
-/// scan's ("4.2 GB over 214 runs"); the caller says what the difference shows once the change works. Without the
-/// sentence's final stop. `None` on a windowed source, whose next scan covers the runs since.
-pub(crate) fn verify_counts_between_scans(snapshot: &Snapshot, counted: &str, now: &str) -> Option<String> {
-    let w = snapshot.workload.as_ref().filter(|w| !w.is_windowed())?;
-    Some(format!(
-        "{} keeps running totals, so compare its {counted} in a scan taken once the change is live and one a day or more later ({now} in this scan)",
-        w.source
-    ))
+/// The source of running totals a statement's numbers are read from, where only another of Culprit's scans shows a
+/// change. A number it keeps beside runs and time (temp files, rows returned, WAL, planning time) isn't in What changed,
+/// so a finding says, in one sentence naming this source, to compare the two scans' totals by hand, with this scan's.
+/// `None` on a windowed source (Query Store, a log), whose next scan covers the runs since.
+pub(crate) fn running_totals(snapshot: &Snapshot) -> Option<&str> {
+    snapshot.workload.as_ref().filter(|w| !w.is_windowed()).map(|w| w.source.as_str())
 }
 
 /// What What changed shows of a fix to a statement, between a scan taken when it ships and a later one: only what it
@@ -223,12 +220,10 @@ pub(crate) enum Shows {
 
 impl Shows {
     /// The clause after "there": "it should run fewer times …".
-    pub(crate) fn between(self) -> &'static str {
+    pub(crate) fn between(self) -> String {
         match self {
-            Shows::FewerRuns => {
-                "it should run fewer times and take less time in all, while a run's own time can stay as it is, or rise"
-            }
-            Shows::CheaperRuns => "its time per run should drop",
+            Shows::FewerRuns => t!("queries.shows.fewer_runs"),
+            Shows::CheaperRuns => t!("queries.shows.cheaper_runs"),
         }
     }
 }
@@ -247,19 +242,24 @@ fn squeeze(text: &str) -> String {
 
 /// What a workload's times add up to, in sentences: "database time", or "logged slow-run time" when the slow query log
 /// keeps only runs over long_query_time.
-pub(crate) fn time_noun(snapshot: &Snapshot) -> &'static str {
-    if slow_log_only(snapshot) { "logged slow-run time" } else { "database time" }
+pub(crate) fn time_noun(snapshot: &Snapshot) -> String {
+    t!("queries.time_noun", of = if slow_log_only(snapshot) { "slow_log" } else { "database" })
 }
 
-pub(crate) fn share_metric_label(snapshot: &Snapshot) -> &'static str {
-    if slow_log_only(snapshot) { "Share of logged slow-run time" } else { "Share of DB time" }
+/// The label of a statement's share: of database time, or of logged slow-run time.
+pub(crate) fn share_metric_label(snapshot: &Snapshot) -> String {
+    if slow_log_only(snapshot) {
+        t!("common.metric.share_of_slow_log_time")
+    } else {
+        t!("common.metric.share_of_db_time")
+    }
 }
 
 /// [`apply_query_impact`], with the label naming the time the share is of.
 pub(crate) fn apply_impact(snapshot: &Snapshot, f: &mut Finding, impact: &QueryImpact) {
     apply_query_impact(f, impact);
     if slow_log_only(snapshot) {
-        f.impact.label = format!("{} of logged slow-run time", format::percent(impact.share));
+        f.impact.label = t!("queries.impact.slow_log_share", share = format::percent(impact.share));
     }
 }
 
@@ -268,16 +268,18 @@ pub(crate) fn apply_impact(snapshot: &Snapshot, f: &mut Finding, impact: &QueryI
 /// no other table), and otherwise as the estimate it is; the table's size only for a scan that reads it in full, never
 /// for a seek.
 fn describe_node(plan: &Plan, node: &PlanNode, examined_per_run: Option<f64>) -> String {
-    let what = node.op.to_ascii_lowercase();
-    // "an index scan", "a seq scan".
-    let a = if what.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" };
+    // The engine's name for the step, as a noun: "index scan", "seq scan".
+    let op = node.op.to_ascii_lowercase();
+    // Whether it starts with a vowel, for a language whose article says so ("an index scan", "a seq scan").
+    let vowel = if op.starts_with(['a', 'e', 'i', 'o', 'u']) { "yes" } else { "no" };
     let Some(object) = node.object.as_deref() else {
-        return format!("{a} {what}");
+        return t!("queries.step.op", vowel = vowel, op = &op);
     };
     // The rows a statement examined are all this step's when its table is the only one the plan reads.
     let only_table = plan.nodes().into_iter().filter(|n| reads_table(n)).all(|n| n.object.as_deref() == Some(object));
     if let Some(rows) = examined_per_run.filter(|_| only_table) {
-        return format!("{a} {what} of {object} that examines {} rows a run", format::count(rows));
+        let count = format::count(rows);
+        return t!("queries.step.examines", vowel = vowel, op = &op, object = object, n = rows, rows = count);
     }
     // A scan that reads its table in full, once, reads the table's size: a fact of the table, not an estimate.
     let whole_table = node.kind == NodeKind::Scan
@@ -285,10 +287,14 @@ fn describe_node(plan: &Plan, node: &PlanNode, examined_per_run: Option<f64>) ->
         && node.rows_read.is_none_or(|read| node.table_rows == Some(read));
     match node.rows_read_total() {
         Some(rows) if node.act_rows.is_some() || whole_table => {
-            format!("{a} {what} of {object} that reads {} rows", format::count(rows))
+            let count = format::count(rows);
+            t!("queries.step.reads", vowel = vowel, op = &op, object = object, n = rows, rows = count)
         }
-        Some(rows) => format!("{a} {what} of {object}, estimated to read {} rows", format::count(rows)),
-        None => format!("{a} {what} of {object}"),
+        Some(rows) => {
+            let count = format::count(rows);
+            t!("queries.step.estimated", vowel = vowel, op = &op, object = object, n = rows, rows = count)
+        }
+        None => t!("queries.step.of", vowel = vowel, op = &op, object = object),
     }
 }
 

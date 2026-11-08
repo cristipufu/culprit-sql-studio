@@ -3,7 +3,7 @@
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
 use culprit_core::{
     Category, CheckInfo, Confidence, Engine, Finding, Fix, Metric, PlanVariant, QueryStat, QueryTrend, Severity,
-    Snapshot, SubjectKind, Timeline, TimelineSource, Unit, format, t,
+    Snapshot, SubjectKind, Timeline, TimelineSource, Unit, format, key, t,
 };
 
 use crate::queries::{apply_impact, time_noun};
@@ -243,7 +243,7 @@ fn regression_finding(snapshot: &Snapshot, regression: Regression<'_>) -> Findin
             after = after,
             runs = runs,
             extra = format::duration(extra_per_day),
-            time = time
+            time = &time
         )
     } else {
         t!(
@@ -339,32 +339,55 @@ fn plan_change<'a>(timeline: &Timeline, q: &'a QueryStat, s: &Shift) -> Option<P
     (new.mean_time_ms >= old.mean_time_ms * SLOW_BUCKET).then_some(PlanChange { new, old })
 }
 
-/// "3.4×": how many times slower, as people say it.
+/// "3.4×": how many times slower, as people say it (whole from 10×, and "2×" rather than "2.0×").
 fn times(factor: f64) -> String {
-    if factor >= 10.0 { format!("{}×", factor.round()) } else { format!("{:.1}×", factor).replace(".0×", "×") }
+    let n = if factor >= 10.0 { format!("{}", factor.round()) } else { format!("{factor:.1}") };
+    let n = n.strip_suffix(".0").map(str::to_string).unwrap_or(n);
+    t!("common.factor", n = format::digits(n))
 }
 
 fn numeric(id: &str) -> bool {
     !id.is_empty() && id.chars().all(|c| c.is_ascii_digit())
 }
 
-const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/// Each month's short name.
+const MONTHS: [&str; 12] = [
+    key!("common.month.jan"),
+    key!("common.month.feb"),
+    key!("common.month.mar"),
+    key!("common.month.apr"),
+    key!("common.month.may"),
+    key!("common.month.jun"),
+    key!("common.month.jul"),
+    key!("common.month.aug"),
+    key!("common.month.sep"),
+    key!("common.month.oct"),
+    key!("common.month.nov"),
+    key!("common.month.dec"),
+];
 
-/// "Oct 9, 14:00 UTC" from an ISO 8601 UTC timestamp.
+/// The day ("Oct 9") and the time of day in UTC ("14:00") of an ISO 8601 UTC timestamp, if it has both.
+fn day_and_time(iso: &str) -> Option<(String, &str)> {
+    let month = iso.get(5..7).and_then(|m| m.parse::<usize>().ok()).filter(|m| (1..=12).contains(m))?;
+    let day = iso.get(8..10).and_then(|d| d.parse::<u32>().ok())?;
+    let time = iso.get(11..16)?;
+    let month = culprit_core::i18n::t(MONTHS[month - 1], &[]);
+    Some((t!("common.date.month_day", month = month, day = day.to_string()), time))
+}
+
+/// "Oct 9, 14:00 UTC" from an ISO 8601 UTC timestamp (anything else as it is).
 pub(crate) fn short_when(iso: &str) -> String {
-    let month = iso.get(5..7).and_then(|m| m.parse::<usize>().ok()).filter(|m| (1..=12).contains(m));
-    let day = iso.get(8..10).and_then(|d| d.parse::<u32>().ok());
-    match (month, day, iso.get(11..16)) {
-        (Some(m), Some(d), Some(time)) => format!("{} {d}, {time} UTC", MONTHS[m - 1]),
-        _ => iso.to_string(),
+    match day_and_time(iso) {
+        Some((day, time)) => t!("common.date.short_utc", day = day, time = time),
+        None => iso.to_string(),
     }
 }
 
+/// "on Oct 9 at 14:00 UTC": when something happened, for the end of a sentence.
 pub(crate) fn when_phrase(iso: &str) -> String {
-    let short = short_when(iso);
-    match short.split_once(", ") {
-        Some((date, time)) => format!("on {date} at {time}"),
-        None => format!("at {short}"),
+    match day_and_time(iso) {
+        Some((day, time)) => t!("common.date.on_at_utc", day = day, time = time),
+        None => t!("common.date.at", when = iso),
     }
 }
 

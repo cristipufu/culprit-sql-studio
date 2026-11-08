@@ -361,10 +361,10 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
                 handle = &handle,
                 tense = tense,
                 share = &share,
-                time = time,
+                time = &time,
                 idle = idle.title_tail()
             ),
-            _ => t!("check.heavy_query.title.share", handle = &handle, tense = tense, share = &share, time = time),
+            _ => t!("check.heavy_query.title.share", handle = &handle, tense = tense, share = &share, time = &time),
         },
         TitleForm::ReadsForNothing { reads, returns } => {
             let (reads, returns) = (format::count(reads), returns.select());
@@ -514,7 +514,7 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
             let beside = !s.is_recent(q);
             f.metrics.push(Metric::new(t!("common.metric.share_of_db_time_over_scans"), s.share(), Unit::Ratio));
             if beside && s.share_differs(w, q) {
-                let label = over(share_metric_label(snapshot).to_string(), &totals);
+                let label = over(share_metric_label(snapshot), &totals);
                 f.metrics.push(Metric::new(label, w.share_of(q.total_time_ms, q), Unit::Ratio));
             }
             // Runs that came in bursts are counted, never a rate a day.
@@ -624,8 +624,8 @@ fn verify_line(snapshot: &Snapshot, q: &QueryStat, expect: Expect) -> String {
             let (part, share) = storage_now(share);
             t!("check.heavy_query.verify.between.storage", part = part, share = share)
         }
-        Expect::CheaperRuns => Shows::CheaperRuns.between().to_string(),
-        Expect::FewerRuns => Shows::FewerRuns.between().to_string(),
+        Expect::CheaperRuns => Shows::CheaperRuns.between(),
+        Expect::FewerRuns => Shows::FewerRuns.between(),
         Expect::Counter => t!("check.heavy_query.verify.between.counter"),
         Expect::Session => t!("check.heavy_query.verify.between.session"),
         Expect::Average => t!("check.heavy_query.verify.between.average"),

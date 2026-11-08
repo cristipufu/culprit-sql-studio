@@ -256,9 +256,8 @@ fn log_volume_finding(snapshot: &Snapshot, w: LogWrites<'_>) -> Finding {
     // (batching writes more of it per run, not per row).
     let now =
         t!("check.log_volume.verify.now", bytes = format::bytes(bytes), rows = format::count(q.rows.unwrap_or(0.0)));
-    let counted = t!("check.log_volume.verify.counted", log = log);
-    f.verify = vec![match crate::queries::verify_counts_between_scans(snapshot, &counted, &now) {
-        Some(compare) => t!("check.log_volume.verify.between_scans", log = log, compare = compare),
+    f.verify = vec![match crate::queries::running_totals(snapshot) {
+        Some(source) => t!("check.log_volume.verify.between_scans", log = log, source = source, now = now),
         None => t!("check.log_volume.verify.rescan", log = log),
     }];
     f

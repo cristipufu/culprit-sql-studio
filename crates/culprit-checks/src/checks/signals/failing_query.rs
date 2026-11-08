@@ -238,9 +238,8 @@ fn failing_query_finding(snapshot: &Snapshot, runs: FailingRuns<'_>) -> Finding 
         unfinished = format::count(unfinished),
         runs = format::count(q.executions)
     );
-    let counted = t!("check.failing_query.verify.counted");
-    f.verify = vec![match crate::queries::verify_counts_between_scans(snapshot, &counted, &now) {
-        Some(compare) => t!("check.failing_query.verify.between_scans", compare = compare),
+    f.verify = vec![match crate::queries::running_totals(snapshot) {
+        Some(source) => t!("check.failing_query.verify.between_scans", source = source, now = now),
         None => t!("check.failing_query.verify.rescan"),
     }];
     if !runs.recent {

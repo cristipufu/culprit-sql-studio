@@ -162,9 +162,8 @@ fn big_result_finding(snapshot: &Snapshot, big: BigResult<'_>) -> Finding {
         rows = format::count(q.rows.unwrap_or(0.0)),
         runs = format::count(q.executions)
     );
-    let counted = t!("check.big_result.verify.counted");
-    f.verify = vec![match crate::queries::verify_counts_between_scans(snapshot, &counted, &now) {
-        Some(compare) => t!("check.big_result.verify.between_scans", compare = compare),
+    f.verify = vec![match crate::queries::running_totals(snapshot) {
+        Some(source) => t!("check.big_result.verify.between_scans", source = source, now = now),
         None => t!("check.big_result.verify.rescan"),
     }];
     f
