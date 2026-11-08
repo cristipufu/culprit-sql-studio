@@ -288,11 +288,6 @@ pub(crate) fn expiring_partition_finding(_: &Snapshot, e: ExpiringPartition) -> 
     f
 }
 
-/// [`expiring_partitions`] worded: what sequence-capacity reports until it decides them itself.
-pub(crate) fn expiring_range_partitions(snapshot: &Snapshot) -> Vec<Finding> {
-    expiring_partitions(snapshot).into_iter().map(|e| expiring_partition_finding(snapshot, e)).collect()
-}
-
 fn parse_range_upper_bound(bound: &str) -> Option<(String, f64)> {
     let upper = bound.to_ascii_uppercase();
     let after = if upper.starts_with("FOR VALUES FROM") {

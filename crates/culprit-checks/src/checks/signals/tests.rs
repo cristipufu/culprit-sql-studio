@@ -1056,7 +1056,7 @@ fn expiring_range_partition_is_flagged_unless_default_exists() {
         ..Default::default()
     });
     let qual = mysql.tables[0].qualified();
-    let out = sequence_capacity::sequence_capacity(&mysql);
+    let out = sequence_capacity::SequenceCapacityCheck.run(&mysql);
     let f = out
         .iter()
         .find(|f| f.id == format!("table-bloat:expiring-partition:{qual}"))
@@ -1066,7 +1066,8 @@ fn expiring_range_partition_is_flagged_unless_default_exists() {
     // Adding a MAXVALUE catch-all partition suppresses the warning on MySQL/MSSQL.
     mysql.tables[0].storage.as_mut().unwrap().options.push("partition_bound=VALUES LESS THAN (MAXVALUE):pmax".into());
     assert!(
-        !sequence_capacity::sequence_capacity(&mysql)
+        !sequence_capacity::SequenceCapacityCheck
+            .run(&mysql)
             .iter()
             .any(|f| f.id == format!("table-bloat:expiring-partition:{qual}"))
     );
@@ -1201,7 +1202,7 @@ fn sequence_capacity_flags_32bit_int_primary_keys_on_hundred_million_row_tables(
         generated: false,
         ordinal: 1,
     });
-    let out = sequence_capacity::sequence_capacity(&s);
+    let out = sequence_capacity::SequenceCapacityCheck.run(&s);
     let f = out.iter().find(|f| f.id == format!("sequence-capacity:int32-pk:{qual}.id")).expect("int32 pk finding");
     assert_eq!(f.severity, Severity::High);
     assert!(f.title.contains("32-bit integer primary key"), "{}", f.title);

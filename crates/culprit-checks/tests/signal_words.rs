@@ -2994,3 +2994,129 @@ sql: CREATE INDEX CONCURRENTLY ix_customers_created_at_brin ON public.customers 
 verify: Re-scan after building `ix_customers_created_at_brin`: verify time-range queries use it before dropping `customers_created_at_small_idx`."#,
     );
 }
+
+// ── sequence-capacity ──────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn sequences_near_their_bound() {
+    use culprit_core::operations::SequenceCapacity;
+    let sequence = |name: &str, current: &str, allocated: bool, table: Option<&str>| SequenceCapacity {
+        name: name.into(),
+        table: table.map(str::to_string),
+        current: current.into(),
+        increment: "1".into(),
+        minimum: "1".into(),
+        maximum: "2147483647".into(),
+        cycles: false,
+        allocated,
+    };
+    let mut s = fixture("mssql-demo");
+    s.operations.sequences = vec![
+        sequence("dbo.order_numbers", "2147480000", true, Some("shop.orders")),
+        sequence("dbo.ticket_numbers", "2127483647", false, None),
+    ];
+    says(
+        &run("sequence-capacity", &s),
+        r#"id: sequence-capacity:dbo.order_numbers
+title: dbo.order_numbers is near its numeric limit (3.6K recorded steps remain)
+summary: The recorded value is 2147480000, increment 1, with bounds 1 to 2147483647 and cycling off. The source may record reserved cache space or the next auto-increment value rather than the last value returned to a caller. Caching, skipped values and per-connection allocation rules mean this is not the number of application requests left or a time-to-failure estimate. Reaching the bound can reject inserts or allocations; reusing old numbers can violate uniqueness.
+impact: 3.6K steps to bound
+metric: Recorded value = 2147480000
+metric: Minimum = 1
+metric: Maximum = 2147483647
+metric: Steps after recorded allocation
+metric: Table = shop.orders
+fix: Plan a migration to a larger numeric range, including referencing columns, constraints, indexes and application types. Validate cache/increment behavior and rollout locking first. Do not reseed, restart or enable cycling without proving values cannot collide.
+cost: Changing column types and dependent keys may rewrite data and require locks; plan and test the migration.
+verify: Check the new type and allocation bounds, confirm foreign keys and application values remain compatible, and verify inserts or sequence allocations under representative load.
+
+id: sequence-capacity:dbo.ticket_numbers
+title: dbo.ticket_numbers is near its numeric limit (20.0M recorded steps remain)
+summary: The recorded value is 2127483647, increment 1, with bounds 1 to 2147483647 and cycling off. This is the allocation state observed by the source. Caching, skipped values and per-connection allocation rules mean this is not the number of application requests left or a time-to-failure estimate. Reaching the bound can reject inserts or allocations; reusing old numbers can violate uniqueness.
+impact: 20.0M steps to bound
+metric: Recorded value = 2127483647
+metric: Minimum = 1
+metric: Maximum = 2147483647
+metric: Steps after recorded allocation
+fix: Plan a migration to a larger numeric range, including referencing columns, constraints, indexes and application types. Validate cache/increment behavior and rollout locking first. Do not reseed, restart or enable cycling without proving values cannot collide.
+cost: Changing column types and dependent keys may rewrite data and require locks; plan and test the migration.
+verify: Check the new type and allocation bounds, confirm foreign keys and application values remain compatible, and verify inserts or sequence allocations under representative load."#,
+    );
+}
+
+#[test]
+fn int32_primary_keys_on_huge_tables() {
+    let mut s = fixture("postgres-demo");
+    for (table, rows) in [("orders", 150_000_000.0), ("customers", 600_000_000.0)] {
+        s.tables.iter_mut().find(|t| t.name == table).unwrap().rows = Some(rows);
+        let pk = s.indexes.iter().find(|i| i.table == table && i.is_primary_key).expect("a primary key").clone();
+        let column = culprit_core::strip_direction(&pk.columns[0]).to_string();
+        s.columns.retain(|c| !(c.table == table && c.name == column));
+        s.columns.push(culprit_core::ColumnInfo {
+            schema: "public".into(),
+            table: table.into(),
+            name: column,
+            data_type: "integer".into(),
+            nullable: false,
+            default: None,
+            generated: false,
+            ordinal: 1,
+        });
+    }
+    says(
+        &run("sequence-capacity", &s),
+        r#"id: sequence-capacity:int32-pk:public.orders.id
+title: orders.id is a 32-bit integer primary key on a 150.0M-row table
+summary: Primary key public.orders.id is declared as `integer` (signed 32-bit maximum 2,147,483,647) and public.orders already holds 150.0M live rows. Once the sequence or auto-increment counter reaches 2,147,483,647 — which happens earlier than the live row count when rows have been deleted or sequence caches skipped values — every new INSERT into public.orders fails with an integer overflow error.
+impact: 150.0M rows on 32-bit PK
+metric: Rows in table
+metric: Primary key column = orders.id (integer)
+metric: Signed 32-bit limit = 2,147,483,647
+fix: Plan a multi-step migration of public.orders.id (and any foreign-key columns referencing it) to 64-bit `bigint` before the 32-bit range is exhausted.
+cost: Widening a primary key column to bigint rewrites the table or requires a dual-column backfill and swap.
+verify: Re-scan after migrating public.orders.id to `bigint`: its type is `bigint` and this finding is gone.
+
+id: sequence-capacity:int32-pk:public.customers.id
+title: customers.id is a 32-bit integer primary key on a 600.0M-row table
+summary: Primary key public.customers.id is declared as `integer` (signed 32-bit maximum 2,147,483,647) and public.customers already holds 600.0M live rows. Once the sequence or auto-increment counter reaches 2,147,483,647 — which happens earlier than the live row count when rows have been deleted or sequence caches skipped values — every new INSERT into public.customers fails with an integer overflow error.
+impact: 600.0M rows on 32-bit PK
+metric: Rows in table
+metric: Primary key column = customers.id (integer)
+metric: Signed 32-bit limit = 2,147,483,647
+fix: Plan a multi-step migration of public.customers.id (and any foreign-key columns referencing it) to 64-bit `bigint` before the 32-bit range is exhausted.
+cost: Widening a primary key column to bigint rewrites the table or requires a dual-column backfill and swap.
+verify: Re-scan after migrating public.customers.id to `bigint`: its type is `bigint` and this finding is gone."#,
+    );
+}
+
+#[test]
+fn range_partitions_about_to_end_on_mysql() {
+    let mut s = fixture("mysql-demo");
+    s.tables[0].storage = storage(&["partition_bound=VALUES LESS THAN ('2026-10-13'):p202610"]);
+    s.tables[1].storage = storage(&[
+        "partition_bound=VALUES LESS THAN ('2026-10-01'):p202609",
+        "partition_bound=VALUES LESS THAN ('2026-10-16'):p202610",
+    ]);
+    says(
+        &run("sequence-capacity", &s),
+        r#"id: table-bloat:expiring-partition:shop.customers
+title: customers's last partition (p202610) ends on 2026-10-13 (in 1.4 days)
+summary: shop.customers has 1 range partition and no DEFAULT or MAXVALUE partition. Its latest partition (p202610) covers values up to '2026-10-13': once timestamps reach '2026-10-13', INSERTs into shop.customers will fail with a partition-routing error.
+impact: ends in 1.4 days
+metric: Partitions
+metric: Days until upper bound
+fix: Create the next range partition(s) on shop.customers covering values from '2026-10-13' onward, and check the scheduled job or partition manager that pre-creates future partitions.
+cost: Creating a new empty partition is fast metadata DDL.
+verify: Re-scan after creating future partitions: shop.customers's highest partition bound should be more than 7 days ahead.
+
+id: table-bloat:expiring-partition:shop.products
+title: products's last partition (p202610) ends on 2026-10-16 (in 4.4 days)
+summary: shop.products has 2 range partitions and no DEFAULT or MAXVALUE partition. Its latest partition (p202610) covers values up to '2026-10-16': once timestamps reach '2026-10-16', INSERTs into shop.products will fail with a partition-routing error.
+impact: ends in 4.4 days
+metric: Partitions
+metric: Days until upper bound
+fix: Create the next range partition(s) on shop.products covering values from '2026-10-16' onward, and check the scheduled job or partition manager that pre-creates future partitions.
+cost: Creating a new empty partition is fast metadata DDL.
+verify: Re-scan after creating future partitions: shop.products's highest partition bound should be more than 7 days ahead."#,
+    );
+}
