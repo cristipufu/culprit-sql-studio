@@ -2,19 +2,26 @@
 
 use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
+use culprit_core::t;
 
 pub fn plan_regression_info() -> CheckInfo {
     CheckInfo {
         id: "plan-regression".into(),
-        title: "Plan regressions".into(),
+        title: t!("check.plan_regression.info.title"),
         category: Category::Queries,
         engines: vec![Engine::Mssql],
         requires: vec![Capability::QueryStore],
-        description: "Queries whose current plan is much slower than a plan they used before.".into(),
+        description: t!("check.plan_regression.info.description"),
     }
 }
 
-check!(PlanRegressionCheck: plan_regression_info, plan_regression, &[Evidence::Query(QueryMeasure::PlanVariants)]);
+check!(
+    PlanRegressionCheck: plan_regression_info,
+    decide = plan_regressions,
+    render = plan_regression_finding,
+    case<'s> = PlanRegression<'s>,
+    evidence = &[Evidence::Query(QueryMeasure::PlanVariants)],
+);
 
 /// A plan with this many runs or more counts as one the query used.
 pub(super) const PLAN_MIN_RUNS: f64 = culprit_core::PLAN_VARIANT_MIN_RUNS;
@@ -75,7 +82,29 @@ pub(super) fn replaced_plan(q: &QueryStat) -> Option<(&PlanVariant, &PlanVariant
     .then_some((best, latest))
 }
 
-pub fn plan_regression(snapshot: &Snapshot) -> Vec<Finding> {
+/// A statement whose plan changed for a much slower one, and what that establishes.
+pub struct PlanRegression<'s> {
+    query: &'s QueryStat,
+    impact: QueryImpact,
+    /// The plan it ran fast with, and the slower one that replaced it.
+    best: &'s PlanVariant,
+    latest: &'s PlanVariant,
+    /// How many times slower the replacement is.
+    factor: f64,
+    /// The slow plan's runs' time beyond the fast plan's (ms).
+    wasted: f64,
+    /// That a day, over a day or more of the slow plan's runs.
+    wasted_per_day: Option<f64>,
+    score: f64,
+    severity: Severity,
+    /// It stopped running: the slow plan ran for a while, and was its last.
+    stopped: bool,
+    /// A table its plan reads that the catalog no longer has: there is nothing to force.
+    gone: Option<String>,
+}
+
+/// The statements whose plan was replaced by a much slower one that is a real part of the workload.
+fn plan_regressions(snapshot: &Snapshot) -> Vec<PlanRegression<'_>> {
     let Some(workload) = snapshot.workload.as_ref() else { return Vec::new() };
     app_queries(snapshot)
         .filter_map(|q| {
@@ -84,16 +113,11 @@ pub fn plan_regression(snapshot: &Snapshot) -> Vec<Finding> {
             let factor = latest.mean_time_ms / best.mean_time_ms.max(0.001);
             let wasted = (latest.mean_time_ms - best.mean_time_ms) * latest.executions;
             // The same bar as `regression`: the slow plan's extra time, or its own time, is a real part of the workload.
-            let (wasted_share, latest_share) = (workload.share_of(wasted, q), workload.share_of(latest.total_time_ms, q));
+            let (wasted_share, latest_share) =
+                (workload.share_of(wasted, q), workload.share_of(latest.total_time_ms, q));
             if wasted_share < 0.01 && latest_share < 0.03 {
                 return None;
             }
-            let mut f = finding("plan-regression", &q.id, Category::Queries, subject(SubjectKind::Query, &q.id));
-            f.facts.plan_change=Some(culprit_core::FindingPlanChange {from:best.id.clone(),to:latest.id.clone()});
-            f.facts.plan_baseline = latest.last_seen.as_ref().map(|last| culprit_core::PlanBaseline {
-                query: q.id.clone(), mean_ms: best.mean_time_ms, observed_until: last.clone(),
-            });
-            apply_impact(snapshot, &mut f, &impact);
             // Its time a day since it took over, so a regression that began this morning isn't diluted by the week.
             let since = latest.first_seen.as_deref().and_then(parse_epoch_seconds);
             let end = workload.window_end.as_deref().or(Some(snapshot.taken_at.as_str())).and_then(parse_epoch_seconds);
@@ -107,9 +131,6 @@ pub fn plan_regression(snapshot: &Snapshot) -> Vec<Finding> {
                 }
                 _ => None,
             };
-            f.impact.time_ms_per_day = wasted_per_day;
-            f.impact.score = score_for_share(latest_share.max(wasted_share));
-            f.impact.label = format!("{} slower", format::factor(factor));
             let amount = match (since, end) {
                 // Runs that came in bursts are graded on their total, never extrapolated to a day.
                 (Some(since), Some(end)) => severity_for_recent_time(
@@ -119,64 +140,108 @@ pub fn plan_regression(snapshot: &Snapshot) -> Vec<Finding> {
                 ),
                 _ => severity_for_time_of(snapshot, &[q], latest.total_time_ms, 1.0),
             };
-            f.severity = severity_for_share(latest_share).min(amount);
+            let mut severity = severity_for_share(latest_share).min(amount);
             if factor >= 3.0 && wasted_share >= 0.05 {
-                f.severity = f.severity.max(Severity::Medium.min(amount));
+                severity = severity.max(Severity::Medium.min(amount));
             }
-            f.confidence = Confidence::High;
-            f.title = format!("{} got {} slower after its plan changed", capitalize(&query_handle(q)), format::factor(factor));
-            let when = |at: Option<&str>| at.map(crate::queries::short_when).unwrap_or_default();
-            // A statement that stopped ran the slow plan for a while, not "since".
-            let slow_when = match (stopped, latest.first_seen.as_deref(), latest.last_seen.as_deref()) {
-                (true, Some(first), Some(last)) => culprit_core::span_when(first, last),
-                _ => format!("since {}", when(latest.first_seen.as_deref())),
-            };
-            f.summary = format!(
-                "Query Store saw this query run with plan {} at {} on average until {}, and with plan {} at {} {slow_when} ({} runs). The plan choice changed, typically after a statistics update, a schema change or a recompile with unusual parameter values.",
-                best.id,
-                format::duration(best.mean_time_ms),
-                when(best.last_seen.as_deref()),
-                latest.id,
-                format::duration(latest.mean_time_ms),
-                format::count(latest.executions)
-            );
-            f.queries = query_refs(&[q]);
-            f.metrics.push(Metric::new("Fast plan", best.mean_time_ms, Unit::Ms));
-            // A statement that stopped has no current plan: the slow one is the last it ran with.
-            let slow_label = if stopped || table_gone(snapshot, q).is_some() { "Last plan" } else { "Current plan" };
-            f.metrics.push(Metric::new(slow_label, latest.mean_time_ms, Unit::Ms));
-            match wasted_per_day {
-                Some(extra) => f.metrics.push(Metric::new("Extra time per day", extra, Unit::Ms)),
-                None => f.metrics.push(Metric::new("Extra time", wasted, Unit::Ms)),
-            }
-            // A plan forced onto a table that is gone can't apply: there is nothing to force.
-            if let Some(gone) = table_gone(snapshot, q) {
-                f.actionability = culprit_core::Actionability::History;
-                f.fix = Some(Fix {
-                    summary: format!(
-                        "{gone} is no longer in the catalog, so the statement can't run as it was, and plan {} can't be forced onto it: a forced plan that names a table or an index that is gone fails to apply. Nothing to force; if a statement on the table that replaced it is slow, its own findings say so.",
-                        best.id
-                    ),
-                    sql: None,
-                    cost: None,
-                });
-                f.verify = vec!["Nothing to check unless the statement runs again.".into()];
-                return Some(f);
-            }
-            // Where SQL Server corrects regressions itself, the fix says what it does and what forcing by hand adds.
-            let automatic = crate::tuning::hand_forcing_note(snapshot)
-                .map(|note| format!(" {note} It hasn't forced plan {} for this one so far.", best.id))
-                .unwrap_or_default();
-            f.fix = Some(Fix {
-                summary: format!("Force the fast plan now to stop the bleeding, then find out why the optimizer changed its mind (statistics, parameter values, schema). Unforce once the cause is fixed.{automatic}"),
-                sql: Some(format!("EXEC sp_query_store_force_plan @query_id = {}, @plan_id = {};", q.id, best.id)),
-                cost: None,
-            });
-            f.verify = vec!["The query's average duration in Query Store should return to the fast plan's level within an interval or two.".into()];
-            f.caveats.push("A forced plan can fail to apply after schema changes; Query Store reports that in sys.query_store_plan.last_force_failure_reason_desc.".into());
-            Some(f)
+            Some(PlanRegression {
+                query: q,
+                impact,
+                best,
+                latest,
+                factor,
+                wasted,
+                wasted_per_day,
+                score: score_for_share(latest_share.max(wasted_share)),
+                severity,
+                stopped,
+                gone: table_gone(snapshot, q),
+            })
         })
         .collect()
+}
+
+fn plan_regression_finding(snapshot: &Snapshot, regression: PlanRegression<'_>) -> Finding {
+    let PlanRegression { query: q, best, latest, .. } = regression;
+    let mut f = finding("plan-regression", &q.id, Category::Queries, subject(SubjectKind::Query, &q.id));
+    f.facts.plan_change = Some(culprit_core::FindingPlanChange { from: best.id.clone(), to: latest.id.clone() });
+    f.facts.plan_baseline = latest.last_seen.as_ref().map(|last| culprit_core::PlanBaseline {
+        query: q.id.clone(),
+        mean_ms: best.mean_time_ms,
+        observed_until: last.clone(),
+    });
+    apply_impact(snapshot, &mut f, &regression.impact);
+    f.impact.time_ms_per_day = regression.wasted_per_day;
+    f.impact.score = regression.score;
+    let factor = format::factor(regression.factor);
+    f.impact.label = t!("common.impact.times_slower", factor = factor.clone());
+    f.severity = regression.severity;
+    f.confidence = Confidence::High;
+    f.title = t!("check.plan_regression.title", query = capitalize(&query_handle(q)), factor = factor);
+    let when = |at: Option<&str>| at.map(crate::queries::short_when).unwrap_or_default();
+    let (fast, fast_ms, until) = (&best.id, format::duration(best.mean_time_ms), when(best.last_seen.as_deref()));
+    let (slow, slow_ms, runs) = (&latest.id, format::duration(latest.mean_time_ms), format::count(latest.executions));
+    f.summary = match (regression.stopped, latest.first_seen.as_deref(), latest.last_seen.as_deref()) {
+        // A statement that stopped ran the slow plan for a while, not "since".
+        (true, Some(first), Some(last)) => t!(
+            "check.plan_regression.summary.stopped",
+            fast = fast,
+            fast_ms = fast_ms,
+            until = until,
+            slow = slow,
+            slow_ms = slow_ms,
+            span = culprit_core::span_when(first, last),
+            runs = runs
+        ),
+        _ => t!(
+            "check.plan_regression.summary.running",
+            fast = fast,
+            fast_ms = fast_ms,
+            until = until,
+            slow = slow,
+            slow_ms = slow_ms,
+            since = when(latest.first_seen.as_deref()),
+            runs = runs
+        ),
+    };
+    f.queries = query_refs(&[q]);
+    f.metrics.push(Metric::new(t!("common.metric.fast_plan"), best.mean_time_ms, Unit::Ms));
+    // A statement that stopped has no current plan: the slow one is the last it ran with.
+    let slow_label = if regression.stopped || regression.gone.is_some() {
+        t!("check.plan_regression.metric.last_plan")
+    } else {
+        t!("check.plan_regression.metric.current_plan")
+    };
+    f.metrics.push(Metric::new(slow_label, latest.mean_time_ms, Unit::Ms));
+    match regression.wasted_per_day {
+        Some(extra) => f.metrics.push(Metric::new(t!("common.metric.extra_time_per_day"), extra, Unit::Ms)),
+        None => f.metrics.push(Metric::new(t!("common.metric.extra_time"), regression.wasted, Unit::Ms)),
+    }
+    // A plan forced onto a table that is gone can't apply: there is nothing to force.
+    if let Some(gone) = regression.gone {
+        f.actionability = culprit_core::Actionability::History;
+        f.fix = Some(Fix {
+            summary: t!("check.plan_regression.fix.table_gone", table = gone, plan = &best.id),
+            sql: None,
+            cost: None,
+        });
+        f.verify = vec![t!("check.plan_regression.verify.table_gone")];
+        return f;
+    }
+    // Where SQL Server corrects regressions itself, the fix says what it does and what forcing by hand adds.
+    let mut fix = vec![t!("check.plan_regression.fix.force")];
+    if let Some(note) = crate::tuning::hand_forcing_note(snapshot) {
+        fix.push(note);
+        fix.push(t!("check.plan_regression.fix.not_forced_yet", plan = &best.id));
+    }
+    f.fix = Some(Fix {
+        summary: fix.join(" "),
+        sql: Some(format!("EXEC sp_query_store_force_plan @query_id = {}, @plan_id = {};", q.id, best.id)),
+        cost: None,
+    });
+    f.verify = vec![t!("check.plan_regression.verify.force")];
+    f.caveats.push(t!("check.plan_regression.caveat.force_failure"));
+    f
 }
 
 /// A table the statement's plan reads that the catalog no longer has (dropped or renamed since), by its name as the

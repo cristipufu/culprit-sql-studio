@@ -183,6 +183,103 @@ fn a_plan_regression_says_a_day_only_of_a_day_of_slow_runs_and_forces_nothing_on
     );
 }
 
+// What plan-regression says, word for word: a slow plan still running over two days, one that ran for three minutes,
+// one that stopped days ago, one whose table is gone, and one where SQL Server corrects regressions itself. Its
+// messages come from locales/en.json.
+#[test]
+fn a_plan_regression_says_what_changed_in_english() {
+    assert_eq!(
+        crate::info("plan-regression"),
+        "Plan regressions\n\
+        Queries whose current plan is much slower than a plan they used before."
+    );
+    let running = || {
+        six_days_with_plans(vec![
+            plan("8", 450.0, 0.5, "2026-10-08T07:44:00Z", "2026-10-09T07:47:00Z"),
+            plan("47", 300.0, 60.0, "2026-10-09T12:13:47Z", "2026-10-11T12:13:00Z"),
+        ])
+    };
+    let burst = || {
+        six_days_with_plans(vec![
+            plan("8", 450.0, 0.5, "2026-10-11T07:44:00Z", "2026-10-11T07:47:00Z"),
+            plan("47", 300.0, 60.0, "2026-10-11T07:48:00Z", "2026-10-11T07:51:00Z"),
+        ])
+    };
+    let mut stopped = six_days_with_plans(vec![
+        plan("8", 450.0, 0.5, "2026-10-06T07:44:00Z", "2026-10-07T07:47:00Z"),
+        plan("47", 300.0, 60.0, "2026-10-07T12:13:47Z", "2026-10-08T12:13:00Z"),
+    ]);
+    let q = query(&mut stopped, "8");
+    (q.first_seen, q.last_seen) = (Some("2026-10-06T07:44:00Z".into()), Some("2026-10-08T12:13:00Z".into()));
+    let mut gone = burst();
+    gone.tables.retain(|t| t.name != "orders");
+    let mut automatic = running();
+    automatic.tuning = Some(TuningAdvice {
+        automatic_tuning: vec![culprit_core::AutomaticTuningOption {
+            name: "FORCE_LAST_GOOD_PLAN".into(),
+            desired: "ON".into(),
+            actual: "ON".into(),
+            reason: None,
+        }],
+        ..Default::default()
+    });
+    let said = |s: Snapshot| crate::words(find(&analyze(s).findings, "plan-regression:8").expect("47 replaced 8"));
+    assert_eq!(
+        [said(running()), said(burst()), said(stopped), said(gone), said(automatic)],
+        [
+            "A read from orders got 120× slower after its plan changed · Low · High\n\
+                The associated statements used 18.2 s of database time over the last 6 days (34%). Query Store saw this query run with plan 8 at 0.50 ms on average until Oct 9, 07:47 UTC, and with plan 47 at 60 ms since Oct 9, 12:13 UTC (300 runs). The plan choice changed, typically after a statistics update, a schema change or a recompile with unusual parameter values.\n\
+                impact: 120× slower\n\
+                metric: Fast plan\n\
+                metric: Current plan\n\
+                metric: Extra time per day\n\
+                fix: Force the fast plan now to stop the bleeding, then find out why the optimizer changed its mind (statistics, parameter values, schema). Unforce once the cause is fixed.\n\
+                sql: EXEC sp_query_store_force_plan @query_id = 8, @plan_id = 8;\n\
+                verify: The query's average duration in Query Store should return to the fast plan's level within an interval or two.\n\
+                caveat: A forced plan can fail to apply after schema changes; Query Store reports that in sys.query_store_plan.last_force_failure_reason_desc.",
+            "A read from orders got 120× slower after its plan changed · Low · High\n\
+                The associated statements used 18.2 s of database time over the last 6 days (34%). Query Store saw this query run with plan 8 at 0.50 ms on average until Oct 11, 07:47 UTC, and with plan 47 at 60 ms since Oct 11, 07:48 UTC (300 runs). The plan choice changed, typically after a statistics update, a schema change or a recompile with unusual parameter values.\n\
+                impact: 120× slower\n\
+                metric: Fast plan\n\
+                metric: Current plan\n\
+                metric: Extra time\n\
+                fix: Force the fast plan now to stop the bleeding, then find out why the optimizer changed its mind (statistics, parameter values, schema). Unforce once the cause is fixed.\n\
+                sql: EXEC sp_query_store_force_plan @query_id = 8, @plan_id = 8;\n\
+                verify: The query's average duration in Query Store should return to the fast plan's level within an interval or two.\n\
+                caveat: A forced plan can fail to apply after schema changes; Query Store reports that in sys.query_store_plan.last_force_failure_reason_desc.",
+            "A read from orders got 120× slower after its plan changed · Low · High\n\
+                Query Store saw this query run with plan 8 at 0.50 ms on average until Oct 7, 07:47 UTC, and with plan 47 at 60 ms between Oct 7, 12:13 and Oct 8, 12:13 UTC (300 runs). The plan choice changed, typically after a statistics update, a schema change or a recompile with unusual parameter values.\n\
+                impact: 120× slower\n\
+                metric: Fast plan\n\
+                metric: Last plan\n\
+                metric: Extra time per day\n\
+                fix: Force the fast plan now to stop the bleeding, then find out why the optimizer changed its mind (statistics, parameter values, schema). Unforce once the cause is fixed.\n\
+                sql: EXEC sp_query_store_force_plan @query_id = 8, @plan_id = 8;\n\
+                verify: Nothing to check unless it runs again: a later scan that sees it run lists this finding as current again.\n\
+                caveat: This query has not run since 2026-10-08 12:13 (3.0 days before this scan's data ends). A deploy may have changed or fixed it; check that the current version of this code doesn't have the same problem.\n\
+                caveat: A forced plan can fail to apply after schema changes; Query Store reports that in sys.query_store_plan.last_force_failure_reason_desc.",
+            "A read from orders got 120× slower after its plan changed · Low · High\n\
+                The associated statements used 18.2 s of database time over the last 6 days (34%). Query Store saw this query run with plan 8 at 0.50 ms on average until Oct 11, 07:47 UTC, and with plan 47 at 60 ms since Oct 11, 07:48 UTC (300 runs). The plan choice changed, typically after a statistics update, a schema change or a recompile with unusual parameter values.\n\
+                impact: 120× slower\n\
+                metric: Fast plan\n\
+                metric: Last plan\n\
+                metric: Extra time\n\
+                fix: shop.orders is no longer in the catalog, so the statement can't run as it was, and plan 8 can't be forced onto it: a forced plan that names a table or an index that is gone fails to apply. Nothing to force; if a statement on the table that replaced it is slow, its own findings say so.\n\
+                verify: Nothing to check unless the statement runs again.",
+            "A read from orders got 120× slower after its plan changed · Low · High\n\
+                The associated statements used 18.2 s of database time over the last 6 days (34%). Query Store saw this query run with plan 8 at 0.50 ms on average until Oct 9, 07:47 UTC, and with plan 47 at 60 ms since Oct 9, 12:13 UTC (300 runs). The plan choice changed, typically after a statistics update, a schema change or a recompile with unusual parameter values.\n\
+                impact: 120× slower\n\
+                metric: Fast plan\n\
+                metric: Current plan\n\
+                metric: Extra time per day\n\
+                fix: Force the fast plan now to stop the bleeding, then find out why the optimizer changed its mind (statistics, parameter values, schema). Unforce once the cause is fixed. Automatic plan correction (FORCE_LAST_GOOD_PLAN) is on for this database: SQL Server forces the last good plan itself once it is sure a regression costs enough (sys.dm_db_tuning_recommendations lists the ones it found), and unforces a plan it forced that turns out slower. A plan forced by hand stays forced until someone unforces it, whatever changes after. It hasn't forced plan 8 for this one so far.\n\
+                sql: EXEC sp_query_store_force_plan @query_id = 8, @plan_id = 8;\n\
+                verify: The query's average duration in Query Store should return to the fast plan's level within an interval or two.\n\
+                caveat: A forced plan can fail to apply after schema changes; Query Store reports that in sys.query_store_plan.last_force_failure_reason_desc.",
+        ]
+    );
+}
+
 // ── one plan story per query ─────────────────────────────────────────────────────────────────────
 
 fn recommend(query: &str, good: &str, bad: &str) -> TuningAdvice {
