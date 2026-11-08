@@ -97,11 +97,17 @@ fn pin(name: &str, text: &str) {
     }
     let (said, was): (Vec<&str>, Vec<&str>) = (text.lines().collect(), pinned.lines().collect());
     let at = said.iter().zip(&was).position(|(a, b)| a != b).unwrap_or(said.len().min(was.len()));
+    let command_start = said[..at.min(said.len())].iter().rposition(|line| line.starts_with("$ culprit ")).unwrap_or(0);
+    let command_end = said[at.min(said.len())..]
+        .iter()
+        .position(|line| line.starts_with("$ culprit "))
+        .map_or(said.len(), |offset| at + offset);
     panic!(
-        "{name}: line {} differs\n  said:   {}\n  pinned: {}",
+        "{name}: line {} differs\n  said:   {:?}\n  pinned: {:?}\nActual command output:\n{}",
         at + 1,
         said.get(at).unwrap_or(&"<nothing>"),
-        was.get(at).unwrap_or(&"<nothing>")
+        was.get(at).unwrap_or(&"<nothing>"),
+        said[command_start..command_end].join("\n")
     );
 }
 
