@@ -963,7 +963,7 @@ fn replicas_lagging_stopped_and_slots() {
             r("old_etl", ReplicaRole::Slot, "inactive", None, Some(14.0 * GB)),
         ];
     });
-    let titles: Vec<String> = replica_lag(&s).into_iter().map(|f| f.title).collect();
+    let titles: Vec<String> = ReplicaLagCheck.run(&s).into_iter().map(|f| f.title).collect();
     assert_eq!(
         titles,
         vec!["The replica reporting is 2 min behind", "The inactive replication slot old_etl keeps 14.0 GB of WAL"]
@@ -971,7 +971,7 @@ fn replicas_lagging_stopped_and_slots() {
     let mut stopped = r("from 10.0.0.5", ReplicaRole::ThisServer, "applying stopped (SQL thread)", None, None);
     stopped.error = Some("1062 duplicate key".into());
     let s = with_pressure(Engine::Mysql, |p| p.replicas = vec![stopped]);
-    let f = replica_lag(&s);
+    let f = ReplicaLagCheck.run(&s);
     assert_eq!(f[0].title, "Replication to this server has stopped (applying stopped (SQL thread))");
     assert!(f[0].summary.contains("1062 duplicate key"));
 }

@@ -6,21 +6,24 @@ use crate::evidence::Requirement as Evidence;
 pub fn replica_lag_info() -> CheckInfo {
     CheckInfo {
         id: "replica-lag".into(),
-        title: "Replicas that fall behind".into(),
+        title: t!("check.replica_lag.info.title"),
         category: Category::Configuration,
         engines: vec![Engine::Mssql, Engine::Postgres, Engine::Mysql],
         requires: vec![],
-        description: "Replicas far behind the primary or stopped, and PostgreSQL replication slots that keep WAL for a consumer that's gone: pg_stat_replication, availability group replica states, SHOW REPLICA STATUS.".into(),
+        description: t!("check.replica_lag.info.description"),
     }
 }
 
 check!(
-    ReplicaLagCheck: replica_lag_info, replica_lag,
-    &[Evidence::Pressure { signal: None, timed_files: false, complete: false }]
+    ReplicaLagCheck: replica_lag_info,
+    decide = lagging,
+    render = replica_lag_finding,
+    case<'s> = Lagging<'s>,
+    evidence = &[Evidence::Pressure { signal: None, timed_files: false, complete: false }],
 );
 
 /// How a replica, a consumer or this server stands, as replica-lag reads it.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub(super) enum ReplicaStatus {
     /// Replication failed or can't connect: the copy stopped with an error, or a standby meant to stream has no
     /// receiver.
@@ -59,28 +62,85 @@ pub(super) fn replica_status(r: &Replica) -> ReplicaStatus {
     }
 }
 
-pub fn replica_lag(snapshot: &Snapshot) -> Vec<Finding> {
+/// A replica, a logical consumer or this server that is stopped or behind, or a slot that keeps WAL for nothing.
+pub enum Lagging<'s> {
+    Replica { replica: &'s Replica, status: ReplicaStatus },
+    Slot(InactiveSlot<'s>),
+}
+
+/// An inactive replication slot that keeps a gigabyte or more of WAL, and what can cap it.
+pub struct InactiveSlot<'s> {
+    slot: &'s Replica,
+    kept: f64,
+    logical: bool,
+    /// max_slot_wal_keep_size caps what it keeps (13+).
+    capped: bool,
+    /// The scan read whether something caps it.
+    cap_known: bool,
+    /// The server can cap what slots keep: PostgreSQL 13 and later.
+    can_cap: bool,
+    severity: Severity,
+}
+
+fn lagging(snapshot: &Snapshot) -> Vec<Lagging<'_>> {
     let Some(p) = snapshot.pressure.as_ref() else { return Vec::new() };
     p.replicas
         .iter()
         .filter_map(|r| match r.role {
-            ReplicaRole::Slot => slot_finding(snapshot, r),
-            _ => replica_finding(snapshot, r),
+            ReplicaRole::Slot => inactive_slot(snapshot, r).map(Lagging::Slot),
+            _ => stopped_or_behind(snapshot, r).map(|status| Lagging::Replica { replica: r, status }),
         })
         .collect()
 }
 
-/// A replica, a logical consumer or this server, when it is stopped or behind.
-pub(super) fn replica_finding(snapshot: &Snapshot, r: &Replica) -> Option<Finding> {
+/// How a replica, a logical consumer or this server stands, when it is stopped or behind.
+pub(super) fn stopped_or_behind(snapshot: &Snapshot, r: &Replica) -> Option<ReplicaStatus> {
     // A logical consumer of another database on this server is that database's lag (its slot, kept server-wide, is
     // still reported as a slot).
     if r.is_logical() && r.database.as_deref().is_some_and(|d| !d.eq_ignore_ascii_case(&snapshot.server.database)) {
         return None;
     }
-    let status = replica_status(r);
-    if status == ReplicaStatus::Fine {
+    Some(replica_status(r)).filter(|s| *s != ReplicaStatus::Fine)
+}
+
+/// An inactive replication slot that keeps a gigabyte or more of WAL. A physical slot without its replica keeps WAL for
+/// nothing; a logical one belongs to a consumer (a subscription, a CDC tool) that may only be between syncs, and
+/// dropping it forces that consumer to copy everything again. Whether it can fill the disk depends on
+/// max_slot_wal_keep_size (13+): with a cap, PostgreSQL gives the slot up instead.
+pub(super) fn inactive_slot<'s>(snapshot: &Snapshot, r: &'s Replica) -> Option<InactiveSlot<'s>> {
+    let kept = r.lag_bytes.filter(|b| *b >= GB)?;
+    if r.state.as_deref() != Some("inactive") || r.wal_status.as_deref() == Some("lost") {
         return None;
     }
+    // safe_wal_size exists from 13 and is empty when nothing caps what slots keep.
+    let capped = r.safe_wal_bytes.is_some();
+    let severity = match (capped, r.wal_status.as_deref()) {
+        (true, Some("unreserved")) => Severity::Medium,
+        (true, _) => Severity::Low,
+        (false, _) if kept >= 10.0 * GB => Severity::High,
+        _ => Severity::Medium,
+    };
+    Some(InactiveSlot {
+        slot: r,
+        kept,
+        logical: r.is_logical(),
+        capped,
+        cap_known: r.wal_status.is_some(),
+        // Before 13 nothing can cap a slot; from 13 the scan reads whether something does, unless the read failed.
+        can_cap: culprit_core::version_at_least(&snapshot.server.version, [13, 0, 0]),
+        severity,
+    })
+}
+
+fn replica_lag_finding(snapshot: &Snapshot, lagging: Lagging<'_>) -> Finding {
+    match lagging {
+        Lagging::Replica { replica, status } => replica_finding(snapshot, replica, status),
+        Lagging::Slot(slot) => slot_finding(snapshot, slot),
+    }
+}
+
+/// A replica, a logical consumer or this server, stopped or behind.
+fn replica_finding(snapshot: &Snapshot, r: &Replica, status: ReplicaStatus) -> Finding {
     let pg = snapshot.server.engine == Engine::Postgres;
     let mysql = snapshot.server.engine == Engine::Mysql;
     let consumer = r.is_logical();
@@ -88,168 +148,129 @@ pub(super) fn replica_finding(snapshot: &Snapshot, r: &Replica) -> Option<Findin
     let mut f = finding("replica-lag", &r.name, Category::Configuration, subject(SubjectKind::Database, &r.name));
     let lag = seconds
         .map(|s| format::duration(s * 1000.0))
-        .or_else(|| r.lag_bytes.map(|b| format!("{} of log", format::bytes(b))))
-        .unwrap_or_else(|| "behind".into());
+        .or_else(|| r.lag_bytes.map(|b| t!("check.replica_lag.lag_bytes", bytes = format::bytes(b))))
+        .unwrap_or_else(|| t!("check.replica_lag.lag_unknown"));
     let state = r.state.clone().unwrap_or_default();
     match status {
         ReplicaStatus::LeftConfigured => {
-            f.title = "This server is still set up as a replica, but replication isn't running".into();
-            f.summary = "Both replication threads are off and no error is recorded, so someone stopped them, and this server takes writes (read_only is off). A former replica promoted to primary looks like this: its old replication settings stay behind, and starting them by mistake would apply another server's changes on top of this one's.".into();
+            f.title = t!("check.replica_lag.title.left_configured");
+            f.summary = t!("check.replica_lag.summary.left_configured");
             f.severity = Severity::Low;
-            f.fix = Some(Fix {
-                summary: "If it is no longer a replica, remove the configuration with RESET REPLICA ALL (RESET SLAVE ALL before MySQL 8.0.22 and MariaDB 10.5.1). If it should replicate, make it read-only and START REPLICA.".into(),
-                sql: None,
-                cost: None,
-            });
+            f.fix = Some(Fix { summary: t!("check.replica_lag.fix.left_configured"), sql: None, cost: None });
         }
         ReplicaStatus::StoppedByHand => {
-            f.title = "Replication to this server was stopped by hand".into();
-            f.summary = "Both replication threads are off and no error is recorded: someone ran STOP REPLICA, for a backup or maintenance perhaps. While it stays stopped the copy gets older by the minute, and failing over to it would lose the changes since.".into();
+            f.title = t!("check.replica_lag.title.stopped_by_hand");
+            f.summary = t!("check.replica_lag.summary.stopped_by_hand");
             f.severity = Severity::Medium;
-            f.fix = Some(Fix {
-                summary: "If it should replicate, START REPLICA and let it catch up before relying on it; if it is no longer a replica, RESET REPLICA ALL removes the configuration.".into(),
-                sql: None,
-                cost: None,
-            });
+            f.fix = Some(Fix { summary: t!("check.replica_lag.fix.stopped_by_hand"), sql: None, cost: None });
         }
         ReplicaStatus::Stopped => {
             f.title = match r.role {
-                ReplicaRole::ThisServer => format!("Replication to this server has stopped ({state})"),
-                _ if consumer => format!("The logical consumer {} isn't receiving changes ({state})", r.name),
-                _ => format!("The replica {} isn't receiving changes ({state})", r.name),
+                ReplicaRole::ThisServer => t!("check.replica_lag.title.stopped_this_server", state = &state),
+                _ if consumer => t!("check.replica_lag.title.stopped_consumer", name = &r.name, state = &state),
+                _ => t!("check.replica_lag.title.stopped_replica", name = &r.name, state = &state),
             };
-            let error = r.error.as_ref().map(|e| format!("The last error was {e}. ")).unwrap_or_default();
-            f.summary = if pg && r.role == ReplicaRole::ThisServer && state == "not receiving" {
-                format!(
-                    "{error}This standby is set up to stream from its primary (primary_conninfo is set) but no WAL receiver is running, so it isn't getting changes: its data is getting older by the minute and failing over to it now would lose them."
-                )
+            let mut summary = Vec::new();
+            if let Some(e) = &r.error {
+                summary.push(t!("check.replica_lag.summary.last_error", error = e));
+            }
+            summary.push(if pg && r.role == ReplicaRole::ThisServer && state == "not receiving" {
+                t!("check.replica_lag.summary.no_receiver")
             } else {
-                format!(
-                    "{error}The copy no longer keeps up, so its data is getting older by the minute and failing over to it now would lose changes."
-                )
-            };
+                t!("check.replica_lag.summary.stopped")
+            });
+            f.summary = summary.join(" ");
             f.severity = Severity::High;
             f.fix = Some(Fix {
                 summary: if mysql {
-                    "Read the full error with SHOW REPLICA STATUS on the replica, fix its cause, then START REPLICA."
-                        .into()
+                    t!("check.replica_lag.fix.stopped_mysql")
                 } else {
-                    "Find why it stopped (the replica's error log, network, disk space), fix it, and let it catch up before relying on it.".into()
+                    t!("check.replica_lag.fix.stopped")
                 },
                 sql: None,
                 cost: None,
             });
         }
         _ => {
-            let delay = r.delay_seconds.map(|d| {
-                format!(
-                    " It is also set up to apply changes {} late on purpose ({}); that part isn't counted.",
-                    format::duration(d * 1000.0),
-                    if pg { "recovery_min_apply_delay" } else { "SOURCE_DELAY" }
-                )
-            });
             if consumer {
-                f.title = format!("The logical consumer {} is {lag} behind", r.name);
-                f.summary = format!(
-                    "{} receives this database's changes through logical decoding: a subscription, or a CDC tool such as Debezium. It has confirmed changes only up to {lag} ago, so whatever it feeds sees data that old, and its slot keeps the WAL since then on this server. A consumer falls behind when it applies changes slower than this server writes them: one very large transaction, a slow destination, or a connector that is throttled or failing.",
-                    r.name
-                );
-                f.fix = Some(Fix {
-                    summary: "Look at the consumer, not this server: the subscriber's apply worker (pg_stat_subscription and its log) or the CDC connector's lag and errors. Split very large transactions so changes flow in smaller pieces.".into(),
-                    sql: None,
-                    cost: None,
-                });
+                f.title = t!("check.replica_lag.title.consumer_behind", name = &r.name, lag = &lag);
+                f.summary = t!("check.replica_lag.summary.consumer_behind", name = &r.name, lag = &lag);
+                f.fix = Some(Fix { summary: t!("check.replica_lag.fix.consumer_behind"), sql: None, cost: None });
             } else {
                 f.title = match r.role {
-                    ReplicaRole::ThisServer => format!("This server is {lag} behind its primary"),
-                    _ => format!("The replica {} is {lag} behind", r.name),
+                    ReplicaRole::ThisServer => t!("check.replica_lag.title.this_server_behind", lag = &lag),
+                    _ => t!("check.replica_lag.title.replica_behind", name = &r.name, lag = &lag),
                 };
-                f.summary = format!(
-                    "Reads from the replica return data {lag} old, and failing over now would lose or wait for that much. Lag grows when the replica applies changes slower than the primary writes them: large transactions, long queries on the replica{}, or slower storage.{}",
-                    if pg { " (which can pause replay)" } else { "" },
-                    delay.clone().unwrap_or_default()
-                );
-                f.fix = Some(Fix {
-                    summary: "Split large write transactions into batches, check the replica's storage and CPU, and move long reports off it or let them run against a snapshot.".into(),
-                    sql: None,
-                    cost: None,
-                });
+                let mut summary = vec![if pg {
+                    t!("check.replica_lag.summary.behind_replay", lag = &lag)
+                } else {
+                    t!("check.replica_lag.summary.behind", lag = &lag)
+                }];
+                if let Some(d) = r.delay_seconds {
+                    summary.push(t!(
+                        "check.replica_lag.summary.delayed",
+                        delay = format::duration(d * 1000.0),
+                        setting = if pg { "recovery_min_apply_delay" } else { "SOURCE_DELAY" }
+                    ));
+                }
+                f.summary = summary.join(" ");
+                f.fix = Some(Fix { summary: t!("check.replica_lag.fix.behind"), sql: None, cost: None });
             }
             f.severity = if seconds.is_some_and(|s| s >= 600.0) { Severity::High } else { Severity::Medium };
             if let Some(s) = seconds {
-                f.metrics.push(Metric::new("Behind by", s * 1000.0, Unit::Ms));
+                f.metrics.push(Metric::new(t!("check.replica_lag.metric.behind_by"), s * 1000.0, Unit::Ms));
             }
             if let Some(b) = r.lag_bytes {
-                f.metrics.push(Metric::new("Not yet applied", b, Unit::Bytes));
+                f.metrics.push(Metric::new(t!("check.replica_lag.metric.not_applied"), b, Unit::Bytes));
             }
             if let Some(d) = r.delay_seconds {
-                f.metrics.push(Metric::new("Delayed on purpose by", d * 1000.0, Unit::Ms));
+                f.metrics.push(Metric::new(t!("check.replica_lag.metric.delayed_by"), d * 1000.0, Unit::Ms));
             }
         }
     }
     severity_score(&mut f);
     f.impact.label = match status {
         ReplicaStatus::LeftConfigured | ReplicaStatus::StoppedByHand | ReplicaStatus::Stopped => {
-            r.state.clone().unwrap_or_else(|| "stopped".into())
+            r.state.clone().unwrap_or_else(|| t!("check.replica_lag.impact.stopped"))
         }
-        _ => format!("{lag} behind"),
+        _ => t!("check.replica_lag.impact.behind", lag = &lag),
     };
     f.confidence = Confidence::High;
     f.verify = vec![match status {
-        ReplicaStatus::LeftConfigured => "Re-scan: the leftover replication configuration should be gone.".into(),
-        _ => "Re-scan: the lag should be seconds.".into(),
+        ReplicaStatus::LeftConfigured => t!("check.replica_lag.verify.left_configured"),
+        _ => t!("check.replica_lag.verify.lag"),
     }];
-    Some(f)
+    f
 }
 
-/// An inactive replication slot that keeps a gigabyte or more of WAL. A physical slot without its replica keeps WAL for
-/// nothing; a logical one belongs to a consumer (a subscription, a CDC tool) that may only be between syncs, and
-/// dropping it forces that consumer to copy everything again. Whether it can fill the disk depends on
-/// max_slot_wal_keep_size (13+): with a cap, PostgreSQL gives the slot up instead.
-pub(super) fn slot_finding(snapshot: &Snapshot, r: &Replica) -> Option<Finding> {
-    let kept = r.lag_bytes.filter(|b| *b >= GB)?;
-    if r.state.as_deref() != Some("inactive") || r.wal_status.as_deref() == Some("lost") {
-        return None;
-    }
-    let logical = r.is_logical();
-    // safe_wal_size exists from 13 and is empty when nothing caps what slots keep.
-    let capped = r.safe_wal_bytes.is_some();
-    let cap_known = r.wal_status.is_some();
+/// An inactive replication slot that keeps WAL.
+fn slot_finding(snapshot: &Snapshot, slot: InactiveSlot<'_>) -> Finding {
+    let InactiveSlot { slot: r, kept, logical, capped, cap_known, can_cap, .. } = slot;
     let mut f = finding("replica-lag", &r.name, Category::Configuration, subject(SubjectKind::Database, &r.name));
     f.title = if logical {
-        format!("The logical slot {} keeps {} of WAL while its consumer is away", r.name, format::bytes(kept))
+        t!("check.replica_lag.title.logical_slot", name = &r.name, kept = format::bytes(kept))
     } else {
-        format!("The inactive replication slot {} keeps {} of WAL", r.name, format::bytes(kept))
+        t!("check.replica_lag.title.physical_slot", name = &r.name, kept = format::bytes(kept))
     };
-    let idle = r
-        .inactive_seconds
-        .map(|s| format!("{} has had no consumer for {}", r.name, format::duration(s * 1000.0)))
-        .unwrap_or_else(|| format!("{} has no consumer connected", r.name));
-    let kind = if logical {
-        " It is a logical slot: a subscription or a CDC tool (Debezium, Fivetran, Airbyte…) reads changes through it, and many connect only between syncs. Dropping it makes that consumer copy everything again."
+    let mut summary = vec![match r.inactive_seconds {
+        Some(s) => t!("check.replica_lag.summary.slot_idle_for", name = &r.name, idle = format::duration(s * 1000.0)),
+        None => t!("check.replica_lag.summary.slot_no_consumer", name = &r.name),
+    }];
+    summary.push(if logical {
+        t!("check.replica_lag.summary.slot_logical")
     } else {
-        " It is a physical slot: a standby or a backup tool streams WAL through it."
-    };
-    // Before 13 nothing can cap a slot; from 13 the scan reads whether something does, unless the read failed.
-    let can_cap = culprit_core::version_at_least(&snapshot.server.version, [13, 0, 0]);
-    let risk = match (capped, cap_known, can_cap) {
-        (true, _, _) => format!(
-            " max_slot_wal_keep_size caps what it can keep: {} more WAL and PostgreSQL gives the slot up, so the disk is safe, but its consumer then has to start over.",
-            format::bytes(r.safe_wal_bytes.unwrap_or(0.0))
-        ),
-        (false, true, _) => " Nothing caps what it keeps (max_slot_wal_keep_size is -1), so it grows until the disk fills and the server stops accepting writes.".into(),
-        (false, false, true) => " Unless max_slot_wal_keep_size caps what slots keep, it grows until the disk fills and the server stops accepting writes.".into(),
-        (false, false, false) => " Before PostgreSQL 13 nothing can cap it: it grows until the disk fills and the server stops accepting writes.".into(),
-    };
-    f.summary = format!(
-        "A replication slot keeps every WAL file its consumer hasn't confirmed. {idle}, so the WAL it holds keeps growing.{kind}{risk}"
-    );
-    f.severity = match (capped, r.wal_status.as_deref()) {
-        (true, Some("unreserved")) => Severity::Medium,
-        (true, _) => Severity::Low,
-        (false, _) if kept >= 10.0 * GB => Severity::High,
-        _ => Severity::Medium,
-    };
+        t!("check.replica_lag.summary.slot_physical")
+    });
+    summary.push(match (capped, cap_known, can_cap) {
+        (true, _, _) => {
+            t!("check.replica_lag.summary.slot_capped", left = format::bytes(r.safe_wal_bytes.unwrap_or(0.0)))
+        }
+        (false, true, _) => t!("check.replica_lag.summary.slot_uncapped"),
+        (false, false, true) => t!("check.replica_lag.summary.slot_cap_unknown"),
+        (false, false, false) => t!("check.replica_lag.summary.slot_cannot_cap"),
+    });
+    f.summary = summary.join(" ");
+    f.severity = slot.severity;
     let quoted = r.name.replace('\'', "''");
     // Only where nothing caps slots yet (or the scan couldn't tell): a cap already set is never lowered.
     let cap = (!capped && can_cap).then(|| setting_change(&snapshot.server, "max_slot_wal_keep_size", "50GB"));
@@ -269,40 +290,32 @@ pub(super) fn slot_finding(snapshot: &Snapshot, r: &Replica) -> Option<Finding> 
         };
         sql.push_str(&format!("\n-- {lead}:\n{statements}"));
     }
-    let cap_advice = match &cap {
-        Some(c) if cap_known => format!(" To keep any slot from filling the disk, cap what slots may keep: {}", c.how),
-        Some(c) => format!(
-            " If max_slot_wal_keep_size isn't set, cap what slots may keep so none can fill the disk: {}",
-            c.how
-        ),
-        None if !can_cap => " PostgreSQL 13 and later can cap what slots keep (max_slot_wal_keep_size).".into(),
-        None => String::new(),
-    };
-    f.fix = Some(Fix {
-        summary: if logical {
-            format!(
-                "Find its consumer first: the slot's name and plugin usually say which subscription or connector it is. If it still syncs, leave the slot: it catches up when the consumer connects. If the consumer is gone for good, drop it.{cap_advice}"
-            )
-        } else {
-            format!("If nothing will stream through this slot again (a standby that was removed), drop it.{cap_advice}")
-        },
-        sql: Some(sql),
-        cost: None,
-    });
-    f.metrics = vec![Metric::new("WAL kept", kept, Unit::Bytes)];
+    let mut fix = vec![if logical {
+        t!("check.replica_lag.fix.logical_slot")
+    } else {
+        t!("check.replica_lag.fix.physical_slot")
+    }];
+    match &cap {
+        Some(c) if cap_known => fix.push(t!("check.replica_lag.fix.cap", how = &c.how)),
+        Some(c) => fix.push(t!("check.replica_lag.fix.cap_if_unset", how = &c.how)),
+        None if !can_cap => fix.push(t!("check.replica_lag.fix.cap_from_13")),
+        None => {}
+    }
+    f.fix = Some(Fix { summary: fix.join(" "), sql: Some(sql), cost: None });
+    f.metrics = vec![Metric::new(t!("check.replica_lag.metric.wal_kept"), kept, Unit::Bytes)];
     if let Some(s) = r.inactive_seconds {
-        f.metrics.push(Metric::new("Without a consumer for", s * 1000.0, Unit::Ms));
+        f.metrics.push(Metric::new(t!("check.replica_lag.metric.without_consumer"), s * 1000.0, Unit::Ms));
     }
     if let Some(b) = r.safe_wal_bytes {
-        f.metrics.push(Metric::new("WAL left before it is given up", b, Unit::Bytes));
+        f.metrics.push(Metric::new(t!("check.replica_lag.metric.wal_left"), b, Unit::Bytes));
     }
     severity_score(&mut f);
-    f.impact.label = format!("{} of WAL kept", format::bytes(kept));
+    f.impact.label = t!("check.replica_lag.impact.wal_kept", kept = format::bytes(kept));
     f.confidence = Confidence::High;
     f.verify = vec![if logical {
-        "Re-scan once the consumer has synced: the WAL kept should drop, or the slot be gone.".into()
+        t!("check.replica_lag.verify.logical_slot")
     } else {
-        "Re-scan: the slot should be gone, or active again.".into()
+        t!("check.replica_lag.verify.physical_slot")
     }];
-    Some(f)
+    f
 }
