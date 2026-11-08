@@ -7,6 +7,7 @@ import type { QueryStat } from "../gen/QueryStat";
 import { planShares } from "../lib/actual";
 import { can } from "../lib/engines";
 import { count, percent } from "../lib/format";
+import { t } from "../lib/i18n";
 import { estRows, estRowsForRuns, findingNoShareReason, insightsByNode, misestimate, noShareReason, rows as rowsText } from "../lib/plan-format";
 import { NodeDetails } from "./NodeDetails";
 import { OpIcon } from "./OpIcon";
@@ -22,15 +23,28 @@ type Props = {
   onSelect?: (id: number) => void;
 };
 
-const WARNING_LABEL: Record<string, string> = {
-  "implicit-conversion": "Type conversion",
-  spill: "Spills to disk",
-  "no-join-predicate": "No join predicate",
-  "missing-statistics": "No statistics",
-  "memory-grant": "Memory grant",
-  misestimate: "Estimate off",
-  "residual-predicate": "Filters after reading",
+const WARNING_LABEL: Record<string, () => string> = {
+  "implicit-conversion": () => t("ui.plan_view.warning.implicit_conversion"),
+  spill: () => t("ui.plan_view.warning.spill"),
+  "no-join-predicate": () => t("ui.plan_view.warning.no_join_predicate"),
+  "missing-statistics": () => t("ui.plan_view.warning.missing_statistics"),
+  "memory-grant": () => t("ui.plan_view.warning.memory_grant"),
+  misestimate: () => t("ui.plan_view.warning.misestimate"),
+  "residual-predicate": () => t("ui.plan_view.warning.residual_predicate"),
 };
+
+/** A plan warning in words; one Culprit doesn't know reads as the engine named it. */
+const warningLabel = (w: string) => WARNING_LABEL[w]?.() ?? w;
+
+/** "Actual plan", "Generic plan" or "Estimated plan". */
+export function planKindLabel(plan: Plan): string {
+  return plan.kind === "actual" ? t("ui.common.plan_kind.actual") : plan.kind === "generic" ? t("ui.common.plan_kind.generic") : t("ui.common.plan_kind.estimated");
+}
+
+/** "filter created_at >= @P1" or "seek id = @P2": a step's predicate, shortened. */
+export function predicateLabel(kind: "filter" | "seek", predicate: string): string {
+  return kind === "seek" ? t("ui.common.plan_seek", { predicate: shortPredicate(predicate) }) : t("ui.common.plan_filter", { predicate: shortPredicate(predicate) });
+}
 
 function walk(node: PlanNode, out: PlanNode[] = []): PlanNode[] {
   out.push(node);
@@ -120,24 +134,24 @@ export function PlanView({ plan, query, focus, compact, selectedId, onSelect }: 
   return (
     <div className="plan">
       <div className="plan-head">
-        <span className="tag">{plan.kind === "actual" ? "Actual plan" : plan.kind === "generic" ? "Generic plan" : "Estimated plan"}</span>
+        <span className="tag">{planKindLabel(plan)}</span>
         <span>
-          {nodes.length} operator{nodes.length === 1 ? "" : "s"}
-          {weighed && ` · cost ${plan.facts.estimated_cost_unavailable ? "unavailable" : (plan.total_cost || plan.root.subtree_cost).toFixed((plan.total_cost || plan.root.subtree_cost) < 10 ? 3 : 1)}`}
+          {t("ui.common.plan_operators", { count: nodes.length })}
+          {weighed && ` · ${plan.facts.estimated_cost_unavailable ? t("ui.common.plan_cost_unavailable") : t("ui.common.plan_cost", { cost: (plan.total_cost || plan.root.subtree_cost).toFixed((plan.total_cost || plan.root.subtree_cost) < 10 ? 3 : 1) })}`}
         </span>
         <span className="spacer" />
         {plan.warnings.length > 0 && (
           <span className="warn-chip">
             <TriangleAlert size={11} />
-            {plan.warnings.map((w) => WARNING_LABEL[w] ?? w).join(", ")}
+            {plan.warnings.map(warningLabel).join(", ")}
           </span>
         )}
       </div>
       {plan.kind === "actual" && <ActualSummary plan={plan} onPick={setSelected} />}
       <div className="plan-cols">
-        <span>Operator</span>
-        <span>{hasActuals ? "Rows est → actual" : weighed ? "Est. rows" : ""}</span>
-        <span>{shares.basis === "time" ? "Own time" : weighed ? "Self cost" : ""}</span>
+        <span>{t("ui.plan_view.operator")}</span>
+        <span>{hasActuals ? t("ui.plan_view.rows_est_actual") : weighed ? t("ui.plan_view.est_rows") : ""}</span>
+        <span>{shares.basis === "time" ? t("ui.plan_view.own_time") : weighed ? t("ui.plan_view.self_cost") : ""}</span>
       </div>
       <div style={compact ? { maxHeight: 340, overflowY: "auto" } : undefined}>
         {rows.map(({ node, depth }) => {
@@ -199,10 +213,10 @@ export function PlanView({ plan, query, focus, compact, selectedId, onSelect }: 
                     <span className="line2">
                       {node.warnings.map((w) => (
                         <span key={w} className="warn-chip">
-                          {WARNING_LABEL[w] ?? w}
+                          {warningLabel(w)}
                         </span>
                       ))}
-                      {(node.seek_predicate || node.predicate) && <span className="pred">{node.seek_predicate ? `seek ${shortPredicate(node.seek_predicate)}` : `filter ${shortPredicate(node.predicate ?? "")}`}</span>}
+                      {(node.seek_predicate || node.predicate) && <span className="pred">{node.seek_predicate ? predicateLabel("seek", node.seek_predicate) : predicateLabel("filter", node.predicate ?? "")}</span>}
                     </span>
                   )}
                 </span>
@@ -211,7 +225,7 @@ export function PlanView({ plan, query, focus, compact, selectedId, onSelect }: 
                 {node.act_rows != null ? (
                   <>
                     {rowsText(estRowsForRuns(plan, node))} <span className="arrow">→</span> {rowsText(node.act_rows)}
-                    {mis != null && <span className="mis">×{count(Math.abs(mis))}{mis < 0 ? " over" : " under"}</span>}
+                    {mis != null && <span className="mis">{mis < 0 ? t("ui.plan_view.over", { times: count(Math.abs(mis)) }) : t("ui.plan_view.under", { times: count(Math.abs(mis)) })}</span>}
                   </>
                 ) : (
                   weighed && rowsText(estRows(plan, node))

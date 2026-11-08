@@ -7,11 +7,12 @@ import type { QueryStat } from "../gen/QueryStat";
 import { planShares } from "../lib/actual";
 import { duration, percent } from "../lib/format";
 import { can, serverName } from "../lib/engines";
+import { t } from "../lib/i18n";
 import { allNodes, costBasis as basis, cost, estRows, estRowsForRuns, findingNoShareReason, insightsByNode, isWrapper, misestimate, noShareReason, rows, rowsOut, uncostedSteps } from "../lib/plan-format";
 import { ActualSummary } from "./ActualSummary";
 import { NodeDetails } from "./NodeDetails";
 import { OpIcon } from "./OpIcon";
-import { shortPredicate } from "./PlanView";
+import { planKindLabel, predicateLabel } from "./PlanView";
 
 const CARD_W = 196;
 
@@ -35,7 +36,11 @@ const MIN_FIT = 0.45;
 /** How a node differs from the other plan in a comparison. */
 export type Mark = "changed" | "added" | "removed";
 
-const MARK_LABEL: Record<Mark, string> = { changed: "changed", added: "only here", removed: "only here" };
+const MARK_LABEL: Record<Mark, () => string> = {
+  changed: () => t("ui.plan_diagram.mark_changed"),
+  added: () => t("ui.plan_diagram.mark_only_here"),
+  removed: () => t("ui.plan_diagram.mark_only_here"),
+};
 
 export const costBasis = basis;
 
@@ -137,7 +142,7 @@ export function CostStrip({ plan, query, focus, onPick }: { plan: Plan; query?: 
   if (shares.basis !== "time" && !can(plan.engine, "plan_estimates")) {
     return (
       <div className="cost-strip">
-        <div className="eyebrow">{serverName(plan.engine)}'s plan has the access path only: no row or cost estimates to weigh its steps by.</div>
+        <div className="eyebrow">{t("ui.plan_diagram.access_path_only", { engine: serverName(plan.engine) })}</div>
       </div>
     );
   }
@@ -150,14 +155,14 @@ export function CostStrip({ plan, query, focus, onPick }: { plan: Plan; query?: 
   if (top.length === 0 && note) {
     return (
       <div className="cost-strip">
-        <div className="eyebrow">Where the cost goes: {note}</div>
+        <div className="eyebrow">{t("ui.plan_diagram.cost_goes_note", { note })}</div>
       </div>
     );
   }
   const rest = Math.max(0, 1 - top.reduce((s, n) => s + own(n), 0));
   return (
     <div className="cost-strip">
-      <div className="eyebrow">{shares.basis === "time" ? `Where the ${duration(shares.total)} went` : "Where the cost goes"}</div>
+      <div className="eyebrow">{shares.basis === "time" ? t("ui.plan_diagram.time_went", { time: duration(shares.total) }) : t("ui.plan_diagram.cost_goes")}</div>
       <div className="cost-bar">
         {top.map((n) => (
           <button type="button"
@@ -169,7 +174,7 @@ export function CostStrip({ plan, query, focus, onPick }: { plan: Plan; query?: 
             onClick={() => onPick(n.id)}
           />
         ))}
-        {rest > 0.005 && <span style={{ flex: rest, background: "var(--sunken)" }} title={`Everything else ${percent(rest)}`} />}
+        {rest > 0.005 && <span style={{ flex: rest, background: "var(--sunken)" }} title={t("ui.plan_diagram.everything_else", { share: percent(rest) })} />}
       </div>
       <div className="cost-legend">
         {top.map((n) => (
@@ -178,7 +183,7 @@ export function CostStrip({ plan, query, focus, onPick }: { plan: Plan; query?: 
             <b>{percent(own(n))}</b> {n.op}
             {n.object && <span className="mono muted"> {n.object.split(".").pop()}</span>}
             {/* An exchange's cost is the charge for passing rows between threads: never the step where the work is. */}
-            {n.kind === "parallelism" && <span className="muted"> · passing rows between workers</span>}
+            {n.kind === "parallelism" && <span className="muted"> · {t("ui.plan_diagram.passing_rows")}</span>}
           </button>
         ))}
       </div>
@@ -320,15 +325,15 @@ export function PlanDiagram(props: {
       {!bare && (
         <div className="plan-head">
           {badge && <span className="side-badge">{badge}</span>}
-          <span className="tag">{kindLabel ?? (plan.kind === "actual" ? "Actual plan" : plan.kind === "generic" ? "Generic plan" : "Estimated plan")}</span>
+          <span className="tag">{kindLabel ?? planKindLabel(plan)}</span>
           <span>
-            {nodes.length} operator{nodes.length === 1 ? "" : "s"}
-            {estimates && ` · cost ${plan.facts.estimated_cost_unavailable ? "unavailable" : cost(planCost)}`}
+            {t("ui.common.plan_operators", { count: nodes.length })}
+            {estimates && ` · ${plan.facts.estimated_cost_unavailable ? t("ui.common.plan_cost_unavailable") : t("ui.common.plan_cost", { cost: cost(planCost) })}`}
           </span>
           <span className="spacer" />
           {plan.warnings.length > 0 && (
             <span className="warn-chip">
-              <TriangleAlert size={11} /> {plan.warnings.length} plan warning{plan.warnings.length > 1 ? "s" : ""}
+              <TriangleAlert size={11} /> {t("ui.plan_diagram.plan_warnings", { count: plan.warnings.length })}
             </span>
           )}
           <ZoomControls zoom={zoom} setZoom={setZoom} fit={fit} />
@@ -360,8 +365,9 @@ export function PlanDiagram(props: {
                   const x2 = px(e.to.x) + CARD_W / 2;
                   const y2 = py(e.to.y) + CARD_H + 3;
                   const mid = (y1 + y2) / 2;
-                  const label = e.rows > 0 ? `${rows(e.rows)} row${rows(e.rows) === "1" ? "" : "s"}` : "";
-                  const via = e.via.length ? `via ${e.via.join(", ")}` : "";
+                  // Singular where the number reads "1", as a person sees it.
+                  const label = e.rows > 0 ? t("ui.plan_diagram.edge_rows", { n: rows(e.rows) === "1" ? 1 : e.rows, rows: rows(e.rows) }) : "";
+                  const via = e.via.length ? t("ui.plan_diagram.via", { operators: e.via.join(", ") }) : "";
                   const text = [label, via].filter(Boolean).join(" · ");
                   const w = text.length * 5.9 + 12;
                   // Beside the curve's midpoint, on the side away from the parent, so it never sits on the line.
@@ -389,7 +395,7 @@ export function PlanDiagram(props: {
                 })}
               </svg>
               <div className="diagram-result" style={{ left: px(boxes.find((b) => !parentOf.has(b.node.id))?.x ?? 0), top: PAD - 4, width: CARD_W }}>
-                result{rootVia.length ? ` · via ${rootVia.join(", ")}` : ""}
+                {t("ui.plan_diagram.result")}{rootVia.length ? ` · ${t("ui.plan_diagram.via", { operators: rootVia.join(", ") })}` : ""}
               </div>
               {boxes.map((b) => (
                 <PlanCard
@@ -417,13 +423,13 @@ export function PlanDiagram(props: {
                   key={f.id}
                   className="fold-pill"
                   style={{ left: px(f.x) + CARD_W / 2 - 78, top: py(f.y) + CARD_H / 2 - 14 }}
-                  title="Show the cheap operators under this node"
+                  title={t("ui.plan_diagram.fold_title")}
                   onClick={() => {
                     const parent = nodes.find((n) => n.id === f.parent);
                     if (parent) setExpanded((prev) => new Set([...prev, ...parent.children.map((c) => drawn(c, total, keep).node.id)]));
                   }}
                 >
-                  +{f.count} cheap operator{f.count > 1 ? "s" : ""}
+                  {t("ui.plan_diagram.cheap_operators", { count: f.count })}
                   {f.share != null && ` · ${percent(f.share)}`}
                 </button>
               ))}
@@ -450,17 +456,17 @@ export function PlanDiagram(props: {
 function ZoomControls({ zoom, setZoom, fit }: { zoom: number; setZoom: (f: (z: number) => number) => void; fit: () => void }) {
   return (
     <span className="zoom">
-      <button type="button" className="btn icon ghost" title="Zoom out" onClick={() => setZoom((z) => Math.max(0.3, +(z - 0.15).toFixed(2)))}>
+      <button type="button" className="btn icon ghost" title={t("ui.plan_diagram.zoom_out")} onClick={() => setZoom((z) => Math.max(0.3, +(z - 0.15).toFixed(2)))}>
         <Minus size={13} />
       </button>
       <span className="zoom-level">{Math.round(zoom * 100)}%</span>
-      <button type="button" className="btn icon ghost" title="Zoom in" onClick={() => setZoom((z) => Math.min(1.6, +(z + 0.15).toFixed(2)))}>
+      <button type="button" className="btn icon ghost" title={t("ui.plan_diagram.zoom_in")} onClick={() => setZoom((z) => Math.min(1.6, +(z + 0.15).toFixed(2)))}>
         <Plus size={13} />
       </button>
-      <button type="button" className="btn icon ghost" title="Fit the whole plan" onClick={fit}>
+      <button type="button" className="btn icon ghost" title={t("ui.plan_diagram.fit")} onClick={fit}>
         <Scan size={13} />
       </button>
-      <button type="button" className="btn icon ghost" title="Actual size" onClick={() => setZoom(() => 1)}>
+      <button type="button" className="btn icon ghost" title={t("ui.plan_diagram.actual_size")} onClick={() => setZoom(() => 1)}>
         <Maximize2 size={12} />
       </button>
     </span>
@@ -496,7 +502,7 @@ function PlanCard(props: {
   const worst = insights?.[0];
   const tip = [
     node.op,
-    node.predicate ? `filter ${shortPredicate(node.predicate)}` : node.seek_predicate ? `seek ${shortPredicate(node.seek_predicate)}` : "",
+    node.predicate ? predicateLabel("filter", node.predicate) : node.seek_predicate ? predicateLabel("seek", node.seek_predicate) : "",
     estimates && props.share == null ? noShare ?? "" : "",
     ...(insights ?? []).map((i) => `• ${i.title}`),
   ]
@@ -510,7 +516,13 @@ function PlanCard(props: {
       style={{ left: x, top: y, width: CARD_W, height: CARD_H, ["--heat" as string]: heat(share), ["--share" as string]: `${Math.max(share > 0 ? 3 : 0, Math.min(100, share * 100))}%` }}
       onClick={onSelect}
       title={tip}
-      aria-label={`${node.op}${table ? ` on ${table}` : ""}${estimates && props.share != null ? `, ${percent(share)} of the work` : ""}${worst ? `, ${insights!.length} issue${insights!.length > 1 ? "s" : ""}` : ""}`}
+      aria-label={[
+        table ? t("ui.plan_diagram.card_on", { operator: node.op, table }) : node.op,
+        estimates && props.share != null ? t("ui.plan_diagram.card_share", { share: percent(share) }) : "",
+        worst ? t("ui.plan_diagram.card_issues", { count: insights!.length }) : "",
+      ]
+        .filter(Boolean)
+        .join(", ")}
     >
       <span className="pc-top">
         <span className="pc-icon">
@@ -534,7 +546,7 @@ function PlanCard(props: {
             {mis != null && <span className="mis">×{rows(Math.abs(mis))}</span>}
           </>
         ) : estimates ? (
-          <>{rows(estRows(plan, node))} est.</>
+          <>{t("ui.plan_diagram.estimated_rows", { rows: rows(estRows(plan, node)) })}</>
         ) : (
           node.seek_predicate && (
             <span className="muted mono pc-seek" title={node.seek_predicate}>
@@ -545,7 +557,7 @@ function PlanCard(props: {
         {(ownMs ?? node.act_time_ms) != null && <span className="muted"> · {duration(ownMs ?? node.act_time_ms!)}</span>}
         {node.warnings.length > 0 && !worst && <TriangleAlert size={11} color="var(--medium-text)" style={{ marginLeft: 3 }} />}
         {/* The compare mark sits here, not beside the name: the name is what tells two steps apart. */}
-        {mark && <span className={`pc-mark ${mark}`}>{MARK_LABEL[mark]}</span>}
+        {mark && <span className={`pc-mark ${mark}`}>{MARK_LABEL[mark]()}</span>}
       </span>
       {worst && (
         <span className={`pc-flag ${worst.severity}`} title={insights!.map((i) => i.title).join("\n")}>

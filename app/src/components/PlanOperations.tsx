@@ -6,6 +6,7 @@ import type { QueryStat } from "../gen/QueryStat";
 import { planShares } from "../lib/actual";
 import { can } from "../lib/engines";
 import { duration, percent } from "../lib/format";
+import { t } from "../lib/i18n";
 import { allNodes, estRowsForRuns, findingNoShareReason, insightsByNode, misestimate, noShareReason, operatorRuns, rows } from "../lib/plan-format";
 import { OpIcon } from "./OpIcon";
 import { shortPredicate } from "./PlanView";
@@ -23,16 +24,16 @@ type Row = {
   worst: "high" | "medium" | "low" | null;
 };
 
-const COLUMNS: { key: SortKey; label: string; title: string; actual?: boolean }[] = [
-  { key: "cost", label: "Self", title: "Share of the plan's work done by this operator itself" },
-  { key: "subtree", label: "With inputs", title: "Share including everything below it" },
-  { key: "est", label: "Est. rows", title: "Rows the optimizer expected, over all executions (the measured ones in an actual plan)" },
-  { key: "act", label: "Actual rows", title: "Rows that actually came out", actual: true },
-  { key: "error", label: "Off by", title: "How far the estimate was from the actual rows", actual: true },
-  { key: "runs", label: "Runs", title: "How many times the operator ran" },
-  { key: "read", label: "Read", title: "Rows read, when the engine reports it" },
-  { key: "time", label: "Time", title: "Elapsed time, from actual plans", actual: true },
-  { key: "issues", label: "Issues", title: "Insights and warnings about this operator" },
+const COLUMNS: { key: SortKey; label: () => string; title: () => string; actual?: boolean }[] = [
+  { key: "cost", label: () => t("ui.plan_operations.column.self"), title: () => t("ui.plan_operations.column.self_title") },
+  { key: "subtree", label: () => t("ui.plan_operations.column.subtree"), title: () => t("ui.plan_operations.column.subtree_title") },
+  { key: "est", label: () => t("ui.plan_operations.column.est"), title: () => t("ui.plan_operations.column.est_title") },
+  { key: "act", label: () => t("ui.plan_operations.column.act"), title: () => t("ui.plan_operations.column.act_title"), actual: true },
+  { key: "error", label: () => t("ui.plan_operations.column.error"), title: () => t("ui.plan_operations.column.error_title"), actual: true },
+  { key: "runs", label: () => t("ui.plan_operations.column.runs"), title: () => t("ui.plan_operations.column.runs_title") },
+  { key: "read", label: () => t("ui.plan_operations.column.read"), title: () => t("ui.plan_operations.column.read_title") },
+  { key: "time", label: () => t("ui.plan_operations.column.time"), title: () => t("ui.plan_operations.column.time_title"), actual: true },
+  { key: "issues", label: () => t("ui.plan_operations.column.issues"), title: () => t("ui.plan_operations.column.issues_title") },
 ];
 
 /** Every operator in one sortable table: where the work goes, where estimates broke, which ones have problems. */
@@ -127,15 +128,15 @@ export function PlanOperations({ plan, query: statement, focus, selectedId, onSe
       <div className="ops-tools">
         <label className="search ops-search">
           <Search size={12} />
-          <input value={query} placeholder="Filter operators, tables, indexes" onChange={(e) => setQuery(e.target.value)} />
+          <input value={query} placeholder={t("ui.plan_operations.filter")} onChange={(e) => setQuery(e.target.value)} />
         </label>
         <label className="ops-toggle">
           <input type="checkbox" checked={issuesOnly} onChange={(e) => setIssuesOnly(e.target.checked)} />
-          With issues only
+          {t("ui.plan_operations.issues_only")}
         </label>
         <span className="spacer" />
         <span className="muted">
-          {visible.length} of {all.length} operators
+          {t("ui.plan_operations.shown", { shown: visible.length, count: all.length })}
         </span>
       </div>
       <div
@@ -155,16 +156,16 @@ export function PlanOperations({ plan, query: statement, focus, selectedId, onSe
         <table className="ops-table">
           <thead>
             <tr>
-              <th className="ops-op">Operator</th>
+              <th className="ops-op">{t("ui.plan_operations.operator")}</th>
               {columns.map((c) => (
                 <th
                   key={c.key}
                   className={`r sortable col-${c.key}`}
-                  title={c.title}
+                  title={c.title()}
                   aria-sort={sort.key === c.key ? (sort.desc ? "descending" : "ascending") : "none"}
                   onClick={() => setSort((s) => (s.key === c.key ? { key: c.key, desc: !s.desc } : { key: c.key, desc: true }))}
                 >
-                  {c.key === "read" && plan.kind !== "actual" ? "Est. read" : c.label}
+                  {c.key === "read" && plan.kind !== "actual" ? t("ui.plan_operations.column.est_read") : c.label()}
                   {sort.key === c.key && (sort.desc ? <ArrowDown size={11} /> : <ArrowUp size={11} />)}
                 </th>
               ))}
@@ -213,7 +214,7 @@ export function PlanOperations({ plan, query: statement, focus, selectedId, onSe
                       {c.key === "subtree" && (r.subtree != null ? percent(r.subtree) : <span className="muted">—</span>)}
                       {c.key === "est" && rows(estRowsForRuns(plan, n))}
                       {c.key === "act" && (n.act_rows != null ? rows(n.act_rows) : "—")}
-                      {c.key === "error" && (err != null && Math.abs(err) >= 2 ? <span className={`ops-err ${n.warnings.includes("misestimate") ? "bad" : ""}`}>{`×${rows(Math.abs(err))} ${err > 0 ? "more" : "fewer"}`}</span> : <span className="muted">—</span>)}
+                      {c.key === "error" && (err != null && Math.abs(err) >= 2 ? <span className={`ops-err ${n.warnings.includes("misestimate") ? "bad" : ""}`}>{err > 0 ? t("ui.plan_operations.more", { times: rows(Math.abs(err)) }) : t("ui.plan_operations.fewer", { times: rows(Math.abs(err)) })}</span> : <span className="muted">—</span>)}
                       {c.key === "runs" && (runs == null ? "—" : runs > 1 ? rows(runs) : <span className="muted">{rows(runs)}</span>)}
                       {c.key === "read" && (n.rows_read != null ? rows(n.rows_read) : <span className="muted">—</span>)}
                       {c.key === "time" && (n.act_time_ms != null ? duration(n.act_time_ms) : <span className="muted">—</span>)}
@@ -225,7 +226,7 @@ export function PlanOperations({ plan, query: statement, focus, selectedId, onSe
             })}
           </tbody>
         </table>
-        {visible.length === 0 && <div className="empty" style={{ padding: 24 }}>No operators match.</div>}
+        {visible.length === 0 && <div className="empty" style={{ padding: 24 }}>{t("ui.plan_operations.none")}</div>}
       </div>
     </div>
   );

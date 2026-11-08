@@ -10,9 +10,10 @@ import { DocdbWork } from "./DocdbWork";
 import { PlanDiagram } from "./PlanDiagram";
 import { PlanInsights } from "./PlanInsights";
 import { PlanOperations } from "./PlanOperations";
-import { PlanView } from "./PlanView";
+import { PlanView, planKindLabel } from "./PlanView";
 import { remember, rememberedChoice } from "../lib/prefs";
 import { tabListKeys } from "../lib/keys";
+import { t } from "../lib/i18n";
 
 export type PlanLook = "diagram" | "tree" | "operations";
 
@@ -26,22 +27,22 @@ export function rememberLook(look: PlanLook): void {
   remember(LOOK_KEY, look);
 }
 
-const LOOKS: { look: PlanLook; label: string; icon: typeof Network; hint: string }[] = [
-  { look: "diagram", label: "Diagram", icon: Network, hint: "The plan as a flow of operators" },
-  { look: "tree", label: "Tree", icon: ListTree, hint: "Operators as an indented tree" },
-  { look: "operations", label: "Operations", icon: TableProperties, hint: "Every operator in a sortable table" },
+const LOOKS: { look: PlanLook; label: () => string; icon: typeof Network; hint: () => string }[] = [
+  { look: "diagram", label: () => t("ui.plan_surface.diagram"), icon: Network, hint: () => t("ui.plan_surface.diagram_hint") },
+  { look: "tree", label: () => t("ui.plan_surface.tree"), icon: ListTree, hint: () => t("ui.plan_surface.tree_hint") },
+  { look: "operations", label: () => t("ui.plan_surface.operations"), icon: TableProperties, hint: () => t("ui.plan_surface.operations_hint") },
 ];
 
 /** Diagram · Tree · Operations. */
 export function LookToggle({ look, onChange }: { look: PlanLook; onChange: (look: PlanLook) => void }) {
   return (
-    <span className="seg look-toggle" role="tablist" aria-label="Plan view" onKeyDown={tabListKeys}>
+    <span className="seg look-toggle" role="tablist" aria-label={t("ui.plan_surface.label")} onKeyDown={tabListKeys}>
       {LOOKS.map((l) => {
         const Icon = l.icon;
         return (
-          <button type="button" key={l.look} role="tab" aria-selected={look === l.look} tabIndex={look === l.look ? 0 : -1} className={look === l.look ? "on" : ""} title={l.hint} onClick={() => onChange(l.look)}>
+          <button type="button" key={l.look} role="tab" aria-selected={look === l.look} tabIndex={look === l.look ? 0 : -1} className={look === l.look ? "on" : ""} title={l.hint()} onClick={() => onChange(l.look)}>
             <Icon size={12} />
-            {l.label}
+            {l.label()}
           </button>
         );
       })}
@@ -57,8 +58,8 @@ export function PlanSurface({ plan, query, focus, look, badge }: { plan: Plan; q
   const [selected, setSelected] = useState<number | null>(null);
   return (
     <div className="plan-surface">
-      {plan.facts.constants_redacted && <p className="notice">This retained plan redacts its original constants. It describes an estimated plan kept by the database, with no measured operator counters; hidden values cannot establish filter selectivity.</p>}
-      {!plan.insights?.note && plan.kind !== "actual" && (plan.props["Generic Plan"] || plan.kind === "generic") && <p className="notice">This plan was obtained without the application's parameter values.{plan.engine === "sqlite" ? " It uses Culprit's SQLite library, which may differ from the application's version and build." : " Connection settings and runtime partition pruning may differ from the application's run."} It does not identify the plan used by historical executions.</p>}
+      {plan.facts.constants_redacted && <p className="notice">{t("ui.plan_surface.redacted")}</p>}
+      {!plan.insights?.note && plan.kind !== "actual" && (plan.props["Generic Plan"] || plan.kind === "generic") && <p className="notice">{t("ui.plan_surface.generic")} {plan.engine === "sqlite" ? t("ui.plan_surface.generic_sqlite") : t("ui.plan_surface.generic_settings")} {t("ui.plan_surface.generic_history")}</p>}
       <PlanInsights plan={plan} selectedNode={selected} onSelectNode={setSelected} />
       <DocdbWork metrics={plan.facts.docdb} basis="execution" />
       {look === "diagram" && <PlanDiagram plan={plan} query={query} focus={focus} selectedId={selected} onSelect={setSelected} badge={badge} />}
@@ -82,14 +83,14 @@ function OperationsPanel({ plan, query, focus, selected, onSelect }: { plan: Pla
   return (
     <div className="plan">
       <div className="plan-head">
-        <span className="tag">{plan.kind === "actual" ? "Actual plan" : plan.kind === "generic" ? "Generic plan" : "Estimated plan"}</span>
+        <span className="tag">{planKindLabel(plan)}</span>
         <span>
-          {nodes.length} operator{nodes.length === 1 ? "" : "s"}
-          {can(plan.engine, "plan_estimates") && ` · cost ${plan.facts.estimated_cost_unavailable ? "unavailable" : cost(plan.total_cost || plan.root.subtree_cost)}`}
+          {t("ui.common.plan_operators", { count: nodes.length })}
+          {can(plan.engine, "plan_estimates") && ` · ${plan.facts.estimated_cost_unavailable ? t("ui.common.plan_cost_unavailable") : t("ui.common.plan_cost", { cost: cost(plan.total_cost || plan.root.subtree_cost) })}`}
         </span>
         <span className="spacer" />
         <GitBranch size={12} className="muted" />
-        <span className="muted">click a row to see the operator</span>
+        <span className="muted">{t("ui.plan_surface.click_row")}</span>
       </div>
       <PlanOperations plan={plan} query={query} focus={focus} selectedId={current?.id ?? null} onSelect={onSelect} />
       {current && (

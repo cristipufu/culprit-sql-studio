@@ -12,17 +12,29 @@ import { Prose } from "./Prose";
 import { Sql } from "./Sql";
 import { copyAndTell } from "../lib/clipboard";
 import { can } from "../lib/engines";
+import { t } from "../lib/i18n";
 
-const AREA: Record<InsightArea, { icon: LucideIcon; label: string }> = {
-  index: { icon: KeyRound, label: "Index" },
-  query: { icon: SquareCode, label: "Query" },
-  statistics: { icon: ChartColumn, label: "Statistics" },
-  memory: { icon: MemoryStick, label: "Memory" },
-  parallelism: { icon: Cpu, label: "Parallelism" },
-  server: { icon: Server, label: "Setting" },
+const AREA: Record<InsightArea, { icon: LucideIcon; label: () => string }> = {
+  index: { icon: KeyRound, label: () => t("ui.plan_insights.area.index") },
+  query: { icon: SquareCode, label: () => t("ui.plan_insights.area.query") },
+  statistics: { icon: ChartColumn, label: () => t("ui.plan_insights.area.statistics") },
+  memory: { icon: MemoryStick, label: () => t("ui.plan_insights.area.memory") },
+  parallelism: { icon: Cpu, label: () => t("ui.plan_insights.area.parallelism") },
+  server: { icon: Server, label: () => t("ui.plan_insights.area.server") },
 };
 
-const SEVERITY_LABEL: Record<Severity, string> = { high: "High", medium: "Medium", low: "Low" };
+const SEVERITY_LABEL: Record<Severity, () => string> = {
+  high: () => t("ui.plan_insights.severity.high"),
+  medium: () => t("ui.plan_insights.severity.medium"),
+  low: () => t("ui.plan_insights.severity.low"),
+};
+
+/** "2 high", in the panel's head. */
+const SEVERITY_COUNT: Record<Severity, (count: number) => string> = {
+  high: (count) => t("ui.plan_insights.count.high", { count: String(count) }),
+  medium: (count) => t("ui.plan_insights.count.medium", { count: String(count) }),
+  low: (count) => t("ui.plan_insights.count.low", { count: String(count) }),
+};
 
 /** The share of the plan's work an insight states: none on a plan without costs (SQLite's has the access path only), a
  * cheap plan, a step whose cost rests on a guess, or for a rule's own weight (`statedInsightShare`). */
@@ -31,23 +43,28 @@ const shareOf = (plan: Plan, i: PlanInsight): number | null =>
 const SHOWN = 4;
 
 /** One insight as Markdown, the way it reads in the panel: for a pull request, an issue or a coding agent. */
-const insightMarkdown = (i: PlanInsight, share: number | null) =>
-  [
-    `**${SEVERITY_LABEL[i.severity]} · ${AREA[i.area].label}:** ${i.title}${share != null ? ` (${percent(share)} of the plan's work)` : ""}`,
+const insightMarkdown = (i: PlanInsight, share: number | null) => {
+  const severity = SEVERITY_LABEL[i.severity]();
+  const area = AREA[i.area].label();
+  return [
+    share != null
+      ? t("ui.plan_insights.md.heading_share", { severity, area, title: i.title, share: percent(share) })
+      : t("ui.plan_insights.md.heading", { severity, area, title: i.title }),
     "",
     i.detail,
     "",
-    `**Fix:** ${i.fix}`,
+    t("ui.plan_insights.md.fix", { fix: i.fix }),
     ...(i.fix_sql ? ["", "```sql", i.fix_sql, "```"] : []),
     "",
-    `**Verify:** ${i.verify}`,
+    t("ui.plan_insights.md.verify", { verify: i.verify }),
   ].join("\n");
+};
 
 /** Every insight, most important first, numbered as the panel lists them, after the statement they're about. */
 const insightsMarkdown = (plan: Plan, items: PlanInsight[]) =>
   [
-    "## Plan insights",
-    ...(plan.statement ? ["For this statement:", ["```sql", plan.statement.trim(), "```"].join("\n")] : []),
+    t("ui.plan_insights.md.title"),
+    ...(plan.statement ? [t("ui.plan_insights.md.statement"), ["```sql", plan.statement.trim(), "```"].join("\n")] : []),
     ...items.map((i, n) => `### ${n + 1}. ${insightMarkdown(i, shareOf(plan, i))}`),
   ].join("\n\n");
 
@@ -82,7 +99,7 @@ export function PlanInsights({ plan, selectedNode, onSelectNode }: { plan: Plan;
       <div className="insights empty-insights">
         <CircleCheck size={16} className="ok" />
         <div>
-          <div className="ins-empty-title">No tuning change suggested by this plan</div>
+          <div className="ins-empty-title">{t("ui.plan_insights.none")}</div>
           {note && <div className="ins-note">{note}</div>}
         </div>
       </div>
@@ -93,31 +110,31 @@ export function PlanInsights({ plan, selectedNode, onSelectNode }: { plan: Plan;
   const focusRow = (index: number) => list.current?.querySelectorAll<HTMLButtonElement>(".ins-row")[index]?.focus();
 
   return (
-    <section className="insights" aria-label="Plan insights">
+    <section className="insights" aria-label={t("ui.plan_insights.label")}>
       <header className="ins-head">
         <ListChecks size={14} />
-        <span className="ins-label">Insights</span>
+        <span className="ins-label">{t("ui.plan_insights.title")}</span>
         <span className="ins-counts">
           {(["high", "medium", "low"] as Severity[])
             .filter((s) => counts[s] > 0)
             .map((s) => (
               <span key={s} className={`ins-count ${s}`}>
                 <i />
-                {counts[s]} {SEVERITY_LABEL[s].toLowerCase()}
+                {SEVERITY_COUNT[s](counts[s])}
               </span>
             ))}
         </span>
         <span className="spacer" />
         <button type="button"
           className="btn ghost small ins-copy-all"
-          onClick={() => copyAndTell(insightsMarkdown(plan, items), items.length === 1 ? "Copied the insight" : `Copied ${items.length} insights`)}
-          title="Copy every insight as Markdown, most important first, for a pull request or a coding agent"
+          onClick={() => copyAndTell(insightsMarkdown(plan, items), t("ui.plan_insights.copied_all", { count: items.length }))}
+          title={t("ui.plan_insights.copy_all_title")}
         >
-          <Copy size={12} /> Copy
+          <Copy size={12} /> {t("ui.common.copy")}
         </button>
       </header>
       {note && <p className="ins-note"><Info size={13} /> {note}</p>}
-      <div className="ins-list" ref={list} role="list" aria-label="Insights, most important first">
+      <div className="ins-list" ref={list} role="list" aria-label={t("ui.plan_insights.list_label")}>
         {shown.map((i, index) => {
           const area = AREA[i.area];
           const Icon = area.icon;
@@ -145,13 +162,13 @@ export function PlanInsights({ plan, selectedNode, onSelectNode }: { plan: Plan;
                   }
                 }}
               >
-                <span className="ins-sev" title={`${SEVERITY_LABEL[i.severity]} severity`} />
-                <span className="ins-area" title={area.label}>
+                <span className="ins-sev" title={t("ui.plan_insights.severity_title", { severity: i.severity })} />
+                <span className="ins-area" title={area.label()}>
                   <Icon size={13} />
                 </span>
                 <span className="ins-title">{i.title}</span>
                 {shareOf(plan, i) != null && (
-                  <span className="ins-impact" title="Share of this plan's work at the operators involved">
+                  <span className="ins-impact" title={t("ui.plan_insights.share_title")}>
                     <span className="ins-bar">
                       <span style={{ width: `${Math.max(4, Math.min(100, (shareOf(plan, i) ?? 0) * 100))}%` }} />
                     </span>
@@ -166,31 +183,31 @@ export function PlanInsights({ plan, selectedNode, onSelectNode }: { plan: Plan;
                     <Prose text={i.detail} />
                   </p>
                   <div className="ins-block">
-                    <div className="ins-block-label">Fix</div>
+                    <div className="ins-block-label">{t("ui.plan_insights.fix")}</div>
                     <p>
                       <Prose text={i.fix} />
                     </p>
                     {i.fix_sql && (
                       <div className="ins-sql">
                         <Sql text={i.fix_sql} />
-                        <button type="button" className="btn ghost small ins-copy" onClick={() => copyAndTell(i.fix_sql!, "Copied the fix")} title="Copy the SQL; Culprit never runs it">
-                          <Copy size={12} /> Copy
+                        <button type="button" className="btn ghost small ins-copy" onClick={() => copyAndTell(i.fix_sql!, t("ui.plan_insights.fix_copied"))} title={t("ui.plan_insights.copy_fix_title")}>
+                          <Copy size={12} /> {t("ui.common.copy")}
                         </button>
                       </div>
                     )}
                   </div>
                   <div className="ins-block">
-                    <div className="ins-block-label">Verify</div>
+                    <div className="ins-block-label">{t("ui.plan_insights.verify")}</div>
                     <p>{i.verify}</p>
                   </div>
                   <div className="ins-actions">
                     {i.nodes[0] != null && (
                       <button type="button" className="btn ghost small" onClick={() => onSelectNode(i.nodes[0]!)}>
-                        <Crosshair size={12} /> Show the operator
+                        <Crosshair size={12} /> {t("ui.plan_insights.show_operator")}
                       </button>
                     )}
-                    <button type="button" className="btn ghost small" onClick={() => copyAndTell(insightMarkdown(i, shareOf(plan, i)), "Copied the insight")} title="Copy this insight as Markdown">
-                      <Copy size={12} /> Copy insight
+                    <button type="button" className="btn ghost small" onClick={() => copyAndTell(insightMarkdown(i, shareOf(plan, i)), t("ui.plan_insights.copied_one"))} title={t("ui.plan_insights.copy_one_title")}>
+                      <Copy size={12} /> {t("ui.plan_insights.copy_one")}
                     </button>
                   </div>
                 </div>
@@ -201,7 +218,7 @@ export function PlanInsights({ plan, selectedNode, onSelectNode }: { plan: Plan;
       </div>
       {items.length > SHOWN && (
         <button type="button" className="ins-more" onClick={() => setAll((v) => !v)}>
-          {all ? "Show fewer" : `Show ${items.length - SHOWN} more`}
+          {all ? t("ui.plan_insights.show_fewer") : t("ui.plan_insights.show_more", { count: String(items.length - SHOWN) })}
         </button>
       )}
     </section>
