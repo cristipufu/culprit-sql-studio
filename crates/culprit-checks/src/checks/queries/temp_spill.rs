@@ -2,21 +2,88 @@
 
 use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
+use culprit_core::t;
 
 pub fn temp_spill_info() -> CheckInfo {
     CheckInfo {
         id: "temp-spill".into(),
-        title: "Queries writing temp files".into(),
+        title: t!("check.temp_spill.info.title"),
         category: Category::Queries,
         engines: vec![Engine::Postgres, Engine::Mysql],
         requires: vec![],
-        description: "Statements whose sorts, hashes or temporary tables outgrow memory and spill to disk.".into(),
+        description: t!("check.temp_spill.info.description"),
     }
 }
 
-check!(TempSpillCheck: temp_spill_info, temp_spill, &[Evidence::Query(QueryMeasure::TempWrites)]);
+check!(
+    TempSpillCheck: temp_spill_info,
+    decide = temp_spills,
+    render = temp_spill_finding,
+    case<'s> = TempSpill<'s>,
+    evidence = &[Evidence::Query(QueryMeasure::TempWrites)],
+);
 
-pub fn temp_spill(snapshot: &Snapshot) -> Vec<Finding> {
+/// A statement whose sorts, hashes or temporary tables spill to disk, and what that establishes.
+pub struct TempSpill<'s> {
+    query: &'s QueryStat,
+    impact: QueryImpact,
+    severity: Severity,
+    score: f64,
+    /// It stopped running: told in the past.
+    stopped: bool,
+    /// The plan's step that spills, where the plan says which.
+    step: Option<u32>,
+    /// Its totals are counted over more than the share and the average beside them (Culprit's scans): over this.
+    basis: Option<String>,
+    spill: Spill,
+}
+
+/// How the statement spills, as each engine counts it.
+enum Spill {
+    /// PostgreSQL: a sort or hash outgrew work_mem and wrote temp files.
+    TempFiles {
+        /// Bytes written in all, and a run.
+        written: f64,
+        per_run: f64,
+        /// work_mem as Culprit's session has it: its text, where the scan read the setting, and in bytes.
+        work_mem_text: Option<String>,
+        work_mem: f64,
+        advice: WorkMem,
+    },
+    /// MySQL and MariaDB: an internal temporary table outgrew memory, or held a value the in-memory engine can't, and
+    /// went to disk.
+    DiskTables {
+        /// Tables built on disk in all, and a run.
+        tables: f64,
+        per_run: f64,
+        /// The share of runs that can have built one: at most every run.
+        runs_share: f64,
+        /// TEXT and BLOB columns the statement groups or sorts, which send its table to disk whatever its size.
+        large: Vec<String>,
+        limits: TempLimits,
+        advice: LimitAdvice,
+    },
+}
+
+/// What more work_mem can do for a spill.
+enum WorkMem {
+    /// It is already at the most Culprit suggests, or the spill needs no more: sort less.
+    Already,
+    /// This much, as the setting is written.
+    Raise(String),
+}
+
+/// What raising MySQL's or MariaDB's in-memory limits can do.
+enum LimitAdvice {
+    /// The scan didn't read these limits' values: raising them is said without SQL that might lower one.
+    Unread(Vec<&'static str>),
+    /// Every limit is already above the proposal: an index is what is left.
+    IndexOnly,
+    /// Raise these limits to the proposal (bytes).
+    Raise { proposed: f64, names: Vec<&'static str> },
+}
+
+fn temp_spills(snapshot: &Snapshot) -> Vec<TempSpill<'_>> {
     match snapshot.server.engine {
         Engine::Postgres => {}
         Engine::Mysql => return mysql_disk_temp_tables(snapshot),
@@ -43,63 +110,187 @@ pub fn temp_spill(snapshot: &Snapshot) -> Vec<Finding> {
                 return None;
             }
             let spill_share = workload.share_of(spill_ms * q.executions, q);
-            let mut f = finding("temp-spill", &q.id, Category::Queries, subject(SubjectKind::Query, &q.id));
-            apply_impact(snapshot, &mut f, &impact);
-            f.severity = severity_for_time_of(snapshot, &[q], spill_ms * q.executions, spill_share);
-            f.impact.score = score_for_share(spill_share);
-            f.confidence = Confidence::High;
-            f.title = format!(
-                "{} {} about {} of temp files per run",
-                capitalize(&query_handle(q)),
-                if crate::all_stopped(snapshot, &[q]) { "wrote" } else { "writes" },
-                format::bytes(per_run)
-            );
+            Some(TempSpill {
+                query: q,
+                impact,
+                severity: severity_for_time_of(snapshot, &[q], spill_ms * q.executions, spill_share),
+                score: score_for_share(spill_share),
+                stopped: crate::all_stopped(snapshot, &[q]),
+                step: spilling_step(q, false),
+                // The spill is kept only in the totals: where the statement's share and average are Culprit's scans',
+                // what it wrote is said over what it is counted over.
+                basis: crate::support::totals_basis(snapshot, q),
+                spill: Spill::TempFiles {
+                    written,
+                    per_run,
+                    work_mem_text: work_mem_text.clone(),
+                    work_mem,
+                    advice: work_mem_advice(work_mem, per_run),
+                },
+            })
+        })
+        .collect()
+}
+
+fn temp_spill_finding(snapshot: &Snapshot, spill: TempSpill<'_>) -> Finding {
+    let q = spill.query;
+    let mut f = finding("temp-spill", &q.id, Category::Queries, subject(SubjectKind::Query, &q.id));
+    apply_impact(snapshot, &mut f, &spill.impact);
+    f.severity = spill.severity;
+    f.impact.score = spill.score;
+    f.confidence = Confidence::High;
+    let query = capitalize(&query_handle(q));
+    let tense = if spill.stopped { "past" } else { "present" };
+    let basis = spill.basis.as_deref();
+    let runs = format::count(q.executions);
+    f.queries = vec![QueryRef { id: q.id.clone(), plan_node: spill.step, note: None }];
+    match spill.spill {
+        Spill::TempFiles { written, per_run, work_mem_text, work_mem, advice } => {
+            f.title =
+                t!("check.temp_spill.title.temp_files", query = query, tense = tense, size = format::bytes(per_run));
             // work_mem as Culprit's session has it: a role or database setting (ALTER ROLE … SET) gives the
             // application's sessions their own, which the scan doesn't read.
-            let (needs, writes, spills) = if crate::all_stopped(snapshot, &[q]) {
-                ("needed", "wrote", "spilled")
-            } else {
-                ("needs", "writes", "spills")
+            let work_mem_said = work_mem_text.clone().unwrap_or_else(|| t!("check.temp_spill.work_mem_default"));
+            let written_said = format::bytes(written);
+            f.summary = match basis {
+                Some(basis) => t!(
+                    "check.temp_spill.summary.temp_files_over",
+                    tense = tense,
+                    work_mem = work_mem_said,
+                    written = written_said.clone(),
+                    runs = runs.clone(),
+                    basis = basis
+                ),
+                None => t!(
+                    "check.temp_spill.summary.temp_files",
+                    tense = tense,
+                    work_mem = work_mem_said,
+                    written = written_said.clone(),
+                    runs = runs.clone()
+                ),
             };
-            // The spill is kept only in the totals: where the statement's share and average are Culprit's scans', what
-            // it wrote is said over what it is counted over.
-            let basis = crate::support::totals_basis(snapshot, q);
-            f.summary = format!(
-                "A sort or hash in this statement {needs} more memory than work_mem ({} in Culprit's session; a setting on the application's role or database can differ) and {writes} the overflow to temporary files: {} over {} runs{}. pg_stat_statements counts the total, so whether every run {spills} or only some is unknown. Writing temp files and reading them back is many times slower than sorting in memory.",
-                work_mem_text.as_deref().unwrap_or("4MB, the default"),
-                format::bytes(written),
-                format::count(q.executions),
-                basis.as_ref().map(|b| format!(" in {b}")).unwrap_or_default()
-            );
-            f.queries = vec![QueryRef { id: q.id.clone(), plan_node: spilling_step(q, false), note: None }];
-            let label = match &basis {
-                Some(b) => format!("Temp written per run over {b}"),
-                None => "Temp written per run".to_string(),
+            let label = match basis {
+                Some(basis) => t!("check.temp_spill.metric.temp_written_over", basis = basis),
+                None => t!("check.temp_spill.metric.temp_written"),
             };
             f.metrics.push(Metric::new(label, per_run, Unit::Bytes));
             f.metrics.extend(crate::queries::average_metrics(snapshot, q));
-            f.fix = Some(work_mem_fix(work_mem, work_mem_text.as_deref(), per_run));
+            f.fix = Some(work_mem_fix(work_mem, work_mem_text.as_deref(), &advice));
             f.verify = vec![spill_verify(
                 snapshot,
-                "Once the application's connections use the new setting (a role's setting reaches the connections it opens after the change)",
-                "temp files",
-                format!("{} over {} runs", format::bytes(written), format::count(q.executions)),
+                t!("check.temp_spill.live.setting"),
+                Counted::TempFiles,
+                t!("check.temp_spill.now.temp_files", written = written_said, runs = runs),
             )];
-            Some(f)
-        })
-        .collect()
+        }
+        Spill::DiskTables { tables, per_run, runs_share, large, limits, advice } => {
+            f.title = if per_run >= 0.95 && per_run.round() <= 1.0 {
+                t!("check.temp_spill.title.table_once", query = query, tense = tense)
+            } else if per_run >= 0.95 {
+                t!(
+                    "check.temp_spill.title.tables_per_run",
+                    query = query,
+                    tense = tense,
+                    count = format::count(per_run.round())
+                )
+            } else {
+                t!(
+                    "check.temp_spill.title.tables_some_runs",
+                    query = query,
+                    tense = tense,
+                    share = format::percent(runs_share)
+                )
+            };
+            let tables_said = format::count(tables);
+            f.summary = match (large.is_empty(), basis) {
+                (true, None) => t!(
+                    "check.temp_spill.summary.tables",
+                    tense = tense,
+                    limit = limits.describe(),
+                    tables = tables_said.clone(),
+                    runs = runs.clone()
+                ),
+                (true, Some(basis)) => t!(
+                    "check.temp_spill.summary.tables_over",
+                    tense = tense,
+                    limit = limits.describe(),
+                    tables = tables_said.clone(),
+                    runs = runs.clone(),
+                    basis = basis
+                ),
+                (false, None) => t!(
+                    "check.temp_spill.summary.large_values",
+                    tense = tense,
+                    columns = format::list(&large),
+                    server = snapshot.server.name(),
+                    tables = tables_said.clone(),
+                    runs = runs.clone()
+                ),
+                (false, Some(basis)) => t!(
+                    "check.temp_spill.summary.large_values_over",
+                    tense = tense,
+                    columns = format::list(&large),
+                    server = snapshot.server.name(),
+                    tables = tables_said.clone(),
+                    runs = runs.clone(),
+                    basis = basis
+                ),
+            };
+            let live = if large.is_empty() && !limits.caps.is_empty() {
+                t!("check.temp_spill.live.limits")
+            } else {
+                t!("check.temp_spill.live.change")
+            };
+            f.verify = vec![spill_verify(
+                snapshot,
+                live,
+                Counted::DiskTables,
+                t!("check.temp_spill.now.disk_tables", tables = tables_said, runs = runs),
+            )];
+            let label = match basis {
+                Some(basis) => t!("check.temp_spill.metric.disk_tables_over", basis = basis),
+                None => t!("check.temp_spill.metric.disk_tables"),
+            };
+            f.metrics.push(Metric::new(label, per_run, Unit::Count));
+            f.metrics.extend(crate::queries::average_metrics(snapshot, q));
+            f.fix = Some(if large.is_empty() {
+                limits.fix(snapshot, &advice)
+            } else {
+                Fix {
+                    summary: t!("check.temp_spill.fix.large_values", columns = format::list(&large)),
+                    sql: None,
+                    cost: None,
+                }
+            });
+        }
+    }
+    f
+}
+
+/// What a later scan compares of a spill: its temp files, or its on-disk temporary tables.
+#[derive(Clone, Copy)]
+enum Counted {
+    TempFiles,
+    DiskTables,
 }
 
 /// How a later scan shows the spill gone. A windowed source drops the runs from before the change once its window has
 /// passed them. A source of running totals keeps them, and this finding with them: what shows it is the statement's
 /// count staying as it is while its runs go on, between a scan taken when the change is live and a later one, said
 /// with this scan's numbers (`now`) ([`verify_counts_between_scans`]).
-fn spill_verify(snapshot: &Snapshot, live: &str, what: &str, now: String) -> String {
-    match verify_counts_between_scans(snapshot, &format!("{what} and runs"), &now) {
-        Some(compare) => format!("{live}, its {what} should stop growing while its runs go on: {compare}."),
-        None => {
-            format!("{live}, scan again once the scan's window holds only runs from after it: this finding is gone.")
+fn spill_verify(snapshot: &Snapshot, live: String, counted: Counted, now: String) -> String {
+    let what = match counted {
+        Counted::TempFiles => t!("check.temp_spill.counted.temp_files"),
+        Counted::DiskTables => t!("check.temp_spill.counted.disk_tables"),
+    };
+    match (verify_counts_between_scans(snapshot, &what, &now), counted) {
+        (Some(compare), Counted::TempFiles) => {
+            t!("check.temp_spill.verify.temp_files", live = live, compare = compare)
         }
+        (Some(compare), Counted::DiskTables) => {
+            t!("check.temp_spill.verify.disk_tables", live = live, compare = compare)
+        }
+        (None, _) => t!("check.temp_spill.verify.windowed", live = live),
     }
 }
 
@@ -136,34 +327,35 @@ const SPILL_MIN_SHARE_OF_RUN: f64 = 0.1;
 /// The most sort memory Culprit suggests for one role: past it, the fix is to sort less.
 const WORK_MEM_MAX: f64 = 1024.0 * MB;
 
-/// More work_mem than the spill needed, for the application's role or one transaction: never less than it has now.
-pub(super) fn work_mem_fix(current: f64, current_text: Option<&str>, per_run: f64) -> Fix {
-    let index = "add an index that returns rows already in the order the sort needs, or sort fewer rows";
-    let now = current_text.map(str::to_string).unwrap_or_else(|| format::bytes(current));
+/// More work_mem than the spill needed, for the application's role or one transaction: never less than it has now, and
+/// never past [`WORK_MEM_MAX`].
+fn work_mem_advice(current: f64, per_run: f64) -> WorkMem {
     let wanted = (current + per_run * 2.0).max(16.0 * MB);
     let proposed = 2f64.powf(wanted.log2().ceil());
     if proposed > WORK_MEM_MAX || proposed <= current {
-        return Fix {
-            summary: format!(
-                "work_mem is already {now}; more sort memory per operation is no longer a reasonable fix, so {index}."
-            ),
-            sql: None,
-            cost: None,
-        };
+        return WorkMem::Already;
     }
-    let value = if proposed >= 1024.0 * MB {
+    WorkMem::Raise(if proposed >= 1024.0 * MB {
         format!("{:.0}GB", proposed / (1024.0 * MB))
     } else {
         format!("{:.0}MB", proposed / MB)
-    };
-    Fix {
-        summary: format!(
-            "Give this statement more sort memory ({value} instead of {now}, if the application's role doesn't already set more), for the role the application connects as or only around this statement, rather than server-wide; or {index}."
-        ),
-        sql: Some(format!(
-            "-- For the role the application connects as (takes effect on its next connections):\nALTER ROLE <app_role> SET work_mem = '{value}';\n\n-- Or only for this statement, inside its transaction:\nSET LOCAL work_mem = '{value}';"
-        )),
-        cost: Some("work_mem is per sort or hash, per connection: size it with your connection count in mind.".into()),
+    })
+}
+
+/// The fix [`work_mem_advice`] says, for the application's role or one transaction.
+fn work_mem_fix(current: f64, current_text: Option<&str>, advice: &WorkMem) -> Fix {
+    let now = current_text.map(str::to_string).unwrap_or_else(|| format::bytes(current));
+    match advice {
+        WorkMem::Already => {
+            Fix { summary: t!("check.temp_spill.fix.work_mem_already", now = now), sql: None, cost: None }
+        }
+        WorkMem::Raise(value) => Fix {
+            summary: t!("check.temp_spill.fix.work_mem", value = value, now = now),
+            sql: Some(format!(
+                "-- For the role the application connects as (takes effect on its next connections):\nALTER ROLE <app_role> SET work_mem = '{value}';\n\n-- Or only for this statement, inside its transaction:\nSET LOCAL work_mem = '{value}';"
+            )),
+            cost: Some(t!("check.temp_spill.fix.cost.work_mem")),
+        },
     }
 }
 
@@ -185,7 +377,7 @@ pub(super) fn pg_size_bytes(text: &str) -> Option<f64> {
 
 /// MySQL counts on-disk temporary tables per digest: a GROUP BY, DISTINCT or ORDER BY whose temporary table outgrew
 /// memory, or held a value the in-memory engine can't (TEXT and BLOB, before MySQL 8.0's TempTable engine).
-pub(super) fn mysql_disk_temp_tables(snapshot: &Snapshot) -> Vec<Finding> {
+fn mysql_disk_temp_tables(snapshot: &Snapshot) -> Vec<TempSpill<'_>> {
     let Some(workload) = snapshot.workload.as_ref() else { return Vec::new() };
     let limits = TempLimits::of(snapshot);
     app_queries(snapshot)
@@ -200,87 +392,40 @@ pub(super) fn mysql_disk_temp_tables(snapshot: &Snapshot) -> Vec<Finding> {
             // MySQL counts tables, not runs: a run can build more than one, so the runs that spilled are at most this.
             let runs_share = per_run.min(1.0);
             let spilled_share = workload.share_of(q.total_time_ms * runs_share, q);
-            let mut f = finding("temp-spill", &q.id, Category::Queries, subject(SubjectKind::Query, &q.id));
-            apply_impact(snapshot, &mut f, &impact);
             let large = if limits.blob_bound { large_value_columns(snapshot, q) } else { Vec::new() };
             // The time of the runs that can have spilled, not the whole statement's. A table that outgrew the memory
             // limit is at least that big, work that costs. One sent to disk for a TEXT or BLOB value can be a few
             // rows, cheap where the file stays in the operating system's cache: nothing says it is what the run
             // spends its time on, so it is Low.
-            f.severity = if large.is_empty() {
+            let severity = if large.is_empty() {
                 severity_for_time_of(snapshot, &[q], q.total_time_ms * runs_share, spilled_share)
             } else {
                 Severity::Low
             };
-            f.impact.score = score_for_share(if large.is_empty() { spilled_share } else { spilled_share * 0.25 });
-            f.confidence = Confidence::High;
-            let handle = capitalize(&query_handle(q));
-            // A statement that stopped running is told in the past.
-            let stopped = crate::all_stopped(snapshot, &[q]);
-            let builds = if stopped { "built" } else { "builds" };
-            let (outgrows, moves, holds) =
-                if stopped { ("outgrew", "moved", "held") } else { ("outgrows", "moves", "holds") };
-            f.title = if per_run >= 0.95 && per_run.round() <= 1.0 {
-                format!("{handle} {builds} an on-disk temporary table about once per run")
-            } else if per_run >= 0.95 {
-                format!("{handle} {builds} about {} on-disk temporary tables per run", format::count(per_run.round()))
-            } else {
-                format!("{handle} {builds} on-disk temporary tables in up to {} of its runs", format::percent(runs_share))
-            };
-            let name = snapshot.server.name();
-            // Counted only in the totals: said over what they are counted over where the share is Culprit's scans'.
-            let basis = crate::support::totals_basis(snapshot, q);
-            let over = basis.as_ref().map(|b| format!(" over {b}")).unwrap_or_default();
-            f.summary = if large.is_empty() {
-                format!(
-                    "The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement {outgrows} {} and {moves} to disk, which is many times slower: {} on-disk tables in {} runs{over}.",
-                    limits.describe(),
-                    format::count(tables),
-                    format::count(q.executions)
-                )
-            } else {
-                format!(
-                    "The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement {holds} {}, and {name} keeps a temporary table with TEXT or BLOB values on disk whatever its size: {} on-disk tables in {} runs{over}. Raising the memory limit won't change that.",
-                    format::list(&large),
-                    format::count(tables),
-                    format::count(q.executions)
-                )
-            };
-            f.queries = vec![QueryRef { id: q.id.clone(), plan_node: spilling_step(q, true), note: None }];
-            f.verify = vec![spill_verify(
-                snapshot,
-                if large.is_empty() && !limits.caps.is_empty() {
-                    "Once the application's connections use the new limits"
-                } else {
-                    "Once the change is live"
+            Some(TempSpill {
+                query: q,
+                impact,
+                severity,
+                score: score_for_share(if large.is_empty() { spilled_share } else { spilled_share * 0.25 }),
+                stopped: crate::all_stopped(snapshot, &[q]),
+                step: spilling_step(q, true),
+                // Counted only in the totals: said over what they are counted over where the share is Culprit's scans'.
+                basis: crate::support::totals_basis(snapshot, q),
+                spill: Spill::DiskTables {
+                    tables,
+                    per_run,
+                    runs_share,
+                    large,
+                    advice: limits.advice(),
+                    limits: limits.clone(),
                 },
-                "on-disk temporary tables",
-                format!("{} in {} runs", format::count(tables), format::count(q.executions)),
-            )];
-            let label = match &basis {
-                Some(b) => format!("On-disk temporary tables per run over {b}"),
-                None => "On-disk temporary tables per run".to_string(),
-            };
-            f.metrics.push(Metric::new(label, per_run, Unit::Count));
-            f.metrics.extend(crate::queries::average_metrics(snapshot, q));
-            f.fix = Some(if large.is_empty() {
-                limits.fix(snapshot)
-            } else {
-                Fix {
-                    summary: format!(
-                        "Leave {} out of the grouped, distinct or sorted rows (group by the key, then fetch the large columns for the rows you keep), or add an index that delivers rows already grouped or ordered so no temporary table is needed.",
-                        format::list(&large)
-                    ),
-                    sql: None,
-                    cost: None,
-                }
-            });
-            Some(f)
+            })
         })
         .collect()
 }
 
 /// What keeps a MySQL or MariaDB internal temporary table in memory, as this server is set up.
+#[derive(Clone)]
 pub(super) struct TempLimits {
     /// The variables that cap one table in memory, with their values (bytes) where the scan read them.
     caps: Vec<(&'static str, Option<f64>)>,
@@ -332,99 +477,102 @@ impl TempLimits {
     fn describe(&self) -> String {
         let known: Vec<f64> = self.caps.iter().filter_map(|(_, v)| *v).collect();
         let smallest = known.iter().copied().reduce(f64::min);
-        let ram = |ram: &Option<f64>| match ram {
-            Some(v) => format!("temptable_max_ram, {}", format::bytes(*v)),
-            None => "temptable_max_ram".to_string(),
-        };
+        let names =
+            |caps: &[(&str, Option<f64>)]| format::list(&caps.iter().map(|(n, _)| n.to_string()).collect::<Vec<_>>());
         match (self.caps.as_slice(), smallest, &self.shared_ram) {
-            ([(name, Some(v))], _, Some(shared)) => format!(
-                "the in-memory limit ({name}, {}; and {}, for all such tables together)",
-                format::bytes(*v),
-                ram(shared)
+            ([(name, Some(v))], _, Some(Some(ram))) => t!(
+                "check.temp_spill.limit.cap_and_ram",
+                name = *name,
+                size = format::bytes(*v),
+                ram = format::bytes(*ram)
             ),
-            ([], _, Some(Some(v))) => {
-                format!("temptable_max_ram ({}, for all temporary tables together)", format::bytes(*v))
+            ([(name, Some(v))], _, Some(None)) => {
+                t!("check.temp_spill.limit.cap_and_unread_ram", name = *name, size = format::bytes(*v))
             }
-            ([], _, Some(None)) => "temptable_max_ram (the memory for all temporary tables together)".to_string(),
-            (caps, Some(v), _) if caps.len() > 1 && self.engine_unknown => format!(
-                "the in-memory limit ({}, the smaller of {}, where these tables use the MEMORY engine; the TempTable \
-                 engine stops at tmp_table_size and temptable_max_ram instead)",
-                format::bytes(v),
-                format::list(&caps.iter().map(|(n, _)| n.to_string()).collect::<Vec<_>>())
-            ),
-            (caps, Some(v), _) if caps.len() > 1 => format!(
-                "the in-memory limit ({}, the smaller of {})",
-                format::bytes(v),
-                format::list(&caps.iter().map(|(n, _)| n.to_string()).collect::<Vec<_>>())
-            ),
-            _ => "the in-memory limit".to_string(),
+            ([], _, Some(Some(v))) => t!("check.temp_spill.limit.ram", size = format::bytes(*v)),
+            ([], _, Some(None)) => t!("check.temp_spill.limit.unread_ram"),
+            (caps, Some(v), _) if caps.len() > 1 && self.engine_unknown => {
+                t!("check.temp_spill.limit.smaller_of_memory", size = format::bytes(v), names = names(caps))
+            }
+            (caps, Some(v), _) if caps.len() > 1 => {
+                t!("check.temp_spill.limit.smaller_of", size = format::bytes(v), names = names(caps))
+            }
+            _ => t!("check.temp_spill.limit.unknown"),
         }
     }
 
     /// Raise every cap below the proposal to it, through the server's own way of changing settings; never lower one.
-    fn fix(&self, snapshot: &Snapshot) -> Fix {
-        let index = "Check whether an index matching the GROUP BY or ORDER BY reduces temporary-table work (an ORDER BY that differs from the grouping can still need a temporary table and sort)";
-        let (names, current): (Vec<&str>, Option<f64>) = if self.caps.is_empty() {
+    fn advice(&self) -> LimitAdvice {
+        let (names, current): (Vec<&'static str>, Option<f64>) = if self.caps.is_empty() {
             (vec!["temptable_max_ram"], self.shared_ram.flatten())
         } else {
             (self.caps.iter().map(|(n, _)| *n).collect(), self.caps.iter().filter_map(|(_, v)| *v).reduce(f64::min))
         };
         let floor = if self.caps.is_empty() { 2048.0 * MB } else { 64.0 * MB };
         let proposed = current.map_or(floor, |c| (c * 2.0).max(floor));
-        let now = |name: &str| {
-            if self.caps.is_empty() {
-                self.shared_ram.flatten()
-            } else {
-                self.caps.iter().find(|(n, _)| *n == name).and_then(|(_, v)| *v)
-            }
-        };
         // A value the scan didn't read could be higher than the proposal: no SQL that might lower it.
-        if names.iter().any(|n| now(n).is_none()) {
-            return Fix {
-                summary: format!(
-                    "{index}, or raise {} (the scan didn't read {}).{}",
-                    format::list(&names.iter().map(|n| n.to_string()).collect::<Vec<_>>()),
-                    if names.len() == 1 { "its current value" } else { "their current values" },
-                    if self.caps.is_empty() { "" } else { NEW_CONNECTION_LIMITS }
-                ),
-                sql: None,
-                cost: None,
-            };
+        if names.iter().any(|n| self.now(n).is_none()) {
+            return LimitAdvice::Unread(names);
         }
-        let changes: Vec<SettingChange> = names
-            .iter()
-            .filter(|name| now(name).is_some_and(|v| v < proposed))
-            .map(|name| setting_change(&snapshot.server, name, &format!("{proposed:.0}")))
-            .collect();
-        if changes.is_empty() {
-            return Fix { summary: format!("{index}."), sql: None, cost: None };
+        let names: Vec<&'static str> =
+            names.into_iter().filter(|name| self.now(name).is_some_and(|v| v < proposed)).collect();
+        if names.is_empty() { LimitAdvice::IndexOnly } else { LimitAdvice::Raise { proposed, names } }
+    }
+
+    /// A limit's value, where the scan read it.
+    fn now(&self, name: &str) -> Option<f64> {
+        if self.caps.is_empty() {
+            self.shared_ram.flatten()
+        } else {
+            self.caps.iter().find(|(n, _)| *n == name).and_then(|(_, v)| *v)
         }
-        let sql: Vec<String> = changes.iter().filter_map(|c| c.sql.clone()).collect();
-        let how: Vec<String> = changes.iter().map(|c| c.how.clone()).collect();
-        Fix {
-            summary: format!(
-                "{index}, or raise the in-memory limit to {}{}. {}{}",
-                format::bytes(proposed),
-                match self.caps.len() {
-                    0 | 1 => "",
-                    _ if self.engine_unknown => " (both variables: with the MEMORY engine the smaller one wins)",
-                    _ => " (both variables: the smaller one wins)",
-                },
-                how.join(" "),
-                if self.caps.is_empty() { "" } else { NEW_CONNECTION_LIMITS }
-            ),
-            sql: (!sql.is_empty()).then(|| sql.join("\n")),
-            cost: Some(if self.caps.is_empty() {
-                "temptable_max_ram is memory the server may use for all temporary tables together.".into()
-            } else {
-                "The limit is per temporary table per connection; size it with your connection count in mind.".into()
-            }),
+    }
+
+    /// The fix `advice` says: an index first, then the limits raised as this server changes settings.
+    fn fix(&self, snapshot: &Snapshot, advice: &LimitAdvice) -> Fix {
+        // The per-table caps are session variables on both MySQL and MariaDB; the shared TempTable RAM cap isn't.
+        let new_connections = (!self.caps.is_empty()).then(|| t!("check.temp_spill.fix.new_connections"));
+        match advice {
+            LimitAdvice::Unread(names) => {
+                let mut summary = vec![t!(
+                    "check.temp_spill.fix.unread",
+                    names = format::list(&names.iter().map(|n| n.to_string()).collect::<Vec<_>>()),
+                    count = names.len()
+                )];
+                summary.extend(new_connections);
+                Fix { summary: summary.join(" "), sql: None, cost: None }
+            }
+            LimitAdvice::IndexOnly => Fix { summary: t!("check.temp_spill.fix.index"), sql: None, cost: None },
+            LimitAdvice::Raise { proposed, names } => {
+                let changes: Vec<SettingChange> = names
+                    .iter()
+                    .map(|name| setting_change(&snapshot.server, name, &format!("{proposed:.0}")))
+                    .collect();
+                let sql: Vec<String> = changes.iter().filter_map(|c| c.sql.clone()).collect();
+                let how: Vec<String> = changes.iter().map(|c| c.how.clone()).collect();
+                let size = format::bytes(*proposed);
+                let mut summary = vec![
+                    match self.caps.len() {
+                        0 | 1 => t!("check.temp_spill.fix.raise", size = size),
+                        _ if self.engine_unknown => t!("check.temp_spill.fix.raise_both_memory", size = size),
+                        _ => t!("check.temp_spill.fix.raise_both", size = size),
+                    },
+                    how.join(" "),
+                ];
+                summary.extend(new_connections);
+                Fix {
+                    summary: summary.join(" "),
+                    sql: (!sql.is_empty()).then(|| sql.join("\n")),
+                    cost: Some(if self.caps.is_empty() {
+                        t!("check.temp_spill.fix.cost.shared_ram")
+                    } else {
+                        t!("check.temp_spill.fix.cost.per_table")
+                    }),
+                }
+            }
         }
     }
 }
-
-/// The per-table caps are session variables on both MySQL and MariaDB; the shared TempTable RAM cap isn't.
-const NEW_CONNECTION_LIMITS: &str = " Global values apply to new connections: reopen the application's existing connections, or have the application set these session variables on them.";
 
 /// TEXT and BLOB columns of the statement's tables that its text names (or all of them, for `SELECT *`).
 pub(super) fn large_value_columns(snapshot: &Snapshot, q: &QueryStat) -> Vec<String> {
