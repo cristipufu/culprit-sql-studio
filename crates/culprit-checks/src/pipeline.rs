@@ -18,7 +18,7 @@
 
 use std::sync::Arc;
 
-use culprit_core::{Check, CollectorNote, Engine, Finding, LockedCheck, Report, Snapshot, WaitStat};
+use culprit_core::{Check, CollectorNote, Engine, Finding, LockedCheck, Report, Snapshot, WaitStat, t};
 
 /// A step that corrects the snapshot before any check reads it. It changes what the data says only where the data
 /// contradicts itself or the database (a plan older than the table it describes), never to hide a problem.
@@ -110,15 +110,9 @@ fn measurement_context(snapshot: &mut Snapshot) {
     use culprit_core::MeasurementScope;
     let Some(context) = snapshot.identified_measurement() else { return };
     let reason = if context.scope != MeasurementScope::Database {
-        Some(
-            "The workload source does not isolate this database; its measurements cannot assess this database."
-                .to_string(),
-        )
+        Some(t!("pipeline.note.workload_not_isolated"))
     } else if !snapshot.identity_names_this_database() {
-        Some(
-            "The workload's recorded database identity names another database; its measurements were left unassessed."
-                .to_string(),
-        )
+        Some(t!("pipeline.note.workload_of_another_database"))
     } else {
         None
     };
@@ -157,14 +151,9 @@ fn lock_time_that_counts_the_run(snapshot: &mut Snapshot) {
         }
     }
     snapshot.waits.retain(|w| w.wait_type.as_deref() != Some("lock time (slow query log)"));
-    let statements =
-        if inflated.len() == 1 { "1 statement".to_string() } else { format!("{} statements", inflated.len()) };
     snapshot.notes.push(CollectorNote {
         collector: "workload".into(),
-        message: format!(
-            "MariaDB counts the whole run of a statement the slow query log writes to its table as lock time, so the \
-             lock time of {statements} is left out as unknown rather than read as waiting."
-        ),
+        message: t!("pipeline.note.mariadb_lock_time", n = inflated.len(), count = inflated.len().to_string()),
     });
 }
 
@@ -184,10 +173,9 @@ fn io_within_statement_time(snapshot: &mut Snapshot) {
     if snapshot.workload.as_ref().is_some_and(|w| io > w.total_time_ms) {
         snapshot.waits.clear();
         snapshot.server.capabilities.retain(|c| *c != culprit_core::Capability::WaitStats);
-        snapshot.notes.push(CollectorNote {
-            collector: "waits".into(),
-            message: "Recorded I/O time exceeds statement execution time; parallel or differently covered timing cannot be shown as exclusive shares of execution time. Per-query I/O totals remain available.".into(),
-        });
+        snapshot
+            .notes
+            .push(CollectorNote { collector: "waits".into(), message: t!("pipeline.note.io_exceeds_statement_time") });
     }
 }
 
@@ -308,7 +296,7 @@ impl Pipeline {
                                 .iter()
                                 .find(|m| m.capability == *c)
                                 .map(|m| m.reason.clone())
-                                .unwrap_or_else(|| format!("{c:?} was not collected"))
+                                .unwrap_or_else(|| t!("pipeline.not_collected", capability = format!("{c:?}")))
                         })
                         .collect::<Vec<_>>()
                         .join(" "),

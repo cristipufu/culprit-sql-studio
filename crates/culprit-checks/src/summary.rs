@@ -1,7 +1,7 @@
 //! The report's summary: counts by category and severity, the share of database time the top findings touch, and the
 //! headline sentence.
 
-use culprit_core::{Category, CategoryCount, Finding, Severity, SeverityCount, Snapshot, Summary, format};
+use culprit_core::{Category, CategoryCount, Finding, Severity, SeverityCount, Snapshot, Summary, format, t};
 
 use crate::support;
 
@@ -30,47 +30,42 @@ pub fn summarize(snapshot: &Snapshot, findings: &[Finding]) -> Summary {
     let cost = support::top_findings_cost(snapshot, findings.iter());
     let n = findings.iter().filter(|f| f.is_actionable()).count();
     let window = support::summary_window(snapshot);
-    let headline = match (n, top_share, &window) {
-        (0, _, Some(window)) => format!("Nothing stands out over {window}."),
+    // The headline's sentences, joined.
+    let mut headline = Vec::new();
+    let opportunities = || t!("summary.headline.opportunities", n = n, count = n.to_string());
+    match (n, top_share, &window) {
+        (0, _, Some(window)) => headline.push(t!("summary.headline.nothing_over", window = window)),
         // No statements were examined: say what was.
-        (0, _, None) if snapshot.workload.is_none() => {
-            "Nothing stands out in the tables, indexes and settings; this scan has no query history.".to_string()
+        (0, _, None) if snapshot.workload.is_none() => headline.push(t!("summary.headline.nothing_without_history")),
+        (0, _, None) => headline.push(t!("summary.headline.nothing")),
+        (_, Some(share), Some(window)) if share >= 0.05 => {
+            headline.push(opportunities());
+            headline.push(match cost {
+                Some(cost) => t!("summary.headline.top_cost", cost = cost),
+                None => t!(
+                    "summary.headline.top_share",
+                    share = format::percent(share),
+                    window = scans.as_deref().unwrap_or(window)
+                ),
+            });
         }
-        (0, _, None) => "Nothing stands out.".to_string(),
-        (n, Some(share), Some(_)) if share >= 0.05 && cost.is_some() => format!(
-            "{} {}. The top ones touch {}.",
-            n,
-            plural(n, "opportunity", "opportunities"),
-            cost.as_deref().unwrap_or_default()
-        ),
-        (n, Some(share), Some(window)) if share >= 0.05 => format!(
-            "{} {}. The top ones touch {} of database time over {}.",
-            n,
-            plural(n, "opportunity", "opportunities"),
-            format::percent(share),
-            scans.as_deref().unwrap_or(window)
-        ),
-        (n, _, _) => format!("{} {}.", n, plural(n, "opportunity", "opportunities")),
-    };
+        _ => headline.push(opportunities()),
+    }
     let stopped = Stopped::of(findings);
-    let headline = match (stopped.statements, stopped.unnamed) {
-        (0, 0) => headline,
-        (s, 0) => format!(
-            "{headline} {s} more {} stopped running: a deploy may have changed {}.",
-            plural(s, "statement", "statements"),
-            plural(s, "it", "them")
-        ),
-        (0, u) => format!(
-            "{headline} {u} more {} on statements that stopped running: a deploy may have changed them.",
-            plural(u, "finding rests", "findings rest")
-        ),
-        (s, u) => format!(
-            "{headline} {s} more {} stopped running, and {u} more {} on statements that did: a deploy may have \
-             changed them.",
-            plural(s, "statement", "statements"),
-            plural(u, "finding rests", "findings rest")
-        ),
-    };
+    let (statements, findings_on) = (stopped.statements, stopped.unnamed);
+    match (statements, findings_on) {
+        (0, 0) => {}
+        (s, 0) => headline.push(t!("summary.headline.stopped_statements", n = s, count = s.to_string())),
+        (0, u) => headline.push(t!("summary.headline.stopped_findings", n = u, count = u.to_string())),
+        (s, u) => headline.push(t!(
+            "summary.headline.stopped_both",
+            s = s,
+            statements = s.to_string(),
+            u = u,
+            findings = u.to_string()
+        )),
+    }
+    let headline = headline.join(" ");
     Summary {
         opportunities: n as u32,
         by_category,
@@ -108,10 +103,6 @@ fn runs_said(snapshot: &Snapshot) -> Vec<culprit_core::RunsSaid> {
         })
         .map(|q| culprit_core::RunsSaid { query: q.id.clone(), runs: w.cost_of(q).runs })
         .collect()
-}
-
-fn plural<'a>(n: usize, one: &'a str, many: &'a str) -> &'a str {
-    if n == 1 { one } else { many }
 }
 
 /// The statements behind findings that stopped running, counted as statements: one statement with a heavy-query and an
@@ -170,5 +161,91 @@ mod window_tests {
         // Less data than asked for: what it covers.
         snapshot.workload.as_mut().unwrap().window_hours = 2.0;
         assert_eq!(summarize(&snapshot, &[]).headline, "Nothing stands out over the last 2 hours.");
+    }
+
+    /// Every headline, word for word, as English has always said it: how many opportunities, what the top ones touch,
+    /// and the findings on statements that stopped running.
+    #[test]
+    fn every_headline_reads_as_english_writes_it() {
+        let snapshot = snapshot_with(Engine::Mssql);
+        let q = |i: usize| snapshot.queries()[i].id.clone();
+        let on = |id: &str, queries: &[String], inactive: bool| {
+            let mut f = crate::support::finding(
+                "heavy-query",
+                id,
+                culprit_core::Category::Queries,
+                crate::support::subject(culprit_core::SubjectKind::Query, id),
+            );
+            f.queries =
+                queries.iter().map(|q| culprit_core::QueryRef { id: q.clone(), plan_node: None, note: None }).collect();
+            f.inactive = inactive;
+            f
+        };
+        let said = |findings: &[culprit_core::Finding]| summarize(&snapshot, findings).headline;
+        let active = on("a", &[q(0)], false);
+        let other = on("b", &[q(1)], false);
+        let stopped = on("c", &[q(2)], true);
+        let stopped_too = on("d", &[q(3)], true);
+        let unnamed = on("e", &[], true);
+        let unnamed_too = on("f", &[], true);
+        let top = "The top ones touch 22.2 s of database time over the last 5 hours (54%).";
+        for (findings, want) in [
+            (vec![active.clone()], format!("1 opportunity. {top}")),
+            (
+                vec![active.clone(), other.clone()],
+                "2 opportunities. The top ones touch 28.9 s of database time over the last 5 hours (71%).".into(),
+            ),
+            (
+                vec![active.clone(), stopped.clone()],
+                format!("1 opportunity. {top} 1 more statement stopped running: a deploy may have changed it."),
+            ),
+            (
+                vec![active.clone(), stopped.clone(), stopped_too.clone()],
+                format!("1 opportunity. {top} 2 more statements stopped running: a deploy may have changed them."),
+            ),
+            (
+                vec![active.clone(), unnamed.clone()],
+                format!(
+                    "1 opportunity. {top} 1 more finding rests on statements that stopped running: a deploy may have \
+                     changed them."
+                ),
+            ),
+            (
+                vec![active.clone(), unnamed.clone(), unnamed_too.clone()],
+                format!(
+                    "1 opportunity. {top} 2 more findings rest on statements that stopped running: a deploy may have \
+                     changed them."
+                ),
+            ),
+            (
+                vec![active.clone(), stopped.clone(), unnamed.clone()],
+                format!(
+                    "1 opportunity. {top} 1 more statement stopped running, and 1 more finding rests on statements \
+                     that did: a deploy may have changed them."
+                ),
+            ),
+            (
+                vec![stopped.clone(), stopped_too.clone(), unnamed.clone(), unnamed_too.clone()],
+                "Nothing stands out over the last 5 hours. 2 more statements stopped running, and 2 more findings rest \
+                 on statements that did: a deploy may have changed them."
+                    .into(),
+            ),
+        ] {
+            assert_eq!(said(&findings), want);
+        }
+        // Shares of entries cached at different times are no amount over one period: the share and its window.
+        let mut cached = snapshot.clone();
+        cached.workload.as_mut().unwrap().hourly_time_ms = Some(1_000.0);
+        assert_eq!(
+            summarize(&cached, &[active.clone()]).headline,
+            "1 opportunity. The top ones touch 54% of database time over the last 5 hours."
+        );
+        let mut none = snapshot.clone();
+        none.workload = None;
+        assert_eq!(
+            summarize(&none, &[]).headline,
+            "Nothing stands out in the tables, indexes and settings; this scan has no query history."
+        );
+        assert_eq!(summarize(&none, &[active.clone()]).headline, "1 opportunity.");
     }
 }

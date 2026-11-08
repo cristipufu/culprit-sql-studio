@@ -1,7 +1,7 @@
 //! Declarative requirements for a negative check result. Partial evidence can still produce findings;
 //! it cannot establish that an unobserved problem is absent. Requirements live beside each check.
 
-use culprit_core::{CheckEvidence, Snapshot, SourceState, source_id};
+use culprit_core::{CheckEvidence, Snapshot, SourceState, source_id, t};
 
 /// Facts a source can contribute, independent of any check's identifier.
 #[derive(Clone, Copy, Debug)]
@@ -59,10 +59,15 @@ pub enum Requirement<'a> {
     Query(QueryMeasure),
     Tables(TableMeasure),
     Statistics,
-    Pressure { signal: Option<&'a str>, timed_files: bool, complete: bool },
+    Pressure {
+        signal: Option<&'a str>,
+        timed_files: bool,
+        complete: bool,
+    },
     Settings,
     Deadlocks,
     Unknown,
+    /// Evidence the check knows is incomplete, and why: the key of the message that says so.
     Incomplete(&'a str),
 }
 
@@ -86,7 +91,7 @@ fn catalog_of(s: &Snapshot, judged: impl Fn(&culprit_core::IndexStat) -> bool) -
             return Some(reason);
         }
         if s.indexes.iter().filter(|index| judged(index)).any(|index| index.docdb.is_none()) {
-            return Some("Native index sharding metadata was not collected; a PostgreSQL key prefix cannot establish DocDB lookup coverage or redundancy.".into());
+            return Some(t!("evidence.docdb_sharding_missing"));
         }
     }
     source_failed(
@@ -97,9 +102,7 @@ fn catalog_of(s: &Snapshot, judged: impl Fn(&culprit_core::IndexStat) -> bool) -
 
 pub fn assess(requirements: &[Requirement<'_>], s: &Snapshot) -> CheckEvidence {
     if requirements.is_empty() {
-        return CheckEvidence::Insufficient(
-            "This check does not declare the evidence needed to establish a negative result.".into(),
-        );
+        return CheckEvidence::Insufficient(t!("evidence.undeclared"));
     }
     let mut result = CheckEvidence::Available;
     for requirement in requirements {
@@ -131,7 +134,7 @@ pub fn assess(requirements: &[Requirement<'_>], s: &Snapshot) -> CheckEvidence {
 impl Requirement<'_> {
     fn assess(&self, s: &Snapshot) -> CheckEvidence {
         use CheckEvidence::*;
-        let insufficient = |why: &str| Insufficient(why.into());
+        let insufficient = |why: String| Insufficient(why);
         match self {
             Self::Observed(observation, sources) => {
                 let known = match observation {
@@ -158,30 +161,28 @@ impl Requirement<'_> {
                     return NotApplicable(
                         s.source_outcome(sources[0])
                             .and_then(|o| o.reason.clone())
-                            .unwrap_or_else(|| "This source does not apply to this database.".into()),
+                            .unwrap_or_else(|| t!("evidence.source_not_applicable")),
                     );
                 }
-                insufficient(
-                    "This source was not recorded, was not applicable, or did not expose visible objects. No clean result can be established from its absence.",
-                )
+                insufficient(t!("evidence.source_not_recorded"))
             }
             Self::Source(name) => match s.source_outcome(name) {
                 Some(o) => match o.state {
                     SourceState::Collected | SourceState::Empty => Available,
-                    SourceState::Partial => {
-                        Insufficient(o.reason.clone().unwrap_or_else(|| format!("{name} was only partly collected.")))
-                    }
-                    SourceState::Unavailable => {
-                        Unavailable(o.reason.clone().unwrap_or_else(|| format!("{name} was unavailable.")))
-                    }
+                    SourceState::Partial => Insufficient(
+                        o.reason.clone().unwrap_or_else(|| t!("evidence.named_source_partial", name = *name)),
+                    ),
+                    SourceState::Unavailable => Unavailable(
+                        o.reason.clone().unwrap_or_else(|| t!("evidence.named_source_unavailable", name = *name)),
+                    ),
                     SourceState::NotApplicable => NotApplicable(
-                        o.reason.clone().unwrap_or_else(|| format!("{name} does not apply to this database.")),
+                        o.reason.clone().unwrap_or_else(|| t!("evidence.named_source_not_applicable", name = *name)),
                     ),
                 },
-                None => insufficient("This scan did not record the required source's collection outcome."),
+                None => insufficient(t!("evidence.source_outcome_missing")),
             },
             Self::IndexCatalog => index_catalog(s)
-                .map(|reason| Unavailable(format!("Current schema evidence was incomplete: {reason}")))
+                .map(|reason| Unavailable(t!("evidence.schema_incomplete", reason = reason)))
                 .unwrap_or(Available),
             Self::ForeignKeys if s.foreign_keys.is_empty() => {
                 if [source_id::FOREIGN_KEYS, source_id::CATALOG].iter().any(|name| {
@@ -189,20 +190,22 @@ impl Requirement<'_> {
                         matches!(o.state, SourceState::Collected | SourceState::Empty | SourceState::NotApplicable)
                     })
                 }) {
-                    NotApplicable("No foreign keys were collected in this database.".into())
+                    NotApplicable(t!("evidence.no_foreign_keys"))
                 } else {
-                    insufficient(
-                        "No foreign keys were recorded, but this scan does not establish a complete foreign-key catalog.",
-                    )
+                    insufficient(t!("evidence.foreign_keys_unestablished"))
                 }
             }
             Self::ForeignKeys => Available,
-            Self::IndexHistory if s.server.engine == culprit_core::Engine::Yugabyte
-                && !s.source_outcome(source_id::DOCDB_INDEX_USAGE).is_some_and(|o| matches!(o.state, SourceState::Collected | SourceState::Empty)) => {
-                insufficient("Complete cluster-wide index usage is required; a node-local or partial read cannot establish absence.")
+            Self::IndexHistory
+                if s.server.engine == culprit_core::Engine::Yugabyte
+                    && !s
+                        .source_outcome(source_id::DOCDB_INDEX_USAGE)
+                        .is_some_and(|o| matches!(o.state, SourceState::Collected | SourceState::Empty)) =>
+            {
+                insufficient(t!("evidence.index_usage_cluster"))
             }
             Self::IndexHistory if !crate::indexes::watched_long_enough(s) => {
-                insufficient("At least a week of comparable index-usage counters is needed to assess absence of reads.")
+                insufficient(t!("evidence.index_usage_week"))
             }
             Self::IndexHistory => Available,
             Self::Query(measure) => query(*measure, s),
@@ -212,97 +215,93 @@ impl Requirement<'_> {
                     return Unavailable(reason);
                 }
                 if !s.statistics.is_empty()
-                    || s.source_outcome(source_id::STATISTICS).is_some_and(|o| matches!(o.state, SourceState::Collected | SourceState::Empty))
+                    || s.source_outcome(source_id::STATISTICS)
+                        .is_some_and(|o| matches!(o.state, SourceState::Collected | SourceState::Empty))
                     || (!s.tables.is_empty() && s.tables.iter().all(|t| t.modifications_since_analyze.is_some()))
                 {
                     Available
                 } else {
-                    insufficient("Statistics update measurements were not collected completely.")
+                    insufficient(t!("evidence.statistics_incomplete"))
                 }
             }
             Self::Pressure { signal, timed_files, complete } => {
                 let Some(p) = &s.pressure else {
-                    return Unavailable(
-                        "The source measurements needed for this assessment were not collected.".into(),
-                    );
+                    return Unavailable(t!("evidence.pressure_missing"));
                 };
                 if signal.is_some_and(|key| p.signal(key).is_none()) {
-                    return insufficient("The required pressure measurement was not recorded by this scan.");
+                    return insufficient(t!("evidence.pressure_signal_missing"));
                 }
                 if signal
                     .and_then(|key| p.signal(key))
                     .is_some_and(|s| !s.value.is_finite() || s.status == culprit_core::SignalStatus::Info)
                 {
-                    return insufficient(
-                        "This pressure measurement's scope or observation period does not support a health assessment.",
-                    );
+                    return insufficient(t!("evidence.pressure_scope"));
                 }
                 if *timed_files
                     && !p.files.iter().any(|f| {
                         f.avg_read_ms().into_iter().chain(f.avg_write_ms()).any(|ms| ms.is_finite() && ms >= 0.0)
                     })
                 {
-                    return insufficient("Storage operations were not timed in this scan.");
+                    return insufficient(t!("evidence.storage_untimed"));
                 }
-                if *complete {
-                    Available
-                } else {
-                    insufficient("The available evidence does not establish complete coverage of this check.")
-                }
+                if *complete { Available } else { insufficient(t!("evidence.incomplete_coverage")) }
             }
-            Self::Settings if s.settings.is_empty() => insufficient("No settings were collected."),
-            Self::Deadlocks if s.deadlocks.is_none() => insufficient("No deadlock evidence was collected."),
-            Self::Settings => source_failed(s, &[
-                source_id::SETTINGS,
-                source_id::ADVICE_SETTINGS,
-                source_id::SERVER_VARIABLES,
-                source_id::TABLES,
-                source_id::CATALOG,
-                source_id::STATISTICS,
-                source_id::WORKLOAD,
-                source_id::GLOBAL_STATUS,
-                source_id::PERFORMANCE_COUNTERS,
-                source_id::PLAN_CACHE_USE,
-                source_id::RESOURCE_USE,
-            ]).map(Insufficient).unwrap_or(Available),
+            Self::Settings if s.settings.is_empty() => insufficient(t!("evidence.no_settings")),
+            Self::Deadlocks if s.deadlocks.is_none() => insufficient(t!("evidence.no_deadlocks")),
+            Self::Settings => source_failed(
+                s,
+                &[
+                    source_id::SETTINGS,
+                    source_id::ADVICE_SETTINGS,
+                    source_id::SERVER_VARIABLES,
+                    source_id::TABLES,
+                    source_id::CATALOG,
+                    source_id::STATISTICS,
+                    source_id::WORKLOAD,
+                    source_id::GLOBAL_STATUS,
+                    source_id::PERFORMANCE_COUNTERS,
+                    source_id::PLAN_CACHE_USE,
+                    source_id::RESOURCE_USE,
+                ],
+            )
+            .map(Insufficient)
+            .unwrap_or(Available),
             Self::Deadlocks => source_failed(s, &[source_id::DEADLOCKS]).map(Unavailable).unwrap_or_else(|| {
                 let Some(d) = s.deadlocks.as_ref() else {
-                    return insufficient("No deadlock evidence was collected.");
+                    return insufficient(t!("evidence.no_deadlocks"));
                 };
                 if d.counted.is_some() || d.note.is_some() {
-                    insufficient("A cumulative counter or a limited deadlock sample cannot verify the absence of this deadlock pattern.")
-                } else { Available }
+                    insufficient(t!("evidence.deadlock_sample"))
+                } else {
+                    Available
+                }
             }),
-            Self::Unknown => insufficient("The available evidence does not establish complete coverage of this check."),
-            Self::Incomplete(reason) => insufficient(reason),
+            Self::Unknown => insufficient(t!("evidence.incomplete_coverage")),
+            Self::Incomplete(key) => insufficient(culprit_core::i18n::t(key, &[])),
         }
     }
 }
 
 fn query(measure: QueryMeasure, s: &Snapshot) -> CheckEvidence {
     use CheckEvidence::*;
-    let insufficient = |why: &str| Insufficient(why.into());
+    let insufficient = |why: String| Insufficient(why);
     let Some(w) = &s.workload else {
         if matches!(measure, QueryMeasure::Grants) && s.pressure.as_ref().is_some_and(|p| !p.grants.is_empty()) {
-            return insufficient("Current grant evidence is available, but statement history was not collected.");
+            return insufficient(t!("evidence.grants_without_history"));
         }
-        return Unavailable(s.no_workload_reason().unwrap_or_else(|| "No statement history was collected.".into()));
+        return Unavailable(s.no_workload_reason().unwrap_or_else(|| t!("evidence.no_history")));
     };
     if w.queries.is_empty() {
-        return insufficient("No statements were captured; this does not establish the absence of workload problems.");
+        return insufficient(t!("evidence.no_statements"));
     }
     if matches!(measure, QueryMeasure::CapturedPlans) {
         if w.queries.iter().any(|q| q.plan.is_none()) {
-            return insufficient(
-                "Only some statements have captured plans; unmeasured runs and uncaptured statements remain unassessed.",
-            );
+            return insufficient(t!("evidence.some_plans"));
         }
-        return insufficient(
-            "Captured plans were inspected. Actual rows, timing and runtime-only problems are assessed only where that plan records them.",
-        );
+        return insufficient(t!("evidence.captured_plans"));
     }
     if matches!(measure, QueryMeasure::Timeline) && !w.timeline.as_ref().is_some_and(|t| t.len() >= 4) {
-        return insufficient("A comparable baseline and later workload are needed to assess regressions.");
+        return insufficient(t!("evidence.timeline_short"));
     }
     let source = match w.kind() {
         Some(culprit_core::WorkloadKind::QueryStore) => source_id::QUERY_STORE,
@@ -370,17 +369,11 @@ fn query(measure: QueryMeasure, s: &Snapshot) -> CheckEvidence {
     } else if assessed.len() == w.queries.len() {
         Queries { assessed, reason: None }
     } else if assessed.is_empty() && matches!(measure, QueryMeasure::PlanVariants) {
-        insufficient("No statement has sufficiently sampled earlier and later plan variants to compare in this window.")
+        insufficient(t!("evidence.no_plan_variants"))
     } else if assessed.is_empty() {
-        insufficient("This scan did not record the measurements this check needs.")
+        insufficient(t!("evidence.unmeasured"))
     } else {
-        Queries {
-            assessed,
-            reason: Some(
-                "Some statements lack the measurements this check needs; only measured statements were assessed."
-                    .into(),
-            ),
-        }
+        Queries { assessed, reason: Some(t!("evidence.some_unmeasured")) }
     }
 }
 
@@ -414,6 +407,6 @@ fn tables(measure: TableMeasure, s: &Snapshot) -> CheckEvidence {
     {
         Available
     } else {
-        Insufficient("Some tables lack the measurements this check needs.".into())
+        Insufficient(t!("evidence.tables_unmeasured"))
     }
 }
