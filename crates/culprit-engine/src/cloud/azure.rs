@@ -196,8 +196,9 @@ pub(super) async fn azure_signals(target: &Target, resource: &Resource, start: f
     Ok(azure_judge(target, resource, raw, notes, start, end, period))
 }
 
-/// How an Azure metric is judged: the kind of episode, the threshold, whether lower is worse, the title and the sentence.
-type Judged = (ThrottleKind, f64, bool, String, Box<dyn Fn(f64, &str) -> String>);
+/// How an Azure metric is judged: the kind of episode, the threshold, whether lower is worse, the title (and how a
+/// summary lists it) and the sentence.
+type Judged = (ThrottleKind, f64, bool, (String, String), Box<dyn Fn(f64, &str) -> String>);
 
 pub(super) fn azure_judge(
     target: &Target,
@@ -238,49 +239,49 @@ pub(super) fn azure_judge(
                 ThrottleKind::CpuLimit,
                 95.0,
                 false,
-                t!("engine.cloud.azure.episode.cpu_limit"),
+                (t!("engine.cloud.azure.episode.cpu_limit"), t!("engine.cloud.azure.episode_said.cpu_limit")),
                 Box::new(limit_detail(key!("engine.cloud.azure.detail.cpu"))),
             )),
             ("cpu_percent", _) => Some((
                 ThrottleKind::CpuLimit,
                 95.0,
                 false,
-                t!("engine.cloud.episode.cpu_high"),
+                (t!("engine.cloud.episode.cpu_high"), t!("engine.cloud.episode_said.cpu_high")),
                 Box::new(limit_detail(key!("engine.cloud.azure.detail.cpu"))),
             )),
             ("physical_data_read_percent", _) => Some((
                 ThrottleKind::IoLimit,
                 95.0,
                 false,
-                t!("engine.cloud.azure.episode.data_io"),
+                (t!("engine.cloud.azure.episode.data_io"), t!("engine.cloud.azure.episode_said.data_io")),
                 Box::new(limit_detail(key!("engine.cloud.azure.detail.data_io"))),
             )),
             ("log_write_percent", _) => Some((
                 ThrottleKind::LogRate,
                 95.0,
                 false,
-                t!("engine.cloud.azure.episode.log_writes"),
+                (t!("engine.cloud.azure.episode.log_writes"), t!("engine.cloud.azure.episode_said.log_writes")),
                 Box::new(limit_detail(key!("engine.cloud.azure.detail.log_writes"))),
             )),
             ("workers_percent", _) => Some((
                 ThrottleKind::Workers,
                 90.0,
                 false,
-                t!("engine.cloud.azure.episode.workers"),
+                (t!("engine.cloud.azure.episode.workers"), t!("engine.cloud.azure.episode_said.workers")),
                 Box::new(limit_detail(key!("engine.cloud.azure.detail.workers"))),
             )),
             ("sessions_percent", _) => Some((
                 ThrottleKind::Workers,
                 90.0,
                 false,
-                t!("engine.cloud.azure.episode.sessions"),
+                (t!("engine.cloud.azure.episode.sessions"), t!("engine.cloud.azure.episode_said.sessions")),
                 Box::new(limit_detail(key!("engine.cloud.azure.detail.sessions"))),
             )),
             ("disk_iops_consumed_percentage" | "io_consumption_percent", _) => Some((
                 ThrottleKind::IoLimit,
                 95.0,
                 false,
-                t!("engine.cloud.azure.episode.iops"),
+                (t!("engine.cloud.azure.episode.iops"), t!("engine.cloud.azure.episode_said.iops")),
                 Box::new(limit_detail(key!("engine.cloud.azure.detail.iops"))),
             )),
             // Allocated memory can include useful cache; a high percentage alone establishes no shortage.
@@ -289,14 +290,14 @@ pub(super) fn azure_judge(
                 ThrottleKind::Storage,
                 95.0,
                 false,
-                t!("engine.cloud.episode.storage_full"),
+                (t!("engine.cloud.episode.storage_full"), t!("engine.cloud.episode_said.storage_full")),
                 Box::new(limit_detail(key!("engine.cloud.azure.detail.storage"))),
             )),
             ("cpu_credits_remaining", _) if burstable => Some((
                 ThrottleKind::CpuCredits,
                 0.0,
                 true,
-                t!("engine.cloud.episode.cpu_credits"),
+                (t!("engine.cloud.episode.cpu_credits"), t!("engine.cloud.episode_said.cpu_credits")),
                 Box::new(|_: f64, lasted: &str| t!("engine.cloud.azure.detail.credits", lasted = lasted)),
             )),
             _ => None,
@@ -309,11 +310,11 @@ pub(super) fn azure_judge(
             s.limit = None;
             s.limit_label = None;
         }
-        if let Some((kind, threshold, floor, title, detail)) = judged {
+        if let Some((kind, threshold, floor, (title, said), detail)) = judged {
             found.extend(episodes(
                 &s,
                 period,
-                &Rule { metric, kind, threshold, floor, min_points: 2, title: &title, detail: &*detail },
+                &Rule { metric, kind, threshold, floor, min_points: 2, title: &title, said: &said, detail: &*detail },
             ));
         }
         series.push(s);

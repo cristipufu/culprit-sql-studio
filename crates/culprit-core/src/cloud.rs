@@ -10,6 +10,7 @@ use ts_rs::TS;
 
 use crate::changes::epoch;
 use crate::events::{ChangeEvent, EventKind, EventSource};
+use crate::t;
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -117,6 +118,11 @@ pub struct ThrottleEpisode {
     pub worst: f64,
     /// "CPU credits ran out".
     pub title: String,
+    /// The episode as a summary lists it, inside a sentence ("storage nearly full"): said when it was found, for
+    /// [`summarize`].
+    #[serde(skip)]
+    #[ts(skip)]
+    pub said: String,
     /// What it meant for queries, in a sentence or two.
     pub detail: String,
     /// Still going at the end of the period.
@@ -198,6 +204,9 @@ pub struct Rule<'a> {
     /// Consecutive bad points before it counts (one 5-minute spike is not an episode).
     pub min_points: usize,
     pub title: &'a str,
+    /// The episode as a summary lists it, inside a sentence ("storage nearly full"): its own message, never the title
+    /// with its first letter lowered.
+    pub said: &'a str,
     /// The sentence for an episode, given its worst value and how long it lasted.
     pub detail: &'a dyn Fn(f64, &str) -> String,
 }
@@ -245,6 +254,7 @@ pub fn episodes(series: &CloudSeries, period_seconds: u32, rule: &Rule) -> Vec<T
                 metric: series.metric.clone(),
                 worst,
                 title: rule.title.to_string(),
+                said: rule.said.to_string(),
                 detail: (rule.detail)(worst, &lasted),
                 ongoing: b + 1 == points.len(),
                 start,
@@ -286,7 +296,7 @@ pub fn sum_series(metric: &str, label: &str, unit: CloudUnit, parts: &[&CloudSer
 /// Summarize measured episodes without asserting an effect on application requests.
 pub fn summarize(episodes: &[ThrottleEpisode], span: &str) -> String {
     if episodes.is_empty() {
-        return format!("No sustained resource-limit warnings in the available cloud measurements for the {span}.");
+        return t!("core.cloud.summary.none", span = span);
     }
     let mut kinds: Vec<ThrottleKind> = Vec::new();
     for e in episodes {
@@ -298,38 +308,18 @@ pub fn summarize(episodes: &[ThrottleEpisode], span: &str) -> String {
         .iter()
         .map(|kind| {
             let of_kind: Vec<&ThrottleEpisode> = episodes.iter().filter(|e| e.kind == *kind).collect();
-            let times = match of_kind.len() {
-                1 => "once".to_string(),
-                2 => "twice".to_string(),
-                n => format!("{n} times"),
-            };
+            let n = of_kind.len();
             let total: f64 =
                 of_kind.iter().map(|e| (epoch(&e.end).unwrap_or(0.0) - epoch(&e.start).unwrap_or(0.0)).max(0.0)).sum();
-            format!(
-                "{} {times} ({}{})",
-                lower_first(&of_kind[0].title),
-                crate::format::duration(total * 1000.0),
-                if of_kind.iter().any(|e| e.ongoing) { ", still going" } else { "" }
-            )
+            let (what, time) = (&of_kind[0].said, crate::format::duration(total * 1000.0));
+            if of_kind.iter().any(|e| e.ongoing) {
+                t!("core.cloud.summary.kind_ongoing", what = what, n = n, count = n.to_string(), time = time)
+            } else {
+                t!("core.cloud.summary.kind", what = what, n = n, count = n.to_string(), time = time)
+            }
         })
         .collect();
-    let joined = match parts.as_slice() {
-        [one] => one.clone(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
-        [] => String::new(),
-    };
-    format!("In the {span}: {joined}.")
-}
-
-fn lower_first(text: &str) -> String {
-    let mut chars = text.chars();
-    match chars.next() {
-        Some(c) if !text.starts_with("CPU") && !text.starts_with("IOPS") && !text.starts_with("EBS") => {
-            c.to_lowercase().collect::<String>() + chars.as_str()
-        }
-        Some(c) => c.to_string() + chars.as_str(),
-        None => String::new(),
-    }
+    t!("core.cloud.summary.episodes", span = span, episodes = crate::format::list(&parts))
 }
 
 /// vCPUs of an RDS instance class (`db.m6g.2xlarge` → 8). Burstable and small classes have 2.
@@ -393,6 +383,7 @@ mod tests {
             floor: true,
             min_points: 2,
             title: "CPU credits ran out",
+            said: "CPU credits ran out",
             detail: &detail,
         };
         // 0 0 1 0 is one episode (a single recovered point doesn't split it); a lone 0 later is too short.
@@ -405,6 +396,36 @@ mod tests {
         assert!(!found[0].ongoing);
         let summary = summarize(&found, "last 24 hours");
         assert_eq!(summary, "In the last 24 hours: CPU credits ran out once (20 min).");
+        // Each kind as the summary lists it, how many times and how long in all, in one sentence of the catalog's.
+        let episode = |kind, said: &str, start: &str, end: &str, ongoing| ThrottleEpisode {
+            kind,
+            start: start.into(),
+            end: end.into(),
+            metric: String::new(),
+            worst: 0.0,
+            title: String::new(),
+            said: said.into(),
+            detail: String::new(),
+            ongoing,
+            status: crate::SignalStatus::Watch,
+        };
+        let credits = |start, end| episode(ThrottleKind::CpuCredits, "CPU credits ran out", start, end, false);
+        let full = |start, end, ongoing| episode(ThrottleKind::Storage, "storage nearly full", start, end, ongoing);
+        let mixed = [
+            credits("2026-10-11T12:00:00Z", "2026-10-11T12:10:00Z"),
+            full("2026-10-11T12:00:00Z", "2026-10-11T12:05:00Z", false),
+            credits("2026-10-11T13:00:00Z", "2026-10-11T13:10:00Z"),
+            full("2026-10-11T13:00:00Z", "2026-10-11T13:05:00Z", false),
+            full("2026-10-11T14:00:00Z", "2026-10-11T14:05:00Z", true),
+        ];
+        assert_eq!(
+            summarize(&mixed, "last 24 hours"),
+            "In the last 24 hours: CPU credits ran out twice (20 min) and storage nearly full 3 times (15 min, still going)."
+        );
+        assert_eq!(
+            summarize(&[], "last 24 hours"),
+            "No sustained resource-limit warnings in the available cloud measurements for the last 24 hours."
+        );
         let events = CloudSignals {
             provider: CloudProvider::Aws,
             service: "Amazon RDS for PostgreSQL".into(),
@@ -434,6 +455,7 @@ mod tests {
             floor: false,
             min_points: 2,
             title: "CPU near its limit",
+            said: "CPU near its limit",
             detail: &detail,
         };
         let mut s = series(&[100.0, 100.0]);
@@ -454,6 +476,7 @@ mod tests {
             floor: false,
             min_points: 2,
             title: "CPU near its limit",
+            said: "CPU near its limit",
             detail: &detail,
         };
         let mut s = series(&[96.0; 6]);

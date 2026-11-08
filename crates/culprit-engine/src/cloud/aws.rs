@@ -193,10 +193,11 @@ pub(super) fn rds_judge(
     };
     let saturated = |worst: f64, lasted: &str| t!("engine.cloud.rds.detail.cpu", lasted = lasted, worst = whole(worst));
     let title = t!("engine.cloud.episode.cpu_high");
+    let said = t!("engine.cloud.episode_said.cpu_high");
     found.extend(episodes(
         &cpu,
         period,
-        &rule("CPUUtilization", ThrottleKind::CpuLimit, 90.0, false, 3, &title, &saturated),
+        &rule("CPUUtilization", ThrottleKind::CpuLimit, 90.0, false, 3, (&title, &said), &saturated),
     ));
     series.push(cpu);
 
@@ -216,10 +217,11 @@ pub(super) fn rds_judge(
             CloudSeries::new("CPUCreditBalance", &t!("engine.cloud.series.cpu_credits"), CloudUnit::Credits, credits)
                 .floor();
         let title = t!("engine.cloud.episode.cpu_credits");
+        let said = t!("engine.cloud.episode_said.cpu_credits");
         found.extend(episodes(
             &s,
             period,
-            &rule("CPUCreditBalance", ThrottleKind::CpuCredits, 0.0, true, 2, &title, &detail),
+            &rule("CPUCreditBalance", ThrottleKind::CpuCredits, 0.0, true, 2, (&title, &said), &detail),
         ));
         series.push(s);
     }
@@ -242,10 +244,11 @@ pub(super) fn rds_judge(
                 };
                 let s = iops.limit(limit, limit_words);
                 let title = t!("engine.cloud.rds.episode.provisioned_iops");
+                let said = t!("engine.cloud.rds.episode_said.provisioned_iops");
                 found.extend(episodes(
                     &s,
                     period,
-                    &rule("IOPS", ThrottleKind::IoLimit, limit * 0.95, false, 3, &title, &detail),
+                    &rule("IOPS", ThrottleKind::IoLimit, limit * 0.95, false, 3, (&title, &said), &detail),
                 ));
                 s
             }
@@ -267,10 +270,11 @@ pub(super) fn rds_judge(
         let label = t!("engine.cloud.rds.series.burst_balance");
         let s = CloudSeries::new("BurstBalance", &label, CloudUnit::Percent, burst).floor();
         let title = t!("engine.cloud.rds.episode.burst");
+        let said = t!("engine.cloud.rds.episode_said.burst");
         found.extend(episodes(
             &s,
             period,
-            &rule("BurstBalance", ThrottleKind::IoCredits, 0.0, true, 2, &title, &detail),
+            &rule("BurstBalance", ThrottleKind::IoCredits, 0.0, true, 2, (&title, &said), &detail),
         ));
         series.push(s);
     }
@@ -288,7 +292,8 @@ pub(super) fn rds_judge(
             move |_: f64, lasted: &str| t!("engine.cloud.rds.detail.ebs_burst", class = &class_words, lasted = lasted);
         let s = CloudSeries::new(metric, &culprit_core::i18n::t(label, &[]), CloudUnit::Percent, points).floor();
         let title = t!("engine.cloud.rds.episode.ebs_burst");
-        found.extend(episodes(&s, period, &rule(metric, ThrottleKind::IoCredits, 0.0, true, 2, &title, &detail)));
+        let said = t!("engine.cloud.rds.episode_said.ebs_burst");
+        found.extend(episodes(&s, period, &rule(metric, ThrottleKind::IoCredits, 0.0, true, 2, (&title, &said), &detail)));
         series.push(s);
     }
 
@@ -310,10 +315,11 @@ pub(super) fn rds_judge(
             t!("engine.cloud.rds.detail.disk_latency", worst = format::duration(worst), lasted = lasted)
         };
         let title = t!("engine.cloud.rds.episode.disk_latency");
+        let said = t!("engine.cloud.rds.episode_said.disk_latency");
         found.extend(episodes(
             &latency,
             period,
-            &rule("DiskLatency", ThrottleKind::DiskLatency, 20.0, false, 3, &title, &detail),
+            &rule("DiskLatency", ThrottleKind::DiskLatency, 20.0, false, 3, (&title, &said), &detail),
         ));
         series.push(latency);
     }
@@ -334,10 +340,11 @@ pub(super) fn rds_judge(
                 };
                 let s = s.limit(v, t!("engine.cloud.rds.limit.vcpus", n = v, count = whole(v)));
                 let title = t!("engine.cloud.rds.episode.load");
+                let said = t!("engine.cloud.rds.episode_said.load");
                 found.extend(episodes(
                     &s,
                     period,
-                    &rule("DBLoad", ThrottleKind::Load, v * 1.5, false, 3, &title, &detail),
+                    &rule("DBLoad", ThrottleKind::Load, v * 1.5, false, 3, (&title, &said), &detail),
                 ));
                 s
             }
@@ -357,10 +364,11 @@ pub(super) fn rds_judge(
                 .floor()
                 .limit(floor, t!("engine.cloud.rds.limit.free_storage", floor = format::bytes(floor), gb = whole(gb)));
         let title = t!("engine.cloud.episode.storage_full");
+        let said = t!("engine.cloud.episode_said.storage_full");
         found.extend(episodes(
             &s,
             period,
-            &rule("FreeStorageSpace", ThrottleKind::Storage, floor, true, 2, &title, &detail),
+            &rule("FreeStorageSpace", ThrottleKind::Storage, floor, true, 2, (&title, &said), &detail),
         ));
         series.push(s);
     }
@@ -425,10 +433,11 @@ fn rule<'a>(
     threshold: f64,
     floor: bool,
     min_points: usize,
-    title: &'a str,
+    // The episode's title, and how a summary lists it.
+    (title, said): (&'a str, &'a str),
     detail: &'a dyn Fn(f64, &str) -> String,
 ) -> Rule<'a> {
-    Rule { metric, kind, threshold, floor, min_points, title, detail }
+    Rule { metric, kind, threshold, floor, min_points, title, said, detail }
 }
 
 fn scale(points: Vec<CloudPoint>, factor: f64) -> Vec<CloudPoint> {
