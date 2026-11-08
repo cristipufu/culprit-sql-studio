@@ -56,14 +56,17 @@ enum Warned {
     Conversion(Conversion),
     Spill,
     NoJoinPredicate(JoinCondition),
-    MissingStatistics {
-        /// The plan's own reading of the warning.
-        insight: Option<PlanInsight>,
-        /// The index keys it names, where every column it names is one.
-        stale: Option<StaleIndexStatistics>,
-        /// What the catalog says of those statistics now.
-        now: Option<StatisticsNow>,
-    },
+    MissingStatistics(Box<StatisticsWarning>),
+}
+
+/// A compilation-time statistics warning, and what reads it.
+struct StatisticsWarning {
+    /// The plan's own reading of the warning.
+    insight: Option<PlanInsight>,
+    /// The index keys it names, where every column it names is one.
+    stale: Option<StaleIndexStatistics>,
+    /// What the catalog says of those statistics now.
+    now: Option<StatisticsNow>,
 }
 
 /// A type mismatch: the database converts a column to compare it with a parameter of another type.
@@ -139,7 +142,7 @@ impl PlanWarningCase<'_> {
             Warned::Conversion(_) => PlanWarning::ImplicitConversion,
             Warned::Spill => PlanWarning::Spill,
             Warned::NoJoinPredicate(_) => PlanWarning::NoJoinPredicate,
-            Warned::MissingStatistics { .. } => PlanWarning::MissingStatistics,
+            Warned::MissingStatistics(_) => PlanWarning::MissingStatistics,
         }
     }
 }
@@ -267,7 +270,11 @@ fn plan_warning_case<'s>(
             // The catalog is current context; a saved compilation warning cannot establish staleness now.
             let stale = insight.as_ref().and(q.plan.as_ref()).and_then(culprit_core::insights::stale_index_statistics);
             let now = stale.as_ref().and_then(|stale| statistics_now(snapshot, stale));
-            (Warned::MissingStatistics { insight, stale, now }, Severity::Low, Confidence::Medium)
+            (
+                Warned::MissingStatistics(Box::new(StatisticsWarning { insight, stale, now })),
+                Severity::Low,
+                Confidence::Medium,
+            )
         }
         _ => return None,
     };
@@ -367,7 +374,8 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
             (f.title, f.summary) = (title, summary);
             f.fix = Some(Fix { summary: fix, sql: None, cost: None });
         }
-        Warned::MissingStatistics { insight, stale, now } => {
+        Warned::MissingStatistics(statistics) => {
+            let StatisticsWarning { insight, stale, now } = statistics.as_ref();
             f.title = t!("check.plan_warnings.title.statistics", query = &query);
             f.summary = t!("check.plan_warnings.summary.statistics");
             f.fix = Some(match insight {
