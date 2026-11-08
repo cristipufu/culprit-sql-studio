@@ -1649,9 +1649,11 @@ caveat: MySQL counts errors from when each statement's entry began counting, so 
 
 // ── hot-rows ───────────────────────────────────────────────────────────────────────────────────────
 
-/// The SQL Server demo with lock waits on its indexes (by position): (waits, ms) at an earlier scan `before_hours` ago
-/// and now, and escalations now.
-fn hot(before_hours: Option<f64>, rcsi: &str, counts: &[(usize, (f64, f64), (f64, f64), f64)]) -> Vec<Finding> {
+/// Lock waits on one index, by its position: (waits, ms) at the earlier scan and now, and escalations now.
+type IndexWaits = (usize, (f64, f64), (f64, f64), f64);
+
+/// The SQL Server demo with lock waits on its indexes, the earlier scan `before_hours` ago.
+fn hot(before_hours: Option<f64>, rcsi: &str, counts: &[IndexWaits]) -> Vec<Finding> {
     use culprit_core::format::{epoch_seconds, iso_from_epoch};
     let mut s = fixture("mssql-demo");
     s.indexes.iter_mut().for_each(|i| i.contention = None);

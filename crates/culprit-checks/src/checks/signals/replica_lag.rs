@@ -24,7 +24,7 @@ check!(
 
 /// How a replica, a consumer or this server stands, as replica-lag reads it.
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub(super) enum ReplicaStatus {
+pub enum ReplicaStatus {
     /// Replication failed or can't connect: the copy stopped with an error, or a standby meant to stream has no
     /// receiver.
     Stopped,
@@ -94,7 +94,7 @@ fn lagging(snapshot: &Snapshot) -> Vec<Lagging<'_>> {
 }
 
 /// How a replica, a logical consumer or this server stands, when it is stopped or behind.
-pub(super) fn stopped_or_behind(snapshot: &Snapshot, r: &Replica) -> Option<ReplicaStatus> {
+fn stopped_or_behind(snapshot: &Snapshot, r: &Replica) -> Option<ReplicaStatus> {
     // A logical consumer of another database on this server is that database's lag (its slot, kept server-wide, is
     // still reported as a slot).
     if r.is_logical() && r.database.as_deref().is_some_and(|d| !d.eq_ignore_ascii_case(&snapshot.server.database)) {
@@ -107,7 +107,7 @@ pub(super) fn stopped_or_behind(snapshot: &Snapshot, r: &Replica) -> Option<Repl
 /// nothing; a logical one belongs to a consumer (a subscription, a CDC tool) that may only be between syncs, and
 /// dropping it forces that consumer to copy everything again. Whether it can fill the disk depends on
 /// max_slot_wal_keep_size (13+): with a cap, PostgreSQL gives the slot up instead.
-pub(super) fn inactive_slot<'s>(snapshot: &Snapshot, r: &'s Replica) -> Option<InactiveSlot<'s>> {
+fn inactive_slot<'s>(snapshot: &Snapshot, r: &'s Replica) -> Option<InactiveSlot<'s>> {
     let kept = r.lag_bytes.filter(|b| *b >= GB)?;
     if r.state.as_deref() != Some("inactive") || r.wal_status.as_deref() == Some("lost") {
         return None;
