@@ -6,21 +6,65 @@ use crate::evidence::Requirement as Evidence;
 pub fn worker_pressure_info() -> CheckInfo {
     CheckInfo {
         id: "worker-pressure".into(),
-        title: "Running out of workers or connections".into(),
+        title: t!("check.worker_pressure.info.title"),
         category: Category::Configuration,
         engines: vec![Engine::Mssql, Engine::Postgres, Engine::Mysql],
         requires: vec![],
-        description: "SQL Server sessions waiting for a worker thread (THREADPOOL), or PostgreSQL/MySQL connections close to max_connections.".into(),
+        description: t!("check.worker_pressure.info.description"),
     }
 }
 
 check!(
-    WorkerPressureCheck: worker_pressure_info, worker_pressure,
-    &[Evidence::Pressure { signal: Some(culprit_core::signal_id::CONNECTIONS), timed_files: false, complete: true }]
+    WorkerPressureCheck: worker_pressure_info,
+    decide = worker_limits,
+    render = worker_pressure_finding,
+    case<'s> = WorkerPressure,
+    evidence = &[Evidence::Pressure {
+        signal: Some(culprit_core::signal_id::CONNECTIONS),
+        timed_files: false,
+        complete: true
+    }],
 );
 
-pub fn worker_pressure(snapshot: &Snapshot) -> Vec<Finding> {
-    let key = server_key(snapshot);
+/// The worker-pressure findings of `snapshot`: its cases, each worded.
+#[cfg(test)]
+pub(crate) fn worker_pressure(snapshot: &Snapshot) -> Vec<Finding> {
+    culprit_core::Check::run(&WorkerPressureCheck, snapshot)
+}
+
+/// Running out of the server's workers (SQL Server) or connections (PostgreSQL, MySQL).
+pub enum WorkerPressure {
+    /// Requests waiting for a worker thread (THREADPOOL): queueing when the scan ran, or on record since the start.
+    Threadpool {
+        /// Requests in this database waiting for a worker when the scan ran.
+        waiting: f64,
+        /// Time waited since the start, and on average an hour.
+        total: Option<f64>,
+        per_hour: Option<f64>,
+        /// The waits since the start are this database's to grade: an hour of counters, ten seconds an hour or more.
+        history: bool,
+        severity: Severity,
+        confidence: Confidence,
+    },
+    /// The whole server's connections near max_connections now, or at it once since the start.
+    Connections {
+        /// Connections in use, in percent of max_connections.
+        used: f64,
+        peak: Option<Peak>,
+        /// Seconds since the busiest moment, when the server keeps it.
+        peak_ago: Option<f64>,
+    },
+}
+
+/// The busiest moment since the start, said when connections aren't near the limit now.
+pub enum Peak {
+    /// Above today's max_connections, in percent of it: the limit was lowered since.
+    AboveLimit(f64),
+    /// At the limit.
+    AtLimit,
+}
+
+fn worker_limits(snapshot: &Snapshot) -> Vec<WorkerPressure> {
     match snapshot.server.engine {
         Engine::Sqlite | Engine::Yugabyte => Vec::new(),
         Engine::Mssql => {
@@ -42,82 +86,26 @@ pub fn worker_pressure(snapshot: &Snapshot) -> Vec<Finding> {
             if waiting <= 0.0 && !history {
                 return Vec::new();
             }
-            let mut f = finding("worker-pressure", &key, Category::Configuration, subject(SubjectKind::Database, &key));
-            f.title = if waiting > 0.0 {
-                format!(
-                    "{} waiting for a worker thread when the scan ran (THREADPOOL)",
-                    if waiting == 1.0 {
-                        "1 request was".to_string()
-                    } else {
-                        format!("{} requests were", format::count(waiting))
-                    }
-                )
-            } else {
-                format!(
-                    "Requests waited {} for a worker thread {} (THREADPOOL)",
-                    format::duration(total.unwrap_or(0.0)),
-                    uptime_phrase(snapshot)
-                )
-            };
-            let mut parts = Vec::new();
-            if history {
-                parts.push(format!(
-                    "{}, requests on this instance waited {} in total for a worker thread, about {} an hour on average; \
-                     the counters don't say when.",
-                    capitalize(&uptime_phrase(snapshot)),
-                    format::duration(total.unwrap_or(0.0)),
-                    format::duration(per_hour.unwrap_or(0.0))
-                ));
-            }
-            if waiting > 0.0 {
-                parts.push(format!(
-                    "When the scan ran, {} in this database waiting for one.",
-                    if waiting == 1.0 {
-                        "1 request was".to_string()
-                    } else {
-                        format!("{} requests were", format::count(waiting))
-                    }
-                ));
-            }
-            parts.push(
-                "A request that can't get a worker can't even begin, so the app sees timeouts while the server looks idle. \
-                 It is almost always a symptom: a blocking chain holding many workers, or many parallel queries each taking several."
-                    .into(),
-            );
-            f.summary = parts.join(" ");
-            // A queue at the moment of the scan is starvation now; totals since the start describe the past (at most
-            // Medium); a task or two seen once, with nothing on record, is a moment worth watching.
-            f.severity = if waiting >= 5.0 && history {
-                Severity::High
-            } else if waiting >= 5.0 || (history && per_hour.is_some_and(|p| p >= MINUTE_MS)) {
-                Severity::Medium
-            } else {
-                Severity::Low
-            };
-            f.impact.score = base_score(f.severity);
-            f.impact.label = "THREADPOOL waits".into();
-            f.confidence = match (history, waiting > 0.0) {
-                (true, true) => Confidence::High,
-                (true, false) => Confidence::Medium,
-                _ => Confidence::Low,
-            };
-            if !history {
-                f.caveats.push(seen_once());
-            }
-            if let Some(t) = total.filter(|t| *t > 0.0) {
-                f.metrics.push(Metric::new("Waited since start", t, Unit::Ms));
-            }
-            if waiting > 0.0 {
-                f.metrics.push(Metric::new("Waiting now", waiting, Unit::Count));
-            }
-            f.fix = Some(Fix {
-                summary: "Find the head blocker in Live and end the transaction behind the chain; then lower parallelism so each query takes fewer workers (cost threshold for parallelism, MAXDOP). Raising max worker threads only hides it.".into(),
-                sql: None,
-                cost: None,
-            });
-            f.verify =
-                vec!["Re-scan: THREADPOOL waits should stop growing and nothing should wait for a worker.".into()];
-            vec![f]
+            vec![WorkerPressure::Threadpool {
+                waiting,
+                total,
+                per_hour,
+                history,
+                // A queue at the moment of the scan is starvation now; totals since the start describe the past (at
+                // most Medium); a task or two seen once, with nothing on record, is a moment worth watching.
+                severity: if waiting >= 5.0 && history {
+                    Severity::High
+                } else if waiting >= 5.0 || (history && per_hour.is_some_and(|p| p >= MINUTE_MS)) {
+                    Severity::Medium
+                } else {
+                    Severity::Low
+                },
+                confidence: match (history, waiting > 0.0) {
+                    (true, true) => Confidence::High,
+                    (true, false) => Confidence::Medium,
+                    _ => Confidence::Low,
+                },
+            }]
         }
         Engine::Postgres | Engine::Mysql => {
             let Some(used) = signal(snapshot, culprit_core::signal_id::CONNECTIONS) else { return Vec::new() };
@@ -126,63 +114,115 @@ pub fn worker_pressure(snapshot: &Snapshot) -> Vec<Finding> {
             if used < 85.0 && !hit_limit {
                 return Vec::new();
             }
-            // When the busiest moment was (MySQL 5.7.5+ keeps it); without it, only that it happened since the start.
-            let peak_ago = signal(snapshot, culprit_core::signal_id::MAX_USED_CONNECTIONS_AGO);
-            let when = match peak_ago {
-                Some(s) => format!("{} ago", format::duration(s * 1000.0)),
-                None => uptime_phrase(snapshot),
+            vec![WorkerPressure::Connections {
+                used,
+                peak: peak.filter(|_| used < 85.0).map(|p| if p > 100.0 { Peak::AboveLimit(p) } else { Peak::AtLimit }),
+                // When the busiest moment was (MySQL 5.7.5+ keeps it); without it, only that it happened since the
+                // start.
+                peak_ago: signal(snapshot, culprit_core::signal_id::MAX_USED_CONNECTIONS_AGO),
+            }]
+        }
+    }
+}
+
+fn worker_pressure_finding(snapshot: &Snapshot, case: WorkerPressure) -> Finding {
+    let key = server_key(snapshot);
+    match case {
+        WorkerPressure::Threadpool { waiting, total, per_hour, history, severity, confidence } => {
+            let mut f = finding("worker-pressure", &key, Category::Configuration, subject(SubjectKind::Database, &key));
+            let count = format::count(waiting);
+            f.title = if waiting > 0.0 {
+                t!("check.worker_pressure.title.waiting", n = waiting, count = &count)
+            } else {
+                t!(
+                    "check.worker_pressure.title.waited",
+                    time = format::duration(total.unwrap_or(0.0)),
+                    since = uptime_phrase(snapshot)
+                )
             };
+            let mut parts = Vec::new();
+            if history {
+                parts.push(t!(
+                    "check.worker_pressure.summary.history",
+                    since = uptime_opening(snapshot),
+                    time = format::duration(total.unwrap_or(0.0)),
+                    per_hour = format::duration(per_hour.unwrap_or(0.0))
+                ));
+            }
+            if waiting > 0.0 {
+                parts.push(t!("check.worker_pressure.summary.waiting", n = waiting, count = &count));
+            }
+            parts.push(t!("check.worker_pressure.summary.symptom"));
+            f.summary = parts.join(" ");
+            f.severity = severity;
+            f.impact.score = base_score(f.severity);
+            f.impact.label = t!("check.worker_pressure.impact.threadpool");
+            f.confidence = confidence;
+            if !history {
+                f.caveats.push(seen_once());
+            }
+            if let Some(t) = total.filter(|t| *t > 0.0) {
+                f.metrics.push(Metric::new(t!("check.worker_pressure.metric.waited"), t, Unit::Ms));
+            }
+            if waiting > 0.0 {
+                f.metrics.push(Metric::new(t!("check.worker_pressure.metric.waiting"), waiting, Unit::Count));
+            }
+            f.fix = Some(Fix { summary: t!("check.worker_pressure.fix.threadpool"), sql: None, cost: None });
+            f.verify = vec![t!("check.worker_pressure.verify.threadpool")];
+            f
+        }
+        WorkerPressure::Connections { used, peak, peak_ago } => {
             let mut f = finding(
                 "worker-pressure",
                 &key,
                 Category::Configuration,
                 subject(SubjectKind::Setting, "max_connections"),
             );
-            f.title = if used >= 85.0 {
-                format!("The whole server's connections were at {:.0}% of max_connections when scanned", used)
-            } else {
-                format!("{} reached its connection limit once, {when}", snapshot.server.name())
-            };
-            let peak_note = match peak.filter(|_| used < 85.0) {
-                Some(p) if p > 100.0 => format!(
-                    " At its busiest it had {:.0}% of today's max_connections open: the limit was lowered after that.",
-                    p
-                ),
-                Some(_) => format!(
-                    " That was the busiest moment since {} started; it isn't near the limit now ({:.0}% in use).",
-                    snapshot.server.name(),
-                    used
-                ),
-                None => String::new(),
-            };
-            f.summary = format!(
-                "This count covers every database on the server, not only this database's application. When every connection slot is taken, new connections are refused and the application errors out.{peak_note} {} \
-                 Each connection costs memory, so the fix is fewer, busier connections rather than a higher limit.",
-                if snapshot.server.engine == Engine::Postgres {
-                    "Idle connections still hold a backend process each."
-                } else {
-                    "Idle connections still hold a thread and buffers each."
+            let engine = snapshot.server.name();
+            let percent = format!("{used:.0}");
+            f.title = match peak_ago {
+                _ if used >= 85.0 => t!("check.worker_pressure.title.connections", percent = &percent),
+                Some(s) => {
+                    t!("check.worker_pressure.title.limit_ago", engine = engine, ago = format::duration(s * 1000.0))
                 }
-            );
-            // Now is measured; a peak since the start is one moment in the past: at most Medium, and Low unless it
-            // was within the last day.
-            // The server's capacity is relevant context, but this count does not identify this database as its cause.
+                None => t!("check.worker_pressure.title.limit_since", engine = engine, since = uptime_phrase(snapshot)),
+            };
+            let postgres = snapshot.server.engine == Engine::Postgres;
+            let mut summary = vec![t!("check.worker_pressure.summary.connections")];
+            match peak {
+                Some(Peak::AboveLimit(p)) => {
+                    summary.push(t!("check.worker_pressure.summary.lowered", percent = format!("{p:.0}")))
+                }
+                Some(Peak::AtLimit) => {
+                    summary.push(t!("check.worker_pressure.summary.busiest", engine = engine, percent = &percent))
+                }
+                None => {}
+            }
+            summary.push(if postgres {
+                t!("check.worker_pressure.summary.idle_postgres")
+            } else {
+                t!("check.worker_pressure.summary.idle_mysql")
+            });
+            summary.push(t!("check.worker_pressure.summary.fewer"));
+            f.summary = summary.join(" ");
+            // Now is measured; a peak since the start is one moment in the past. The server's capacity is relevant
+            // context, but this count does not identify this database as its cause.
             f.severity = Severity::Low;
             f.impact.score = base_score(f.severity);
-            f.impact.label = format!("{:.0}% of connections", used);
+            f.impact.label = t!("check.worker_pressure.impact.connections", percent = &percent);
             f.confidence = Confidence::High;
-            f.metrics = vec![Metric::new("Connections in use", used / 100.0, Unit::Ratio)];
+            f.metrics = vec![Metric::new(t!("check.worker_pressure.metric.connections"), used / 100.0, Unit::Ratio)];
             f.fix = Some(Fix {
-                summary: if snapshot.server.engine == Engine::Postgres {
-                    "Put a connection pooler in front (PgBouncer, or the application's pool with a smaller maximum) and close idle sessions. Raise max_connections only with memory to spare (it needs a restart).".into()
+                summary: if postgres {
+                    t!("check.worker_pressure.fix.postgres")
                 } else {
-                    "Size the application's connection pools to what the server can run (a few per core), close idle sessions, and use ProxySQL or the cloud proxy if many clients connect. Raise max_connections only with memory to spare.".into()
+                    t!("check.worker_pressure.fix.mysql")
                 },
                 sql: None,
                 cost: None,
             });
-            f.verify = vec!["Re-scan: connections in use should stay under 80% of max_connections.".into()];
-            vec![f]
+            f.verify = vec![t!("check.worker_pressure.verify.connections")];
+            f
         }
     }
 }
