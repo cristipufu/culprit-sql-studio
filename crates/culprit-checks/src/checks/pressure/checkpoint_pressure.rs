@@ -2,26 +2,50 @@
 
 use super::*;
 use crate::evidence::Requirement as Evidence;
+use culprit_core::t;
 
 pub fn checkpoint_pressure_info() -> CheckInfo {
     CheckInfo {
         id: "checkpoint-pressure".into(),
-        title: "Requested checkpoints".into(),
+        title: t!("check.checkpoint_pressure.info.title"),
         category: Category::Configuration,
         engines: vec![Engine::Postgres],
         requires: vec![],
-        description:
-            "The server's requested checkpoints, with the possible causes and the evidence needed before changing WAL settings."
-                .into(),
+        description: t!("check.checkpoint_pressure.info.description"),
     }
 }
 
 check!(
-    CheckpointPressureCheck: checkpoint_pressure_info, checkpoint_pressure,
-    &[Evidence::Pressure { signal: Some(culprit_core::signal_id::CHECKPOINTS_REQUESTED), timed_files: false, complete: true }]
+    CheckpointPressureCheck: checkpoint_pressure_info,
+    decide = requested_checkpoints,
+    render = checkpoint_pressure_finding,
+    case<'s> = RequestedCheckpoints<'s>,
+    evidence = &[Evidence::Pressure {
+        signal: Some(culprit_core::signal_id::CHECKPOINTS_REQUESTED),
+        timed_files: false,
+        complete: true
+    }],
 );
 
-pub fn checkpoint_pressure(snapshot: &Snapshot) -> Vec<Finding> {
+/// The checkpoint-pressure findings of `snapshot`: its cases, each worded.
+#[cfg(test)]
+pub(crate) fn checkpoint_pressure(snapshot: &Snapshot) -> Vec<Finding> {
+    culprit_core::Check::run(&CheckpointPressureCheck, snapshot)
+}
+
+/// The server's checkpoints, many of them requested rather than timed, and the WAL room a confirmed cause would need.
+pub struct RequestedCheckpoints<'s> {
+    /// Requested checkpoints, as a percentage of all of them.
+    requested: f64,
+    /// Checkpoints since the counters were reset.
+    total: f64,
+    /// max_wal_size as the server reports it.
+    current: Option<&'s str>,
+    /// More room than it has now: 8GB, or twice the current size when that's already at least 8GB.
+    proposed: String,
+}
+
+fn requested_checkpoints(snapshot: &Snapshot) -> Vec<RequestedCheckpoints<'_>> {
     let (Some(requested), Some(total)) = (
         signal(snapshot, culprit_core::signal_id::CHECKPOINTS_REQUESTED),
         signal(snapshot, culprit_core::signal_id::CHECKPOINTS),
@@ -31,7 +55,17 @@ pub fn checkpoint_pressure(snapshot: &Snapshot) -> Vec<Finding> {
     if requested < 30.0 || total < 10.0 || snapshot.server.platform().is_some_and(|p| p.applies_wal_in_storage()) {
         return Vec::new();
     }
-    let current = snapshot.settings.iter().find(|s| s.name == "max_wal_size").map(|s| s.value.clone());
+    let current = snapshot.settings.iter().find(|s| s.name == "max_wal_size").map(|s| s.value.as_str());
+    let proposed_mb = current.and_then(size_in_mb).map_or(8192.0, |mb| (mb * 2.0).max(8192.0));
+    let proposed = if proposed_mb >= 1024.0 && proposed_mb % 1024.0 == 0.0 {
+        format!("{:.0}GB", proposed_mb / 1024.0)
+    } else {
+        format!("{proposed_mb:.0}MB")
+    };
+    vec![RequestedCheckpoints { requested, total, current, proposed }]
+}
+
+fn checkpoint_pressure_finding(snapshot: &Snapshot, c: RequestedCheckpoints<'_>) -> Finding {
     let mut f = finding(
         "checkpoint-pressure",
         "max_wal_size",
@@ -40,37 +74,35 @@ pub fn checkpoint_pressure(snapshot: &Snapshot) -> Vec<Finding> {
     );
     // PostgreSQL counts every checkpoint something asked for as requested: WAL reaching max_wal_size, but also a
     // manual CHECKPOINT, a base backup or CREATE DATABASE. The counter doesn't say which.
-    f.title = format!("{:.0}% of the server's recorded checkpoints were requested rather than timed", requested);
-    f.summary = format!(
-        "{} of {} checkpoints across the whole server were requested rather than timed since the checkpoint counters were reset. Requests can come from WAL reaching max_wal_size{}, a manual CHECKPOINT, a base backup or CREATE DATABASE. This counter does not distinguish their causes or measure write latency, so it does not establish that WAL is too small or that this database has write pressure.",
-        format::count(total * requested / 100.0),
-        format::count(total),
-        current.as_deref().map(|c| format!(" ({c})")).unwrap_or_default()
-    );
+    let percent = format!("{:.0}", c.requested);
+    f.title = t!("check.checkpoint_pressure.title", percent = &percent);
+    f.summary = [
+        t!(
+            "check.checkpoint_pressure.summary.requested",
+            requested = format::count(c.total * c.requested / 100.0),
+            total = format::count(c.total)
+        ),
+        match c.current {
+            Some(size) => t!("check.checkpoint_pressure.summary.causes_at", size = size),
+            None => t!("check.checkpoint_pressure.summary.causes"),
+        },
+        t!("check.checkpoint_pressure.summary.not_proof"),
+    ]
+    .join(" ");
     f.severity = Severity::Low;
-    f.impact.score = base_score(f.severity) + requested / 10.0;
-    f.impact.label = format!("{:.0}% requested", requested);
+    f.impact.score = base_score(f.severity) + c.requested / 10.0;
+    f.impact.label = t!("check.checkpoint_pressure.impact", percent = &percent);
     f.confidence = Confidence::Medium;
     f.metrics = vec![
-        Metric::new("Requested checkpoints", requested / 100.0, Unit::Ratio),
-        Metric::new("Checkpoints", total, Unit::Count),
+        Metric::new(t!("check.checkpoint_pressure.metric.requested"), c.requested / 100.0, Unit::Ratio),
+        Metric::new(t!("check.checkpoint_pressure.metric.checkpoints"), c.total, Unit::Count),
     ];
-    // More room than it has now: 8GB, or twice the current size when that's already at least 8GB.
-    let proposed_mb = current.as_deref().and_then(size_in_mb).map_or(8192.0, |mb| (mb * 2.0).max(8192.0));
-    let proposed = if proposed_mb >= 1024.0 && proposed_mb % 1024.0 == 0.0 {
-        format!("{:.0}GB", proposed_mb / 1024.0)
-    } else {
-        format!("{proposed_mb:.0}MB")
-    };
-    let change = setting_change(&snapshot.server, "max_wal_size", &proposed);
+    let change = setting_change(&snapshot.server, "max_wal_size", &c.proposed);
     f.fix = Some(Fix {
-        summary: format!(
-            "Inspect the checkpoint log (log_checkpoints) during normal load before changing anything. If it confirms frequent checkpoints caused by WAL filling max_wal_size, check free disk space and consider giving WAL more room: {} Backups and manual checkpoints need no WAL-size fix.",
-            change.how
-        ),
+        summary: t!("check.checkpoint_pressure.fix", how = change.how),
         sql: None,
-        cost: Some("WAL takes more disk, and crash recovery can take a little longer.".into()),
+        cost: Some(t!("check.checkpoint_pressure.fix_cost")),
     });
-    f.verify = vec!["Check checkpoint reasons and write latency during comparable load. After a confirmed WAL-size change, WAL-triggered checkpoints should be less frequent; the requested-checkpoint ratio alone is not a health target.".into()];
-    vec![f]
+    f.verify = vec![t!("check.checkpoint_pressure.verify")];
+    f
 }
