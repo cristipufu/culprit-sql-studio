@@ -32,10 +32,7 @@ pub struct Counters {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference: Option<culprit_core::ScanReference>,
     pub taken_at: String,
-    pub source: String,
     pub database: String,
-    /// When the source's counters last started from zero (statistics reset or server start).
-    pub window_start: Option<String>,
     pub total_time_ms: f64,
     pub total_executions: f64,
     pub queries: BTreeMap<String, [f64; 2]>,
@@ -161,9 +158,7 @@ impl Counters {
             reference: None,
             measurement: snapshot.identified_measurement(),
             taken_at: snapshot.taken_at.clone(),
-            source: workload.source.clone(),
             database: snapshot.server.database.clone(),
-            window_start: workload.window_start.clone(),
             total_time_ms: workload.total_time_ms,
             total_executions: workload.total_executions,
             queries: workload.queries.iter().map(|q| (q.id.clone(), [q.total_time_ms, q.executions])).collect(),
@@ -202,8 +197,8 @@ pub fn evictions_baseline(
     snapshot: &culprit_core::Snapshot,
 ) -> Option<culprit_core::CountBaseline> {
     let now = evictions(snapshot)?;
-    let workload = snapshot.workload.as_ref().filter(|w| w.is_cumulative())?;
     let current = Counters::from_snapshot(snapshot)?;
+    let measured = current.measurement.as_ref()?;
     let at = epoch(&snapshot.taken_at)?;
     history
         .iter()
@@ -211,17 +206,8 @@ pub fn evictions_baseline(
         .filter_map(|c| Some((epoch(&c.taken_at)?, c, c.evictions?)))
         .filter(|(t, _, _)| *t <= at - culprit_core::PER_DAY_MIN_HOURS * 3600.0)
         .filter_map(|(t, c, then)| {
-            let mut baseline = match (&c.measurement, &current.measurement) {
-                (Some(a), Some(b)) => culprit_core::CountBaseline::in_context(&c.taken_at, then, now, a, b)?,
-                (None, None) => culprit_core::CountBaseline::between(
-                    &c.taken_at,
-                    then,
-                    now,
-                    c.window_start.as_deref(),
-                    workload.window_start.as_deref(),
-                ),
-                _ => return None,
-            };
+            let mut baseline =
+                culprit_core::CountBaseline::in_context(&c.taken_at, then, now, c.measurement.as_ref()?, measured)?;
             baseline.reference = Some(c.scan_reference());
             Some((t, baseline))
         })
@@ -246,20 +232,17 @@ pub enum StepKind {
 /// last digits when the same entries are added in another order: a difference this small is no time.
 const SUM_JITTER_MS: f64 = 0.5;
 
-pub fn step_kind(ta: f64, a: &Counters, b: &Counters) -> StepKind {
+pub fn step_kind(a: &Counters, b: &Counters) -> StepKind {
     if !a.same_series(b) {
         return StepKind::Unknown;
     }
-    match (&a.measurement, &b.measurement) {
-        (Some(before), Some(after)) => match before.counter_transition(after) {
+    // Counters in the same series both carry their measurement context.
+    if let (Some(before), Some(after)) = (&a.measurement, &b.measurement) {
+        match before.counter_transition(after) {
             CounterTransition::Reset => return StepKind::Reset,
             CounterTransition::Incompatible(_) => return StepKind::Unknown,
             _ => {}
-        },
-        (None, None) if b.window_start.as_deref().and_then(epoch).is_some_and(|r| r > ta + 1.0) => {
-            return StepKind::Reset;
         }
-        _ => {}
     }
     let shrank = b.total_executions < a.total_executions || b.total_time_ms < a.total_time_ms - SUM_JITTER_MS;
     let evicted = matches!((a.evictions, b.evictions), (Some(x), Some(y)) if y > x);
@@ -389,7 +372,7 @@ pub fn from_scans(snapshot: &mut Snapshot, evictions: Option<f64>, history: &[Co
         .windows(2)
         .map(|pair| {
             let ((ta, a), (tb, b)) = (pair[0], pair[1]);
-            let kind = step_kind(ta, a, b);
+            let kind = step_kind(a, b);
             let first = |id: &str| first_seen.get(id).copied();
             let queries = ids.iter().map(|id| query_step(kind, ta, a, b, id, first(id))).collect();
             let (time_ms, executions) = match kind {
@@ -526,16 +509,13 @@ fn last_ran(
         visited.extend(start..end);
         let mut reset = false;
         let mut continued = false;
-        for (t, c) in group {
+        for (_, c) in group {
             match (&c.measurement, &later.measurement) {
                 (Some(before), Some(after)) => match before.counter_transition(after) {
                     CounterTransition::Incompatible(_) => return None,
                     CounterTransition::Reset => reset = true,
                     _ => continued = true,
                 },
-                (None, None) if later.window_start.as_deref().and_then(epoch).is_some_and(|r| r > t + 1.0) => {
-                    return (later.taken_at != taken_at).then(|| later.taken_at.clone());
-                }
                 _ => continued = true,
             }
         }
@@ -812,9 +792,9 @@ mod tests {
         let mut a = counters("2026-10-10T00:00:00Z", reset, &[("a", 100.0, 10.0)]);
         let mut b = counters("2026-10-10T06:00:00Z", reset, &[("a", 200.0, 20.0)]);
         (a.evictions, b.evictions) = (Some(3.0), Some(7.0));
-        assert_eq!(step_kind(epoch(&a.taken_at).unwrap(), &a, &b), StepKind::Unknown);
+        assert_eq!(step_kind(&a, &b), StepKind::Unknown);
         b.evictions = Some(3.0);
-        assert_eq!(step_kind(epoch(&a.taken_at).unwrap(), &a, &b), StepKind::Growth);
+        assert_eq!(step_kind(&a, &b), StepKind::Growth);
     }
 
     #[test]
@@ -853,7 +833,7 @@ mod tests {
         let a = counters("2026-10-10T00:00:00Z", reset, &[("q", 900_000.0, 90_000.0), ("b", 100.0, 10.0)]);
         let mut b = counters("2026-10-10T06:00:00Z", reset, &[("q", 800_000.0, 80_000.0), ("b", 200.0, 20.0)]);
         (b.total_time_ms, b.total_executions) = (a.total_time_ms + 3_000.0, a.total_executions + 300.0);
-        assert_eq!(step_kind(ta, &a, &b), StepKind::Growth);
+        assert_eq!(step_kind(&a, &b), StepKind::Growth);
         assert_eq!(query_step(StepKind::Growth, ta, &a, &b, "q", None), None);
         assert_eq!(query_step(StepKind::Growth, ta, &a, &b, "b", None), Some([100.0, 10.0]));
     }
@@ -982,7 +962,6 @@ mod tests {
         let scan = |at: &str, start: &str, evictions: f64| {
             let mut c = counters(at, start, &[("a", 1.0, 1.0)]);
             c.database = s.server.database.clone();
-            c.source = s.workload.as_ref().unwrap().source.clone();
             c.evictions = Some(evictions);
             let mut w = s.workload.clone().unwrap();
             w.window_start = Some(start.into());

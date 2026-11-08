@@ -185,9 +185,6 @@ pub async fn attach(
     }
     coverage.append_to(snapshot);
     snapshot.workload = Some(workload);
-    if let Some(identity) = snapshot.identity.clone() {
-        snapshot.bind_identity(identity);
-    }
     Ok(())
 }
 

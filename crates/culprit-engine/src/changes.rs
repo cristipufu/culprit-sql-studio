@@ -183,7 +183,7 @@ fn span(points: &[(f64, &Counters)], from: usize, to: usize) -> Span {
         let ((ta, a), (_, b)) = (pair[0], pair[1]);
         // A reset only when the source says so: totals also shrink when entries are evicted, and then the later totals
         // are not "everything since", only what the entries still there grew by.
-        let kind = trends::step_kind(ta, a, b);
+        let kind = trends::step_kind(a, b);
         match kind {
             StepKind::Reset => {
                 out.time_ms += b.total_time_ms;
@@ -440,9 +440,7 @@ mod tests {
                 reset: culprit_core::ResetMarker::At("2026-10-01T00:00:00Z".into()),
             }),
             taken_at: at.into(),
-            source: "pg_stat_statements".into(),
             database: "shop".into(),
-            window_start: Some("2026-10-01T00:00:00Z".into()),
             total_time_ms: total[0],
             total_executions: total[1],
             queries: queries.iter().map(|(id, t, r, _)| (id.to_string(), [*t, *r])).collect(),
@@ -550,7 +548,6 @@ mod tests {
     fn empty_earlier_scans_are_not_called_untracked() {
         // Statistics were reset before the first scans: they saw nothing, then a query appeared.
         let mut later = counters("2026-10-11T12:00:00Z", [500.0, 50.0], &[("a", 500.0, 50.0, None)]);
-        later.window_start = Some("2026-10-11T07:00:00Z".into());
         later.measurement.as_mut().unwrap().reset = culprit_core::ResetMarker::At("2026-10-11T07:00:00Z".into());
         let history = vec![
             counters("2026-10-11T00:00:00Z", [0.0, 0.0], &[]),

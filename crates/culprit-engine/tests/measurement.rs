@@ -195,7 +195,7 @@ fn cache_entry_ages_never_establish_source_resets() {
     current.workload.as_mut().unwrap().window_start = Some("2026-10-10T12:00:00Z".into());
     let before = Counters::from_snapshot(&old).unwrap();
     let after = Counters::from_snapshot(&current).unwrap();
-    assert_eq!(trends::step_kind(trends::epoch(&old.taken_at).unwrap(), &before, &after), trends::StepKind::Growth);
+    assert_eq!(trends::step_kind(&before, &after), trends::StepKind::Growth);
     trends::last_seen_from_scans(&mut current, &[before]);
     assert_eq!(current.workload.as_ref().unwrap().queries[0].last_seen.as_deref(), Some(old.taken_at.as_str()));
 }
