@@ -5,35 +5,72 @@ import type { EventKind } from "../gen/EventKind";
 import type { EventLog } from "../gen/EventLog";
 import type { EventsRequest } from "../gen/EventsRequest";
 import { api, errorMessage, type ApiError } from "./api";
+import { dateLocale } from "./format";
+import { t } from "./i18n";
 
-/** What each kind of change is called in a legend or a chip. */
+/** What each kind of change is called in a legend or a chip, read in the app's language each time it is shown. */
 export const KIND_LABEL: Record<EventKind, string> = {
-  mark: "Mark",
-  index: "Index",
-  table: "Table",
-  code: "Code",
-  setting: "Setting",
-  version: "Upgrade",
-  restart: "Restart",
-  "stats-reset": "Stats reset",
-  statistics: "Statistics",
-  throttle: "Cloud",
+  get mark() {
+    return t("ui.events.kind.mark");
+  },
+  get index() {
+    return t("ui.events.kind.index");
+  },
+  get table() {
+    return t("ui.events.kind.table");
+  },
+  get code() {
+    return t("ui.events.kind.code");
+  },
+  get setting() {
+    return t("ui.events.kind.setting");
+  },
+  get version() {
+    return t("ui.events.kind.version");
+  },
+  get restart() {
+    return t("ui.events.kind.restart");
+  },
+  get "stats-reset"() {
+    return t("ui.events.kind.stats_reset");
+  },
+  get statistics() {
+    return t("ui.events.kind.statistics");
+  },
+  get throttle() {
+    return t("ui.events.kind.throttle");
+  },
 };
 
-const clock = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
-const dayClock = new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
-const dateClock = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const CLOCKS = {
+  clock: { hour: "numeric", minute: "2-digit" },
+  dayClock: { weekday: "short", hour: "numeric", minute: "2-digit" },
+  dateClock: { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" },
+} satisfies Record<string, Intl.DateTimeFormatOptions>;
+const clocks = new Map<string, Intl.DateTimeFormat>();
+
+/** A moment as `kind` writes it, in the app's language (one formatter per language and kind). */
+function clock(kind: keyof typeof CLOCKS, at: number): string {
+  const locale = dateLocale();
+  const key = `${kind} ${locale}`;
+  let format = clocks.get(key);
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale, CLOCKS[kind]);
+    clocks.set(key, format);
+  }
+  return format.format(at);
+}
 
 /** "Tue 14:05" within the week, "Oct 3, 14:05" before. */
-export function stamp(t: number): string {
-  return Date.now() - t < 6 * 86_400_000 ? dayClock.format(t) : dateClock.format(t);
+export function stamp(at: number): string {
+  return clock(Date.now() - at < 6 * 86_400_000 ? "dayClock" : "dateClock", at);
 }
 
 /** When an event happened, in local time and as exactly as its source knows. */
 export function eventTime(e: ChangeEvent): string {
   const at = Date.parse(e.at);
-  if (e.after) return `between the ${stamp(Date.parse(e.after))} and ${clock.format(at)} scans`;
-  if (e.until) return `${stamp(at)}–${clock.format(Date.parse(e.until))}`;
+  if (e.after) return t("ui.events.between_scans", { from: stamp(Date.parse(e.after)), to: clock("clock", at) });
+  if (e.until) return `${stamp(at)}–${clock("clock", Date.parse(e.until))}`;
   return stamp(at);
 }
 

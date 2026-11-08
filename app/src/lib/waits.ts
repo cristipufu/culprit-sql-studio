@@ -4,22 +4,50 @@ import type { WaitSample } from "../gen/WaitSample";
 import type { WaitStat } from "../gen/WaitStat";
 import { api, errorMessage, type ApiError } from "./api";
 import { bytes, count, duration, percentValue } from "./format";
+import { t } from "./i18n";
 
-/** The shared wait categories, in the same order and words as the Rust side (culprit_core::waits). */
+/** The shared wait categories, in the same order and words as the Rust side (culprit_core::waits), read in the app's
+ * language each time they are shown. */
 export const WAIT_LABEL: Record<string, string> = {
-  cpu: "CPU",
-  rpc: "Distributed RPCs",
-  storage: "Storage I/O",
-  io: "Disk reads",
-  rows: "Row access",
-  lock: "Locks",
-  latch: "In-memory contention",
-  log: "Log writes",
-  network: "Sending results",
-  parallelism: "Parallel queries",
-  memory: "Memory",
-  compilation: "Compiling plans",
-  other: "Everything else",
+  get cpu() {
+    return t("ui.waits.category.cpu");
+  },
+  get rpc() {
+    return t("ui.waits.category.rpc");
+  },
+  get storage() {
+    return t("ui.waits.category.storage");
+  },
+  get io() {
+    return t("ui.waits.category.io");
+  },
+  get rows() {
+    return t("ui.waits.category.rows");
+  },
+  get lock() {
+    return t("ui.waits.category.lock");
+  },
+  get latch() {
+    return t("ui.waits.category.latch");
+  },
+  get log() {
+    return t("ui.waits.category.log");
+  },
+  get network() {
+    return t("ui.waits.category.network");
+  },
+  get parallelism() {
+    return t("ui.waits.category.parallelism");
+  },
+  get memory() {
+    return t("ui.waits.category.memory");
+  },
+  get compilation() {
+    return t("ui.waits.category.compilation");
+  },
+  get other() {
+    return t("ui.waits.category.other");
+  },
 };
 
 /** Shares of task observations; these weights are never durations. */
@@ -32,7 +60,7 @@ export function foldActivity(history: import("../gen/ActivityHistory").ActivityH
     weights.set(key, (weights.get(key) ?? 0) + e.weighted_observations);
     total += e.weighted_observations;
   }
-  return [...weights].map(([key, weight]) => ({ key, label: WAIT_LABEL[key] ?? "Everything else", weight, share: weight / total })).sort((a, b) => b.weight - a.weight);
+  return [...weights].map(([key, weight]) => ({ key, label: WAIT_LABEL[key] ?? t("ui.waits.category.other"), weight, share: weight / total })).sort((a, b) => b.weight - a.weight);
 }
 
 /** Fold an engine's category name into a shared key (mirrors `category_key` in Rust). */
@@ -113,9 +141,9 @@ export function signalValue(s: Signal): string {
       return percentValue(s.value);
     case "per-second":
       // Under one every ten seconds, a per-minute rate says more than "0.0/s".
-      return s.value > 0 && s.value < 0.1 ? `${count(s.value * 60)}/min` : `${count(s.value)}/s`;
+      return s.value > 0 && s.value < 0.1 ? t("ui.waits.rate.per_minute", { value: count(s.value * 60) }) : t("ui.waits.rate.per_second", { value: count(s.value) });
     case "per-hour":
-      return `${count(s.value)}/h`;
+      return t("ui.waits.rate.per_hour", { value: count(s.value) });
     case "count":
       return count(s.value);
     case "bytes":
@@ -127,7 +155,27 @@ export function signalValue(s: Signal): string {
   }
 }
 
-export const SIGNAL_SCOPE: Record<Signal["scope"], string> = { now: "when scanned", "since-startup": "since start", sampled: "sampled", "last-hour": "available recent history", "query-history": "retained query history", window: "selected period" };
+/** What a signal's value covers, read in the app's language each time it is shown. */
+export const SIGNAL_SCOPE: Record<Signal["scope"], string> = {
+  get now() {
+    return t("ui.waits.scope.now");
+  },
+  get "since-startup"() {
+    return t("ui.waits.scope.since_startup");
+  },
+  get sampled() {
+    return t("ui.waits.scope.sampled");
+  },
+  get "last-hour"() {
+    return t("ui.waits.scope.last_hour");
+  },
+  get "query-history"() {
+    return t("ui.waits.scope.query_history");
+  },
+  get window() {
+    return t("ui.waits.scope.window");
+  },
+};
 
 // ── the "right now" sample keeps running while the panel is closed ────────────────────────────────
 
