@@ -74,7 +74,10 @@ export class EditorExecution {
     const live = () => this.owners.get(tab) === owner;
     this.show(tab, { kind: "busy", label: mode === "analyze" ? "Running and measuring…" : "Planning…" });
     try {
-      const plan = await (await this.client()).explain(connection, sql, mode, false);
+      const client = await this.client();
+      // The tab may have closed while the client was coming: nothing is sent for it (Analyze runs the statement).
+      if (!live()) return "stopped";
+      const plan = await client.explain(connection, sql, mode, false);
       if (!live()) return "stopped";
       this.owners.delete(tab);
       this.show(tab, { kind: "plan", plan });
@@ -125,6 +128,8 @@ export class EditorExecution {
       this.show(tab, { kind: "error", error: errorMessage(e) });
       return "error";
     }
+    // Retired while the client was coming: not even the production checks are sent.
+    if (!live()) return "stopped";
     let started = false;
     const progress = (label: string) => {
       if (!live()) return;

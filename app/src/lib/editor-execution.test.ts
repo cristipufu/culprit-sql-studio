@@ -23,10 +23,14 @@ const update: StatementCheck = { reads_only: false, verb: "UPDATE", warning: nul
 /** An API whose statements and plans each finish when the test says, and which records what was sent. */
 function controlledApi() {
   const sent: { sql: string; confirmed: boolean }[] = [];
+  const checked: string[] = [];
   const running = new Map<string, ReturnType<typeof deferred<ResultSet>>>();
   const planning = new Map<string, ReturnType<typeof deferred<Plan>>>();
   const api: ExecutionApi = {
-    checkStatement: async (_engine, sql) => (sql.startsWith("UPDATE") ? update : read),
+    checkStatement: async (_engine, sql) => {
+      checked.push(sql);
+      return sql.startsWith("UPDATE") ? update : read;
+    },
     lintSql: async () => [],
     run: (_connection, sql, _limit, confirmed) => {
       sent.push({ sql, confirmed });
@@ -42,7 +46,7 @@ function controlledApi() {
   };
   /** Let the async steps before a statement is sent (checks, the client) happen. */
   const settle = () => new Promise((r) => setTimeout(r, 0));
-  return { api, sent, running, planning, settle };
+  return { api, sent, checked, running, planning, settle };
 }
 
 function editor(client: () => Promise<ExecutionApi>) {
@@ -168,4 +172,22 @@ test("Leaving the connection retires every tab and counts those with a statement
   expect(await a).toBe("stopped");
   expect(sent.map((s) => s.sql)).toEqual(["SELECT 'a'"]);
   expect(execution.busy("a") || execution.busy("b")).toBe(false);
+});
+
+test("A tab closed while the API is still coming sends nothing: no plan, no Analyze run, no checks", async () => {
+  const { api, sent, checked, planning } = controlledApi();
+  const ready = deferred<ExecutionApi>();
+  const { execution, shown } = editor(() => ready.promise);
+  const analyze = execution.explain("plan", "orders", "SELECT * FROM orders", "analyze");
+  const change = execution.run("batch", batch(["UPDATE a SET x = 1"], true));
+  // Nothing has been sent yet, so nothing is left running for either.
+  expect(execution.retire("plan")).toBe(true);
+  expect(execution.retire("batch")).toBe(true);
+  ready.resolve(api);
+  expect(await analyze).toBe("stopped");
+  expect(await change).toBe("stopped");
+  expect(planning.size).toBe(0);
+  expect(sent).toEqual([]);
+  expect(checked).toEqual([]);
+  expect(shown.map((s) => s.output.kind)).toEqual(["busy"]);
 });
