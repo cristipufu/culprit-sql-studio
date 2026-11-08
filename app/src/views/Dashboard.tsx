@@ -321,14 +321,14 @@ function FindingsTile({ tile, report }: { tile: Tile; report: Report }) {
   return (
     <Frame tile={tile} action={t("ui.dashboard.action.all_findings")} onOpen={() => setState({ view: "overview", changes: null })}>
       {total > 0 && (
-        <div className="dash-sevbar" role="img" aria-label={counts.map((c) => t("ui.dashboard.findings.severity_count", { severity: c.s, count: String(c.n) })).join(", ")}>
+        <div className="dash-sevbar" role="img" aria-label={counts.map((c) => t("ui.dashboard.findings.severity_count", { severity: c.s, n: c.n, count: String(c.n) })).join(", ")}>
           <div className="dash-sevbar-track">
             {counts.map((c) => (c.n > 0 ? <span key={c.s} className={c.s} style={{ flexGrow: c.n }} /> : null))}
           </div>
           <div className="dash-sevbar-legend">
             {counts.map((c) => (
               <span key={c.s} className={c.n === 0 ? "zero" : ""}>
-                <i className={`sev ${c.s}`} /> {t("ui.dashboard.findings.severity_count", { severity: c.s, count: String(c.n) })}
+                <i className={`sev ${c.s}`} /> {t("ui.dashboard.findings.severity_count", { severity: c.s, n: c.n, count: String(c.n) })}
               </span>
             ))}
           </div>

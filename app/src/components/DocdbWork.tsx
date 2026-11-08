@@ -6,7 +6,7 @@ import { t } from "../lib/i18n";
 export function DocdbWork({ metrics, basis, runs }: { metrics?: DocdbMetrics | null; basis: "execution" | "loop" | "workload"; runs?: number }) {
   if (!metrics) return null;
   const divisor = basis === "workload" && runs != null && runs > 0 ? runs : 1;
-  const label = basis === "workload" ? (runs != null && runs > 0 ? t("ui.docdb_work.basis.per_run") : t("ui.docdb_work.basis.retained")) : basis === "loop" ? t("ui.docdb_work.basis.per_loop") : t("ui.docdb_work.basis.execution");
+  const said = basis === "workload" ? (runs != null && runs > 0 ? "per_run" : "retained") : basis === "loop" ? "per_loop" : "execution";
   const entries: [keyof DocdbMetrics, string, "count" | "time"][] = [
     ["read_requests", t("ui.docdb_work.read_requests"), "count"], ["write_requests", t("ui.docdb_work.write_requests"), "count"],
     ["read_operations", t("ui.docdb_work.read_operations"), "count"], ["write_operations", t("ui.docdb_work.write_operations"), "count"],
@@ -25,7 +25,7 @@ export function DocdbWork({ metrics, basis, runs }: { metrics?: DocdbMetrics | n
   return (
     <section className="beyond" aria-label={t("ui.docdb_work.title")}>
       <h3>{t("ui.docdb_work.title")}</h3>
-      <p className="beyond-foot">{t("ui.docdb_work.foot", { basis: label })}</p>
+      <p className="beyond-foot">{t("ui.docdb_work.foot", { basis: said })}</p>
       <div className="beyond-rows" role="list">
         {rows.map((row) => <div className="beyond-row" key={row.key} role="listitem"><i className="sig-dot info" aria-hidden /><span className="beyond-label">{row.title}</span><span className="beyond-value">{row.value}</span></div>)}
       </div>

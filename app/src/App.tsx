@@ -194,7 +194,7 @@ function TopBar() {
           title={
             environment === "production"
               ? t("ui.app.production_title")
-              : t("ui.app.environment_connection", { environment: t("ui.common.environment", { environment }) })
+              : t("ui.app.environment_connection", { environment })
           }
         >
           {t("ui.common.environment", { environment })}
