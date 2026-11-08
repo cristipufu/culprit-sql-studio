@@ -6,7 +6,7 @@ use culprit_core::{
     format,
 };
 
-use culprit_core::Check;
+use culprit_core::{Check, t};
 
 use crate::support::*;
 
@@ -31,15 +31,19 @@ fn short_date(iso: &str) -> String {
     iso.get(..10).unwrap_or(iso).to_string()
 }
 
+/// What holds cleanup back, and how far behind when known: "session 4242, 5.0M transactions behind".
 pub(super) fn cleanup_holder_phrase(h: &culprit_core::OpenTransaction) -> String {
-    let kind = match h.holder {
-        culprit_core::CleanupHolder::PreparedTransaction => format!("prepared transaction '{}'", h.session),
-        culprit_core::CleanupHolder::ReplicationSlot => format!("replication slot '{}'", h.session),
-        culprit_core::CleanupHolder::Session => format!("session {}", h.session),
-    };
-    match h.xid_age.filter(|a| *a > 0.0) {
-        Some(age) => format!("{kind}, {} transactions behind", format::count(age)),
-        None => kind,
+    use culprit_core::CleanupHolder::{PreparedTransaction, ReplicationSlot, Session};
+    let name = &h.session;
+    match (h.holder, h.xid_age.filter(|a| *a > 0.0).map(format::count)) {
+        (PreparedTransaction, None) => t!("common.cleanup_holder.prepared", name = name),
+        (PreparedTransaction, Some(behind)) => {
+            t!("common.cleanup_holder.prepared_behind", name = name, behind = behind)
+        }
+        (ReplicationSlot, None) => t!("common.cleanup_holder.slot", name = name),
+        (ReplicationSlot, Some(behind)) => t!("common.cleanup_holder.slot_behind", name = name, behind = behind),
+        (Session, None) => t!("common.cleanup_holder.session", name = name),
+        (Session, Some(behind)) => t!("common.cleanup_holder.session_behind", name = name, behind = behind),
     }
 }
 

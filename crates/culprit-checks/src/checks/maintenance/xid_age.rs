@@ -2,24 +2,44 @@
 
 use super::*;
 use crate::evidence::Requirement as Evidence;
+use culprit_core::{OpenTransaction, TableStat, t};
 
 pub fn xid_age_info() -> CheckInfo {
     CheckInfo {
         id: "xid-age".into(),
-        title: "Transaction ID wraparound risk".into(),
+        title: t!("check.xid_age.info.title"),
         category: Category::Maintenance,
         engines: vec![Engine::Postgres],
         requires: vec![Capability::TableStats],
-        description:
-            "Transaction ID age approaching the point where PostgreSQL stops accepting writes to protect data.".into(),
+        description: t!("check.xid_age.info.description"),
     }
 }
 
-check!(XidAgeCheck: xid_age_info, xid_age, &[Evidence::Tables(crate::evidence::TableMeasure::Xid)]);
+check!(
+    XidAgeCheck: xid_age_info,
+    decide = xid_ages,
+    render = xid_age_finding,
+    case<'s> = XidAge<'s>,
+    evidence = &[Evidence::Tables(crate::evidence::TableMeasure::Xid)],
+);
 
 pub(super) const WRAPAROUND: f64 = 2_000_000_000.0;
 
-pub fn xid_age(snapshot: &Snapshot) -> Vec<Finding> {
+/// The database's oldest unfrozen transaction ID, old enough that freezing is falling behind.
+pub struct XidAge<'s> {
+    /// Its age: the database's, else its oldest table's.
+    age: f64,
+    /// autovacuum_freeze_max_age, when the age is past it: autovacuum should be freezing and isn't keeping up.
+    past_freeze_max: Option<f64>,
+    /// The cleanup holder this scan observed: VACUUM can't freeze row versions newer than its horizon.
+    holder: Option<&'s OpenTransaction>,
+    /// The table with the oldest transaction ID, to freeze first.
+    oldest: Option<&'s TableStat>,
+    severity: Severity,
+    score: f64,
+}
+
+fn xid_ages(snapshot: &Snapshot) -> Vec<XidAge<'_>> {
     if snapshot.server.engine != Engine::Postgres {
         return Vec::new();
     }
@@ -38,63 +58,69 @@ pub fn xid_age(snapshot: &Snapshot) -> Vec<Finding> {
     if age < threshold {
         return Vec::new();
     }
-    let remaining = (WRAPAROUND - age).max(0.0);
     let holder = snapshot
         .pressure
         .as_ref()
         .and_then(|p| p.oldest_transaction.as_ref())
         .filter(|h| !h.catalog_only && h.xid_age.is_some_and(|a| a > 0.0));
+    vec![XidAge {
+        age,
+        past_freeze_max: freeze_max.filter(|m| age >= *m),
+        holder,
+        oldest,
+        severity: if age >= 1_200_000_000.0 { Severity::High } else { Severity::Medium },
+        score: if age >= 1_500_000_000.0 {
+            95.0
+        } else if age >= 1_200_000_000.0 {
+            70.0
+        } else {
+            35.0
+        },
+    }]
+}
+
+fn xid_age_finding(snapshot: &Snapshot, xid: XidAge<'_>) -> Finding {
+    let age = xid.age;
+    let remaining = (WRAPAROUND - age).max(0.0);
     let mut f = finding(
         "xid-age",
         &snapshot.server.database,
         Category::Maintenance,
         subject(SubjectKind::Database, &snapshot.server.database),
     );
-    f.title = format!("Transaction IDs are {} of the way to wraparound", format::percent(age / WRAPAROUND));
-    f.summary = format!(
-        "The oldest unfrozen transaction ID in this database is {} transactions old.{}{} At about 2 billion PostgreSQL stops accepting writes until a full vacuum completes. {} transactions remain.",
-        format::count(age),
-        freeze_max
-            .filter(|m| age >= *m)
-            .map(|m| format!(
-                " Autovacuum starts freezing a table at autovacuum_freeze_max_age ({}), and this is {:.1} times that: freezing isn't keeping up.",
-                format::count(m),
-                age / m.max(1.0)
-            ))
-            .unwrap_or_default(),
-        holder
-            .map(|h| format!(
-                " A cleanup holder was observed in this scan ({}): VACUUM cannot freeze row versions newer than its horizon until it finishes or is removed.",
-                cleanup_holder_phrase(h)
-            ))
-            .unwrap_or_default(),
-        format::count(remaining)
-    );
-    f.severity = if age >= 1_200_000_000.0 { Severity::High } else { Severity::Medium };
-    f.impact.score = if age >= 1_500_000_000.0 {
-        95.0
-    } else if age >= 1_200_000_000.0 {
-        70.0
-    } else {
-        35.0
-    };
-    f.impact.label = format!("{} left", format::count(remaining));
-    f.confidence = Confidence::High;
-    f.metrics.push(Metric::new("Transaction ID age", age, Unit::Count));
-    f.metrics.push(Metric::new("Remaining before wraparound", remaining, Unit::Count));
-    if let Some(t) = oldest {
-        f.metrics.push(Metric::text("Oldest table", t.qualified()));
+    f.title = t!("check.xid_age.title", share = format::percent(age / WRAPAROUND));
+    let mut summary = vec![t!("check.xid_age.summary.age", age = format::count(age))];
+    if let Some(m) = xid.past_freeze_max {
+        summary.push(t!(
+            "check.xid_age.summary.freeze_max",
+            freeze_max = format::count(m),
+            times = format!("{:.1}", age / m.max(1.0))
+        ));
     }
-    if let Some(h) = holder {
-        f.metrics.push(Metric::text("Oldest cleanup holder", cleanup_holder_phrase(h)));
+    if let Some(h) = xid.holder {
+        summary.push(t!("check.xid_age.summary.holder", holder = cleanup_holder_phrase(h)));
+    }
+    summary.push(t!("check.xid_age.summary.wraparound", remaining = format::count(remaining)));
+    f.summary = summary.join(" ");
+    f.severity = xid.severity;
+    f.impact.score = xid.score;
+    f.impact.label = t!("check.xid_age.impact", remaining = format::count(remaining));
+    f.confidence = Confidence::High;
+    f.metrics.push(Metric::new(t!("check.xid_age.metric.age"), age, Unit::Count));
+    f.metrics.push(Metric::new(t!("check.xid_age.metric.remaining"), remaining, Unit::Count));
+    if let Some(t) = xid.oldest {
+        f.metrics.push(Metric::text(t!("check.xid_age.metric.oldest_table"), t.qualified()));
+    }
+    if let Some(h) = xid.holder {
+        f.metrics.push(Metric::text(t!("check.xid_age.metric.holder"), cleanup_holder_phrase(h)));
     }
     f.fix = Some(Fix {
-        summary: "Freeze the oldest tables first, and look for what holds vacuum back: long-running or idle-in-transaction sessions, abandoned replication slots, or prepared transactions.".into(),
-        sql: Some(match oldest {
+        summary: t!("check.xid_age.fix"),
+        sql: Some(match xid.oldest {
             Some(t) => format!("VACUUM (FREEZE, VERBOSE) {};", qualified(Engine::Postgres, &t.schema, &t.name)),
             None => "VACUUM (FREEZE, VERBOSE);".into(),
         }),
-        cost: Some("A freeze vacuum reads the whole table; it doesn't block reads or writes.".into()),
+        cost: Some(t!("check.xid_age.fix_cost")),
     });
-    vec![f]
+    f
 }
