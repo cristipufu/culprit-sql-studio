@@ -159,7 +159,7 @@ fn unread_finding(snapshot: &Snapshot, u: UnreadIndexes<'_>) -> Finding {
     let size = format::bytes(u.size);
     f.summary = match u.writes {
         // Nothing written either: the cost is the space, not the upkeep.
-        Some(w) if w == 0.0 => [
+        Some(0.0) => [
             if u.index_counted {
                 t!("check.unused_index.summary.unwritten_index", indexes = &indexes, since = &since, n = n)
             } else {
