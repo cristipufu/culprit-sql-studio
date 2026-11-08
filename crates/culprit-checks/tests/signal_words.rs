@@ -385,3 +385,45 @@ fix: Inspect server connection logs and client configuration for bad credentials
 verify: Compare two scans over a stated interval: new errors or waits should stop increasing, and the relevant worker/archive or application operations should succeed. Lifetime totals need not return to zero."#,
     );
 }
+
+// ── cluster-health ─────────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn cluster_health_of_a_node_out_of_the_component_and_of_flow_control() {
+    use culprit_core::operations::ClusterHealth;
+    let mut s = fixture("mysql-demo");
+    s.operations.cluster = Some(ClusterHealth {
+        ready: Some(false),
+        connected: Some(true),
+        primary_component: None,
+        local_state: Some("Donor/Desynced".into()),
+        flow_control_paused: Some(0.2),
+    });
+    let mut findings = run("cluster-health", &s);
+    s.operations.cluster = Some(ClusterHealth {
+        ready: Some(true),
+        connected: Some(true),
+        primary_component: Some(true),
+        local_state: None,
+        flow_control_paused: Some(0.3),
+    });
+    findings.extend(run("cluster-health", &s));
+    says(
+        &findings,
+        r#"id: cluster-health:shop
+title: This Galera node reports that it is not ready, disconnected or outside the primary component
+summary: Measured node status: ready no, connected yes, primary component unknown. Local state: Donor/Desynced. This is the node's own availability verdict; it can reject application operations. Check whether it is intentionally being maintained before intervening.
+impact: Node availability
+metric: Recorded flow-control paused share
+fix: Inspect cluster membership, node logs and state transfer with the cluster owner. Check network and capacity, and route traffic only to suitable nodes. Do not bootstrap a component, disable flow control or force quorum from this observation alone.
+verify: Verify the intended node rejoins the primary component, reports ready and connected, and serves application operations. Compare flow control over a fresh known interval before diagnosing sustained pressure.
+
+id: cluster-health:shop
+title: Galera recorded time paused for flow control (whole cluster context)
+summary: Measured node status: ready yes, connected yes, primary component yes. Local state: not recorded. Donor or desynchronized states can be deliberate. The retained flow-control ratio does not establish pressure or delays in this database now.
+impact: Historical cluster context
+metric: Recorded flow-control paused share
+fix: Inspect cluster membership, node logs and state transfer with the cluster owner. Check network and capacity, and route traffic only to suitable nodes. Do not bootstrap a component, disable flow control or force quorum from this observation alone.
+verify: Verify the intended node rejoins the primary component, reports ready and connected, and serves application operations. Compare flow control over a fresh known interval before diagnosing sustained pressure."#,
+    );
+}
