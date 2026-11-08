@@ -467,4 +467,15 @@ mod tests {
         }
         assert_eq!(parse_as("mysql://app@db/shop", Some(Engine::Yugabyte)).unwrap().engine, Some(Engine::Mysql));
     }
+
+    // What a person reads when the text isn't a connection, word for word: its messages come from locales/en.json.
+    #[test]
+    fn a_text_that_is_not_a_connection_says_why_in_english() {
+        let said = |input: &str| parse(input).unwrap_err().message;
+        assert_eq!(said("  "), "Paste a connection string or a host name");
+        assert_eq!(said("sqlite:"), "A SQLite connection needs the database file's path");
+        assert_eq!(said("[::1"), "Unclosed IPv6 address");
+        assert_eq!(said("db.example:abc"), "'abc' is not a valid port");
+        assert_eq!(said("postgres://"), "The connection string has no host");
+    }
 }

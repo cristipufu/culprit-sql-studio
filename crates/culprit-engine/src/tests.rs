@@ -291,3 +291,164 @@ async fn native_sessions_keep_complete_identity_for_progress_and_actions() {
     assert_eq!(*calls.lock().unwrap(), vec![(id.to_string(), SessionAction::Cancel)]);
     let _ = std::fs::remove_dir_all(home);
 }
+
+// What a person reads when a connection, a period or a pasted deadlock can't be used, word for word: these messages come
+// from locales/en.json.
+#[tokio::test]
+async fn what_cannot_be_done_with_a_connection_says_why_in_english() {
+    let home = temp_home("english");
+    let ws = Workspace::open_in(&home);
+    let said = |result: Result<ConnectionInfo>| {
+        let e = result.unwrap_err();
+        (e.message, e.hint)
+    };
+    assert_eq!(
+        said(ws.add_connection(NewConnection { name: "x".into(), input: "db.example".into(), ..Default::default() })),
+        (
+            "Can't tell which database engine this is".into(),
+            Some("Choose the engine explicitly: PostgreSQL, SQL Server, MySQL or SQLite (--engine in the CLI)".into())
+        )
+    );
+    let file = home.join("app.db");
+    ws.add_connection(NewConnection {
+        name: "file".into(),
+        input: file.to_string_lossy().into(),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(said(ws.set_password("file", "x")).0, "'file' does not use password authentication");
+    ws.add_connection(NewConnection {
+        name: "shop".into(),
+        input: "postgres://app@db.example:5432/shop".into(),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(said(ws.set_password("shop", "")).0, "The password is empty");
+    let missing = home.join("missing.log");
+    let (message, hint) = said(ws.set_query_log("file", Some(&missing)));
+    assert!(message.starts_with(&format!("Can't read {}: ", missing.display())), "{message}");
+    assert_eq!(hint.as_deref(), Some("Give the path of the log file the application writes, e.g. log/production.log."));
+    let folder = std::fs::canonicalize(&home).unwrap();
+    assert_eq!(said(ws.set_query_log("file", Some(&home))).0, format!("{} isn't a file", folder.display()));
+
+    let candidate = ImportCandidate {
+        alias: "shop".into(),
+        source: ImportSource::Ads,
+        origin: "shop".into(),
+        file: "settings.json".into(),
+        engine: Engine::Postgres,
+        environment: Environment::Development,
+        host: "db.example".into(),
+        port: Some(5432),
+        database: Some("shop".into()),
+        user: Some("app".into()),
+        auth: AuthKind::Password,
+        options: Default::default(),
+        note: None,
+        saved_as: None,
+    };
+    let e = ws.import_connections(&[candidate]).unwrap_err();
+    assert_eq!(
+        (e.message.as_str(), e.hint.as_deref()),
+        ("A connection named 'shop' already exists", Some("Pick another alias for it"))
+    );
+
+    let discovered = |cloud: Cloud| DiscoveredDatabase {
+        alias: "yb".into(),
+        cloud,
+        engine: Engine::Yugabyte,
+        environment: Environment::Development,
+        server: "yb".into(),
+        host: "yb.example".into(),
+        database: "yugabyte".into(),
+        location: String::new(),
+        subscription: String::new(),
+        resource_group: String::new(),
+        port: None,
+        user: None,
+        region: None,
+        auth: AuthKind::Password,
+        saved_as: None,
+    };
+    assert_eq!(said(ws.add_discovered(&discovered(Cloud::Aws))).0, "YugabyteDB is not an Amazon RDS engine");
+    assert_eq!(
+        said(ws.add_discovered(&discovered(Cloud::Azure))).0,
+        "YugabyteDB is not an Azure flexible-server engine"
+    );
+
+    let workspace = &ws;
+    let refused = |input: &str| {
+        let new = NewConnection {
+            name: "iam".into(),
+            input: input.into(),
+            auth: Some(AuthKind::AwsIam),
+            ..Default::default()
+        };
+        async move { workspace.provider_for(&new).await.err().expect("refused before the AWS CLI") }
+    };
+    assert_eq!(
+        refused("postgres://db.example/shop").await.message,
+        "AWS IAM authentication needs a database user name"
+    );
+    assert_eq!(
+        refused("yugabyte://app@db.example/shop").await.message,
+        "AWS RDS IAM authentication does not apply to YugabyteDB"
+    );
+    let e = refused("postgres://app@db.example/shop").await;
+    assert_eq!(e.message, "Can't tell which AWS region this RDS endpoint is in");
+    assert_eq!(e.hint.as_deref(), Some("Add ?region=… to the connection"));
+
+    let variable = "CULPRIT_ENGLISH_TEST_UNSET_PASSWORD";
+    ws.add_connection(NewConnection {
+        name: "from-env".into(),
+        input: "postgres://app@db.example:5432/shop".into(),
+        password_env: Some(variable.into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let e = ws.provider("from-env").await.err().expect("no password to read");
+    assert_eq!(e.message, format!("Environment variable {variable} is not set"));
+    assert_eq!(e.hint, Some(format!("Connection 'from-env' reads its password from {variable}")));
+
+    ws.save_query(saved::SaveQuery {
+        name: "q".into(),
+        sql: "SELECT 1".into(),
+        connection: None,
+        description: None,
+        previous_name: None,
+    })
+    .unwrap();
+    let e = ws.run_saved("q", None, 10, false).await.unwrap_err();
+    assert_eq!(
+        (e.message.as_str(), e.hint.as_deref()),
+        ("'q' isn't tied to a connection", Some("Pass the connection to run it on."))
+    );
+    let _ = std::fs::remove_dir_all(home);
+}
+
+#[test]
+fn periods_and_pasted_deadlocks_that_cannot_be_read_say_why_in_english() {
+    let e = EventsRequest { start: Some("soon".into()), ..Default::default() }.range().unwrap_err();
+    assert_eq!(e.message, "`start` isn't a timestamp: soon");
+    assert_eq!(e.hint.as_deref(), Some("Use ISO 8601 with a time zone, e.g. 2026-10-11T14:05:00Z"));
+    let backwards = EventsRequest {
+        start: Some("2026-10-11T14:05:00Z".into()),
+        end: Some("2026-10-10T14:05:00Z".into()),
+        ..Default::default()
+    };
+    assert_eq!(backwards.range().unwrap_err().message, "The period is empty: its start must come before its end");
+
+    let e = deadlocks::parse_deadlock("nothing to see").unwrap_err();
+    assert_eq!(e.message, "No deadlock found in that text");
+    assert_eq!(
+        e.hint.as_deref(),
+        Some(
+            "Paste a SQL Server deadlock graph (.xdl XML), the LATEST DETECTED DEADLOCK section of SHOW ENGINE INNODB \
+             STATUS, or the PostgreSQL log lines from \"deadlock detected\" to STATEMENT."
+        )
+    );
+    assert_eq!(
+        deadlocks::parse_deadlock(&"x".repeat(8 * 1024 * 1024 + 1)).unwrap_err().message,
+        "That text is larger than 8 MB; paste one deadlock at a time"
+    );
+}

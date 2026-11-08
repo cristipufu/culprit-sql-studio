@@ -131,4 +131,21 @@ mod tests {
         assert!(remove(&dir, "nope").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    // What a person reads, word for word: its messages come from locales/en.json.
+    #[test]
+    fn a_mark_that_cannot_be_kept_says_why_in_english() {
+        let dir = std::env::temp_dir().join(format!("culprit-marks-english-{}", std::process::id()));
+        let said = |text: &str, at: Option<&str>| add(&dir, text, at, "cli").unwrap_err();
+        assert_eq!(said(" ", None).message, "A mark needs a few words, e.g. \"deploy v1.4.2\"");
+        assert_eq!(said(&"x".repeat(201), None).message, "A mark is at most 200 characters");
+        let e = said("deploy", Some("yesterday"));
+        assert_eq!(e.message, "`yesterday` isn't a timestamp");
+        assert_eq!(e.hint.as_deref(), Some("Use ISO 8601 with a time zone, e.g. 2026-10-11T14:05:00Z"));
+        assert_eq!(said("deploy", Some("2999-01-01T00:00:00Z")).message, "A mark can't be in the future");
+        let e = remove(&dir, "nope").unwrap_err();
+        assert_eq!(e.message, "No mark 'nope' on this connection");
+        assert_eq!(e.hint.as_deref(), Some("`culprit events <connection>` lists them"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

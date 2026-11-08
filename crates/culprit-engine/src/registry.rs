@@ -75,4 +75,12 @@ mod tests {
             assert_eq!(names.len(), before, "{engine:?} names two sources the same");
         }
     }
+
+    // What a person reads, word for word: its messages come from locales/en.json.
+    #[test]
+    fn a_spec_without_an_engine_says_how_to_name_one_in_english() {
+        let Err(e) = provider(&ConnectionSpec::default()) else { panic!("no engine, no provider") };
+        assert_eq!(e.message, "Can't tell which database engine this is");
+        assert_eq!(e.hint.as_deref(), Some("Use a postgres://, mssql://, mysql:// or sqlite:// URL, or pass --engine"));
+    }
 }

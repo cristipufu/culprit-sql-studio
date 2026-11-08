@@ -222,4 +222,49 @@ mod tests {
         let text = String::from_utf8_lossy(RDS_CA_BUNDLE);
         assert!(text.matches("BEGIN CERTIFICATE").count() > 10);
     }
+
+    // What a person reads, word for word: its messages come from locales/en.json.
+    #[test]
+    fn aws_cli_failures_say_what_to_do_in_english() {
+        let e = cli_error("aws: [ERROR]: Unable to locate credentials");
+        assert_eq!(e.code, ErrorCode::AuthFailed);
+        assert_eq!(e.message, "The AWS CLI is not signed in: Unable to locate credentials");
+        assert_eq!(
+            e.hint.as_deref(),
+            Some("Sign in with `aws login` (or `aws configure sso` / `aws configure`), then search again")
+        );
+        let e = cli_error("An error occurred (AccessDenied) when calling DescribeDBInstances");
+        assert_eq!(
+            e.message,
+            "AWS refused the request: An error occurred (AccessDenied) when calling DescribeDBInstances"
+        );
+        assert_eq!(
+            e.hint.as_deref(),
+            Some("The signed-in AWS identity needs rds:Describe* (and rds-db:connect for IAM database authentication)")
+        );
+        let e = cli_error("boom");
+        assert_eq!((e.message.as_str(), e.hint), ("AWS CLI call failed: boom", None));
+    }
+
+    #[tokio::test]
+    async fn iam_tokens_refused_before_the_cli_say_why_in_english() {
+        let host = "shop.abc123.us-east-1.rds.amazonaws.com";
+        let e = iam_token(Engine::Mssql, host, 1433, "app", "us-east-1").await.unwrap_err();
+        assert_eq!(e.message, "Amazon RDS for SQL Server does not support IAM database authentication");
+        assert_eq!(e.hint.as_deref(), Some("Use password authentication for this connection"));
+        let e = iam_token(Engine::Postgres, "db.example.com", 5432, "app", "us-east-1").await.unwrap_err();
+        assert_eq!(
+            e.message,
+            "Refusing to send an AWS IAM token to 'db.example.com', which is not an Amazon RDS endpoint"
+        );
+        assert_eq!(
+            e.hint.as_deref(),
+            Some(
+                "IAM database authentication only works with *.rds.amazonaws.com hosts; use password authentication for \
+                 other servers"
+            )
+        );
+        let e = iam_token(Engine::Postgres, host, 5432, "app", "nowhere").await.unwrap_err();
+        assert_eq!(e.message, "'nowhere' is not an AWS region");
+    }
 }

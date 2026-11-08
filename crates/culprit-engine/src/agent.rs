@@ -525,4 +525,39 @@ mod tests {
         }
         let _ = fs::remove_dir_all(dir);
     }
+
+    // What the person answering in the app reads, word for word: its messages come from locales/en.json.
+    #[test]
+    fn answers_that_cannot_be_kept_say_why_in_english() {
+        let (ws, dir) = workspace("english");
+        assert_eq!(
+            ws.decide_approval("../../etc/passwd", "x", true).unwrap_err().message,
+            "Not an approval request id"
+        );
+        let id = "0123456789abcdef0123456789abcdef";
+        assert_eq!(
+            ws.decide_approval(id, "x", true).unwrap_err().message,
+            "This request is no longer waiting; the agent stopped waiting for it"
+        );
+        let queue = ws.queue();
+        queue.ensure().unwrap();
+        let request = ApprovalRequest {
+            id: id.into(),
+            connection: "pg-demo".into(),
+            environment: Environment::Production,
+            tool: "run_query".into(),
+            sql: "SELECT 1".into(),
+            hash: approval_hash("pg-demo", "SELECT 1"),
+            client: "test".into(),
+            requested_at: rfc3339(now()),
+            expires_at: rfc3339(now() + chrono::Duration::seconds(60)),
+        };
+        queue.write(&queue.request(id), &request).unwrap();
+        let e = ws.decide_approval(id, &approval_hash("pg-demo", "SELECT 2"), true).unwrap_err();
+        assert_eq!(
+            (e.code, e.message.as_str()),
+            (ErrorCode::PermissionDenied, "The statement changed after it was shown, so it was denied")
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
 }

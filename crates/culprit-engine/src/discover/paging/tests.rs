@@ -264,3 +264,53 @@ async fn an_inflight_request_has_a_deadline() {
     assert_eq!(error.code, ErrorCode::Timeout);
     assert_eq!(search.requests, 1);
 }
+
+// What a search says when it can't finish, word for word: its messages come from locales/en.json.
+#[tokio::test(start_paused = true)]
+async fn a_search_that_cannot_finish_says_why_in_english() {
+    assert_eq!(
+        validate_terms(&["a b".into()]).unwrap_err().message,
+        "Use up to 16 search terms of 1–64 letters, digits, hyphens, underscores or dots"
+    );
+    assert_eq!(
+        aws_rds(&["nowhere".into()], &[]).await.unwrap_err().message,
+        "Use at most 100 AWS region codes, such as us-east-1 or eu-central-1"
+    );
+    let said = |result: Result<Option<String>>| result.unwrap_err().message;
+    assert_eq!(said(cursor(&json!({ "t": 1 }), "t")), "The cloud returned an unreadable continuation token");
+    assert_eq!(entries(&json!({}), "data").unwrap_err().message, "The cloud returned an unreadable inventory page");
+    assert_eq!(
+        graph_entries(&json!({ "data": vec![Value::Null; PAGE_SIZE + 1] })).unwrap_err().message,
+        "Azure exceeded the requested inventory page size"
+    );
+    assert_eq!(
+        said(graph_cursor(&json!({ "data": [], "resultTruncated": true }))),
+        "Azure truncated the inventory without a continuation token; refine the search"
+    );
+    assert_eq!(
+        arm_next(&format!("{SERVER}/databases"), "https://example.com/x".into()).unwrap_err().message,
+        "Azure returned a continuation outside the requested resource collection"
+    );
+    let mut cursor = Cursor::default();
+    cursor.advance(Some("a".into())).unwrap();
+    assert_eq!(
+        cursor.advance(Some("a".into())).unwrap_err().message,
+        "The cloud returned an invalid or repeated continuation token"
+    );
+    let mut search = Search::new(&[], Instant::now());
+    assert_eq!(
+        search.request(async { Ok(()) }).await.unwrap_err().message,
+        "Discovery reached its search budget; narrow the search or choose specific regions"
+    );
+    search.success = true;
+    assert_eq!(search.finish().unwrap().warnings, ["Discovery reached its search budget; more matches may exist"]);
+    let mut search = Search::new(&[], deadline());
+    let slow = search.request(async {
+        tokio::time::sleep(REQUEST_TIMEOUT * 2).await;
+        Ok(())
+    });
+    assert_eq!(
+        slow.await.unwrap_err().message,
+        "Cloud discovery timed out; narrow the search or choose specific regions"
+    );
+}

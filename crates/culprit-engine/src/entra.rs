@@ -729,4 +729,80 @@ mod tests {
         assert_eq!(token_user(&format!("h.{claims}.s")).as_deref(), Some("dev@example.com"));
         assert_eq!(token_user("not-a-jwt"), None);
     }
+
+    // What a person reads, word for word: its messages come from locales/en.json.
+    #[test]
+    fn sign_in_settings_and_replies_say_what_went_wrong_in_english() {
+        let e = Authority::new("not a tenant!", AZURE_CLI_CLIENT_ID).unwrap_err();
+        assert_eq!(e.message, "'not a tenant!' is not a Microsoft Entra tenant");
+        assert_eq!(
+            e.hint.as_deref(),
+            Some("Use a tenant id (GUID), a domain like contoso.onmicrosoft.com, or organizations")
+        );
+        assert_eq!(
+            Authority::new("organizations", "nope").unwrap_err().message,
+            "'nope' is not an application (client) id"
+        );
+        let mut spec = ConnectionSpec::default();
+        spec.options.insert("entra-login".into(), "weird".into());
+        let e = login_mode(&spec).unwrap_err();
+        assert_eq!(e.message, "Unknown entra-login `weird`");
+        assert_eq!(e.hint.as_deref(), Some("Use auto, azure-cli or device-code"));
+
+        let failed = |json: Value| match parse_token(&Reply { status: 400, json }) {
+            Err(Poll::Failed(message)) => message,
+            _ => panic!("a failed sign-in"),
+        };
+        assert_eq!(failed(serde_json::json!({ "error": "authorization_declined" })), "Sign-in was declined");
+        assert_eq!(
+            failed(serde_json::json!({ "error": "expired_token" })),
+            "The sign-in code expired before it was used"
+        );
+        assert_eq!(
+            failed(
+                serde_json::json!({ "error": "invalid_grant", "error_description": "AADSTS70000: bad grant\nTrace ID: 1" })
+            ),
+            "Microsoft Entra ID refused the sign-in: AADSTS70000: bad grant"
+        );
+        assert_eq!(failed(serde_json::json!({})), "Microsoft Entra ID refused the sign-in: unknown error");
+
+        let e = parse_device_code(&Reply { status: 400, json: serde_json::json!({ "error": "invalid_request" }) })
+            .unwrap_err();
+        assert_eq!(e.message, "Microsoft Entra ID did not start a sign-in: invalid_request");
+        assert_eq!(e.hint.as_deref(), Some("Check the tenant (connection option entra-tenant) and try again"));
+        let reply = |uri: &str| Reply {
+            status: 200,
+            json: serde_json::json!({ "device_code": "dc", "user_code": "ABCD", "verification_uri": uri }),
+        };
+        assert_eq!(
+            parse_device_code(&reply("http://example.com")).unwrap_err().message,
+            "Microsoft Entra ID returned an unexpected sign-in page"
+        );
+        let (prompt, _, _) = parse_device_code(&reply("https://microsoft.com/devicelogin")).unwrap();
+        assert_eq!(prompt.message, "To sign in, open https://microsoft.com/devicelogin and enter the code ABCD.");
+    }
+
+    #[tokio::test]
+    async fn refused_hosts_and_missing_people_say_why_in_english() {
+        let auth = EntraAuth::with_endpoint(Script::new(vec![]));
+        let spec = ConnectionSpec { host: "db.example.com".into(), ..Default::default() };
+        let e = auth.token(Engine::Postgres, &spec, &Memory::default()).await.unwrap_err();
+        assert_eq!(
+            e.message,
+            "Refusing to send a Microsoft Entra ID token to 'db.example.com', which is not an Azure PostgreSQL host"
+        );
+        assert_eq!(
+            e.hint.as_deref(),
+            Some(
+                "Entra ID authentication only works with Azure database hosts; use password authentication for other \
+                 servers"
+            )
+        );
+        let e = auth.device_token(Engine::Mssql, &authority(), &Memory::default()).await.unwrap_err();
+        assert_eq!(e.message, "Microsoft Entra ID sign-in needs a person at the keyboard");
+        assert_eq!(
+            e.hint.as_deref(),
+            Some("Run `az login`, or run the command in a terminal to sign in with a device code")
+        );
+    }
 }

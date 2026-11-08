@@ -463,3 +463,103 @@ async fn half_close_drains_the_final_response_and_database_bytes_take_priority_o
     assert!(bytes.windows(b"FINAL_DATABASE_RESPONSE".len()).any(|w| w == b"FINAL_DATABASE_RESPONSE"));
     assert!(endpoint.failure().is_none(), "SSH stderr overrode the database protocol response");
 }
+
+// What a person reads about an SSH route, word for word: its messages come from locales/en.json.
+#[test]
+fn ssh_settings_that_cannot_be_used_say_why_in_english() {
+    let said = |config: SshConfig, engine: Engine| normalize(config, engine).unwrap_err();
+    assert_eq!(
+        said(ssh("bastion"), Engine::Sqlite).message,
+        "SSH forwarding is available for server databases; SQLite opens a local file"
+    );
+    assert_eq!(said(ssh("-x@bastion"), Engine::Postgres).message, "The SSH user name contains unsupported characters");
+    assert_eq!(said(ssh("[::1"), Engine::Postgres).message, "The SSH IPv6 address needs a closing bracket");
+    let e = said(ssh("bad host!"), Engine::Postgres);
+    assert_eq!(e.message, "Enter an SSH host alias or [user@]hostname");
+    assert_eq!(
+        e.hint.as_deref(),
+        Some("Brackets require an IPv6 address. SSH options, commands and passwords do not belong here.")
+    );
+    assert_eq!(said(ssh("bastion:0"), Engine::Postgres).message, "The SSH port must be between 1 and 65535");
+    assert_eq!(
+        said(SshConfig { port: Some(2222), ..ssh("bastion:22") }, Engine::Postgres).message,
+        "The SSH host and port field specify different ports"
+    );
+    assert_eq!(
+        said(SshConfig { port: Some(0), ..ssh("bastion") }, Engine::Postgres).message,
+        "The SSH port must be between 1 and 65535"
+    );
+    assert_eq!(
+        said(SshConfig { identity_file: Some("key\u{7}".into()), ..ssh("bastion") }, Engine::Postgres).message,
+        "The SSH identity file path contains unsupported characters"
+    );
+    let e = said(SshConfig { identity_file: Some("/keys/%h".into()), ..ssh("bastion") }, Engine::Postgres);
+    assert_eq!(e.message, "The SSH identity file path cannot contain '%' characters");
+    assert_eq!(
+        e.hint.as_deref(),
+        Some("Choose a file without OpenSSH expansion tokens, or configure IdentityFile in your SSH configuration")
+    );
+    assert_eq!(
+        config::Target::new("", 5432).unwrap_err().message,
+        "SSH forwarding needs a database hostname or IP address and a nonzero TCP port"
+    );
+    let mut unknown = ConnectionSpec { engine: None, ..spec() };
+    assert_eq!(validate_spec(&mut unknown).unwrap_err().message, "Choose a database engine before configuring SSH");
+    let e = busy("Too many SSH database routes are active");
+    assert_eq!(e.hint.as_deref(), Some("Finish or cancel another SSH operation, then retry"));
+
+    let failed = |stderr: &str| {
+        let e = command::failure(stderr.as_bytes());
+        (e.message, e.hint.unwrap_or_default())
+    };
+    assert_eq!(
+        failed("command-line line 0: Bad configuration option: forkafterauthentication"),
+        (
+            "The installed OpenSSH client does not support the required options".into(),
+            "Update the OpenSSH client, then retry".into()
+        )
+    );
+    assert_eq!(
+        failed("Host key verification failed."),
+        (
+            "SSH host key verification failed".into(),
+            "Verify the bastion's fingerprint and trust it with ssh in a terminal, then retry. Culprit requires a \
+             trusted host key and never accepts a changed key."
+                .into()
+        )
+    );
+    assert_eq!(
+        failed("app@bastion: Permission denied (publickey)."),
+        (
+            "SSH authentication failed".into(),
+            "Check the SSH user and identity file. Unlock or load encrypted keys in your OpenSSH agent, and confirm \
+             the host alias works with ssh in a terminal."
+                .into()
+        )
+    );
+    assert_eq!(
+        failed("channel 0: open failed: administratively prohibited: open failed"),
+        (
+            "The SSH server refused database forwarding".into(),
+            "Ask the bastion administrator to allow TCP forwarding to this database endpoint.".into()
+        )
+    );
+    assert_eq!(
+        failed("ssh: Could not resolve hostname bastion: nodename nor servname provided"),
+        (
+            "SSH could not reach the bastion or database".into(),
+            "Check the SSH host alias, VPN and database endpoint. The database hostname must be reachable from the \
+             bastion."
+                .into()
+        )
+    );
+    assert_eq!(
+        failed("kex_exchange_identification: read: Connection reset by peer"),
+        (
+            "SSH forwarding failed".into(),
+            "Check the SSH host alias and agent in a terminal. Culprit uses noninteractive OpenSSH and requires a \
+             trusted host key."
+                .into()
+        )
+    );
+}

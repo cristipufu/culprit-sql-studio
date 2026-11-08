@@ -146,4 +146,12 @@ mod tests {
         assert_ne!(export, link);
         assert_eq!(std::fs::read_to_string(original).unwrap(), "keep");
     }
+
+    // What a person reads, word for word: its messages come from locales/en.json.
+    #[test]
+    fn an_export_too_large_says_so_in_english() {
+        let e = check_size(MAX_EXPORT_BYTES + 1).unwrap_err();
+        assert_eq!(e.message, "Exports are limited to 64 MiB");
+        assert_eq!(e.hint.as_deref(), Some("Export fewer rows or columns, then try again"));
+    }
 }
