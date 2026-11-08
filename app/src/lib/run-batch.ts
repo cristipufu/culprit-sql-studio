@@ -3,6 +3,7 @@ import type { Finding } from "../gen/Finding";
 import type { ResultSet } from "../gen/ResultSet";
 import type { StatementCheck } from "../gen/StatementCheck";
 import { type Api, type ApiError, errorMessage } from "./api";
+import { t } from "./i18n";
 
 /** What running a batch needs from the API. */
 export type RunApi = Pick<Api, "checkStatement" | "lintSql" | "run">;
@@ -80,7 +81,8 @@ export async function runBatch(
     const results: StatementResult[] = [];
     for (const [i, sql] of statements.entries()) {
       if (!live()) return { kind: "stopped", ran: i };
-      progress(statements.length > 1 ? `Running ${i + 1} of ${statements.length}…` : "Running…");
+      const place = { number: String(i + 1), total: String(statements.length) };
+      progress(statements.length > 1 ? t("ui.run_batch.running_statement", place) : t("ui.run_batch.running"));
       try {
         results.push({ result: await api.run(batch.connection, sql, batch.limit, batch.confirmed), sql });
       } catch (e) {
@@ -89,8 +91,8 @@ export async function runBatch(
           const pending = await confirmation(api, batch, true);
           if (pending) return { kind: "confirm", pending };
         }
-        const where = statements.length > 1 ? `Statement ${i + 1} of ${statements.length}: ` : "";
-        return { kind: "error", error: { ...error, message: where + error.message } };
+        const message = statements.length > 1 ? t("ui.run_batch.statement_failed", { ...place, message: error.message }) : error.message;
+        return { kind: "error", error: { ...error, message } };
       }
     }
     return { kind: "rows", results };

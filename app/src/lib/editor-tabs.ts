@@ -1,4 +1,5 @@
 import type { ConnectionInfo } from "../gen/ConnectionInfo";
+import { t } from "./i18n";
 
 export type EditorTab = { id: string; title: string; sql: string; saved: string | null };
 export type EditorTabs = { tabs: EditorTab[]; active: string };
@@ -10,15 +11,15 @@ export const MAX_EDITOR_TABS = 200;
 const MAX_SQL_CHARS = 2 * 1024 * 1024;
 const MAX_INDEX_CHARS = 64 * 1024;
 const BODY_PREFIX = "culprit.editor.sql:";
-const UNAVAILABLE = "Scratch tabs couldn’t be saved on this device. Save important work as named queries.";
-const INVALID = "Saved scratch tabs couldn’t be read. Their stored copy has been kept.";
-const TOO_LARGE = "These scratch tabs exceed the device storage limit. Save important work as named queries.";
+const unavailable = () => t("ui.editor_tabs.unavailable");
+const invalid = () => t("ui.editor_tabs.invalid");
+const tooLarge = () => t("ui.editor_tabs.too_large");
 
 export function editorScope(connection: Connection): string {
   return `culprit.editor.workspace:${encodeURIComponent(JSON.stringify([connection.name, connection.engine, connection.host, connection.port, connection.database]))}`;
 }
 
-export function newEditorTab(sql = "", title = "Query 1", saved: string | null = null): EditorTab {
+export function newEditorTab(sql = "", title = t("ui.editor_tabs.untitled", { number: "1" }), saved: string | null = null): EditorTab {
   const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
   return { id, sql, title, saved };
 }
@@ -33,7 +34,7 @@ export function tabTitle(sql: string, index: number): string {
     .filter(Boolean)
     .slice(0, 4)
     .join(" ");
-  return words ? (words.length > 28 ? `${words.slice(0, 27)}…` : words) : `Query ${index}`;
+  return words ? (words.length > 28 ? `${words.slice(0, 27)}…` : words) : t("ui.editor_tabs.untitled", { number: String(index) });
 }
 
 function deviceStorage(): StorageLike | null {
@@ -45,28 +46,28 @@ function metadata(tabs: EditorTabs): string {
 }
 
 function validate(value: unknown): EditorTabs {
-  if (!value || typeof value !== "object") throw new Error(INVALID);
+  if (!value || typeof value !== "object") throw new Error(invalid());
   const index = value as Partial<Index>;
-  if (index.version !== 1 || !Array.isArray(index.tabs) || !index.tabs.length || index.tabs.length > MAX_EDITOR_TABS) throw new Error(INVALID);
+  if (index.version !== 1 || !Array.isArray(index.tabs) || !index.tabs.length || index.tabs.length > MAX_EDITOR_TABS) throw new Error(invalid());
   const ids = new Set<string>();
   for (const tab of index.tabs) {
     if (!tab || typeof tab.id !== "string" || !/^[\w-]{1,64}$/.test(tab.id) || ids.has(tab.id)
       || typeof tab.title !== "string" || tab.title.length > 1024 || (tab.saved !== null && typeof tab.saved !== "string")
-      || (typeof tab.saved === "string" && tab.saved.length > 1024)) throw new Error(INVALID);
+      || (typeof tab.saved === "string" && tab.saved.length > 1024)) throw new Error(invalid());
     ids.add(tab.id);
   }
   return { tabs: index.tabs as EditorTab[], active: typeof index.active === "string" && ids.has(index.active) ? index.active : index.tabs[0]!.id };
 }
 
 function load(raw: string, storage: StorageLike): EditorTabs {
-  if (raw.length > MAX_INDEX_CHARS) throw new Error(INVALID);
+  if (raw.length > MAX_INDEX_CHARS) throw new Error(invalid());
   const parsed = validate(JSON.parse(raw));
   let chars = 0;
   return { ...parsed, tabs: parsed.tabs.map(({ id, title, saved }) => {
     const sql = storage.getItem(BODY_PREFIX + id);
-    if (sql === null) throw new Error(INVALID);
+    if (sql === null) throw new Error(invalid());
     chars += sql.length;
-    if (chars > MAX_SQL_CHARS) throw new Error(INVALID);
+    if (chars > MAX_SQL_CHARS) throw new Error(invalid());
     return { id, title, saved, sql };
   }) };
 }
@@ -84,7 +85,7 @@ export class EditorTabStorage {
     this.scope = editorScope(connection);
     const fresh = newEditorTab(placeholder);
     this.initial = { tabs: [fresh], active: fresh.id };
-    if (!storage) { this.error = UNAVAILABLE; return; }
+    if (!storage) { this.error = unavailable(); return; }
     try {
       const raw = storage.getItem(this.scope);
       if (raw !== null) {
@@ -94,16 +95,16 @@ export class EditorTabStorage {
       }
     } catch {
       // Unreadable storage or saved tabs that don't parse: never overwrite what may be there.
-      this.error = INVALID;
+      this.error = invalid();
       this.blocked = true;
     }
   }
 
   write(tabs: EditorTabs): string | null {
     if (this.blocked) return this.error;
-    if (!this.storage) return this.settle(UNAVAILABLE);
+    if (!this.storage) return this.settle(unavailable());
     const index = metadata(tabs);
-    if (tabs.tabs.length > MAX_EDITOR_TABS || index.length > MAX_INDEX_CHARS || tabs.tabs.reduce((sum, t) => sum + t.sql.length, 0) > MAX_SQL_CHARS) return this.settle(TOO_LARGE);
+    if (tabs.tabs.length > MAX_EDITOR_TABS || index.length > MAX_INDEX_CHARS || tabs.tabs.reduce((sum, t) => sum + t.sql.length, 0) > MAX_SQL_CHARS) return this.settle(tooLarge());
     const added: string[] = [];
     let committed = false;
     try {
@@ -130,7 +131,7 @@ export class EditorTabStorage {
       if (!committed) for (const id of added) {
         try { this.storage.removeItem(BODY_PREFIX + id); this.bodies.delete(id); } catch { /* Keep the source index intact. */ }
       }
-      return this.settle(UNAVAILABLE);
+      return this.settle(unavailable());
     }
   }
 
@@ -152,7 +153,7 @@ export function renameEditorTabs(from: Connection, to: Connection, storage = dev
       storage.removeItem(editorScope(from));
     }
     return null;
-  } catch { return "The connection was renamed, but its scratch tabs couldn’t be moved. Their stored copy has been kept."; }
+  } catch { return t("ui.editor_tabs.rename_failed"); }
 }
 
 /** A removed connection's scratch tabs go with it, so they neither hold device storage other connections' tabs need
@@ -170,5 +171,5 @@ export function removeEditorTabs(connection: Connection, storage = deviceStorage
     for (const id of ids) storage.removeItem(BODY_PREFIX + id);
     storage.removeItem(editorScope(connection));
     return null;
-  } catch { return "The connection was removed, but its scratch tabs couldn’t be cleared from this device."; }
+  } catch { return t("ui.editor_tabs.remove_failed"); }
 }

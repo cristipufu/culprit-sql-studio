@@ -4,6 +4,7 @@ import type { QueryStat } from "../gen/QueryStat";
 import type { DatabaseProduct } from "../gen/DatabaseProduct";
 import { api, errorMessage, type ApiError } from "./api";
 import { PRODUCTS } from "./engines";
+import { t } from "./i18n";
 import { planSamples } from "./plan-samples";
 import { LatestRequest } from "./requests";
 import { setState, toast } from "./store";
@@ -139,7 +140,7 @@ export async function importText(text: string, name: string, origin: string): Pr
 /** Read a plan file: UTF-8, or UTF-16 with a byte-order mark (SSMS saves .sqlplan that way). */
 export async function importFile(file: File): Promise<boolean> {
   if (file.size > 64 * 1024 * 1024) {
-    update({ error: { code: "invalid_input", message: `${file.name} is far larger than any query plan`, hint: null } });
+    update({ error: { code: "invalid_input", message: t("ui.plans.file_too_large", { file: file.name }), hint: null } });
     setState({ view: "plans" });
     return false;
   }
@@ -176,7 +177,7 @@ export function installPlanPaste(currentView: () => string): () => void {
     if (!text.trim()) return;
     if (currentView() !== "plans" && !looksLikePlan(text)) return;
     e.preventDefault();
-    importText(text, `Pasted plan ${state.items.length + 1}`, "Pasted");
+    importText(text, t("ui.plans.pasted_name", { number: String(state.items.length + 1) }), t("ui.plans.pasted_origin"));
   };
   window.addEventListener("paste", onPaste);
   return () => window.removeEventListener("paste", onPaste);
@@ -200,7 +201,7 @@ export async function savePlan(item: LoadedPlan, asJson: boolean): Promise<void>
     : exportable(item);
   try {
     const where = await (await api()).saveFile(file.name, file.contents);
-    toast(where.includes("/") || where.includes("\\") ? `Saved to ${where.split(/[\\/]/).slice(-2).join("/")}` : `Saved ${where}`);
+    toast(where.includes("/") || where.includes("\\") ? t("ui.plans.saved_to", { path: where.split(/[\\/]/).slice(-2).join("/") }) : t("ui.common.saved_file", { file: where }));
   } catch (e) {
     toast(errorMessage(e).message);
   }
@@ -216,8 +217,8 @@ export async function trySample(product: DatabaseProduct): Promise<void> {
   try {
     const sample = (await planSamples()).find((sample) => sample.product === product);
     if (!current()) return;
-    if (!sample) throw new Error("This product's captured comparison is missing");
-    const origin = `Sample · ${PRODUCTS.find((p) => p.id === product)?.label ?? product}`;
+    if (!sample) throw new Error(t("ui.plans.sample_missing"));
+    const origin = t("ui.plans.sample_origin", { product: PRODUCTS.find((p) => p.id === product)?.label ?? product });
     compare({ plan: sample.plans[0], name: sample.names[0], origin }, { plan: sample.plans[1], name: sample.names[1], origin });
     update({ busy: false });
   } catch (error) {

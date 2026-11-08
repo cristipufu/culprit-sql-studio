@@ -1,6 +1,7 @@
 import type { Engine } from "../gen/Engine";
 import type { Finding } from "../gen/Finding";
 import type { QueryStat } from "../gen/QueryStat";
+import { t } from "./i18n";
 
 const DOLLAR_TAG_RE = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/;
 const GO_LINE_RE = /^[ \t]*GO(?:[ \t]+\d+)?[ \t]*(?:--[^\r\n]*)?(?:\r?\n|$)/i;
@@ -292,13 +293,18 @@ function parseCompiledValues(compiled: string | null | undefined): Map<string, s
   return map;
 }
 
+/** `body` under a one-line SQL comment saying `note`. */
+function noted(note: string, body: string): string {
+  return `-- ${note}\n${body}`;
+}
+
 export function prepareRawQueryTextForEditor(text: string): string {
   const { parameters, body } = splitLeadingParameterList(text);
   if (parameters) {
-    return `-- Parameters (${parameters}): replace @par… with values before running\n${body}`;
+    return noted(t("ui.editor_sql.parameters", { parameters }), body);
   }
   if (countPlaceholders(body) > 0) {
-    return `-- Replace the parameter placeholders (?, $1, @p1) with literal values before running\n${body}`;
+    return noted(t("ui.editor_sql.placeholders"), body);
   }
   return body;
 }
@@ -321,14 +327,14 @@ export function prepareQueryForEditor(query: QueryStat, engine: Engine): string 
   if (values.size > 0) {
     const replaced = body.replace(/(?<![@A-Za-z0-9_])@[A-Za-z0-9_]+\b/g, (token) => values.get(token.toLowerCase()) ?? token);
     if (replaced !== body) {
-      return `-- Values filled from the plan's compiled parameters (${compiled})\n${replaced}`;
+      return noted(t("ui.editor_sql.compiled_values", { compiled: compiled ?? "" }), replaced);
     }
   }
   if (params) {
-    return `-- Parameters (${params}): replace @par… with values before running\n${body}`;
+    return noted(t("ui.editor_sql.parameters", { parameters: params }), body);
   }
   if (countPlaceholders(body) > 0) {
-    return `-- Replace the parameter placeholders (?, $1, @p1) with literal values before running\n${body}`;
+    return noted(t("ui.editor_sql.placeholders"), body);
   }
   return body;
 }

@@ -1,4 +1,5 @@
 import type { ResultSet } from "../gen/ResultSet";
+import { t } from "./i18n";
 import { cellText } from "./result-values";
 
 export type ResultFileFormat = "csv" | "json";
@@ -25,7 +26,7 @@ export async function resultFile(result: ResultSet, format: ResultFileFormat, no
   if (format === "csv") chunks.push("\uFEFF" + csvRow(result.columns) + "\r\n");
   else chunks.push('{\n  "columns": ' + JSON.stringify(result.columns) + ',\n  "rows": [');
   for (let row = 0; row < result.rows.length; row++) {
-    if (result.rows[row]!.length !== result.columns.length) throw new Error("Cannot export: a result row does not match its column headers");
+    if (result.rows[row]!.length !== result.columns.length) throw new Error(t("ui.result_export.row_mismatch"));
     if (format === "csv") chunks.push(csvRow(result.rows[row]!) + "\r\n");
     // Compact nested values keep deeply nested JSON from amplifying indentation and memory use.
     else chunks.push((row ? "," : "") + "\n    " + JSON.stringify(result.rows[row]));

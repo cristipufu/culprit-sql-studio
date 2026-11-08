@@ -1,6 +1,7 @@
 import type { ExplainMode } from "../gen/ExplainMode";
 import type { Plan } from "../gen/Plan";
 import { type Api, type ApiError, errorMessage } from "./api";
+import { t } from "./i18n";
 import { type Batch, type PendingRun, type RunApi, type StatementResult, runBatch } from "./run-batch";
 
 /** What a tab's last action left below the editor. */
@@ -72,7 +73,7 @@ export class EditorExecution {
     const owner = this.claim(tab);
     if (!owner) return "busy";
     const live = () => this.owners.get(tab) === owner;
-    this.show(tab, { kind: "busy", label: mode === "analyze" ? "Running and measuring…" : "Planning…" });
+    this.show(tab, { kind: "busy", label: mode === "analyze" ? t("ui.editor_execution.analyzing") : t("ui.editor_execution.planning") });
     try {
       const client = await this.client();
       // The tab may have closed while the client was coming: nothing is sent for it (Analyze runs the statement).

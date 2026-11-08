@@ -1,6 +1,7 @@
 import type { ExportFile } from "../gen/ExportFile";
 import type { ExportOptions } from "../gen/ExportOptions";
 import { api, copyText, errorMessage } from "./api";
+import { t } from "./i18n";
 import { toast } from "./store";
 import { remember, remembered } from "./prefs";
 
@@ -25,11 +26,11 @@ export async function deliver(file: Promise<ExportFile>, how: "copy" | "save", r
     const f = await file;
     if (how === "copy") {
       await copyText(f.contents);
-      toast(redact ? "Copied as Markdown, values redacted. Paste it into your PR" : "Copied as Markdown. Paste it into your PR");
+      toast(redact ? t("ui.share.copied_redacted") : t("ui.share.copied"));
     } else {
       const where = await (await api()).saveFile(f.name, f.contents);
       const shown = where.includes("/") || where.includes("\\") ? where.split(/[\\/]/).slice(-2).join("/") : where;
-      toast(`Saved ${shown}`);
+      toast(t("ui.common.saved_file", { file: shown }));
     }
     return true;
   } catch (e) {

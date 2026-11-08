@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { api, errorMessage, type UpdateInfo } from "./api";
+import { t } from "./i18n";
 import { toast } from "./store";
 import { remember, remembered } from "./prefs";
 
@@ -59,7 +60,7 @@ export function setAutoCheck(on: boolean): void {
  */
 export async function checkForUpdates(manual: boolean): Promise<void> {
   if (state.status === "downloading" || state.status === "ready") {
-    if (manual) toast(state.status === "ready" ? `Restart to finish updating to ${state.info.version}` : "The update is downloading");
+    if (manual) toast(state.status === "ready" ? t("ui.updates.restart_to_finish", { version: state.info.version }) : t("ui.updates.downloading"));
     return;
   }
   if (state.status === "checking") return;
@@ -69,11 +70,11 @@ export async function checkForUpdates(manual: boolean): Promise<void> {
     const info = await (await api()).checkUpdate();
     if (info) {
       set({ status: "available", info });
-      if (manual) toast(`Culprit ${info.version} is available`);
+      if (manual) toast(t("ui.updates.available", { version: info.version }));
     } else {
       remember(LAST_KEY, String(Date.now()));
       set({ status: "idle" });
-      if (manual) toast("Culprit is up to date");
+      if (manual) toast(t("ui.updates.up_to_date"));
     }
   } catch (e) {
     set(before);

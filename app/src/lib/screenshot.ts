@@ -1,4 +1,5 @@
 import { api, errorMessage, isDesktop } from "./api";
+import { t } from "./i18n";
 import { setState, toast } from "./store";
 
 /** The webview takes the picture itself, which the desktop app does on macOS only so far. */
@@ -25,7 +26,7 @@ export async function screenshotWorkspace(): Promise<void> {
     await frame();
     const r = pane.getBoundingClientRect();
     await (await api()).screenshot({ x: r.left, y: r.top, width: r.width, height: r.height });
-    toast("Screenshot copied");
+    toast(t("ui.screenshot.copied"));
   } catch (e) {
     toast(errorMessage(e).message);
   } finally {

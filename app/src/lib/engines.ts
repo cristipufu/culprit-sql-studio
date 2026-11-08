@@ -5,6 +5,7 @@ import type { EngineFacts } from "../gen/EngineFacts";
 import type { Plan } from "../gen/Plan";
 import type { SessionAction } from "../gen/SessionAction";
 import engines from "../gen/engines.json";
+import { t } from "./i18n";
 
 /** Everything the app knows about each engine without a connection: its label, what it can answer, its session
  *  actions and why it refuses what it can't do. Written from the engine files in culprit-core (`engines/*.rs`) to
@@ -58,7 +59,7 @@ export function can(engine: Engine, ability: Ability): boolean {
 /** The error the engine gives for something it can't do, as the desktop returns it. */
 export function refusal(engine: Engine, ability: Ability): { code: "unsupported"; message: string; hint: string | null } {
   const r = FACTS[engine].refusals[ability];
-  return { code: "unsupported", message: r?.message ?? `${LABEL[engine]} can't do this`, hint: r?.hint ?? null };
+  return { code: "unsupported", message: r?.message ?? t("ui.engines.refused", { engine: LABEL[engine] }), hint: r?.hint ?? null };
 }
 
 /** What Live may do to another session on this engine, outside production. */
