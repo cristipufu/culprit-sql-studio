@@ -533,4 +533,69 @@ fn plan_warnings_say_what_the_plan_warned_in_english() {
                 verify: Capture a newly compiled plan after any justified statistics change and compare its warning and estimates with representative runs. Query Store may retain the original XML, so a re-scan of that saved plan alone cannot verify the change.",
         ]
     );
+    // The catalog's other readings: neither rows nor changes, changes only, rows and none since.
+    assert_eq!(
+        [
+            statistics(None, None, true, true),
+            statistics(None, Some(3.0), true, true),
+            statistics(Some(5_000.0), Some(0.0), true, true),
+        ]
+        .concat(),
+        [
+            "A type mismatch on customers.email stops a read from customers from seeking an index · Medium · High\n\
+                The database has to convert customers.email before comparing it with a parameter of a different type (`CONVERT_IMPLICIT(nvarchar(200),[culprit_demo].[shop].[customers].[email],0)=[@P1]`). SQL Server warns that the conversion keeps it from searching an index, so it reads every row instead. The application declares its parameters as `@P1 nvarchar(4000)`: Unicode strings compared with a non-Unicode column.\n\
+                impact: 54% of DB time\n\
+                metric: Share of DB time\n\
+                metric: Average duration\n\
+                metric: Column: customers.email\n\
+                note: Implicit conversion\n\
+                fix: Make the types match: send the value as non-Unicode text (SqlDbType.VarChar in .NET, sql.VarChar in Node's mssql, a non-Unicode mapping in your ORM), or, if your schema keeps text as Unicode, change customers.email to nvarchar(200). Changing a column rewrites it and the indexes on it.\n\
+                verify: Re-scan after the change; the warning should be gone from this query's plan.",
+            "The captured plan for a read from support_tickets reported a statistics warning on priority · Low · Medium\n\
+                SQL Server reported no usable statistics on priority when this plan was compiled. These columns appear in seek keys of ix_support_tickets_priority. An index has statistics, but its histogram describes only the first key; the seek alone does not establish that each named column has a histogram or that the statistics are out of date. Query Store can retain the original warning after statistics change. Current catalog: The statistics of ix_support_tickets_priority were last updated on Aug 28; the table held 300K rows when this plan was compiled, and holds 300K now.\n\
+                impact: 14% of DB time\n\
+                metric: Share of DB time\n\
+                metric: Average duration\n\
+                note: Missing statistics\n\
+                fix: Inspect the current column and index statistics and AUTO_CREATE_STATISTICS before choosing a change. An index histogram describes only its first key, so a column appearing in a seek does not prove that it has a usable histogram. Refresh or create statistics only where current evidence supports it; compare actual rows with estimates if the query is costly.\n\
+                sql: SELECT name, is_auto_create_stats_on, is_read_only\n  FROM sys.databases\n WHERE database_id = DB_ID();\n\
+                verify: Capture a newly compiled plan after any justified statistics change and compare its warning and estimates with representative runs. Query Store may retain the original XML, so a re-scan of that saved plan alone cannot verify the change.",
+            "A type mismatch on customers.email stops a read from customers from seeking an index · Medium · High\n\
+                The database has to convert customers.email before comparing it with a parameter of a different type (`CONVERT_IMPLICIT(nvarchar(200),[culprit_demo].[shop].[customers].[email],0)=[@P1]`). SQL Server warns that the conversion keeps it from searching an index, so it reads every row instead. The application declares its parameters as `@P1 nvarchar(4000)`: Unicode strings compared with a non-Unicode column.\n\
+                impact: 54% of DB time\n\
+                metric: Share of DB time\n\
+                metric: Average duration\n\
+                metric: Column: customers.email\n\
+                note: Implicit conversion\n\
+                fix: Make the types match: send the value as non-Unicode text (SqlDbType.VarChar in .NET, sql.VarChar in Node's mssql, a non-Unicode mapping in your ORM), or, if your schema keeps text as Unicode, change customers.email to nvarchar(200). Changing a column rewrites it and the indexes on it.\n\
+                verify: Re-scan after the change; the warning should be gone from this query's plan.",
+            "The captured plan for a read from support_tickets reported a statistics warning on priority · Low · Medium\n\
+                SQL Server reported no usable statistics on priority when this plan was compiled. These columns appear in seek keys of ix_support_tickets_priority. An index has statistics, but its histogram describes only the first key; the seek alone does not establish that each named column has a histogram or that the statistics are out of date. Query Store can retain the original warning after statistics change. Current catalog: The statistics of ix_support_tickets_priority were last updated on Aug 28, and have counted 3 changes since; the table held 300K rows when this plan was compiled, and holds 300K now.\n\
+                impact: 14% of DB time\n\
+                metric: Share of DB time\n\
+                metric: Average duration\n\
+                note: Missing statistics\n\
+                fix: Inspect the current column and index statistics and AUTO_CREATE_STATISTICS before choosing a change. An index histogram describes only its first key, so a column appearing in a seek does not prove that it has a usable histogram. Refresh or create statistics only where current evidence supports it; compare actual rows with estimates if the query is costly.\n\
+                sql: SELECT name, is_auto_create_stats_on, is_read_only\n  FROM sys.databases\n WHERE database_id = DB_ID();\n\
+                verify: Capture a newly compiled plan after any justified statistics change and compare its warning and estimates with representative runs. Query Store may retain the original XML, so a re-scan of that saved plan alone cannot verify the change.",
+            "A type mismatch on customers.email stops a read from customers from seeking an index · Medium · High\n\
+                The database has to convert customers.email before comparing it with a parameter of a different type (`CONVERT_IMPLICIT(nvarchar(200),[culprit_demo].[shop].[customers].[email],0)=[@P1]`). SQL Server warns that the conversion keeps it from searching an index, so it reads every row instead. The application declares its parameters as `@P1 nvarchar(4000)`: Unicode strings compared with a non-Unicode column.\n\
+                impact: 54% of DB time\n\
+                metric: Share of DB time\n\
+                metric: Average duration\n\
+                metric: Column: customers.email\n\
+                note: Implicit conversion\n\
+                fix: Make the types match: send the value as non-Unicode text (SqlDbType.VarChar in .NET, sql.VarChar in Node's mssql, a non-Unicode mapping in your ORM), or, if your schema keeps text as Unicode, change customers.email to nvarchar(200). Changing a column rewrites it and the indexes on it.\n\
+                verify: Re-scan after the change; the warning should be gone from this query's plan.",
+            "The captured plan for a read from support_tickets reported a statistics warning on priority · Low · Medium\n\
+                SQL Server reported no usable statistics on priority when this plan was compiled. These columns appear in seek keys of ix_support_tickets_priority. An index has statistics, but its histogram describes only the first key; the seek alone does not establish that each named column has a histogram or that the statistics are out of date. Query Store can retain the original warning after statistics change. Current catalog: The statistics of ix_support_tickets_priority were last updated on Aug 28, when the table had 5.0K rows, with no changes counted since; the table held 300K rows when this plan was compiled, and holds 300K now.\n\
+                impact: 14% of DB time\n\
+                metric: Share of DB time\n\
+                metric: Average duration\n\
+                note: Missing statistics\n\
+                fix: Inspect the current column and index statistics and AUTO_CREATE_STATISTICS before choosing a change. An index histogram describes only its first key, so a column appearing in a seek does not prove that it has a usable histogram. Refresh or create statistics only where current evidence supports it; compare actual rows with estimates if the query is costly.\n\
+                sql: SELECT name, is_auto_create_stats_on, is_read_only\n  FROM sys.databases\n WHERE database_id = DB_ID();\n\
+                verify: Capture a newly compiled plan after any justified statistics change and compare its warning and estimates with representative runs. Query Store may retain the original XML, so a re-scan of that saved plan alone cannot verify the change.",
+        ]
+    );
 }

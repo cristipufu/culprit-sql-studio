@@ -1256,6 +1256,41 @@ fn unstable_queries_say_what_their_slow_runs_waited_for_in_english() {
                 caveat: PostgreSQL keeps one minimum, average, maximum and standard deviation per statement since Oct 11, 07:01 UTC, so the slowest runs could be from any time in that span (a lock wait during a migration counts too), and Culprit can't tell how many calls were slow.",
         ]
     );
+    // SQL Server: an insert whose one foreign key checks each row, and waits Query Store recorded on CPU alone.
+    let mut one_key = swinging(snapshot("mssql-demo.json"), "6", (9_900.0, 2.0), (100.0, 5_000.0));
+    let q = query(&mut one_key, "6");
+    q.text = "INSERT INTO [shop].[orders] ([customer_id], [status]) VALUES (@P1, @P2)".into();
+    let mut plan = insert_values_plan();
+    (plan.engine, plan.root.object) = (culprit_core::Engine::Mssql, Some("[shop].[orders]".into()));
+    q.plan = Some(plan);
+    assert_eq!(
+        [said(one_key, "6"), said(mssql(vec![wait("CPU", "CPU", 500.0)]), "10")],
+        [
+            "An insert into orders averages 52 ms per run, but some runs take far longer (up to 5.0 s) · High · Medium\n\
+                Same query, same plan, very different run times: the slow runs took at least 8 min more than the average, together. Its plan reads no table (it writes the values it is given), but its foreign key on customer_id checks each row it inserts against customers: the referenced row is looked up and share-locked. The slow runs may have been waiting for a transaction that locks, updates or deletes the referenced row of customers, for a lock on the table (a migration's, say), or on storage (the log flush at commit, when it commits on its own, or a checkpoint). Triggers and other work absent from this plan can also vary between runs; measure a slow run before choosing a cause.\n\
+                impact: 88% of DB time in slow runs\n\
+                metric: Average\n\
+                metric: Slowest\n\
+                metric: Std deviation\n\
+                metric: Slow runs' extra time (at least)\n\
+                fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). A transaction that locks, updates or deletes the referenced row of customers holds this one until it commits or rolls back: keep those transactions short. Compare log and storage timing during a slow run with its other work. Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help.\n\
+                verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.",
+            "A read from support_tickets averages 2.6 ms per run, but some runs take far longer (up to 1.1 s) · Low · Medium\n\
+                Same query, same plan, very different run times: the slow runs took at least 10.9 s more than the average, together. Query Store recorded no lock waits for it, so locks weren't what made them slow. Most likely some parameter values match far more rows than the plan was built for (parameter sensitivity). Compare the parameter values of the slow runs with those of the fast ones.\n\
+                impact: 20% of DB time in slow runs\n\
+                metric: Average\n\
+                metric: Slowest\n\
+                metric: Std deviation\n\
+                metric: Slow runs' extra time (at least)\n\
+                fix: Pick the lightest option that works: plan for the typical value or plan per call for this statement only. Each is reversible.\n\
+                sql: -- 1. In the application, plan for the typical value instead of the first one seen:\n\
+                --    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement\n\n\
+                -- 2. Or plan each call for its own values (costs compile CPU per call):\n\
+                EXEC sys.sp_query_store_set_hints @query_id = 10, @query_hints = N'OPTION (RECOMPILE)';\n\
+                cost: RECOMPILE spends a compile on every call: about 123 ms each, 16 min over its 8.0K runs in the last 5 hours, more than the 10.9 s its slow calls cost, so it comes last.\n\
+                verify: Compare equal Query Store windows before and after the change, with the later window containing only runs after it. Check the query's average and slowest run times, and lock waits per run where recorded, under a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.",
+        ]
+    );
 }
 
 // ── stopped running ──────────────────────────────────────────────────────────────────────────────
@@ -1646,6 +1681,34 @@ fn a_spill_says_what_it_writes_and_what_limits_it_in_english() {
                 SET PERSIST max_heap_table_size = 67108864;\n\
                 cost: The limit is per temporary table per connection; size it with your connection count in mind.\n\
                 verify: Once the application's connections use the new limits, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (20 in 20 runs in this scan).",
+        ]
+    );
+    // TempTable with tmp_table_size unread; a TEXT column on MariaDB, with totals Culprit's scans measured apart.
+    let mut unread_cap = temptable("8.0.36", Some("1073741824"));
+    unread_cap.settings.retain(|x| x.name != "tmp_table_size");
+    let mut text_scanned = measured_by_scans("mysql-demo.json", GROUP_BY, 3.0, 7_500.0);
+    (text_scanned.server.product, text_scanned.server.version) = ("MariaDB 10.11.8".into(), "10.11.8-MariaDB".into());
+    let mut note = text_scanned.columns.iter().find(|c| c.table == "orders").cloned().expect("a column of orders");
+    (note.name, note.data_type) = ("channel".into(), "text".into());
+    text_scanned.columns.retain(|c| !(c.table == "orders" && c.name.eq_ignore_ascii_case("channel")));
+    text_scanned.columns.push(note);
+    assert_eq!(
+        [said(unread_cap, GROUP_BY), said(text_scanned, GROUP_BY)],
+        [
+            "A read from orders builds an on-disk temporary table about once per run · Low · High\n\
+                The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement outgrows the in-memory limit and moves to disk, which is many times slower: 20 on-disk tables in 20 runs.\n\
+                impact: 77% of DB time\n\
+                metric: On-disk temporary tables per run\n\
+                metric: Average duration\n\
+                fix: Check whether an index matching the GROUP BY or ORDER BY reduces temporary-table work (an ORDER BY that differs from the grouping can still need a temporary table and sort), or raise tmp_table_size (the scan didn't read its current value). Global values apply to new connections: reopen the application's existing connections, or have the application set these session variables on them.\n\
+                verify: Once the application's connections use the new limits, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (20 in 20 runs in this scan).",
+            "A read from orders builds an on-disk temporary table about once per run · Low · High\n\
+                The temporary table behind a GROUP BY, DISTINCT or ORDER BY in this statement holds channel, and MariaDB keeps a temporary table with TEXT or BLOB values on disk whatever its size: 20 on-disk tables in 20 runs over the 40 days since statistics were reset. Raising the memory limit won't change that.\n\
+                impact: 75% of DB time\n\
+                metric: On-disk temporary tables per run over the 40 days since statistics were reset\n\
+                metric: Average duration over Culprit's scans\n\
+                fix: Leave channel out of the grouped, distinct or sorted rows (group by the key, then fetch the large columns for the rows you keep), or add an index that delivers rows already grouped or ordered so no temporary table is needed.\n\
+                verify: Once the change is live, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (20 in 20 runs in this scan).",
         ]
     );
 }
@@ -2870,6 +2933,20 @@ fn parameter_sensitivity_says_what_the_values_do_in_english() {
         histogram: vec![[100.0, 200.0, 70.0], [200.0, 400.0, 7.0], [2000.0, 5000.0, 3.0]],
         ..Default::default()
     });
+    // And the slow query log's tail without a histogram: 1 in 100 of the logged runs.
+    assert_eq!(
+        said(slow_log(tail(mysql(), 400.0, false)), id),
+        "Logged runs of a read from orders usually take 2.0 ms but 1 in 100 takes over 900 ms · Low · Medium\n\
+        Of the runs of this statement the slow query log kept (only those over long_query_time, 100 ms, so faster runs aren't counted): half finished within 2.0 ms, 99 in 100 within 900 ms, the slowest took 8.3 ms. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.\n\
+        impact: 450× slower for some runs\n\
+        metric: Typical logged run\n\
+        metric: 1 in 100 runs\n\
+        fix: Compare a slow and a fast value with EXPLAIN ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MySQL choose a better plan for each.\n\
+        sql: -- Give the optimizer the distribution of an uneven column:\n\
+        ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;\n\
+        verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
+        verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one."
+    );
     assert_eq!(
         [said(cheap, "8"), said(few, id)],
         [

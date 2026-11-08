@@ -511,7 +511,7 @@ fn chatty_statements_say_what_their_round_trips_do_in_english() {
     let pg = "2885972271926804069";
     // The PostgreSQL demo's customer lookup over 40 days of running totals, 10K runs a day, where Culprit's three scans
     // of the last 36 hours measured 40K a day; the demo's other statements run `others` times.
-    let scanned = |others: f64| {
+    let scanned_as = |others: f64, text: Option<&str>, rows: f64| {
         let mut scanned = demo("postgres-demo.json");
         let w = scanned.workload.as_mut().unwrap();
         let end = epoch_seconds(w.window_end.as_deref().unwrap()).unwrap();
@@ -529,13 +529,17 @@ fn chatty_statements_say_what_their_round_trips_do_in_english() {
             w.queries.iter_mut().find(|q| q.id == pg).unwrap().executions = others;
         }
         let q = w.queries.iter_mut().find(|q| q.id == "3432126458605143571").unwrap();
-        (q.executions, q.total_time_ms, q.mean_time_ms, q.rows) = (400_000.0, 8_000.0, 0.02, Some(400_000.0));
+        (q.executions, q.total_time_ms, q.mean_time_ms, q.rows) = (400_000.0, 8_000.0, 0.02, Some(rows));
+        if let Some(text) = text {
+            q.text = text.into();
+        }
         q.first_seen = Some(at(960.0));
         q.trend = Some(culprit_core::QueryTrend { time_ms: vec![Some(400.0); 3], executions: vec![Some(20_000.0); 3] });
         w.total_executions = w.queries.iter().map(|q| q.executions).sum();
         let found = crate::run("chatty-query", &scanned);
         found.iter().find(|f| f.id == "chatty-query:3432126458605143571").map(crate::words)
     };
+    let scanned = |others: f64| scanned_as(others, None, 400_000.0);
     let scanned_alone = scanned(0.0);
     assert_eq!(
         [
@@ -720,6 +724,75 @@ fn chatty_statements_say_what_their_round_trips_do_in_english() {
                 fix: If the caller confirms that this is solely a number allocator, consider an INTEGER PRIMARY KEY only if a database-wide allocator, gaps and allocation order satisfy the application's requirements. It does not preserve gapless or per-parent numbering or commit order. Otherwise keep the atomic UPDATE. Check whether the caller can combine work without losing filters, returned values or transaction guarantees; the SQL alone does not establish a removable call.\n\
                 verify: It ran 30K times in 90 minutes; after the change compare total time and any avoidable calls, while checking that numbering, metadata updates and returned values remain correct.\n\
                 caveat: A sequence can have gaps, allocates outside transaction commit order and does not provide per-parent numbering. Check the application's numbering and atomicity requirements before considering one.",
+        ]
+    );
+    // What Culprit's scans measured of a write of a few rows, a poll, a write that changes nothing and a counter; and a
+    // write that changes nothing without them.
+    let scanned_as = |text: &str, rows: f64| scanned_as(0.0, Some(text), rows).expect("a chatty statement");
+    assert_eq!(
+        [
+            scanned_as("UPDATE sessions SET seen_at = now() WHERE user_id = $1", 640_000.0),
+            scanned_as("SELECT id FROM jobs WHERE status = $1", 0.0),
+            scanned_as("UPDATE jobs SET seen_at = now() WHERE id = $1 AND owner IS NULL", 0.0),
+            scanned_as("UPDATE counters SET n = n + 1 WHERE name = $1 RETURNING n", 400_000.0),
+            said(
+                demo("postgres-demo.json"),
+                pg,
+                "UPDATE jobs SET seen_at = now() WHERE id = $1 AND owner IS NULL",
+                0.0,
+                None,
+                none
+            ),
+        ],
+        [
+            "An update of sessions runs about 40K times a day over 36 hours of Culprit's scans, about 1.6 rows each time · Low · Medium\n\
+                Its runs are 50% of all statement runs over 36 hours of Culprit's scans, and each run changes about 1.6 rows (counted over the 40 days since statistics were reset). Frequent small updates can be independent requests, row-by-row loops, heartbeats or status changes; each call can add a round trip, and each committing transaction can flush the log (4% of database time in all). The counters do not show whether calls already share a transaction.\n\
+                impact: 50% of executions\n\
+                metric: Runs per day over Culprit's scans\n\
+                metric: Runs per day over the 40 days since statistics were reset\n\
+                metric: Share of executions over Culprit's scans\n\
+                metric: Average duration over Culprit's scans\n\
+                fix: Where the application changes many rows the same way, update them in one statement (an UPDATE over an array of keys (`= ANY($1)`), or joined to a VALUES list) inside one transaction; for a heartbeat or lease, renew less often.\n\
+                verify: It ran about 40K times a day over 36 hours of Culprit's scans. pg_stat_statements keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there it should run fewer times and take less time in all while the useful work stays the same. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running.\n\
+                caveat: Some frequent single-row updates are legitimate (a status that changes as its work progresses). Check the calling code before batching.",
+            "A read from jobs runs about 40K times a day over 36 hours of Culprit's scans and most runs find nothing · Low · Medium\n\
+                Its runs are 50% of all statement runs over 36 hours of Culprit's scans, and on average a run returns 0 rows (counted over the 40 days since statistics were reset). Empty results can come from polling, request-driven checks or legitimate misses; the counters do not identify the caller or prove a timer. Each run is cheap (4% of database time in all), but unnecessary calls still add round trips.\n\
+                impact: 50% of executions\n\
+                metric: Runs per day over Culprit's scans\n\
+                metric: Runs per day over the 40 days since statistics were reset\n\
+                metric: Share of executions over Culprit's scans\n\
+                metric: Average duration over Culprit's scans\n\
+                fix: Check the caller first. If it polls for work, back off after empty results, coordinate pollers, or have the writer wake them (a queue or notification). For request-driven checks, reuse an answer only while it remains valid. Keep necessary checks and their correctness guarantees.\n\
+                verify: It ran about 40K times a day over 36 hours of Culprit's scans. pg_stat_statements keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there unnecessary calls and total database time should fall while the useful work stays the same. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running.\n\
+                caveat: Some frequent checks are legitimate (a lease or a lock checked on every request). Check the calling code before changing how often it asks.",
+            "An update of jobs runs about 40K times a day over 36 hours of Culprit's scans and most runs find nothing · Low · Medium\n\
+                Its runs are 50% of all statement runs over 36 hours of Culprit's scans, and on average a run changes 0 rows (counted over the 40 days since statistics were reset). Empty results can come from polling, request-driven checks or legitimate misses; the counters do not identify the caller or prove a timer. Each run is cheap (4% of database time in all), but unnecessary calls still add round trips.\n\
+                impact: 50% of executions\n\
+                metric: Runs per day over Culprit's scans\n\
+                metric: Runs per day over the 40 days since statistics were reset\n\
+                metric: Share of executions over Culprit's scans\n\
+                metric: Average duration over Culprit's scans\n\
+                fix: Check the caller first. If it polls for work, back off after empty results, coordinate pollers, or have the writer wake them (a queue or notification). For request-driven checks, reuse an answer only while it remains valid. Keep necessary checks and their correctness guarantees.\n\
+                verify: It ran about 40K times a day over 36 hours of Culprit's scans. pg_stat_statements keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there unnecessary calls and total database time should fall while the useful work stays the same. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running.\n\
+                caveat: Some frequent checks are legitimate (a lease or a lock checked on every request). Check the calling code before changing how often it asks.",
+            "An update of counters runs about 40K times a day over 36 hours of Culprit's scans, one row each time · Low · Medium\n\
+                Its runs are 50% of all statement runs over 36 hours of Culprit's scans. Each run adds to n in one row of counters and returns the new value. It may allocate numbers or maintain other application state; the SQL alone does not establish its business purpose or a removable call. Each call can add a round trip, and the row stays locked until its transaction commits, so callers that need the next number of the same row can wait for each other. In all it takes 4% of database time.\n\
+                impact: 50% of executions\n\
+                metric: Runs per day over Culprit's scans\n\
+                metric: Runs per day over the 40 days since statistics were reset\n\
+                metric: Share of executions over Culprit's scans\n\
+                metric: Average duration over Culprit's scans\n\
+                fix: If the caller confirms that this is solely a number allocator, consider a sequence (`nextval()`, or an identity column) only if a database-wide allocator, gaps and allocation order satisfy the application's requirements. It does not preserve gapless or per-parent numbering or commit order. Otherwise keep the atomic UPDATE. Check whether the caller can combine work without losing filters, returned values or transaction guarantees; the SQL alone does not establish a removable call.\n\
+                verify: It ran about 40K times a day over 36 hours of Culprit's scans. pg_stat_statements keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there compare total time and any avoidable calls, while checking that numbering, metadata updates and returned values remain correct. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running.\n\
+                caveat: A sequence can have gaps, allocates outside transaction commit order and does not provide per-parent numbering. Check the application's numbering and atomicity requirements before considering one.",
+            "An update of jobs runs 30K times in 5 hours and most runs find nothing · Medium · Medium\n\
+                Its runs are 75% of all statement runs, and on average a run changes 0 rows. Empty results can come from polling, request-driven checks or legitimate misses; the counters do not identify the caller or prove a timer. Each run is cheap (2% of database time in all), but unnecessary calls still add round trips.\n\
+                impact: 75% of executions\n\
+                metric: Share of executions\n\
+                metric: Average duration\n\
+                fix: Check the caller first. If it polls for work, back off after empty results, coordinate pollers, or have the writer wake them (a queue or notification). For request-driven checks, reuse an answer only while it remains valid. Keep necessary checks and their correctness guarantees.\n\
+                verify: It ran 30K times in 5 hours. pg_stat_statements keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there unnecessary calls and total database time should fall while the useful work stays the same. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running.\n\
+                caveat: Some frequent checks are legitimate (a lease or a lock checked on every request). Check the calling code before changing how often it asks.",
         ]
     );
 }
