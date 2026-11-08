@@ -5,6 +5,7 @@ import type { Environment } from "../../gen/Environment";
 import type { ParsedConnection } from "../../gen/ParsedConnection";
 import { api, errorMessage, type ApiError } from "../../lib/api";
 import { connectFacts, ENGINES } from "../../lib/engines";
+import { t } from "../../lib/i18n";
 import { LatestRequest } from "../../lib/requests";
 import { loadConnections, openConnection } from "../../lib/store";
 import { remember, rememberedChoice } from "../../lib/prefs";
@@ -197,23 +198,23 @@ export function NewConnectionForm({ onDone, canCancel }: { onDone: () => void; c
         if (e.key === "Escape" && canCancel) onDone();
       }}
     >
-      <div className="eyebrow">New connection</div>
+      <div className="eyebrow">{t("ui.connections.new")}</div>
       <div className="new-conn-connect">
         <div className="new-conn-field">
-          <label htmlFor={`${ids}-engine`}>Database type</label>
+          <label htmlFor={`${ids}-engine`}>{t("ui.new_connection_form.engine")}</label>
           <EnginePicker id={`${ids}-engine`} value={engine} onChange={pick} autoFocus={!engine} />
         </div>
         <div className="new-conn-field">
-          <label htmlFor={`${ids}-input`}>{facts?.file ? "Database file" : "Connection string"}</label>
+          <label htmlFor={`${ids}-input`}>{facts?.file ? t("ui.new_connection_form.file") : t("ui.new_connection_form.connection_string")}</label>
           <div className="smart-input">
             <Database size={16} color="var(--text-3)" aria-hidden />
             <input ref={field} id={`${ids}-input`} value={input} spellCheck={false}
-              autoComplete="off" autoCapitalize="off" placeholder={facts?.example ?? "Paste a connection string…"}
+              autoComplete="off" autoCapitalize="off" placeholder={facts?.example ?? t("ui.new_connection_form.paste")}
               aria-describedby={`${ids}-help`}
               onChange={(event) => { setInput(event.target.value); setSwitched(false); setTest({ status: "idle" }); }} />
             {facts?.file && (
               <button type="button" className={`btn ${input.trim() ? "" : "primary"}`} onClick={onChoose}>
-                <FolderOpen size={13} /> Choose file…
+                <FolderOpen size={13} /> {t("ui.new_connection_form.choose_file")}
               </button>
             )}
           </div>
@@ -223,21 +224,21 @@ export function NewConnectionForm({ onDone, canCancel }: { onDone: () => void; c
         {parseError ? parseError : ready && !facts?.file ? (
           <>
             <Check size={12} className="read" aria-hidden />
-            {switched && <b>Switched to {facts?.choice}, which the text names. </b>}
+            {switched && <b>{t("ui.new_connection_form.switched", { engine: facts?.choice ?? "" })} </b>}
             <span className="mono">{parsed.display}</span>
-            {parsed.auth === "entra" && " · Microsoft Entra ID through your az login, no password kept"}
+            {parsed.auth === "entra" && ` · ${t("ui.new_connection_form.entra")}`}
           </>
         ) : (
           <>
-            {switched && <b>Switched to {facts?.choice}, which the text names. </b>}
-            {facts?.accepts ?? "Paste a connection string to detect the database, or select a type."}
+            {switched && <b>{t("ui.new_connection_form.switched", { engine: facts?.choice ?? "" })} </b>}
+            {facts?.accepts ?? t("ui.new_connection_form.accepts")}
           </>
         )}
       </p>
 
       {ready && (
         <div className="form-grid">
-          <label htmlFor={`${ids}-name`}>Name</label>
+          <label htmlFor={`${ids}-name`}>{t("ui.new_connection_form.name")}</label>
           <input
             id={`${ids}-name`}
             value={name}
@@ -247,7 +248,7 @@ export function NewConnectionForm({ onDone, canCancel }: { onDone: () => void; c
               setNameTouched(true);
             }}
           />
-          <span id={`${ids}-environment`} className="form-grid-label">Environment</span>
+          <span id={`${ids}-environment`} className="form-grid-label">{t("ui.new_connection_form.environment")}</span>
           <div className="seg" role="radiogroup" aria-labelledby={`${ids}-environment`}>
             {ENVIRONMENTS.map((env) => (
               <button
@@ -262,20 +263,20 @@ export function NewConnectionForm({ onDone, canCancel }: { onDone: () => void; c
                 }}
               >
                 <span className={`env-dot env-${env}`} style={{ display: "inline-block", marginRight: 6, width: 6, height: 6, boxShadow: "none" }} />
-                {env}
+                {t("ui.common.environment", { environment: env })}
               </button>
             ))}
           </div>
           {needsUser && (
             <>
-              <label htmlFor={`${ids}-user`}>User</label>
-              <input id={`${ids}-user`} value={user} spellCheck={false} autoComplete="off" onChange={(e) => setUser(e.target.value)} placeholder="Not in the connection string" />
+              <label htmlFor={`${ids}-user`}>{t("ui.new_connection_form.user")}</label>
+              <input id={`${ids}-user`} value={user} spellCheck={false} autoComplete="off" onChange={(e) => setUser(e.target.value)} placeholder={t("ui.new_connection_form.user_placeholder")} />
             </>
           )}
           {needsPassword && (
             <>
-              <label htmlFor={`${ids}-password`}>Password</label>
-              <input id={`${ids}-password`} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Kept in the OS keychain" />
+              <label htmlFor={`${ids}-password`}>{t("ui.new_connection_form.password")}</label>
+              <input id={`${ids}-password`} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("ui.new_connection_form.password_placeholder")} />
             </>
           )}
           {!facts?.file && <><span /><SshFields value={ssh} disabled={test.status === "busy"} onChange={(value) => {
@@ -284,14 +285,14 @@ export function NewConnectionForm({ onDone, canCancel }: { onDone: () => void; c
           <span />
           <div className="new-conn-actions">
             <button type="submit" className="btn primary" disabled={!name || !defaultsCurrent || test.status === "busy"}>
-              Connect and scan
+              {t("ui.new_connection_form.connect")}
             </button>
             <button type="button" className="btn" disabled={!defaultsCurrent || test.status === "busy"} onClick={onTest}>
-              Test
+              {t("ui.new_connection_form.test")}
             </button>
             {canCancel && (
               <button type="button" className="btn ghost" onClick={onDone}>
-                Cancel
+                {t("ui.common.cancel")}
               </button>
             )}
             {test.status === "busy" && <span className="spinner" />}
@@ -311,7 +312,7 @@ export function NewConnectionForm({ onDone, canCancel }: { onDone: () => void; c
           {environment === "production" && (
             <>
               <span />
-              <div className="notice">Production connections are read-only in Culprit: scans read statistics views, plans are estimated, and anything that executes a statement asks first.</div>
+              <div className="notice">{t("ui.new_connection_form.production_notice")}</div>
             </>
           )}
         </div>

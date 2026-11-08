@@ -6,35 +6,39 @@ import type { ImportCandidate } from "../../gen/ImportCandidate";
 import type { ImportSource } from "../../gen/ImportSource";
 import { api, errorMessage, type ApiError } from "../../lib/api";
 import { engineLabel } from "../../lib/engines";
+import { t } from "../../lib/i18n";
 import { discoveryKey, preselectedDiscoveries, type DiscoveryPage } from "../../lib/discovery-results";
 import { LatestRequest } from "../../lib/requests";
 import { loadConnections } from "../../lib/store";
 import { remember, remembered } from "../../lib/prefs";
+import { slot, withElements } from "../message-parts";
 
 const TERMS_KEY: Record<CloudKind, string> = { azure: "culprit.discover.terms", aws: "culprit.discover.aws.terms" };
 const REGIONS_KEY = "culprit.discover.aws.regions";
 
 const words = (text: string) => text.split(/[\s,]+/).filter(Boolean);
 
-const CLOUD_COPY: Record<CloudKind, { heading: string; login: string; busy: string; note: string }> = {
-  azure: {
-    heading: "Azure SQL, PostgreSQL and MySQL databases your",
-    login: "az login",
-    busy: "Asking Azure…",
-    note: "Saved with Microsoft Entra ID through your Azure CLI login where the server allows it; the others ask for their password once (kept in the OS keychain).",
-  },
-  aws: {
-    heading: "Amazon RDS and Aurora databases your",
-    login: "aws login",
-    busy: "Asking AWS…",
-    note: "IAM-enabled databases sign in through your AWS CLI login; the others ask for their password once (kept in the OS keychain).",
-  },
-};
+/** What the panel says for each cloud; `heading` has a slot for the login command. */
+function cloudCopy(cloud: CloudKind): { heading: string; login: string; busy: string; note: string } {
+  return cloud === "azure"
+    ? {
+        heading: t("ui.discover_panel.azure.heading", { login: slot(0) }),
+        login: "az login",
+        busy: t("ui.discover_panel.azure.busy"),
+        note: t("ui.discover_panel.azure.note"),
+      }
+    : {
+        heading: t("ui.discover_panel.aws.heading", { login: slot(0) }),
+        login: "aws login",
+        busy: t("ui.discover_panel.aws.busy"),
+        note: t("ui.discover_panel.aws.note"),
+      };
+}
 
 type DiscoverState = { status: "idle" } | { status: "busy" } | ({ status: "done" } & DiscoveryPage) | { status: "error"; error: ApiError };
 
 export function DiscoverPanel({ cloud, onDone }: { cloud: CloudKind; onDone: () => void }) {
-  const copy = CLOUD_COPY[cloud];
+  const copy = cloudCopy(cloud);
   const [terms, setTerms] = useState(() => remembered(TERMS_KEY[cloud]) ?? "");
   const [regions, setRegions] = useState(() => (cloud === "aws" ? (remembered(REGIONS_KEY) ?? "") : ""));
   const [state, setDiscover] = useState<DiscoverState>({ status: "idle" });
@@ -109,26 +113,26 @@ export function DiscoverPanel({ cloud, onDone }: { cloud: CloudKind; onDone: () 
   return (
     <div className="cloud-discovery" style={{ marginTop: 18 }}>
       <div className="eyebrow" style={{ marginBottom: 8 }}>
-        {copy.heading} <span className="mono">{copy.login}</span> can see
+        {withElements(copy.heading, [<span key="login" className="mono">{copy.login}</span>])}
       </div>
       <label className="smart-input discovery-search">
         <Search size={16} color="var(--text-3)" />
-        <input value={terms} aria-label="Search databases" disabled={adding} placeholder="Words in the database or server name, e.g. shop stg"
+        <input value={terms} aria-label={t("ui.discover_panel.search_label")} disabled={adding} placeholder={t("ui.discover_panel.search_placeholder")}
           onChange={(e) => { resetResults(); setTerms(e.target.value); }} onKeyDown={(e) => e.key === "Enter" && !adding && search()} />
         {cloud === "aws" && (
           <input
             value={regions}
-            aria-label="AWS regions"
+            aria-label={t("ui.discover_panel.regions_label")}
             disabled={adding}
             className="discovery-regions"
-            placeholder="All enabled regions"
-            title="Regions to search, e.g. us-east-1 eu-central-1"
+            placeholder={t("ui.discover_panel.regions_placeholder")}
+            title={t("ui.discover_panel.regions_title")}
             onChange={(e) => { resetResults(); setRegions(e.target.value); }}
             onKeyDown={(e) => e.key === "Enter" && !adding && search()}
           />
         )}
         <button type="button" className="btn" disabled={adding} onClick={search}>
-          Search
+          {t("ui.common.search")}
         </button>
       </label>
       {state.status === "busy" && (
@@ -147,10 +151,10 @@ export function DiscoverPanel({ cloud, onDone }: { cloud: CloudKind; onDone: () 
       )}
       {state.status === "done" && (
         <div className="discover-list">
-          {state.items.length === 0 && <div className="muted" style={{ padding: 12 }}>{state.has_more ? "The incomplete search found no matches. Refine the search and retry." : "No databases match."}</div>}
+          {state.items.length === 0 && <div className="muted" style={{ padding: 12 }}>{state.has_more ? t("ui.discover_panel.incomplete_no_match") : t("ui.discover_panel.no_match")}</div>}
           {state.has_more && (
             <p className="discover-more muted" role="status">
-              {state.items.length} {state.items.length === 1 ? "match" : "matches"} shown · more may be available. Refine your search to narrow the results.
+              {t("ui.discover_panel.more", { count: state.items.length })}
             </p>
           )}
           {state.warnings.length > 0 && <div className="notice" role="status"><div>{state.warnings.map((warning) => <p key={warning}>{warning}</p>)}</div></div>}
@@ -167,17 +171,17 @@ export function DiscoverPanel({ cloud, onDone }: { cloud: CloudKind; onDone: () 
                 )}
                 <span className="where muted" title={d.host}>
                   {d.cloud === "aws"
-                    ? `${d.server} · ${engineLabel(d.engine)} · ${d.location} · ${d.auth === "aws-iam" ? "IAM" : "password"}`
-                    : `${d.server}${d.database ? ` / ${d.database}` : ""} · ${engineLabel(d.engine)} · ${d.location}${d.auth === "password" ? " · password" : ""}`}
+                    ? `${d.server} · ${engineLabel(d.engine)} · ${d.location} · ${d.auth === "aws-iam" ? t("ui.discover_panel.auth_iam") : t("ui.discover_panel.auth_password")}`
+                    : `${d.server}${d.database ? ` / ${d.database}` : ""} · ${engineLabel(d.engine)} · ${d.location}${d.auth === "password" ? ` · ${t("ui.discover_panel.auth_password")}` : ""}`}
                 </span>
-                <span className="muted">{d.saved_as ? "saved" : d.environment}</span>
+                <span className="muted">{d.saved_as ? t("ui.discover_panel.saved") : t("ui.common.environment", { environment: d.environment })}</span>
               </label>
             );
           })}
           {state.items.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "10px 4px 2px" }}>
               <button type="button" className="btn primary" disabled={selected.length === 0 || adding} onClick={add}>
-                Add {selected.length} {selected.length === 1 ? "connection" : "connections"}
+                {t("ui.discover_panel.add", { count: selected.length })}
               </button>
               <span className="muted">{copy.note}</span>
             </div>
@@ -246,13 +250,13 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
   return (
     <div style={{ marginTop: 18 }}>
       <div className="eyebrow" style={{ marginBottom: 8 }}>
-        Connections saved in other tools on this computer
+        {t("ui.import_panel.heading")}
       </div>
       {state.status === "done" && items.length > 0 && (
         <div className="import-sources">
           <div className="seg">
             <button type="button" className={source === null ? "on" : ""} onClick={() => setSource(null)}>
-              All {items.length}
+              {t("ui.import_panel.all", { count: items.length })}
             </button>
             {SOURCES.filter((s) => (counts[s] ?? 0) > 0).map((s) => (
               <button type="button" key={s} className={source === s ? "on" : ""} onClick={() => setSource(s)}>
@@ -265,7 +269,7 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
       {state.status === "busy" && (
         <div className="empty" style={{ padding: 24 }}>
           <div className="spinner" />
-          Looking for Azure Data Studio, VS Code, DBeaver and DataGrip connections…
+          {t("ui.import_panel.busy")}
         </div>
       )}
       {state.status === "error" && (
@@ -279,8 +283,7 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
       {state.status === "done" && items.length === 0 && (
         <div className="notice" style={{ marginTop: 12 }}>
           <div>
-            No saved connections found in Azure Data Studio, VS Code (mssql), DBeaver or DataGrip on this computer. Point the CLI at a settings file
-            with <span className="mono">culprit conn import --file …</span>
+            {withElements(t("ui.import_panel.none", { command: slot(0) }), [<span key="command" className="mono">culprit conn import --file …</span>])}
           </div>
         </div>
       )}
@@ -298,11 +301,11 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
                   ) : (
                     <input className="alias-input" value={aliases[key] ?? c.alias} onChange={(e) => setAliases((a) => ({ ...a, [key]: e.target.value }))} />
                   )}
-                  <span className="where muted" title={`${c.origin} in ${SOURCE_LABEL[c.source]} · ${c.file}`}>
+                  <span className="where muted" title={t("ui.import_panel.origin", { origin: c.origin, tool: SOURCE_LABEL[c.source], file: c.file })}>
                     {engineLabel(c.engine)} · {target(c)}
                     {c.auth === "entra" ? " · Entra ID" : c.user ? ` · ${c.user}` : ""}
                   </span>
-                  <span className="muted">{c.saved_as ? "saved" : c.environment}</span>
+                  <span className="muted">{c.saved_as ? t("ui.discover_panel.saved") : t("ui.common.environment", { environment: c.environment })}</span>
                 </label>
                 {c.note && !c.saved_as && <div className="import-note">{c.note}</div>}
               </div>
@@ -310,9 +313,9 @@ export function ImportPanel({ onDone }: { onDone: () => void }) {
           })}
           <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "10px 4px 2px" }}>
             <button type="button" className="btn primary" disabled={selected.length === 0 || adding} onClick={add}>
-              Import {selected.length} {selected.length === 1 ? "connection" : "connections"}
+              {t("ui.import_panel.import", { count: selected.length })}
             </button>
-            <span className="muted">Names, hosts, databases and user names only. Passwords stay in the other tool; Culprit asks once and keeps them in the OS keychain.</span>
+            <span className="muted">{t("ui.import_panel.note")}</span>
           </div>
         </div>
       )}

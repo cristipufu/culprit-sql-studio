@@ -2,6 +2,7 @@ import { Cable, FolderOpen } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { SshDraft } from "../../lib/ssh";
 import { api, errorMessage, isDesktop } from "../../lib/api";
+import { t } from "../../lib/i18n";
 import { LatestRequest } from "../../lib/requests";
 import "./ssh.css";
 
@@ -31,38 +32,38 @@ export function SshFields({ value, onChange, disabled = false }: {
         request.current.invalidate(); setPicking(false); setError(null);
         onChange(event.target.checked ? { destination: "", port: "", identityFile: "" } : null);
       }} />
-      <Cable size={15} aria-hidden="true" /><span>SSH jump host</span><small>Optional</small>
+      <Cable size={15} aria-hidden="true" /><span>{t("ui.ssh_fields.jump_host")}</span><small>{t("ui.common.optional")}</small>
     </label>
     {value && <div className="ssh-fields-body">
       <div className="ssh-field">
-        <label htmlFor={`${id}-host`}>SSH host or alias</label>
+        <label htmlFor={`${id}-host`}>{t("ui.ssh_fields.host")}</label>
         <input id={`${id}-host`} value={value.destination} required maxLength={512} autoComplete="off" spellCheck={false}
-          placeholder="reader@bastion or prod-bastion" onChange={(event) => onChange({ ...value, destination: event.target.value })} />
-        <p className="ssh-help">Uses your OpenSSH configuration and agent. Your database address and sign-in method stay the same.</p>
+          placeholder={t("ui.ssh_fields.host_placeholder")} onChange={(event) => onChange({ ...value, destination: event.target.value })} />
+        <p className="ssh-help">{t("ui.ssh_fields.host_help")}</p>
       </div>
       <details ref={options} className="ssh-options" open={advanced} onToggle={(event) => setAdvanced(event.currentTarget.open)}>
-        <summary>Identity file &amp; port</summary>
+        <summary>{t("ui.ssh_fields.options")}</summary>
         <div className="ssh-options-grid">
           <div className="ssh-field">
-            <label htmlFor={`${id}-port`}>SSH port</label>
+            <label htmlFor={`${id}-port`}>{t("ui.ssh_fields.port")}</label>
             <input id={`${id}-port`} type="text" inputMode="numeric" pattern={"\\s*(?:[0-9]+\\s*)?"} value={value.port}
               onInvalid={() => {
                 // Native validation focuses the field immediately after this event, before React's next render.
                 if (options.current) options.current.open = true;
                 setAdvanced(true);
               }}
-              placeholder="From SSH config" onChange={(event) => onChange({ ...value, port: event.target.value })} />
+              placeholder={t("ui.ssh_fields.port_placeholder")} onChange={(event) => onChange({ ...value, port: event.target.value })} />
           </div>
           <div className="ssh-field">
-            <label htmlFor={`${id}-key`}>Identity file</label>
+            <label htmlFor={`${id}-key`}>{t("ui.ssh_fields.identity_file")}</label>
             <div className="ssh-key-input">
               <input id={`${id}-key`} value={value.identityFile} maxLength={4096} autoComplete="off" spellCheck={false}
-                placeholder="From SSH config or agent" onChange={(event) => onChange({ ...value, identityFile: event.target.value })} />
-              {isDesktop() && <button type="button" className="btn ghost" aria-label="Choose SSH identity file" disabled={picking} onClick={() => void chooseKey()}><FolderOpen size={14} /></button>}
+                placeholder={t("ui.ssh_fields.identity_placeholder")} onChange={(event) => onChange({ ...value, identityFile: event.target.value })} />
+              {isDesktop() && <button type="button" className="btn ghost" aria-label={t("ui.ssh_fields.choose_identity")} disabled={picking} onClick={() => void chooseKey()}><FolderOpen size={14} /></button>}
             </div>
           </div>
         </div>
-        <p className="ssh-help">Encrypted keys need to be unlocked in your SSH agent. The bastion’s host key must already be trusted.</p>
+        <p className="ssh-help">{t("ui.ssh_fields.options_help")}</p>
       </details>
       {error && <p className="ssh-error" role="alert">{error}</p>}
     </div>}

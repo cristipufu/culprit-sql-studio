@@ -8,6 +8,7 @@ import type { ConnectionInfo } from "../../gen/ConnectionInfo";
 import { api, errorMessage, isDesktop } from "../../lib/api";
 import { connectFacts, serverName } from "../../lib/engines";
 import { ago } from "../../lib/format";
+import { t } from "../../lib/i18n";
 import { loadConnections, openConnection, removeConnection, renameConnection } from "../../lib/store";
 
 const AUTH_LABEL: Partial<Record<AuthKind, string>> = { entra: "Entra ID", "aws-iam": "AWS IAM" };
@@ -25,8 +26,12 @@ export function ConnectionCard({ connection: c }: { connection: ConnectionInfo }
   const database = c.database ?? (file ? c.host.split(/[\\/]/).pop() : null);
   const host = c.host.includes(":") && !c.host.startsWith("[") ? `[${c.host}]` : c.host;
   const endpoint = file ? c.display : `${host}${c.port ? `:${c.port}` : ""}`;
+  // A headline with only a count (no workload, or no finding above 5% of database time) still gets a line, so every
+  // scanned card has the same shape.
   const headline = c.last_report
-    ? c.last_report.no_workload ? `No query history: ${c.last_report.no_workload}` : (takeaway(c.last_report.headline) ?? NO_TAKEAWAY)
+    ? c.last_report.no_workload
+      ? t("ui.connection_card.no_query_history", { reason: c.last_report.no_workload })
+      : (takeaway(c.last_report.headline) ?? t("ui.connection_card.no_takeaway"))
     : null;
 
   const save = async () => {
@@ -51,9 +56,9 @@ export function ConnectionCard({ connection: c }: { connection: ConnectionInfo }
       <article className="conn-card conn-card-editing">
         <EngineBadge engine={c.engine} environment={c.environment} product={c.last_report?.product} size="md" />
         <div className="conn-edit-name">
-          <label htmlFor={nameId}>Connection name</label>
+          <label htmlFor={nameId}>{t("ui.connection_card.name")}</label>
           <input id={nameId} className="alias-input" autoFocus value={alias} readOnly={saving}
-            aria-label={`Rename ${c.name}`} aria-busy={saving}
+            aria-label={t("ui.connection_card.rename", { name: c.name })} aria-busy={saving}
             onChange={(event) => setAlias(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") { event.preventDefault(); void save(); }
@@ -61,7 +66,7 @@ export function ConnectionCard({ connection: c }: { connection: ConnectionInfo }
                 event.preventDefault(); submitted.current = true; setEditing(false);
               }
             }} onBlur={save} />
-          <span className="muted">{saving ? "Saving…" : "Enter to save · Escape to cancel"}</span>
+          <span className="muted">{saving ? t("ui.common.saving") : t("ui.connection_card.rename_keys")}</span>
           {error && <span className="error" role="alert">{error}</span>}
         </div>
       </article>
@@ -77,27 +82,27 @@ export function ConnectionCard({ connection: c }: { connection: ConnectionInfo }
           <span className="conn-meta">{product}{database && <> · {database}</>}</span>
         </span>
         <span className="conn-count">
-          {c.last_report ? <><b>{c.last_report.opportunities}</b><span>{c.last_report.opportunities === 1 ? "opportunity" : "opportunities"}</span></>
-            : <span className="conn-scan">First scan <ArrowRight size={12} /></span>}
+          {c.last_report ? <><b>{c.last_report.opportunities}</b><span>{t("ui.connection_card.opportunities", { count: c.last_report.opportunities })}</span></>
+            : <span className="conn-scan">{t("ui.connection_card.first_scan")} <ArrowRight size={12} /></span>}
         </span>
         <span className="conn-endpoint" title={c.display}>
-          <span>{file ? "File" : "Host"}</span><span>{endpoint}</span>
+          <span>{file ? t("ui.connection_card.file") : t("ui.connection_card.host")}</span><span>{endpoint}</span>
           {AUTH_LABEL[c.auth] && <span className="conn-auth">{AUTH_LABEL[c.auth]}</span>}
         </span>
         {headline && <span className="conn-summary" title={headline}>{headline}</span>}
       </button>
       <div className="conn-card-footer">
         <span className={`conn-when ${c.last_report && stale(c.last_report.taken_at) ? "stale" : ""}`}
-          title={c.last_report ? `${c.last_report.taken_at}${stale(c.last_report.taken_at) ? " · Open to refresh this saved report" : ""}` : undefined}>
+          title={c.last_report ? (stale(c.last_report.taken_at) ? t("ui.connection_card.stale", { time: c.last_report.taken_at }) : c.last_report.taken_at) : undefined}>
           <Clock3 size={12} aria-hidden="true" />
-          {c.last_report ? `Scanned ${ago(c.last_report.taken_at)}` : "No saved report"}
+          {c.last_report ? t("ui.connection_card.scanned", { ago: ago(c.last_report.taken_at) }) : t("ui.connection_card.no_report")}
         </span>
         <span className="conn-tools">
           {c.auth === "password" && !c.has_secret && <SetPassword name={c.name} />}
           {(file || c.query_log) && <QueryLogSetting connection={c} />}
           {!file && <SshSetting connection={c} />}
           <AgentAccessMenu connection={c} />
-          <button type="button" className="btn ghost conn-rename" title={`Rename ${c.name}`} aria-label={`Rename ${c.name}`}
+          <button type="button" className="btn ghost conn-rename" title={t("ui.connection_card.rename", { name: c.name })} aria-label={t("ui.connection_card.rename", { name: c.name })}
             onClick={() => { submitted.current = false; setAlias(c.name); setError(null); setEditing(true); }}>
             <Pencil size={12} />
           </button>
@@ -124,30 +129,26 @@ function RemoveConnection({ name }: { name: string }) {
   };
   if (!open) {
     return (
-      <button type="button" className="btn ghost conn-remove" title={`Remove ${name}`} aria-label={`Remove ${name}`}
+      <button type="button" className="btn ghost conn-remove" title={t("ui.connection_card.remove", { name })} aria-label={t("ui.connection_card.remove", { name })}
         onClick={() => { setError(null); setOpen(true); }}>
         <Trash2 size={12} />
       </button>
     );
   }
   return (
-    <span className="conn-settings-editor" role="group" aria-label={`Remove ${name}`}
+    <span className="conn-settings-editor" role="group" aria-label={t("ui.connection_card.remove", { name })}
       onKeyDown={(e) => { if (e.key === "Escape" && !busy) { e.stopPropagation(); setOpen(false); } }}>
-      <span className="muted">Remove {name}?</span>
+      <span className="muted">{t("ui.connection_card.remove_confirm", { name })}</span>
       <button type="button" className="btn small danger" autoFocus disabled={busy} aria-busy={busy} onClick={remove}>
-        {busy ? "Removing…" : "Remove"}
+        {busy ? t("ui.connection_card.removing") : t("ui.common.remove")}
       </button>
       <button type="button" className="btn small ghost" disabled={busy} onClick={() => setOpen(false)}>
-        Cancel
+        {t("ui.common.cancel")}
       </button>
       {error && <span className="error" role="alert">{error}</span>}
     </span>
   );
 }
-
-/** A headline with only a count (no workload, or no finding above 5% of database time) still gets a line, so every
- * scanned card has the same shape. */
-const NO_TAKEAWAY = "No finding is tied to a large share of database time.";
 
 /** The report headline without its count ("14 opportunities. The top ones touch…"), which the card already shows. */
 function takeaway(headline: string | undefined): string | null {
@@ -161,11 +162,13 @@ function stale(iso: string): boolean {
   return !Number.isNaN(t) && Date.now() - t > 86_400_000;
 }
 
-const AGENT_ACCESS: { value: AgentAccess; label: string; title: string }[] = [
-  { value: "off", label: "Off", title: "Coding agents using culprit mcp don't see this connection." },
-  { value: "stats", label: "Stats & plans", title: "Agents read findings, query statistics, schema and estimated plans. Nothing runs your SQL." },
-  { value: "query", label: "Approved queries", title: "Agents may also run read-only statements, each one only after you approve it here." },
-];
+function agentAccessOptions(): { value: AgentAccess; label: string; title: string }[] {
+  return [
+    { value: "off", label: t("ui.connection_card.agents.off"), title: t("ui.connection_card.agents.off_title") },
+    { value: "stats", label: t("ui.connection_card.agents.stats"), title: t("ui.connection_card.agents.stats_title") },
+    { value: "query", label: t("ui.connection_card.agents.query"), title: t("ui.connection_card.agents.query_title") },
+  ];
+}
 
 /** What coding agents may do with this connection through `culprit mcp`: a compact chip that opens a small menu. */
 function AgentAccessMenu({ connection: c }: { connection: ConnectionInfo }) {
@@ -174,7 +177,9 @@ function AgentAccessMenu({ connection: c }: { connection: ConnectionInfo }) {
   const root = useRef<HTMLSpanElement>(null);
   const items = useRef<(HTMLButtonElement | null)[]>([]);
   const menuId = useId();
-  const current = AGENT_ACCESS.find((a) => a.value === c.agent_access) ?? AGENT_ACCESS[0]!;
+  const options = agentAccessOptions();
+  const currentIndex = Math.max(0, options.findIndex((a) => a.value === c.agent_access));
+  const current = options[currentIndex]!;
 
   useEffect(() => {
     if (!open) return;
@@ -182,9 +187,9 @@ function AgentAccessMenu({ connection: c }: { connection: ConnectionInfo }) {
       if (!root.current?.contains(e.target as Node)) setOpen(false);
     };
     window.addEventListener("mousedown", onDown);
-    requestAnimationFrame(() => items.current[AGENT_ACCESS.indexOf(current)]?.focus());
+    requestAnimationFrame(() => items.current[currentIndex]?.focus());
     return () => window.removeEventListener("mousedown", onDown);
-  }, [open, current]);
+  }, [open, currentIndex]);
 
   const choose = async (value: AgentAccess) => {
     setOpen(false);
@@ -205,20 +210,20 @@ function AgentAccessMenu({ connection: c }: { connection: ConnectionInfo }) {
     if (e.key === "Escape") setOpen(false);
     else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
-      items.current[(at + (e.key === "ArrowDown" ? 1 : -1) + AGENT_ACCESS.length) % AGENT_ACCESS.length]?.focus();
+      items.current[(at + (e.key === "ArrowDown" ? 1 : -1) + options.length) % options.length]?.focus();
     }
   };
 
   return (
     <span className="agent-access" ref={root} onClick={(e) => e.stopPropagation()} onKeyDown={onKey}>
       <button type="button" className={`agent-chip access-${c.agent_access}`} aria-haspopup="menu" aria-expanded={open} aria-controls={menuId} title={current.title} onClick={() => setOpen((o) => !o)}>
-        <Bot size={12} /> Agents: {current.label}
+        <Bot size={12} /> {t("ui.connection_card.agents.chip", { access: current.label })}
         <ChevronDown size={11} />
       </button>
       {open && (
         <span className="agent-menu" role="menu" id={menuId}>
-          <span className="agent-menu-head">What coding agents may do here</span>
-          {AGENT_ACCESS.map((a, i) => (
+          <span className="agent-menu-head">{t("ui.connection_card.agents.heading")}</span>
+          {options.map((a, i) => (
             <button type="button"
               key={a.value}
               role="menuitemradio"
@@ -280,13 +285,13 @@ function QueryLogSetting({ connection: c }: { connection: ConnectionInfo }) {
           {file}
         </span>
         <button type="button" className="btn" onClick={choose}>
-          Choose another…
+          {t("ui.connection_card.query_log.choose_another")}
         </button>
         <button type="button" className="btn ghost" onClick={() => save(null)}>
-          Remove
+          {t("ui.common.remove")}
         </button>
         <button type="button" className="btn ghost" onClick={() => setOpen(false)}>
-          Done
+          {t("ui.common.done")}
         </button>
         {error && <span className="muted">{error}</span>}
       </span>
@@ -296,8 +301,8 @@ function QueryLogSetting({ connection: c }: { connection: ConnectionInfo }) {
     return (
       <button type="button"
         className="btn ghost conn-log"
-        aria-label={c.query_log ? `Query log for ${c.name}: ${file}` : `Add query log for ${c.name}`}
-        title={c.query_log ? `Scans read the statements from ${c.query_log}` : "Read the statements and their times from the log your framework writes (Rails, Django, EF Core, Phoenix)"}
+        aria-label={c.query_log ? t("ui.connection_card.query_log.label", { name: c.name, file: file ?? "" }) : t("ui.connection_card.query_log.add_label", { name: c.name })}
+        title={c.query_log ? t("ui.connection_card.query_log.title", { path: c.query_log }) : t("ui.connection_card.query_log.add_title")}
         onClick={(e) => {
           e.stopPropagation();
           if (isDesktop() && !c.query_log) void choose();
@@ -323,11 +328,11 @@ function QueryLogSetting({ connection: c }: { connection: ConnectionInfo }) {
         }}
       />
       <button type="button" className="btn" disabled={!path.trim()} onClick={() => save(path.trim())}>
-        Save
+        {t("ui.common.save")}
       </button>
       {c.query_log && (
         <button type="button" className="btn ghost" onClick={() => save(null)}>
-          Remove
+          {t("ui.common.remove")}
         </button>
       )}
       {error && <span className="muted">{error}</span>}
@@ -353,7 +358,7 @@ function SetPassword({ name }: { name: string }) {
   if (!open) {
     return (
       <button type="button"
-        className="btn ghost conn-key" title="Set password" aria-label={`Set password for ${name}`}
+        className="btn ghost conn-key" title={t("ui.connection_card.set_password")} aria-label={t("ui.connection_card.set_password_for", { name })}
         onClick={(e) => {
           e.stopPropagation();
           setOpen(true);
@@ -370,7 +375,7 @@ function SetPassword({ name }: { name: string }) {
         type="password"
         autoFocus
         value={password}
-        placeholder="Stored in the OS keychain"
+        placeholder={t("ui.connection_card.password_placeholder")}
         onChange={(e) => setPassword(e.target.value)}
         onKeyDown={(e) => {
           e.stopPropagation();
@@ -379,7 +384,7 @@ function SetPassword({ name }: { name: string }) {
         }}
       />
       <button type="button" className="btn" disabled={!password} onClick={save}>
-        Save
+        {t("ui.common.save")}
       </button>
       {error && <span className="muted">{error}</span>}
     </span>

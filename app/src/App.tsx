@@ -1,4 +1,4 @@
-import { useLanguage } from "./lib/i18n";
+import { t, useLanguage } from "./lib/i18n";
 import { AlertCircle } from "lucide-react";
 import { lazy, Suspense, useEffect } from "react";
 import { CommandPalette } from "./components/CommandPalette";
@@ -30,16 +30,26 @@ const Dashboard = lazy(() => import("./views/Dashboard"));
 const ApprovalDialog = lazy(() => import("./components/ApprovalDialog"));
 const Plans = lazy(() => import("./views/Plans").then((m) => ({ default: m.Plans })));
 
-const TITLES: Record<View, string> = {
-  dashboard: "Dashboard",
-  overview: "Findings",
-  queries: "Queries",
-  live: "Live",
-  schema: "Schema",
-  editor: "Editor",
-  plans: "Plans",
-  connections: "Connections",
-};
+function viewTitle(view: View): string {
+  switch (view) {
+    case "dashboard":
+      return t("ui.common.view.dashboard");
+    case "overview":
+      return t("ui.common.view.findings");
+    case "queries":
+      return t("ui.common.view.queries");
+    case "live":
+      return t("ui.common.view.live");
+    case "schema":
+      return t("ui.common.view.schema");
+    case "editor":
+      return t("ui.common.view.editor");
+    case "plans":
+      return t("ui.common.view.plans");
+    case "connections":
+      return t("ui.common.view.connections");
+  }
+}
 
 /** The sources a scan's query history comes from; when one is missing, its reason says why there is no workload. */
 
@@ -132,8 +142,8 @@ function TopBar() {
   if (view === "plans") {
     return (
       <header className="topbar" data-tauri-drag-region>
-        <h1>{TITLES[view]}</h1>
-        <span className="context">Paste, drop or open plans · compare any two</span>
+        <h1>{viewTitle(view)}</h1>
+        <span className="context">{t("ui.app.plans_context")}</span>
         <span className="spacer" />
         <ScreenshotButton />
       </header>
@@ -141,29 +151,53 @@ function TopBar() {
   }
   return (
     <header className="topbar" data-tauri-drag-region>
-      <h1>{TITLES[view]}</h1>
+      <h1>{viewTitle(view)}</h1>
       {showsWorkload && windowed && <WindowPicker coveredHours={w?.window_hours ?? null} source={w?.source ?? null} />}
       {showsWorkload && w?.log != null && (
-        <span className="context" title={`Statements read from the application's ${w.log} log${w.window_start ? `, ${when(w.window_start).full} to ${w.window_end ? when(w.window_end).full : "its end"}` : ""}. It covers its own period, not the last hours before the scan.`}>
-          {w.source} · {windowUnknown(w) ? "no timestamps" : windowLabel(w.window_hours).replace(/^last /, "")}
+        <span
+          className="context"
+          title={
+            !w.window_start
+              ? t("ui.app.log_title", { log: w.log })
+              : w.window_end
+                ? t("ui.app.log_title_range", { log: w.log, from: when(w.window_start).full, to: when(w.window_end).full })
+                : t("ui.app.log_title_from", { log: w.log, from: when(w.window_start).full })
+          }
+        >
+          {windowUnknown(w)
+            ? t("ui.app.log_no_timestamps", { source: w.source })
+            : t("ui.app.log_window", { source: w.source, window: windowLabel(w.window_hours).replace(/^last /, "") })}
         </span>
       )}
       {showsWorkload && report && !w && (
-        <span className="context" title={noHistory ?? "This scan found no statement statistics."}>
-          No query history in this scan
+        <span className="context" title={noHistory ?? t("ui.app.no_statement_statistics")}>
+          {t("ui.app.no_query_history")}
         </span>
       )}
       {showsWorkload && !windowed && w && w.log == null && (
-        <span className="context" title={`Cumulative statistics since they were last reset${w.window_start ? ` (${when(w.window_start).full})` : ""}; this source keeps no time windows.`}>
-          {w.source} · since {w.window_start ? when(w.window_start).short : "the last reset"}
+        <span
+          className="context"
+          title={
+            w.window_start
+              ? t("ui.app.cumulative_title_since", { time: when(w.window_start).full })
+              : t("ui.app.cumulative_title")
+          }
+        >
+          {w.window_start
+            ? t("ui.app.cumulative_since", { source: w.source, time: when(w.window_start).short })
+            : t("ui.app.cumulative_since_reset", { source: w.source })}
         </span>
       )}
       {environment && (
         <span
           className={`env-chip env-${environment}`}
-          title={environment === "production" ? "Production: reads run as they are; anything that changes data asks first" : `${environment} connection`}
+          title={
+            environment === "production"
+              ? t("ui.app.production_title")
+              : t("ui.app.environment_connection", { environment: t("ui.common.environment", { environment }) })
+          }
         >
-          {environment}
+          {t("ui.common.environment", { environment })}
         </span>
       )}
       <span className="spacer" />
@@ -172,12 +206,12 @@ function TopBar() {
         <div className="scan-error-anchor" tabIndex={0}>
           <span className="tag high scan-error-badge">
             <AlertCircle size={12} aria-hidden />
-            Last scan failed
+            {t("ui.app.last_scan_failed")}
           </span>
           <div className="scan-error-popover" role="tooltip">
             <div className="scan-error-title">
               <span className="sev high" aria-hidden />
-              Last scan failed
+              {t("ui.app.last_scan_failed")}
             </div>
             <p className="scan-error-msg selectable">{report.scanError.message}</p>
             {report.scanError.hint && (
@@ -209,11 +243,11 @@ function Workspace({ view, name }: { view: View; name: string }) {
     }
     return (
       <div className="empty">
-        <h3>Couldn't scan {name}</h3>
+        <h3>{t("ui.app.scan_failed", { name })}</h3>
         <p>{state.error.message}</p>
         {state.error.hint && <p className="muted">{state.error.hint}</p>}
         <button type="button" className="btn" onClick={() => scan(name)}>
-          Try again
+          {t("ui.common.try_again")}
         </button>
       </div>
     );
@@ -244,7 +278,7 @@ function Loading() {
       </div>
       <div className="empty">
         <div className="spinner" />
-        Reading statistics views…
+        {t("ui.app.reading_statistics")}
       </div>
     </div>
   );

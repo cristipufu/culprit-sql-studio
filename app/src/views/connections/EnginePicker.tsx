@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { EngineBadge } from "../../components/EngineBadge";
 import type { Engine } from "../../gen/Engine";
 import { connectFacts, ENGINES } from "../../lib/engines";
+import { t } from "../../lib/i18n";
 
 /** A bounded, searchable provider menu. The engine catalog owns its options and labels. */
 export function EnginePicker({ id, value, onChange, autoFocus }: { id: string; value: Engine | null; onChange: (engine: Engine) => void; autoFocus: boolean }) {
@@ -63,7 +64,7 @@ export function EnginePicker({ id, value, onChange, autoFocus }: { id: string; v
           }
         }}>
         {value ? <EngineBadge engine={value} /> : <Database size={18} aria-hidden="true" />}
-        <span>{value ? connectFacts(value).choice : "Select database"}</span>
+        <span>{value ? connectFacts(value).choice : t("ui.engine_picker.select")}</span>
         <ChevronDown size={14} aria-hidden="true" />
       </button>
       {open && (
@@ -82,13 +83,13 @@ export function EnginePicker({ id, value, onChange, autoFocus }: { id: string; v
         }}>
           <div className="engine-search">
             <Search size={14} aria-hidden="true" />
-            <input ref={search} role="combobox" aria-label="Search database types" aria-expanded="true"
+            <input ref={search} role="combobox" aria-label={t("ui.engine_picker.search_label")} aria-expanded="true"
               aria-controls={listId} aria-autocomplete="list" aria-activedescendant={options[current] ? optionId(options[current]) : undefined}
-              value={query} placeholder="Search databases…" autoComplete="off" spellCheck={false}
+              value={query} placeholder={t("ui.engine_picker.search_placeholder")} autoComplete="off" spellCheck={false}
               onPaste={(event) => event.stopPropagation()}
               onChange={(event) => { setQuery(event.target.value); setActive(0); }} />
           </div>
-          <div className="engine-options" id={listId} role="listbox" aria-label="Database types">
+          <div className="engine-options" id={listId} role="listbox" aria-label={t("ui.engine_picker.options")}>
             {options.map((engine, index) => (
               // biome-ignore lint/a11y/useFocusableInteractive lint/a11y/useKeyWithClickEvents: focus stays in the search field, whose arrow keys and Enter pick an option through aria-activedescendant
               <div key={engine} id={optionId(engine)} role="option" aria-selected={value === engine}
@@ -99,7 +100,7 @@ export function EnginePicker({ id, value, onChange, autoFocus }: { id: string; v
                 {value === engine && <Check size={14} aria-hidden="true" />}
               </div>
             ))}
-            {options.length === 0 && <p className="engine-empty" role="status">No matching database</p>}
+            {options.length === 0 && <p className="engine-empty" role="status">{t("ui.engine_picker.no_match")}</p>}
           </div>
         </div>
       )}
