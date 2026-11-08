@@ -1,7 +1,7 @@
 //! Filtered-index parameter mismatch detection (`ParameterizedFilter`): when an existing filtered index would serve an
 //! optimizer request if its queries wrote the filter's literal instead of passing a parameter.
 
-use super::candidates::index_filter_equalities;
+use super::candidates::{LargeIncludes, index_filter_equalities, large_includes};
 use super::*;
 
 /// An existing filtered index that would serve a request if its queries wrote the filter as the index does. SQL Server
@@ -128,126 +128,138 @@ pub(in crate::checks::indexes) fn compares_to_parameter(text: &str, table: &str,
     compared_to(text, table, column, |value| value.starts_with('@') && value.len() > 1)
 }
 
-/// The finding when an existing filtered index would serve the request but its queries pass the filter's column as a
-/// parameter: the fix is the literal, and only what the index can't do after it (a range, included columns) is left.
-pub(super) fn parameterized_filter_finding(
-    snapshot: &Snapshot,
-    mut f: Finding,
-    c: &Candidate,
-    linked: &[&QueryStat],
-    miss: &ParameterizedFilter,
-) -> Finding {
-    let index = miss.index;
-    let columns = miss.columns();
-    let literals = miss.literals();
-    let lookups = c.seeks + c.scans;
-    let one = linked.len() == 1;
-    let who = if one { format!("A query on {}", c.table) } else { format!("{} queries on {}", linked.len(), c.table) };
-    let (passes, them) = if one { ("passes", "it") } else { ("pass", "them") };
-    let below = if one { "the query below" } else { "the queries below" };
-    let index_keys: Vec<String> = index.key_names().iter().map(|k| k.to_string()).collect();
-    let equality = &miss.keys[..miss.keys.len() - miss.missing_range.len()];
+/// A request an existing filtered index would serve if its queries wrote the filter's literal instead of passing a
+/// parameter, and what its finding concludes: the fix is the literal, and only what the index can't do after it (a
+/// range, included columns) is left.
+pub struct LiteralFilter<'s> {
+    c: Candidate,
+    linked: Vec<&'s QueryStat>,
+    miss: ParameterizedFilter<'s>,
+    /// The included columns left out because they hold large objects.
+    large: Option<LargeIncludes>,
+    remainder: Remainder,
+    severity: Severity,
+    score: f64,
+    confidence: Confidence,
+}
 
+pub(super) fn literal_filter<'s>(
+    snapshot: &Snapshot,
+    c: Candidate,
+    linked: Vec<&'s QueryStat>,
+    miss: ParameterizedFilter<'s>,
+) -> LiteralFilter<'s> {
     let mut include = c.include.clone();
-    if let Some(note) = drop_large_includes(snapshot, &c.schema, &c.table, &mut include) {
-        f.caveats.push(note);
-    }
+    let large = large_includes(snapshot, &c.schema, &c.table, &mut include);
     if include.len() > MAX_INCLUDE {
         include.clear();
     }
     let remainder = miss.remainder(&include);
-    let partial = !matches!(remainder, Remainder::Nothing);
+    LiteralFilter {
+        // Whether the rest is worth an index of its own is only known once the queries use the one there is.
+        confidence: if matches!(remainder, Remainder::Index { .. }) { Confidence::Low } else { Confidence::Medium },
+        score: (4.0 * (c.weight + 1.0).log10()).clamp(2.0, 20.0),
+        severity: Severity::Low,
+        c,
+        linked,
+        miss,
+        large,
+        remainder,
+    }
+}
 
-    f.title = format!("{who} {passes} {} as a parameter, so {} can't serve {them}", format::list(&columns), index.name);
-    let serves = if miss.missing_range.is_empty() {
-        format!("already serves these lookups where {literals}")
+pub(super) fn literal_filter_finding(snapshot: &Snapshot, l: LiteralFilter<'_>) -> Finding {
+    let (c, linked, miss) = (&l.c, &l.linked, &l.miss);
+    let mut f = super::request_base(c);
+    let index = miss.index;
+    let columns = format::list(&miss.columns());
+    let literals = miss.literals();
+    let lookups = c.seeks + c.scans;
+    let n = linked.len().to_string();
+    let index_keys: Vec<String> = index.key_names().iter().map(|k| k.to_string()).collect();
+    let equality = &miss.keys[..miss.keys.len() - miss.missing_range.len()];
+    let partial = !matches!(l.remainder, Remainder::Nothing);
+    if let Some(large) = &l.large {
+        f.caveats.push(large.note(&c.schema, &c.table));
+    }
+
+    f.title =
+        t!("check.missing_index.title.literal", n = &n, table = &c.table, columns = &columns, index = &index.name);
+    let table = format!("{}.{}", c.schema, c.table);
+    let asked = if miss.missing_range.is_empty() {
+        t!(
+            "check.missing_index.summary.literal_serves",
+            table = &table,
+            keys = format::list(&c.keys()),
+            lookups = format::count(lookups),
+            since = since_phrase(snapshot),
+            index = &index.name,
+            index_keys = format::list(&index_keys),
+            literals = &literals
+        )
     } else {
-        format!(
-            "already finds these rows where {literals} by {}, though not by {}",
-            format::list(equality),
-            format::list(&miss.missing_range)
+        t!(
+            "check.missing_index.summary.literal_finds",
+            table = &table,
+            keys = format::list(&c.keys()),
+            lookups = format::count(lookups),
+            since = since_phrase(snapshot),
+            index = &index.name,
+            index_keys = format::list(&index_keys),
+            literals = &literals,
+            equality = format::list(equality),
+            range = format::list(&miss.missing_range)
         )
     };
-    f.summary = format!(
-        "SQL Server's optimizer asked for an index on {}.{} ({}) {} times {}, but {} ({}) {serves}. \
-         It's a filtered index, and SQL Server uses one only for a query whose filter matches it as written: {below} {} {} to a parameter, \
-         which could hold any value, so the optimizer can't use the index and asks for a new one instead.",
-        c.schema,
-        c.table,
-        format::list(&c.keys()),
-        format::count(lookups),
-        since_phrase(snapshot),
-        index.name,
-        format::list(&index_keys),
-        if one { "compares" } else { "compare" },
-        format::list(&columns),
-    );
-    f.severity = Severity::Low;
-    // Whether the rest is worth an index of its own is only known once the queries use the one there is.
-    f.confidence = if matches!(remainder, Remainder::Index { .. }) { Confidence::Low } else { Confidence::Medium };
-    f.impact.score = (4.0 * (c.weight + 1.0).log10()).clamp(2.0, 20.0);
-    f.impact.label = format!("{} lookups", format::count(lookups));
+    f.summary = [asked, t!("check.missing_index.summary.literal_filtered", n = &n, columns = &columns)].join(" ");
+    f.severity = l.severity;
+    f.confidence = l.confidence;
+    f.impact.score = l.score;
+    f.impact.label = t!("check.missing_index.impact.lookups", lookups = format::count(lookups));
     f.queries = query_refs(linked);
-    f.metrics.push(Metric::new("Lookups that wanted it", lookups, Unit::Count));
-    f.metrics.push(Metric::new("Estimated improvement", c.impact_pct / 100.0, Unit::Ratio));
-    let lead = format!("Write the filter as the index does, {literals}, instead of a parameter in {below}");
-    let (summary, sql) = match (&remainder, miss.remainder_sql(snapshot, &remainder)) {
+    f.metrics.push(Metric::new(t!("check.missing_index.metric.lookups"), lookups, Unit::Count));
+    f.metrics.push(Metric::new(t!("check.missing_index.metric.improvement"), c.impact_pct / 100.0, Unit::Ratio));
+    let (summary, sql) = match (&l.remainder, miss.remainder_sql(snapshot, &l.remainder)) {
         (Remainder::Index { include, .. }, Some((sql, _))) => {
             let replaces = index_keys.len() == equality.len()
                 && !index.is_unique
                 && !index.is_primary_key
                 && index.include.iter().all(|i| include.iter().any(|c| c.eq_ignore_ascii_case(i)));
-            (
-                format!(
-                    "{lead}: {} then finds {} rows by {}. If the range on {} still costs too much after that, create the index below: \
-                     the request without {}, filtered the same way, so it holds only the rows where {literals}.{}",
-                    index.name,
-                    if one { "its" } else { "their" },
-                    format::list(equality),
-                    format::list(&miss.missing_range),
-                    format::list(&columns),
-                    if replaces {
-                        format!(" It starts with {}'s keys, so once it's in use {} can go.", index.name, index.name)
-                    } else {
-                        String::new()
-                    }
-                ),
-                Some(sql),
-            )
+            let mut summary = vec![t!(
+                "check.missing_index.fix.literal_index",
+                literals = &literals,
+                n = &n,
+                index = &index.name,
+                equality = format::list(equality),
+                range = format::list(&miss.missing_range),
+                columns = &columns
+            )];
+            if replaces {
+                summary.push(t!("check.missing_index.fix.literal_replaces", index = &index.name));
+            }
+            (summary.join(" "), Some(sql))
         }
         (Remainder::Include(missing), Some((sql, _))) => (
-            format!(
-                "{lead}: {} then serves {them}. If reading {} from the table for each row still costs too much after that, \
-                 include {} in {} (below: the rebuild keeps its filter).",
-                index.name,
-                format::list(missing),
-                if missing.len() == 1 { "it" } else { "them" },
-                index.name
+            t!(
+                "check.missing_index.fix.literal_include",
+                literals = &literals,
+                n = &n,
+                index = &index.name,
+                missing = format::list(missing),
+                missing_n = missing.len()
             ),
             Some(sql),
         ),
-        _ => (format!("{lead}: {} then serves {them}, and no new index is needed.", index.name), None),
+        _ => (t!("check.missing_index.fix.literal_nothing", literals = &literals, n = &n, index = &index.name), None),
     };
     // The write cost of "this index" only beside the SQL that creates it.
     let cost = if partial && sql.is_some() { write_cost(snapshot, &c.schema, &c.table) } else { None };
     f.fix = Some(Fix { summary, sql, cost });
     f.verify = vec![if partial {
-        format!(
-            "Change the query, let the workload run, then re-scan: the query's plan seeks {}, and if the optimizer still asks for an index, it's the one above.",
-            index.name
-        )
+        t!("check.missing_index.verify.literal_partial", index = &index.name)
     } else {
-        format!(
-            "Change the query, let the workload run, then re-scan: this request disappears, and the query's plan seeks {}.",
-            index.name
-        )
+        t!("check.missing_index.verify.literal", index = &index.name)
     }];
-    f.caveats.push(format!(
-        "If {} also {} with other values for {}, those runs can't use {}: give them a statement of their own, with their own literal.",
-        if one { "the query" } else { "the queries" },
-        if one { "runs" } else { "run" },
-        format::list(&columns),
-        index.name
-    ));
+    f.caveats.push(t!("check.missing_index.caveat.literal_values", n = &n, columns = &columns, index = &index.name));
     f
 }

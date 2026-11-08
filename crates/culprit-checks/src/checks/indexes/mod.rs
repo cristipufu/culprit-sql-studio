@@ -258,19 +258,18 @@ pub(crate) fn new_index_fix(
 ) -> Fix {
     if table_gone(snapshot, table, statements) {
         return Fix {
-            summary: format!(
-                "Nothing to create: {schema}.{table} isn't in the database's catalog any more, so it was dropped or \
-                 renamed since these statements ran. If they now read a table under another name, a scan of it says \
-                 whether that one needs an index."
-            ),
+            summary: culprit_core::t!("common.new_index.table_gone", table = format!("{schema}.{table}")),
             sql: None,
             cost: None,
         };
     }
     let mut cost = write_cost(snapshot, schema, table);
     if snapshot.server.engine == Engine::Yugabyte {
-        let native = "Standalone ordered YSQL indexes may start on one range tablet. Review tablet splitting, colocation and write hotspots before deploying the index.";
-        cost = Some(cost.map_or_else(|| native.into(), |cost| format!("{cost} {native}")));
+        let native = culprit_core::t!("common.new_index.ysql_cost");
+        cost = Some(match cost {
+            Some(cost) => [cost, native].join(" "),
+            None => native,
+        });
     }
     Fix { summary, sql: Some(create_index_sql(snapshot, schema, table, keys, include)), cost }
 }

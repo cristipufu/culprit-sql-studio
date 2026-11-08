@@ -2461,3 +2461,315 @@ verify: A later scan must show a new request inside its workload window and enou
 caveat: SQL Server's optimizer last asked for this index on Aug 1, 71.1 days before this scan's data ends: the queries that wanted it have most likely changed or stopped running. Its requests are kept until the server restarts."#,
     );
 }
+
+// More shapes ------------------------------------------------------------------------------------------------------
+
+/// A copy of query `id` on `s`, as `new_id`.
+fn another(s: &mut Snapshot, id: &str, new_id: &str) {
+    let mut q = s.queries().iter().find(|q| q.id == id).expect("a query").clone();
+    q.id = new_id.into();
+    add(s, q);
+}
+
+// One large column left out of the INCLUDE list of a table that keeps large values apart from its rows.
+#[test]
+fn a_request_including_one_large_column() {
+    let mut s = asked(&["customer_id", "is_deleted"], &[], &["status", "body"], "[is_deleted] = 0");
+    s.columns.push(column("support_tickets", "body", "nvarchar(max)", None));
+    table(&mut s, "support_tickets").lob_bytes = Some(5.0e9);
+    pin(
+        "missing-index",
+        &s,
+        "missing-index:shop.support_tickets(customer_id,is_deleted)",
+        r#"missing-index:shop.support_tickets(customer_id,is_deleted) · Medium · High · OptionalImprovement
+title: support_tickets is searched by customer_id and is_deleted without a supporting index
+summary: SQL Server's optimizer asked for an index on shop.support_tickets (customer_id and is_deleted) 400 times in the 10 days since the server last restarted. Without it, each of those lookups reads more of shop.support_tickets (300K rows) than it needs to. It estimates the index would make them about 95% cheaper. The query that asked for it accounts for 54% of database time.
+impact: 54% of DB time
+metric: Share of DB time: 0.5439766525721529
+metric: Lookups that wanted it: 400
+metric: Estimated improvement: 0.95
+metric: Rows in table: 300000
+fix: Create an index on customer_id and is_deleted, including status. Equality columns come first; put the most selective one at the front if you know it.
+cost: shop.support_tickets received no writes in the 10 days since the server last restarted, so this index would cost next to nothing to maintain.
+verify: Test the candidate index with representative parameters and load, then capture a newly compiled plan. Old stored suggestions need not disappear.
+verify: Check whether the queries listed here use the new index and compare reads and execution time under equivalent parameters and load, including index storage and write cost.
+caveat: Left body out of INCLUDE: its type can hold large values, and shop.support_tickets keeps 4.7 GB of large values apart from its rows. Including it could copy that data into the index; the rows the index finds go back to the table for it, which costs less.
+caveat: Missing-index suggestions are per-query and ignore the cost of maintaining the index; review overlapping suggestions together."#,
+    );
+}
+
+// A filtered index that leads with the request's columns, which its query doesn't fit.
+#[test]
+fn a_request_led_by_a_filtered_index_it_doesnt_fit() {
+    let mut s = asked(&["customer_id", "priority", "kind"], &[], &["status"], "[priority] = @par1");
+    ticket_index(&mut s, "ix_support_tickets_open", &["customer_id", "priority"], Some("([is_deleted]=(0))"), &[]);
+    pin(
+        "missing-index",
+        &s,
+        "missing-index:shop.support_tickets(customer_id,priority,kind)",
+        r#"missing-index:shop.support_tickets(customer_id,priority,kind) · Medium · High · OptionalImprovement
+title: support_tickets is searched by customer_id, priority and kind without a supporting index
+summary: SQL Server's optimizer asked for an index on shop.support_tickets (customer_id, priority and kind) 400 times in the 10 days since the server last restarted. Without it, each of those lookups reads more of shop.support_tickets (300K rows) than it needs to. It estimates the index would make them about 95% cheaper. The query that asked for it accounts for 54% of database time.
+impact: 54% of DB time
+metric: Share of DB time: 0.5439766525721529
+metric: Lookups that wanted it: 400
+metric: Estimated improvement: 0.95
+metric: Rows in table: 300000
+fix: Create an index on customer_id, priority and kind, including status. Equality columns come first; put the most selective one at the front if you know it. ix_support_tickets_open leads with customer_id and priority but holds only the rows where is_deleted = 0, which the query below doesn't ask for.
+cost: shop.support_tickets received no writes in the 10 days since the server last restarted, so this index would cost next to nothing to maintain.
+verify: Test the candidate index with representative parameters and load, then capture a newly compiled plan. Old stored suggestions need not disappear.
+verify: Check whether the queries listed here use the new index and compare reads and execution time under equivalent parameters and load, including index storage and write cost.
+caveat: Missing-index suggestions are per-query and ignore the cost of maintaining the index; review overlapping suggestions together."#,
+    );
+}
+
+// The literal, then one column to include, for one query; the literal alone, and the literal then an index, for two.
+#[test]
+fn literal_filters_for_one_query_and_for_two() {
+    let mut s = asked(&["customer_id", "is_deleted"], &[], &["status"], "[is_deleted] = @par1");
+    ticket_index(&mut s, "ix_support_tickets_open", &["customer_id", "created_at"], Some("([is_deleted]=(0))"), &[]);
+    pin(
+        "missing-index",
+        &s,
+        "missing-index:shop.support_tickets(customer_id,is_deleted)",
+        r#"missing-index:shop.support_tickets(customer_id,is_deleted) · Low · Medium · OptionalImprovement
+title: A query on support_tickets passes is_deleted as a parameter, so ix_support_tickets_open can't serve it
+summary: SQL Server's optimizer asked for an index on shop.support_tickets (customer_id and is_deleted) 400 times in the 10 days since the server last restarted, but ix_support_tickets_open (customer_id and created_at) already serves these lookups where is_deleted = 0. It's a filtered index, and SQL Server uses one only for a query whose filter matches it as written: the query below compares is_deleted to a parameter, which could hold any value, so the optimizer can't use the index and asks for a new one instead.
+impact: 400 lookups
+metric: Lookups that wanted it: 400
+metric: Estimated improvement: 0.95
+fix: Write the filter as the index does, is_deleted = 0, instead of a parameter in the query below: ix_support_tickets_open then serves it. If reading status from the table for each row still costs too much after that, include it in ix_support_tickets_open (below: the rebuild keeps its filter).
+cost: shop.support_tickets received no writes in the 10 days since the server last restarted, so this index would cost next to nothing to maintain.
+verify: Change the query, let the workload run, then re-scan: the query's plan seeks ix_support_tickets_open, and if the optimizer still asks for an index, it's the one above.
+caveat: If the query also runs with other values for is_deleted, those runs can't use ix_support_tickets_open: give them a statement of their own, with their own literal."#,
+    );
+    let mut s = asked(&["customer_id", "is_deleted"], &[], &[], "[is_deleted] = @par1");
+    ticket_index(&mut s, "ix_support_tickets_open", &["customer_id", "created_at"], Some("([is_deleted]=(0))"), &[]);
+    another(&mut s, "4242", "4343");
+    pin(
+        "missing-index",
+        &s,
+        "missing-index:shop.support_tickets(customer_id,is_deleted)",
+        r#"missing-index:shop.support_tickets(customer_id,is_deleted) · Low · Medium · OptionalImprovement
+title: 2 queries on support_tickets pass is_deleted as a parameter, so ix_support_tickets_open can't serve them
+summary: SQL Server's optimizer asked for an index on shop.support_tickets (customer_id and is_deleted) 400 times in the 10 days since the server last restarted, but ix_support_tickets_open (customer_id and created_at) already serves these lookups where is_deleted = 0. It's a filtered index, and SQL Server uses one only for a query whose filter matches it as written: the queries below compare is_deleted to a parameter, which could hold any value, so the optimizer can't use the index and asks for a new one instead.
+impact: 400 lookups
+metric: Lookups that wanted it: 400
+metric: Estimated improvement: 0.95
+fix: Write the filter as the index does, is_deleted = 0, instead of a parameter in the queries below: ix_support_tickets_open then serves them, and no new index is needed.
+verify: Change the query, let the workload run, then re-scan: this request disappears, and the query's plan seeks ix_support_tickets_open.
+caveat: If the queries also run with other values for is_deleted, those runs can't use ix_support_tickets_open: give them a statement of their own, with their own literal."#,
+    );
+    let mut s = asked(&["customer_id", "priority", "is_deleted"], &["due_at"], &[], "[is_deleted] = @par1");
+    ticket_index(&mut s, "ix_support_tickets_open", &["priority", "customer_id"], Some("([is_deleted]=(0))"), &[]);
+    another(&mut s, "4242", "4343");
+    pin(
+        "missing-index",
+        &s,
+        "missing-index:shop.support_tickets(customer_id,priority,is_deleted,due_at)",
+        r#"missing-index:shop.support_tickets(customer_id,priority,is_deleted,due_at) · Low · Low · OptionalImprovement
+title: 2 queries on support_tickets pass is_deleted as a parameter, so ix_support_tickets_open can't serve them
+summary: SQL Server's optimizer asked for an index on shop.support_tickets (customer_id, priority, is_deleted and due_at) 400 times in the 10 days since the server last restarted, but ix_support_tickets_open (priority and customer_id) already finds these rows where is_deleted = 0 by priority and customer_id, though not by due_at. It's a filtered index, and SQL Server uses one only for a query whose filter matches it as written: the queries below compare is_deleted to a parameter, which could hold any value, so the optimizer can't use the index and asks for a new one instead.
+impact: 400 lookups
+metric: Lookups that wanted it: 400
+metric: Estimated improvement: 0.95
+fix: Write the filter as the index does, is_deleted = 0, instead of a parameter in the queries below: ix_support_tickets_open then finds their rows by priority and customer_id. If the range on due_at still costs too much after that, create the index below: the request without is_deleted, filtered the same way, so it holds only the rows where is_deleted = 0. It starts with ix_support_tickets_open's keys, so once it's in use ix_support_tickets_open can go.
+cost: shop.support_tickets received no writes in the 10 days since the server last restarted, so this index would cost next to nothing to maintain.
+verify: Change the query, let the workload run, then re-scan: the query's plan seeks ix_support_tickets_open, and if the optimizer still asks for an index, it's the one above.
+caveat: If the queries also run with other values for is_deleted, those runs can't use ix_support_tickets_open: give them a statement of their own, with their own literal."#,
+    );
+}
+
+// A filtered index widened to cover two queries.
+#[test]
+fn a_filtered_index_widened_for_two_queries() {
+    let mut s = asked(&["customer_id", "priority", "is_deleted"], &[], &["status"], "[is_deleted] = 0");
+    ticket_index(&mut s, "ix_support_tickets_open", &["customer_id", "priority"], Some("([is_deleted]=(0))"), &[]);
+    another(&mut s, "4242", "4343");
+    pin(
+        "missing-index",
+        &s,
+        "missing-index:shop.support_tickets(customer_id,priority,is_deleted)",
+        r#"missing-index:shop.support_tickets(customer_id,priority,is_deleted) · Medium · High · OptionalImprovement
+title: support_tickets is searched by customer_id, priority and is_deleted without a supporting index
+summary: SQL Server's optimizer asked for an index on shop.support_tickets (customer_id, priority and is_deleted) 400 times in the 10 days since the server last restarted. Without it, each of those lookups reads more of shop.support_tickets (300K rows) than it needs to. It estimates the index would make them about 95% cheaper. The 2 queries that asked for it account for 70% of database time.
+impact: 70% of DB time
+metric: Share of DB time: 0.7046436248448801
+metric: Lookups that wanted it: 400
+metric: Estimated improvement: 0.95
+metric: Rows in table: 300000
+fix: ix_support_tickets_open already finds these rows by customer_id and priority, in the rows where is_deleted = 0. Rebuild it with status included rather than add an index, so it covers the queries below without going back to the table. The statement keeps its keys, their order, its filter and the columns it already includes; restate DATA_COMPRESSION, FILLFACTOR or its partition scheme in it if the index uses them.
+cost: The index grows from 4.3 MB; writes that touch the included columns maintain it.
+verify: After testing the rebuild of ix_support_tickets_open, capture a newly compiled plan under representative load. A stored suggestion can remain in old plan XML.
+verify: Check whether the queries listed here use ix_support_tickets_open and compare reads and execution time under equivalent parameters and load, including index storage and write cost.
+caveat: Missing-index suggestions are per-query and ignore the cost of maintaining the index; review overlapping suggestions together."#,
+    );
+}
+
+// An hour of Query Store, before which the request was last made; and a table whose rows aren't known.
+#[test]
+fn requests_beside_an_hour_of_queries_and_of_a_table_of_unknown_size() {
+    let mut s = snapshot("mssql-demo.json");
+    crate::last_hours(s.workload.as_mut().unwrap(), 1.0);
+    s.missing_indexes.iter_mut().find(|m| m.table == "order_items").unwrap().last_used =
+        Some("2026-10-11T06:00:00Z".into());
+    pin(
+        "missing-index",
+        &s,
+        "missing-index:shop.order_items(order_id)",
+        r#"missing-index:shop.order_items(order_id) · Low · High · Information
+title: SQL Server previously requested an index on order_items (order_id)
+summary: SQL Server last requested this index on Oct 11 at 06:00 UTC, before the last 60 minutes. The 300 requests are cumulative in the minute since the server last restarted. Associated statements may still run, but their activity does not establish that this historical request is still needed in the selected period.
+impact: Historical optimizer request
+metric: Lookups that wanted it: 300
+metric: Estimated improvement: 0.9947
+metric: Rows in table: 1500000
+query 9: Associated with a request made before the selected window; current query activity does not date that request.
+fix: Keep this candidate as context. Check representative plans and reads in the period that matters before choosing an index. If the optimizer requests it again, compare the measured benefit with index storage and write maintenance.
+verify: A later scan must show a new request inside its workload window and enough measured work before this becomes an index recommendation.
+caveat: None of the last 60 minutes' statements asked for it: SQL Server's optimizer last did on Oct 11 at 06:00 UTC, 6 h 14 min before this scan's data ends, too short a time to say the statements that wanted it stopped."#,
+    );
+    let mut s = snapshot("mssql-demo.json");
+    s.tables.retain(|t| t.name != "orders");
+    pin(
+        "missing-index",
+        &s,
+        "missing-index:shop.orders(shipped_at)",
+        r#"missing-index:shop.orders(shipped_at) · Low · Medium · OptionalImprovement
+title: orders is searched by shipped_at without a supporting index
+summary: SQL Server's optimizer asked for an index on shop.orders (shipped_at) 150 times in the minute since the server last restarted. Without it, each of those lookups reads more of shop.orders than it needs to. It estimates the index would make them about 81% cheaper. The query that asked for it accounts for 12% of database time.
+impact: 12% of DB time
+metric: Share of DB time: 0.12221322978535604
+metric: Lookups that wanted it: 150
+metric: Estimated improvement: 0.81
+fix: Create an index on shipped_at, including total.
+verify: Test the candidate index with representative parameters and load, then capture a newly compiled plan. Old stored suggestions need not disappear.
+verify: Check whether the queries listed here use the new index and compare reads and execution time under equivalent parameters and load, including index storage and write cost.
+caveat: Missing-index suggestions are per-query and ignore the cost of maintaining the index; review overlapping suggestions together."#,
+    );
+}
+
+// MySQL: a table read in full by statements outside the workload (no generic plan to show).
+#[test]
+fn a_table_read_in_full_on_mysql_by_statements_outside_the_workload() {
+    let mut s = ten_days(snapshot("mysql-demo.json"));
+    let customers = table(&mut s, "customers");
+    customers.seq_scans = Some(1000.0);
+    customers.seq_rows_read = Some(1000.0 * customers.rows.unwrap());
+    pin(
+        "scan-heavy",
+        &s,
+        "scan-heavy:shop.customers",
+        r#"scan-heavy:shop.customers · Low · Low · OptionalImprovement
+title: customers is read in full about 100 times a day (19.9M rows a day)
+summary: shop.customers has 199K rows, and queries have read all of it about 100 times a day in the 10 days since the server last restarted: 19.9M rows a day read without an index. None of the captured statements names it, so the scans come from statements outside the top of the workload.
+impact: 19.9M rows scanned/day
+metric: Full reads per day: 100
+metric: Rows read without an index per day: 19911600
+metric: Rows in table: 199116
+fix: Find the statements that read it in full (they aren't among the heaviest this scan captured), explain them to check their access paths. To measure each filter, capture an actual plan with representative values in a controlled environment: this runs the statement. Compare rows kept with rows read. If a filter keeps at most 10% of the rows read, consider an index on the columns it searches by; if it keeps more, read fewer rows or columns instead. Small lookup tables are fine to scan.
+cost: shop.customers received no writes in the 10 days since the server last restarted, so any index you add would cost next to nothing to maintain.
+verify: After adding an index for a selective filter, the full reads of customers should grow far slower. Compare how much its scan counters grow between a scan taken once the change is live and one a day or more later (1.0K full reads in this scan).
+caveat: Counters accumulate since statistics were last reset; one nightly report can make up much of them."#,
+    );
+}
+
+// One statement whose plan reads it in full and one without a plan; statements that stopped over ten days of counters;
+// and one statement on a windowed source.
+#[test]
+fn a_table_read_in_full_in_more_ways() {
+    let mut s = ten_days(snapshot("postgres-demo.json"));
+    events_read_in_full(&mut s, 1000.0);
+    let q = events_statement(&s, "scans-events", "SELECT kind FROM events WHERE note = $1", true, 10.0);
+    add(&mut s, q);
+    let q = events_statement(&s, "maybe-events", "SELECT id FROM events WHERE created_at > $1", false, 10.0);
+    add(&mut s, q);
+    pin(
+        "scan-heavy",
+        &s,
+        "scan-heavy:public.events",
+        r#"scan-heavy:public.events · Low · Medium · OptionalImprovement
+title: events is read in full about 100 times a day (30.0M rows a day)
+summary: public.events has 300K rows, and queries have read all of it about 100 times a day in the 10 days since the server last restarted: 30.0M rows a day read without an index. 1 of the captured statements reads it in full (its plan scans it), and 1 more without a captured plan may; explain them to check the access path, then measure rows kept in representative runs.
+impact: 30.0M rows scanned/day
+metric: Full reads per day: 100
+metric: Rows read without an index per day: 30000000
+metric: Rows in table: 300000
+fix: Explain the statements listed with this finding (Culprit can show a generic plan, which does not measure actual rows) to check their access paths. To measure each filter, capture an actual plan with representative values in a controlled environment: this runs the statement. Compare rows kept with rows read. If a filter keeps at most 10% of the rows read, consider an index on the columns it searches by; if it keeps more, read fewer rows or columns instead. Small lookup tables are fine to scan.
+cost: public.events received no writes in the 10 days since the server last restarted, so any index you add would cost next to nothing to maintain.
+verify: After adding an index for a selective filter, the full reads of events should grow far slower. Compare how much its scan counters grow between a scan taken once the change is live and one a day or more later (1.0K full reads and 1.7K index scans in this scan).
+verify: Whether the fix adds an index or reads fewer rows or columns: pg_stat_statements keeps running totals, so a later scan's runs, share and averages for the queries still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there their time per run should drop.
+caveat: Counters accumulate since statistics were last reset; one nightly report can make up much of them."#,
+    );
+
+    let mut s = ten_days(snapshot("postgres-demo.json"));
+    events_read_in_full(&mut s, 1000.0);
+    let mut q = events_statement(&s, "scans-events", "SELECT kind FROM events WHERE note = $1", true, 10.0);
+    q.last_seen = Some("2026-01-01T00:00:00Z".into());
+    add(&mut s, q);
+    pin(
+        "scan-heavy",
+        &s,
+        "scan-heavy:public.events",
+        r#"scan-heavy:public.events · Low · Medium · OptionalImprovement
+title: events was read in full about 100 times a day (30.0M rows a day)
+summary: public.events has 300K rows, and queries have read all of it about 100 times a day in the 10 days since the server last restarted: 30.0M rows a day read without an index. 1 of the captured statements reads it in full (its plan scans it); explain it to check the access path, then measure rows kept in representative runs.
+impact: 30.0M rows scanned/day
+metric: Full reads per day: 100
+metric: Rows read without an index per day: 30000000
+metric: Rows in table: 300000
+fix: Explain the statements listed with this finding (Culprit can show a generic plan, which does not measure actual rows) to check their access paths. To measure each filter, capture an actual plan with representative values in a controlled environment: this runs the statement. Compare rows kept with rows read. If a filter keeps at most 10% of the rows read, consider an index on the columns it searches by; if it keeps more, read fewer rows or columns instead. Small lookup tables are fine to scan.
+cost: public.events received no writes in the 10 days since the server last restarted, so any index you add would cost next to nothing to maintain.
+verify: After adding an index for a selective filter, the full reads of events should grow far slower. Compare how much its scan counters grow between a scan taken once the change is live and one a day or more later (1.0K full reads and 1.7K index scans in this scan).
+verify: Whether the fix adds an index or reads fewer rows or columns: pg_stat_statements keeps running totals, so a later scan's runs, share and averages for the query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there its time per run should drop.
+caveat: Counters accumulate since statistics were last reset; one nightly report can make up much of them."#,
+    );
+
+    let mut s = ten_days(snapshot("postgres-demo.json"));
+    events_read_in_full(&mut s, 1000.0);
+    let q = events_statement(&s, "scans-events", "SELECT kind FROM events WHERE note = $1", true, 10.0);
+    add(&mut s, q);
+    s.workload.as_mut().unwrap().windowed = true;
+    pin(
+        "scan-heavy",
+        &s,
+        "scan-heavy:public.events",
+        r#"scan-heavy:public.events · Low · Medium · OptionalImprovement
+title: events is read in full about 100 times a day (30.0M rows a day)
+summary: public.events has 300K rows, and queries have read all of it about 100 times a day in the 10 days since the server last restarted: 30.0M rows a day read without an index. 1 of the captured statements reads it in full (its plan scans it); explain it to check the access path, then measure rows kept in representative runs.
+impact: 30.0M rows scanned/day
+metric: Full reads per day: 100
+metric: Rows read without an index per day: 30000000
+metric: Rows in table: 300000
+fix: Explain the statements listed with this finding (Culprit can show a generic plan, which does not measure actual rows) to check their access paths. To measure each filter, capture an actual plan with representative values in a controlled environment: this runs the statement. Compare rows kept with rows read. If a filter keeps at most 10% of the rows read, consider an index on the columns it searches by; if it keeps more, read fewer rows or columns instead. Small lookup tables are fine to scan.
+cost: public.events received no writes in the 10 days since the server last restarted, so any index you add would cost next to nothing to maintain.
+verify: After adding an index for a selective filter, the full reads of events should grow far slower. Compare how much its scan counters grow between a scan taken once the change is live and one a day or more later (1.0K full reads and 1.7K index scans in this scan).
+verify: Whether the fix adds an index or reads fewer rows or columns: Re-scan after the workload has run: its time per run should drop.
+caveat: Counters accumulate since statistics were last reset; one nightly report can make up much of them."#,
+    );
+}
+
+// A window of unknown length, before whose end the request was last made: "the recorded workload window's".
+#[test]
+fn a_request_beside_a_window_of_unknown_length() {
+    let mut s = snapshot("mssql-demo.json");
+    s.workload.as_mut().unwrap().window_hours = 0.0;
+    s.missing_indexes.iter_mut().find(|m| m.table == "order_items").unwrap().last_used =
+        Some("2026-10-11T06:00:00Z".into());
+    pin(
+        "missing-index",
+        &s,
+        "missing-index:shop.order_items(order_id)",
+        r#"missing-index:shop.order_items(order_id) · Low · High · Information
+title: SQL Server previously requested an index on order_items (order_id)
+summary: SQL Server last requested this index on Oct 11 at 06:00 UTC, before the recorded workload window. The 300 requests are cumulative in the minute since the server last restarted. Associated statements may still run, but their activity does not establish that this historical request is still needed in the selected period.
+impact: Historical optimizer request
+metric: Lookups that wanted it: 300
+metric: Estimated improvement: 0.9947
+metric: Rows in table: 1500000
+query 9: Associated with a request made before the selected window; current query activity does not date that request.
+fix: Keep this candidate as context. Check representative plans and reads in the period that matters before choosing an index. If the optimizer requests it again, compare the measured benefit with index storage and write maintenance.
+verify: A later scan must show a new request inside its workload window and enough measured work before this becomes an index recommendation.
+caveat: None of the recorded workload window's statements asked for it: SQL Server's optimizer last did on Oct 11 at 06:00 UTC, 6 h 14 min before this scan's data ends, too short a time to say the statements that wanted it stopped."#,
+    );
+}
