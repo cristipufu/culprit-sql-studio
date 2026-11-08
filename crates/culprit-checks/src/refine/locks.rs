@@ -136,18 +136,23 @@ impl Refine for Rule {
             }
             let target = &mut findings[d.into];
             let mut note = None;
-            let window = s.workload.as_ref().map(|w| format!(" in {}", w.window_phrase())).unwrap_or_default();
+            // A decision rests on the statements of a workload (`merge::complete_queries`): there is a window.
+            let window = s.workload.as_ref().map(|w| w.window_phrase()).unwrap_or_default();
+            // "nearly all of its time", "40% of its time".
+            let share_of_time = |share: f64| {
+                if share >= 0.97 {
+                    t!("refine.locks.nearly_all_of_its_time")
+                } else {
+                    t!("refine.locks.share_of_its_time", share = format::percent(share))
+                }
+            };
             match d.evidence {
                 Evidence::Episode { query, table, wait } => {
                     let Some((w, q)) = s.workload.as_ref().and_then(|w| Some((w, w.query(&query)?))) else {
                         continue;
                     };
-                    let share = if wait.share >= 0.97 {
-                        "nearly all of its time".into()
-                    } else {
-                        format!("{} of its time", format::percent(wait.share))
-                    };
-                    let waited = format!("{} ({share})", format::duration(wait.ms));
+                    let waited =
+                        t!("refine.locks.waited", time = format::duration(wait.ms), share = share_of_time(wait.share));
                     let start = w
                         .window_end
                         .as_deref()
@@ -157,44 +162,51 @@ impl Refine for Rule {
                         (Some(first), Some(last), Some((from, _)), Some(start)) if from >= start => {
                             culprit_core::span_when(first, last)
                         }
-                        _ => "in the same window".into(),
+                        _ => t!("refine.locks.in_the_same_window"),
                     };
-                    target.summary.push_str(&format!(" {} (query {}) waited on locks on {table} {when} too, {waited}: likely the same episode of blocking, behind the same holder or one another.",capitalize(&support::query_handle(q)),q.id));
+                    target.summary.push(' ');
+                    target.summary.push_str(&t!(
+                        "refine.locks.same_episode",
+                        handle = capitalize(&support::query_handle(q)),
+                        query = &q.id,
+                        table = &table,
+                        when = when,
+                        waited = &waited
+                    ));
                     if wait.versioning_spares_read
                         && let Some(fix) = target.fix.as_mut()
                     {
-                        let stopped = query_stopped(s, q).is_some();
-                        fix.summary.push_str(&format!(" Query {}, a read, {} for writes on the same table while READ_COMMITTED_SNAPSHOT is off: with row versioning on (config:read-committed-snapshot has the change), it {} the last committed version of the rows instead.",q.id,if stopped {"waited"} else {"waits"},if stopped {"would have read"} else {"reads"}));
+                        let stopped = if query_stopped(s, q).is_some() { "yes" } else { "no" };
+                        fix.summary.push(' ');
+                        fix.summary.push_str(&t!("refine.locks.row_versioning", query = &q.id, stopped = stopped));
                     }
-                    note = Some(format!(
-                        "Waited {waited} on locks on {table} in the same hours; the holder isn't recorded."
-                    ));
-                    target.impact.label = format!("{} waiting on locks", format::duration(d.total_lock_ms));
+                    note = Some(t!("refine.locks.episode_note", waited = waited, table = table));
+                    target.impact.label = t!("refine.locks.impact", time = format::duration(d.total_lock_ms));
                 }
                 Evidence::Chain { current, promote } => {
                     if promote {
                         let table = finding_table(target);
-                        target.title = format!("Queries on {} recorded lock waits{window}", leaf(&table));
+                        target.title = t!("refine.locks.chain_title", table = leaf(&table), window = &window);
                     }
                     for q in merge::complete_queries(s, &absorption.source).unwrap_or_default() {
                         let lock = signals::lock_ms(q);
-                        let share = (lock / q.total_time_ms).min(1.0);
-                        let share = if share >= 0.97 {
-                            "nearly all of its time".into()
-                        } else {
-                            format!("{} of its time", format::percent(share))
-                        };
+                        let share = share_of_time((lock / q.total_time_ms).min(1.0));
                         let waited = format::duration(lock);
-                        target.summary.push_str(&format!(
-                            " {} waited {waited} for these locks{window}, {share}.",
-                            capitalize(&support::query_handle(q))
+                        target.summary.push(' ');
+                        target.summary.push_str(&t!(
+                            "refine.locks.chain_waited",
+                            handle = capitalize(&support::query_handle(q)),
+                            waited = &waited,
+                            window = &window,
+                            share = &share
                         ));
                         if let Some(r) = target.queries.iter_mut().find(|r| r.id == q.id) {
-                            r.note = Some(format!("Waited {waited} on locks, {share}{window}."));
+                            r.note =
+                                Some(t!("refine.locks.chain_note", waited = waited, share = share, window = &window));
                         }
                     }
                     if current {
-                        target.impact.label = format!("{} waiting on locks", format::duration(d.total_lock_ms));
+                        target.impact.label = t!("refine.locks.impact", time = format::duration(d.total_lock_ms));
                     }
                 }
             }

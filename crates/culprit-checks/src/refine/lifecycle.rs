@@ -283,130 +283,100 @@ impl Decision {
     }
 
     fn render(&self, s: &Snapshot, f: &mut Finding) {
+        // A statement that may have taken the place of the one that stopped, said after the sentence it follows.
         let successor = |id: &Option<String>, creation: bool| {
-            id.as_deref()
-                .and_then(|id| s.workload.as_ref()?.query(id))
-                .map(|q| {
-                    if creation {
-                        format!(
-                            " If query {}, {} too, took its place, look at that one.",
-                            q.id,
-                            support::query_handle(q)
-                        )
-                    } else {
-                        format!(
-                            " Query {}, {} too, still runs and may be what replaced it: check that one.",
-                            q.id,
-                            support::query_handle(q)
-                        )
-                    }
-                })
-                .unwrap_or_default()
+            id.as_deref().and_then(|id| s.workload.as_ref()?.query(id)).map(|q| {
+                let handle = support::query_handle(q);
+                if creation {
+                    t!("refine.lifecycle.successor_took_its_place", query = &q.id, handle = handle)
+                } else {
+                    t!("refine.lifecycle.successor_still_runs", query = &q.id, handle = handle)
+                }
+            })
+        };
+        let with_successor = |sentence: String, next: &Option<String>, creation: bool| match successor(next, creation) {
+            Some(next) => [sentence, next].join(" "),
+            None => sentence,
         };
         match &self.change {
             Change::SourceHistory | Change::LastSeen(_) | Change::MissingQueries(_) => {}
             Change::Once { one, slow_log } => {
                 let window = s.workload.as_ref().map(|w| w.window_phrase()).unwrap_or_default();
+                let one = if *one { "yes" } else { "no" };
                 let caveat = if *slow_log {
-                    format!(
-                        "{} logged once in {}: the slow query log keeps only runs over long_query_time, so it may run more often, faster. One slow run shows what it cost once, not a pattern; it needs work if it keeps showing up.",
-                        if *one { "This statement was" } else { "Each of these statements was" },
-                        window
-                    )
+                    t!("refine.lifecycle.logged_once", one = one, window = window)
                 } else {
-                    format!(
-                        "{} once in {}. One run shows what it cost, not that it will run again: an export, a backfill or a query someone ran by hand looks like this. It needs work only if it keeps running.",
-                        if *one { "This statement ran" } else { "Each of these statements ran" },
-                        window
-                    )
+                    t!("refine.lifecycle.ran_once", one = one, window = window)
                 };
                 f.caveats.insert(0, caveat);
-                f.verify.insert(0, "Re-scan later: if it hasn't run again, there is nothing to do.".into());
+                f.verify.insert(0, t!("refine.lifecycle.ran_once_verify"));
             }
             Change::Quiet { seconds, last, one, by_first_scan } => {
-                let span = format::duration(seconds * 1000.0);
+                let (span, when) = (format::duration(seconds * 1000.0), crate::queries::short_when(last));
+                let one = if *one { "yes" } else { "no" };
                 let caveat = if *by_first_scan {
-                    format!(
-                        "{} run in the {span} since Culprit's first scan ({}): too short a time to say {} stopped.",
-                        if *one { "This query hasn't" } else { "None of these queries has" },
-                        crate::queries::short_when(last),
-                        if *one { "it" } else { "they" }
-                    )
+                    t!("refine.lifecycle.quiet_since_first_scan", one = one, span = span, when = when)
                 } else {
-                    format!(
-                        "{} run in the last {span} of this scan's data (since {}): too short a time to say {} stopped.",
-                        if *one { "This query hasn't" } else { "None of these queries has" },
-                        crate::queries::short_when(last),
-                        if *one { "it" } else { "they" }
-                    )
+                    t!("refine.lifecycle.quiet", one = one, span = span, when = when)
                 };
                 f.caveats.insert(0, caveat);
             }
             Change::Stopped { seconds, last, one, by_first_scan, successor: next } => {
+                let span = format::duration(seconds * 1000.0);
+                let one = if *one { "yes" } else { "no" };
                 let caveat = if *by_first_scan {
-                    format!(
-                        "{} run in the {} since Culprit's first scan ({}); {} may have stopped earlier. A deploy before that scan may have changed or fixed {}, at a time the counters don't show; check that the current version of this code doesn't have the same problem.",
-                        if *one { "This query hasn't" } else { "None of these queries has" },
-                        format::duration(seconds * 1000.0),
-                        crate::queries::short_when(last),
-                        if *one { "it" } else { "they" },
-                        if *one { "it" } else { "them" }
+                    t!(
+                        "refine.lifecycle.stopped_since_first_scan",
+                        one = one,
+                        span = span,
+                        when = crate::queries::short_when(last)
                     )
                 } else {
-                    format!(
-                        "{} run since {} ({} before this scan's data ends). A deploy may have changed or fixed {}; check that the current version of this code doesn't have the same problem.",
-                        if *one { "This query has not" } else { "None of these queries has" },
-                        last.get(..16).unwrap_or(last).replace('T', " "),
-                        format::duration(seconds * 1000.0),
-                        if *one { "it" } else { "them" }
+                    t!(
+                        "refine.lifecycle.stopped",
+                        one = one,
+                        last = last.get(..16).unwrap_or(last).replace('T', " "),
+                        span = span
                     )
                 };
-                f.caveats.insert(0, caveat + &successor(next, false));
+                f.caveats.insert(0, with_successor(caveat, next, false));
             }
             Change::Gone => {
                 if let Some(fix) = f.fix.as_mut() {
-                    fix.summary = format!(
-                        "Nothing to change: {} {} in the database's catalog any more, so {} dropped or renamed since these statements ran. If the application now uses other tables, scan those before making a change.",
-                        format::list(&self.tables),
-                        if self.tables.len() == 1 { "isn't" } else { "aren't" },
-                        if self.tables.len() == 1 { "it was" } else { "they were" }
-                    );
+                    fix.summary =
+                        t!("refine.lifecycle.gone_fix", n = self.tables.len(), tables = format::list(&self.tables));
                 }
-                f.verify=vec!["Nothing to check: the tables are gone. If these statements return against replacement tables, scan those to see what needs a change.".into()];
+                f.verify = vec![t!("refine.lifecycle.gone_verify")];
             }
             Change::Creation { one, successor: next } => {
                 if let Some(fix) = f.fix.as_mut() {
-                    fix.summary = format!(
-                        "Nothing to create: {} stopped running, so an index or statistics made for {} now would serve code that no longer runs. If {} again, a scan shows this finding again with the SQL for {}.{}",
-                        if *one { "the statement behind this finding" } else { "the statements behind this finding" },
-                        if *one { "it" } else { "them" },
-                        if *one { "it runs" } else { "they run" },
-                        if *one { "it" } else { "them" },
-                        successor(next, true)
-                    );
+                    let nothing = t!("refine.lifecycle.nothing_to_create", one = if *one { "yes" } else { "no" });
+                    fix.summary = with_successor(nothing, next, true);
                 }
             }
             Change::IndexWork => {
                 if let Some(fix) = &mut f.fix {
-                    fix.summary = format!(
-                        "Keep this as an index candidate. The captured workload does not establish enough measured work to recommend creating it now. Compare representative plans, reads and write maintenance if the workload grows. Only if later measurements justify a change, evaluate this candidate: {}",
-                        fix.summary
-                    );
+                    fix.summary = t!("refine.lifecycle.index_candidate", candidate = std::mem::take(&mut fix.summary));
                 }
-                f.verify=vec!["Compare representative plans, reads, execution time and write maintenance before choosing an index. Recheck the access path as the table or call volume grows; an old plan or optimizer request does not establish current benefit.".into()];
+                f.verify = vec![t!("refine.lifecycle.index_candidate_verify")];
             }
             Change::Verification => {
                 // Preserve a detector's more specific historical sentence. This only avoids redundant rendering;
-                // eligibility has already been settled from inactive state, never from these words.
-                if f.verify
-                    .first()
-                    .is_some_and(|v| v.starts_with("Nothing to check") && (v.contains("unless") || v.contains(" gone")))
-                {
+                // eligibility has already been settled from inactive state, never from these words. The tables-gone
+                // step is this rule's own; a check's are recognised by their English.
+                let gone = t!("refine.lifecycle.gone_verify");
+                if f.verify.first().is_some_and(|v| {
+                    *v == gone || (v.starts_with("Nothing to check") && (v.contains("unless") || v.contains(" gone")))
+                }) {
                     return;
                 }
-                f.verify=vec![if f.queries.is_empty()&&f.check=="missing-index" {"Nothing to check unless the optimizer asks for this index again within a scan's window."}
-                    else if f.queries.len()<=1 {"Nothing to check unless it runs again: a later scan that sees it run lists this finding as current again."}
-                    else {"Nothing to check unless they run again: a later scan that sees one of them run lists this finding as current again."}.into()];
+                f.verify = vec![if f.queries.is_empty() && f.check == "missing-index" {
+                    t!("refine.lifecycle.verify_if_asked_again")
+                } else if f.queries.len() <= 1 {
+                    t!("refine.lifecycle.verify_if_it_runs_again")
+                } else {
+                    t!("refine.lifecycle.verify_if_they_run_again")
+                }];
             }
         }
     }

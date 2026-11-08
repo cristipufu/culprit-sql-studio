@@ -72,22 +72,24 @@ impl Change {
                 if let Some(share) = title_share {
                     *prose.title = prose.title.replace(share, cost);
                 }
-                *prose.summary = if *direct {
-                    format!("{cost}. {}", prose.summary)
+                let lead = if *direct {
+                    t!("refine.presentation.cost", cost = cost)
                 } else {
-                    format!("The associated statements used {cost}. {}", prose.summary)
+                    t!("refine.presentation.cost_of_the_statements", cost = cost)
                 };
+                *prose.summary = [lead, std::mem::take(prose.summary)].join(" ");
                 if *direct {
                     *prose.impact_label = cost.clone();
                 }
             }
             Self::Activity { runs, incomplete } => {
                 let coverage = if *incomplete {
-                    "Missing entries prevent a complete share or average for this interval."
+                    t!("refine.presentation.activity_incomplete")
                 } else {
-                    "This count is shown without extrapolating a daily rate."
+                    t!("refine.presentation.activity_counted")
                 };
-                prose.summary.push_str(&format!(" Latest activity: {runs}. {coverage}"));
+                prose.summary.push(' ');
+                prose.summary.push_str(&[t!("refine.presentation.latest_activity", runs = runs), coverage].join(" "));
             }
             Self::Names { database } => {
                 *prose.title = without_database(prose.title, database);
@@ -122,11 +124,11 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Vec<Decision> {
                     .zip(f.impact.db_time_share)
                     .is_some_and(|(impact, share)| (impact.share - share).abs() < 1e-9);
                 if same_share && let Some(cost) = support::query_cost_context(s, &queries) {
-                    let title_share = f
-                        .impact
-                        .db_time_share
-                        .filter(|_| f.check == "heavy-query")
-                        .map(|share| format!("{} of {}", format::percent(share), crate::queries::time_noun(s)));
+                    let title_share = f.impact.db_time_share.filter(|_| f.check == "heavy-query").map(|share| {
+                        // The share as heavy-query's title says it, to put the cost in its place.
+                        let of = if crate::queries::slow_log_only(s) { "slow_log" } else { "database" };
+                        t!("refine.presentation.share_of_time", share = format::percent(share), of = of)
+                    });
                     let direct =
                         matches!(f.check.as_str(), "heavy-query" | "chatty-query" | "missing-index" | "filtered-scan");
                     out.push(Decision { at, change: Change::Cost { cost, title_share, direct } });

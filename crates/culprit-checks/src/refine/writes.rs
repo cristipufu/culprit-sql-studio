@@ -132,22 +132,41 @@ impl Refine for Rule {
             let target = &mut findings[d.into];
             let mut note = None;
             match d.evidence {
-                Evidence::Bloat(bloat)=>target.caveats.push(format!(
-                    "PostgreSQL's statistics also estimate about {} of {} ({}) as empty space: these dead rows. VACUUM makes it reusable; rewrite the table (pg_repack) only if the estimate stays high after a vacuum.",
-                    format::bytes(bloat.bytes),leaf(&finding_table(&a.source)),format::percent(bloat.share))),
-                Evidence::Cold {query,rows,log,once}=> {
+                Evidence::Bloat(bloat) => target.caveats.push(t!(
+                    "refine.writes.bloat_caveat",
+                    bytes = format::bytes(bloat.bytes),
+                    table = leaf(&finding_table(&a.source)),
+                    share = format::percent(bloat.share)
+                )),
+                Evidence::Cold { query, rows, log, once } => {
                     if let Some((w, q)) = s.workload.as_ref().and_then(|w| Some((w, w.query(&query)?))) {
-                        target.summary.push_str(&format!(
-                            " {} changed {} of these rows and wrote {} of WAL for them{}: an update that isn't HOT logs the new row version and an entry in every index, and the first change to each page after a checkpoint logs the whole page.",
-                            capitalize(&support::query_handle(q)),format::count(rows),format::bytes(log.bytes),log.per_row.map(|bytes|format!(", about {} a row",format::bytes(bytes))).unwrap_or_default()));
-                        target.metrics.push(culprit_core::Metric::new("WAL its update wrote",log.bytes,culprit_core::Unit::Bytes));
+                        let (handle, rows, bytes) =
+                            (capitalize(&support::query_handle(q)), format::count(rows), format::bytes(log.bytes));
+                        target.summary.push(' ');
+                        target.summary.push_str(&match log.per_row {
+                            Some(per_row) => t!(
+                                "refine.writes.cold_per_row",
+                                handle = handle,
+                                rows = rows,
+                                bytes = &bytes,
+                                per_row = format::bytes(per_row)
+                            ),
+                            None => t!("refine.writes.cold", handle = handle, rows = rows, bytes = &bytes),
+                        });
+                        target.metrics.push(culprit_core::Metric::new(
+                            t!("refine.writes.metric.wal_its_update_wrote"),
+                            log.bytes,
+                            culprit_core::Unit::Bytes,
+                        ));
                         if once {
-                            target.caveats.insert(0,format!("The update behind most of these ran once in {}: a backfill or a migration looks like this, and its share stays in the counts long after. It needs work only if updates like it keep coming.",w.window_phrase()));
+                            target.caveats.insert(0, t!("refine.writes.cold_once", window = w.window_phrase()));
                         }
-                        note=Some(format!("Wrote {} of WAL.",format::bytes(log.bytes)));
+                        note = Some(t!("refine.writes.cold_note", bytes = bytes));
                     }
                 }
-                Evidence::Large=>{joined.insert(target.id.clone());}
+                Evidence::Large => {
+                    joined.insert(target.id.clone());
+                }
             }
             a.render(findings, note);
             a.finish(findings);
@@ -165,22 +184,21 @@ impl Refine for Rule {
                 })
                 .collect();
             if let Some(said) = log_of_writers(s, &writers) {
+                f.summary.push(' ');
                 f.summary.push_str(&said);
             }
             let total = writers.iter().map(|(_, _, bytes)| bytes).sum();
-            match f.metrics.iter_mut().find(|m| m.label == "Log written by its writes") {
+            // The label this rule gives the metric, in the language it is said in.
+            let label = t!("refine.writes.metric.log_written_by_its_writes");
+            match f.metrics.iter_mut().find(|m| m.label == label) {
                 Some(m) => m.value = total,
-                None => f.metrics.push(culprit_core::Metric::new(
-                    "Log written by its writes",
-                    total,
-                    culprit_core::Unit::Bytes,
-                )),
+                None => f.metrics.push(culprit_core::Metric::new(label, total, culprit_core::Unit::Bytes)),
             }
             for (q, _, bytes) in &writers {
                 if let Some(r) = f.queries.iter_mut().find(|r| r.id == q.id && r.note.is_none()) {
                     r.note = Some(match per_row(q, *bytes) {
-                        Some(b) => format!("Writes about {} of {} a row.", format::bytes(b), log_name(s)),
-                        None => format!("Wrote {} of {}.", format::bytes(*bytes), log_name(s)),
+                        Some(b) => t!("refine.writes.note_per_row", bytes = format::bytes(b), log = log_name(s)),
+                        None => t!("refine.writes.note", bytes = format::bytes(*bytes), log = log_name(s)),
                     });
                 }
             }
@@ -189,9 +207,10 @@ impl Refine for Rule {
     }
 }
 
-/// What the engine calls its log, as a sentence names it.
-fn log_name(snapshot: &Snapshot) -> &'static str {
-    if snapshot.server.engine == Engine::Postgres { "WAL" } else { "transaction log" }
+/// What the engine calls its log, as a sentence names it: "WAL", "transaction log".
+fn log_name(snapshot: &Snapshot) -> String {
+    let log = if snapshot.server.engine == Engine::Postgres { "wal" } else { "transaction" };
+    t!("refine.writes.log_name", log = log)
 }
 
 /// Log a statement wrote for each row it changed, when it counted them.
@@ -202,18 +221,17 @@ fn per_row(q: &QueryStat, bytes: f64) -> Option<f64> {
 /// The log the writes of a large-rows table made, said once for all of them: one writer by its handle, several by what
 /// they are ("77.2 MB by an insert (about 412 KB a row) and 15.3 MB by 2 updates (about 90.8 KB a row)").
 fn log_of_writers(snapshot: &Snapshot, writers: &[(&QueryStat, &'static str, f64)]) -> Option<String> {
-    const IN_FULL: &str = "the large values are logged in full, so batching the writes or dropping indexes won't shrink it; smaller or fewer values will.";
     let log = log_name(snapshot);
-    let a_row = |bytes: f64, rows: Option<f64>| {
-        rows.filter(|r| *r > 0.0).map(|r| format!("about {} a row", format::bytes(bytes / r)))
-    };
+    let a_row = |bytes: f64, rows: Option<f64>| rows.filter(|r| *r > 0.0).map(|r| format::bytes(bytes / r));
     if let [(q, _, bytes)] = writers {
-        return Some(format!(
-            " {} wrote {} of {log} for them{}: {IN_FULL}",
-            capitalize(&support::query_handle(q)),
-            format::bytes(*bytes),
-            a_row(*bytes, q.rows).map(|r| format!(", {r}")).unwrap_or_default()
-        ));
+        let (handle, bytes, per_row) =
+            (capitalize(&support::query_handle(q)), format::bytes(*bytes), a_row(*bytes, q.rows));
+        return Some(match per_row {
+            Some(per_row) => {
+                t!("refine.writes.one_writer_per_row", handle = handle, bytes = bytes, log = log, per_row = per_row)
+            }
+            None => t!("refine.writes.one_writer", handle = handle, bytes = bytes, log = log),
+        });
     }
     // By kind of write, the kind that logged most first; a row count only where every one of them counted its rows.
     let mut kinds: Vec<(&'static str, usize, f64, Option<f64>)> = Vec::new();
@@ -229,38 +247,48 @@ fn log_of_writers(snapshot: &Snapshot, writers: &[(&QueryStat, &'static str, f64
     }
     kinds.sort_by(|a, b| b.2.total_cmp(&a.2));
     let total: f64 = kinds.iter().map(|(_, _, b, _)| b).sum();
-    let noun = |verb: &str, n: usize| match (verb, n) {
-        ("insert", 1) => "an insert".to_string(),
-        ("update", 1) => "an update".to_string(),
-        (verb, 1) => format!("a {verb}"),
-        (verb, n) => format!("{n} {verb}s"),
-    };
     Some(match kinds.as_slice() {
         [] => return None,
         // Several writes of one kind (one alone is said by its handle above).
-        [(verb, n, bytes, rows)] => format!(
-            " The {n} {verb}s below logged {} of {log} for them{}: {IN_FULL}",
-            format::bytes(*bytes),
-            a_row(*bytes, *rows).map(|r| format!(", {r}")).unwrap_or_default()
-        ),
+        [(verb, n, bytes, rows)] => {
+            let per_row = a_row(*bytes, *rows);
+            let (count, bytes) = (n.to_string(), format::bytes(*bytes));
+            match per_row {
+                Some(per_row) => t!(
+                    "refine.writes.one_kind_per_row",
+                    count = count,
+                    verb = *verb,
+                    bytes = bytes,
+                    log = log,
+                    per_row = per_row
+                ),
+                None => t!("refine.writes.one_kind", count = count, verb = *verb, bytes = bytes, log = log),
+            }
+        }
         _ => {
             let parts: Vec<String> = kinds
                 .iter()
                 .map(|(verb, n, bytes, rows)| {
-                    format!(
-                        "{} by {}{}",
-                        format::bytes(*bytes),
-                        noun(verb, *n),
-                        a_row(*bytes, *rows).map(|r| format!(" ({r})")).unwrap_or_default()
-                    )
+                    let writes = t!("refine.writes.writes", verb = *verb, n = *n, count = n.to_string());
+                    match a_row(*bytes, *rows) {
+                        Some(per_row) => {
+                            t!(
+                                "refine.writes.logged_by_per_row",
+                                bytes = format::bytes(*bytes),
+                                writes = writes,
+                                per_row = per_row
+                            )
+                        }
+                        None => t!("refine.writes.logged_by", bytes = format::bytes(*bytes), writes = writes),
+                    }
                 })
                 .collect();
-            format!(
-                " The {} statements below that write them logged {} of {log}: {}. {}",
-                writers.len(),
-                format::bytes(total),
-                format::list(&parts),
-                capitalize(IN_FULL)
+            t!(
+                "refine.writes.kinds",
+                count = writers.len().to_string(),
+                total = format::bytes(total),
+                log = log,
+                parts = format::list(&parts)
             )
         }
     })

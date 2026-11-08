@@ -141,33 +141,23 @@ impl Refine for Rule {
         }
         for (d, source) in decisions.iter().zip(&sources) {
             let f = &mut findings[d.into];
+            f.summary.push(' ');
             match d.evidence {
                 Evidence::Compiles => {
-                    f.summary.push_str(&format!(
-                        " Instance-wide compilation context (not attributed to this database): {}.",
-                        source.title.trim_end_matches('.')
-                    ));
+                    f.summary.push_str(&t!("refine.maintenance.compiles", title = source.title.trim_end_matches('.')));
                     f.verify.extend(source.verify.iter().cloned());
                 }
-                Evidence::Statistics { changes } => {
-                    f.summary.push_str(&format!(
-                        " Its statistics are behind too{}: VACUUM (ANALYZE) refreshes them in the same pass.",
-                        changes
-                            .map(|c| format!(" ({} changes since the last analyze)", format::count(c)))
-                            .unwrap_or_default()
-                    ));
-                }
+                Evidence::Statistics { changes } => f.summary.push_str(&match changes {
+                    Some(c) => t!("refine.maintenance.statistics_changes", changes = format::count(c)),
+                    None => t!("refine.maintenance.statistics"),
+                }),
                 Evidence::Slot { transactions, catalog_only } => {
-                    let effect = format!(
-                        "holds {} back by {} transactions",
-                        if catalog_only { "system-catalog cleanup" } else { "VACUUM" },
-                        format::count(transactions)
-                    );
-                    if catalog_only {
-                        f.summary.push_str(&format!(" It also {effect}: old system-catalog row versions needed for logical decoding remain. This does not establish that application-table cleanup is held back."));
+                    let transactions = format::count(transactions);
+                    f.summary.push_str(&if catalog_only {
+                        t!("refine.maintenance.slot_catalog", transactions = transactions)
                     } else {
-                        f.summary.push_str(&format!(" It also {effect}: rows deleted or updated after it can't be removed from any table, in any database."));
-                    }
+                        t!("refine.maintenance.slot_vacuum", transactions = transactions)
+                    });
                 }
             }
         }

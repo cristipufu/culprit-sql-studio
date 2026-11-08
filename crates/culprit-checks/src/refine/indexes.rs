@@ -276,23 +276,18 @@ impl Refine for Rule {
         // Preserve the established order when several observations decorate the same foreign key.
         for d in decisions.iter().rev() {
             if let Action::Automatic { into, queries, .. } = &d.action {
-                findings[*into].summary.push_str(&format!(
-                    " {} already builds this index for itself on every run of {}, and drops it after.",
-                    s.server.engine,
-                    if queries.len() == 1 {
-                        "one of these statements".into()
-                    } else {
-                        format!("{} of these statements", queries.len())
-                    }
+                findings[*into].summary.push(' ');
+                findings[*into].summary.push_str(&t!(
+                    "refine.indexes.built_on_every_run",
+                    engine = s.server.engine.to_string(),
+                    n = queries.len(),
+                    count = queries.len().to_string()
                 ));
             }
         }
         for d in &decisions {
             if let Action::Histogram { columns, full: false, .. } = &d.action {
-                findings[d.at].caveats.push(format!(
-                    "An index is also suggested for {}; once it exists the optimizer estimates from the index instead.",
-                    format::list(columns)
-                ));
+                findings[d.at].caveats.push(t!("refine.indexes.histogram_caveat", columns = format::list(columns)));
             }
         }
         let mut at = 0;

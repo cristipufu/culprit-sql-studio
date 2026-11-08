@@ -57,13 +57,13 @@ impl ReadChange {
         (after > before * 2.0).then(|| Self { from: change.from.clone(), to: change.to.clone(), before, after })
     }
     fn render(&self, history: bool) -> String {
-        format!(
-            " The scan came with the plan change: plan {} read about {} pages a run, plan {} {} about {}.",
-            self.from,
-            format::count(self.before),
-            self.to,
-            if history { "read" } else { "reads" },
-            format::count(self.after)
+        t!(
+            "refine.queries.scan_came_with_plan_change",
+            from = &self.from,
+            before = format::count(self.before),
+            to = &self.to,
+            history = if history { "yes" } else { "no" },
+            after = format::count(self.after)
         )
     }
 }
@@ -128,28 +128,24 @@ fn add_metrics(target: &mut Finding, source: &Finding, skip_runs: bool) {
 fn timeline(source: &Finding) -> String {
     let first =
         source.summary.split_once(". ").map_or(source.summary.as_str(), |(first, _)| first).trim_end_matches('.');
+    // The regression's own first sentence, as its check worded it ("Until Oct 11, 10:44 UTC, …"): English's is said as
+    // Query Store's timeline. Another language's is kept as it is.
     match first.strip_prefix("Until ") {
-        Some(rest) => format!("Query Store's timeline: until {rest}."),
+        Some(rest) => t!("refine.queries.timeline_until", rest = rest),
         None => format!("{first}."),
     }
 }
 fn recommendation_caveat(rec: &Finding, sensitive: &Finding) -> String {
-    let plan = rec.facts.recommended_plan.as_ref().map_or("another plan", |r| r.plan.as_str());
-    let gain = rec
-        .facts
-        .recommended_plan
-        .as_ref()
-        .and_then(|r| r.cpu_saved_share)
-        .map(|g| format!(" (estimated {} less CPU per run)", format::percent(g)))
-        .unwrap_or_default();
+    let recommended = rec.facts.recommended_plan.as_ref().map(|r| r.plan.as_str());
+    let plan = recommended.map_or_else(|| t!("refine.queries.another_plan"), str::to_string);
+    let plan = match rec.facts.recommended_plan.as_ref().and_then(|r| r.cpu_saved_share) {
+        Some(g) => t!("refine.queries.plan_saving_cpu", plan = plan, share = format::percent(g)),
+        None => plan,
+    };
     match sensitive.facts.usual_fast_plan.as_deref() {
-        Some(fast) if fast == plan => format!(
-            "SQL Server's automatic tuning also recommends forcing plan {plan}{gain}: the plan most calls run fast with, the fix's first step."
-        ),
-        Some(fast) => format!(
-            "SQL Server's automatic tuning recommends forcing plan {plan}{gain}, while most calls run fast with plan {fast}. With plans used side by side for different values, forcing one for every value can slow the calls the other suits: try a value from a slow call under it first."
-        ),
-        None => format!("SQL Server's automatic tuning recommends forcing plan {plan}{gain}."),
+        Some(fast) if Some(fast) == recommended => t!("refine.queries.force_the_fast_plan", plan = plan),
+        Some(fast) => t!("refine.queries.force_another_than_the_fast_plan", plan = plan, fast = fast),
+        None => t!("refine.queries.force_plan", plan = plan),
     }
 }
 impl Refine for Rule {
@@ -216,7 +212,7 @@ impl Refine for Rule {
                         sentence
                     };
                     target.summary =
-                        format!("{} {sentence}{}", target.summary.trim_end(), reads.render(query_is_history(s, q)));
+                        [target.summary.trim_end(), &sentence, &reads.render(query_is_history(s, q))].join(" ");
                     add_metrics(target, &source, false);
                 }
             }
