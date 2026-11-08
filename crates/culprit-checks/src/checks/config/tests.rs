@@ -187,11 +187,11 @@ fn buffer_pool_snapshot(hit: f64, reads: f64) -> Snapshot {
 // no size is proposed without knowing the server's memory.
 #[test]
 fn buffer_pool_is_graded_on_misses_not_data_size() {
-    assert!(mysql::buffer_pool(&buffer_pool_snapshot(99.9, 3.0)).is_none());
-    let f = mysql::buffer_pool(&buffer_pool_snapshot(90.0, 400.0)).unwrap();
+    assert!(mysql::buffer_pool_check(&buffer_pool_snapshot(99.9, 3.0)).is_none());
+    let f = mysql::buffer_pool_check(&buffer_pool_snapshot(90.0, 400.0)).unwrap();
     assert_eq!(f.severity, Severity::Low);
     assert!(f.fix.as_ref().unwrap().sql.is_none());
-    assert_eq!(mysql::buffer_pool(&buffer_pool_snapshot(97.0, 400.0)).unwrap().severity, Severity::Low);
+    assert_eq!(mysql::buffer_pool_check(&buffer_pool_snapshot(97.0, 400.0)).unwrap().severity, Severity::Low);
     // MyISAM tables (a primary key that isn't clustered) have no pages in the buffer pool.
     let mut s = buffer_pool_snapshot(90.0, 400.0);
     for i in &mut s.indexes {
@@ -200,7 +200,7 @@ fn buffer_pool_is_graded_on_misses_not_data_size() {
     for t in &mut s.tables {
         t.has_primary_key = true;
     }
-    assert!(mysql::buffer_pool(&s).is_none());
+    assert!(mysql::buffer_pool_check(&s).is_none());
 }
 
 // C9: with size-based cleanup on AUTO, Query Store trims itself at 90% and never fills.
