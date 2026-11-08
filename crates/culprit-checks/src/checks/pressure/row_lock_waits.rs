@@ -6,20 +6,50 @@ use crate::evidence::Requirement as Evidence;
 pub fn row_lock_waits_info() -> CheckInfo {
     CheckInfo {
         id: "row-lock-waits".into(),
-        title: "Transactions waiting for row locks".into(),
+        title: t!("check.row_lock_waits.info.title"),
         category: Category::Queries,
         engines: vec![Engine::Mysql],
         requires: vec![],
-        description: "InnoDB row-lock waits add up to real time (a minute an hour or more across the server), from long transactions or updates that scan instead of using an index.".into(),
+        description: t!("check.row_lock_waits.info.description"),
     }
 }
 
 check!(
-    RowLockWaitsCheck: row_lock_waits_info, row_lock_waits,
-    &[Evidence::Pressure { signal: Some(culprit_core::signal_id::ROW_LOCK_AVG), timed_files: false, complete: true }]
+    RowLockWaitsCheck: row_lock_waits_info,
+    decide = row_lock_time,
+    render = row_lock_waits_finding,
+    case<'s> = RowLockWaits<'s>,
+    evidence = &[Evidence::Pressure {
+        signal: Some(culprit_core::signal_id::ROW_LOCK_AVG),
+        timed_files: false,
+        complete: true
+    }],
 );
 
-pub fn row_lock_waits(snapshot: &Snapshot) -> Vec<Finding> {
+/// The row-lock-waits findings of `snapshot`: its cases, each worded.
+#[cfg(test)]
+pub(crate) fn row_lock_waits(snapshot: &Snapshot) -> Vec<Finding> {
+    culprit_core::Check::run(&RowLockWaitsCheck, snapshot)
+}
+
+/// The server's row-lock waits since it started, a minute an hour or more, and what of them this database shows.
+pub struct RowLockWaits<'s> {
+    /// Waits since the start.
+    count: f64,
+    /// Their time since the start, and on average.
+    total_ms: f64,
+    avg_ms: f64,
+    per_hour_ms: f64,
+    /// That time against this database's statement time an hour.
+    share: Option<f64>,
+    /// This database's statement that waited longest on locks, and how long.
+    top: Option<(&'s QueryStat, f64)>,
+    /// That statement spends most of its time waiting on locks: it is where they show, named with the finding.
+    named: Option<&'s QueryStat>,
+    severity: Severity,
+}
+
+fn row_lock_time(snapshot: &Snapshot) -> Vec<RowLockWaits<'_>> {
     let Some(avg_ms) = signal(snapshot, culprit_core::signal_id::ROW_LOCK_AVG) else { return Vec::new() };
     // A rate needs at least an hour of counters.
     let Some(hours) = counter_hours(snapshot) else { return Vec::new() };
@@ -39,19 +69,6 @@ pub fn row_lock_waits(snapshot: &Snapshot) -> Vec<Finding> {
         .as_ref()
         .filter(|w| w.measurement_hours() >= culprit_core::RATE_MIN_HOURS && w.total_time_ms > 0.0)
         .map(|w| per_hour_ms / (w.total_time_ms / w.measurement_hours()));
-    let mut f = finding(
-        "row-lock-waits",
-        &server_key(snapshot),
-        Category::Queries,
-        subject(SubjectKind::Database, snapshot.server.database.clone()),
-    );
-    let name = snapshot.server.name();
-    let total = crate::signals::total_wait(total_ms);
-    f.title = format!(
-        "Transactions on this server waited {total} for row locks {}, {} each on average",
-        uptime_phrase(snapshot),
-        format::duration(avg_ms)
-    );
     // InnoDB reads a plain SELECT from a snapshot, taking no row locks (except under SERIALIZABLE, which makes it a
     // locking read): its lock time is table and metadata locks, never these waits.
     let serializable = ["transaction_isolation", "tx_isolation"]
@@ -67,56 +84,73 @@ pub fn row_lock_waits(snapshot: &Snapshot) -> Vec<Finding> {
             (lock > 0.0).then_some((q, lock))
         })
         .max_by(|a, b| a.1.total_cmp(&b.1));
-    f.summary = format!(
-        "{}, InnoDB made transactions across the whole server (it counts every database together) wait for row locks \
-         {} times, {} in all and about {} each: about {} an hour on average{}; the counters don't say when.{} \
-         Lock waits grow with long transactions, and with UPDATE or DELETE statements whose filter isn't indexed: they lock every row they scan.",
-        capitalize(&uptime_phrase(snapshot)),
-        format::count(count),
-        total,
-        format::duration(avg_ms),
-        format::duration(per_hour_ms),
-        share
-            .map(|s| format!(", against {} of statement time an hour in this database", format::percent(s.min(9.99))))
-            .unwrap_or_default(),
-        top.map(|(q, ms)| format!(
-            " In this database, {} waited longest on locks ({} in total).",
-            query_handle(q),
-            format::duration(ms)
-        ))
-        .unwrap_or_default()
-    );
-    if let Some((q, ms)) = top
-        && q.total_time_ms > 0.0
-        && ms / q.total_time_ms >= 0.5
-    {
-        f.queries = query_refs(&[q]);
-    }
+    let named = top.filter(|(q, ms)| q.total_time_ms > 0.0 && ms / q.total_time_ms >= 0.5).map(|(q, _)| q);
     // Totals since the start describe the past: at most Medium, and Medium only when they are a real part of the
     // work (ten minutes an hour, or a tenth of this database's statement time) and this database's own statements
     // show it (one spends most of its time waiting on locks): the counters are every database's on the server.
-    let here = !f.queries.is_empty();
-    f.severity = if here && (per_hour_ms >= 10.0 * MINUTE_MS || share.is_some_and(|s| s >= 0.1)) {
+    let severity = if named.is_some() && (per_hour_ms >= 10.0 * MINUTE_MS || share.is_some_and(|s| s >= 0.1)) {
         Severity::Medium
     } else {
         Severity::Low
     };
+    vec![RowLockWaits { count, total_ms, avg_ms, per_hour_ms, share, top, named, severity }]
+}
+
+fn row_lock_waits_finding(snapshot: &Snapshot, r: RowLockWaits<'_>) -> Finding {
+    let mut f = finding(
+        "row-lock-waits",
+        &server_key(snapshot),
+        Category::Queries,
+        subject(SubjectKind::Database, snapshot.server.database.clone()),
+    );
+    let total = crate::signals::total_wait(r.total_ms);
+    let average = format::duration(r.avg_ms);
+    f.title = t!(
+        "check.row_lock_waits.title",
+        total = &total,
+        since = uptime_phrase(snapshot),
+        average = &average
+    );
+    let since = uptime_opening(snapshot);
+    let (count, per_hour) = (format::count(r.count), format::duration(r.per_hour_ms));
+    let mut summary = vec![match r.share {
+        Some(s) => t!(
+            "check.row_lock_waits.summary.waits_share",
+            since = since,
+            count = count,
+            total = &total,
+            average = &average,
+            per_hour = per_hour,
+            share = format::percent(s.min(9.99))
+        ),
+        None => t!(
+            "check.row_lock_waits.summary.waits",
+            since = since,
+            count = count,
+            total = &total,
+            average = &average,
+            per_hour = per_hour
+        ),
+    }];
+    if let Some((q, ms)) = r.top {
+        summary.push(t!("check.row_lock_waits.summary.longest", query = query_handle(q), time = format::duration(ms)));
+    }
+    summary.push(t!("check.row_lock_waits.summary.causes"));
+    f.summary = summary.join(" ");
+    if let Some(q) = r.named {
+        f.queries = query_refs(&[q]);
+    }
+    f.severity = r.severity;
     f.impact.score = base_score(f.severity);
-    f.impact.label = format!("{}/h lock waits", format::duration(per_hour_ms));
+    f.impact.label = t!("check.row_lock_waits.impact", per_hour = format::duration(r.per_hour_ms));
     f.confidence = Confidence::Medium;
     f.metrics = vec![
-        Metric::new("Lock waits since start", count, Unit::Count),
-        Metric::new("Time waiting since start", total_ms, Unit::Ms),
-        Metric::new("Average wait", avg_ms, Unit::Ms),
+        Metric::new(t!("check.row_lock_waits.metric.waits"), r.count, Unit::Count),
+        Metric::new(t!("check.row_lock_waits.metric.time"), r.total_ms, Unit::Ms),
+        Metric::new(t!("check.row_lock_waits.metric.average"), r.avg_ms, Unit::Ms),
     ];
-    f.caveats.push(format!(
-        "{name} counts row-lock waits for the whole server, so other databases' waits are in these numbers."
-    ));
-    f.fix = Some(Fix {
-        summary: "Keep transactions short (no user input or slow calls inside them), make UPDATE and DELETE filter on indexed columns, and touch tables in the same order everywhere. Live shows who blocks whom right now.".into(),
-        sql: None,
-        cost: None,
-    });
-    f.verify = vec!["Sample Waits → Right now during normal load: it counts row-lock waits over the sample, which should be rare and short.".into()];
-    vec![f]
+    f.caveats.push(t!("check.row_lock_waits.caveat.server_wide", engine = snapshot.server.name()));
+    f.fix = Some(Fix { summary: t!("check.row_lock_waits.fix"), sql: None, cost: None });
+    f.verify = vec![t!("check.row_lock_waits.verify")];
+    f
 }
