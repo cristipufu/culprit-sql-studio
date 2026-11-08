@@ -12,6 +12,7 @@ mod evidence_contracts;
 mod heap_tables;
 mod index_advice;
 mod index_false_flags;
+mod index_words;
 mod mariadb;
 mod multi_tenant;
 mod old_versions;
