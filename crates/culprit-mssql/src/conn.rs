@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use culprit_core::{
     AuthKind, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, Engine, Error, ErrorCode, Result,
-    entra_host_allowed,
+    entra_host_allowed, t,
 };
 use futures_util::future::BoxFuture;
 use tiberius::{AuthMethod, Client, Config, EncryptionLevel};
@@ -35,7 +35,7 @@ pub(crate) enum SessionKind {
 pub(crate) fn build_config(spec: &ConnectionSpec) -> Result<Config> {
     spec.check_transport()?;
     if spec.host.trim().is_empty() {
-        return Err(Error::invalid("A SQL Server host is required"));
+        return Err(Error::invalid(t!("provider.mssql.connect.host_required")));
     }
     let mut config = Config::new();
     config.host(spec.host.trim());
@@ -50,9 +50,8 @@ pub(crate) fn build_config(spec: &ConnectionSpec) -> Result<Config> {
     let entra = spec.auth == AuthKind::Entra;
     let trust_any_certificate = spec.flag("trustServerCertificate").unwrap_or(false);
     if entra && trust_any_certificate {
-        return Err(Error::invalid("Microsoft Entra ID authentication needs a verified server certificate").with_hint(
-            "Remove TrustServerCertificate=true: the token would otherwise be readable by anyone in the middle",
-        ));
+        return Err(Error::invalid(t!("provider.mssql.connect.entra_certificate"))
+            .with_hint(t!("provider.mssql.connect.entra_certificate.hint")));
     }
     let level = encryption_level(spec);
     config.encryption(if entra && level == EncryptionLevel::Off { EncryptionLevel::Required } else { level });
@@ -78,28 +77,22 @@ fn auth_method(spec: &ConnectionSpec) -> Result<AuthMethod> {
                 .user
                 .as_deref()
                 .filter(|u| !u.is_empty())
-                .ok_or_else(|| Error::invalid("SQL Server password authentication needs a user name"))?;
+                .ok_or_else(|| Error::invalid(t!("provider.mssql.connect.user_required")))?;
             Ok(AuthMethod::sql_server(user, spec.password.as_deref().unwrap_or("")))
         }
         AuthKind::Entra => {
             if !entra_host_allowed(Engine::Mssql, &spec.host) {
-                return Err(Error::new(
-                    ErrorCode::PermissionDenied,
-                    "Microsoft Entra ID tokens are only sent to Azure SQL hosts",
-                ));
+                return Err(Error::new(ErrorCode::PermissionDenied, t!("provider.mssql.connect.entra_host")));
             }
             let token = spec.token.as_deref().ok_or_else(|| {
-                Error::new(ErrorCode::AuthFailed, "No Microsoft Entra ID token is available")
-                    .with_hint("Sign in with `az login`, then try again.")
+                Error::new(ErrorCode::AuthFailed, t!("provider.mssql.connect.no_entra_token"))
+                    .with_hint(t!("provider.mssql.connect.no_entra_token.hint"))
             })?;
             Ok(AuthMethod::aad_token(token))
         }
-        AuthKind::AwsIam => Err(Error::new(
-            ErrorCode::Unsupported,
-            "Amazon RDS for SQL Server does not support IAM database authentication",
-        )
-        .with_hint("Use password authentication for this connection")),
-        AuthKind::None => Err(Error::invalid("SQL Server needs either password or Microsoft Entra ID authentication")),
+        AuthKind::AwsIam => Err(Error::new(ErrorCode::Unsupported, t!("provider.mssql.connect.no_iam"))
+            .with_hint(t!("provider.mssql.connect.no_iam.hint"))),
+        AuthKind::None => Err(Error::invalid(t!("provider.mssql.connect.no_auth"))),
     }
 }
 
@@ -128,8 +121,9 @@ async fn endpoint_for(
 ) -> Result<Option<ConnectionEndpoint>> {
     let Some(transport) = transport else { return Ok(None) };
     let addr = config.get_addr();
-    let (host, port) = addr.rsplit_once(':').ok_or_else(|| Error::invalid("Invalid SQL Server endpoint"))?;
-    let port = port.parse().map_err(|_| Error::invalid("Invalid SQL Server port"))?;
+    let (host, port) =
+        addr.rsplit_once(':').ok_or_else(|| Error::invalid(t!("provider.mssql.connect.invalid_endpoint")))?;
+    let port = port.parse().map_err(|_| Error::invalid(t!("provider.mssql.connect.invalid_port")))?;
     transport.endpoint(host, port).await.map(Some)
 }
 
@@ -145,15 +139,12 @@ async fn open_tcp(config: Config, endpoint: Option<&ConnectionEndpoint>) -> tibe
 
 /// The TCP connection to `addr` didn't open in time: the message of the I/O error it becomes.
 pub(crate) fn connect_timed_out(addr: &str) -> String {
-    format!("timed out connecting to {addr}")
+    t!("provider.mssql.connect.timed_out", address = addr)
 }
 
 /// A gateway redirected the login outside Azure SQL, where it would carry the password or token to someone else.
 pub(crate) fn redirect_refused(host: &str) -> Error {
-    Error::new(
-        ErrorCode::ConnectionFailed,
-        format!("Refusing a redirect from an Azure SQL gateway to '{host}', outside Azure SQL"),
-    )
+    Error::new(ErrorCode::ConnectionFailed, t!("provider.mssql.connect.redirect_refused", host = host))
 }
 
 /// Connect, following one Azure SQL gateway redirect, and prepare the session.
@@ -282,7 +273,7 @@ pub(crate) fn is_permission_error(err: &tiberius::error::Error) -> bool {
 
 /// What a login without the monitoring permission is told to ask for.
 pub(crate) fn permission_hint() -> String {
-    "Grant the monitoring permission: GRANT VIEW DATABASE STATE TO [<user>]; on Azure SQL Database, or GRANT VIEW SERVER STATE TO [<login>]; on SQL Server.".to_string()
+    t!("provider.mssql.error.permission.hint")
 }
 
 /// An error the server returned (`code`, its `message`), with what to do about it where Culprit knows.
@@ -290,21 +281,20 @@ pub(crate) fn server_error(code: u32, message: String) -> Error {
     match code {
         18456 | 18452 | 18470 | 18486 | 18487 | 18488 => {
             let hint = if message.contains("token-identified principal") {
-                "This Microsoft Entra identity has no user in the database. Ask an admin to run CREATE USER [you@company.com] FROM EXTERNAL PROVIDER;"
+                t!("provider.mssql.error.entra_user.hint")
             } else {
-                "Check the user name and password, and that SQL authentication is enabled on the server."
+                t!("provider.mssql.error.login.hint")
             };
             Error::new(ErrorCode::AuthFailed, message).with_hint(hint)
         }
-        4060 => Error::new(ErrorCode::NotFound, message)
-            .with_hint("Check the database name and that this login has a user in it."),
-        40615 | 40914 => Error::new(ErrorCode::ConnectionFailed, message).with_hint(
-            "Your IP address is not allowed by the server firewall. Add it under the server's networking settings.",
-        ),
-        40613 | 40501 | 40197 | 49918 | 49919 | 49920 => Error::new(ErrorCode::ConnectionFailed, message)
-            .with_hint("The database is temporarily unavailable or throttled. Try again in a few seconds."),
-        1222 => Error::new(ErrorCode::Timeout, message)
-            .with_hint("A lock wait exceeded Culprit's 2 second limit; the server is busy or something is blocking."),
+        4060 => Error::new(ErrorCode::NotFound, message).with_hint(t!("provider.mssql.error.database.hint")),
+        40615 | 40914 => {
+            Error::new(ErrorCode::ConnectionFailed, message).with_hint(t!("provider.mssql.error.firewall.hint"))
+        }
+        40613 | 40501 | 40197 | 49918 | 49919 | 49920 => {
+            Error::new(ErrorCode::ConnectionFailed, message).with_hint(t!("provider.mssql.error.unavailable.hint"))
+        }
+        1222 => Error::new(ErrorCode::Timeout, message).with_hint(t!("provider.mssql.error.lock_timeout.hint")),
         229 | 230 | 262 | 297 | 300 | 15151 | 15247 => {
             Error::new(ErrorCode::PermissionDenied, message).with_hint(permission_hint())
         }
@@ -317,20 +307,19 @@ pub(crate) fn map_error(err: tiberius::error::Error) -> Error {
     match &err {
         T::Server(token) => server_error(token.code(), token.message().to_string()),
         T::Io { kind, message } if *kind == std::io::ErrorKind::TimedOut => {
-            Error::new(ErrorCode::Timeout, format!("SQL Server did not respond in time: {message}"))
-                .with_hint("Check the host, port and firewall, or whether the server is under heavy load.")
+            Error::new(ErrorCode::Timeout, t!("provider.mssql.error.timeout", error = message))
+                .with_hint(t!("provider.mssql.error.timeout.hint"))
         }
         T::Io { message, .. } => {
-            Error::new(ErrorCode::ConnectionFailed, format!("Could not reach SQL Server: {message}"))
-                .with_hint("Check the host and port, and that the server accepts TCP connections from this machine.")
+            Error::new(ErrorCode::ConnectionFailed, t!("provider.mssql.error.unreachable", error = message))
+                .with_hint(t!("provider.mssql.error.unreachable.hint"))
         }
-        T::Tls(message) => Error::new(ErrorCode::ConnectionFailed, format!("TLS handshake failed: {message}"))
-            .with_hint(
-                "If this is a development server with a self-signed certificate, set TrustServerCertificate=true.",
-            ),
-        T::Routing { host, port } => {
-            Error::new(ErrorCode::ConnectionFailed, format!("SQL Server redirected twice (last to {host}:{port})"))
-        }
+        T::Tls(message) => Error::new(ErrorCode::ConnectionFailed, t!("provider.mssql.error.tls", error = message))
+            .with_hint(t!("provider.mssql.error.tls.hint")),
+        T::Routing { host, port } => Error::new(
+            ErrorCode::ConnectionFailed,
+            t!("provider.mssql.error.redirected_twice", host = host, port = port.to_string()),
+        ),
         _ => Error::new(ErrorCode::Internal, err.to_string()),
     }
 }

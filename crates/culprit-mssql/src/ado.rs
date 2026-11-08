@@ -1,4 +1,4 @@
-use culprit_core::{AuthKind, ConnectionSpec, Engine, Error, Result};
+use culprit_core::{AuthKind, ConnectionSpec, Engine, Error, Result, t};
 
 /// Parses an ADO.NET connection string (`Server=host,port;Database=…;User ID=…;Password=…;…`) into a spec.
 /// Keys the spec has no field for are kept as driver options.
@@ -14,8 +14,9 @@ pub fn parse_ado(ado: &str) -> Result<ConnectionSpec> {
                 let (host, port) = server.split_once(',').unwrap_or((server, ""));
                 spec.host = host.trim().to_string();
                 if !port.trim().is_empty() {
-                    spec.port =
-                        Some(port.trim().parse().map_err(|_| Error::invalid(format!("Invalid port `{port}`")))?);
+                    spec.port = Some(port.trim().parse().map_err(|_| {
+                        Error::invalid(t!("provider.mssql.connection_string.invalid_port", port = port))
+                    })?);
                 }
             }
             "database" | "initialcatalog" => spec.database = Some(value.to_string()),
@@ -32,7 +33,7 @@ pub fn parse_ado(ado: &str) -> Result<ConnectionSpec> {
         }
     }
     if spec.host.is_empty() {
-        return Err(Error::invalid("The connection string has no Server"));
+        return Err(Error::invalid(t!("provider.mssql.connection_string.no_server")));
     }
     Ok(spec)
 }

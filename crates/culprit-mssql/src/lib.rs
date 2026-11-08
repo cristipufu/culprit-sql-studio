@@ -231,12 +231,12 @@ impl Provider for MssqlProvider {
 pub(crate) fn waits_unreadable(grant: String) -> culprit_core::Error {
     culprit_core::Error::new(
         culprit_core::ErrorCode::PermissionDenied,
-        "Sampling waits needs permission to read the server's wait statistics",
+        culprit_core::t!("provider.mssql.waits.unreadable"),
     )
     .with_hint(grant)
 }
 
 /// The task running a table preview ended without an answer.
 pub(crate) fn preview_stopped() -> culprit_core::Error {
-    culprit_core::Error::internal("The table preview worker stopped")
+    culprit_core::Error::internal(culprit_core::t!("provider.mssql.preview_stopped"))
 }

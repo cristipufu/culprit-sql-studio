@@ -250,12 +250,12 @@ const MAX_ASKERS: usize = 20;
 
 /// What a login that can't read Query Store's statement waits needs.
 pub(crate) fn waits_grant() -> String {
-    "Grant VIEW DATABASE STATE (VIEW DATABASE PERFORMANCE STATE on SQL Server 2022+).".into()
+    culprit_core::t!("provider.mssql.query_waits.grant")
 }
 
 /// Query Store's statement waits read, without knowing they are captured: a missing category isn't a zero.
 pub(crate) fn waits_not_captured() -> String {
-    "Query Store wait capture is disabled or could not be established; missing wait categories are unknown.".into()
+    culprit_core::t!("provider.mssql.query_waits.not_captured")
 }
 
 /// Workload from Query Store over the scan's window. Query Store keeps runtime stats per interval (often an

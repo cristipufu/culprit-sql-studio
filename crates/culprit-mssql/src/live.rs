@@ -109,20 +109,20 @@ pub(crate) async fn interrupt(pool: &Pool, session: &str, action: SessionAction)
 
 /// Cancelling a statement, which SQL Server can only do by ending its session.
 pub(crate) fn cancel_unsupported() -> Error {
-    Error::new(ErrorCode::Unsupported, "SQL Server can't stop another session's statement without ending the session")
-        .with_hint("End the session instead; its open transaction rolls back.")
+    Error::new(ErrorCode::Unsupported, culprit_core::t!("provider.mssql.session.cancel_unsupported"))
+        .with_hint(culprit_core::t!("provider.mssql.session.cancel_unsupported.hint"))
 }
 
 pub(crate) fn session_gone(id: u64) -> Error {
-    Error::not_found(format!("Session {id} is gone"))
+    Error::not_found(culprit_core::t!("provider.mssql.session.gone", id = id.to_string()))
 }
 
 pub(crate) fn own_session(id: u64) -> Error {
-    Error::invalid(format!("Session {id} is Culprit's own"))
+    Error::invalid(culprit_core::t!("provider.mssql.session.own", id = id.to_string()))
 }
 
 pub(crate) fn system_session(id: u64) -> Error {
-    Error::invalid(format!("Session {id} is a SQL Server system session"))
+    Error::invalid(culprit_core::t!("provider.mssql.session.system", id = id.to_string()))
 }
 
 fn session_of(r: &Rec) -> Session {

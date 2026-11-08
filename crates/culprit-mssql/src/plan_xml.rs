@@ -50,7 +50,7 @@ const MAX_LIST_PROP_LEN: usize = 600;
 /// nested ones included (the branches of an IF are statements of their own).
 pub fn statement_types(xml: &str) -> Result<Vec<String>> {
     culprit_core::xml::read(xml, |doc| {
-        let doc = doc.map_err(|e| Error::internal(format!("Could not read the SQL Server plan XML: {e}")))?;
+        let doc = doc.map_err(unreadable)?;
         Ok(doc
             .descendants()
             .filter(|n| n.is_element() && n.tag_name().name().starts_with("Stmt"))
@@ -86,9 +86,14 @@ fn empty_showplan(doc: &Document) -> bool {
 /// expensive statement when none matches.
 pub fn parse_statement(xml: &str, query_hash: Option<&str>) -> Result<Plan> {
     culprit_core::xml::read(xml, |doc| {
-        let doc = doc.map_err(|e| Error::internal(format!("Could not read the SQL Server plan XML: {e}")))?;
+        let doc = doc.map_err(unreadable)?;
         read_statement(&doc, xml, query_hash)
     })
+}
+
+/// Plan XML that doesn't read as XML.
+fn unreadable(error: impl std::fmt::Display) -> Error {
+    Error::internal(culprit_core::t!("provider.mssql.plan.unreadable", error = error.to_string()))
 }
 
 fn read_statement(doc: &Document, xml: &str, query_hash: Option<&str>) -> Result<Plan> {
@@ -110,9 +115,10 @@ fn read_statement(doc: &Document, xml: &str, query_hash: Option<&str>) -> Result
             candidates()
                 .max_by(|a, b| attr_f64(*a, "StatementSubTreeCost").total_cmp(&attr_f64(*b, "StatementSubTreeCost")))
         })
-        .ok_or_else(|| Error::internal("The plan XML contains no statement with a query plan"))?;
+        .ok_or_else(|| Error::internal(culprit_core::t!("provider.mssql.plan.no_statement")))?;
     let query_plan = query_plan_of(statement).expect("filtered on QueryPlan above");
-    let root_op = child(query_plan, "RelOp").ok_or_else(|| Error::internal("The query plan has no operators"))?;
+    let root_op = child(query_plan, "RelOp")
+        .ok_or_else(|| Error::internal(culprit_core::t!("provider.mssql.plan.no_operators")))?;
 
     let mut root = parse_relop(root_op, 1)?;
     let total_cost =

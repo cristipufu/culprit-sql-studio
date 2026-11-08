@@ -4,7 +4,7 @@
 
 use culprit_core::deadlock::classify;
 use culprit_core::{
-    Deadlock, DeadlockProcess, DeadlockReport, DeadlockResource, Engine, Error, LockHolder, LockWait, Result,
+    Deadlock, DeadlockProcess, DeadlockReport, DeadlockResource, Engine, Error, LockHolder, LockWait, Result, t,
 };
 use roxmltree::{Document, Node};
 
@@ -83,41 +83,29 @@ const AZURE_SQL_DB: f64 = 5.0;
 
 /// Where Azure SQL Database's deadlocks come from, as a person reads it.
 pub(crate) fn telemetry() -> String {
-    "Azure SQL deadlock telemetry".to_string()
+    t!("provider.mssql.deadlocks.telemetry")
 }
 
 /// Azure SQL Database's deadlock telemetry couldn't be read (`error`): where else its deadlocks are.
 pub(crate) fn telemetry_unreadable(error: &dyn std::fmt::Display) -> String {
-    format!(
-        "Culprit couldn't read Azure SQL Database's deadlock telemetry ({error}). Deadlocks are also in Azure \
-         Monitor (diagnostic setting \"Deadlocks\"), or paste a deadlock graph (.xdl) to have it explained."
-    )
+    t!("provider.mssql.deadlocks.telemetry_unreadable", error = error.to_string())
 }
 
 /// Where system_health's deadlocks were read from (its event files, its in-memory ring buffer, either or neither), and
 /// what the reader should know about that.
 pub(crate) fn origin(files: bool, ring: bool) -> (String, Option<String>) {
-    let mut sources: Vec<&str> = Vec::new();
-    if files {
-        sources.push("event files");
-    }
-    if ring {
-        sources.push("ring buffer");
-    }
-    let source =
-        if sources.is_empty() { "system_health".into() } else { format!("system_health {}", sources.join(" and ")) };
-    let note = if sources.is_empty() {
-        Some(
-            "Reading deadlocks needs VIEW SERVER STATE (VIEW SERVER PERFORMANCE STATE on SQL Server 2022). \
-             Paste a deadlock graph (.xdl) to have it explained."
-                .into(),
-        )
-    } else if !files {
-        Some("Read from system_health's in-memory buffer, which only keeps the most recent events.".into())
-    } else {
-        None
+    let read = match (files, ring) {
+        (true, true) => "both",
+        (true, false) => "files",
+        (false, true) => "ring",
+        (false, false) => "none",
     };
-    (source, note)
+    let note = match (files, ring) {
+        (false, false) => Some(t!("provider.mssql.deadlocks.needs_permission")),
+        (false, true) => Some(t!("provider.mssql.deadlocks.ring_only")),
+        (true, _) => None,
+    };
+    (t!("provider.mssql.deadlocks.origin", read = read), note)
 }
 
 /// Deadlocks in the last `since_hours`. On SQL Server from system_health: its event files first (they keep days), the
@@ -238,7 +226,7 @@ fn parse_with_time(xml: &str, source: &str, at: Option<String>) -> Result<Vec<De
 /// Every deadlock in `xml`: a saved .xdl (`<deadlock-list>` or `<deadlock>`), a system_health event, or a ring buffer.
 pub fn parse_deadlock_xml(xml: &str, source: &str) -> Result<Vec<Deadlock>> {
     culprit_core::xml::read(xml.trim_start_matches('\u{feff}'), |doc| {
-        let doc = doc.map_err(|e| Error::invalid(format!("This isn't a deadlock graph Culprit can read: {e}")))?;
+        let doc = doc.map_err(|e| Error::invalid(t!("provider.mssql.deadlocks.unreadable", error = e.to_string())))?;
         deadlock_graphs(&doc, source)
     })
 }
@@ -257,8 +245,8 @@ fn deadlock_graphs(doc: &Document, source: &str) -> Result<Vec<Deadlock>> {
         }
     }
     if out.is_empty() && !doc.descendants().any(|n| n.has_tag_name("RingBufferTarget") || n.has_tag_name("event")) {
-        return Err(Error::invalid("No <deadlock> element found")
-            .with_hint("Save the deadlock graph from SSMS or system_health as .xdl XML."));
+        return Err(Error::invalid(t!("provider.mssql.deadlocks.no_graph"))
+            .with_hint(t!("provider.mssql.deadlocks.no_graph.hint")));
     }
     Ok(out)
 }

@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use culprit_core::{Error, ErrorCode, Plan, Result, ResultSet};
+use culprit_core::{Error, ErrorCode, Plan, Result, ResultSet, format, t};
 use futures_util::TryStreamExt;
 use tiberius::QueryItem;
 
@@ -16,22 +16,17 @@ const SHOWPLAN_COLUMN_MARKER: &str = "Showplan";
 pub(crate) fn parameter_error(e: culprit_core::Error) -> culprit_core::Error {
     // Query Store keeps an application's text with its parameter list in front: `(@P1 int)SELECT …`.
     if e.message.contains("only allowed for parameterized queries") {
-        return culprit_core::Error::invalid(
-            "This text starts with a parameter list ((@P1 int)…), which SQL Server only accepts from an application",
-        )
-        .with_hint(
-            "Delete the leading parameter list and replace each parameter with a sample value of its type. Queries \
-             Culprit captured open from Queries with the plan SQL Server actually used.",
-        );
+        return culprit_core::Error::invalid(t!("provider.mssql.statement.parameter_list"))
+            .with_hint(t!("provider.mssql.statement.parameter_list.hint"));
     }
     if !e.message.contains("Must declare the scalar variable") {
         return e;
     }
-    let name = e.message.split('"').nth(1).unwrap_or("parameters").to_string();
-    culprit_core::Error::invalid(format!("This statement uses {name}, which SQL Server needs a value for")).with_hint(
-        "Replace each parameter with a sample value of its type (a quoted string for text, a number for an id) and \
-             try again. Queries Culprit captured open from Queries with the plan SQL Server actually used.",
-    )
+    let message = match e.message.split('"').nth(1) {
+        Some(name) => t!("provider.mssql.statement.undeclared", name = name),
+        None => t!("provider.mssql.statement.undeclared_unnamed"),
+    };
+    culprit_core::Error::invalid(message).with_hint(t!("provider.mssql.statement.undeclared.hint"))
 }
 
 /// The person's SQL as sent to run: marked as Culprit's own after each statement keyword, so what Query Store records of
@@ -130,10 +125,8 @@ pub(crate) fn best_plan(documents: &[String]) -> Result<Plan> {
         .filter_map(|xml| plan_xml::parse(xml).ok())
         .max_by(|a, b| a.total_cost.total_cmp(&b.total_cost))
         .ok_or_else(|| {
-            Error::new(ErrorCode::Unsupported, "SQL Server returned no plan for this statement").with_hint(
-                "It builds no plan for a statement that reads no table (SELECT 1, a variable assignment) or only \
-                 declares or sets something. Explain a query that reads a table.",
-            )
+            Error::new(ErrorCode::Unsupported, t!("provider.mssql.statement.no_plan"))
+                .with_hint(t!("provider.mssql.statement.no_plan.hint"))
         })
 }
 
@@ -192,22 +185,26 @@ pub(crate) async fn run(client: &mut MsClient, sql: &str, limit: usize) -> Resul
 pub(crate) fn result_messages(result_sets: usize) -> Vec<String> {
     let mut messages = Vec::new();
     if result_sets == 0 {
-        messages.push("The statement completed without returning rows.".to_string());
+        messages.push(t!("provider.mssql.statement.no_rows"));
     }
     if result_sets > 1 {
-        messages.push(format!("The batch returned {result_sets} result sets; showing the first."));
+        messages.push(t!(
+            "provider.mssql.statement.result_sets",
+            n = result_sets,
+            count = format::digits(result_sets.to_string())
+        ));
     }
     messages
 }
 
 /// A write that changed `affected` rows, committed (SQL Server runs it in autocommit).
 pub(crate) fn changed_committed(affected: u64) -> String {
-    format!("{affected} row{} changed, committed.", if affected == 1 { "" } else { "s" })
+    t!("provider.mssql.statement.changed", n = affected, count = format::digits(affected.to_string()))
 }
 
 /// A statement that returned rows, committed.
 pub(crate) fn committed() -> String {
-    "Committed.".to_string()
+    t!("provider.mssql.statement.committed")
 }
 
 /// A statement that changes data and returns no rows (INSERT/UPDATE/DELETE/MERGE without OUTPUT, DDL): run it through

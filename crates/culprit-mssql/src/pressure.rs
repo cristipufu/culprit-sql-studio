@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use culprit_core::{
     CleanupHolder, Coverage, Engine, GrantStat, OpenTransaction, Pressure, Signal, SignalScope, SignalUnit, WaitSample,
-    WaitStat,
+    WaitStat, format, t,
 };
 
 use crate::conn::{MsClient, OWN_QUERY_MARKER, query};
@@ -190,8 +190,8 @@ fn uptime_hours(probe: &Probe) -> Option<f64> {
 /// database, which an elastic pool shares among all its databases: shown for context, labelled as the whole server's,
 /// and never graded, since another database's scans would turn this one red.
 pub(crate) fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azure: bool) -> Vec<Signal> {
-    const SHARED: &str = "covers every database on the server behind this one (its elastic pool's, if it has one), so it isn't graded here";
-    let label = |name: &str| if azure { format!("{name} (whole server)") } else { name.to_string() };
+    let shared = || Some(t!("provider.mssql.signal.shared"));
+    let whole = if azure { "server" } else { "other" };
     let mut signals = Vec::new();
     let batches = c.get("Batch Requests/sec").copied().unwrap_or(0.0);
     let compilations = c.get("SQL Compilations/sec").copied().unwrap_or(0.0);
@@ -202,17 +202,17 @@ pub(crate) fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azu
     if let Some(hours) = uptime.filter(|_| batches > 0.0) {
         let rate = Signal::new(
             culprit_core::signal_id::BATCH_REQUESTS,
-            &label("Batch requests"),
+            &t!("provider.mssql.signal.batch_requests", whole = whole),
             batches / (hours * 3600.0),
             SignalUnit::PerSecond,
             SignalScope::SinceStartup,
         );
-        signals.push(if azure { Signal { healthy: Some(SHARED.into()), ..rate } } else { rate });
+        signals.push(if azure { Signal { healthy: shared(), ..rate } } else { rate });
     }
     if batches > 0.0 {
         let ratio = Signal::new(
             culprit_core::signal_id::COMPILES_PER_BATCH,
-            &label("Plans compiled"),
+            &t!("provider.mssql.signal.plans_compiled", whole = whole),
             compiles / batches * 100.0,
             SignalUnit::Percent,
             SignalScope::SinceStartup,
@@ -220,39 +220,33 @@ pub(crate) fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azu
         // A handful of batches compiling says nothing about plan reuse; grade the ratio only under real load.
         let busy = uptime.is_none_or(|h| batches / (h * 3600.0) >= 1.0);
         signals.push(if azure {
-            Signal { healthy: Some(SHARED.into()), ..ratio }
+            Signal { healthy: shared(), ..ratio }
         } else if busy {
-            ratio.graded("under 10% of batches is healthy", 10.0, 25.0, true)
+            ratio.graded(&t!("provider.mssql.signal.plans_compiled.healthy"), 10.0, 25.0, true)
         } else {
-            Signal { healthy: Some("too few batches to judge; under 10% is healthy under load".into()), ..ratio }
+            Signal { healthy: Some(t!("provider.mssql.signal.plans_compiled.too_few")), ..ratio }
         });
         let recompiled = Signal::new(
             culprit_core::signal_id::RECOMPILES_PER_BATCH,
-            &label("Plans recompiled"),
+            &t!("provider.mssql.signal.plans_recompiled", whole = whole),
             recompiles / batches * 100.0,
             SignalUnit::Percent,
             SignalScope::SinceStartup,
         );
-        signals.push(if azure { Signal { healthy: Some(SHARED.into()), ..recompiled } } else { recompiled });
+        signals.push(if azure { Signal { healthy: shared(), ..recompiled } } else { recompiled });
     }
     if let Some(ple) = c.get("Page life expectancy") {
         let life = Signal::new(
             culprit_core::signal_id::PAGE_LIFE,
-            &label("Page life expectancy"),
+            &t!("provider.mssql.signal.page_life", whole = whole),
             *ple,
             SignalUnit::Seconds,
             SignalScope::Now,
         );
         signals.push(if azure {
-            Signal { healthy: Some(SHARED.into()), ..life }
+            Signal { healthy: shared(), ..life }
         } else {
-            life.graded(
-                "how long a page stays in memory once read: five minutes or more is healthy; under a minute means \
-                 pages leave memory soon after they're read, often because of large scans",
-                300.0,
-                60.0,
-                false,
-            )
+            life.graded(&t!("provider.mssql.signal.page_life.healthy"), 300.0, 60.0, false)
         });
     }
     signals
@@ -263,22 +257,23 @@ pub(crate) fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azu
 pub(crate) fn resource_signals(data_io: f64, data_io_peak: f64, memory: f64) -> Vec<Signal> {
     vec![
         Signal {
-            healthy: Some(format!(
-                "Average use of this database's I/O limit; peak {data_io_peak:.1}%. The individual resource samples establish whether pressure was sustained."
+            healthy: Some(t!(
+                "provider.mssql.signal.data_io.healthy",
+                peak = format::digits(std::format!("{data_io_peak:.1}"))
             )),
             ..Signal::new(
                 culprit_core::signal_id::DATA_IO,
-                "Storage I/O of its limit",
+                &t!("provider.mssql.signal.data_io"),
                 data_io,
                 SignalUnit::Percent,
                 SignalScope::LastHour,
             )
         },
         Signal {
-            healthy: Some("of its memory limit; a full cache is normal, so it isn't graded".into()),
+            healthy: Some(t!("provider.mssql.signal.memory_use.healthy")),
             ..Signal::new(
                 culprit_core::signal_id::MEMORY_USE,
-                "Memory in use",
+                &t!("provider.mssql.signal.memory_use"),
                 memory,
                 SignalUnit::Percent,
                 SignalScope::LastHour,
@@ -382,12 +377,12 @@ pub(crate) async fn collect(client: &mut MsClient, probe: &Probe) -> (Pressure, 
 pub(crate) fn pending_grants_signal(pending: f64) -> Signal {
     Signal::new(
         culprit_core::signal_id::MEMORY_GRANTS_PENDING,
-        "Waiting for memory",
+        &t!("provider.mssql.signal.grants_pending"),
         pending,
         SignalUnit::Count,
         SignalScope::Now,
     )
-    .graded("0 is healthy", 1.0, 5.0, true)
+    .graded(&t!("provider.mssql.signal.grants_pending.healthy"), 1.0, 5.0, true)
 }
 
 /// What the wait totals since the start say: the scheduling share, and the waits for workers and memory grants.
@@ -402,7 +397,7 @@ pub(crate) fn wait_total_signals(totals: &WaitTotals, azure: bool, uptime: Optio
     // say how much and since when instead of an hourly rate.
     out.push(Signal::new(
         culprit_core::signal_id::THREADPOOL_WAIT_MS,
-        if azure { "Waiting for workers since start" } else { "Waiting for workers since start (whole instance)" },
+        &t!("provider.mssql.signal.threadpool_wait_ms", whole = if azure { "other" } else { "instance" }),
         threadpool,
         SignalUnit::Milliseconds,
         SignalScope::SinceStartup,
@@ -411,11 +406,7 @@ pub(crate) fn wait_total_signals(totals: &WaitTotals, azure: bool, uptime: Optio
     let grants = totals.get("RESOURCE_SEMAPHORE").map(|t| t.0).unwrap_or(0.0);
     out.push(Signal::new(
         culprit_core::signal_id::GRANT_WAIT_MS,
-        if azure {
-            "Waiting for memory grants since start"
-        } else {
-            "Waiting for memory grants since start (whole instance)"
-        },
+        &t!("provider.mssql.signal.grant_wait_ms", whole = if azure { "other" } else { "instance" }),
         grants,
         SignalUnit::Milliseconds,
         SignalScope::SinceStartup,
@@ -424,13 +415,13 @@ pub(crate) fn wait_total_signals(totals: &WaitTotals, azure: bool, uptime: Optio
         out.push(
             Signal::new(
                 culprit_core::signal_id::THREADPOOL_WAITS,
-                if hours >= 1.0 { "Waiting for workers, per hour" } else { "Waiting for workers since start" },
+                &t!("provider.mssql.signal.threadpool_waits", per = if hours >= 1.0 { "hour" } else { "other" }),
                 // Under an hour of uptime, report the total rather than extrapolate an hourly rate.
                 threadpool / hours.max(1.0),
                 SignalUnit::Milliseconds,
                 SignalScope::SinceStartup,
             )
-            .graded("under a second an hour is healthy", 1_000.0, 60_000.0, true),
+            .graded(&t!("provider.mssql.signal.threadpool_waits.healthy"), 1_000.0, 60_000.0, true),
         );
     }
     out
@@ -440,35 +431,41 @@ pub(crate) fn wait_total_signals(totals: &WaitTotals, azure: bool, uptime: Optio
 pub(crate) fn threadpool_now_signal(waiting: f64) -> Signal {
     Signal::new(
         culprit_core::signal_id::THREADPOOL_WAITING,
-        "Requests in this database without a worker",
+        &t!("provider.mssql.signal.threadpool_waiting"),
         waiting,
         SignalUnit::Count,
         SignalScope::Now,
     )
-    .graded("One observation; sample again to establish whether the queue persists", 1.0, f64::INFINITY, true)
+    .graded(&t!("provider.mssql.signal.threadpool_waiting.healthy"), 1.0, f64::INFINITY, true)
 }
 
 /// tempdb's version store, which open snapshot transactions keep from shrinking.
 pub(crate) fn version_store_signal(bytes: f64) -> Signal {
-    Signal::new(culprit_core::signal_id::VERSION_STORE, "Version store", bytes, SignalUnit::Bytes, SignalScope::Now)
-        .graded(
-            "small, and shrinking when transactions end",
-            1024.0 * 1024.0 * 1024.0,
-            10.0 * 1024.0 * 1024.0 * 1024.0,
-            true,
-        )
+    Signal::new(
+        culprit_core::signal_id::VERSION_STORE,
+        &t!("provider.mssql.version_store"),
+        bytes,
+        SignalUnit::Bytes,
+        SignalScope::Now,
+    )
+    .graded(
+        &t!("provider.mssql.signal.version_store.healthy"),
+        1024.0 * 1024.0 * 1024.0,
+        10.0 * 1024.0 * 1024.0 * 1024.0,
+        true,
+    )
 }
 
 /// How long the oldest open transaction has been open.
 pub(crate) fn oldest_transaction_signal(seconds: f64) -> Signal {
     Signal::new(
         culprit_core::signal_id::OLDEST_TRANSACTION,
-        "Oldest open transaction",
+        &t!("provider.mssql.signal.oldest_transaction"),
         seconds,
         SignalUnit::Seconds,
         SignalScope::Now,
     )
-    .graded("seconds or minutes, not hours", 600.0, 1800.0, true)
+    .graded(&t!("provider.mssql.signal.oldest_transaction.healthy"), 600.0, 1800.0, true)
 }
 
 /// Two readings of wait totals and counters `seconds` apart; the difference is what happened in between.
@@ -532,16 +529,12 @@ pub(crate) async fn sample(client: &mut MsClient, azure: bool, seconds: u32) -> 
 
 /// How a sample was taken: two readings of `view`, `seconds` apart.
 pub(crate) fn sample_method(view: &str, seconds: u32) -> String {
-    format!("Difference of two readings of {view} {seconds} s apart")
+    t!("provider.mssql.sample.method", view = view, seconds = format::digits(seconds.to_string()))
 }
 
 /// What a sample's reader should know: on SQL Server the wait counters are the whole instance's.
 pub(crate) fn sample_notes(azure: bool) -> Vec<String> {
-    if azure {
-        Vec::new()
-    } else {
-        vec!["These wait counters cover the whole SQL Server instance, including other databases; they do not establish pressure in the selected database.".into()]
-    }
+    if azure { Vec::new() } else { vec![t!("provider.mssql.sample.instance_wide")] }
 }
 
 /// The counters' rates over a sample (`rate` of a counter, per second), and the scheduling share of its waits.
@@ -555,7 +548,7 @@ pub(crate) fn sampled_signals(
     if let Some(batches) = rate("Batch Requests/sec") {
         signals.push(Signal::new(
             "batch-requests",
-            "Batch requests",
+            &t!("provider.mssql.signal.batch_requests", whole = "other"),
             batches,
             SignalUnit::PerSecond,
             SignalScope::Sampled,
@@ -567,7 +560,7 @@ pub(crate) fn sampled_signals(
         {
             signals.push(Signal::new(
                 "compiles-per-batch",
-                "Plans compiled (whole instance)",
+                &t!("provider.mssql.signal.plans_compiled", whole = "instance"),
                 compiles / batches * 100.0,
                 SignalUnit::Percent,
                 SignalScope::Sampled,
@@ -575,7 +568,13 @@ pub(crate) fn sampled_signals(
         }
     }
     if let Some(recompiles) = rate("SQL Re-Compilations/sec") {
-        signals.push(Signal::new("recompiles", "Recompiles", recompiles, SignalUnit::PerSecond, SignalScope::Sampled));
+        signals.push(Signal::new(
+            "recompiles",
+            &t!("provider.mssql.signal.recompiles"),
+            recompiles,
+            SignalUnit::PerSecond,
+            SignalScope::Sampled,
+        ));
     }
     if wait_total > 0.0 {
         signals.push(scheduling_share(signal_total, wait_total, SignalScope::Sampled));
@@ -589,10 +588,10 @@ pub(crate) fn sampled_signals(
 /// A wait composition, never CPU utilization or a CPU-pressure verdict, even in a short live sample.
 fn scheduling_share(signal: f64, wait: f64, scope: SignalScope) -> Signal {
     Signal {
-        healthy: Some("Share of recorded waiting spent ready to run before being scheduled. This is not CPU utilization; the ratio alone does not establish CPU pressure.".into()),
+        healthy: Some(t!("provider.mssql.signal.scheduling_share.healthy")),
         ..Signal::new(
             culprit_core::signal_id::SIGNAL_WAIT,
-            "Scheduling share of recorded waits",
+            &t!("provider.mssql.signal.scheduling_share"),
             signal / wait * 100.0,
             SignalUnit::Percent,
             scope,

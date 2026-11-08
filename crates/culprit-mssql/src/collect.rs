@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use culprit_core::{
     Capability, ColumnInfo, Coverage, Engine, ForeignKey, IndexStat, MissingIndex, ResourceSample, Result,
-    SNAPSHOT_FORMAT, Setting, Snapshot, SnapshotOptions, StatisticsInfo, TableStat, WaitStat, Workload,
+    SNAPSHOT_FORMAT, Setting, Snapshot, SnapshotOptions, StatisticsInfo, TableStat, WaitStat, Workload, format, t,
 };
 
 use crate::{
@@ -54,15 +54,8 @@ struct MiscPart {
 /// What the probe already knows about Query Store: none here (an older server, a system database), or one that is off.
 pub(crate) fn query_store_account(outcome: &mut Outcome, probe: &Probe) {
     if probe.query_store.is_none() {
-        outcome.not_applicable(
-            &sources::QUERY_STORE,
-            "Query Store requires SQL Server 2016 or later and a user database.",
-        );
-        outcome.lacking(
-            Capability::QueryStore,
-            "Query Store is not available here; it needs SQL Server 2016 or later and a user database.",
-            None,
-        );
+        outcome.not_applicable(&sources::QUERY_STORE, t!("provider.mssql.capability.query_store_requires"));
+        outcome.lacking(Capability::QueryStore, t!("provider.mssql.capability.query_store_missing"), None);
     }
     if let Some(qs) = &probe.query_store
         && !qs.readable()
@@ -70,14 +63,11 @@ pub(crate) fn query_store_account(outcome: &mut Outcome, probe: &Probe) {
         outcome.recorded(
             &sources::QUERY_STORE,
             culprit_core::SourceState::Unavailable,
-            Some(format!("Query Store is {} on this database.", qs.actual)),
+            Some(t!("provider.mssql.capability.query_store_state", state = &qs.actual)),
         );
         outcome.lacking(
             Capability::QueryStore,
-            format!(
-                "Query Store is {} on this database, so workload history is limited to what is still in the plan cache.",
-                qs.actual.to_ascii_lowercase().replace('_', " ")
-            ),
+            t!("provider.mssql.capability.query_store_off", state = qs.actual.to_ascii_lowercase().replace('_', " ")),
             Some("ALTER DATABASE CURRENT SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE);".into()),
         );
     }
@@ -85,24 +75,21 @@ pub(crate) fn query_store_account(outcome: &mut Outcome, probe: &Probe) {
 
 /// Query Store plans whose XML couldn't be read.
 pub(crate) fn unparsed_plans(count: usize) -> String {
-    format!("{count} Query Store plans could not be parsed")
+    t!("provider.mssql.note.unparsed_plans", n = count, count = format::digits(count.to_string()))
 }
 
 /// This login can't read the plan cache either.
 pub(crate) fn plan_cache_unreadable(outcome: &mut Outcome, probe: &Probe) {
-    outcome.recorded(
-        &sources::PLAN_CACHE,
-        culprit_core::SourceState::Unavailable,
-        Some("This login cannot read plan cache statistics.".into()),
-    );
-    outcome.lacking(Capability::PlanCache, "This login cannot read plan cache statistics.", Some(probe.grant_hint()));
+    let reason = t!("provider.mssql.capability.plan_cache_unreadable");
+    outcome.recorded(&sources::PLAN_CACHE, culprit_core::SourceState::Unavailable, Some(reason.clone()));
+    outcome.lacking(Capability::PlanCache, reason, Some(probe.grant_hint()));
 }
 
 /// Index usage counters this login can't read.
 pub(crate) fn index_usage_unreadable(outcome: &mut Outcome, probe: &Probe) {
     outcome.lacking(
         Capability::IndexUsage,
-        "Index usage counters are not readable with this login, so unused-index checks are off.",
+        t!("provider.mssql.capability.index_usage_unreadable"),
         Some(probe.grant_hint()),
     );
 }
@@ -110,11 +97,7 @@ pub(crate) fn index_usage_unreadable(outcome: &mut Outcome, probe: &Probe) {
 /// What the server state views would have delivered, without the permission to read them.
 pub(crate) fn server_state_unreadable(outcome: &mut Outcome, probe: &Probe) {
     for capability in [Capability::MissingIndexes, Capability::WaitStats] {
-        outcome.lacking(
-            capability,
-            "This login lacks VIEW DATABASE STATE / VIEW SERVER STATE.",
-            Some(probe.grant_hint()),
-        );
+        outcome.lacking(capability, t!("provider.mssql.capability.no_server_state"), Some(probe.grant_hint()));
     }
 }
 

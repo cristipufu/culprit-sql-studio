@@ -94,15 +94,13 @@ WHERE q.is_internal_query = 0 AND q.is_clouddb_internal_query = 0 AND t.query_sq
 
 /// Compiles Query Store retains for this database's user queries, and their elapsed time, first compile to `last`.
 pub(crate) fn compile_signals(compiles: f64, ms: f64, first: &str, last: &str) -> Vec<Signal> {
-    let context = format!(
-        "Only user queries retained by this database's Query Store; first compile {first}, most recent {last}. Counts cover those entries' history, not the selected runtime window. Compilation duration is elapsed time, not measured CPU usage.",
-    );
+    let context = culprit_core::t!("provider.mssql.signal.compiles.context", first = first, last = last);
     vec![
         Signal {
             healthy: Some(context.clone()),
             ..Signal::new(
                 culprit_core::signal_id::DATABASE_COMPILES,
-                "Compiles recorded",
+                &culprit_core::t!("provider.mssql.signal.compiles_recorded"),
                 compiles,
                 SignalUnit::Count,
                 SignalScope::QueryHistory,
@@ -112,7 +110,7 @@ pub(crate) fn compile_signals(compiles: f64, ms: f64, first: &str, last: &str) -
             healthy: Some(context),
             ..Signal::new(
                 culprit_core::signal_id::DATABASE_COMPILE_TIME,
-                "Compilation time",
+                &culprit_core::t!("provider.mssql.signal.compile_time"),
                 ms,
                 SignalUnit::Milliseconds,
                 SignalScope::QueryHistory,
@@ -491,13 +489,12 @@ pub(crate) fn login_signals(
     uptime_s: Option<f64>,
     shared: bool,
 ) -> Vec<Signal> {
-    const SHARED: &str = "covers every database on the server behind this one (its elastic pool's, if it has one), so it isn't graded here";
-    let label = |name: &str| if shared { format!("{name} (whole server)") } else { name.to_string() };
-    let grade = |signal: Signal, healthy: &str, watch: f64, bad: f64, higher_is_worse: bool| {
+    let whole = if shared { "server" } else { "other" };
+    let grade = |signal: Signal, healthy: String, watch: f64, bad: f64, higher_is_worse: bool| {
         if shared {
-            Signal { healthy: Some(SHARED.into()), ..signal }
+            Signal { healthy: Some(culprit_core::t!("provider.mssql.signal.shared")), ..signal }
         } else {
-            signal.graded(healthy, watch, bad, higher_is_worse)
+            signal.graded(&healthy, watch, bad, higher_is_worse)
         }
     };
     let mut out = Vec::new();
@@ -505,12 +502,12 @@ pub(crate) fn login_signals(
         out.push(grade(
             Signal::new(
                 culprit_core::signal_id::NEW_CONNECTIONS,
-                &label("New connections"),
+                &culprit_core::t!("provider.mssql.signal.new_connections", whole = whole),
                 logins / seconds,
                 SignalUnit::PerSecond,
                 SignalScope::SinceStartup,
             ),
-            "under 5 a second: pooled connections log in once and are reused",
+            culprit_core::t!("provider.mssql.signal.new_connections.healthy"),
             5.0,
             25.0,
             true,
@@ -521,12 +518,12 @@ pub(crate) fn login_signals(
             out.push(grade(
                 Signal::new(
                     culprit_core::signal_id::POOLED_REUSE,
-                    &label("Connections served from a pool"),
+                    &culprit_core::t!("provider.mssql.signal.pooled_reuse", whole = whole),
                     resets / (logins + resets) * 100.0,
                     SignalUnit::Percent,
                     SignalScope::SinceStartup,
                 ),
-                "above 90% when the application pools connections",
+                culprit_core::t!("provider.mssql.signal.pooled_reuse.healthy"),
                 90.0,
                 50.0,
                 false,

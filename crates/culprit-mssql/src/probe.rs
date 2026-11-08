@@ -1,4 +1,4 @@
-use culprit_core::{Capability, Engine, MissingCapability, ServerInfo};
+use culprit_core::{Capability, Engine, MissingCapability, ServerInfo, t};
 
 use crate::conn::{MsClient, query, query_one};
 
@@ -98,7 +98,7 @@ impl Probe {
             13 => "SQL Server 2016".into(),
             12 => "SQL Server 2014".into(),
             0 => "SQL Server".into(),
-            n => format!("SQL Server (version {n})"),
+            n => t!("provider.mssql.product.version", version = n.to_string()),
         }
     }
 
@@ -164,17 +164,20 @@ pub(crate) fn expected_capabilities(p: &Probe) -> (Vec<Capability>, Vec<MissingC
         Some(qs) if qs.readable() && dmv => have.push(Capability::QueryStore),
         Some(qs) if qs.readable() => missing.push(MissingCapability {
             capability: Capability::QueryStore,
-            reason: "This login cannot read Query Store views.".into(),
+            reason: t!("provider.mssql.capability.query_store_unreadable"),
             fix: Some(grant.clone()),
         }),
         Some(qs) => missing.push(MissingCapability {
             capability: Capability::QueryStore,
-            reason: format!("Query Store is {} on this database.", qs.actual.to_ascii_lowercase().replace('_', " ")),
+            reason: t!(
+                "provider.mssql.capability.query_store_state",
+                state = qs.actual.to_ascii_lowercase().replace('_', " ")
+            ),
             fix: Some("ALTER DATABASE CURRENT SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE);".into()),
         }),
         None => missing.push(MissingCapability {
             capability: Capability::QueryStore,
-            reason: "Query Store options could not be read.".into(),
+            reason: t!("provider.mssql.capability.query_store_options"),
             fix: Some(grant.clone()),
         }),
     }
@@ -196,7 +199,7 @@ pub(crate) fn expected_capabilities(p: &Probe) -> (Vec<Capability>, Vec<MissingC
         }
         missing.push(MissingCapability {
             capability,
-            reason: "This login lacks VIEW DATABASE STATE / VIEW SERVER STATE.".into(),
+            reason: t!("provider.mssql.capability.no_server_state"),
             fix: Some(grant.clone()),
         });
     }
@@ -212,7 +215,7 @@ pub(crate) fn expected_capabilities(p: &Probe) -> (Vec<Capability>, Vec<MissingC
     } else {
         missing.push(MissingCapability {
             capability: Capability::Showplan,
-            reason: "This login cannot request estimated plans.".into(),
+            reason: t!("provider.mssql.capability.no_showplan"),
             fix: Some(format!("GRANT SHOWPLAN TO {};", bracket(&p.user))),
         });
     }

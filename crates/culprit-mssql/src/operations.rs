@@ -48,25 +48,29 @@ const SEQUENCES_SQL: &str = "SELECT s.name + '.' + q.name AS name, CAST(NULL AS 
 
 /// This database's transaction log, as a space.
 pub(crate) fn log_name(database: &str) -> String {
-    format!("{database} transaction log")
+    culprit_core::t!("provider.mssql.space.log", database = database)
 }
 
 /// One of this database's filegroups, as a space.
 pub(crate) fn filegroup_name(database: &str, filegroup: &str) -> String {
-    format!("{database} data filegroup {filegroup}")
+    culprit_core::t!("provider.mssql.space.filegroup", database = database, filegroup = filegroup)
 }
 
 /// tempdb's data files, shared by every database on the instance.
 pub(crate) fn tempdb_name() -> String {
-    "tempdb data files (whole instance)".into()
+    culprit_core::t!("provider.mssql.space.tempdb")
 }
 
 /// What tempdb's space holds: user objects, internal objects and the version store, where the row says.
 pub(crate) fn tempdb_parts(r: &crate::value::Rec) -> Vec<SpacePart> {
-    [("User objects", "users"), ("Internal objects", "internals"), ("Version store", "versions")]
-        .into_iter()
-        .filter_map(|(name, col)| r.f64(col).map(|bytes| SpacePart { name: name.into(), bytes }))
-        .collect()
+    [
+        (culprit_core::key!("provider.mssql.space.user_objects"), "users"),
+        (culprit_core::key!("provider.mssql.space.internal_objects"), "internals"),
+        (culprit_core::key!("provider.mssql.version_store"), "versions"),
+    ]
+    .into_iter()
+    .filter_map(|(name, col)| r.f64(col).map(|bytes| SpacePart { name: culprit_core::i18n::t(name, &[]), bytes }))
+    .collect()
 }
 
 pub async fn collect(client: &mut MsClient, probe: &Probe, snapshot: &mut Snapshot) {
