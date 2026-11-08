@@ -2,25 +2,66 @@
 
 use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
+use culprit_core::{ScanSpan, t};
 
 pub fn chatty_query_info() -> CheckInfo {
     CheckInfo {
         id: "chatty-query".into(),
-        title: "Chatty queries".into(),
+        title: t!("check.chatty_query.info.title"),
         category: Category::Queries,
         engines: vec![Engine::Mssql, Engine::Postgres, Engine::Yugabyte, Engine::Mysql],
         requires: vec![],
-        description: "Tiny queries executed so often that the round trips cost more than the work, typically a loop in application code.".into(),
+        description: t!("check.chatty_query.info.description"),
     }
 }
 
-check!(ChattyQueryCheck: chatty_query_info, chatty_query, &[Evidence::Query(QueryMeasure::Work)]);
+check!(
+    ChattyQueryCheck: chatty_query_info,
+    decide = chatty_queries,
+    render = chatty_query_finding,
+    case<'s> = ChattyQuery<'s>,
+    evidence = &[Evidence::Query(QueryMeasure::Work)],
+);
 
 /// Round trips a day for a chatty statement to be Medium: at about a millisecond each, the minute a day
 /// ([`MEDIUM_MS_A_DAY`]) Medium asks of database time.
 pub(super) const MEDIUM_ROUND_TRIPS_A_DAY: f64 = MEDIUM_MS_A_DAY;
 
-pub fn chatty_query(snapshot: &Snapshot) -> Vec<Finding> {
+/// A tiny statement sent so often that its round trips are the cost, and what its counters establish.
+pub struct ChattyQuery<'s> {
+    query: &'s QueryStat,
+    impact: QueryImpact,
+    /// Its share of the statements' runs, over Culprit's scans where they measured it.
+    exec_share: f64,
+    /// Its runs a day, where they came that way.
+    per_day_runs: Option<f64>,
+    /// Its runs came in bursts: said by when they came, never a rate a day.
+    burst: bool,
+    /// It ran in a burst or stopped running: told in the past.
+    past: bool,
+    /// Rows a run changed (a write) or returned (a read).
+    rows: f64,
+    shape: Shape,
+    /// What Culprit's scans measured of it, where they did (not a burst's).
+    scans: Option<ScanSpan>,
+    /// The rows a run handles are kept only in the source's totals, which span more than its scans.
+    rows_counted_over: bool,
+    severity: Severity,
+    score: f64,
+}
+
+/// Shapes that look alike in the counters and need different fixes.
+enum Shape {
+    /// Most runs find nothing: a poll, a check, a miss.
+    FindsNothing { writes: bool },
+    /// A single-row write: a counter handed out one number at a time, or an update, delete or insert repeated row by
+    /// row (or a heartbeat).
+    Write(WriteKind),
+    /// A read of one key a call (N+1).
+    Read,
+}
+
+fn chatty_queries(snapshot: &Snapshot) -> Vec<ChattyQuery<'_>> {
     let Some(workload) = &snapshot.workload else {
         return Vec::new();
     };
@@ -45,168 +86,283 @@ pub fn chatty_query(snapshot: &Snapshot) -> Vec<Finding> {
         .take(4)
         .map(|q| {
             let exec_share = workload.statement_runs_share(q);
-            let per_day_runs = workload.runs_per_day_of(q);
             let burst = ran_in_bursts(snapshot, q);
             let impact = query_impact(snapshot, &[q]).expect("workload present");
-            let mut f = finding("chatty-query", &q.id, Category::Queries, subject(SubjectKind::Query, &q.id));
             // Rows changed for a write, rows returned otherwise: MySQL counts a write's rows apart, and returns none.
             let rows = q.rows_handled_per_execution().unwrap_or(1.0);
-            let handle = capitalize(&query_handle(q));
-            // As its runs came: a burst by when it ran ("ran 30K times on Oct 17 at 10:17 UTC").
-            let runs = runs_of(snapshot, q);
-            // A burst, or a statement that stopped running, is told in the past.
-            let past = burst || crate::all_stopped(snapshot, &[q]);
-            let (ran, find) = if past { ("ran", "found") } else { ("runs", "find") };
-            let (are, is, returns, changes) =
-                if past { ("were", "was", "returned", "changed") } else { ("are", "is", "returns", "changes") };
-            let writes = q.writes_rows();
-            let share = format!("{} of {}", format::percent(impact.share), time_noun(snapshot));
-            let exec = format::percent(exec_share);
-            let one_row = |rows: f64| format!("{} row{}", format::count(rows), if rows <= 1.0 { "" } else { "s" });
+            let shape = if rows < 0.5 {
+                Shape::FindsNothing { writes: q.writes_rows() }
+            } else if q.writes_rows() {
+                Shape::Write(WriteKind::of(&q.text, snapshot.server.engine))
+            } else {
+                Shape::Read
+            };
             // Its runs and their share as Culprit's scans measured them, where they did (not a burst's, said by when it
             // ran); the rows a run handles are kept only in the totals, named so beside them.
             let scans = workload.scans_of(q).filter(|_| !burst);
-            let runs_over = scans.as_ref().map(|s| format!(" over {}", s.phrase())).unwrap_or_default();
-            let rows_over = crate::support::totals_basis(snapshot, q)
-                .filter(|_| scans.is_some())
-                .map(|basis| format!(" (counted over {basis})"))
-                .unwrap_or_default();
-            let rows_said = |rows: f64| format!("{}{rows_over}", one_row(rows));
-            // On a source of running totals the counts keep every run from before the change: two scans show it.
-            let fewer_runs = |between: &str| {
-                verify_between_scans(snapshot, q, between).map_or_else(
-                    || format!("It ran {runs}; after the change {between}."),
-                    |scans| format!("It ran {runs}. {scans}"),
-                )
-            };
-            let fewer = fewer_runs("it should run fewer times and take less time in all while the useful work stays the same");
-            let engine = snapshot.server.engine;
-            // Shapes that look alike in the counters and need different fixes: a poll that mostly finds nothing, a
-            // counter handed out one number at a time, a write repeated row by row (or a heartbeat), and a read inside
-            // a loop (N+1).
-            let (title, summary, fix, verify, caveat) = if rows < 0.5 {
-                (
-                    format!("{handle} {ran} {runs} and most runs {find} nothing"),
-                    format!(
-                        "Its runs {are} {exec} of all statement runs{runs_over}, and on average a run {} {} row{}{rows_over}. Empty results can come from polling, request-driven checks or legitimate misses; the counters do not identify the caller or prove a timer. Each run {is} cheap ({share} in all), but unnecessary calls still add round trips.",
-                        if writes { changes } else { returns },
-                        format::count(rows),
-                        if rows == 1.0 { "" } else { "s" },
-                    ),
-                    "Check the caller first. If it polls for work, back off after empty results, coordinate pollers, or have the writer wake them (a queue or notification). For request-driven checks, reuse an answer only while it remains valid. Keep necessary checks and their correctness guarantees.".to_string(),
-                    fewer_runs("unnecessary calls and total database time should fall while the useful work stays the same"),
-                    "Some frequent checks are legitimate (a lease or a lock checked on every request). Check the calling code before changing how often it asks.",
-                )
-            } else if writes {
-                let write = WriteKind::of(&q.text, engine);
-                let (summary, fix, verify, caveat) = match &write {
-                    WriteKind::Counter { column, table, isolated } => (
-                        format!(
-                            "Its runs {are} {exec} of all statement runs{runs_over}. Each run adds to {column} in one row of {table} and returns the new value. It may allocate numbers or maintain other application state; the SQL alone does not establish its business purpose or a removable call. Each call can add a round trip, and the row stays locked until its transaction commits, so callers that need the next number of the same row can wait for each other. In all it takes {share}{}.",
-                            lock_waits(snapshot, q).map(|w| format!(", and {w}")).unwrap_or_default()
-                        ),
-                        counter_fix(snapshot, *isolated),
-                        fewer_runs("compare total time and any avoidable calls, while checking that numbering, metadata updates and returned values remain correct"),
-                        "A sequence can have gaps, allocates outside transaction commit order and does not provide per-parent numbering. Check the application's numbering and atomicity requirements before considering one.",
-                    ),
-                    WriteKind::Update => (
-                        format!(
-                            "Its runs {are} {exec} of all statement runs{runs_over}, and each run {changes} about {}. Frequent small updates can be independent requests, row-by-row loops, heartbeats or status changes; each call can add a round trip, and each committing transaction can flush the log ({share} in all). The counters do not show whether calls already share a transaction.",
-                            rows_said(rows)
-                        ),
-                        format!(
-                            "Where the application changes many rows the same way, update them in one statement ({}) inside one transaction; for a heartbeat or lease, renew less often.",
-                            many_keys(engine, "UPDATE")
-                        ),
-                        fewer,
-                        "Some frequent single-row updates are legitimate (a status that changes as its work progresses). Check the calling code before batching.",
-                    ),
-                    WriteKind::Delete => (
-                        format!(
-                            "Its runs {are} {exec} of all statement runs{runs_over}, and each run {changes} about {}. Frequent small deletes can be independent removals or a row-by-row loop; each call can add a round trip, and each committing transaction can flush the log ({share} in all). The counters do not show whether calls already share a transaction.",
-                            rows_said(rows)
-                        ),
-                        format!(
-                            "If the caller already has independent removals that can safely be grouped, delete many rows per statement ({}, or by a condition the rows share) inside one transaction.",
-                            many_keys(engine, "DELETE")
-                        ),
-                        fewer,
-                        "Some frequent single-row deletes are legitimate (a row removed as its work completes). Check the calling code before batching.",
-                    ),
-                    WriteKind::Insert => (
-                        format!(
-                            "Its runs {are} {exec} of all statement runs{runs_over}, and each run {changes} about {}. Frequent small writes can be individual events, heartbeats or a row-by-row loop; each call can add a round trip, and each committing transaction can flush the log ({share} in all). The counters do not show whether calls already share a transaction.",
-                            rows_said(rows)
-                        ),
-                        format!(
-                            "If the caller already has independent rows that can safely be grouped, write many rows per statement ({}) inside one transaction; for a heartbeat or lease, renew less often.",
-                            bulk_insert(engine)
-                        ),
-                        fewer,
-                        "Some frequent single-row writes are legitimate (each event recorded as it happens). Check the calling code before batching.",
-                    ),
-                };
-                // "One row" only where a run changes about one: 1.6 rows a run is said as it is.
-                let each = if format::count(rows) == "1" { "one row".to_string() } else { format!("about {}", one_row(rows)) };
-                (format!("{handle} {ran} {runs}, {each} each time"), summary, fix, verify, caveat)
-            } else {
-                // A read in a loop asks for one key a call, whatever the rows each key finds (1.6 a run is still one
-                // lookup).
-                (
-                    format!("{handle} {ran} {runs}, one key at a time"),
-                    format!(
-                        "Its runs {are} {exec} of all statement runs{runs_over}, and each run {returns} about {}. Repeated lookups can be per-request checks or a loop in application code (N+1). Each run {is} cheap ({share} in all), but each call can add a network round trip.",
-                        rows_said(rows)
-                    ),
-                    "Reuse a result the application already has, or cache it for as long as it remains valid; access checks must still reflect permission changes. If the caller loops over items, load their rows in one query (WHERE key IN (…) or a join) before the loop; ORMs usually have an eager-loading option for this.".to_string(),
-                    fewer_runs("it should run fewer times and take less time in all"),
-                    "Some high-frequency single-row lookups are legitimate (for example, by primary key on a hot path). Check the calling code before batching.",
-                )
-            };
-            f.title = title;
-            f.summary = summary;
             // A share of the executions is easy to reach on a quiet database; the amount is the round trips: each costs
             // the application about a millisecond in the same region, so Medium asks for the minute a day it asks of
             // database time; a burst's are its own total, never extrapolated to a day.
             let medium = exec_share >= 0.25 && at_least_per_day_of(snapshot, q, q.executions, MEDIUM_ROUND_TRIPS_A_DAY);
-            f.severity = if medium { Severity::Medium } else { Severity::Low };
-            f.impact.score = (score_for_share(impact.share) + exec_share * 40.0).min(60.0);
-            f.impact.db_time_share = Some(impact.share);
-            f.impact.time_ms_per_day = impact.per_day_ms;
-            f.impact.label = format!("{} of executions", format::percent(exec_share));
-            f.confidence = Confidence::Medium;
-            f.queries = query_refs(&[q]);
-            // Named for what they are over, as the title and summary say them: Culprit's scans where they measured it,
-            // with the totals' beside where the two differ twofold (never for a recent entry, nor a burst's rate).
-            let (over, beside) = match &scans {
-                Some(s) => (" over Culprit's scans", (!s.is_recent(q)).then(|| format!(" over {}", workload.window_phrase()))),
-                None => ("", None),
-            };
-            match per_day_runs {
-                Some(runs) => f.metrics.push(Metric::new(format!("Runs per day{over}"), runs, Unit::Count)),
-                // Runs that came in bursts: what was counted, never a rate a day.
-                None if burst => f.metrics.push(Metric::new("Runs", q.executions, Unit::Count)),
-                None => {}
+            ChattyQuery {
+                query: q,
+                exec_share,
+                per_day_runs: workload.runs_per_day_of(q),
+                burst,
+                // A burst, or a statement that stopped running, is told in the past.
+                past: burst || crate::all_stopped(snapshot, &[q]),
+                rows,
+                shape,
+                scans,
+                rows_counted_over: scans.is_some() && crate::support::totals_basis(snapshot, q).is_some(),
+                severity: if medium { Severity::Medium } else { Severity::Low },
+                score: (score_for_share(impact.share) + exec_share * 40.0).min(60.0),
+                impact,
             }
-            if let (Some(s), Some(totals)) = (&scans, &beside)
-                && s.runs_differ(workload, q)
-            {
-                f.metrics.push(Metric::new(format!("Runs per day{totals}"), workload.per_day(q.executions), Unit::Count));
-            }
-            f.metrics.push(Metric::new(format!("Share of executions{over}"), exec_share, Unit::Ratio));
-            if let (Some(s), Some(totals)) = (&scans, &beside)
-                && s.runs_share_differs(workload, q)
-            {
-                let all = q.executions / workload.total_executions;
-                f.metrics.push(Metric::new(format!("Share of executions{totals}"), all, Unit::Ratio));
-            }
-            f.metrics.extend(average_metrics(snapshot, q));
-            f.fix = Some(Fix { summary: fix, sql: None, cost: None });
-            f.verify = vec![verify];
-            f.caveats.push(caveat.into());
-            f
         })
         .collect()
+}
+
+fn chatty_query_finding(snapshot: &Snapshot, chatty: ChattyQuery<'_>) -> Finding {
+    let q = chatty.query;
+    let workload = snapshot.workload.as_ref().expect("the check needs a workload");
+    let mut f = finding("chatty-query", &q.id, Category::Queries, subject(SubjectKind::Query, &q.id));
+    let query = capitalize(&query_handle(q));
+    // As its runs came: a burst by when it ran ("ran 30K times on Oct 17 at 10:17 UTC").
+    let runs = runs_of(snapshot, q);
+    let tense = if chatty.past { "past" } else { "present" };
+    let share =
+        t!("check.chatty_query.share", share = format::percent(chatty.impact.share), time = time_noun(snapshot));
+    let exec = format::percent(chatty.exec_share);
+    let scans = chatty.scans.map(|s| s.phrase());
+    let basis = crate::support::totals_basis(snapshot, q).filter(|_| chatty.rows_counted_over);
+    // "1 row", "1.6 rows", with what they are counted over where that isn't the runs' own basis.
+    let rows_said = |rows: f64, one: bool| match (&basis, one) {
+        (None, true) => t!("check.chatty_query.rows.one", count = format::count(rows)),
+        (None, false) => t!("check.chatty_query.rows.many", count = format::count(rows)),
+        (Some(basis), true) => t!("check.chatty_query.rows.one_counted", count = format::count(rows), basis = basis),
+        (Some(basis), false) => t!("check.chatty_query.rows.many_counted", count = format::count(rows), basis = basis),
+    };
+    // Its runs' share of all, then what each run does.
+    let runs_share = |key: Verb, rows: Option<String>| -> String {
+        let rows = rows.unwrap_or_default();
+        match (key, &scans) {
+            (Verb::FindsNothingReturns, None) => {
+                t!("check.chatty_query.summary.share.poll_returns", tense = tense, share = &exec, rows = rows)
+            }
+            (Verb::FindsNothingReturns, Some(over)) => t!(
+                "check.chatty_query.summary.share.poll_returns_over",
+                tense = tense,
+                share = &exec,
+                over = over,
+                rows = rows
+            ),
+            (Verb::FindsNothingChanges, None) => {
+                t!("check.chatty_query.summary.share.poll_changes", tense = tense, share = &exec, rows = rows)
+            }
+            (Verb::FindsNothingChanges, Some(over)) => t!(
+                "check.chatty_query.summary.share.poll_changes_over",
+                tense = tense,
+                share = &exec,
+                over = over,
+                rows = rows
+            ),
+            (Verb::Changes, None) => {
+                t!("check.chatty_query.summary.share.changes", tense = tense, share = &exec, rows = rows)
+            }
+            (Verb::Changes, Some(over)) => t!(
+                "check.chatty_query.summary.share.changes_over",
+                tense = tense,
+                share = &exec,
+                over = over,
+                rows = rows
+            ),
+            (Verb::Returns, None) => {
+                t!("check.chatty_query.summary.share.returns", tense = tense, share = &exec, rows = rows)
+            }
+            (Verb::Returns, Some(over)) => t!(
+                "check.chatty_query.summary.share.returns_over",
+                tense = tense,
+                share = &exec,
+                over = over,
+                rows = rows
+            ),
+            (Verb::Runs, None) => t!("check.chatty_query.summary.share.runs", tense = tense, share = &exec),
+            (Verb::Runs, Some(over)) => {
+                t!("check.chatty_query.summary.share.runs_over", tense = tense, share = &exec, over = over)
+            }
+        }
+    };
+    // On a source of running totals the counts keep every run from before the change: two scans show it.
+    let fewer_runs = |between: String| match verify_between_scans(snapshot, q, &between) {
+        Some(scans) => [t!("check.chatty_query.verify.ran", runs = &runs), scans].join(" "),
+        None => t!("check.chatty_query.verify.ran_then", runs = &runs, between = between),
+    };
+    let rows = chatty.rows;
+    let engine = snapshot.server.engine;
+    let (title, summary, fix, verify, caveat) = match &chatty.shape {
+        Shape::FindsNothing { writes } => (
+            t!("check.chatty_query.title.finds_nothing", query = &query, tense = tense, runs = &runs),
+            [
+                runs_share(
+                    if *writes { Verb::FindsNothingChanges } else { Verb::FindsNothingReturns },
+                    Some(rows_said(rows, rows == 1.0)),
+                ),
+                t!("check.chatty_query.summary.finds_nothing", tense = tense, share = &share),
+            ]
+            .join(" "),
+            t!("check.chatty_query.fix.finds_nothing"),
+            fewer_runs(t!("check.chatty_query.between.finds_nothing")),
+            t!("check.chatty_query.caveat.finds_nothing"),
+        ),
+        Shape::Write(write) => {
+            let (summary, fix, verify, caveat) = match write {
+                WriteKind::Counter { column, table, isolated } => (
+                    [
+                        runs_share(Verb::Runs, None),
+                        t!("check.chatty_query.summary.counter", column = column, table = table),
+                        match lock_waits(snapshot, q) {
+                            Some(locks) => {
+                                t!("check.chatty_query.summary.counter_locks", share = &share, locks = locks)
+                            }
+                            None => t!("check.chatty_query.summary.counter_total", share = &share),
+                        },
+                    ]
+                    .join(" "),
+                    counter_fix(snapshot, *isolated),
+                    fewer_runs(t!("check.chatty_query.between.counter")),
+                    t!("check.chatty_query.caveat.counter"),
+                ),
+                WriteKind::Update => (
+                    [
+                        runs_share(Verb::Changes, Some(rows_said(rows, rows <= 1.0))),
+                        t!("check.chatty_query.summary.update", share = &share),
+                    ]
+                    .join(" "),
+                    t!("check.chatty_query.fix.update", keys = many_keys(engine, "UPDATE")),
+                    fewer_runs(t!("check.chatty_query.between.fewer")),
+                    t!("check.chatty_query.caveat.update"),
+                ),
+                WriteKind::Delete => (
+                    [
+                        runs_share(Verb::Changes, Some(rows_said(rows, rows <= 1.0))),
+                        t!("check.chatty_query.summary.delete", share = &share),
+                    ]
+                    .join(" "),
+                    t!("check.chatty_query.fix.delete", keys = many_keys(engine, "DELETE")),
+                    fewer_runs(t!("check.chatty_query.between.fewer")),
+                    t!("check.chatty_query.caveat.delete"),
+                ),
+                WriteKind::Insert => (
+                    [
+                        runs_share(Verb::Changes, Some(rows_said(rows, rows <= 1.0))),
+                        t!("check.chatty_query.summary.insert", share = &share),
+                    ]
+                    .join(" "),
+                    t!("check.chatty_query.fix.insert", bulk = bulk_insert(engine)),
+                    fewer_runs(t!("check.chatty_query.between.fewer")),
+                    t!("check.chatty_query.caveat.insert"),
+                ),
+            };
+            // "One row" only where a run changes exactly one: 1.6 rows a run is said as it is.
+            let title = if rows == 1.0 {
+                t!("check.chatty_query.title.one_row", query = &query, tense = tense, runs = &runs)
+            } else {
+                t!(
+                    "check.chatty_query.title.rows",
+                    query = &query,
+                    tense = tense,
+                    runs = &runs,
+                    rows = if rows <= 1.0 {
+                        t!("check.chatty_query.rows.one", count = format::count(rows))
+                    } else {
+                        t!("check.chatty_query.rows.many", count = format::count(rows))
+                    }
+                )
+            };
+            (title, summary, fix, verify, caveat)
+        }
+        // A read in a loop asks for one key a call, whatever the rows each key finds (1.6 a run is still one lookup).
+        Shape::Read => (
+            t!("check.chatty_query.title.read", query = &query, tense = tense, runs = &runs),
+            [
+                runs_share(Verb::Returns, Some(rows_said(rows, rows <= 1.0))),
+                t!("check.chatty_query.summary.read", tense = tense, share = &share),
+            ]
+            .join(" "),
+            t!("check.chatty_query.fix.read"),
+            fewer_runs(t!("check.chatty_query.between.read")),
+            t!("check.chatty_query.caveat.read"),
+        ),
+    };
+    f.title = title;
+    f.summary = summary;
+    f.severity = chatty.severity;
+    f.impact.score = chatty.score;
+    f.impact.db_time_share = Some(chatty.impact.share);
+    f.impact.time_ms_per_day = chatty.impact.per_day_ms;
+    f.impact.label = t!("check.chatty_query.impact", share = &exec);
+    f.confidence = Confidence::Medium;
+    f.queries = query_refs(&[q]);
+    // Named for what they are over, as the title and summary say them: Culprit's scans where they measured it, with
+    // the totals' beside where the two differ twofold (never for a recent entry, nor a burst's rate).
+    let beside = chatty.scans.filter(|s| !s.is_recent(q)).map(|_| workload.window_phrase());
+    match chatty.per_day_runs {
+        Some(runs) => f.metrics.push(Metric::new(
+            if chatty.scans.is_some() {
+                t!("check.chatty_query.metric.runs_per_day_scans")
+            } else {
+                t!("check.chatty_query.metric.runs_per_day")
+            },
+            runs,
+            Unit::Count,
+        )),
+        // Runs that came in bursts: what was counted, never a rate a day.
+        None if chatty.burst => f.metrics.push(Metric::new(t!("common.metric.runs"), q.executions, Unit::Count)),
+        None => {}
+    }
+    if let (Some(s), Some(totals)) = (&chatty.scans, &beside)
+        && s.runs_differ(workload, q)
+    {
+        f.metrics.push(Metric::new(
+            t!("check.chatty_query.metric.runs_per_day_over", over = totals),
+            workload.per_day(q.executions),
+            Unit::Count,
+        ));
+    }
+    f.metrics.push(Metric::new(
+        if chatty.scans.is_some() {
+            t!("check.chatty_query.metric.share_scans")
+        } else {
+            t!("check.chatty_query.metric.share")
+        },
+        chatty.exec_share,
+        Unit::Ratio,
+    ));
+    if let (Some(s), Some(totals)) = (&chatty.scans, &beside)
+        && s.runs_share_differs(workload, q)
+    {
+        let all = q.executions / workload.total_executions;
+        f.metrics.push(Metric::new(t!("check.chatty_query.metric.share_over", over = totals), all, Unit::Ratio));
+    }
+    f.metrics.extend(average_metrics(snapshot, q));
+    f.fix = Some(Fix { summary: fix, sql: None, cost: None });
+    f.verify = vec![verify];
+    f.caveats.push(caveat);
+    f
+}
+
+/// What the first sentence of a summary says each run does, beside its share of the runs.
+#[derive(Clone, Copy)]
+enum Verb {
+    /// Most runs find nothing: what a run returns, or changes, on average.
+    FindsNothingReturns,
+    FindsNothingChanges,
+    /// About how many rows each run changes, or returns.
+    Changes,
+    Returns,
+    /// Only its share (a counter, whose runs are said after).
+    Runs,
 }
 
 /// What a single-row write does, as its text says: the fix for each is different.
@@ -299,16 +455,22 @@ fn counter_column(text: &str) -> Option<String> {
 /// statement with waits recorded and none of them on locks waited for none) and MySQL's lock time. PostgreSQL keeps
 /// no waits per statement: nothing is said there.
 fn lock_waits(snapshot: &Snapshot, q: &QueryStat) -> Option<String> {
-    let of_its =
-        |ms: f64| format!("{} of lock waits out of its {}", format::duration(ms), format::duration(q.total_time_ms));
+    let total = format::duration(q.total_time_ms);
     let locks = || q.waits.iter().filter(|w| w.category == "Lock").map(|w| w.wait_ms).reduce(|a, b| a + b);
     match snapshot.server.engine {
-        Engine::Mssql if !q.waits.is_empty() => {
-            Some(format!("Query Store recorded {}", of_its(locks().unwrap_or(0.0))))
-        }
+        Engine::Mssql if !q.waits.is_empty() => Some(t!(
+            "check.chatty_query.locks.query_store",
+            waits = format::duration(locks().unwrap_or(0.0)),
+            total = total
+        )),
         Engine::Mysql => {
             let lock = q.spread.as_ref().and_then(|s| s.lock_ms).or_else(locks)?;
-            Some(format!("{} counted {}", snapshot.server.name(), of_its(lock)))
+            Some(t!(
+                "check.chatty_query.locks.counted",
+                server = snapshot.server.name(),
+                waits = format::duration(lock),
+                total = total
+            ))
         }
         Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Sqlite => None,
     }
@@ -325,16 +487,14 @@ pub(super) fn counter_advice(snapshot: &Snapshot, q: &QueryStat) -> Option<Strin
 
 fn counter_fix(snapshot: &Snapshot, isolated: bool) -> String {
     if !isolated {
-        return "The SQL does not establish an isolated counter-only operation: preserve every assignment, returned value, row filter and transaction guarantee. Check the caller before changing it. If it already has independent work that can safely share a call, consider batching that work; per-parent numbering and metadata updates may require this atomic UPDATE. A sequence is not a replacement for the whole statement.".into();
+        return t!("check.chatty_query.fix.counter_compound");
     }
     let sequence = match snapshot.server.engine {
-        Engine::Mssql => "a SEQUENCE (`NEXT VALUE FOR`)",
-        Engine::Postgres | Engine::Yugabyte => "a sequence (`nextval()`, or an identity column)",
-        Engine::Mysql if snapshot.server.is_mariadb() => "a SEQUENCE (`NEXT VALUE FOR`) or an AUTO_INCREMENT column",
-        Engine::Mysql => "an AUTO_INCREMENT column",
-        Engine::Sqlite => "an INTEGER PRIMARY KEY",
+        Engine::Mssql => t!("check.chatty_query.sequence.mssql"),
+        Engine::Postgres | Engine::Yugabyte => t!("check.chatty_query.sequence.postgres"),
+        Engine::Mysql if snapshot.server.is_mariadb() => t!("check.chatty_query.sequence.mariadb"),
+        Engine::Mysql => t!("check.chatty_query.sequence.mysql"),
+        Engine::Sqlite => t!("check.chatty_query.sequence.sqlite"),
     };
-    format!(
-        "If the caller confirms that this is solely a number allocator, consider {sequence} only if a database-wide allocator, gaps and allocation order satisfy the application's requirements. It does not preserve gapless or per-parent numbering or commit order. Otherwise keep the atomic UPDATE. Check whether the caller can combine work without losing filters, returned values or transaction guarantees; the SQL alone does not establish a removable call."
-    )
+    t!("check.chatty_query.fix.counter", sequence = sequence)
 }
