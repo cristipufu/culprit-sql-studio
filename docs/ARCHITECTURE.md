@@ -417,11 +417,15 @@ records invocation only. An extension providing its decisions overrides `refine_
 ### Checks
 
 A check looks for one kind of problem: `<name>_info()` (id, title, category, the engines it applies to, the
-capabilities it needs) and `<name>(&Snapshot) -> Vec<Finding>`. `check!(NameCheck: name_info, name)` makes it a type
-implementing `culprit_core::Check`, the same trait a plugged-in check implements, and the area lists it in its `CHECKS`
-(`all()` runs every area's, in the order of `checks::AREAS`; `tests/registry.rs` fails when a check is written but not
-listed). Each registration also declares its evidence contract, for example
-`check!(PlanningTimeCheck: planning_time_info, planning_time, &[Evidence::Query(QueryMeasure::Planning)])`, with
+capabilities it needs), then two steps. Its decide function (`&Snapshot -> Vec<Case>`) establishes what the evidence
+supports as typed cases (subjects, numbers, which advice applies, severity) with no prose; its render function
+(`&Snapshot, Case -> Finding`) words one case from the language catalogs (docs/localization.md) and judges nothing
+more. `check!(NameCheck: name_info, decide = .., render = .., case<'s> = .., evidence = ..)` makes it a
+`culprit_core::Diagnosis`, and so a `culprit_core::Check`, the same trait a plugged-in check implements; the area lists
+it in its `CHECKS` (`all()` runs every area's, in the order of `checks::AREAS`; `tests/registry.rs` fails when a check is
+written but not listed, or implements `Check` by hand). `checks/maintenance/heap_table.rs` is the reference. Each
+registration also declares its evidence contract, for example
+`check!(PlanningTimeCheck: planning_time_info, decide = .., render = .., case<'s> = .., evidence = &[Evidence::Query(QueryMeasure::Planning)])`, with
 `Evidence` imported as `crate::evidence::Requirement`. The reusable evaluator `evidence::assess` checks sources and
 measurements, never check IDs. External checks can call `culprit_checks::evidence::assess` in `Check::evidence` too.
 An undeclared contract stays insufficient, and an unavailable mandatory source wins regardless of requirement order.
@@ -616,7 +620,7 @@ request. Window destruction retires its search too; other windows and CLI search
 Implemented provider coverage is indexed in [Engine parity](parity.md). The unimplemented
 [Oracle provider design](design/oracle-provider.md) is maintained separately from supported-provider documentation.
 
-- **A check**: write `<name>_info()` and `<name>(&Snapshot)` in a file of its own in the area's directory under
+- **A check**: write `<name>_info()`, its decide and render functions in a file of its own in the area's directory under
   `checks/` (declared in the area's `mod.rs`), declare its type with `check!`, add it to the area's `CHECKS` list, give each finding a stable id, follow the evidence rules, and test it on a fixture (`fixtures/*-demo.json`)
   for the case it should flag and the cases it must not.
 - **A refine rule**: a `Refine` implementation in the appropriate `refine/` module, listed in `rules()`. Select its

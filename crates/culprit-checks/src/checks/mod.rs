@@ -1,7 +1,8 @@
-//! Every built-in check, one directory per area and one file per check. A check looks for one kind of problem: a pure
-//! function of the snapshot that returns findings (`<name>(&Snapshot) -> Vec<Finding>`), with its description
-//! (`<name>_info()`), declared as a type with [`check!`] and listed in its area's `CHECKS`. Checks never touch a connection, and each follows the evidence rules
-//! in `crate::support` (docs/ARCHITECTURE.md lists them).
+//! Every built-in check, one directory per area and one file per check. A check looks for one kind of problem in two
+//! steps, both pure functions of the snapshot: it decides what the evidence supports, as typed cases with no prose, then
+//! words each case as a finding from the language catalogs. It has a description (`<name>_info()`), is declared as a
+//! [`culprit_core::Diagnosis`] with [`check!`], and is listed in its area's `CHECKS`. Checks never touch a connection,
+//! and each follows the evidence rules in `crate::support` (docs/ARCHITECTURE.md lists them).
 //!
 //! | Area | What it looks at |
 //! |---|---|
@@ -53,27 +54,6 @@ macro_rules! check {
     };
     (@requirements $requirements:expr) => {
         $requirements
-    };
-    ($ty:ident: $info:ident, $run:ident) => {
-        check!($ty: $info, $run, &[]);
-    };
-    ($ty:ident: $info:ident, $run:ident, $requirements:expr) => {
-        #[doc = concat!("The `", stringify!($run), "` check, as a `culprit_core::Check`.")]
-        pub struct $ty;
-
-        impl culprit_core::Check for $ty {
-            fn info(&self) -> culprit_core::CheckInfo {
-                $info()
-            }
-
-            fn run(&self, snapshot: &culprit_core::Snapshot) -> Vec<culprit_core::Finding> {
-                $run(snapshot)
-            }
-
-            fn evidence(&self, snapshot: &culprit_core::Snapshot) -> culprit_core::CheckEvidence {
-                crate::evidence::assess($requirements, snapshot)
-            }
-        }
     };
 }
 
