@@ -290,7 +290,7 @@ function QueryCard({ report, query, node }: { report: Report; query: QueryStat; 
       onKeyDown={(e) => e.key === "Enter" && setState({ view: "queries", query: query.id })}
     >
       <SqlPreview text={query.text} />
-      <div className="qmeta" title={stated?.over ? (stated.totals ? t("ui.finding_detail.over_totals", { over: stated.over, totals: stated.totals }) : t("ui.finding_detail.over", { over: stated.over })) : undefined}>
+      <div className="qmeta" title={stated?.over ? (stated.totals ? t("ui.finding_detail.over_totals", { over: stated.over, totals: stated.totals }) : t("ui.common.over", { over: stated.over })) : undefined}>
         {share != null && (
           <span>{withElements(t("ui.finding_detail.db_time_share", { share: slot(0) }), [<b key="share">{percent(share)}</b>])}</span>
         )}
@@ -306,7 +306,7 @@ function QueryCard({ report, query, node }: { report: Report; query: QueryStat; 
         {stated?.over && <span className="muted">{t("ui.finding_detail.over_short", { over: stated.over })}</span>}
         {query.object_name && <span className="mono">{query.object_name}</span>}
         <span className="open muted">
-          {node != null ? t("ui.finding_detail.open_plan") : t("ui.finding_detail.open_query")} <ArrowUpRight size={12} />
+          {node != null ? t("ui.common.open_plan") : t("ui.finding_detail.open_query")} <ArrowUpRight size={12} />
         </span>
       </div>
     </div>

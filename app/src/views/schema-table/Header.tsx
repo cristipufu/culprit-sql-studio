@@ -129,7 +129,7 @@ export function Header({ report, table, findings }: { report: Report; table: Tab
               </button>
               {n === 0 && findings.length > 1 && (
                 <button type="button" className="td-more" onClick={() => setAll((a) => !a)} aria-expanded={all}>
-                  {all ? t("ui.table_header.fewer") : t("ui.table_header.more", { count: findings.length - 1 })}
+                  {all ? t("ui.table_header.fewer") : t("ui.common.more", { count: findings.length - 1 })}
                 </button>
               )}
             </div>

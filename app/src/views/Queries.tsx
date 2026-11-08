@@ -15,6 +15,7 @@ import { api, errorMessage, type ApiError } from "../lib/api";
 import { canOpenQueryInEditor, prepareQueryForEditor } from "../lib/editor-sql";
 import { count, duration, oneLine, percent, when } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
+import { t } from "../lib/i18n";
 import { addPlan, compare } from "../lib/plans";
 import { querySummary } from "../lib/query-summary";
 import { figures, honest, workloadKind, windowPhrase, type Figures } from "../lib/rates";
@@ -22,20 +23,39 @@ import { setState, toast, useStore } from "../lib/store";
 import { compareSince } from "./Overview";
 import { remember, rememberedChoice } from "../lib/prefs";
 import { tabListKeys } from "../lib/keys";
+import { slot, withElements } from "./message-parts";
 
 const PAGE_SIZE = 100;
 type QueryEntry = { query: QueryStat; figures: Figures; search: string };
 
 type SortKey = "share" | "runs" | "avg" | "max" | "rows" | "reads" | "cpu";
 
+type ColumnKey = "runs" | "avg" | "max" | "rows" | "reads";
+
 /** `optional` columns step aside on narrow panes (container queries) before the table would scroll sideways. */
-const COLUMNS: { key: SortKey; label: string; optional?: boolean }[] = [
-  { key: "runs", label: "Runs/day" },
-  { key: "avg", label: "Avg" },
-  { key: "max", label: "Max", optional: true },
-  { key: "rows", label: "Rows/run", optional: true },
-  { key: "reads", label: "Reads/run", optional: true },
+const COLUMNS: { key: ColumnKey; optional?: boolean }[] = [
+  { key: "runs" },
+  { key: "avg" },
+  { key: "max", optional: true },
+  { key: "rows", optional: true },
+  { key: "reads", optional: true },
 ];
+
+/** A column's heading; YugabyteDB's reads are the storage entries it records. */
+function columnLabel(key: ColumnKey, native: boolean): string {
+  switch (key) {
+    case "runs":
+      return t("ui.queries.col.runs");
+    case "avg":
+      return t("ui.queries.col.avg");
+    case "max":
+      return t("ui.queries.col.max");
+    case "rows":
+      return t("ui.queries.col.rows");
+    case "reads":
+      return native ? t("ui.queries.col.entries") : t("ui.queries.col.reads");
+  }
+}
 
 /** Verb, table and key predicate on one line ("SELECT orders · customer_id = @P1"); the statement on hover. */
 function QueryCell({ q }: { q: QueryStat }) {
@@ -119,8 +139,8 @@ export function Queries({ report }: { report: Report }) {
   if (!workload) {
     return (
       <div className="empty">
-        <h3>No query history</h3>
-        <p>{report.summary.no_workload ?? "This scan has no query history."}</p>
+        <h3>{t("ui.queries.no_history")}</h3>
+        <p>{report.summary.no_workload ?? t("ui.queries.no_history_detail")}</p>
       </div>
     );
   }
@@ -135,11 +155,11 @@ export function Queries({ report }: { report: Report }) {
         <div className="toolbar">
           <label className="search">
             <Search size={13} />
-            <input ref={searchRef} value={filter} placeholder="Filter by text, table or id" onChange={(e) => setFilter(e.target.value)} />
+            <input ref={searchRef} value={filter} placeholder={t("ui.queries.filter")} onChange={(e) => setFilter(e.target.value)} />
           </label>
           <span className="spacer" />
           <span className="muted">
-            {rows.length} of {count(workload.query_count)} queries · {workload.source}
+            {t("ui.queries.shown", { n: workload.query_count, shown: String(rows.length), total: count(workload.query_count), source: workload.source })}
           </span>
         </div>
         <div className="table-wrap" ref={tableRef}>
@@ -147,20 +167,20 @@ export function Queries({ report }: { report: Report }) {
             <thead>
               <tr>
                 <th className={`sortable ${sort === "share" ? "sorted" : ""}`} onClick={() => setSort("share")}>
-                  DB time
+                  {t("ui.queries.col.share")}
                 </th>
-                <th className="col-query">Query</th>
-                <th className="col-trend" title="Average duration per run over the window">
-                  Trend
+                <th className="col-query">{t("ui.queries.col.query")}</th>
+                <th className="col-trend" title={t("ui.queries.col.trend_title")}>
+                  {t("ui.queries.col.trend")}
                 </th>
                 {COLUMNS.map((c) => (
                   <th
                     key={c.key}
                     className={`r sortable ${sort === c.key ? "sorted" : ""} ${c.optional ? "col-optional" : ""}`}
                     onClick={() => setSort(c.key)}
-                    title={c.key === "reads" && native ? "Recorded DocDB storage entries per run; index and table reads can visit the same SQL row" : c.key === "runs" && !rates.perDay ? `Runs ${rates.suffix}` : undefined}
+                    title={c.key === "reads" && native ? t("ui.queries.col.entries_title") : c.key === "runs" && !rates.perDay ? t("ui.queries.col.runs_title", { suffix: rates.suffix }) : undefined}
                   >
-                    {c.key === "runs" ? "Runs" : c.key === "reads" && native ? "Entries/run" : c.label}
+                    {columnLabel(c.key, native)}
                   </th>
                 ))}
               </tr>
@@ -173,7 +193,7 @@ export function Queries({ report }: { report: Report }) {
                 return (
                   <tr key={q.id} className={`row ${q.id === current?.id ? "selected" : ""}`} onClick={() => setState({ query: q.id })}>
                     <td>
-                      <span className="sharecell" title={f.over ? `Over ${f.over}` : undefined}>
+                      <span className="sharecell" title={f.over ? t("ui.common.over", { over: f.over }) : undefined}>
                         <span className="bar">
                           <span style={{ width: `${Math.max(2, Math.sqrt(share) * 100)}%`, background: share >= 0.15 ? "var(--high)" : share >= 0.03 ? "var(--medium)" : "var(--low)" }} />
                         </span>
@@ -189,11 +209,11 @@ export function Queries({ report }: { report: Report }) {
                     <td className="r">
                       {f.said != null ? (
                         <span className={rates.perDay ? "muted" : undefined} title={f.said}>
-                          {f.activity?.incomplete ? "≥ " : ""}{count(f.runs)}
-                          {f.activity ? " observed" : rates.perDay ? " in all" : ""}
+                          {f.activity?.incomplete ? "≥ " : ""}
+                          {f.activity ? t("ui.queries.runs_observed", { runs: count(f.runs) }) : rates.perDay ? t("ui.queries.runs_in_all", { runs: count(f.runs) }) : count(f.runs)}
                         </span>
                       ) : (
-                        <span title={f.over ? `Over ${f.over}` : undefined}>{count(f.runs)}{f.perDay ? "/day" : ""}</span>
+                        <span title={f.over ? t("ui.common.over", { over: f.over }) : undefined}>{f.perDay ? t("ui.queries.runs_per_day", { runs: count(f.runs) }) : count(f.runs)}</span>
                       )}
                     </td>
                     <td className="r">{duration(f.mean)}</td>
@@ -207,15 +227,15 @@ export function Queries({ report }: { report: Report }) {
           </table>
         </div>
         {rows.length > PAGE_SIZE && (
-          <nav className="toolbar query-pages" aria-label="Query pages">
-            <span className="muted" aria-live="polite">{(pageStart + 1).toLocaleString()}–{Math.min(pageStart + PAGE_SIZE, rows.length).toLocaleString()} of {rows.length.toLocaleString()}</span>
+          <nav className="toolbar query-pages" aria-label={t("ui.queries.pages")}>
+            <span className="muted" aria-live="polite">{t("ui.queries.page_range", { from: pageStart + 1, to: Math.min(pageStart + PAGE_SIZE, rows.length), total: rows.length })}</span>
             <span className="spacer" />
-            <button type="button" className="btn" disabled={pageStart === 0} onClick={() => select(pageStart - PAGE_SIZE)} aria-label="Previous query page"><ChevronLeft size={13} /> Previous</button>
-            <button type="button" className="btn" disabled={pageStart + PAGE_SIZE >= rows.length} onClick={() => select(pageStart + PAGE_SIZE)} aria-label="Next query page">Next <ChevronRight size={13} /></button>
+            <button type="button" className="btn" disabled={pageStart === 0} onClick={() => select(pageStart - PAGE_SIZE)} aria-label={t("ui.queries.previous_page")}><ChevronLeft size={13} /> {t("ui.queries.previous")}</button>
+            <button type="button" className="btn" disabled={pageStart + PAGE_SIZE >= rows.length} onClick={() => select(pageStart + PAGE_SIZE)} aria-label={t("ui.queries.next_page")}>{t("ui.queries.next")} <ChevronRight size={13} /></button>
           </nav>
         )}
       </div>
-      <div className="pane">{current ? <QueryDetail key={`${report.snapshot.connection}:${report.snapshot.id}:${current.id}`} report={report} query={current} /> : <div className="empty">No queries match</div>}</div>
+      <div className="pane">{current ? <QueryDetail key={`${report.snapshot.connection}:${report.snapshot.id}:${current.id}`} report={report} query={current} /> : <div className="empty">{t("ui.queries.no_match")}</div>}</div>
     </div>
   );
 }
@@ -255,41 +275,41 @@ function QueryDetail({ report, query }: { report: Report; query: QueryStat }) {
   useHotkeys({ p: () => choose(tab === "plan" ? "summary" : "plan") });
 
   const tabs: { tab: DetailTab; label: string; extra?: React.ReactNode; hint?: string }[] = [
-    { tab: "summary", label: "Summary" },
+    { tab: "summary", label: t("ui.queries.tab.summary") },
     {
       tab: "plan",
-      label: "Plan",
+      label: t("ui.queries.tab.plan"),
       hint: "P",
       extra: insights.length > 0 ? <span className={`tab-count ${worst}`}>{insights.length}</span> : null,
     },
-    { tab: "history", label: "History", extra: query.plans.length > 1 ? <span className="tab-count">{query.plans.length}</span> : null },
+    { tab: "history", label: t("ui.queries.tab.history"), extra: query.plans.length > 1 ? <span className="tab-count">{query.plans.length}</span> : null },
   ];
 
   return (
     <div className="detail query-detail">
       <div className="qd-head">
         <div className="crumbs">
-          <span className="tag mono">query {query.id}</span>
+          <span className="tag mono">{t("ui.queries.query_id", { id: query.id })}</span>
           {query.object_name && <span className="tag mono">{query.object_name}</span>}
-          {query.plans.length > 1 && <span className="tag medium">{query.plans.length} plans</span>}
+          {query.plans.length > 1 && <span className="tag medium">{t("ui.queries.plan_count", { n: query.plans.length, count: String(query.plans.length) })}</span>}
           <span style={{ flex: 1 }} />
           {(() => {
             const editorSql = prepareQueryForEditor(query, report.snapshot.server.engine);
             return (
               canOpenQueryInEditor(query.text, editorSql) && (
                 <button type="button" className="btn" onClick={() => setState({ view: "editor", editorSql })}>
-                  <SquarePen size={13} /> Open in editor
+                  <SquarePen size={13} /> {t("ui.common.open_in_editor")}
                 </button>
               )
             );
           })()}
         </div>
-        <div className="qd-tabs" role="tablist" aria-label="Query detail" onKeyDown={tabListKeys}>
-          {tabs.map((t) => (
-            <button type="button" key={t.tab} role="tab" aria-selected={tab === t.tab} tabIndex={tab === t.tab ? 0 : -1} className={`qd-tab ${tab === t.tab ? "on" : ""}`} onClick={() => choose(t.tab)}>
-              {t.label}
-              {t.extra}
-              {t.hint && <span className="kbd">{t.hint}</span>}
+        <div className="qd-tabs" role="tablist" aria-label={t("ui.queries.detail")} onKeyDown={tabListKeys}>
+          {tabs.map((item) => (
+            <button type="button" key={item.tab} role="tab" aria-selected={tab === item.tab} tabIndex={tab === item.tab ? 0 : -1} className={`qd-tab ${tab === item.tab ? "on" : ""}`} onClick={() => choose(item.tab)}>
+              {item.label}
+              {item.extra}
+              {item.hint && <span className="kbd">{item.hint}</span>}
             </button>
           ))}
         </div>
@@ -299,56 +319,61 @@ function QueryDetail({ report, query }: { report: Report; query: QueryStat }) {
           <>
             <section style={{ marginTop: 4 }}>
               <div className="metrics">
-                <Metric value={percent(share)} label="of DB time" />
+                <Metric value={percent(share)} label={t("ui.queries.metric.share")} />
                 {stated.activity ? (
-                  <Metric value={`${stated.activity.incomplete ? "≥ " : ""}${count(stated.runs)}`} label="runs observed in latest interval" />
+                  <Metric value={`${stated.activity.incomplete ? "≥ " : ""}${count(stated.runs)}`} label={t("ui.queries.metric.runs_observed")} />
                 ) : ran != null ? (
                   <Metric value={count(stated.runs)} label={ran} />
                 ) : stated.over ? (
-                  <Metric value={count(stated.runs)} label={stated.perDay ? "runs per day" : rates.runsHeader.toLowerCase()} />
+                  <Metric value={count(stated.runs)} label={stated.perDay ? t("ui.queries.metric.runs_per_day") : rates.runsHeader.toLowerCase()} />
                 ) : (
-                  <Metric value={count(rates.value(query.executions))} label={`runs ${rates.suffix}`} />
+                  <Metric value={count(rates.value(query.executions))} label={t("ui.queries.metric.runs_over", { suffix: rates.suffix })} />
                 )}
-                <Metric value={duration(stated.mean)} label="average" />
-                <Metric value={duration(query.max_time_ms)} label="slowest" />
-                {query.rows != null && <Metric value={count(query.rows / Math.max(1, query.executions))} label="rows per run" />}
-                {query.logical_reads != null && <Metric value={count(query.logical_reads / Math.max(1, query.executions))} label={report.snapshot.server.engine === "mysql" ? "rows examined per run" : "pages read per run"} />}
+                <Metric value={duration(stated.mean)} label={t("ui.queries.metric.average")} />
+                <Metric value={duration(query.max_time_ms)} label={t("ui.queries.metric.slowest")} />
+                {query.rows != null && <Metric value={count(query.rows / Math.max(1, query.executions))} label={t("ui.queries.metric.rows")} />}
+                {query.logical_reads != null && <Metric value={count(query.logical_reads / Math.max(1, query.executions))} label={report.snapshot.server.engine === "mysql" ? t("ui.queries.metric.rows_examined") : t("ui.queries.metric.pages_read")} />}
               </div>
               {stated.over && (
                 <p className="muted">
-                  {stated.activity ? "Share and average" : "Share, runs and average"} over {stated.over}
-                  {stated.totals ? ` (${stated.totals})` : ""}. Slowest run, rows and reads are counted over {windowPhrase(w)}.
+                  {stated.activity
+                    ? stated.totals
+                      ? t("ui.queries.over.activity_totals", { over: stated.over, totals: stated.totals, window: windowPhrase(w) })
+                      : t("ui.queries.over.activity", { over: stated.over, window: windowPhrase(w) })
+                    : stated.totals
+                      ? t("ui.queries.over.all_totals", { over: stated.over, totals: stated.totals, window: windowPhrase(w) })
+                      : t("ui.queries.over.all", { over: stated.over, window: windowPhrase(w) })}
                 </p>
               )}
               {stated.activity && (
                 <p className="muted">
-                  {stated.said}. {stated.activity.incomplete ? "Entries were evicted during this interval, so its complete workload share and average are unknown. " : "This interval is too short for a daily rate. "}
-                  {!stated.over && `Share and average retain their cumulative period: ${windowPhrase(w)}.`}
+                  {stated.said}. {stated.activity.incomplete ? t("ui.queries.activity.evicted") : t("ui.queries.activity.short")}{" "}
+                  {!stated.over && t("ui.queries.activity.cumulative", { window: windowPhrase(w) })}
                 </p>
               )}
             </section>
             {insights.length > 0 && (
               <button type="button" className={`plan-teaser ${worst}`} onClick={() => choose("plan")}>
-                <span className="pt-label">In the plan</span>
+                <span className="pt-label">{t("ui.queries.in_the_plan")}</span>
                 <span className="pt-title">{insights[0]!.title}</span>
-                {insights.length > 1 && <span className="muted">+{insights.length - 1} more</span>}
+                {insights.length > 1 && <span className="muted">{t("ui.common.more", { count: insights.length - 1 })}</span>}
                 <span className="pt-go">
-                  Open the plan <span className="kbd">P</span>
+                  {t("ui.queries.open_the_plan")} <span className="kbd">P</span>
                 </span>
               </button>
             )}
             {w.timeline && query.trend && <QueryTrend query={query} timeline={w.timeline} onSince={compareSince} />}
             <RuntimeSpread query={query} engine={report.snapshot.server.engine} windowed={w.windowed} product={report.snapshot.server.product} kind={workloadKind(w)} />
             {query.requests && <section>
-              <h3>Calls within logged requests</h3>
-              <p>This statement shape appeared in {count(query.requests.requests)} identified request groups; {count(query.requests.repeated_requests)} groups logged it at least 10 times. The largest group logged {count(query.requests.most_calls)} calls.</p>
-              <p className="muted">Only records with explicit request IDs contribute. Repetition can come from loops, retries or intended batches; it does not establish an N+1 bug or network overhead.{query.requests.sample_truncated ? " The request sample reached its limit, so these are partial counts." : ""}</p>
+              <h3>{t("ui.queries.requests.heading")}</h3>
+              <p>{t("ui.queries.requests.summary", { requests: count(query.requests.requests), repeated: count(query.requests.repeated_requests), calls: count(query.requests.most_calls) })}</p>
+              <p className="muted">{query.requests.sample_truncated ? t("ui.queries.requests.note_partial") : t("ui.queries.requests.note")}</p>
             </section>}
             <QueryCostsPanel report={report} query={query} />
             <DocdbWork metrics={query.costs?.docdb} basis="workload" runs={query.executions} />
             {related.length > 0 && (
               <section>
-                <h3>Findings</h3>
+                <h3>{t("ui.queries.findings")}</h3>
                 {related.map((f) => (
                   <button type="button" key={f.id} className="frow" onClick={() => setState({ view: "overview", finding: f.id })}>
                     <span className={`sev ${f.severity}`} />
@@ -359,7 +384,7 @@ function QueryDetail({ report, query }: { report: Report; query: QueryStat }) {
               </section>
             )}
             <section>
-              <h3>Statement</h3>
+              <h3>{t("ui.queries.statement")}</h3>
               <div className="codeblock">
                 <Sql text={query.text} />
               </div>
@@ -385,23 +410,23 @@ function Metric({ value, label }: { value: string; label: string }) {
 /** The plans the engine kept for this query, best first by average time, and when each was used. */
 function PlanHistory({ query, planId, onOpen }: { query: QueryStat; planId: string | null; onOpen: (id: string) => void }) {
   if (query.plans.length === 0) {
-    return <div className="empty" style={{ padding: 30 }}>{query.plan_history ? `No retained plan entries were collected for this query. ${query.plan_history.note}` : "This engine doesn't keep plan history for a query; the Plan tab shows its current plan."}</div>;
+    return <div className="empty" style={{ padding: 30 }}>{query.plan_history ? t("ui.queries.history.none_retained", { note: query.plan_history.note }) : t("ui.queries.history.none")}</div>;
   }
   const best = Math.min(...query.plans.map((v) => v.mean_time_ms));
   return (
     <section>
       <h3>
-        Plans this query used <span className="muted">{query.plans.length}</span>
+        {t("ui.queries.history.heading")} <span className="muted">{query.plans.length}</span>
       </h3>
       {query.plan_history && <p className="muted">{query.plan_history.source}. {query.plan_history.note}</p>}
       <table className="grid history-table">
         <thead>
           <tr>
-            <th>Plan</th>
-            <th className="r">Average</th>
-            <th className="r">Runs</th>
-            <th>First seen</th>
-            <th>Last seen</th>
+            <th>{t("ui.queries.history.plan")}</th>
+            <th className="r">{t("ui.queries.history.average")}</th>
+            <th className="r">{t("ui.queries.history.runs")}</th>
+            <th>{t("ui.queries.history.first_seen")}</th>
+            <th>{t("ui.queries.history.last_seen")}</th>
             <th />
           </tr>
         </thead>
@@ -409,9 +434,9 @@ function PlanHistory({ query, planId, onOpen }: { query: QueryStat; planId: stri
           {query.plans.map((v, i) => (
             <tr key={v.id} className={`row ${planId === v.id ? "selected" : ""}`} onClick={() => onOpen(v.id)}>
               <td>
-                <b style={query.plan_history?.kind === "cache" ? { display: "block" } : undefined}>Plan {v.id}</b>
-                {i === 0 && <span className="tag" style={{ marginLeft: query.plan_history?.kind === "cache" ? 0 : 6 }}>{query.plan_history?.kind === "cache" ? "most retained time" : "most time"}</span>}
-                {v.is_forced && <span className="tag medium" style={{ marginLeft: 6 }}>forced</span>}
+                <b style={query.plan_history?.kind === "cache" ? { display: "block" } : undefined}>{t("ui.queries.plan_name", { id: v.id })}</b>
+                {i === 0 && <span className="tag" style={{ marginLeft: query.plan_history?.kind === "cache" ? 0 : 6 }}>{query.plan_history?.kind === "cache" ? t("ui.queries.most_retained_time") : t("ui.queries.most_time")}</span>}
+                {v.is_forced && <span className="tag medium" style={{ marginLeft: 6 }}>{t("ui.queries.forced")}</span>}
               </td>
               <td className={`r ${query.plan_history?.kind !== "cache" && query.plans.length > 1 && v.mean_time_ms > best * 2 ? "slow" : ""}`}>{duration(v.mean_time_ms)}</td>
               <td className="r">{count(v.executions)}</td>
@@ -422,7 +447,7 @@ function PlanHistory({ query, planId, onOpen }: { query: QueryStat; planId: stri
                 {v.last_seen ? seenAt(v.last_seen).short : "—"}
               </td>
               <td className="r">
-                <span className="link">Open plan →</span>
+                <span className="link">{t("ui.common.open_plan")} →</span>
               </td>
             </tr>
           ))}
@@ -481,8 +506,8 @@ function QueryPlans(props: { report: Report; query: QueryStat; focus: number | n
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
-  const origin = `${connection} · query ${query.id}`;
-  const nameOf = (id: string | null) => (id ? `Plan ${id}` : `Query ${query.id}`);
+  const origin = t("ui.queries.origin", { connection, id: query.id });
+  const nameOf = (id: string | null) => (id ? t("ui.queries.plan_name", { id }) : t("ui.queries.query_name", { id: query.id }));
 
   /** The dominant plan next to the selected one (or the runner-up when the dominant one is selected), faster one first. */
   const compareVariants = async () => {
@@ -513,20 +538,20 @@ function QueryPlans(props: { report: Report; query: QueryStat; focus: number | n
       <h3 className="plan-bar">
         {variants.length > 1 ? (
           <>
-            Plans <span className="muted">{variants.length}</span>
+            {t("ui.queries.plans")} <span className="muted">{variants.length}</span>
           </>
         ) : (
-          <span className="muted plan-source">{query.plan?.kind === "actual" ? "Actual plan" : report.snapshot.server.engine === "mssql" ? (report.snapshot.workload?.source ?? "Plan") : "Estimated plan"}</span>
+          <span className="muted plan-source">{query.plan?.kind === "actual" ? t("ui.queries.actual_plan") : report.snapshot.server.engine === "mssql" ? (report.snapshot.workload?.source ?? t("ui.queries.tab.plan")) : t("ui.queries.estimated_plan")}</span>
         )}
         <span className="actions">
           {variants.length > 1 && (
-            <button type="button" className="btn ghost" disabled={comparing} title="Compare the plan that took the most time with the selected one" onClick={compareVariants}>
-              {comparing ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <GitCompareArrows size={13} />} Compare
+            <button type="button" className="btn ghost" disabled={comparing} title={t("ui.queries.compare_title")} onClick={compareVariants}>
+              {comparing ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <GitCompareArrows size={13} />} {t("ui.queries.compare")}
             </button>
           )}
           {state.status === "ready" && (
-            <button type="button" className="btn ghost" title="Open this plan in Plans to save it or compare it with another" onClick={() => addPlan(state.plan, nameOf(planId), origin, { source: { connection, queryId: query.id, planId }, query: planQuery ? { ...planQuery, plan_id: planId } : undefined })}>
-              <SquareArrowOutUpRight size={13} /> Open in Plans
+            <button type="button" className="btn ghost" title={t("ui.queries.open_in_plans_title")} onClick={() => addPlan(state.plan, nameOf(planId), origin, { source: { connection, queryId: query.id, planId }, query: planQuery ? { ...planQuery, plan_id: planId } : undefined })}>
+              <SquareArrowOutUpRight size={13} /> {t("ui.queries.open_in_plans")}
             </button>
           )}
           {measuresRuns(report.snapshot.server.engine) && <PlanSourceToggle value={source} onChange={setSource} />}
@@ -537,22 +562,24 @@ function QueryPlans(props: { report: Report; query: QueryStat; focus: number | n
       {(variants.length > 1 || (cachedHistory && variants.length > 0)) && (
         <div className="plan-variants">
           {cachedHistory && <button type="button" className={`variant ${planId === null ? "on" : ""}`} onClick={() => setPlanId(null)}>
-            <span className="v-name">Current estimate</span>
-            <span className="v-stats">Estimated independently of retained history</span>
+            <span className="v-name">{t("ui.queries.current_estimate")}</span>
+            <span className="v-stats">{t("ui.queries.current_estimate_detail")}</span>
           </button>}
           {variants.map((v, i) => (
             <button type="button" key={v.id} className={`variant ${planId === v.id ? "on" : ""}`} onClick={() => setPlanId(v.id)}>
               <span className="v-name">
-                Plan {v.id}
-                {i === 0 && <span className="tag" style={{ marginLeft: 6 }}>{cachedHistory ? "most retained time" : "most time"}</span>}
-                {v.is_forced && <span className="tag medium" style={{ marginLeft: 6 }}>forced</span>}
+                {t("ui.queries.plan_name", { id: v.id })}
+                {i === 0 && <span className="tag" style={{ marginLeft: 6 }}>{cachedHistory ? t("ui.queries.most_retained_time") : t("ui.queries.most_time")}</span>}
+                {v.is_forced && <span className="tag medium" style={{ marginLeft: 6 }}>{t("ui.queries.forced")}</span>}
               </span>
               <span className="v-stats">
-                <b className={!cachedHistory && best != null && v.mean_time_ms > best * 2 ? "slow" : ""}>{duration(v.mean_time_ms)}</b> avg · {count(v.executions)} runs
+                {withElements(t("ui.queries.variant_stats", { duration: slot(0), runs: count(v.executions) }), [
+                  <b key="avg" className={!cachedHistory && best != null && v.mean_time_ms > best * 2 ? "slow" : ""}>{duration(v.mean_time_ms)}</b>,
+                ])}
                 {v.last_seen && (
                   <span className="muted" title={seenAt(v.last_seen).full}>
                     {" "}
-                    · last {seenAt(v.last_seen).short}
+                    · {t("ui.queries.last_seen", { time: seenAt(v.last_seen).short })}
                   </span>
                 )}
               </span>
@@ -564,13 +591,13 @@ function QueryPlans(props: { report: Report; query: QueryStat; focus: number | n
       {source === "plan" && state.status === "loading" && (
         <div className="empty" style={{ padding: 30 }}>
           <div className="spinner" />
-          Loading the plan…
+          {t("ui.queries.loading_plan")}
         </div>
       )}
       {source === "plan" && state.status === "error" && (
         <div className="notice">
           <div>
-            <b>No plan for this query.</b> {state.error.message}
+            <b>{t("ui.queries.no_plan")}</b> {state.error.message}
             {state.error.hint && <div className="muted">{state.error.hint}</div>}
           </div>
         </div>
