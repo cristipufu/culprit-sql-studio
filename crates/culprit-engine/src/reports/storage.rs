@@ -207,6 +207,11 @@ pub(super) fn analysis_input(mut value: Value) -> serde_json::Result<crate::anal
             collected,
             recorded_changes: stored.recorded_changes,
         })
+    } else if let Some(evidence) = value.get_mut("evidence").map(Value::take).filter(|e| !e.is_null()) {
+        // A report serialized whole (`serde_json::to_vec(&report)`, as an embedder saves one) keeps its retained
+        // input inline rather than as a difference.
+        drop(value);
+        crate::analysis::Input::retained(serde_json::from_value(evidence)?)
     } else {
         let snapshot =
             value.get_mut("snapshot").map(Value::take).ok_or_else(|| serde_json::Error::custom("No saved snapshot"))?;
@@ -320,17 +325,20 @@ mod tests {
             serde_json::to_value(decode(&compact).unwrap()).unwrap(),
             serde_json::to_value(decode(&full).unwrap()).unwrap()
         );
-        let input = analysis_input(serde_json::from_slice(&compact).unwrap()).unwrap();
-        assert_eq!(
-            serde_json::to_value(&input.snapshot).unwrap(),
-            serde_json::to_value(decoded.analysis_input()).unwrap()
-        );
-        assert_eq!(
-            serde_json::to_value(&input.collected).unwrap(),
-            serde_json::to_value(&decoded.evidence.as_ref().unwrap().collected).unwrap()
-        );
-        assert!(std::sync::Arc::ptr_eq(&raw(&input.snapshot), &raw(input.collected.as_ref().unwrap())));
-        assert_eq!(input.origin, culprit_core::AnalysisOrigin::RetainedInput);
+        // Saved compactly, or serialized whole: the retained input is read either way.
+        for encoded in [&compact, &full] {
+            let input = analysis_input(serde_json::from_slice(encoded).unwrap()).unwrap();
+            assert_eq!(
+                serde_json::to_value(&input.snapshot).unwrap(),
+                serde_json::to_value(decoded.analysis_input()).unwrap()
+            );
+            assert_eq!(
+                serde_json::to_value(&input.collected).unwrap(),
+                serde_json::to_value(&decoded.evidence.as_ref().unwrap().collected).unwrap()
+            );
+            assert!(std::sync::Arc::ptr_eq(&raw(&input.snapshot), &raw(input.collected.as_ref().unwrap())));
+            assert_eq!(input.origin, culprit_core::AnalysisOrigin::RetainedInput);
+        }
         let mut expected = serde_json::to_value(&report).unwrap();
         expected.as_object_mut().unwrap().remove("evidence");
         assert_eq!(serde_json::to_value(super::super::display(&report)).unwrap(), expected);
