@@ -2,23 +2,25 @@
 
 use super::*;
 use crate::evidence::Requirement as Evidence;
+use culprit_core::t;
 
 pub fn overlapping_index_info() -> CheckInfo {
     CheckInfo {
         id: "overlapping-index".into(),
-        title: "Overlapping indexes".into(),
+        title: t!("check.overlapping_index.info.title"),
         category: Category::Indexes,
         engines: vec![Engine::Mssql, Engine::Postgres, Engine::Yugabyte, Engine::Mysql],
         requires: vec![Capability::IndexUsage],
-        description: "Two indexes that lead with the same column where one is barely read and the other holds all \
-            its key columns: queries that use the first can seek the second and filter the rest there."
-            .into(),
+        description: t!("check.overlapping_index.info.description"),
     }
 }
 
 check!(
-    OverlappingIndexCheck: overlapping_index_info, overlapping_index,
-    &[Evidence::IndexCatalog]
+    OverlappingIndexCheck: overlapping_index_info,
+    decide = overlapping_indexes,
+    render = overlapping_index_finding,
+    case<'s> = OverlappingIndex<'s>,
+    evidence = &[Evidence::IndexCatalog],
 );
 
 /// Indexes that compete for the same leading column, as (rarely read, well used). The well-used one must hold every key
@@ -85,70 +87,100 @@ pub(crate) fn overlapping_pairs(snapshot: &Snapshot) -> Vec<(&IndexStat, &IndexS
     out
 }
 
-pub fn overlapping_index(snapshot: &Snapshot) -> Vec<Finding> {
+/// An index barely read next to a better-used one that leads with the same column ([`overlapping_pairs`]), and what its
+/// finding concludes.
+pub struct OverlappingIndex<'s> {
+    /// The index barely read.
+    index: &'s IndexStat,
+    /// The index that leads with the same column and holds all its keys.
+    wider: &'s IndexStat,
+    /// Their first key.
+    lead: &'s str,
+    reads: f64,
+    wider_reads: f64,
+    size: f64,
+    /// The foreign key the barely-read index also supports.
+    foreign_key: Option<&'s culprit_core::ForeignKey>,
+    severity: Severity,
+    score: f64,
+    confidence: Confidence,
+}
+
+fn overlapping_indexes(snapshot: &Snapshot) -> Vec<OverlappingIndex<'_>> {
     overlapping_pairs(snapshot)
         .into_iter()
-        .map(|(a, b)| {
-            let table_name = format!("{}.{}", a.schema, a.table);
-            let mut f = finding(
-                "overlapping-index",
-                &format!("{}.{}", table_name, a.name),
-                Category::Indexes,
-                subject(SubjectKind::Index, format!("{}.{}", table_name, a.name)),
-            );
-            let lead = a.key_names()[0].to_string();
-            let (ra, rb) = (a.reads.unwrap_or(0.0), b.reads.unwrap_or(0.0));
-            f.title = format!("{} is barely read next to {}, which also starts with {}", a.name, b.name, lead);
-            f.summary = format!(
-                "{} ({}) and {} ({}) both lead with {} on {}, and the second has every key column of the first among its keys. {} was \
-                 read {} times {}, {} {} times. Queries that use the first can seek the second on {} and filter the rest \
-                 inside it, while every write to {} keeps both up to date.",
-                a.name,
-                a.columns.join(", "),
-                b.name,
-                b.columns.join(", "),
-                lead,
-                table_name,
-                a.name,
-                format::count(ra),
-                since_phrase(snapshot),
-                b.name,
-                format::count(rb),
-                lead,
-                table_name
-            );
-            let size = a.size_bytes.unwrap_or(0.0);
-            f.severity = Severity::Low;
-            f.impact.score = base_score(f.severity) + (size / (1024.0 * 1024.0 * 1024.0)).min(6.0);
-            f.impact.label = format!("{} barely used", format::bytes(size));
-            f.confidence = Confidence::Low;
-            f.metrics.push(Metric::new(format!("Reads of {}", a.name), ra, Unit::Count));
-            f.metrics.push(Metric::new(format!("Reads of {}", b.name), rb, Unit::Count));
-            f.metrics.push(Metric::new("Size", size, Unit::Bytes));
-            f.fix = Some(Fix {
-                summary: format!(
-                    "Find the queries that read {} and check their plans against {}; if they seek it just as well, \
-                     hide {} first and drop it after a business cycle.",
-                    a.name, b.name, a.name
-                ),
-                sql: Some(hide_index_sql(snapshot, a)),
-                cost: Some(format!("Frees {} and one index's worth of work on every write.", format::bytes(size))),
-            });
-            f.verify = vec![format!(
-                "After hiding {}, the queries on {} keep their speed and {}'s reads grow by about {}.",
-                a.name,
-                a.table,
-                b.name,
-                format::count(ra)
-            )];
-            f.caveats.push(format!(
-                "{} may cover columns {} lacks; a query that only reads it for those columns would need a key lookup instead.",
-                a.name, b.name
-            ));
-            if let Some(fk) = backs_foreign_key(snapshot, a) {
-                f.caveats.push(format!("{} also supports the foreign key {}.", a.name, fk.name));
+        .map(|(index, wider)| {
+            let size = index.size_bytes.unwrap_or(0.0);
+            let severity = Severity::Low;
+            OverlappingIndex {
+                index,
+                wider,
+                lead: index.key_names()[0],
+                reads: index.reads.unwrap_or(0.0),
+                wider_reads: wider.reads.unwrap_or(0.0),
+                size,
+                foreign_key: backs_foreign_key(snapshot, index),
+                severity,
+                score: base_score(severity) + (size / (1024.0 * 1024.0 * 1024.0)).min(6.0),
+                confidence: Confidence::Low,
             }
-            f
         })
         .collect()
+}
+
+fn overlapping_index_finding(snapshot: &Snapshot, o: OverlappingIndex<'_>) -> Finding {
+    let (a, b) = (o.index, o.wider);
+    let table_name = format!("{}.{}", a.schema, a.table);
+    let mut f = finding(
+        "overlapping-index",
+        &format!("{}.{}", table_name, a.name),
+        Category::Indexes,
+        subject(SubjectKind::Index, format!("{}.{}", table_name, a.name)),
+    );
+    f.title = t!("check.overlapping_index.title", index = &a.name, wider = &b.name, lead = o.lead);
+    f.summary = [
+        t!(
+            "check.overlapping_index.summary.keys",
+            index = &a.name,
+            keys = a.columns.join(", "),
+            wider = &b.name,
+            wider_keys = b.columns.join(", "),
+            lead = o.lead,
+            table = &table_name
+        ),
+        t!(
+            "check.overlapping_index.summary.reads",
+            index = &a.name,
+            reads = format::count(o.reads),
+            since = since_phrase(snapshot),
+            wider = &b.name,
+            wider_reads = format::count(o.wider_reads)
+        ),
+        t!("check.overlapping_index.summary.seek", lead = o.lead, table = &table_name),
+    ]
+    .join(" ");
+    f.severity = o.severity;
+    f.impact.score = o.score;
+    f.impact.label = t!("check.overlapping_index.impact", size = format::bytes(o.size));
+    f.confidence = o.confidence;
+    f.metrics.push(Metric::new(t!("common.metric.reads_of", index = &a.name), o.reads, Unit::Count));
+    f.metrics.push(Metric::new(t!("common.metric.reads_of", index = &b.name), o.wider_reads, Unit::Count));
+    f.metrics.push(Metric::new(t!("common.metric.size"), o.size, Unit::Bytes));
+    f.fix = Some(Fix {
+        summary: t!("check.overlapping_index.fix", index = &a.name, wider = &b.name),
+        sql: Some(hide_index_sql(snapshot, a)),
+        cost: Some(t!("check.overlapping_index.fix_cost", size = format::bytes(o.size))),
+    });
+    f.verify = vec![t!(
+        "check.overlapping_index.verify",
+        index = &a.name,
+        table = &a.table,
+        wider = &b.name,
+        reads = format::count(o.reads)
+    )];
+    f.caveats.push(t!("check.overlapping_index.caveat.covers", index = &a.name, wider = &b.name));
+    if let Some(fk) = o.foreign_key {
+        f.caveats.push(t!("check.overlapping_index.caveat.foreign_key", index = &a.name, foreign_key = &fk.name));
+    }
+    f
 }
