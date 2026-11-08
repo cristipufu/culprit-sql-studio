@@ -2851,3 +2851,44 @@ verify: Obtain a newly compiled plan for one of the queries and check whether or
 verify: pg_stat_statements keeps running totals, so a later scan's runs, share and averages for the queries still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there compare their time per run under equivalent load. Use the scans' read-counter changes to compare reads per new run, accounting for resets; include index storage and write cost."#,
     );
 }
+
+// Every key unindexed and on a small table: four of them, then five.
+#[test]
+fn only_small_keys_without_an_index() {
+    let mut s = snapshot("sqlite-demo.json");
+    small_keys(&mut s, 4);
+    s.foreign_keys.retain(|fk| fk.table.starts_with("child_"));
+    pin(
+        "unindexed-fk",
+        &s,
+        "unindexed-fk:schema",
+        r#"unindexed-fk:schema · Low · High · OptionalImprovement
+title: None of the 4 foreign keys has an index that can serve it
+summary: All 4 are on tables under 10K rows; they are child_3(parent_id) (400 rows), child_2(parent_id) (300 rows), child_1(parent_id) (200 rows) and child_0(parent_id) (100 rows). Deleting a parent row, or changing its key, checks every child table for matching rows, and without an index that check reads the child table in full: cheap while the tables are small, slower with every row and with every new table declared the same way. When this many keys lack an index, the code that declares tables usually creates foreign keys without one: fixing it there covers the keys still to come.
+impact: 4 of 4 foreign keys unindexed
+metric: Foreign keys without a usable index: 4
+metric: Foreign keys: 4
+fix: Give each foreign key an unfiltered index led by its columns, and make declaring a foreign key declare its index wherever the schema is defined (a migration helper, the ORM's table definitions), so new keys get one too.
+cost: Each index is on a small table and costs little to keep up; check the busiest tables' write rates first.
+verify: Re-scan: this finding is gone; the foreign-key findings for single tables go once their own fixes are applied.
+caveat: SQLite looks for matching child rows only on connections that enable PRAGMA foreign_keys; queries that join or filter on the keys need the indexes either way.
+caveat: A key whose parent rows are never deleted or re-keyed (a lookup table, append-only history) doesn't need the index for the check; leave those out if their write cost matters."#,
+    );
+    small_keys(&mut s, 1);
+    pin(
+        "unindexed-fk",
+        &s,
+        "unindexed-fk:schema",
+        r#"unindexed-fk:schema · Low · High · OptionalImprovement
+title: None of the 5 foreign keys has an index that can serve it
+summary: All 5 are on tables under 10K rows; the largest are child_4(parent_id) (500 rows), child_3(parent_id) (400 rows), child_2(parent_id) (300 rows) and child_1(parent_id) (200 rows). Deleting a parent row, or changing its key, checks every child table for matching rows, and without an index that check reads the child table in full: cheap while the tables are small, slower with every row and with every new table declared the same way. When this many keys lack an index, the code that declares tables usually creates foreign keys without one: fixing it there covers the keys still to come.
+impact: 5 of 5 foreign keys unindexed
+metric: Foreign keys without a usable index: 5
+metric: Foreign keys: 5
+fix: Give each foreign key an unfiltered index led by its columns, and make declaring a foreign key declare its index wherever the schema is defined (a migration helper, the ORM's table definitions), so new keys get one too.
+cost: Each index is on a small table and costs little to keep up; check the busiest tables' write rates first.
+verify: Re-scan: this finding is gone; the foreign-key findings for single tables go once their own fixes are applied.
+caveat: SQLite looks for matching child rows only on connections that enable PRAGMA foreign_keys; queries that join or filter on the keys need the indexes either way.
+caveat: A key whose parent rows are never deleted or re-keyed (a lookup table, append-only history) doesn't need the index for the check; leave those out if their write cost matters."#,
+    );
+}
