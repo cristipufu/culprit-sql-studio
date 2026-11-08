@@ -26,6 +26,12 @@ impl Rec {
         Rec { cols }
     }
 
+    /// A row as a test writes it: column names and values.
+    #[cfg(test)]
+    pub(crate) fn of(cols: &[(&str, Val)]) -> Rec {
+        Rec { cols: cols.iter().map(|(name, value)| (name.to_ascii_lowercase(), value.clone())).collect() }
+    }
+
     fn get(&self, name: &str) -> Option<&Val> {
         let name = name.to_ascii_lowercase();
         self.cols.iter().find(|(n, _)| *n == name).map(|(_, v)| v)

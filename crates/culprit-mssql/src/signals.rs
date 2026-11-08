@@ -397,7 +397,8 @@ ORDER BY s.name, t.name, prv.boundary_id
 // ── per server ─────────────────────────────────────────────────────────────────────────────────────
 
 fn file_io(r: &Rec, database: Option<String>, kind: FileKind) -> FileIo {
-    // A file of the scanned database counts that database's I/O; tempdb's and the instance's have no single scope.
+    // Every file read here is one database's (the scanned one's, or tempdb's), and counts that database's I/O; one
+    // whose database the server didn't name has no scope to state.
     let scope = database.is_some().then_some(culprit_core::FileScope::Database);
     FileIo {
         name: r.string("file_name"),
@@ -583,6 +584,23 @@ WHERE drs.database_id = DB_ID()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::{Rec, Val};
+
+    // Prepare no longer fills in file scopes: the collector states each file's, and the storage tile grades by it.
+    #[test]
+    fn a_file_states_the_database_whose_io_it_counts() {
+        let row = Rec::of(&[
+            ("file_name", Val::Text("shop_log".into())),
+            ("reads", Val::Int(10)),
+            ("read_ms", Val::Int(40)),
+            ("writes", Val::Int(900)),
+            ("write_ms", Val::Int(1800)),
+        ]);
+        let named = file_io(&row, Some("shop".into()), FileKind::Log);
+        assert_eq!((named.scope, named.database.as_deref()), (Some(culprit_core::FileScope::Database), Some("shop")));
+        assert_eq!((named.reads, named.write_ms), (10.0, Some(1800.0)));
+        assert_eq!(file_io(&row, None, FileKind::Log).scope, None, "no database named, no scope stated");
+    }
 
     #[test]
     fn only_compiles_wholly_in_the_selected_period_are_compared_with_its_runs() {
