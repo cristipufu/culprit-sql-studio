@@ -1093,7 +1093,7 @@ fn checksum_failures_raise_high_database_attention_while_shared_connection_failu
             before: None,
         },
     ];
-    let out = operational_errors::operational_errors(&s);
+    let out = operational_errors::OperationalErrorsCheck.run(&s);
     let checksum = out.iter().find(|f| f.id == "operational-errors:checksum-failures:shop").expect("checksum finding");
     assert_eq!(checksum.severity, Severity::High);
     assert_eq!(checksum.actionability, Actionability::NeedsAttention);

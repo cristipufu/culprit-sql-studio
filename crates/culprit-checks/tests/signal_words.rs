@@ -291,3 +291,97 @@ fix: If this accompanies capacity or latency trouble, inspect the application's 
 verify: Compare WAL allocation across scans and correlate it with application checkpoint progress, latency and filesystem headroom. Reuse of a stable allocated WAL can be healthy; shrinking is not required."#,
     );
 }
+
+// ── operational-errors ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn operational_errors_of_every_kind() {
+    use culprit_core::operations::{CounterReading, OperationalCounter, OperationalCounterKind as Kind};
+    let counter = |kind: Kind, subject: &str, scope: FileScope, count: f64, before: Option<f64>| OperationalCounter {
+        kind,
+        subject: subject.into(),
+        scope,
+        count,
+        since: None,
+        last_event_at: None,
+        before: before.map(|count| CounterReading { at: "2026-10-11T10:54:21Z".into(), count, reference: None }),
+    };
+    let mut s = fixture("postgres-demo");
+    s.operations.counters = vec![
+        OperationalCounter {
+            since: Some("2026-10-01T00:00:00Z".into()),
+            ..counter(Kind::ArchiveFailures, "archiver", FileScope::Server, 3.0, None)
+        },
+        counter(Kind::SubscriptionApplyErrors, "sub_orders", FileScope::Database, 50.0, Some(20.0)),
+        counter(Kind::SubscriptionSyncErrors, "sub_items", FileScope::Database, 5.0, None),
+        counter(Kind::StandbyConflicts, "demo", FileScope::Database, 12.0, Some(10.0)),
+        counter(Kind::RedoLogWaits, "server", FileScope::Server, 1_000.0, Some(900.0)),
+        OperationalCounter {
+            last_event_at: Some("2026-10-11T09:00:00Z".into()),
+            ..counter(Kind::ChecksumFailures, "demo", FileScope::Database, 2.0, None)
+        },
+        counter(Kind::ConnectionFailures, "server", FileScope::Server, 40.0, None),
+    ];
+    says(
+        &run("operational-errors", &s),
+        r#"id: operational-errors:archive:archiver
+title: WAL archive failures: 3 recorded in the source's history
+summary: archiver The archive command or library failed. This is a shared server counter, and a later successful archive may have resolved the incident. The total covers since 2026-10-01T00:00:00Z. It is context for the whole server and is not graded as a problem in this database.
+impact: Historical counter
+metric: Source total
+fix: Check current archiver progress and server logs for the failure, archive destination capacity and access. Confirm retained WAL and backup/recovery requirements; never remove WAL files to clear the counter.
+verify: Compare two scans over a stated interval: new errors or waits should stop increasing, and the relevant worker/archive or application operations should succeed. Lifetime totals need not return to zero.
+
+id: operational-errors:subscription-apply:sub_orders
+title: Logical replication apply errors: 30 newly counted between scans
+summary: sub_orders The subscriber could not apply some incoming changes. Counters do not identify the conflicting row or establish that replication is still stopped. Its statistics period is unknown. The comparison covers 2026-10-11T10:54:21Z to 2026-10-11T11:54:21Z. These are newly recorded events over the stated interval, not proof that the cause persists now.
+impact: 30 between scans
+metric: Source total
+metric: New events between scans
+fix: Inspect the subscription worker state and server log. Resolve the reported schema, constraint or data conflict with the replication owner, then verify apply resumes. Do not skip transactions without proving correctness.
+verify: Compare two scans over a stated interval: new errors or waits should stop increasing, and the relevant worker/archive or application operations should succeed. Lifetime totals need not return to zero.
+
+id: operational-errors:subscription-sync:sub_items
+title: Logical replication synchronization errors: 5 recorded in the source's history
+summary: sub_items Initial table synchronization failed. A retained error count does not establish that the table is still unsynchronized. Its statistics period is unknown. No comparable counter interval inside the requested period establishes new failures; this is historical information.
+impact: Historical counter
+metric: Source total
+fix: Inspect subscription relation states and the worker's server-log error. Repair permissions, schema or capacity as indicated, then verify affected tables finish synchronization.
+verify: Compare two scans over a stated interval: new errors or waits should stop increasing, and the relevant worker/archive or application operations should succeed. Lifetime totals need not return to zero.
+
+id: operational-errors:standby-conflicts:demo
+title: Standby queries cancelled for recovery: 2 newly counted between scans
+summary: demo Recovery cancelled queries whose snapshots, locks or buffers conflicted with replay. This records actual cancellations, not ordinary replica lag or a claim that every read failed. Its statistics period is unknown. The comparison covers 2026-10-11T10:54:21Z to 2026-10-11T11:54:21Z. These are newly recorded events over the stated interval, not proof that the cause persists now.
+impact: 2 between scans
+metric: Source total
+metric: New events between scans
+fix: Correlate cancelled requests with recovery-conflict logs and query duration. Consider shorter reads or a suitable reporting replica; feedback and longer replay delays trade cancellations for primary bloat, retained WAL or replica lag.
+verify: Compare two scans over a stated interval: new errors or waits should stop increasing, and the relevant worker/archive or application operations should succeed. Lifetime totals need not return to zero.
+
+id: operational-errors:redo-waits:server
+title: Redo buffer waits (whole server): 100 newly counted between scans
+summary: server InnoDB waited for redo buffer space to become available. This counter does not measure wait duration or prove that this database's requests were delayed. Its statistics period is unknown. The comparison covers 2026-10-11T10:54:21Z to 2026-10-11T11:54:21Z. It is context for the whole server and is not graded as a problem in this database.
+impact: 100 between scans
+metric: Source total
+metric: New events between scans
+fix: Compare counter growth, redo write/flush latency and representative write activity across the server. Inspect transaction size, log-buffer capacity and storage before testing a setting change; preserve durability requirements.
+verify: Compare two scans over a stated interval: new errors or waits should stop increasing, and the relevant worker/archive or application operations should succeed. Lifetime totals need not return to zero.
+
+id: operational-errors:checksum-failures:demo
+title: Data page checksum or I/O corruption: 2 recorded in the source's history
+summary: demo The storage engine recorded data pages that failed checksum verification or suffered a torn-page / I/O read error in this database. Its statistics period is unknown. Any recorded page checksum or I/O corruption in this database warrants immediate investigation of the server error log and backups.
+impact: 2 corrupt pages
+metric: Source total
+metric: Latest recorded event = 2026-10-11T09:00:00Z
+fix: Inspect the server error log immediately to identify the affected relation or file, verify recent backups, and check underlying storage health before running repair or restore procedures.
+verify: Compare two scans over a stated interval: new errors or waits should stop increasing, and the relevant worker/archive or application operations should succeed. Lifetime totals need not return to zero.
+
+id: operational-errors:connection-failures:server
+title: Failed client connection handshakes (whole server): 40 recorded in the source's history
+summary: server Clients attempted to connect to the server and failed during authentication, TLS negotiation or packet read (Aborted_connects). This is a shared server counter. Its statistics period is unknown. It is context for the whole server and is not graded as a problem in this database.
+impact: Historical counter
+metric: Source total
+fix: Inspect server connection logs and client configuration for bad credentials, TLS mismatches, connect_timeout settings, or health checks that close TCP sockets without completing the handshake.
+verify: Compare two scans over a stated interval: new errors or waits should stop increasing, and the relevant worker/archive or application operations should succeed. Lifetime totals need not return to zero."#,
+    );
+}

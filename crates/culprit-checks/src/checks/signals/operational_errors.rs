@@ -1,13 +1,25 @@
 use super::*;
 use crate::evidence::{Observation, Requirement as Evidence};
-use culprit_core::operations::OperationalCounterKind as Kind;
-use culprit_core::{Actionability, FileScope};
+use culprit_core::operations::{CounterReading, OperationalCounter, OperationalCounterKind as Kind};
+use culprit_core::{Actionability, FileScope, t};
+
 pub fn operational_errors_info() -> CheckInfo {
-    CheckInfo {id:"operational-errors".into(),title:"Archive, replication and redo failures".into(),category:Category::Maintenance,engines:vec![Engine::Postgres,Engine::Mysql,Engine::Mssql],requires:vec![],description:"WAL archive failures, logical subscription errors, standby recovery cancellations, InnoDB redo buffer waits, connection handshake failures, and storage page checksum or I/O corruption errors. Counter history is kept separate from newly observed errors.".into()}
+    CheckInfo {
+        id: "operational-errors".into(),
+        title: t!("check.operational_errors.info.title"),
+        category: Category::Maintenance,
+        engines: vec![Engine::Postgres, Engine::Mysql, Engine::Mssql],
+        requires: vec![],
+        description: t!("check.operational_errors.info.description"),
+    }
 }
+
 check!(
-    OperationalErrorsCheck: operational_errors_info, operational_errors,
-    &[Evidence::Observed(
+    OperationalErrorsCheck: operational_errors_info,
+    decide = error_counters,
+    render = operational_errors_finding,
+    case<'s> = ErrorCounter<'s>,
+    evidence = &[Evidence::Observed(
         Observation::OperationalCounters,
         &[
             culprit_core::source_id::ARCHIVER,
@@ -15,37 +27,158 @@ check!(
             culprit_core::source_id::STANDBY_CONFLICTS,
             culprit_core::source_id::REDO_PRESSURE,
         ],
-    )]
+    )],
 );
-pub fn operational_errors(s: &Snapshot) -> Vec<Finding> {
-    s.operations.counters.iter().filter_map(|c| {
-        if !c.count.is_finite() || c.count <= 0.0 {return None;}
-        let (key,label,why,fix) = match c.kind {
-            Kind::ArchiveFailures => ("archive","WAL archive failures","The archive command or library failed. This is a shared server counter, and a later successful archive may have resolved the incident.","Check current archiver progress and server logs for the failure, archive destination capacity and access. Confirm retained WAL and backup/recovery requirements; never remove WAL files to clear the counter."),
-            Kind::SubscriptionApplyErrors => ("subscription-apply","Logical replication apply errors","The subscriber could not apply some incoming changes. Counters do not identify the conflicting row or establish that replication is still stopped.","Inspect the subscription worker state and server log. Resolve the reported schema, constraint or data conflict with the replication owner, then verify apply resumes. Do not skip transactions without proving correctness."),
-            Kind::SubscriptionSyncErrors => ("subscription-sync","Logical replication synchronization errors","Initial table synchronization failed. A retained error count does not establish that the table is still unsynchronized.","Inspect subscription relation states and the worker's server-log error. Repair permissions, schema or capacity as indicated, then verify affected tables finish synchronization."),
-            Kind::StandbyConflicts => ("standby-conflicts","Standby queries cancelled for recovery","Recovery cancelled queries whose snapshots, locks or buffers conflicted with replay. This records actual cancellations, not ordinary replica lag or a claim that every read failed.","Correlate cancelled requests with recovery-conflict logs and query duration. Consider shorter reads or a suitable reporting replica; feedback and longer replay delays trade cancellations for primary bloat, retained WAL or replica lag."),
-            Kind::RedoLogWaits => ("redo-waits","Redo buffer waits (whole server)","InnoDB waited for redo buffer space to become available. This counter does not measure wait duration or prove that this database's requests were delayed.","Compare counter growth, redo write/flush latency and representative write activity across the server. Inspect transaction size, log-buffer capacity and storage before testing a setting change; preserve durability requirements."),
-            Kind::ChecksumFailures => ("checksum-failures","Data page checksum or I/O corruption","The storage engine recorded data pages that failed checksum verification or suffered a torn-page / I/O read error in this database.","Inspect the server error log immediately to identify the affected relation or file, verify recent backups, and check underlying storage health before running repair or restore procedures."),
-            Kind::ConnectionFailures => ("connection-failures","Failed client connection handshakes (whole server)","Clients attempted to connect to the server and failed during authentication, TLS negotiation or packet read (Aborted_connects). This is a shared server counter.","Inspect server connection logs and client configuration for bad credentials, TLS mismatches, connect_timeout settings, or health checks that close TCP sockets without completing the handshake."),
-        };
-        let now=parse_epoch_seconds(&s.taken_at);
-        let window_secs=f64::from(s.options.as_ref().map_or(24*60,|o|o.window_in_minutes()))*60.0;
-        let start=now.map(|n|n-window_secs*1.25);
-        let recent=c.before.as_ref().filter(|b| parse_epoch_seconds(&b.at).zip(start).is_some_and(|(a,start)|a>=start)
-            && parse_epoch_seconds(&b.at).zip(now).is_some_and(|(a,n)|a<n) && c.count >= b.count
-            && (c.count > b.count || parse_epoch_seconds(&b.at).zip(now).is_some_and(|(a,n)| n - a >= window_secs * 0.8)));
-        let delta=recent.map(|b|c.count-b.count);
-        let shared=c.scope==FileScope::Server;
-        let is_corruption = c.kind == Kind::ChecksumFailures && !shared;
-        let current = is_corruption || (delta.is_some_and(|d|d>=10.0) && !shared);
-        let mut f=finding("operational-errors",&format!("{key}:{}",c.subject),Category::Maintenance,subject(SubjectKind::Database,&c.subject));
-        f.title=if let Some(delta)=delta {format!("{label}: {} newly counted between scans",format::count(delta))} else {format!("{label}: {} recorded in the source's history",format::count(c.count))};
-        if delta == Some(0.0) && !is_corruption {return None;}
-        f.summary=format!("{} {}{}{} {}",c.subject,why,c.since.as_deref().map(|a|format!(" The total covers since {a}.")).unwrap_or_else(||" Its statistics period is unknown.".into()),recent.map(|b|format!(" The comparison covers {} to {}.",b.at,s.taken_at)).unwrap_or_default(),if shared {"It is context for the whole server and is not graded as a problem in this database."}else if is_corruption{"Any recorded page checksum or I/O corruption in this database warrants immediate investigation of the server error log and backups."}else if recent.is_none(){"No comparable counter interval inside the requested period establishes new failures; this is historical information."}else{"These are newly recorded events over the stated interval, not proof that the cause persists now."});
-        f.severity=if is_corruption {Severity::High} else if current {Severity::Medium} else {Severity::Low};f.actionability=if current{Actionability::NeedsAttention}else{Actionability::Information};f.confidence=Confidence::High;f.impact.score=base_score(f.severity);f.impact.label=if let Some(d)=delta{format!("{} between scans",format::count(d))}else if is_corruption{format!("{} corrupt pages",format::count(c.count))}else{"Historical counter".into()};
-        f.metrics=vec![Metric::new("Source total",c.count,Unit::Count)];if let Some(d)=delta{f.metrics.push(Metric::new("New events between scans",d,Unit::Count));}
-        if let Some(a)=&c.last_event_at{f.metrics.push(Metric::text("Latest recorded event",a));}
-        f.fix=Some(Fix{summary:fix.into(),sql:None,cost:None});f.verify=vec!["Compare two scans over a stated interval: new errors or waits should stop increasing, and the relevant worker/archive or application operations should succeed. Lifetime totals need not return to zero.".into()];Some(f)
-    }).collect()
+
+/// A counter of failures or waits that recorded any, and what it establishes.
+pub struct ErrorCounter<'s> {
+    counter: &'s OperationalCounter,
+    /// The earlier reading inside the requested period it compares with, and the events counted since.
+    recent: Option<(&'s CounterReading, f64)>,
+    /// Counted for the whole server: context, never graded on this database.
+    shared: bool,
+    /// Pages of this database that failed their checksum or a read.
+    corruption: bool,
+    /// New events between scans, or corruption: something to attend to now.
+    current: bool,
+}
+
+fn error_counters(s: &Snapshot) -> Vec<ErrorCounter<'_>> {
+    let now = parse_epoch_seconds(&s.taken_at);
+    let window_secs = f64::from(s.options.as_ref().map_or(24 * 60, |o| o.window_in_minutes())) * 60.0;
+    let start = now.map(|n| n - window_secs * 1.25);
+    s.operations
+        .counters
+        .iter()
+        .filter_map(|c| {
+            if !c.count.is_finite() || c.count <= 0.0 {
+                return None;
+            }
+            let recent = c.before.as_ref().filter(|b| {
+                parse_epoch_seconds(&b.at).zip(start).is_some_and(|(a, start)| a >= start)
+                    && parse_epoch_seconds(&b.at).zip(now).is_some_and(|(a, n)| a < n)
+                    && c.count >= b.count
+                    && (c.count > b.count
+                        || parse_epoch_seconds(&b.at).zip(now).is_some_and(|(a, n)| n - a >= window_secs * 0.8))
+            });
+            let delta = recent.map(|b| c.count - b.count);
+            let shared = c.scope == FileScope::Server;
+            let corruption = c.kind == Kind::ChecksumFailures && !shared;
+            let current = corruption || (delta.is_some_and(|d| d >= 10.0) && !shared);
+            if delta == Some(0.0) && !corruption {
+                return None;
+            }
+            Some(ErrorCounter {
+                counter: c,
+                recent: recent.map(|b| (b, c.count - b.count)),
+                shared,
+                corruption,
+                current,
+            })
+        })
+        .collect()
+}
+
+fn operational_errors_finding(s: &Snapshot, e: ErrorCounter<'_>) -> Finding {
+    let c = e.counter;
+    let (key, label, why, fix) = match c.kind {
+        Kind::ArchiveFailures => (
+            "archive",
+            t!("check.operational_errors.label.archive"),
+            t!("check.operational_errors.why.archive", subject = &c.subject),
+            t!("check.operational_errors.fix.archive"),
+        ),
+        Kind::SubscriptionApplyErrors => (
+            "subscription-apply",
+            t!("check.operational_errors.label.subscription_apply"),
+            t!("check.operational_errors.why.subscription_apply", subject = &c.subject),
+            t!("check.operational_errors.fix.subscription_apply"),
+        ),
+        Kind::SubscriptionSyncErrors => (
+            "subscription-sync",
+            t!("check.operational_errors.label.subscription_sync"),
+            t!("check.operational_errors.why.subscription_sync", subject = &c.subject),
+            t!("check.operational_errors.fix.subscription_sync"),
+        ),
+        Kind::StandbyConflicts => (
+            "standby-conflicts",
+            t!("check.operational_errors.label.standby_conflicts"),
+            t!("check.operational_errors.why.standby_conflicts", subject = &c.subject),
+            t!("check.operational_errors.fix.standby_conflicts"),
+        ),
+        Kind::RedoLogWaits => (
+            "redo-waits",
+            t!("check.operational_errors.label.redo_waits"),
+            t!("check.operational_errors.why.redo_waits", subject = &c.subject),
+            t!("check.operational_errors.fix.redo_waits"),
+        ),
+        Kind::ChecksumFailures => (
+            "checksum-failures",
+            t!("check.operational_errors.label.checksum_failures"),
+            t!("check.operational_errors.why.checksum_failures", subject = &c.subject),
+            t!("check.operational_errors.fix.checksum_failures"),
+        ),
+        Kind::ConnectionFailures => (
+            "connection-failures",
+            t!("check.operational_errors.label.connection_failures"),
+            t!("check.operational_errors.why.connection_failures", subject = &c.subject),
+            t!("check.operational_errors.fix.connection_failures"),
+        ),
+    };
+    let delta = e.recent.map(|(_, d)| d);
+    let mut f = finding(
+        "operational-errors",
+        &format!("{key}:{}", c.subject),
+        Category::Maintenance,
+        subject(SubjectKind::Database, &c.subject),
+    );
+    f.title = match delta {
+        Some(delta) => t!("check.operational_errors.title.new", label = &label, count = format::count(delta)),
+        None => t!("check.operational_errors.title.history", label = &label, count = format::count(c.count)),
+    };
+    let mut summary = vec![why];
+    summary.push(match c.since.as_deref() {
+        Some(since) => t!("check.operational_errors.summary.since", since = since),
+        None => t!("check.operational_errors.summary.period_unknown"),
+    });
+    if let Some((b, _)) = e.recent {
+        summary.push(t!("check.operational_errors.summary.compared", from = &b.at, to = &s.taken_at));
+    }
+    summary.push(if e.shared {
+        t!("check.operational_errors.summary.shared")
+    } else if e.corruption {
+        t!("check.operational_errors.summary.corruption")
+    } else if e.recent.is_none() {
+        t!("check.operational_errors.summary.history")
+    } else {
+        t!("check.operational_errors.summary.new")
+    });
+    f.summary = summary.join(" ");
+    f.severity = if e.corruption {
+        Severity::High
+    } else if e.current {
+        Severity::Medium
+    } else {
+        Severity::Low
+    };
+    f.actionability = if e.current { Actionability::NeedsAttention } else { Actionability::Information };
+    f.confidence = Confidence::High;
+    f.impact.score = base_score(f.severity);
+    f.impact.label = if let Some(d) = delta {
+        t!("check.operational_errors.impact.new", count = format::count(d))
+    } else if e.corruption {
+        t!("check.operational_errors.impact.corrupt_pages", count = format::count(c.count))
+    } else {
+        t!("check.operational_errors.impact.history")
+    };
+    f.metrics = vec![Metric::new(t!("check.operational_errors.metric.total"), c.count, Unit::Count)];
+    if let Some(d) = delta {
+        f.metrics.push(Metric::new(t!("check.operational_errors.metric.new"), d, Unit::Count));
+    }
+    if let Some(a) = &c.last_event_at {
+        f.metrics.push(Metric::text(t!("check.operational_errors.metric.latest"), a));
+    }
+    f.fix = Some(Fix { summary: fix, sql: None, cost: None });
+    f.verify = vec![t!("check.operational_errors.verify")];
+    f
 }
