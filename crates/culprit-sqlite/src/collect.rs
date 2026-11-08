@@ -32,7 +32,7 @@ const WHOLE_READ_BUDGET_ROLLBACK: Duration = Duration::from_millis(500);
 /// Whether the file may be read whole (`dbstat`) for sizes and row counts, and for how long at most; why not otherwise.
 pub fn whole_file_read(conn: &Connection) -> std::result::Result<Duration, String> {
     if conn.prepare("SELECT 1 FROM dbstat LIMIT 0").is_err() {
-        return Err("this SQLite library has no dbstat table to measure them".into());
+        return Err(no_dbstat());
     }
     let bytes = number(conn, "page_count").unwrap_or(0.0) * number(conn, "page_size").unwrap_or(0.0);
     let wal = pragma(conn, "journal_mode").is_some_and(|m| m.eq_ignore_ascii_case("wal"));
@@ -42,16 +42,61 @@ pub fn whole_file_read(conn: &Connection) -> std::result::Result<Duration, Strin
         (WHOLE_READ_MAX_BYTES_ROLLBACK, WHOLE_READ_BUDGET_ROLLBACK)
     };
     if bytes > limit {
-        return Err(if wal {
-            format!("the file is {}: Culprit doesn't read that much of it to count", culprit_core::format::bytes(bytes))
-        } else {
-            format!(
-                "the file is {} with a rollback journal, where reading it whole would make the application's writes wait",
-                culprit_core::format::bytes(bytes)
-            )
-        });
+        return Err(too_large(bytes, wal));
     }
     Ok(budget)
+}
+
+/// Why sizes can't be measured: the library has no dbstat table.
+pub(crate) fn no_dbstat() -> String {
+    "this SQLite library has no dbstat table to measure them".into()
+}
+
+/// Why the file isn't read whole: it is `bytes` large, in WAL mode or with a rollback journal.
+pub(crate) fn too_large(bytes: f64, wal: bool) -> String {
+    if wal {
+        format!("the file is {}: Culprit doesn't read that much of it to count", culprit_core::format::bytes(bytes))
+    } else {
+        format!(
+            "the file is {} with a rollback journal, where reading it whole would make the application's writes wait",
+            culprit_core::format::bytes(bytes)
+        )
+    }
+}
+
+/// Reading every page stopped with `error` (already worded, lowercased).
+pub(crate) fn reading_stopped(error: &str) -> String {
+    format!("reading every page stopped ({error})")
+}
+
+/// Table and index sizes weren't measured, and `why`.
+pub(crate) fn sizes_unknown(why: &str) -> String {
+    format!("Table and index sizes are unknown: {why}.")
+}
+
+/// A virtual table whose module this library lacks: its columns can't be read.
+pub(crate) fn columns_unavailable(table: &str, error: &str) -> String {
+    format!("Columns of main.{table} are unavailable: {error}. The table's original definition is retained.")
+}
+
+/// Some of the file's settings the library couldn't report.
+pub(crate) fn pragmas_partial() -> String {
+    "Some file pragmas were not available from this SQLite library.".into()
+}
+
+/// The WAL file's size couldn't be read.
+pub(crate) fn wal_unreadable() -> String {
+    "WAL file size could not be read; no file contents were inspected.".into()
+}
+
+/// The journal mode couldn't be read, so whether a WAL file applies is unknown.
+pub(crate) fn journal_mode_unknown() -> String {
+    "The journal mode was unavailable, so WAL file health could not be assessed.".into()
+}
+
+/// A blob in a result, by its size.
+pub(crate) fn blob(len: usize) -> String {
+    format!("<{len} bytes>")
 }
 
 /// What a SQLite snapshot can hold, and what SQLite doesn't keep (`have`, `missing`). `rows`: why row counts are
@@ -159,15 +204,14 @@ pub fn snapshot(
         schema.tables.iter().filter(|t| t.without_rowid).map(|t| t.name.as_str()).collect();
     // Counted rows where the file was read whole; the planner's statistics otherwise.
     let (sizes, counted, whole) = match whole_file_read(conn).and_then(|budget| {
-        object_sizes(conn, &without_rowid, budget)
-            .map_err(|e| format!("reading every page stopped ({})", map_error(&e).message.to_lowercase()))
+        object_sizes(conn, &without_rowid, budget).map_err(|e| reading_stopped(&map_error(&e).message.to_lowercase()))
     }) {
         Ok(ObjectSizes { bytes, rows }) => {
             coverage.completed(&crate::sources::SIZES, bytes.len());
             (bytes, rows, Ok(()))
         }
         Err(why) => {
-            let error = culprit_core::Error::internal(format!("Table and index sizes are unknown: {why}."));
+            let error = culprit_core::Error::internal(sizes_unknown(&why));
             coverage.source_failed(&crate::sources::SIZES, &error);
             (HashMap::new(), HashMap::new(), Err(why))
         }
@@ -207,14 +251,7 @@ pub fn snapshot(
             Err(error) if virtual_table => {
                 // The application can load a virtual-table module that Culprit's SQLite library doesn't include.
                 // Its CREATE statement remains useful; missing columns must not lose the rest of the database.
-                coverage.partial(
-                    &crate::sources::CATALOG,
-                    format!(
-                        "Columns of main.{} are unavailable: {}. The table's original definition is retained.",
-                        t.name,
-                        map_error(&error).message
-                    ),
-                );
+                coverage.partial(&crate::sources::CATALOG, columns_unavailable(&t.name, &map_error(&error).message));
                 Vec::new()
             }
             Err(error) => return Err(map_error(&error)),
@@ -270,7 +307,7 @@ pub fn snapshot(
     if settings.len() == FILE_PRAGMAS.len() {
         coverage.completed(&crate::sources::SETTINGS, settings.len());
     } else {
-        coverage.partial(&crate::sources::SETTINGS, "Some file pragmas were not available from this SQLite library.");
+        coverage.partial(&crate::sources::SETTINGS, pragmas_partial());
     }
     let server = server_info(conn, path, have, missing);
     let mut operations = culprit_core::operations::OperationalStats::default();
@@ -280,21 +317,14 @@ pub fn snapshot(
         let size = match std::fs::metadata(std::path::PathBuf::from(wal)) {
             Ok(metadata) => Ok(metadata.len() as f64),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0.0),
-            Err(_) => {
-                Err(culprit_core::Error::internal("WAL file size could not be read; no file contents were inspected."))
-            }
+            Err(_) => Err(culprit_core::Error::internal(wal_unreadable())),
         };
         let wal_bytes = coverage.read(&crate::sources::WAL_FILE, size);
         operations.sqlite = Some(culprit_core::operations::SqliteFileHealth { wal_bytes, before: None });
     } else if settings.iter().any(|s| s.name == "journal_mode") {
         coverage.not_applicable(&crate::sources::WAL_FILE, "The database is not using WAL journal mode.");
     } else {
-        coverage.source_failed(
-            &crate::sources::WAL_FILE,
-            &culprit_core::Error::internal(
-                "The journal mode was unavailable, so WAL file health could not be assessed.",
-            ),
-        );
+        coverage.source_failed(&crate::sources::WAL_FILE, &culprit_core::Error::internal(journal_mode_unknown()));
     }
     let mut snapshot = Snapshot {
         identity: None,
@@ -809,7 +839,7 @@ pub fn run(conn: &Connection, sql: &str, limit: usize) -> Result<ResultSet> {
                 ValueRef::Integer(n) => serde_json::Value::from(n),
                 ValueRef::Real(f) => serde_json::Value::from(f),
                 ValueRef::Text(t) => serde_json::Value::from(String::from_utf8_lossy(t).into_owned()),
-                ValueRef::Blob(b) => serde_json::Value::from(format!("<{} bytes>", b.len())),
+                ValueRef::Blob(b) => serde_json::Value::from(blob(b.len())),
             });
         }
         out.push(values);

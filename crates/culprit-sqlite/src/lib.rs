@@ -5,6 +5,8 @@
 mod collect;
 pub mod plan;
 pub mod sources;
+#[cfg(test)]
+mod words;
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -86,7 +88,17 @@ pub(crate) fn map_error(e: &rusqlite::Error) -> Error {
 
 /// Run SQLite's blocking calls off the async runtime.
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
-    tokio::task::spawn_blocking(f).await.map_err(|e| Error::internal(format!("The SQLite task stopped: {e}")))?
+    tokio::task::spawn_blocking(f).await.map_err(|e| task_stopped(&e))?
+}
+
+/// The blocking task running SQLite's calls ended without an answer (`error`).
+pub(crate) fn task_stopped(error: &dyn std::fmt::Display) -> Error {
+    Error::internal(format!("The SQLite task stopped: {error}"))
+}
+
+/// The pool of statement workers is closed.
+pub(crate) fn execution_unavailable() -> Error {
+    Error::internal("SQLite execution is unavailable")
 }
 
 const STATEMENT_TIMEOUT: Duration = culprit_core::limits::QUERY_TIMEOUT;
@@ -103,7 +115,7 @@ async fn interactive<T: Send + 'static>(
     let permit = tokio::time::timeout(handle.remaining(), STATEMENTS.acquire())
         .await
         .map_err(|_| culprit_core::limits::timeout_error())?
-        .map_err(|_| Error::internal("SQLite execution is unavailable"))?;
+        .map_err(|_| execution_unavailable())?;
     blocking(move || {
         let _permit = permit;
         handle.check()?;
