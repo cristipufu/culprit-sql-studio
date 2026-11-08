@@ -1,0 +1,40 @@
+## A plan
+
+SQL Server · estimated plan · 3 operators · estimated cost 0.991
+
+**Where the cost goes:** **88%** Index Scan on customers · **12%** Nested Loops
+
+| Step | Table · index | Cost | Rows (est.) | Notes |
+|---|---|---:|---:|---|
+| Nested Loops | Inner Join | 12% | 1.0 |  |
+|    ↳ Index Scan | customers · ix\_customers\_email | 88% | 1.0 | most expensive, Filters after reading |
+|    ↳ Key Lookup | customers · pk\_customers | <1% | 1.0 |  |
+
+**Predicates on the expensive steps**
+
+- Index Scan on customers filters `CONVERT_IMPLICIT(nvarchar(200),email,0) = @email`
+
+**Plan warnings:** Implicit conversion
+
+**Insights**
+
+- **A note on a step** (Index Scan on customers) — Its detail.
+  Fix: Its fix.
+- **A note on the plan**
+
+<details><summary>Statement</summary>
+
+```sql
+SELECT id, name, segment FROM shop.customers WHERE email = @email
+```
+
+</details>
+
+<sub>Exported from Culprit on <when> UTC.</sub>
+
+=== html
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="generator" content="Culprit"><title>A plan</title><style>…</style></head>
+<body><main><div class="top"><span class="mark">C</span><span class="brand">Culprit</span><span class="spacer"></span><span class="chip">SQL Server</span><span class="chip">Estimated plan</span></div>
+<h1>A plan</h1><p class="sub">SQL Server · Estimated plan</p><div class="figures"><div class="fig"><div class="v">0.991</div><div class="l">estimated cost</div></div><div class="fig"><div class="v">3</div><div class="l">operators</div></div><div class="fig"><div class="v">88%</div><div class="l">in Index Scan on customers</div></div></div><h2>Where the cost goes</h2><div class="strip" role="img" aria-label="Share of the plan's cost per operator"><span class="h4" style="flex:0.8797" title="Index Scan on customers 88%"></span><span class="h2" style="flex:0.1170" title="Nested Loops 12%"></span></div><ul class="legend"><li><span class="sw h4"></span><b>88%</b> Index Scan on customers</li><li><span class="sw h2"></span><b>12%</b> Nested Loops</li></ul><h2>Plan</h2><div class="wrap"><svg class="diagram" viewBox="0 0 464 278" width="464" height="278" role="img" aria-label="A plan"><defs><marker id="arrow-p" viewBox="0 0 10 10" refX="8" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M 0 1 L 9 5 L 0 9 z" class="arrowhead"/></marker></defs><text class="result" x="232.0" y="28.0">RESULT</text><path class="edge hot" d="M 122.0 174.0 C 122.0 148.0, 232.0 148.0, 232.0 125.0" stroke-width="6.50" marker-end="url(#arrow-p)"/><text class="edge-label" x="132.2" y="165.0">1.0 row</text><path class="edge" d="M 342.0 174.0 C 342.0 148.0, 232.0 148.0, 232.0 125.0" stroke-width="6.50" marker-end="url(#arrow-p)"/><text class="edge-label" x="352.2" y="165.0">1.0 row</text><g class="card hot"><title>filter CONVERT_IMPLICIT(nvarchar(200),[culprit_demo].[shop].[customers].[email],0)=[@email]</title><rect class="box" x="22.0" y="174.0" width="200" height="82" rx="9"/><rect class="track" x="34.0" y="248.0" width="176.0" height="3" rx="1.5"/><rect class="bar h4" x="34.0" y="248.0" width="154.8" height="3" rx="1.5"/><text class="kind k-scan" x="34.0" y="192.0">SCAN</text><text class="pct" x="210.0" y="192.0" text-anchor="end">▲ 88%</text><text class="op" x="34.0" y="211.0">Index Scan</text><text class="obj" x="34.0" y="227.0">customers · ix_customers_e…</text><text class="rows" x="34.0" y="241.0">1.0 row est.  ⚠</text></g><g class="card"><title>seek [id] = [culprit_demo].[shop].[customers].[id]</title><rect class="box" x="242.0" y="174.0" width="200" height="82" rx="9"/><rect class="track" x="254.0" y="248.0" width="176.0" height="3" rx="1.5"/><rect class="bar h0" x="254.0" y="248.0" width="2.0" height="3" rx="1.5"/><text class="kind k-lookup" x="254.0" y="192.0">LOOKUP</text><text class="pct" x="430.0" y="192.0" text-anchor="end"><1%</text><text class="op" x="254.0" y="211.0">Key Lookup</text><text class="obj" x="254.0" y="227.0">customers · pk_customers</text><text class="rows" x="254.0" y="241.0">1.0 row est.</text></g><g class="card hot"><title>Nested Loops</title><rect class="box" x="132.0" y="40.0" width="200" height="82" rx="9"/><rect class="track" x="144.0" y="114.0" width="176.0" height="3" rx="1.5"/><rect class="bar h2" x="144.0" y="114.0" width="20.6" height="3" rx="1.5"/><text class="kind k-join" x="144.0" y="58.0">JOIN</text><text class="pct" x="320.0" y="58.0" text-anchor="end">12%</text><text class="op" x="144.0" y="77.0">Nested Loops</text><text class="obj" x="144.0" y="93.0">Inner Join</text><text class="rows" x="144.0" y="107.0">1.0 row est.</text></g></svg></div><h2>Steps</h2><table class="steps"><thead><tr><th>Step</th><th>Table · index</th><th class="r">Cost</th><th class="r">Rows (est.)</th><th>Notes</th></tr></thead><tbody><tr><td class="op" style="padding-left:12px">Nested Loops</td><td class="obj">Inner Join</td><td class="r"><span class="pctbar"><i class="h2" style="width:12%"></i></span>12%</td><td class="r">1.0</td><td class="warnings"></td></tr><tr class="hotrow"><td class="op" style="padding-left:28px">Index Scan</td><td class="obj">customers · ix_customers_email</td><td class="r"><span class="pctbar"><i class="h4" style="width:88%"></i></span>88%</td><td class="r">1.0</td><td class="warnings">Filters after reading</td></tr><tr><td class="op" style="padding-left:28px">Key Lookup</td><td class="obj">customers · pk_customers</td><td class="r"><span class="pctbar"><i class="h0" style="width:0%"></i></span><1%</td><td class="r">1.0</td><td class="warnings"></td></tr></tbody></table><h2>Insights</h2><ul class="scen"><li><span class="tag">Index Scan on customers</span><div><div class="t">A note on a step</div><div class="d">Its detail.</div><div class="d"><b>Fix:</b> Its fix.</div></div></li><li><span class="tag">Plan</span><div><div class="t">A note on the plan</div></div></li></ul><h2>Statement</h2><pre>SELECT id, name, segment FROM shop.customers WHERE email = @email</pre>
+<footer><span>Exported from Culprit on <when> UTC</span></footer></main></body></html>

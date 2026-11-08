@@ -1,0 +1,71 @@
+## Culprit: 0 opportunities
+
+MySQL 8.4.11, local environment. Scanned 2026-10-11T12:09:00Z.
+
+> Literal values are redacted (`'?'`, `?`); names and parameter markers are kept.
+
+Nothing stands out.
+
+<sub>Exported from Culprit on <when> UTC.</sub>
+
+=== next
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="generator" content="Culprit"><title>Culprit report</title><style>…</style></head>
+<body><main><div class="top"><span class="mark">C</span><span class="brand">Culprit</span><span class="spacer"></span><span class="chip">MySQL</span><span class="chip redacted" title="Strings and numbers in SQL text, predicates and parameter values are replaced with ? — names are kept">Values redacted</span></div>
+<h1>0 opportunities</h1><p class="sub">MySQL 8.4.11, local environment · scanned 2026-10-11T12:09:00Z</p><p>Nothing stands out.</p>
+<footer><span>Exported from Culprit on <when> UTC</span><span>· literal values redacted</span></footer></main></body></html>
+
+=== next
+## Culprit: 1 opportunity
+
+MySQL 8.4.11, local environment. Scanned 2026-10-11T12:09:00Z.
+
+> Literal values are redacted (`'?'`, `?`); names and parameter markers are kept.
+
+| | Finding | Impact |
+|---|---|---|
+| 🔴 | An update of orders fails 28% of the time (1205 lock wait timeout) | 28% of runs fail |
+
+### An update of orders fails 28% of the time (1205 lock wait timeout)
+
+**28% of runs fail** · Needs attention · high impact, high confidence · MySQL 8.4.11, local environment
+
+The associated statements used 12.0 s of database time over the 2 minutes since statistics were reset (4%). 12 of its 43 runs since its statistics began 2 minutes ago didn't finish. 12 ended in an error; the recent ones were 1205 lock wait timeout. A run that doesn't finish still costs the time it ran, and the application retries it or shows an error.
+
+- Runs: **43**
+- Didn't finish: **28%**
+- Errors: **12**
+- Recent error: **1205 lock wait timeout**
+
+**Query `4515abd524a46f37`** · 4% of database time · 43 runs over the 2 minutes since statistics were reset · 280 ms on average
+
+```sql
+UPDATE `orders` SET STATUS = STATUS WHERE `id` = ?
+```
+
+**Fix.** Another transaction holds the rows it needs for longer than innodb\_lock\_wait\_timeout. Find what holds the locks while it waits (Live shows the blocking chain). Keep transactions short. The recent errors and their messages are in performance\_schema.
+
+```sql
+SELECT MYSQL_ERRNO, RETURNED_SQLSTATE, MESSAGE_TEXT
+  FROM performance_schema.events_statements_history
+ WHERE DIGEST = '4515abd524a46f378b048f32e532cb1befdfd6c88178caeab12746b1f6c2b9c6' AND MYSQL_ERRNO <> 0;
+```
+
+**How to verify**
+
+1. Between two scans, runs that fail or are cancelled should drop to near zero: performance_schema keeps running totals, so compare its failed runs and runs in a scan taken once the change is live and one a day or more later (12 of 43 runs in this scan).
+
+**Before you act**
+
+- MySQL counts errors from when each statement's entry began counting, so old failures stay in its total until the counters are reset or the server restarts.
+
+<sub>Exported from Culprit on <when> UTC.</sub>
+
+=== next
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="generator" content="Culprit"><title>Culprit report</title><style>…</style></head>
+<body><main><div class="top"><span class="mark">C</span><span class="brand">Culprit</span><span class="spacer"></span><span class="chip">MySQL</span><span class="chip redacted" title="Strings and numbers in SQL text, predicates and parameter values are replaced with ? — names are kept">Values redacted</span></div>
+<h1>1 opportunity</h1><p class="sub">MySQL 8.4.11, local environment · scanned 2026-10-11T12:09:00Z</p><ul class="scen" style="margin-top:18px"><li><span class="tag">28% of runs fail</span><div><div class="t"><span class="sev high"></span>An update of orders fails 28% of the time (1205 lock wait timeout)</div></div></li></ul><section class="finding"><h1>An update of orders fails 28% of the time (1205 lock wait timeout)</h1><p class="sub"><span class="sev high"></span>28% of runs fail · Needs attention · high impact, high confidence · MySQL 8.4.11, local environment</p><p>The associated statements used 12.0 s of database time over the 2 minutes since statistics were reset (4%). 12 of its 43 runs since its statistics began 2 minutes ago didn&#39;t finish. 12 ended in an error; the recent ones were 1205 lock wait timeout. A run that doesn&#39;t finish still costs the time it ran, and the application retries it or shows an error.</p><div class="metrics"><div class="fig"><div class="v">43</div><div class="l">Runs</div></div><div class="fig"><div class="v">28%</div><div class="l">Didn&#39;t finish</div></div><div class="fig"><div class="v">12</div><div class="l">Errors</div></div><div class="fig metric-text"><div class="l">Recent error</div><div class="v">1205 lock wait timeout</div></div></div><h2>Query 4515abd524a46f37</h2><p class="qmeta">4% of database time · 43 runs over the 2 minutes since statistics were reset · 280 ms on average</p><pre>UPDATE `orders` SET STATUS = STATUS WHERE `id` = ?</pre><h2>Fix</h2><div class="callout"><p>Another transaction holds the rows it needs for longer than innodb_lock_wait_timeout. Find what holds the locks while it waits (Live shows the blocking chain). Keep transactions short. The recent errors and their messages are in performance_schema.</p><pre>SELECT MYSQL_ERRNO, RETURNED_SQLSTATE, MESSAGE_TEXT
+  FROM performance_schema.events_statements_history
+ WHERE DIGEST = &#39;4515abd524a46f378b048f32e532cb1befdfd6c88178caeab12746b1f6c2b9c6&#39; AND MYSQL_ERRNO &lt;&gt; 0;</pre></div><h2>How to verify</h2><ol class="verify"><li>Between two scans, runs that fail or are cancelled should drop to near zero: performance_schema keeps running totals, so compare its failed runs and runs in a scan taken once the change is live and one a day or more later (12 of 43 runs in this scan).</li></ol><h2>Before you act</h2><ul class="more"><li>MySQL counts errors from when each statement&#39;s entry began counting, so old failures stay in its total until the counters are reset or the server restarts.</li></ul></section>
+<footer><span>Exported from Culprit on <when> UTC</span><span>· literal values redacted</span></footer></main></body></html>

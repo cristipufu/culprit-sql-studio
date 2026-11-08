@@ -5,6 +5,7 @@
 mod dashboard;
 mod demo_sidecars;
 mod escalations;
+mod export_words;
 mod file_pickers;
 mod fuzz;
 mod golden;

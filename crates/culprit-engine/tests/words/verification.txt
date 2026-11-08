@@ -1,0 +1,70 @@
+=== mssql-demo.report.json
+**1 of 22 fixed; 21 still present. 1 new finding.**
+
+- ✅ Fixed: A read from order\_items times out on every run, at about 15 s (was 100% of runs fail)
+- ⏳ Still present: A read from orders fails 25% of the time (25% of runs fail)
+  It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
+- ⏳ Still present: Row locks on support\_tickets escalated to a table lock 5 times since SQL Server started (Oct 11) (5 table locks)
+  It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
+- ⏳ Still present: Inserts into hot queue for the last page of pk\_hot (53.6 s latch waits)
+- ⏳ Still present: Queries on orders recorded lock waits in the last 5 hours (3 min waiting on locks)
+  It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
+- ⏳ Still present: Compares each of 1.5M rows of order\_items with 999 rows the Table Spool replays (1.5B pairs) (27% of DB time)
+  It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
+- ⏳ Still present: This plan runs on one CPU because its statement says OPTION (MAXDOP 1) (27% of DB time)
+  It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
+- ⏳ Still present: A read from products runs 60K times in 5 hours, one key at a time (822 ms of database time over the last 5 hours (&lt;1%))
+  It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
+- ⏳ Still present: A type mismatch on customers.email stops a read from customers from seeking an index (7% of DB time)
+  It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
+- ⏳ Still present: order\_items is searched by order\_id without a supporting index (20.3 s of database time over the last 5 hours (6%))
+  It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
+- ⏳ Still present: Readers and writers block each other (READ\_COMMITTED\_SNAPSHOT is off) (Setting)
+- ⏳ Still present: A read from orders got 3.4× slower on Oct 11 at 10:45 UTC, when its plan changed (3.4× slower)
+  It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
+- ⏳ Still present: ticket\_events has no index on ticket\_id, its foreign key to support\_tickets (800K rows unindexed)
+- ⏳ Still present: orders is searched by shipped\_at without a supporting index (5.0 s of database time over the last 5 hours (1%))
+  It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
+- ⏳ Still present: Two queries deadlocked once in the last 6 hours (key-lookup deadlock on shop.customers) (1 deadlock)
+- ⏳ Still present: ix\_orders\_status is covered by the wider ix\_orders\_status\_created on orders (26.5 MB redundant)
+- ⏳ Still present: ix\_products\_sku duplicates uq\_products\_sku on products (648 KB redundant)
+- ⏳ Still present: A read from order\_items returns 20K rows per run (20K rows per run)
+  It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
+- ⏳ Still present: SQL Server doesn't trust 2 constraints on child (2 untrusted)
+- ⏳ Still present: Cost threshold for parallelism is still the 1990s default of 5 (Setting)
+- ⏳ Still present: Query Store records every statement, including one-off ones (Setting)
+- ⏳ Still present: LAST\_QUERY\_PLAN\_STATS is off for this database (Diagnostics)
+- ❔ Can't tell: Something unknown (was 12 ms)
+  A note about it.
+- 🆕 New: A new finding (25% of runs fail)
+
+<sub>Scans Sun 12:13 UTC → Sun 13:13 UTC.</sub>
+
+=== pg-demo.report.json
+**1 of 14 fixed; 13 still present. 1 new finding.**
+
+- ✅ Fixed: A read from orders writes about 19.9 MB of temp files per run (was 44% of DB time)
+- ⏳ Still present: orders is read in full to find rows by customer\_id (37.7 s of database time over the 5 hours since statistics were reset (23%))
+  pg\_stat\_statements keeps running totals since its statistics were reset (4 h 53 min ago), so runs from before the change still count, and it stays listed. What changed, with Since at the ship time (\`culprit changes pg-demo --since &lt;ship time&gt;\`), compares the runs since then with the runs before, from Culprit's scans.
+- ⏳ Still present: Planning takes almost all of the time of a read from orders (100% planning)
+  pg\_stat\_statements keeps running totals since its statistics were reset (4 h 53 min ago), so runs from before the change still count, and it stays listed. What changed, with Since at the ship time (\`culprit changes pg-demo --since &lt;ship time&gt;\`), compares the runs since then with the runs before, from Culprit's scans.
+- ⏳ Still present: The inactive replication slot analytics\_slot keeps 1.1 GB of WAL (1.1 GB of WAL kept)
+- ⏳ Still present: No update to wide is HOT: each one rewrites every index (0% HOT)
+  pg\_stat\_statements keeps running totals since its statistics were reset (4 h 53 min ago), so runs from before the change still count, and it stays listed. What changed, with Since at the ship time (\`culprit changes pg-demo --since &lt;ship time&gt;\`), compares the runs since then with the runs before, from Culprit's scans.
+- ⏳ Still present: A read from customers runs 8.2K times in 5 hours, one key at a time (129 ms of database time over the 5 hours since statistics were reset (&lt;1%))
+  pg\_stat\_statements keeps running totals since its statistics were reset (4 h 53 min ago), so runs from before the change still count, and it stays listed. What changed, with Since at the ship time (\`culprit changes pg-demo --since &lt;ship time&gt;\`), compares the runs since then with the runs before, from Culprit's scans.
+- ⏳ Still present: order\_items is read in full to find rows by product\_id (6.8 s of database time over the 5 hours since statistics were reset (4%))
+  pg\_stat\_statements keeps running totals since its statistics were reset (4 h 53 min ago), so runs from before the change still count, and it stays listed. What changed, with Since at the ship time (\`culprit changes pg-demo --since &lt;ship time&gt;\`), compares the runs since then with the runs before, from Culprit's scans.
+- ⏳ Still present: JIT compilation takes longer than running a read from products (98% JIT)
+  pg\_stat\_statements keeps running totals since its statistics were reset (4 h 53 min ago), so runs from before the change still count, and it stays listed. What changed, with Since at the ship time (\`culprit changes pg-demo --since &lt;ship time&gt;\`), compares the runs since then with the runs before, from Culprit's scans.
+- ⏳ Still present: 74% of wide is dead rows (126K dead rows)
+- ⏳ Still present: order\_items has no index on order\_id, its foreign key to orders (1.0M rows unindexed)
+- ⏳ Still present: orders\_status\_idx is covered by the wider orders\_status\_created\_idx on orders (13.3 MB redundant)
+- ⏳ Still present: products\_sku\_idx duplicates products\_sku\_key on products (328 KB redundant)
+- ⏳ Still present: PostgreSQL resolved 1 deadlock since Oct 11 (1 deadlock)
+- ⏳ Still present: The check constraint wide\_touched\_positive on wide was never validated (1 untrusted)
+- ❔ Can't tell: Something unknown (was 12 ms)
+  A note about it.
+- 🆕 New: A new finding (37.7 s of database time over the 5 hours since statistics were reset (23%))
+
+<sub>Scans Sun 11:54 UTC → Sun 12:54 UTC.</sub>
