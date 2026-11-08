@@ -18,6 +18,18 @@ in [`locales/`](../locales).
 4. Run `bun test src/lib/catalogs.test.ts` in `app/` (or `cargo test -p culprit-core --lib i18n`). It checks that every
    message reads, that no key is one English lacks, and that each uses the same arguments as English.
 
+To translate in batches, or to catch up after English gains messages, `dev/catalog.py` does the bookkeeping:
+
+```sh
+python3 dev/catalog.py status                 # how much of English each language says
+python3 dev/catalog.py todo it ui.editor. > todo.json   # what Italian lacks (optionally under a prefix), as {key: English}
+python3 dev/catalog.py add it todo.json       # after translating the values in place: into locales/it.json, sorted
+```
+
+A language's terminology (how it says "index", "wait", "scan", "finding"; formal or informal address) is kept in
+`locales/glossary/<code>.md`, so every message says a thing the same way. Start one for a new language, and read it
+before changing an existing one.
+
 That's all: the build compiles every file in `locales/` into the app and the CLI. Nothing is read from disk when Culprit
 runs, and CI checks that every language is inside the built app.
 
