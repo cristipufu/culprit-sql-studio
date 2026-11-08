@@ -535,7 +535,9 @@ pub(super) fn too_small_finding(snapshot: &Snapshot, mut f: Finding, c: &Candida
     };
     let writes = measured_writes(snapshot, &c.schema, &c.table)
         .filter(|(writes, _)| *writes > 0.0)
-        .map(|(writes, days)| format!(" ({})", how_many(snapshot, writes, days, "write", "writes")))
+        .map(|(writes, days)| {
+            format!(" ({})", how_many(snapshot, writes, days, culprit_core::key!("common.noun.write")))
+        })
         .unwrap_or_default();
     // An index the table has that already narrows these lookups by most of their columns: what they can use meanwhile.
     let existing = serving_index(snapshot, c)

@@ -312,7 +312,7 @@ pub(crate) fn write_cost_of(snapshot: &Snapshot, schema: &str, table: &str, inde
     }
     Some(format!(
         "{schema}.{table} receives {}; each one will also update {index}.",
-        how_many(snapshot, writes, days, "write", "writes")
+        how_many(snapshot, writes, days, culprit_core::key!("common.noun.write"))
     ))
 }
 

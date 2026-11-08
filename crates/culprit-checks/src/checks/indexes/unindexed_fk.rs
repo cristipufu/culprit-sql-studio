@@ -569,7 +569,7 @@ pub(super) fn unindexed_fk_finding(snapshot: &Snapshot, fk: &culprit_core::Forei
     if let (Some(deletes), Some(days)) = (parent_deletes.filter(|_| measured), counter_days(snapshot)) {
         f.summary.push_str(&format!(
             " Deletes from {parent} came to {}, each a read of the whole of {child}.",
-            how_many(snapshot, deletes, days, "row", "rows")
+            how_many(snapshot, deletes, days, culprit_core::key!("common.noun.row"))
         ));
     }
     if sqlite {

@@ -33,9 +33,13 @@ pub(crate) struct IndexWrites {
 }
 
 impl IndexWrites {
-    /// The unit, one and many: "write statement(s)" on SQL Server, "row(s) written" elsewhere.
-    pub(crate) fn unit(&self) -> (&'static str, &'static str) {
-        if self.statements { ("write statement", "write statements") } else { ("row written", "rows written") }
+    /// The counted noun's key ([`crate::support::counted`]): write statements on SQL Server, rows written elsewhere.
+    pub(crate) fn unit(&self) -> &'static str {
+        if self.statements {
+            culprit_core::key!("common.noun.write_statement")
+        } else {
+            culprit_core::key!("common.noun.row_written")
+        }
     }
 }
 
@@ -73,7 +77,7 @@ pub fn over_indexed(snapshot: &Snapshot) -> Vec<Finding> {
         if writes < MANY_WRITES_A_DAY {
             continue;
         }
-        let (one, many) = w.unit();
+        let noun = w.unit();
         let measured = counters_measure_a_day(snapshot, days);
         let idle: Vec<&IndexStat> = secondary
             .iter()
@@ -94,26 +98,36 @@ pub fn over_indexed(snapshot: &Snapshot) -> Vec<Finding> {
             "{} has {} indexes and gets {}",
             t.name,
             secondary.len(),
-            how_many(snapshot, writes_total, days, one, many)
+            how_many(snapshot, writes_total, days, noun)
         );
         let upkeep = match snapshot.server.engine {
             Engine::Mssql => format!(
                 "Every insert into {table_name} updates all {} secondary indexes, and every update touching their columns \
                  updates them too: {}, each one doing that for every row it changes.",
                 secondary.len(),
-                how_many(snapshot, writes_total, days, one, many)
+                how_many(snapshot, writes_total, days, noun)
             ),
             Engine::Postgres => format!(
                 "Every insert into {table_name} adds an entry to all {} secondary indexes, and so does every update that \
                  isn't HOT (HOT updates change no indexed column and stay on their page): up to {}.",
                 secondary.len(),
-                how_many(snapshot, writes_total * secondary.len() as f64, days, "index entry", "index entries")
+                how_many(
+                    snapshot,
+                    writes_total * secondary.len() as f64,
+                    days,
+                    culprit_core::key!("common.noun.index_entry")
+                )
             ),
             Engine::Yugabyte | Engine::Mysql | Engine::Sqlite => format!(
                 "Every insert into {table_name} updates all {} secondary indexes, and every update touching their columns \
                  updates them too: up to {}.",
                 secondary.len(),
-                how_many(snapshot, writes_total * secondary.len() as f64, days, "index change", "index changes")
+                how_many(
+                    snapshot,
+                    writes_total * secondary.len() as f64,
+                    days,
+                    culprit_core::key!("common.noun.index_change")
+                )
             ),
         };
         f.summary = format!(

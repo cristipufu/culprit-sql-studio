@@ -145,6 +145,15 @@ pub fn t(key: &str, args: &[(&str, Arg)]) -> String {
     }
 }
 
+/// `key!("common.noun.time")`: a message key handed on rather than said here (to [`t`] later, by the code it is given
+/// to). It is the key itself; the macro marks it as one, so the catalogs' tests know it is used.
+#[macro_export]
+macro_rules! key {
+    ($key:literal) => {
+        $key
+    };
+}
+
 /// `t!("key", name = value, ...)`: the message `key` in the current language, with each value as its named argument
 /// (text as it is; a number for `plural` or in the language's digits).
 #[macro_export]

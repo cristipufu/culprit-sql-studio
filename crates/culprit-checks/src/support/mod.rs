@@ -381,15 +381,30 @@ pub fn per_day_is_measured(days: f64) -> bool {
 }
 
 /// "about 1.2K times a day" over 20 hours or more of counters, otherwise what was counted and over how long: "340 times
-/// in the 5 hours since the server last restarted".
-pub fn how_many(snapshot: &Snapshot, total: f64, days: f64, one: &str, many: &str) -> String {
+/// in the 5 hours since the server last restarted". `noun` is the key of a counted noun ([`counted`]).
+pub fn how_many(snapshot: &Snapshot, total: f64, days: f64, noun: &str) -> String {
     // Counters that may have started long after the server did have no length to divide by: said as counted.
     if per_day_is_measured(days) && !counters_may_be_reset(snapshot) {
         let per_day = total / days;
-        format!("about {} {} a day", format::count(per_day), if per_day.round() == 1.0 { one } else { many })
+        culprit_core::t!(
+            "common.how_many.per_day",
+            count = format::count(per_day),
+            noun = counted(noun, per_day.round())
+        )
     } else {
-        format!("{} {} {}", format::count(total), if total == 1.0 { one } else { many }, since_phrase(snapshot))
+        culprit_core::t!(
+            "common.how_many.since",
+            count = format::count(total),
+            noun = counted(noun, total),
+            since = since_phrase(snapshot)
+        )
     }
+}
+
+/// A counted noun for `n` of it, in the current language: `noun` is the key of a plural message, such as
+/// `common.noun.time` (`{n, plural, one {time} other {times}}`).
+pub fn counted(noun: &str, n: f64) -> String {
+    culprit_core::i18n::t(noun, &[("n", culprit_core::i18n::Arg::Number(n))])
 }
 
 /// [`per_day_is_measured`] for counters of this snapshot: also never on counters that may have been reset since the

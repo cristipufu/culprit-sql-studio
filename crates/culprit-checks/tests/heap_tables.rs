@@ -37,3 +37,36 @@ fn measured_forwarded_reads_make_it_medium() {
 fn a_total_from_half_an_hour_of_counters_is_no_rate() {
     assert_eq!(severity(Some(5_000_000.0), 0.5), Some(Severity::Low));
 }
+
+// What the finding says, word for word, with and without forwarded reads: its messages come from locales/en.json.
+#[test]
+fn a_heap_says_what_it_costs_in_english() {
+    let (s, id) = snapshot(Some(5_000_000.0), 240.0);
+    let f = analyze(s).findings.into_iter().find(|f| f.id == id).expect("a heap finding");
+    assert_eq!(f.title, "Reads of customers follow forwarding pointers about 500K times a day");
+    assert_eq!(
+        f.summary,
+        "shop.customers is stored as a heap. Updates that grow a row leave forwarding pointers behind, deleted space \
+         isn't reclaimed well, and every nonclustered index lookup has to go through a row identifier. Reads have \
+         followed a forwarding pointer to another page 5.0M times in the 10 days since the server last restarted (about \
+         500K a day): each one is an extra random read. It does have a primary key, just not a clustered one."
+    );
+    assert_eq!(f.impact.label, "10.0M rows");
+    assert_eq!(
+        f.metrics.iter().map(|m| m.label.as_str()).collect::<Vec<_>>(),
+        ["Forwarded reads per day", "Rows", "Size"]
+    );
+    let fix = f.fix.expect("a fix");
+    assert!(fix.summary.starts_with("Add a clustered index, usually on the primary key"), "{}", fix.summary);
+    assert!(fix.cost.is_some_and(|c| c.starts_with("Rewrites about ") && c.ends_with(" of data.")));
+    assert_eq!(f.caveats, ["Staging tables that are bulk-loaded and truncated can be fine as heaps."]);
+
+    let (s, id) = snapshot(None, 240.0);
+    let f = analyze(s).findings.into_iter().find(|f| f.id == id).expect("a heap finding");
+    assert_eq!(f.title, "customers (10.0M rows) has no clustered index");
+    assert!(
+        f.summary.ends_with("row identifier. It does have a primary key, just not a clustered one."),
+        "{}",
+        f.summary
+    );
+}

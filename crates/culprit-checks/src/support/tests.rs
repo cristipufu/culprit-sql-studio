@@ -184,10 +184,13 @@ fn counts_are_per_day_only_over_a_day_of_counters() {
     s.server.started_at = Some("2026-10-11T12:05:00Z".into());
     let days = counter_days(&s).unwrap();
     // 5 hours: what was counted, not "~1.6K times a day".
-    assert_eq!(how_many(&s, 340.0, days, "time", "times"), "340 times in the 5 hours since the server last restarted");
+    assert_eq!(
+        how_many(&s, 340.0, days, culprit_core::key!("common.noun.time")),
+        "340 times in the 5 hours since the server last restarted"
+    );
     s.server.started_at = Some("2026-10-09T17:05:00Z".into());
     let days = counter_days(&s).unwrap();
-    assert_eq!(how_many(&s, 340.0, days, "time", "times"), "about 170 times a day");
+    assert_eq!(how_many(&s, 340.0, days, culprit_core::key!("common.noun.time")), "about 170 times a day");
 }
 
 #[test]

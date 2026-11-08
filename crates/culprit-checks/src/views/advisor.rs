@@ -785,7 +785,7 @@ fn collect_table_advice(scope: &AdvisorScope<'_>) -> Vec<TableAdvice> {
                 table: t.name.clone(),
                 reason: format!(
                     "Read in full {} ({} rows without an index). {}",
-                    how_many(s, scans_total, days, "time", "times"),
+                    how_many(s, scans_total, days, culprit_core::key!("common.noun.time")),
                     format::count(read_total),
                     match listed.len() {
                         0 => "None of the captured statements explains these full reads: they come \
@@ -850,7 +850,7 @@ fn collect_table_advice(scope: &AdvisorScope<'_>) -> Vec<TableAdvice> {
                 table: t.name.clone(),
                 reason: format!(
                     "{secondary} secondary indexes and {}: every insert updates all of them.",
-                    how_many(s, w.total, w.days, w.unit().0, w.unit().1)
+                    how_many(s, w.total, w.days, w.unit())
                 ),
                 rows: t.rows,
                 indexes: Some(secondary as f64),

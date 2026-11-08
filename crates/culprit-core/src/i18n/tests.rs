@@ -87,7 +87,7 @@ fn a_scope_speaks_its_language_and_restores_the_one_before() {
     assert_eq!(t("no.such.key", &[]), "no.such.key");
 }
 
-/// Every message key the code uses: `t!("..")` in Rust and `t("..")` in the app's TypeScript.
+/// Every message key the code uses: `t!("..")` and `key!("..")` in Rust, and `t("..")` in the app's TypeScript.
 fn keys_used() -> BTreeSet<String> {
     fn scan(dir: &Path, out: &mut BTreeSet<String>) {
         let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -104,24 +104,28 @@ fn keys_used() -> BTreeSet<String> {
                 continue;
             }
             let text = std::fs::read_to_string(&path).unwrap_or_default();
-            for line in text.lines() {
-                // Examples in comments and docs aren't uses.
-                let code = line.trim_start();
-                if code.starts_with("//") || code.starts_with('*') || code.starts_with("/*") {
-                    continue;
-                }
-                for marker in ["t!(\"", "t(\""] {
-                    let mut from = 0;
-                    while let Some(at) = line[from..].find(marker).map(|at| at + from) {
-                        from = at + marker.len();
-                        // `t` as a name of its own, not the end of `format!(` or `split(`.
-                        if line[..at].chars().next_back().is_some_and(|c| c.is_ascii_alphanumeric() || c == '_') {
-                            continue;
-                        }
-                        let Some(key) = line[from..].split('"').next() else { continue };
-                        if key.contains('.') && key.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)) {
-                            out.insert(key.to_string());
-                        }
+            // Examples in comments and docs aren't uses; a call may put its key on the next line.
+            let code: String = text
+                .lines()
+                .filter(|line| {
+                    let line = line.trim_start();
+                    !(line.starts_with("//") || line.starts_with('*') || line.starts_with("/*"))
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            for marker in ["t!(", "t(", "key!("] {
+                let mut from = 0;
+                while let Some(at) = code[from..].find(marker).map(|at| at + from) {
+                    from = at + marker.len();
+                    // `t` or `key` as a name of its own, not the end of `format!(` or `split(`.
+                    if code[..at].chars().next_back().is_some_and(|c| c.is_ascii_alphanumeric() || c == '_') {
+                        continue;
+                    }
+                    let rest = code[from..].trim_start();
+                    let Some(rest) = rest.strip_prefix('"') else { continue };
+                    let Some(key) = rest.split('"').next() else { continue };
+                    if key.contains('.') && key.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)) {
+                        out.insert(key.to_string());
                     }
                 }
             }

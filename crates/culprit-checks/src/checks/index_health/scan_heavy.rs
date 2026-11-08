@@ -166,13 +166,13 @@ pub fn scan_heavy(snapshot: &Snapshot) -> Vec<Finding> {
             "{} {} read in full {} ({rows_text})",
             t.name,
             if crate::all_stopped(snapshot, &listed) { "was" } else { "is" },
-            how_many(snapshot, scans_total, days, "time", "times")
+            how_many(snapshot, scans_total, days, culprit_core::key!("common.noun.time"))
         );
         f.summary = format!(
             "{} has {} rows, and queries have read all of it {}{}: {rows_text} read without an index. {}",
             table_name,
             format::count(t.rows.unwrap_or(0.0)),
-            how_many(snapshot, scans_total, days, "time", "times"),
+            how_many(snapshot, scans_total, days, culprit_core::key!("common.noun.time")),
             if measured { format!(" {}", since_phrase(snapshot)) } else { String::new() },
             if !proven.is_empty() {
                 format!(

@@ -207,7 +207,7 @@ pub(super) fn missing_index_finding(snapshot: &Snapshot, queries: &[QueryStat], 
             .map(|(writes, days)| {
                 format!(
                     ", and an index on {key_text} would add to every write on {table_name} ({})",
-                    how_many(snapshot, writes, days, "write", "writes")
+                    how_many(snapshot, writes, days, culprit_core::key!("common.noun.write"))
                 )
             })
             .unwrap_or_default();
