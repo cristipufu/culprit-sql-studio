@@ -95,12 +95,12 @@ fn log_volume_per_row_and_share() {
         ..Default::default()
     });
     // Whether wal_compression is on decides both what the image count means and the advice: it was assumed off.
-    let f = log_volume(&s);
+    let f = LogVolumeCheck.run(&s);
     assert_eq!(f[0].title, "An update of orders writes 10.2 KB of WAL per row it changes");
     assert!(f[0].summary.contains("20K of its records are full-page images"), "{}", f[0].summary);
     assert!(f[0].fix.as_ref().unwrap().sql.is_none(), "unknown wal_compression: no setting to change");
     set(&mut s, "wal_compression", "off");
-    let f = log_volume(&s);
+    let f = LogVolumeCheck.run(&s);
     assert!(f[0].summary.contains("Up to 78% of it is full-page images"), "{}", f[0].summary);
     assert_eq!(
         f[0].fix.as_ref().unwrap().sql.as_deref(),
@@ -108,17 +108,17 @@ fn log_volume_per_row_and_share() {
     );
     // Already compressed: the checkpoint interval is the lever, not the setting it already has.
     set(&mut s, "wal_compression", "lz4");
-    let f = log_volume(&s);
+    let f = LogVolumeCheck.run(&s);
     assert!(f[0].fix.as_ref().unwrap().sql.is_none());
     assert!(f[0].fix.as_ref().unwrap().summary.contains("wal_compression already shrinks"));
     // On a managed service the advice is the platform's control.
     set(&mut s, "wal_compression", "off");
     s.server.set_platform(Some(culprit_core::Platform::AmazonRds));
-    let fix = log_volume(&s)[0].fix.clone().unwrap();
+    let fix = LogVolumeCheck.run(&s)[0].fix.clone().unwrap();
     assert!(fix.sql.is_none() && fix.summary.contains("DB parameter group"), "{}", fix.summary);
     // Reads are never log findings.
     first_query(&mut s).text = "SELECT 1".into();
-    assert!(log_volume(&s).is_empty());
+    assert!(LogVolumeCheck.run(&s).is_empty());
 }
 
 // A share of the log needs a measured volume a day: 30% of a few quiet minutes is nothing.
@@ -130,15 +130,15 @@ fn a_log_share_needs_a_daily_volume() {
     q.rows = None;
     q.costs = Some(QueryCosts { log_bytes: Some(0.4 * GB), log_share: Some(0.6), ..Default::default() });
     s.workload.as_mut().unwrap().window_hours = 0.5;
-    assert!(log_volume(&s).is_empty(), "0.4 GB in half an hour is a gigabyte a day only by stretching it");
+    assert!(LogVolumeCheck.run(&s).is_empty(), "0.4 GB in half an hour is a gigabyte a day only by stretching it");
     // 2 GB inside half an hour are 2 GB inside that day: nothing is stretched.
     first_query(&mut s).costs.as_mut().unwrap().log_bytes = Some(2.0 * GB);
-    assert_eq!(log_volume(&s).len(), 1);
+    assert_eq!(LogVolumeCheck.run(&s).len(), 1);
     s.workload.as_mut().unwrap().window_hours = 24.0;
-    assert_eq!(log_volume(&s)[0].severity, Severity::Medium);
+    assert_eq!(LogVolumeCheck.run(&s)[0].severity, Severity::Medium);
     // pg_stat_statements before 14 can't say when its counts began: the window may be days longer.
     s.server.version = "13.16".into();
-    assert!(log_volume(&s).is_empty());
+    assert!(LogVolumeCheck.run(&s).is_empty());
 }
 
 fn set(s: &mut Snapshot, name: &str, value: &str) {

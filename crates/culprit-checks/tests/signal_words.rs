@@ -2639,3 +2639,165 @@ sql: ALTER TABLE public.customers ALTER COLUMN prefs TYPE jsonb USING prefs::jso
 verify: Re-scan after converting public.customers.prefs to `jsonb`: the column type is `jsonb` and this finding is gone."#,
     );
 }
+
+// ── log-volume ─────────────────────────────────────────────────────────────────────────────────────
+
+fn logging(name: &str, text: &str, rows: Option<f64>, costs: culprit_core::QueryCosts) -> Snapshot {
+    let mut s = fixture(name);
+    let q = only(&mut s, text);
+    q.rows = rows;
+    q.costs = Some(costs);
+    s
+}
+
+#[test]
+fn wal_per_row_with_full_page_images() {
+    use culprit_core::QueryCosts;
+    let costs = || QueryCosts {
+        log_bytes: Some(200.0 * MB),
+        log_share: Some(0.2),
+        log_full_pages: Some(20_000.0),
+        ..Default::default()
+    };
+    let update = "UPDATE events SET note = $1 WHERE id = $2";
+    let mut findings = run("log-volume", &logging("postgres-demo", update, Some(20_000.0), costs()));
+    for compression in ["off", "lz4"] {
+        let mut s = logging("postgres-demo", update, Some(20_000.0), costs());
+        set(&mut s, "wal_compression", compression);
+        findings.extend(run("log-volume", &s));
+    }
+    says(
+        &findings,
+        r#"id: log-volume:9065391607317686058
+title: An update of events writes 10.2 KB of WAL per row it changes
+summary: It wrote 200 MB of WAL since its statistics began 5 hours ago: 20% of what statements wrote, about 10.2 KB per row it changed. Every byte of WAL is also written to backups and sent to replicas, so it drives replication lag, backup size and checkpoints. 20K of its records are full-page images: the first change to each page after a checkpoint logs the whole page.
+impact: 200 MB of WAL
+metric: Log written
+metric: Share of log
+metric: Per row
+fix: Touch each page once per checkpoint: batch the changes (one statement for many rows, sorted by key) rather than many scattered single-row writes. If full-page images dominate, a longer checkpoint interval (checkpoint_timeout, max_wal_size) logs fewer of them, and wal_compression shrinks them if it is off.
+verify: Between two scans, the WAL it writes per row should drop: pg_stat_statements keeps running totals, so compare its WAL and the rows it changed in a scan taken once the change is live and one a day or more later (200 MB for 20K rows in this scan).
+
+id: log-volume:9065391607317686058
+title: An update of events writes 10.2 KB of WAL per row it changes
+summary: It wrote 200 MB of WAL since its statistics began 5 hours ago: 20% of what statements wrote, about 10.2 KB per row it changed. Every byte of WAL is also written to backups and sent to replicas, so it drives replication lag, backup size and checkpoints. Up to 78% of it is full-page images: the first change to each page after a checkpoint logs the whole page, 8 KB at most.
+impact: 200 MB of WAL
+metric: Log written
+metric: Share of log
+metric: Per row
+fix: Touch each page once per checkpoint: batch the changes (one statement for many rows, sorted by key) rather than many scattered single-row writes. Full-page images dominate and wal_compression is off: turning it on shrinks them (lz4 or zstd on PostgreSQL 15+). Set wal_compression to on and reload the configuration (settings marked as needing a restart take effect after one).
+sql: ALTER SYSTEM SET wal_compression = 'on';
+SELECT pg_reload_conf();
+verify: Between two scans, the WAL it writes per row should drop: pg_stat_statements keeps running totals, so compare its WAL and the rows it changed in a scan taken once the change is live and one a day or more later (200 MB for 20K rows in this scan).
+
+id: log-volume:9065391607317686058
+title: An update of events writes 10.2 KB of WAL per row it changes
+summary: It wrote 200 MB of WAL since its statistics began 5 hours ago: 20% of what statements wrote, about 10.2 KB per row it changed. Every byte of WAL is also written to backups and sent to replicas, so it drives replication lag, backup size and checkpoints. 20K of its records are full-page images: the first change to each page after a checkpoint logs the whole page, compressed with wal_compression.
+impact: 200 MB of WAL
+metric: Log written
+metric: Share of log
+metric: Per row
+fix: Touch each page once per checkpoint: batch the changes (one statement for many rows, sorted by key) rather than many scattered single-row writes. wal_compression already shrinks full-page images; a longer checkpoint interval (checkpoint_timeout, max_wal_size) logs fewer of them.
+verify: Between two scans, the WAL it writes per row should drop: pg_stat_statements keeps running totals, so compare its WAL and the rows it changed in a scan taken once the change is live and one a day or more later (200 MB for 20K rows in this scan)."#,
+    );
+}
+
+#[test]
+fn a_share_of_the_wal_on_a_table_with_an_unread_index() {
+    use culprit_core::QueryCosts;
+    let costs = QueryCosts { log_bytes: Some(2_048.0 * MB), log_share: Some(0.6), ..Default::default() };
+    let mut s = logging("postgres-demo", "UPDATE events SET note = $1 WHERE id = $2", None, costs);
+    s.pressure.get_or_insert_with(Default::default).uptime_hours = Some(240.0);
+    let mut idle = s.indexes.iter().find(|i| i.table == "events").expect("an index on events").clone();
+    idle.name = "events_idle_idx".into();
+    idle.columns = vec!["kind".into()];
+    (idle.is_primary_key, idle.is_unique, idle.is_clustered) = (false, false, false);
+    idle.reads = Some(0.0);
+    idle.size_bytes = Some(8.0 * MB);
+    s.indexes.push(idle);
+    says(
+        &run("log-volume", &s),
+        r#"id: log-volume:9065391607317686058
+title: An update of events writes 60% of the WAL statements write
+summary: It wrote 2.0 GB of WAL since its statistics began 5 hours ago: 60% of what statements wrote. Every byte of WAL is also written to backups and sent to replicas, so it drives replication lag, backup size and checkpoints.
+impact: 2.0 GB of WAL
+metric: Log written
+metric: Share of log
+fix: Touch each page once per checkpoint: batch the changes (one statement for many rows, sorted by key) rather than many scattered single-row writes. Every index on the table adds its own WAL, and events has one nobody reads: drop it (see Indexes). If full-page images dominate, a longer checkpoint interval (checkpoint_timeout, max_wal_size) logs fewer of them, and wal_compression shrinks them if it is off.
+verify: Between two scans, the WAL it writes per row should drop: pg_stat_statements keeps running totals, so compare its WAL and the rows it changed in a scan taken once the change is live and one a day or more later (2.0 GB for 0 rows in this scan)."#,
+    );
+}
+
+#[test]
+fn wal_of_a_writer_that_stopped() {
+    use culprit_core::QueryCosts;
+    let costs = QueryCosts { log_bytes: Some(2_048.0 * MB), log_share: Some(0.6), ..Default::default() };
+    let mut s = logging("postgres-demo", "UPDATE events SET note = $1 WHERE id = $2", Some(20_000.0), costs);
+    stopped(&mut s);
+    says(
+        &run("log-volume", &s),
+        r#"id: log-volume:9065391607317686058
+title: An update of events wrote 105 KB of WAL per row it changed
+summary: It wrote 2.0 GB of WAL in the last 3 days: 60% of what statements wrote, about 105 KB per row it changed. Every byte of WAL is also written to backups and sent to replicas, so it drives replication lag, backup size and checkpoints.
+impact: 2.0 GB of WAL
+metric: Log written
+metric: Share of log
+metric: Per row
+fix: Touch each page once per checkpoint: batch the changes (one statement for many rows, sorted by key) rather than many scattered single-row writes. If full-page images dominate, a longer checkpoint interval (checkpoint_timeout, max_wal_size) logs fewer of them, and wal_compression shrinks them if it is off.
+verify: Re-scan: its share of the WAL and the bytes per row should drop."#,
+    );
+}
+
+#[test]
+fn transaction_log_on_sql_server() {
+    use culprit_core::QueryCosts;
+    let costs = || QueryCosts { log_bytes: Some(2_048.0 * MB), log_share: Some(0.6), ..Default::default() };
+    let mut findings = run(
+        "log-volume",
+        &logging("mssql-demo", "INSERT INTO shop.orders (customer_id) VALUES (@P1)", Some(100_000.0), costs()),
+    );
+    findings.extend(run(
+        "log-volume",
+        &logging("mssql-demo", "UPDATE shop.orders SET status = @P1 WHERE id = @P2", Some(100_000.0), costs()),
+    ));
+    let columns = [("id", "int"), ("body", "nvarchar(max)")];
+    let mut s = large("mssql-demo", "support_tickets", &columns);
+    statement(&mut s, "301", "INSERT INTO shop.support_tickets (body) VALUES (@P1)", 2_000.0, 1.0, 10.0);
+    s.workload.as_mut().unwrap().queries.retain(|q| q.id == "301");
+    let q = &mut s.workload.as_mut().unwrap().queries[0];
+    q.costs =
+        Some(QueryCosts { log_bytes: Some(2_000.0 * 300.0 * 1024.0), log_share: Some(0.9), ..Default::default() });
+    findings.extend(run("log-volume", &s));
+    says(
+        &findings,
+        r#"id: log-volume:7
+title: An insert into orders writes 21.0 KB of transaction log per row it changes
+summary: It wrote 2.0 GB of transaction log in the last 5 hours: 60% of what statements wrote, about 21.0 KB per row it changed. Every byte of transaction log is also written to backups and sent to replicas, so it drives replication lag, backup size and checkpoints.
+impact: 2.0 GB of transaction log
+metric: Log written
+metric: Share of log
+metric: Per row
+fix: An insert logs every row it adds in full, with an entry in each index: this much transaction log is this much data. Store less per row (large values compressed as they're written, or kept in object storage with a reference in the row), and commit many rows per transaction rather than one.
+verify: Re-scan: its share of the transaction log and the bytes per row should drop.
+
+id: log-volume:7
+title: An update of orders writes 21.0 KB of transaction log per row it changes
+summary: It wrote 2.0 GB of transaction log in the last 5 hours: 60% of what statements wrote, about 21.0 KB per row it changed. Every byte of transaction log is also written to backups and sent to replicas, so it drives replication lag, backup size and checkpoints.
+impact: 2.0 GB of transaction log
+metric: Log written
+metric: Share of log
+metric: Per row
+fix: Log this heavy usually means wide rows rewritten whole, many indexes updated, or one transaction per row. Batch writes into transactions of about a thousand rows, and update only the columns that change.
+verify: Re-scan: its share of the transaction log and the bytes per row should drop.
+
+id: log-volume:301
+title: An insert into support_tickets writes 300 KB of transaction log per row it changes
+summary: It wrote 586 MB of transaction log in the last 24 hours: 90% of what statements wrote, about 300 KB per row it changed. Every byte of transaction log is also written to backups and sent to replicas, so it drives replication lag, backup size and checkpoints.
+impact: 586 MB of transaction log
+metric: Log written
+metric: Share of log
+metric: Per row
+fix: The rows of support_tickets average 309 KB, almost all of it large values, and every insert or update that sets them writes them to the transaction log in full: batching the writes won't shrink that, smaller or fewer values will. For values that must stay, COMPRESS() them as they're written (GZip; DECOMPRESS() reads them back), or keep them in object storage and store a reference.
+verify: Re-scan: its share of the transaction log and the bytes per row should drop."#,
+    );
+}

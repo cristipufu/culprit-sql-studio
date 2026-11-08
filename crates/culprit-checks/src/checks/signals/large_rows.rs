@@ -112,21 +112,6 @@ pub(super) fn large_values(t: &TableStat) -> Option<(f64, f64)> {
     (size / versions >= LARGE_ROW_BYTES && large / size >= LARGE_VALUE_SHARE).then(|| (size / rows, large / size))
 }
 
-/// What shrinks large values that must stay: large-rows' fix, which log-volume points to for the log they make.
-pub(super) fn compress_advice(engine: Engine) -> &'static str {
-    match engine {
-        Engine::Postgres => {
-            "LZ4 compresses them faster than the default (ALTER TABLE … ALTER COLUMN … SET COMPRESSION lz4, PostgreSQL 14+), or keep them in object storage and store a reference"
-        }
-        Engine::Yugabyte => {
-            "review supported DocDB compression and the application's representation of large values, or keep them in object storage and store a reference; PostgreSQL TOAST compression settings do not describe DocDB"
-        }
-        Engine::Mssql | Engine::Mysql | Engine::Sqlite => {
-            "COMPRESS() them as they're written (GZip; DECOMPRESS() reads them back), or keep them in object storage and store a reference"
-        }
-    }
-}
-
 /// The rows a table holds, as far as its size per row goes. PostgreSQL's live-row counter starts again from zero after
 /// a statistics reset, a crash or a failover, while the planner's count (reltuples) doesn't: the larger of the two.
 pub(super) fn table_rows(t: &TableStat) -> Option<f64> {
