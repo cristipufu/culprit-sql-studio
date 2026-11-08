@@ -213,8 +213,8 @@ settings. `workload.rs` reads statement counters, families or digests, slow-log 
 an explicit `CollectedWorkload` to its caller. `collect.rs` owns concurrent source orchestration, coverage accounting
 and snapshot assembly. Individual source errors still become notes and unavailable capabilities in that one place.
 
-PostgreSQL's native parser owns generic-plan and normalized-statement annotations in `plan_json.rs`, so reparsing a
-saved plan does not depend on collection orchestration. Shared identifier quoting stays with the SQL protocol helpers
+PostgreSQL's native parser owns generic-plan and normalized-statement annotations in `plan_json.rs`, so every plan it
+parses carries them, whichever path captured it. Shared identifier quoting stays with the SQL protocol helpers
 in `rows.rs`. The public provider traits and PostgreSQL's SQL helper exports retain their original interfaces.
 
 YugabyteDB has its own probe, catalogs, workload, native DIST plan reader and live sources. The shared `wire` boundary
@@ -321,13 +321,11 @@ recover data an older preparation discarded, and it never claims to hold the ori
 
 `Report.provenance` records the analyzer and collector component versions, optional build revisions, actual pipeline
 registration order, and extension versions supplied by their `version()` methods. Unknown extension or external-provider
-versions remain unknown. Plan parsing records the native parser component and whether each saved query plan was
-reparsed, lacked native text, or was retained. Baseline references identify the actual historical scan ids, dates and
+versions remain unknown. Baseline references identify the actual historical scan ids, dates and
 database identities used for workload trends, query activity, inferred windows, index ages, growth and counters. Only
 workload comparisons carry workload measurement context; index and operational counters do not borrow that clock.
-Older baselines with only dates keep only dates, and never acquire today's endpoint or an id guessed from a rounded
-timestamp. Index-age history uses only this database's past scans; older event sidecars recover their source identity
-from their own saved reports within a bounded backfill.
+A baseline that names no scan keeps only its date, and never acquires today's endpoint or an id guessed from a rounded
+timestamp. Index-age history uses only this database's past scans.
 
 Saved reports use a versioned private JSON encoding: the prepared snapshot appears once, with lossless flat-path
 differences for retained input and collection. Loading restores the full report. Immutable native plan text is shared
@@ -385,8 +383,8 @@ explains the latest-only report or the counter without graphs.
 1. **Prepare**: make the snapshot say what the database says now, before anything reads it
    (`pipeline.rs::preparation()`): plans captured before a column changed type, MySQL's possible keys named with their
    columns, plan operators marked with their index's kind from the catalog (a BRIN bitmap counts pages, not rows), the
-   health counters' grades held to the evidence rules (`pressure::grade_on_evidence`), PostgreSQL's WAL write and sync
-   time kept out of statement-time waits in scans saved before the collector did so (`statement_time_without_wal`), and
+   health counters' grades held to the evidence rules (`pressure::grade_on_evidence`), PostgreSQL's I/O time held
+   within its statement time (`io_within_statement_time`), and
    MariaDB's lock time read as unknown where the slow log to a table counts a statement's whole run as it
    (`lock_time_that_counts_the_run`, through `signals::lock_time_counts_the_run`), and what MySQL's runs measured of a
    scan's filter put on the scan (`indexes::mark_measured_kept`), so the plan's own rules judge it as filtered-scan does.
@@ -413,8 +411,7 @@ mutable access to display fields, never rank, actionability, query references or
 withheld fixes, absorption and coverage. Transferring only some queries records a partial transfer and recalculates
 the source finding from its remaining evidence. Every removed detector finding must lead to a retained cause;
 fixture invariants check this chain. Missing linked queries cannot prove a whole group stopped or redistribute its
-measurements to the known subset. Older reports default to empty facts and trace and acquire current decisions when
-re-analyzed. An external `Refine` implementation can keep its original interface; the default `refine_traced`
+measurements to the known subset. An external `Refine` implementation can keep its original interface; the default `refine_traced`
 records invocation only. An extension providing its decisions overrides `refine_traced`.
 
 ### Checks
@@ -443,7 +440,8 @@ A plan regression retains a typed fast-plan baseline in the finding and digest. 
 forced or naturally selected, only with fresh, sufficiently sampled runs inside the new window that no longer meet
 the regression threshold. Losing an earlier variant alone never verifies recovery. Source failures, incompatible
 measurements, locked checks and refinement into another cause still prevent a fixed verdict.
-A source's recorded outcome decides whether it was read; a retained payload alone never establishes that.
+A source's recorded outcome decides whether it was read; a collector note never does. A check that observes its data
+directly counts what it observed, and that data's absence is never a clean result.
 
 Cumulative findings declare `VerificationBasis::CounterChange`: losing their counters is unknown, not proof of a fix, and exports ask for comparisons under representative load. This contract applies to built-in and embedded checks alike.
 
@@ -456,8 +454,8 @@ stand in for the affected one. Saved digests retain those statement identities a
 assessment or established inapplicability can confirm absence; a check missing from the assessments was not run.
 The same guard consults the refinement trace: an observation absorbed or covered by another cause was reclassified,
 so losing its old id is not proof of improvement.
-Saved digests retain the originating check in `DigestFinding.check`; older digests recover it only from an
-unambiguous registered check prefix, so a custom check namespace cannot accidentally borrow another check's result.
+Saved digests retain the originating check in `DigestFinding.check`, so a custom check namespace cannot borrow another
+check's result.
 
 Plan insights (`culprit-core/src/insights.rs`) are rules over one plan, shown in the plan viewer; the `plan-insights`
 check promotes the ones that matter to findings. `views/plan_advice.rs` applies the selected scan's workload and
@@ -539,7 +537,7 @@ data reads per database, while `pg_stat_io` and WAL are shared server sources. W
 An unknown source reset remains unknown.
 A reset of database, background-writer or archiver statistics never supplies the WAL source's period.
 
-Health counters follow these rules in `checks/pressure/health.rs`: preparation corrects saved and fresh counters, honors `Snapshot::options` for dated samples, and keeps shared or descriptive ratios ungraded. Azure CPU/I/O/log/worker assessments require 30 minutes of actual 15-second samples with at least 80% coverage per dimension; allocated cache memory is contextual. After refinement, queue and cleanup colors come from final findings. The app's query/table/storage/replica colors also use those findings instead of independent thresholds. Query Store compilation history is exact and separate (`QueryCosts::compile_history`); an old prorated compilation estimate is withdrawn on reread. Cloud episode assessments require contiguous timestamps, preserve the actual fetch period, and are cached per database and period.
+Health counters follow these rules in `checks/pressure/health.rs`: preparation corrects saved and fresh counters, honors `Snapshot::options` for dated samples, and keeps shared or descriptive ratios ungraded. Azure CPU/I/O/log/worker assessments require 30 minutes of actual 15-second samples with at least 80% coverage per dimension; allocated cache memory is contextual. After refinement, queue and cleanup colors come from final findings. The app's query/table/storage/replica colors also use those findings instead of independent thresholds. Query Store compilation history is exact and separate (`QueryCosts::compile_history`). Cloud episode assessments require contiguous timestamps, preserve the actual fetch period, and are cached per database and period.
 
 ### Views built on a report
 
@@ -563,8 +561,8 @@ units and precision without parsing display labels. Native collection and normal
 invalid numeric evidence as unknown; a measured zero stays distinct from a missing counter. SQL Server's lightweight profiling withdraws its unrecorded timing placeholders at
 its collection boundary.
 
-A missing facts object identifies an older normalized plan or a property-only external provider: one compatibility
-adapter recovers its inputs. A present object is authoritative, including unknown fields, and never inherits a
+A missing facts object identifies a property-only plan (an external provider's): one adapter reads its inputs from
+the engine's properties. A present object is authoritative, including unknown fields, and never inherits a
 conflicting raw property. Preparation updates typed facts and their inspection strings together, withdrawing stale
 derived annotations. Catalog enrichment requires an unambiguous table/index identity; an unqualified name shared by
 schemas cannot establish one. Column-type context retains schema and target type, and aliases resolve only where

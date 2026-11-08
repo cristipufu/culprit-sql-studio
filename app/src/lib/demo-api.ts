@@ -45,10 +45,7 @@ const adviceSample: () => Promise<Record<string, IndexAdvice>> = import.meta.env
   ? () => import("../../../fixtures/index-advice.sample.json").then((m) => fromRust<Record<string, IndexAdvice>>(m.default))
   : async () => ({});
 
-/**
- * The dashboard for each demo connection, made with `culprit dashboard <report> --no-live --json` from the fixture
- * reports merged with the sidecars below (pressure, waits, deadlocks), exactly as this demo serves them.
- */
+/** The dashboard for each demo connection, made with `culprit dashboard <report> --no-live --json` from the fixture reports. */
 const dashboardSample: () => Promise<Record<string, Dashboard>> = import.meta.env.DEV
   ? () => import("../../../fixtures/dashboard.sample.json").then((m) => fromRust<Record<string, Dashboard>>(m.default))
   : async () => ({});

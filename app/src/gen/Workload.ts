@@ -11,7 +11,8 @@ export type Workload = {
  */
 source: string, 
 /**
- * The same, typed: see [`Workload::kind`]. `None` in scans saved before it existed.
+ * The same, typed: see [`Workload::kind`]. `None` when the provider doesn't say (a plugin's): its source is then
+ * told by name.
  */
 kind: WorkloadKind | null, 
 /**

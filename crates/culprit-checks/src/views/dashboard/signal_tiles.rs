@@ -52,8 +52,8 @@ pub(super) fn storage(report: &Report) -> Tile {
     let files: Vec<&FileIo> =
         merged.iter().filter(|f| f.kind != FileKind::Other && waited_latency(f).is_some()).collect();
     if files.is_empty() {
-        // An engine fact only when the scan proves it; otherwise just what this scan lacks (an older scan, a login
-        // that can't read the views).
+        // An engine fact only when the scan proves it; otherwise just what this scan lacks (a login that can't read
+        // the views, a source that failed).
         let why = match s.server.engine {
             Engine::Postgres if is_off(setting(s, "track_io_timing")) => {
                 "PostgreSQL times reads and writes only with track_io_timing on.".to_string()

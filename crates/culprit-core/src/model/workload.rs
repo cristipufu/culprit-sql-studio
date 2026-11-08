@@ -33,7 +33,8 @@ pub enum WorkloadKind {
 pub struct Workload {
     /// Where the statements were read from, by name, for sentences ("Query Store covers …").
     pub source: String,
-    /// The same, typed: see [`Workload::kind`]. `None` in scans saved before it existed.
+    /// The same, typed: see [`Workload::kind`]. `None` when the provider doesn't say (a plugin's): its source is then
+    /// told by name.
     pub kind: Option<WorkloadKind>,
     /// The source keeps history by time, so a scan can choose its window (Query Store), or records a period of its own
     /// (an application's log): its numbers are of that period, never running totals to subtract. Cumulative sources
@@ -563,11 +564,10 @@ impl Workload {
         (!parts.is_empty()).then(|| format!("{} over {}", crate::format::list(&parts), self.window_phrase()))
     }
 
-    /// The source's running totals started at a time nobody can say (pg_stat_statements before PostgreSQL 14 keeps no
-    /// reset time, and its statistics outlive restarts), or its log has no timestamps: `window_hours` is 0 and no rate
-    /// can be derived from it.
-    /// Whether nobody can say how long the workload's numbers cover: a source that didn't say, or a log whose records
-    /// carry no times.
+    /// Whether nobody can say how long the workload's numbers cover (`window_hours` is 0, and no rate is derived from
+    /// it): running totals that started at a time nobody can say (pg_stat_statements before PostgreSQL 14 keeps no
+    /// reset time, and its statistics outlive restarts), a window whose bounds contradict its length, or a log whose
+    /// records carry no times.
     pub fn window_unknown(&self) -> bool {
         self.measurement_hours() <= 0.0
     }

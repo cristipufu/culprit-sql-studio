@@ -372,7 +372,7 @@ pub struct TableStat {
     /// since the scan before without the server restarting: a statistics reset for the table, a database taken offline,
     /// restored or failed over. What they count covers the time since then at least. `None`: as old as the server's.
     pub counters_since: Option<String>,
-    // The engine's table kind (SQLite: "table" or "virtual"). Absent in older scans and where not collected.
+    // The engine's table kind (SQLite: "table" or "virtual"). Absent where not collected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     // The table's original CREATE statement, where collected. Virtual tables must keep their module and options.

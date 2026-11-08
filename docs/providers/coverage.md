@@ -10,7 +10,7 @@ prove that a database is healthy. Findings distinguish a measured negative resul
 
 Each report's `assessments` distinguishes findings, assessed checks without a finding, insufficient evidence,
 unavailable sources and inapplicable checks. Supported findings can coexist with incomplete evidence. The app's
-Check coverage panel and CLI JSON retain the reasons; older reports without assessments need fresh analysis.
+Check coverage panel and CLI JSON retain the reasons.
 
 A scan describes one database. Server-wide or shared-node measurements stay labeled with that scope and are not
 charged to one database or statement. Restricted role visibility and incomplete contributors remain explicit.

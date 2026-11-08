@@ -214,8 +214,8 @@ pub fn mark_measured_kept(snapshot: &mut Snapshot) {
     if snapshot.server.engine != Engine::Mysql {
         return;
     }
-    // Saved snapshots can carry an annotation inferred by an older version. Re-establish it from today's evidence
-    // rules, including withdrawing it when a sample LIMIT never described all of the statement's runs.
+    // A prepared snapshot analyzed again carries the annotation its earlier analysis made. Re-establish it from today's
+    // evidence rules, including withdrawing it when a sample LIMIT never described all of the statement's runs.
     fn clear(node: &mut culprit_core::PlanNode) {
         node.facts_mut().measured_kept_share = None;
         node.props.remove(culprit_core::plan::MEASURED_KEPT);

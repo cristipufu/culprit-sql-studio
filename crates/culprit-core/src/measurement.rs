@@ -1,5 +1,6 @@
 //! The identity and clock behind a measurement. Comparisons ask this contract before subtracting values.
-//! Older reports retain an explicit legacy comparison; a known endpoint is never filled in from today's connection.
+//! A scan that doesn't say where its database is compares with none; a known endpoint is never filled in from today's
+//! connection.
 
 use crate::{Engine, Period, Snapshot, Workload, WorkloadKind, format::epoch_seconds};
 use serde::{Deserialize, Serialize};

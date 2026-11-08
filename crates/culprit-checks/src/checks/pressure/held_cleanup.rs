@@ -26,7 +26,7 @@ const SLOT_FAR_BEHIND: f64 = 100_000_000.0;
 pub fn held_cleanup(snapshot: &Snapshot) -> Vec<Finding> {
     let Some(t) = pressure(snapshot).and_then(|p| p.oldest_transaction.as_ref()) else { return Vec::new() };
     let engine = snapshot.server.engine;
-    // Collectors report only what holds this database's cleanup; scans before they said what it is held a session.
+    // Collectors report only what holds this database's cleanup, and say what it is.
     let holder = t.holder;
     let slot = holder == CleanupHolder::ReplicationSlot;
     let held_gb = t.held_bytes.unwrap_or(0.0) / 1024.0 / 1024.0 / 1024.0;

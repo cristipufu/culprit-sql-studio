@@ -230,7 +230,7 @@ pub(super) fn slot_finding(snapshot: &Snapshot, r: &Replica) -> Option<Finding> 
     } else {
         " It is a physical slot: a standby or a backup tool streams WAL through it."
     };
-    // Before 13 nothing can cap a slot; from 13 the scan reads whether something does (older scans didn't).
+    // Before 13 nothing can cap a slot; from 13 the scan reads whether something does, unless the read failed.
     let can_cap = culprit_core::version_at_least(&snapshot.server.version, [13, 0, 0]);
     let risk = match (capped, cap_known, can_cap) {
         (true, _, _) => format!(

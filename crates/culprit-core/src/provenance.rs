@@ -117,8 +117,8 @@ pub struct BaselineReference {
 }
 
 impl Snapshot {
-    /// The historical inputs retained with these measurements. Older baselines keep their date without inventing
-    /// a scan id or borrowing the current endpoint. Workload clocks belong only to the workload inputs using them.
+    /// The historical inputs retained with these measurements. A baseline that names no scan keeps its date without
+    /// inventing a scan id or borrowing the current endpoint. Workload clocks belong only to the workload inputs using them.
     pub fn baseline_references(&self) -> Vec<BaselineReference> {
         let mut references = self.workload.as_ref().map(|w| w.history_inputs.clone()).unwrap_or_default();
         let mut record = |purpose, at: &str, reference: &Option<ScanReference>, measurement| {

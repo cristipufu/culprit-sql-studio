@@ -531,7 +531,7 @@ fn prop_bool(value: &str) -> Option<bool> {
     }
 }
 
-/// Runtime counters are authoritative. Only older property-only plans need this compatibility path.
+/// Runtime counters are authoritative. A plan without facts (an external provider's) is read from its properties.
 pub(crate) fn spill_pages(node: &crate::PlanNode) -> Option<f64> {
     node.runtime.as_ref().and_then(|r| r.spill_pages).and_then(nonnegative).or_else(|| {
         node.facts
@@ -542,7 +542,8 @@ pub(crate) fn spill_pages(node: &crate::PlanNode) -> Option<f64> {
 }
 
 /// Number of participating workers/processes, their total rows and the busiest worker's rows. Native plans retain
-/// the actual worker vector in NodeRuntime; old SQL Server plans retained only its maximum and count.
+/// the actual worker vector in NodeRuntime; a plan without facts (an external provider's) is read from its
+/// properties, where SQL Server's showplan states only the maximum and count.
 pub(crate) fn parallel_distribution(node: &crate::PlanNode, engine: crate::Engine) -> Option<(usize, f64, f64)> {
     if !matches!(engine, crate::Engine::Mssql | crate::Engine::Postgres) {
         return None;

@@ -370,7 +370,7 @@ pub struct Plan {
     // Immutable native text is shared across prepared, replay and collected pictures. JSON remains a string.
     pub raw: Option<std::sync::Arc<str>>,
     // Structural observations, with catalog and workload context when attached to a scan. Recomputed when a saved
-    // report is read; absent in older files.
+    // report is read; absent until computed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub insights: Option<PlanInsights>,
