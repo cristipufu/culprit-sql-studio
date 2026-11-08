@@ -8,7 +8,7 @@ use culprit_core::{
     Severity, SignalStatus, SignalUnit, Snapshot, SubjectKind, Unit, format,
 };
 
-use culprit_core::Check;
+use culprit_core::{Check, t};
 
 use crate::support::*;
 
@@ -88,13 +88,44 @@ fn waits_window(snapshot: &Snapshot) -> (Option<f64>, bool) {
 const SEEN_ONCE: &str = "Seen once, when the scan ran, with nothing on record before it: sample Waits → Right now a few \
                          times before acting on it.";
 
+/// How long the counters kept since the server started have counted, as a sentence says it mid-way: "since SQL Server
+/// started 3 days ago".
 fn uptime_phrase(snapshot: &Snapshot) -> String {
+    uptime(snapshot, false)
+}
+
+/// [`uptime_phrase`] opening a sentence: "Since SQL Server started 3 days ago".
+fn uptime_opening(snapshot: &Snapshot) -> String {
+    uptime(snapshot, true)
+}
+
+fn uptime(snapshot: &Snapshot, opening: bool) -> String {
     let engine = snapshot.server.name();
-    match pressure(snapshot).and_then(|p| p.uptime_hours) {
-        Some(h) if h >= 47.0 => format!("since {engine} started {} days ago", (h / 24.0).round()),
-        Some(h) if h >= 1.5 => format!("since {engine} started {} hours ago", h.round()),
-        Some(h) => format!("since {engine} started {} minutes ago", (h * 60.0).round().max(1.0)),
-        None => format!("since {engine} started"),
+    match (pressure(snapshot).and_then(|p| p.uptime_hours), opening) {
+        (Some(h), false) if h >= 47.0 => {
+            t!("common.since_started.days", engine = engine, days = format!("{}", (h / 24.0).round()))
+        }
+        (Some(h), true) if h >= 47.0 => {
+            t!("common.since_started.days_opening", engine = engine, days = format!("{}", (h / 24.0).round()))
+        }
+        (Some(h), false) if h >= 1.5 => {
+            t!("common.since_started.hours", engine = engine, hours = format!("{}", h.round()))
+        }
+        (Some(h), true) if h >= 1.5 => {
+            t!("common.since_started.hours_opening", engine = engine, hours = format!("{}", h.round()))
+        }
+        (Some(h), false) => t!(
+            "common.since_started.minutes",
+            engine = engine,
+            minutes = format!("{}", (h * 60.0).round().max(1.0))
+        ),
+        (Some(h), true) => t!(
+            "common.since_started.minutes_opening",
+            engine = engine,
+            minutes = format!("{}", (h * 60.0).round().max(1.0))
+        ),
+        (None, false) => t!("common.since_started.unknown", engine = engine),
+        (None, true) => t!("common.since_started.unknown_opening", engine = engine),
     }
 }
 
