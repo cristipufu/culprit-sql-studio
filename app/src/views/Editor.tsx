@@ -1,8 +1,7 @@
-import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
+import type { Extension } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
-import { EditorView, basicSetup } from "codemirror";
 import { TriangleAlert } from "lucide-react";
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmRun } from "../components/ConfirmRun";
 import { rememberLook, rememberedLook, type PlanLook } from "../components/PlanSurface";
 import { SavedRail } from "../components/SavedRail";
@@ -21,11 +20,12 @@ import { type Acted, EditorExecution, type Output } from "../lib/editor-executio
 import type { PendingRun } from "../lib/run-batch";
 import { remember, rememberedChoice } from "../lib/prefs";
 import { currentReport, getState, loadSaved, setState, toast, useStore } from "../lib/store";
-import { lintField, sqlColors, sqlLanguage } from "./editor/codemirror";
+import { sqlLanguage } from "./editor/codemirror";
 import { PLACEHOLDER, useLiveLint, useSplit } from "./editor/hooks";
 import { LintPanel } from "./editor/LintPanel";
 import { EmptyOutput, OutputPane } from "./editor/OutputPane";
 import { TabStrip } from "./editor/TabStrip";
+import { useTabViews } from "./editor/tab-views";
 import { Toolbar } from "./editor/Toolbar";
 
 const RAIL_KEY = "culprit.editor.rail";
@@ -37,10 +37,6 @@ const STILL_RUNNING = "The statement already sent finishes on the database; noth
 const catalogs = new Map<string, Catalog>();
 
 export default function Editor({ connection }: { connection: ConnectionInfo }) {
-  const host = useRef<HTMLDivElement>(null);
-  const view = useRef<EditorView | null>(null);
-  const states = useRef(new Map<string, EditorState>());
-  const language = useRef(new Compartment());
   const [tabStorage] = useState(() => new EditorTabStorage(connection, PLACEHOLDER));
   const [tabs, setTabs] = useState<Tabs>(tabStorage.initial);
   const [persistenceError, setPersistenceError] = useState(tabStorage.error);
@@ -99,37 +95,32 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
     setPersistenceError(tabStorage.write(value));
   }, [tabStorage, connection.name]);
 
-  const currentText = () => view.current?.state.doc.toString() ?? "";
-
-  /** The text to act on: the selection when there is one, otherwise the whole tab. */
-  const target = () => {
-    const state = view.current?.state;
-    if (!state) return "";
-    const selected = state.selection.ranges.map((r) => state.sliceDoc(r.from, r.to)).join("\n").trim();
-    return selected || state.doc.toString().trim();
-  };
-
-  const stateFor = useCallback(
-    (tab: Tab, actions: Extension) =>
-      EditorState.create({
-        doc: tab.sql,
-        extensions: [
-          basicSetup,
-          Prec.high(sqlColors),
-          lintField,
-          language.current.of(languageExtension()),
-          // Above CodeMirror's defaults, which bind Mod-Enter to "insert blank line".
-          Prec.highest(actions),
-          EditorView.updateListener.of((update) => {
-            if (!update.docChanged) return;
-            const text = update.state.doc.toString();
-            const id = tabsRef.current.active;
-            updateTabs((t) => ({ ...t, tabs: t.tabs.map((x) => (x.id === id ? { ...x, sql: text } : x)) }));
-          }),
-        ],
-      }),
-    [languageExtension, updateTabs],
+  // The editor's own keys, read when pressed: the actions they call are this render's.
+  const actionKeys = useRef<Extension>(
+    keymap.of([
+      { key: "Mod-Enter", preventDefault: true, run: () => (void actions.current.run(actions.current.target()), true) },
+      { key: "Mod-e", preventDefault: true, run: () => (void actions.current.explain("estimated"), true) },
+      { key: "Mod-Shift-e", preventDefault: true, run: () => (void actions.current.explain("analyze"), true) },
+      { key: "Mod-s", preventDefault: true, run: () => (void actions.current.save(), true) },
+      { key: "Mod-t", preventDefault: true, run: () => (actions.current.newTab(), true) },
+      { key: "Mod-Shift-w", preventDefault: true, run: () => (actions.current.closeTab(tabsRef.current.active), true) },
+      { key: "Mod-Shift-]", preventDefault: true, run: () => (actions.current.cycle(1), true) },
+      { key: "Mod-Shift-[", preventDefault: true, run: () => (actions.current.cycle(-1), true) },
+    ]),
   );
+
+  // The CodeMirror view and each tab's editing state.
+  const views = useTabViews({
+    language: languageExtension,
+    keys: actionKeys.current,
+    onEdit: (text) => {
+      const id = tabsRef.current.active;
+      updateTabs((t) => ({ ...t, tabs: t.tabs.map((x) => (x.id === id ? { ...x, sql: text } : x)) }));
+    },
+    initial: () => tabsRef.current.tabs.find((tab) => tab.id === tabsRef.current.active) ?? tabsRef.current.tabs[0]!,
+    rebuild: connection.engine,
+  });
+  const { show, forget, view, textOf } = views;
 
   const liveLint = useLiveLint(connection.name, activeTab, view);
 
@@ -171,7 +162,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
   };
 
   const explain = async (mode: ExplainMode) => {
-    const raw = target();
+    const raw = views.target();
     if (!raw || raw === PLACEHOLDER.trim() || (mode === "analyze" && !measuresRuns(connection.engine))) return;
     const statements = splitSqlStatements(raw);
     if (statements.length === 0) {
@@ -185,7 +176,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
   const save = async (name?: string) => {
     const tab = tabsRef.current.tabs.find((t) => t.id === tabsRef.current.active);
     if (!tab) return;
-    const text = currentText().trim();
+    const text = views.text().trim();
     if (!text || text === PLACEHOLDER.trim()) return toast("Write a query before saving it");
     const existing = getState().saved?.find((q) => q.name === tab.saved);
     if (!tab.saved && !name) return setNaming("");
@@ -208,18 +199,12 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
 
   const activate = useCallback(
     (id: string, added?: Tab) => {
-      const editor = view.current;
-      const current = tabsRef.current.active;
       if (!added && !tabsRef.current.tabs.some((t) => t.id === id)) return;
-      if (editor && tabsRef.current.tabs.some((t) => t.id === current)) states.current.set(current, editor.state);
       updateTabs((t) => ({ tabs: added ? [...t.tabs, added] : t.tabs, active: id }));
       const tab = tabsRef.current.tabs.find((t) => t.id === id);
-      if (editor && tab) {
-        editor.setState(states.current.get(id) ?? stateFor(tab, actionKeys.current));
-        editor.focus();
-      }
+      if (tab) show(tab);
     },
-    [stateFor, updateTabs],
+    [show, updateTabs],
   );
 
   const newTab = useCallback(
@@ -241,31 +226,26 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
       const list = tabsRef.current.tabs;
       if (!list.some((t) => t.id === id)) return;
       if (execution.retire(id)) toast(STILL_RUNNING);
+      forget(id);
       if (list.length === 1) {
-        states.current.delete(id);
         setOutputs({});
         const fresh = newEditorTab();
         updateTabs(() => ({ tabs: [fresh], active: fresh.id }));
-        view.current?.setState(stateFor(fresh, actionKeys.current));
+        show(fresh, false);
         return;
       }
       const wasActive = tabsRef.current.active === id;
       const index = list.findIndex((t) => t.id === id);
       const rest = list.filter((t) => t.id !== id);
-      states.current.delete(id);
       setOutputs((o) => {
         const { [id]: _, ...others } = o;
         return others;
       });
       const next = tabsRef.current.active === id ? rest[Math.max(0, index - 1)]!.id : tabsRef.current.active;
       updateTabs(() => ({ tabs: rest, active: next }));
-      if (view.current && wasActive) {
-        const tab = rest.find((t) => t.id === next)!;
-        view.current.setState(states.current.get(next) ?? stateFor(tab, actionKeys.current));
-        view.current.focus();
-      }
+      if (wasActive) show(rest.find((t) => t.id === next)!);
     },
-    [stateFor, updateTabs, execution],
+    [show, forget, updateTabs, execution],
   );
 
   const cycle = (delta: number) => {
@@ -274,8 +254,8 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
     activate(list[(index + delta + list.length) % list.length]!.id);
   };
 
-  const actions = useRef({ run, explain, save, newTab, closeTab, cycle, target });
-  actions.current = { run, explain, save, newTab, closeTab, cycle, target };
+  const actions = useRef({ run, explain, save, newTab, closeTab, cycle, target: views.target });
+  actions.current = { run, explain, save, newTab, closeTab, cycle, target: views.target };
 
   const openQuery = useCallback(
     (query: SavedQuery, thenRun: boolean) => {
@@ -287,44 +267,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
     },
     [activate, newTab],
   );
-  const actionKeys = useRef<Extension>(
-    keymap.of([
-      { key: "Mod-Enter", preventDefault: true, run: () => (void actions.current.run(actions.current.target()), true) },
-      { key: "Mod-e", preventDefault: true, run: () => (void actions.current.explain("estimated"), true) },
-      { key: "Mod-Shift-e", preventDefault: true, run: () => (void actions.current.explain("analyze"), true) },
-      { key: "Mod-s", preventDefault: true, run: () => (void actions.current.save(), true) },
-      { key: "Mod-t", preventDefault: true, run: () => (actions.current.newTab(), true) },
-      { key: "Mod-Shift-w", preventDefault: true, run: () => (actions.current.closeTab(tabsRef.current.active), true) },
-      { key: "Mod-Shift-]", preventDefault: true, run: () => (actions.current.cycle(1), true) },
-      { key: "Mod-Shift-[", preventDefault: true, run: () => (actions.current.cycle(-1), true) },
-    ]),
-  );
-
   // ── lifecycle ──────────────────────────────────────────────────────────────────────────────────
-  // The connection owns this view; tab switches swap states, so a new state function doesn't rebuild it.
-  const initialState = useEffectEvent((tab: Tab) => stateFor(tab, actionKeys.current));
-  useEffect(() => {
-    if (!host.current) return;
-    const current = tabsRef.current;
-    const tab = current.tabs.find((tab) => tab.id === current.active) ?? current.tabs[0]!;
-    const editor = new EditorView({ parent: host.current, state: initialState(tab) });
-    view.current = editor;
-    editor.focus();
-    return () => {
-      states.current.clear();
-      editor.destroy();
-      view.current = null;
-    };
-  }, [connection.engine]);
-
-  // New table/column names: reconfigure the visible tab and drop cached states so other tabs pick them up on switch.
-  useEffect(() => {
-    const editor = view.current;
-    if (!editor) return;
-    editor.dispatch({ effects: language.current.reconfigure(languageExtension()) });
-    for (const id of [...states.current.keys()]) if (id !== tabsRef.current.active) states.current.delete(id);
-  }, [languageExtension]);
-
   const refreshCatalog = useCallback(async () => {
     setCatalogBusy(true);
     try {
@@ -352,12 +295,10 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
     if (!incoming || getState().editorSql !== incoming || !view.current) return;
     setState({ editorSql: null });
     const wanted = incoming.trim();
-    const textOf = (tab: Tab) =>
-      tab.id === tabsRef.current.active && view.current ? view.current.state.doc.toString() : (states.current.get(tab.id)?.doc.toString() ?? tab.sql);
     const open = wanted ? tabsRef.current.tabs.find((t) => textOf(t).trim() === wanted) : undefined;
     if (open) activate(open.id);
     else newTab(incoming);
-  }, [incoming, newTab, activate]);
+  }, [incoming, newTab, activate, view, textOf]);
 
   // A saved query picked in the command palette.
   useEffect(() => {
@@ -410,10 +351,10 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
             savedName={activeTab.saved}
             naming={naming}
             onNaming={setNaming}
-            onRun={() => run(target())}
+            onRun={() => run(views.target())}
             onExplain={explain}
             onSave={save}
-            onCancelNaming={() => view.current?.focus()}
+            onCancelNaming={views.focus}
             catalogBusy={catalogBusy}
             tables={effectiveCatalog ? effectiveCatalog.tables.length : null}
             onRefreshCatalog={refreshCatalog}
@@ -425,7 +366,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
           )}
           <LintPanel findings={liveLint} onFix={applyLintFix} onFixAll={applyAllLintFixes} />
           <div className="editor-body" ref={body}>
-            <div className="editor-host" ref={host} style={{ flex: `0 0 ${split * 100}%` }} />
+            <div className="editor-host" ref={views.host} style={{ flex: `0 0 ${split * 100}%` }} />
             <div className="editor-splitter" onPointerDown={drag} role="separator" aria-orientation="horizontal" />
             <div className="editor-output">
               <OutputPane
@@ -448,7 +389,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
           connection={connection}
           onCancel={() => {
             execution.cancel(asking.tab);
-            view.current?.focus();
+            views.focus();
           }}
           onConfirm={() => void execution.confirm(asking.tab).then((acted) => settle(asking.tab, acted))}
         />

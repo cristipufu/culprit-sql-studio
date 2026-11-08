@@ -52,3 +52,18 @@ test("Tabs open and close from the keyboard, and keep their SQL across a reload"
   await page.keyboard.press("6");
   await expect(page.locator(".cm-content")).toContainText("SELECT 1 AS kept");
 });
+
+test("Each tab keeps its own text and undo history while another is shown", async ({ page }) => {
+  await openEditor(page);
+  await replaceSql(page, "SELECT 1 AS first");
+  await page.keyboard.press("ControlOrMeta+t");
+  await replaceSql(page, "SELECT 2 AS second");
+  await page.keyboard.press("ControlOrMeta+Shift+[");
+  await expect(page.getByRole("tab", { name: "Query 1" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".cm-content")).toContainText("SELECT 1 AS first");
+  // The kept state is the tab's own: undo there takes back that tab's typing, not the other tab's.
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.locator(".cm-content")).not.toContainText("SELECT 1 AS first");
+  await page.keyboard.press("ControlOrMeta+Shift+]");
+  await expect(page.locator(".cm-content")).toContainText("SELECT 2 AS second");
+});
