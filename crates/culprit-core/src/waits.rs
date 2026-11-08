@@ -409,6 +409,36 @@ pub fn category_info(key: &str, engine: Engine) -> (String, String) {
     }
 }
 
+/// What a category means, in its first sentence alone: [`category_info`]'s meaning, short enough for a tile. Its own
+/// message, never the meaning cut at a full stop.
+pub fn category_gist(key: &str, engine: Engine) -> String {
+    match key {
+        "rpc" => t!("core.waits.category.rpc.gist"),
+        "storage" => t!("core.waits.category.storage.gist"),
+        "cpu" => match engine {
+            Engine::Mssql => t!("core.waits.category.cpu.gist_threadpool"),
+            _ => t!("core.waits.category.cpu.gist"),
+        },
+        "io" => t!("core.waits.category.io.gist"),
+        "rows" => t!("core.waits.category.rows.gist"),
+        "lock" => t!("core.waits.category.lock.gist"),
+        "latch" => t!("core.waits.category.latch.gist"),
+        "log" => match engine {
+            Engine::Yugabyte => t!("core.waits.category.log.gist.yugabyte"),
+            Engine::Postgres => t!("core.waits.category.log.gist.postgres"),
+            Engine::Mysql => t!("core.waits.category.log.gist.mysql"),
+            Engine::Mssql => t!("core.waits.category.log.gist.mssql"),
+            Engine::Sqlite => t!("core.waits.category.log.gist.sqlite"),
+        },
+        "network" => t!("core.waits.category.network.gist", engine = engine.label()),
+        "parallelism" => t!("core.waits.category.parallelism.gist"),
+        "memory" => t!("core.waits.category.memory.gist"),
+        "compilation" => t!("core.waits.category.compilation.gist"),
+        // Its meaning is one sentence already.
+        _ => category_info(key, engine).1,
+    }
+}
+
 /// Fold an engine category name into the shared keys.
 pub fn category_key(category: &str) -> &'static str {
     match category.to_ascii_lowercase().as_str() {
@@ -470,6 +500,9 @@ mod tests {
             ] {
                 let (label, meaning) = category_info(key, engine);
                 out.push(format!("{engine:?} {key}: {label} | {meaning}"));
+                // Its gist is the meaning's first sentence, word for word as a tile has always said it.
+                let first = meaning.find(". ").map_or(meaning.as_str(), |end| &meaning[..=end]);
+                assert_eq!(category_gist(key, engine), first, "{engine:?} {key}");
             }
         }
         let got = out.join("\n");

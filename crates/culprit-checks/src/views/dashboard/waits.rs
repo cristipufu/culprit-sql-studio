@@ -144,7 +144,7 @@ pub(super) fn waits(s: &Snapshot) -> Tile {
     } else if since_start {
         Some(format!("{}.", r.source.trim_end_matches('.')))
     } else {
-        lead.detail.clone().or_else(|| first_sentence(&lead.meaning))
+        lead.detail.clone().or_else(|| Some(culprit_core::waits::category_gist(&lead.key, s.server.engine)))
     };
     let label = if s.server.engine == Engine::Postgres {
         t!("view.dashboard.waits.metric.statement_time")
@@ -192,17 +192,6 @@ pub(super) fn in_sentence(key: &str) -> String {
         "compilation" => t!("view.dashboard.waits.category.compilation"),
         _ => t!("view.dashboard.waits.category.other"),
     }
-}
-
-pub(super) fn first_sentence(text: &str) -> Option<String> {
-    let text = text.trim();
-    if text.is_empty() {
-        return None;
-    }
-    Some(match text.find(". ") {
-        Some(end) => text[..=end].to_string(),
-        None => text.to_string(),
-    })
 }
 
 pub(super) fn waits_missing(s: &Snapshot) -> Tile {
