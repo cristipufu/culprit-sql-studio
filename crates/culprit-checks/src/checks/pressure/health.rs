@@ -441,6 +441,343 @@ mod tests {
         }
     }
 
+    /// Each signal's key, label, status and what healthy looks like, a line each.
+    fn told(s: &Snapshot) -> String {
+        let p = s.pressure.as_ref().unwrap();
+        p.signals
+            .iter()
+            .map(|s| format!("{} | {} | {:?} | {}", s.key, s.label, s.status, s.healthy.as_deref().unwrap_or("-")))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    // What the graded signals say, word for word: their words come from locales/en.json, and moving them there must not
+    // change a word of English.
+    #[test]
+    fn health_counters_say_what_they_said() {
+        const KEYS: [&str; 25] = [
+            "signal-wait",
+            "cache-hit",
+            "buffer-pool-hit",
+            "page-life",
+            "tmp-disk-tables",
+            "temp-bytes",
+            "deadlocks",
+            "rollbacks",
+            "row-lock-avg",
+            "max-used-connections",
+            "checkpoints-requested",
+            "new-connections",
+            "session-length",
+            "sessions-abandoned",
+            "pooled-reuse",
+            "thread-cache-misses",
+            "version-store",
+            "history-length",
+            "threadpool-waits",
+            "compiles-per-batch",
+            "batch-requests",
+            "connections",
+            "threadpool-waiting",
+            "memory-grants-pending",
+            "oldest-transaction",
+        ];
+        let mut out = Vec::new();
+        for engine in [Engine::Mssql, Engine::Postgres, Engine::Mysql, Engine::Yugabyte] {
+            let mut s = crate::waits::snapshot_with(engine);
+            s.options = None;
+            s.resources.clear();
+            s.pressure = Some(Pressure {
+                uptime_hours: Some(256.0),
+                signals: KEYS
+                    .iter()
+                    .map(|key| {
+                        // A label that already says it is the whole server's keeps its words.
+                        let label = match *key {
+                            "batch-requests" => "Batch requests (whole server)".to_string(),
+                            "connections" => "Connections (whole instance)".to_string(),
+                            _ => format!("Label of {key}"),
+                        };
+                        Signal::new(key, &label, 3.0, SignalUnit::Count, SignalScope::SinceStartup)
+                    })
+                    .collect(),
+                ..Pressure::default()
+            });
+            grade_on_evidence(&mut s);
+            out.push(format!("{engine}:\n{}", told(&s)));
+            // A queue empty when the scan ran, and a cleanup holder no finding is about.
+            for sig in &mut s.pressure.as_mut().unwrap().signals {
+                if sig.key == "memory-grants-pending" {
+                    sig.value = 0.0;
+                }
+            }
+            grade_findings(&mut s, &[]);
+            out.push(format!("{engine}, graded on no findings:\n{}", told(&s)));
+        }
+        // Azure SQL Database's resource samples: sustained, measured, sparse, and without a selected window.
+        let mut s = azure(|i| if i < 60 { 100.0 } else { 3.0 });
+        grade_on_evidence(&mut s);
+        out.push(format!("azure:\n{}", told(&s)));
+        let mut s = azure(|_| 50.0);
+        s.resources = s.resources.into_iter().step_by(12).collect();
+        grade_on_evidence(&mut s);
+        out.push(format!("azure, sparse:\n{}", told(&s)));
+        let mut s = azure(|_| 0.004);
+        s.options = None;
+        grade_on_evidence(&mut s);
+        out.push(format!("azure, no window:\n{}", told(&s)));
+        let mut s = azure(|_| 3.0);
+        s.options = Some(SnapshotOptions::default().with_window_minutes(7 * 1440));
+        grade_on_evidence(&mut s);
+        out.push(format!("azure, a week selected:\n{}", told(&s)));
+        let actual = out.join("\n\n");
+        assert!(actual == HEALTH_WORDS, "said:\n{actual}\n\nwhere the English was:\n{HEALTH_WORDS}");
+    }
+
+    const HEALTH_WORDS: &str = r#"SQL Server:
+signal-wait | Scheduling share of recorded waits (whole server) | Info | The share of recorded waiting spent ready to run, before a worker was scheduled. This is not CPU utilization and alone does not establish CPU pressure.
+cache-hit | Label of cache-hit | Info | Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
+buffer-pool-hit | Label of buffer-pool-hit | Info | The share of reads served by InnoDB's buffer pool across the whole server. A miss ratio alone does not establish a memory shortage in this database.
+page-life | Label of page-life (whole server) | Info | A server cache counter at the scan's instant. There is no universal healthy number of seconds; cache size, workload and measured I/O matter.
+tmp-disk-tables | Label of tmp-disk-tables | Info | The share of internal temporary tables written to disk across the whole server. Table sizes and the statements' measured cost determine whether this needs work.
+temp-bytes | Label of temp-bytes | Info | Temporary data written by this database over its statistics period. This amount alone does not establish a performance problem; the findings identify costly spills.
+deadlocks | Label of deadlocks | Info | A count over the statistics period, not deadlocks happening now. The deadlock finding uses the amount and period recorded.
+rollbacks | Label of rollbacks | Info | Rollbacks can be deliberate application behavior. This historical share alone does not establish failed requests.
+row-lock-avg | Label of row-lock-avg | Info | An average across the whole server's recorded row-lock waits, not a current wait. The lock findings use the amount of waiting too.
+max-used-connections | Label of max-used-connections | Info | The busiest moment since these counters started, compared with today's limit. This does not establish a connection shortage now.
+checkpoints-requested | Label of checkpoints-requested | Info | Requested checkpoints include WAL-triggered checkpoints, manual CHECKPOINT, backups and CREATE DATABASE. This shared historical ratio does not identify their cause or establish current write pressure.
+new-connections | Label of new-connections (whole server) | Info | The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
+session-length | Label of session-length | Info | Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.
+sessions-abandoned | Label of sessions-abandoned | Info | The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.
+pooled-reuse | Label of pooled-reuse (whole server) | Info | SQL Server's recorded connection resets compared with new logins, across the server. Some pools reuse a connection without resetting it, so this does not prove whether the application pools connections.
+thread-cache-misses | Label of thread-cache-misses | Info | The share of connections needing a new server thread across the whole server. This does not measure application connection pooling or its cost.
+version-store | Label of version-store | Info | Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.
+history-length | Label of history-length | Info | Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
+threadpool-waits | Label of threadpool-waits (whole server) | Info | Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.
+compiles-per-batch | Label of compiles-per-batch (whole server) | Info | New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
+batch-requests | Batch requests (whole server) | Info | -
+connections | Connections (whole instance) | Info | -
+threadpool-waiting | Label of threadpool-waiting | Watch | Requests waiting at the scan's instant. Sample again to establish whether the queue persists before changing settings.
+memory-grants-pending | Label of memory-grants-pending | Watch | Requests waiting at the scan's instant. Sample again to establish whether the queue persists before changing settings.
+oldest-transaction | Label of oldest-transaction | Info | -
+
+SQL Server, graded on no findings:
+signal-wait | Scheduling share of recorded waits (whole server) | Info | The share of recorded waiting spent ready to run, before a worker was scheduled. This is not CPU utilization and alone does not establish CPU pressure.
+cache-hit | Label of cache-hit | Info | Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
+buffer-pool-hit | Label of buffer-pool-hit | Info | The share of reads served by InnoDB's buffer pool across the whole server. A miss ratio alone does not establish a memory shortage in this database.
+page-life | Label of page-life (whole server) | Info | A server cache counter at the scan's instant. There is no universal healthy number of seconds; cache size, workload and measured I/O matter.
+tmp-disk-tables | Label of tmp-disk-tables | Info | The share of internal temporary tables written to disk across the whole server. Table sizes and the statements' measured cost determine whether this needs work.
+temp-bytes | Label of temp-bytes | Info | Temporary data written by this database over its statistics period. This amount alone does not establish a performance problem; the findings identify costly spills.
+deadlocks | Label of deadlocks | Info | A count over the statistics period, not deadlocks happening now. The deadlock finding uses the amount and period recorded.
+rollbacks | Label of rollbacks | Info | Rollbacks can be deliberate application behavior. This historical share alone does not establish failed requests.
+row-lock-avg | Label of row-lock-avg | Info | An average across the whole server's recorded row-lock waits, not a current wait. The lock findings use the amount of waiting too.
+max-used-connections | Label of max-used-connections | Info | The busiest moment since these counters started, compared with today's limit. This does not establish a connection shortage now.
+checkpoints-requested | Label of checkpoints-requested | Info | Requested checkpoints include WAL-triggered checkpoints, manual CHECKPOINT, backups and CREATE DATABASE. This shared historical ratio does not identify their cause or establish current write pressure.
+new-connections | Label of new-connections (whole server) | Info | The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
+session-length | Label of session-length | Info | Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.
+sessions-abandoned | Label of sessions-abandoned | Info | The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.
+pooled-reuse | Label of pooled-reuse (whole server) | Info | SQL Server's recorded connection resets compared with new logins, across the server. Some pools reuse a connection without resetting it, so this does not prove whether the application pools connections.
+thread-cache-misses | Label of thread-cache-misses | Info | The share of connections needing a new server thread across the whole server. This does not measure application connection pooling or its cost.
+version-store | Label of version-store | Info | Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.
+history-length | Label of history-length | Info | Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
+threadpool-waits | Label of threadpool-waits (whole server) | Info | Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.
+compiles-per-batch | Label of compiles-per-batch (whole server) | Info | New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
+batch-requests | Batch requests (whole server) | Info | -
+connections | Connections (whole instance) | Info | -
+threadpool-waiting | Label of threadpool-waiting | Info | Requests waiting at the scan's instant. Sample again to establish whether the queue persists before changing settings.
+memory-grants-pending | Label of memory-grants-pending | Good | No requests in this queue when the scan ran. Historical waits are reported separately.
+oldest-transaction | Label of oldest-transaction | Info | A cleanup holder observed at the scan's instant; no long-held-cleanup finding is supported by this scan.
+
+PostgreSQL:
+signal-wait | Scheduling share of recorded waits | Info | The share of recorded waiting spent ready to run, before a worker was scheduled. This is not CPU utilization and alone does not establish CPU pressure.
+cache-hit | Label of cache-hit | Info | Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
+buffer-pool-hit | Label of buffer-pool-hit | Info | The share of reads served by InnoDB's buffer pool across the whole server. A miss ratio alone does not establish a memory shortage in this database.
+page-life | Label of page-life | Info | A server cache counter at the scan's instant. There is no universal healthy number of seconds; cache size, workload and measured I/O matter.
+tmp-disk-tables | Label of tmp-disk-tables | Info | The share of internal temporary tables written to disk across the whole server. Table sizes and the statements' measured cost determine whether this needs work.
+temp-bytes | Label of temp-bytes | Info | Temporary data written by this database over its statistics period. This amount alone does not establish a performance problem; the findings identify costly spills.
+deadlocks | Label of deadlocks | Info | A count over the statistics period, not deadlocks happening now. The deadlock finding uses the amount and period recorded.
+rollbacks | Label of rollbacks | Info | Rollbacks can be deliberate application behavior. This historical share alone does not establish failed requests.
+row-lock-avg | Label of row-lock-avg | Info | An average across the whole server's recorded row-lock waits, not a current wait. The lock findings use the amount of waiting too.
+max-used-connections | Label of max-used-connections | Info | The busiest moment since these counters started, compared with today's limit. This does not establish a connection shortage now.
+checkpoints-requested | Label of checkpoints-requested (whole server) | Info | Requested checkpoints include WAL-triggered checkpoints, manual CHECKPOINT, backups and CREATE DATABASE. This shared historical ratio does not identify their cause or establish current write pressure.
+new-connections | Label of new-connections | Info | The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
+session-length | Label of session-length | Info | Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.
+sessions-abandoned | Label of sessions-abandoned | Info | The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.
+pooled-reuse | Label of pooled-reuse | Info | SQL Server's recorded connection resets compared with new logins, across the server. Some pools reuse a connection without resetting it, so this does not prove whether the application pools connections.
+thread-cache-misses | Label of thread-cache-misses | Info | The share of connections needing a new server thread across the whole server. This does not measure application connection pooling or its cost.
+version-store | Label of version-store | Info | Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.
+history-length | Label of history-length | Info | Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
+threadpool-waits | Label of threadpool-waits | Info | Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.
+compiles-per-batch | Label of compiles-per-batch | Info | New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
+batch-requests | Batch requests (whole server) | Info | -
+connections | Connections (whole instance) | Info | -
+threadpool-waiting | Label of threadpool-waiting | Watch | Requests waiting at the scan's instant. Sample again to establish whether the queue persists before changing settings.
+memory-grants-pending | Label of memory-grants-pending | Watch | Requests waiting at the scan's instant. Sample again to establish whether the queue persists before changing settings.
+oldest-transaction | Label of oldest-transaction | Info | -
+
+PostgreSQL, graded on no findings:
+signal-wait | Scheduling share of recorded waits | Info | The share of recorded waiting spent ready to run, before a worker was scheduled. This is not CPU utilization and alone does not establish CPU pressure.
+cache-hit | Label of cache-hit | Info | Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
+buffer-pool-hit | Label of buffer-pool-hit | Info | The share of reads served by InnoDB's buffer pool across the whole server. A miss ratio alone does not establish a memory shortage in this database.
+page-life | Label of page-life | Info | A server cache counter at the scan's instant. There is no universal healthy number of seconds; cache size, workload and measured I/O matter.
+tmp-disk-tables | Label of tmp-disk-tables | Info | The share of internal temporary tables written to disk across the whole server. Table sizes and the statements' measured cost determine whether this needs work.
+temp-bytes | Label of temp-bytes | Info | Temporary data written by this database over its statistics period. This amount alone does not establish a performance problem; the findings identify costly spills.
+deadlocks | Label of deadlocks | Info | A count over the statistics period, not deadlocks happening now. The deadlock finding uses the amount and period recorded.
+rollbacks | Label of rollbacks | Info | Rollbacks can be deliberate application behavior. This historical share alone does not establish failed requests.
+row-lock-avg | Label of row-lock-avg | Info | An average across the whole server's recorded row-lock waits, not a current wait. The lock findings use the amount of waiting too.
+max-used-connections | Label of max-used-connections | Info | The busiest moment since these counters started, compared with today's limit. This does not establish a connection shortage now.
+checkpoints-requested | Label of checkpoints-requested (whole server) | Info | Requested checkpoints include WAL-triggered checkpoints, manual CHECKPOINT, backups and CREATE DATABASE. This shared historical ratio does not identify their cause or establish current write pressure.
+new-connections | Label of new-connections | Info | The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
+session-length | Label of session-length | Info | Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.
+sessions-abandoned | Label of sessions-abandoned | Info | The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.
+pooled-reuse | Label of pooled-reuse | Info | SQL Server's recorded connection resets compared with new logins, across the server. Some pools reuse a connection without resetting it, so this does not prove whether the application pools connections.
+thread-cache-misses | Label of thread-cache-misses | Info | The share of connections needing a new server thread across the whole server. This does not measure application connection pooling or its cost.
+version-store | Label of version-store | Info | Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.
+history-length | Label of history-length | Info | Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
+threadpool-waits | Label of threadpool-waits | Info | Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.
+compiles-per-batch | Label of compiles-per-batch | Info | New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
+batch-requests | Batch requests (whole server) | Info | -
+connections | Connections (whole instance) | Info | -
+threadpool-waiting | Label of threadpool-waiting | Info | Requests waiting at the scan's instant. Sample again to establish whether the queue persists before changing settings.
+memory-grants-pending | Label of memory-grants-pending | Good | No requests in this queue when the scan ran. Historical waits are reported separately.
+oldest-transaction | Label of oldest-transaction | Info | A cleanup holder observed at the scan's instant; no long-held-cleanup finding is supported by this scan.
+
+MySQL:
+signal-wait | Scheduling share of recorded waits (whole server) | Info | The share of recorded waiting spent ready to run, before a worker was scheduled. This is not CPU utilization and alone does not establish CPU pressure.
+cache-hit | Label of cache-hit (whole server) | Info | Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
+buffer-pool-hit | Label of buffer-pool-hit (whole server) | Info | The share of reads served by InnoDB's buffer pool across the whole server. A miss ratio alone does not establish a memory shortage in this database.
+page-life | Label of page-life (whole server) | Info | A server cache counter at the scan's instant. There is no universal healthy number of seconds; cache size, workload and measured I/O matter.
+tmp-disk-tables | Label of tmp-disk-tables (whole server) | Info | The share of internal temporary tables written to disk across the whole server. Table sizes and the statements' measured cost determine whether this needs work.
+temp-bytes | Label of temp-bytes (whole server) | Info | Temporary data written by this database over its statistics period. This amount alone does not establish a performance problem; the findings identify costly spills.
+deadlocks | Label of deadlocks (whole server) | Info | A count over the statistics period, not deadlocks happening now. The deadlock finding uses the amount and period recorded.
+rollbacks | Label of rollbacks (whole server) | Info | Rollbacks can be deliberate application behavior. This historical share alone does not establish failed requests.
+row-lock-avg | Label of row-lock-avg (whole server) | Info | An average across the whole server's recorded row-lock waits, not a current wait. The lock findings use the amount of waiting too.
+max-used-connections | Label of max-used-connections (whole server) | Info | The busiest moment since these counters started, compared with today's limit. This does not establish a connection shortage now.
+checkpoints-requested | Label of checkpoints-requested (whole server) | Info | Requested checkpoints include WAL-triggered checkpoints, manual CHECKPOINT, backups and CREATE DATABASE. This shared historical ratio does not identify their cause or establish current write pressure.
+new-connections | Label of new-connections (whole server) | Info | The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
+session-length | Label of session-length (whole server) | Info | Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.
+sessions-abandoned | Label of sessions-abandoned (whole server) | Info | The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.
+pooled-reuse | Label of pooled-reuse (whole server) | Info | SQL Server's recorded connection resets compared with new logins, across the server. Some pools reuse a connection without resetting it, so this does not prove whether the application pools connections.
+thread-cache-misses | Label of thread-cache-misses (whole server) | Info | The share of connections needing a new server thread across the whole server. This does not measure application connection pooling or its cost.
+version-store | Label of version-store (whole server) | Info | Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.
+history-length | Label of history-length (whole server) | Info | Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
+threadpool-waits | Label of threadpool-waits (whole server) | Info | Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.
+compiles-per-batch | Label of compiles-per-batch (whole server) | Info | New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
+batch-requests | Batch requests (whole server) | Info | -
+connections | Connections (whole instance) | Info | -
+threadpool-waiting | Label of threadpool-waiting (whole server) | Watch | Requests waiting at the scan's instant. Sample again to establish whether the queue persists before changing settings.
+memory-grants-pending | Label of memory-grants-pending (whole server) | Watch | Requests waiting at the scan's instant. Sample again to establish whether the queue persists before changing settings.
+oldest-transaction | Label of oldest-transaction | Info | -
+
+MySQL, graded on no findings:
+signal-wait | Scheduling share of recorded waits (whole server) | Info | The share of recorded waiting spent ready to run, before a worker was scheduled. This is not CPU utilization and alone does not establish CPU pressure.
+cache-hit | Label of cache-hit (whole server) | Info | Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
+buffer-pool-hit | Label of buffer-pool-hit (whole server) | Info | The share of reads served by InnoDB's buffer pool across the whole server. A miss ratio alone does not establish a memory shortage in this database.
+page-life | Label of page-life (whole server) | Info | A server cache counter at the scan's instant. There is no universal healthy number of seconds; cache size, workload and measured I/O matter.
+tmp-disk-tables | Label of tmp-disk-tables (whole server) | Info | The share of internal temporary tables written to disk across the whole server. Table sizes and the statements' measured cost determine whether this needs work.
+temp-bytes | Label of temp-bytes (whole server) | Info | Temporary data written by this database over its statistics period. This amount alone does not establish a performance problem; the findings identify costly spills.
+deadlocks | Label of deadlocks (whole server) | Info | A count over the statistics period, not deadlocks happening now. The deadlock finding uses the amount and period recorded.
+rollbacks | Label of rollbacks (whole server) | Info | Rollbacks can be deliberate application behavior. This historical share alone does not establish failed requests.
+row-lock-avg | Label of row-lock-avg (whole server) | Info | An average across the whole server's recorded row-lock waits, not a current wait. The lock findings use the amount of waiting too.
+max-used-connections | Label of max-used-connections (whole server) | Info | The busiest moment since these counters started, compared with today's limit. This does not establish a connection shortage now.
+checkpoints-requested | Label of checkpoints-requested (whole server) | Info | Requested checkpoints include WAL-triggered checkpoints, manual CHECKPOINT, backups and CREATE DATABASE. This shared historical ratio does not identify their cause or establish current write pressure.
+new-connections | Label of new-connections (whole server) | Info | The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
+session-length | Label of session-length (whole server) | Info | Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.
+sessions-abandoned | Label of sessions-abandoned (whole server) | Info | The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.
+pooled-reuse | Label of pooled-reuse (whole server) | Info | SQL Server's recorded connection resets compared with new logins, across the server. Some pools reuse a connection without resetting it, so this does not prove whether the application pools connections.
+thread-cache-misses | Label of thread-cache-misses (whole server) | Info | The share of connections needing a new server thread across the whole server. This does not measure application connection pooling or its cost.
+version-store | Label of version-store (whole server) | Info | Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.
+history-length | Label of history-length (whole server) | Info | Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
+threadpool-waits | Label of threadpool-waits (whole server) | Info | Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.
+compiles-per-batch | Label of compiles-per-batch (whole server) | Info | New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
+batch-requests | Batch requests (whole server) | Info | -
+connections | Connections (whole instance) | Info | -
+threadpool-waiting | Label of threadpool-waiting (whole server) | Info | Requests waiting at the scan's instant. Sample again to establish whether the queue persists before changing settings.
+memory-grants-pending | Label of memory-grants-pending (whole server) | Good | No requests in this queue when the scan ran. Historical waits are reported separately.
+oldest-transaction | Label of oldest-transaction | Info | A cleanup holder observed at the scan's instant; no long-held-cleanup finding is supported by this scan.
+
+YugabyteDB:
+signal-wait | Scheduling share of recorded waits (whole server) | Info | The share of recorded waiting spent ready to run, before a worker was scheduled. This is not CPU utilization and alone does not establish CPU pressure.
+cache-hit | Label of cache-hit (whole server) | Info | Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
+buffer-pool-hit | Label of buffer-pool-hit (whole server) | Info | The share of reads served by InnoDB's buffer pool across the whole server. A miss ratio alone does not establish a memory shortage in this database.
+page-life | Label of page-life (whole server) | Info | A server cache counter at the scan's instant. There is no universal healthy number of seconds; cache size, workload and measured I/O matter.
+tmp-disk-tables | Label of tmp-disk-tables (whole server) | Info | The share of internal temporary tables written to disk across the whole server. Table sizes and the statements' measured cost determine whether this needs work.
+temp-bytes | Label of temp-bytes (whole server) | Info | Temporary data written by this database over its statistics period. This amount alone does not establish a performance problem; the findings identify costly spills.
+deadlocks | Label of deadlocks (whole server) | Info | A count over the statistics period, not deadlocks happening now. The deadlock finding uses the amount and period recorded.
+rollbacks | Label of rollbacks (whole server) | Info | Rollbacks can be deliberate application behavior. This historical share alone does not establish failed requests.
+row-lock-avg | Label of row-lock-avg (whole server) | Info | An average across the whole server's recorded row-lock waits, not a current wait. The lock findings use the amount of waiting too.
+max-used-connections | Label of max-used-connections (whole server) | Info | The busiest moment since these counters started, compared with today's limit. This does not establish a connection shortage now.
+checkpoints-requested | Label of checkpoints-requested (whole server) | Info | Requested checkpoints include WAL-triggered checkpoints, manual CHECKPOINT, backups and CREATE DATABASE. This shared historical ratio does not identify their cause or establish current write pressure.
+new-connections | Label of new-connections (whole server) | Info | The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
+session-length | Label of session-length (whole server) | Info | Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.
+sessions-abandoned | Label of sessions-abandoned (whole server) | Info | The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.
+pooled-reuse | Label of pooled-reuse (whole server) | Info | SQL Server's recorded connection resets compared with new logins, across the server. Some pools reuse a connection without resetting it, so this does not prove whether the application pools connections.
+thread-cache-misses | Label of thread-cache-misses (whole server) | Info | The share of connections needing a new server thread across the whole server. This does not measure application connection pooling or its cost.
+version-store | Label of version-store (whole server) | Info | Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.
+history-length | Label of history-length (whole server) | Info | Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
+threadpool-waits | Label of threadpool-waits (whole server) | Info | Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.
+compiles-per-batch | Label of compiles-per-batch (whole server) | Info | New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
+batch-requests | Batch requests (whole server) | Info | -
+connections | Connections (whole instance) | Info | -
+threadpool-waiting | Label of threadpool-waiting (whole server) | Watch | Requests waiting at the scan's instant. Sample again to establish whether the queue persists before changing settings.
+memory-grants-pending | Label of memory-grants-pending (whole server) | Watch | Requests waiting at the scan's instant. Sample again to establish whether the queue persists before changing settings.
+oldest-transaction | Label of oldest-transaction | Info | -
+
+YugabyteDB, graded on no findings:
+signal-wait | Scheduling share of recorded waits (whole server) | Info | The share of recorded waiting spent ready to run, before a worker was scheduled. This is not CPU utilization and alone does not establish CPU pressure.
+cache-hit | Label of cache-hit (whole server) | Info | Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
+buffer-pool-hit | Label of buffer-pool-hit (whole server) | Info | The share of reads served by InnoDB's buffer pool across the whole server. A miss ratio alone does not establish a memory shortage in this database.
+page-life | Label of page-life (whole server) | Info | A server cache counter at the scan's instant. There is no universal healthy number of seconds; cache size, workload and measured I/O matter.
+tmp-disk-tables | Label of tmp-disk-tables (whole server) | Info | The share of internal temporary tables written to disk across the whole server. Table sizes and the statements' measured cost determine whether this needs work.
+temp-bytes | Label of temp-bytes (whole server) | Info | Temporary data written by this database over its statistics period. This amount alone does not establish a performance problem; the findings identify costly spills.
+deadlocks | Label of deadlocks (whole server) | Info | A count over the statistics period, not deadlocks happening now. The deadlock finding uses the amount and period recorded.
+rollbacks | Label of rollbacks (whole server) | Info | Rollbacks can be deliberate application behavior. This historical share alone does not establish failed requests.
+row-lock-avg | Label of row-lock-avg (whole server) | Info | An average across the whole server's recorded row-lock waits, not a current wait. The lock findings use the amount of waiting too.
+max-used-connections | Label of max-used-connections (whole server) | Info | The busiest moment since these counters started, compared with today's limit. This does not establish a connection shortage now.
+checkpoints-requested | Label of checkpoints-requested (whole server) | Info | Requested checkpoints include WAL-triggered checkpoints, manual CHECKPOINT, backups and CREATE DATABASE. This shared historical ratio does not identify their cause or establish current write pressure.
+new-connections | Label of new-connections (whole server) | Info | The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
+session-length | Label of session-length (whole server) | Info | Average session lifetime over the statistics period. Session length alone does not measure connection overhead or request latency.
+sessions-abandoned | Label of sessions-abandoned (whole server) | Info | The share of sessions that ended through a lost client connection over the statistics period, not sessions failing now.
+pooled-reuse | Label of pooled-reuse (whole server) | Info | SQL Server's recorded connection resets compared with new logins, across the server. Some pools reuse a connection without resetting it, so this does not prove whether the application pools connections.
+thread-cache-misses | Label of thread-cache-misses (whole server) | Info | The share of connections needing a new server thread across the whole server. This does not measure application connection pooling or its cost.
+version-store | Label of version-store (whole server) | Info | Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.
+history-length | Label of history-length (whole server) | Info | Committed undo logs awaiting purge across the whole server. This is not a count of rows, and a large value alone does not establish a purge problem in this database.
+threadpool-waits | Label of threadpool-waits (whole server) | Info | Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.
+compiles-per-batch | Label of compiles-per-batch (whole server) | Info | New plan compilations compared with batches across the server. Compilation is normal; the ratio alone does not establish pressure in this database.
+batch-requests | Batch requests (whole server) | Info | -
+connections | Connections (whole instance) | Info | -
+threadpool-waiting | Label of threadpool-waiting (whole server) | Info | Requests waiting at the scan's instant. Sample again to establish whether the queue persists before changing settings.
+memory-grants-pending | Label of memory-grants-pending (whole server) | Good | No requests in this queue when the scan ran. Historical waits are reported separately.
+oldest-transaction | Label of oldest-transaction | Info | A cleanup holder observed at the scan's instant; no long-held-cleanup finding is supported by this scan.
+
+azure:
+cpu-use | CPU used against its limit | Watch | 1h selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 100%. At or above 95% of this database's limit in 25% of samples. A warning needs at least 10% of samples near the limit.
+data-io | Storage I/O used against its limit | Good | 1h selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
+log-write-use | Log throughput used against its limit | Good | 1h selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
+workers-use | Worker slots used against their limit | Good | 1h selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 0.2%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
+memory-use | Memory allocated against its limit | Info | 1h selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 20%. At or above 95% of this database's limit in 0% of samples. Allocated memory includes cache; a full cache is normal and is not graded as memory pressure.
+
+azure, sparse:
+cpu-use | CPU used against its limit | Info | 1h selected; 57 minutes of resource samples available. Average over 57 minutes of recorded samples; peak 50%. At or above 95% of this database's limit in 0% of samples. Too little coverage to judge sustained pressure; at least 30 minutes of samples are needed.
+data-io | Storage I/O used against its limit | Info | 1h selected; 57 minutes of resource samples available. Average over 57 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. Too little coverage to judge sustained pressure; at least 30 minutes of samples are needed.
+log-write-use | Log throughput used against its limit | Info | 1h selected; 57 minutes of resource samples available. Average over 57 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. Too little coverage to judge sustained pressure; at least 30 minutes of samples are needed.
+workers-use | Worker slots used against their limit | Info | 1h selected; 57 minutes of resource samples available. Average over 57 minutes of recorded samples; peak 0.2%. At or above 95% of this database's limit in 0% of samples. Too little coverage to judge sustained pressure; at least 30 minutes of samples are needed.
+memory-use | Memory allocated against its limit | Info | 1h selected; 57 minutes of resource samples available. Average over 57 minutes of recorded samples; peak 20%. At or above 95% of this database's limit in 0% of samples. Allocated memory includes cache; a full cache is normal and is not graded as memory pressure.
+
+azure, no window:
+cpu-use | CPU used against its limit | Good | Average over 60 minutes of recorded samples; peak <0.01%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
+data-io | Storage I/O used against its limit | Good | Average over 60 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
+log-write-use | Log throughput used against its limit | Good | Average over 60 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
+workers-use | Worker slots used against their limit | Good | Average over 60 minutes of recorded samples; peak 0.2%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
+memory-use | Memory allocated against its limit | Info | Average over 60 minutes of recorded samples; peak 20%. At or above 95% of this database's limit in 0% of samples. Allocated memory includes cache; a full cache is normal and is not graded as memory pressure.
+
+azure, a week selected:
+cpu-use | CPU used against its limit | Good | 7d selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 3%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
+data-io | Storage I/O used against its limit | Good | 7d selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
+log-write-use | Log throughput used against its limit | Good | 7d selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 0%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
+workers-use | Worker slots used against their limit | Good | 7d selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 0.2%. At or above 95% of this database's limit in 0% of samples. A warning needs at least 10% of samples near the limit.
+memory-use | Memory allocated against its limit | Info | 7d selected; 60 minutes of resource samples available. Average over 60 minutes of recorded samples; peak 20%. At or above 95% of this database's limit in 0% of samples. Allocated memory includes cache; a full cache is normal and is not graded as memory pressure."#;
+
     #[test]
     fn full_memory_allocation_and_an_empty_current_queue_do_not_assert_pressure() {
         let mut s = azure(|_| 2.0);

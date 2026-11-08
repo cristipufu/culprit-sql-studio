@@ -75,3 +75,43 @@ fn labels_keep_acronyms() {
     assert_eq!(lower_label("CPU"), "CPU");
     assert_eq!(lower_label("Disk reads"), "disk reads");
 }
+
+// Each kind of waiting as the waits tile names it mid-sentence ("Most time goes to disk reads (40%)"), word for word.
+#[test]
+fn wait_categories_read_mid_sentence() {
+    let keys = [
+        "rpc",
+        "storage",
+        "cpu",
+        "io",
+        "rows",
+        "lock",
+        "latch",
+        "log",
+        "network",
+        "parallelism",
+        "memory",
+        "compilation",
+        "other",
+    ];
+    let said: Vec<String> =
+        keys.iter().map(|k| lower_label(culprit_core::waits::category_info(k, Engine::Postgres).0)).collect();
+    assert_eq!(
+        said,
+        [
+            "distributed RPCs",
+            "storage I/O",
+            "CPU",
+            "disk reads",
+            "row access",
+            "locks",
+            "in-memory contention",
+            "log writes",
+            "sending results",
+            "parallel queries",
+            "memory",
+            "compiling plans",
+            "everything else",
+        ]
+    );
+}

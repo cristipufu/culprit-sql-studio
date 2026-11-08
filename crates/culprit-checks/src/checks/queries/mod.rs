@@ -24,6 +24,8 @@ mod regression;
 mod repeated_request;
 mod temp_spill;
 mod unstable_query;
+#[cfg(test)]
+mod words;
 
 pub use chatty_query::*;
 pub use heavy_query::*;
