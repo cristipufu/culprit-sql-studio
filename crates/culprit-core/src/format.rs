@@ -1,47 +1,70 @@
-//! Human formatting shared by checks (for finding prose) and the CLI. The UI formats from raw values.
+//! Human formatting shared by checks (for finding prose) and the CLI, in the current language
+//! ([`crate::i18n::current`]): its decimal separator, and its words for units, lists and dates (`common.*` messages).
+//! Numbers keep the digits they have always had otherwise (no thousands separator: "1277 days", "1023 KB"), so English
+//! reads as it always has. The UI formats from raw values.
+
+use crate::i18n::{self, Arg};
+use crate::{key, t};
+
+/// `fixed`, a number as Rust's formatting writes it ("9.5", "-12"), in the current language's decimal separator.
+pub fn digits(fixed: String) -> String {
+    let lang = i18n::current();
+    if lang.decimal == "." { fixed } else { fixed.replace('.', &lang.decimal) }
+}
+
+/// [`digits`] without a trailing ".0" ("5.0" is "5").
+fn digits_whole(fixed: String) -> String {
+    digits(fixed.strip_suffix(".0").map(str::to_string).unwrap_or(fixed))
+}
 
 pub fn duration(ms: f64) -> String {
     if !ms.is_finite() {
-        return "0 ms".to_string();
+        return t!("common.duration.ms", n = "0");
     }
     let ms = ms.max(0.0);
     // Nothing measured reads as 0 ms; cache-fast work in microseconds, as the app shows it ("3 µs", not "0.00 ms").
     if ms == 0.0 {
-        return "0 ms".to_string();
+        return t!("common.duration.ms", n = "0");
     }
     if ms < 0.01 {
-        return format!("{:.0} µs", (ms * 1_000.0).max(1.0));
+        return t!("common.duration.us", n = digits(format!("{:.0}", (ms * 1_000.0).max(1.0))));
     }
     if ms < 1.0 {
-        return format!("{:.2} ms", ms);
+        return t!("common.duration.ms", n = digits(format!("{:.2}", ms)));
     }
     // A tenth under 10 ms: rounding 2.59 ms to "3 ms" is off by 16%. A whole number reads without its ".0", and one
     // that rounds up to 10 reads as 10 ms.
     if ms < 9.95 {
-        let tenths = format!("{ms:.1}");
-        return format!("{} ms", tenths.strip_suffix(".0").unwrap_or(&tenths));
+        return t!("common.duration.ms", n = digits_whole(format!("{ms:.1}")));
     }
     if ms < 1_000.0 {
-        return format!("{:.0} ms", ms);
+        return t!("common.duration.ms", n = digits(format!("{:.0}", ms)));
     }
     let s = ms / 1_000.0;
     if s < 60.0 {
-        return format!("{:.1} s", s);
+        return t!("common.duration.s", n = digits(format!("{:.1}", s)));
     }
     let m = s / 60.0;
     if m < 60.0 {
-        return format!("{:.0} min", m);
+        return t!("common.duration.min", n = format!("{:.0}", m));
     }
     let h = m / 60.0;
     if h < 48.0 {
         let whole = h.floor();
         let minutes = ((h - whole) * 60.0).round();
         if minutes >= 1.0 {
-            return format!("{whole:.0} h {minutes:.0} min");
+            return t!("common.duration.h_min", h = format!("{whole:.0}"), min = format!("{minutes:.0}"));
         }
-        return format!("{whole:.0} h");
+        return t!("common.duration.h", n = format!("{whole:.0}"));
     }
-    format!("{:.1} days", h / 24.0)
+    t!("common.duration.days", n = digits(format!("{:.1}", h / 24.0)))
+}
+
+/// The days [`days_counted`] says, as a number: a tenth under 10, whole days from 10 on, never more than were.
+fn counted_days(days: f64) -> f64 {
+    // A hair under a whole number from adding hours is that number.
+    let days = days + 1e-9;
+    if days < 10.0 { (days * 10.0).floor() / 10.0 } else { days.floor() }
 }
 
 /// Days counted, never more than were: a tenth under 10 (9.51 days are "9.5", not "10"), whole days from 10 on.
@@ -49,14 +72,8 @@ pub fn days_counted(days: f64) -> String {
     if !days.is_finite() {
         return "0".to_string();
     }
-    // A hair under a whole number from adding hours is that number.
-    let days = days + 1e-9;
-    if days < 10.0 {
-        let tenths = format!("{:.1}", (days * 10.0).floor() / 10.0);
-        tenths.strip_suffix(".0").unwrap_or(&tenths).to_string()
-    } else {
-        format!("{}", days.floor())
-    }
+    let counted = counted_days(days);
+    if days + 1e-9 < 10.0 { digits_whole(format!("{counted:.1}")) } else { digits(format!("{counted}")) }
 }
 
 /// A span of days as a metric says it: [`days_counted`] ("9.5 days", "1 day"), and under a day the hours and minutes
@@ -65,10 +82,8 @@ pub fn days(days: f64) -> String {
     if days < 1.0 {
         return duration(days.max(0.0) * 86_400_000.0);
     }
-    match days_counted(days).as_str() {
-        "1" => "1 day".to_string(),
-        n => format!("{n} days"),
-    }
+    let count = if days.is_finite() { counted_days(days) } else { 0.0 };
+    t!("common.days", count = count, n = days_counted(days))
 }
 
 /// Seconds since the epoch for an RFC 3339 / ISO 8601 timestamp (UTC offsets honoured), without a date library.
@@ -132,20 +147,25 @@ pub fn age_between(from: &str, to: &str) -> Option<String> {
 }
 
 pub fn bytes(value: f64) -> String {
+    // Each unit's message: "{n} KB".
+    const UNITS: [&str; 5] = [
+        key!("common.bytes.b"),
+        key!("common.bytes.kb"),
+        key!("common.bytes.mb"),
+        key!("common.bytes.gb"),
+        key!("common.bytes.tb"),
+    ];
     if !value.is_finite() {
-        return "0 B".to_string();
+        return t!("common.bytes.b", n = "0");
     }
-    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     let mut v = value.max(0.0);
     let mut unit = 0;
     while v >= 1024.0 && unit < UNITS.len() - 1 {
         v /= 1024.0;
         unit += 1;
     }
-    if unit == 0 || v >= 100.0 {
-        return format!("{:.0} {}", v, UNITS[unit]);
-    }
-    format!("{:.1} {}", v, UNITS[unit])
+    let n = if unit == 0 || v >= 100.0 { format!("{:.0}", v) } else { format!("{:.1}", v) };
+    i18n::t(UNITS[unit], &[("n", Arg::Text(digits(n)))])
 }
 
 pub fn count(value: f64) -> String {
@@ -155,33 +175,34 @@ pub fn count(value: f64) -> String {
     // An empty f64 sum is -0.0; it reads as nothing, not as a negative.
     let value = if value == 0.0 { 0.0 } else { value };
     let v = value.abs();
+    // Compact forms keep their suffixes in every language: "1.2K", "1,2K".
     if v >= 1e9 {
-        return format!("{:.1}B", value / 1e9);
+        return digits(format!("{:.1}", value / 1e9)) + "B";
     }
     if v >= 1e6 {
-        return format!("{:.1}M", value / 1e6);
+        return digits(format!("{:.1}", value / 1e6)) + "M";
     }
     if v >= 1e4 {
-        return format!("{:.0}K", value / 1e3);
+        return digits(format!("{:.0}", value / 1e3)) + "K";
     }
     if v >= 1e3 {
-        return format!("{:.1}K", value / 1e3);
+        return digits(format!("{:.1}", value / 1e3)) + "K";
     }
     if v >= 100.0 || v.fract() == 0.0 {
-        return format!("{:.0}", value);
+        return digits(format!("{:.0}", value));
     }
-    format!("{:.1}", value)
+    digits(format!("{:.1}", value))
 }
 
 pub fn percent(ratio: f64) -> String {
     if !ratio.is_finite() {
-        return "0%".to_string();
+        return t!("common.percent", n = "0");
     }
     let p = ratio * 100.0;
     if p > 0.0 && p < 1.0 {
-        return "<1%".to_string();
+        return t!("common.percent.below", n = "1");
     }
-    format!("{:.0}%", p)
+    t!("common.percent", n = digits(format!("{:.0}", p)))
 }
 
 /// A measured percentage already on a 0–100 scale. Keep low resource use visible, and distinguish a positive
@@ -191,33 +212,47 @@ pub fn percent_value(value: f64) -> String {
         return "—".into();
     }
     if value == 0.0 {
-        return "0%".into();
+        return t!("common.percent", n = "0");
     }
     if value.abs() < 0.01 {
-        return if value > 0.0 { "<0.01%" } else { ">-0.01%" }.into();
+        return if value > 0.0 {
+            t!("common.percent.below", n = digits("0.01".into()))
+        } else {
+            t!("common.percent.above", n = digits("-0.01".into()))
+        };
     }
     let text = format!("{value:.2}");
-    format!("{}%", text.trim_end_matches('0').trim_end_matches('.'))
+    t!("common.percent", n = digits(text.trim_end_matches('0').trim_end_matches('.').to_string()))
 }
 
 /// "3.4×", "710×": how many times larger, written the way the rest of the product writes it.
 pub fn factor(value: f64) -> String {
     if !value.is_finite() {
-        return "1.0×".to_string();
+        return t!("common.factor", n = digits("1.0".into()));
     }
     if value >= 100.0 {
-        return format!("{}×", count(value));
+        return t!("common.factor", n = count(value));
     }
-    format!("{:.1}×", value)
+    t!("common.factor", n = digits(format!("{:.1}", value)))
 }
 
+/// "a, b and c": the items as a sentence lists them.
 pub fn list(items: &[String]) -> String {
-    match items {
-        [] => String::new(),
-        [one] => one.clone(),
-        [a, b] => format!("{a} and {b}"),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
-    }
+    joined(items, key!("common.list.pair"))
+}
+
+/// "a, b or c": the items as alternatives.
+pub fn list_or(items: &[String]) -> String {
+    joined(items, key!("common.list.pair_or"))
+}
+
+/// `items` listed with `pair` (the message joining two: "{first} and {last}") for the last two, and
+/// `common.list.more` ("{first}, {rest}") for each before them.
+fn joined(items: &[String], pair: &str) -> String {
+    let Some((last, rest)) = items.split_last() else { return String::new() };
+    let Some((before, rest)) = rest.split_last() else { return last.clone() };
+    let tail = i18n::t(pair, &[("first", Arg::from(before)), ("last", Arg::from(last))]);
+    rest.iter().rev().fold(tail, |tail, item| t!("common.list.more", first = item, rest = tail))
 }
 
 /// `[db].[dbo].[orders].[created_at]>=[@P1]` reads as `created_at >= @P1`, and MySQL's `` `shop`.`orders`.`status` ``
@@ -277,14 +312,33 @@ fn last_names(text: &str, open: char, close: char) -> String {
 
 /// "Oct 1" (with the year when it isn't `now`'s): a date as people write it, from an ISO date or timestamp.
 pub fn friendly_date(iso: &str, now: &str) -> String {
-    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    // Each month's short name.
+    const MONTHS: [&str; 12] = [
+        key!("common.month.jan"),
+        key!("common.month.feb"),
+        key!("common.month.mar"),
+        key!("common.month.apr"),
+        key!("common.month.may"),
+        key!("common.month.jun"),
+        key!("common.month.jul"),
+        key!("common.month.aug"),
+        key!("common.month.sep"),
+        key!("common.month.oct"),
+        key!("common.month.nov"),
+        key!("common.month.dec"),
+    ];
     let mut parts = iso.get(..10).unwrap_or(iso).split('-');
     let (Some(year), Some(month), Some(day)) = (parts.next(), parts.next(), parts.next()) else {
         return iso.to_string();
     };
     let (Ok(m), Ok(d)) = (month.parse::<usize>(), day.parse::<u32>()) else { return iso.to_string() };
     let Some(name) = m.checked_sub(1).and_then(|i| MONTHS.get(i)) else { return iso.to_string() };
-    if now.get(..4) == Some(year) { format!("{name} {d}") } else { format!("{name} {d}, {year}") }
+    let (month, day) = (i18n::t(name, &[]), d.to_string());
+    if now.get(..4) == Some(year) {
+        t!("common.date.month_day", month = month, day = day)
+    } else {
+        t!("common.date.month_day_year", month = month, day = day, year = year)
+    }
 }
 
 /// [`friendly_date`] relative to today (UTC).
@@ -354,6 +408,63 @@ mod tests {
         assert_eq!(count(std::iter::empty::<f64>().sum()), "0");
         assert_eq!(percent(0.314), "31%");
         assert_eq!(list(&["a".into(), "b".into(), "c".into()]), "a, b and c");
+    }
+
+    // The words these helpers write, in English as they have always read.
+    #[test]
+    fn lists_dates_and_factors_read_as_english_writes_them() {
+        let items = |n: usize| ["a", "b", "c", "d"][..n].iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(list(&items(0)), "");
+        assert_eq!(list(&items(1)), "a");
+        assert_eq!(list(&items(2)), "a and b");
+        assert_eq!(list(&items(4)), "a, b, c and d");
+        assert_eq!(list_or(&items(3)), "a, b or c");
+        assert_eq!(friendly_date("2026-10-01T08:00:00Z", "2026-11-08"), "Oct 1");
+        assert_eq!(friendly_date("2025-01-31", "2026-11-08"), "Jan 31, 2025");
+        assert_eq!(friendly_date("2025-13-01", "2026-11-08"), "2025-13-01");
+        assert_eq!(factor(3.44), "3.4×");
+        assert_eq!(factor(710.0), "710×");
+        assert_eq!(factor(12_500.0), "12K×");
+        assert_eq!(factor(f64::NAN), "1.0×");
+        assert_eq!(days(1.0), "1 day");
+        assert_eq!(days(f64::INFINITY), "0 days");
+        assert_eq!(duration(3.0 * 86_400_000.0), "3.0 days");
+        assert_eq!(duration(0.004), "4 µs");
+        assert_eq!(duration(f64::NAN), "0 ms");
+        assert_eq!(bytes(f64::NAN), "0 B");
+        assert_eq!(bytes(1_023.0 * 1024.0), "1023 KB");
+        assert_eq!(percent(f64::NAN), "0%");
+        assert_eq!(percent(0.005), "<1%");
+        assert_eq!(percent_value(-0.004), ">-0.01%");
+        assert_eq!(days_counted(1277.4), "1277");
+    }
+
+    // French and German write a decimal comma (and group thousands where a message is handed a number); these helpers
+    // keep their digits otherwise, and their words read in English until a catalog translates them.
+    #[test]
+    fn numbers_are_written_in_the_language_s_digits() {
+        crate::i18n::scope("fr", || {
+            assert_eq!(count(1_234.0), "1,2K");
+            assert_eq!(count(18_200_000.0), "18,2M");
+            assert_eq!(count(1.6), "1,6");
+            assert_eq!(duration(12_300.0), "12,3 s");
+            assert_eq!(duration(2.59), "2,6 ms");
+            assert_eq!(bytes(6.1 * 1024.0 * 1024.0 * 1024.0), "6,1 GB");
+            assert_eq!(percent_value(0.135), "0,14%");
+            assert_eq!(factor(3.44), "3,4×");
+            assert_eq!(days(9.51), "9,5 days");
+            assert_eq!(days_counted(1277.4), "1277");
+            let lang = crate::i18n::current();
+            assert_eq!(crate::i18n::format_number(1_234_567.5, &lang), "1\u{202f}234\u{202f}567,5");
+        });
+        crate::i18n::scope("de", || {
+            assert_eq!(count(1_234.0), "1,2K");
+            assert_eq!(duration(0.5), "0,50 ms");
+            assert_eq!(percent_value(12.5), "12,5%");
+            assert_eq!(crate::i18n::format_number(1_234_567.5, &crate::i18n::current()), "1.234.567,5");
+        });
+        // Outside the scope, English again.
+        assert_eq!(count(1_234.0), "1.2K");
     }
 
     // A staging SQL Server reading: the summary said "9.5 days" and the brief's metric "Counting for: 10 days"; the app
