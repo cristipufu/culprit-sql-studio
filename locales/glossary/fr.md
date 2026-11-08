@@ -195,3 +195,10 @@ say in English (Query Store, autovacuum, tempdb, buffer pool, DocDB, tablet, tab
 | Explain again | « Expliquez à nouveau » (« Relancez EXPLAIN ANALYZE » for PostgreSQL) | |
 | tile (dashboard) | vignette (f.) | |
 | a handle (`support.handle.*`) | starts with « une »/« un »: never put `{handle}` after « de » or « que » | no elision, unknown gender |
+| tier (cloud), throttling, burst / baseline | niveau de service, limitation, burst / ligne de base | |
+| endpoint, tenant / subscription, token | point de terminaison, locataire / abonnement, jeton | |
+| CLI, bastion, SSH forwarding, timestamp | la CLI, bastion, redirection SSH, horodatage | |
+| statement shapes, digest | formes, digest | |
+| page life expectancy, batch requests | espérance de vie des pages, demandes de lots | |
+| gap / insert-intention lock, intent lock | verrou d’intervalle / d’intention d’insertion, verrou intentionnel | |
+| the Queries, Live views | Requêtes, En direct | |
