@@ -31,9 +31,9 @@ const SEVERITY_LABEL: Record<Severity, () => string> = {
 
 /** "2 high", in the panel's head. */
 const SEVERITY_COUNT: Record<Severity, (count: number) => string> = {
-  high: (count) => t("ui.plan_insights.count.high", { count: String(count) }),
-  medium: (count) => t("ui.plan_insights.count.medium", { count: String(count) }),
-  low: (count) => t("ui.plan_insights.count.low", { count: String(count) }),
+  high: (count) => t("ui.plan_insights.count.high", { n: count, count: String(count) }),
+  medium: (count) => t("ui.plan_insights.count.medium", { n: count, count: String(count) }),
+  low: (count) => t("ui.plan_insights.count.low", { n: count, count: String(count) }),
 };
 
 /** The share of the plan's work an insight states: none on a plan without costs (SQLite's has the access path only), a

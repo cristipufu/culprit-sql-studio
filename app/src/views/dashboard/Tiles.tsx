@@ -208,7 +208,7 @@ export function DeadlocksTile({ tile, report }: { tile: Tile; report: Report }) 
   const start = end - d.since_hours * 3_600_000;
   return (
     <Frame tile={tile} action={t("ui.dashboard.action.deadlocks")} onOpen={open}>
-      <div className="dash-ticks" role="img" aria-label={t("ui.dashboard.deadlocks.over", { n: d.deadlocks.length, count: String(d.deadlocks.length), hours: String(d.since_hours) })}>
+      <div className="dash-ticks" role="img" aria-label={t("ui.dashboard.deadlocks.over", { n: d.deadlocks.length, count: String(d.deadlocks.length), h: d.since_hours, hours: String(d.since_hours) })}>
         {d.deadlocks.map((dl) => {
           const at = dl.at ? Date.parse(dl.at) : NaN;
           if (!Number.isFinite(at)) return null;

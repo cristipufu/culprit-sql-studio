@@ -103,26 +103,30 @@ fn uptime_opening(snapshot: &Snapshot) -> String {
 fn uptime(snapshot: &Snapshot, opening: bool) -> String {
     let engine = snapshot.server.name();
     match (pressure(snapshot).and_then(|p| p.uptime_hours), opening) {
-        (Some(h), false) if h >= 47.0 => {
-            t!("common.since_started.days", engine = engine, days = format!("{}", (h / 24.0).round()))
+        (Some(h), opening) if h >= 47.0 => {
+            let n = (h / 24.0).round();
+            if opening {
+                t!("common.since_started.days_opening", engine = engine, n = n, days = format!("{n}"))
+            } else {
+                t!("common.since_started.days", engine = engine, n = n, days = format!("{n}"))
+            }
         }
-        (Some(h), true) if h >= 47.0 => {
-            t!("common.since_started.days_opening", engine = engine, days = format!("{}", (h / 24.0).round()))
+        (Some(h), opening) if h >= 1.5 => {
+            let n = h.round();
+            if opening {
+                t!("common.since_started.hours_opening", engine = engine, n = n, hours = format!("{n}"))
+            } else {
+                t!("common.since_started.hours", engine = engine, n = n, hours = format!("{n}"))
+            }
         }
-        (Some(h), false) if h >= 1.5 => {
-            t!("common.since_started.hours", engine = engine, hours = format!("{}", h.round()))
+        (Some(h), opening) => {
+            let n = (h * 60.0).round().max(1.0);
+            if opening {
+                t!("common.since_started.minutes_opening", engine = engine, n = n, minutes = format!("{n}"))
+            } else {
+                t!("common.since_started.minutes", engine = engine, n = n, minutes = format!("{n}"))
+            }
         }
-        (Some(h), true) if h >= 1.5 => {
-            t!("common.since_started.hours_opening", engine = engine, hours = format!("{}", h.round()))
-        }
-        (Some(h), false) => {
-            t!("common.since_started.minutes", engine = engine, minutes = format!("{}", (h * 60.0).round().max(1.0)))
-        }
-        (Some(h), true) => t!(
-            "common.since_started.minutes_opening",
-            engine = engine,
-            minutes = format!("{}", (h * 60.0).round().max(1.0))
-        ),
         (None, false) => t!("common.since_started.unknown", engine = engine),
         (None, true) => t!("common.since_started.unknown_opening", engine = engine),
     }

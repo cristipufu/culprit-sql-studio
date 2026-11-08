@@ -284,10 +284,11 @@ function Sparkline({ samples }: { samples: Sample[] }) {
   const anyBlocked = samples.some((s) => s.blocked > 0);
   const area = `${line("active")} L ${x(samples.length - 1).toFixed(1)} ${h} L ${x(0).toFixed(1)} ${h} Z`;
   const blockedPeak = Math.max(...samples.map((s) => s.blocked));
+  const sparkMinutes = Math.round((samples.length * REFRESH_MS) / 60000) || 1;
   return (
     <svg className="live-spark" width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label={anyBlocked
-      ? t("ui.live.spark.label_blocked", { minutes: String(Math.round((samples.length * REFRESH_MS) / 60000) || 1), peak: String(peak), blocked: String(blockedPeak) })
-      : t("ui.live.spark.label", { minutes: String(Math.round((samples.length * REFRESH_MS) / 60000) || 1), peak: String(peak) })}>
+      ? t("ui.live.spark.label_blocked", { n: sparkMinutes, minutes: String(sparkMinutes), peak: String(peak), blocked: String(blockedPeak) })
+      : t("ui.live.spark.label", { n: sparkMinutes, minutes: String(sparkMinutes), peak: String(peak) })}>
       <title>{anyBlocked ? t("ui.live.spark.title_blocked", { peak: String(peak), blocked: String(blockedPeak) }) : t("ui.live.spark.title", { peak: String(peak) })}</title>
       <path d={area} className="spark-area" />
       <path d={line("active")} className="spark-line" />

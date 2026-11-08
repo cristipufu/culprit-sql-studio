@@ -395,9 +395,9 @@ function Summary({ changes }: { changes: Changes }) {
       <div className="wc-stat">
         <span className="label">{t("ui.what_changed.queries")}</span>
         <span className="value wc-counts">
-          <span className="high">{t("ui.what_changed.count_slower", { count: String(counts("regressed")) })}</span>
-          <span className="medium">{t("ui.what_changed.count_new", { count: String(counts("new")) })}</span>
-          <span className="good">{t("ui.what_changed.count_faster", { count: String(counts("improved")) })}</span>
+          <span className="high">{t("ui.what_changed.count_slower", { n: counts("regressed"), count: String(counts("regressed")) })}</span>
+          <span className="medium">{t("ui.what_changed.count_new", { n: counts("new"), count: String(counts("new")) })}</span>
+          <span className="good">{t("ui.what_changed.count_faster", { n: counts("improved"), count: String(counts("improved")) })}</span>
         </span>
       </div>
       <p className="wc-source">

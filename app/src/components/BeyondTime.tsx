@@ -58,8 +58,8 @@ function costRows(report: Report, q: QueryStat): Row[] {
             : t("ui.beyond_time.cancelled_after", { count: count(aborted), duration: duration(mean) }),
       );
     }
-    if (failed > 0) parts.push(c.top_error ? t("ui.beyond_time.errors_recently", { count: count(failed), error: c.top_error }) : t("ui.beyond_time.errors", { count: count(failed) }));
-    if (c.warnings) parts.push(t("ui.beyond_time.warnings", { count: count(c.warnings) }));
+    if (failed > 0) parts.push(c.top_error ? t("ui.beyond_time.errors_recently", { n: failed, count: count(failed), error: c.top_error }) : t("ui.beyond_time.errors", { n: failed, count: count(failed) }));
+    if (c.warnings) parts.push(t("ui.beyond_time.warnings", { n: c.warnings, count: count(c.warnings) }));
     const status = "info" as const;
     // Why runs don't finish, when the evidence says: a client timeout, else the recent error.
     const cause = timeout ? "timeout" : failed > 0 && c.top_error ? "error" : "other";
@@ -81,7 +81,7 @@ function costRows(report: Report, q: QueryStat): Row[] {
       key: "planning",
       label: t(metrics.planning_label),
       value: t("ui.beyond_time.of_its_time", { share: percent(share) }),
-      note: plans >= runs * 0.9 ? t("ui.beyond_time.plan_every_run", { duration: duration(c.plan_ms / plans) }) : t("ui.beyond_time.plan_reused", { duration: duration(c.plan_ms / plans), times: count(runs / plans) }),
+      note: plans >= runs * 0.9 ? t("ui.beyond_time.plan_every_run", { duration: duration(c.plan_ms / plans) }) : t("ui.beyond_time.plan_reused", { duration: duration(c.plan_ms / plans), n: runs / plans, times: count(runs / plans) }),
       status: "info",
       takeaway: t("ui.beyond_time.takeaway.planning", { planning: metrics.planning, share: percent(share) }),
     });
@@ -95,7 +95,7 @@ function costRows(report: Report, q: QueryStat): Row[] {
     const history = c?.compile_history;
     rows.push({
       key: "compile-history", label: t("ui.beyond_time.compile_history"),
-      value: history ? t("ui.beyond_time.compiles", { count: count(history.count), duration: duration(history.total_ms) }) : t("ui.beyond_time.compiles_unmeasured"),
+      value: history ? t("ui.beyond_time.compiles", { n: history.count, count: count(history.count), duration: duration(history.total_ms) }) : t("ui.beyond_time.compiles_unmeasured"),
       note: history ? t("ui.beyond_time.compile_history_note") : t("ui.beyond_time.compile_history_missing"),
       status: "info",
     });
@@ -107,7 +107,7 @@ function costRows(report: Report, q: QueryStat): Row[] {
       key: "jit",
       label: t("ui.beyond_time.jit"),
       value: t("ui.beyond_time.of_run_time", { share: percent(share) }),
-      note: c.jit_functions ? t("ui.beyond_time.jit_per_run_functions", { duration: duration(c.jit_ms / runs), functions: count(c.jit_functions) }) : t("ui.beyond_time.per_run", { amount: duration(c.jit_ms / runs) }),
+      note: c.jit_functions ? t("ui.beyond_time.jit_per_run_functions", { duration: duration(c.jit_ms / runs), n: c.jit_functions, functions: count(c.jit_functions) }) : t("ui.beyond_time.per_run", { amount: duration(c.jit_ms / runs) }),
       status: "info",
       takeaway: share >= 0.5 ? t("ui.beyond_time.takeaway.jit_longer") : t("ui.beyond_time.takeaway.jit", { share: percent(share) }),
     });
@@ -259,7 +259,7 @@ function Latency({ ms, n, kind }: { ms: number | null; n: number; kind: "reads" 
   if (n <= 0) return <span className="io-cell muted">—</span>;
   const a = avg(ms, n);
   return (
-    <span className="io-cell" title={ms != null ? t("ui.beyond_time.latency_total", { count: count(n), kind, total: duration(ms) }) : t("ui.beyond_time.latency_untimed", { count: count(n), kind })}>
+    <span className="io-cell" title={ms != null ? t("ui.beyond_time.latency_total", { n, count: count(n), kind, total: duration(ms) }) : t("ui.beyond_time.latency_untimed", { n, count: count(n), kind })}>
       <b>{a == null ? t("ui.beyond_time.untimed") : latency(a)}</b>
       <span className="muted"> × {count(n)}</span>
     </span>
@@ -421,7 +421,7 @@ export function TableSignalFacts({ report, table }: { report: Report; table: Tab
           label={t("ui.beyond_time.lock_waits")}
           value={duration(lockMs)}
           warn={tableSignalWarning(report, table, ["hot-rows", "lock-escalations"])}
-          detail={t("ui.beyond_time.locks.detail", { waits: count(waits), index: worst.name })}
+          detail={t("ui.beyond_time.locks.detail", { n: waits, waits: count(waits), index: worst.name })}
           title={t("ui.beyond_time.locks.hint")}
         />,
       );
@@ -595,7 +595,7 @@ export function SignalEvidence({ report, finding }: { report: Report; finding: F
             ))}
           </div>
           <p className="beyond-foot">
-            {c.lock_escalations > 0 ? `${t("ui.beyond_time.waits.escalations", { count: count(c.lock_escalations) })} ` : ""}
+            {c.lock_escalations > 0 ? `${t("ui.beyond_time.waits.escalations", { n: c.lock_escalations, count: count(c.lock_escalations) })} ` : ""}
             {c.sequential_key ? `${index.columns[0] != null ? t("ui.beyond_time.waits.column_grows", { column: index.columns[0] }) : t("ui.beyond_time.waits.key_grows")} ` : ""}
             {t("ui.beyond_time.waits.since_loaded")}
           </p>
