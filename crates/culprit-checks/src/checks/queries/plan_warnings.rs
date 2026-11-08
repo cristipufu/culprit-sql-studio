@@ -305,7 +305,7 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
     f.queries = case
         .steps
         .iter()
-        .map(|(r, step)| QueryRef { id: r.id.clone(), plan_node: *step, note: Some(warning.label().into()) })
+        .map(|(r, step)| QueryRef { id: r.id.clone(), plan_node: *step, note: Some(warning.label()) })
         .collect();
     let share_metric = Metric::new(share_metric_label(snapshot), case.impact.share, Unit::Ratio);
     f.metrics.push(share_metric.clone());

@@ -245,11 +245,7 @@ impl Workload {
             };
         }
         if self.is_windowed() {
-            if self.window_unknown() {
-                t!("model.window.recorded")
-            } else {
-                last_span(self.measurement_hours())
-            }
+            if self.window_unknown() { t!("model.window.recorded") } else { last_span(self.measurement_hours()) }
         } else if self.window_unknown() {
             t!("model.window.since_reset_unknown")
         } else {
