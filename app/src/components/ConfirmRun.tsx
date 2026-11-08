@@ -1,7 +1,13 @@
 import { TriangleAlert } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import type { ConnectionInfo } from "../gen/ConnectionInfo";
+import { t } from "../lib/i18n";
 import type { PendingRun } from "../lib/run-batch";
+
+/** A message whose `{name}` arguments are elements: t() leaves them as `{name}`, and each is put in its place. */
+function place(message: string, elements: Record<string, ReactNode>): ReactNode[] {
+  return message.split(/\{(\w+)\}/).map((piece, i) => (i % 2 ? <Fragment key={i}>{elements[piece] ?? `{${piece}}`}</Fragment> : piece));
+}
 
 /**
  * Asked before a statement that changes data runs on production. Cancel has focus; a statement that touches every row
@@ -22,9 +28,9 @@ export function ConfirmRun({ pending, connection, onCancel, onConfirm }: { pendi
     return () => window.removeEventListener("keydown", onKey);
   }, [risky, onCancel]);
 
-  const verb = check.verb || "statement";
   const lines = sql.split("\n");
-  const preview = lines.length > 14 ? [...lines.slice(0, 14), `… ${lines.length - 14} more lines`].join("\n") : sql;
+  const preview = lines.length > 14 ? [...lines.slice(0, 14), t("ui.confirm_run.more_lines", { count: lines.length - 14 })].join("\n") : sql;
+  const pill = <span className="env-pill production">{connection.name}</span>;
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
@@ -32,9 +38,9 @@ export function ConfirmRun({ pending, connection, onCancel, onConfirm }: { pendi
         <div className="confirm-head">
           <TriangleAlert size={18} />
           <div>
-            <h2 id="confirm-run-title">Change data on production?</h2>
+            <h2 id="confirm-run-title">{t("ui.confirm_run.title")}</h2>
             <div className="muted">
-              This {verb} runs on <span className="env-pill production">{connection.name}</span> and commits.
+              {place(check.verb ? t("ui.confirm_run.runs_on", { verb: check.verb }) : t("ui.confirm_run.statement_runs_on"), { connection: pill })}
             </div>
           </div>
         </div>
@@ -50,16 +56,16 @@ export function ConfirmRun({ pending, connection, onCancel, onConfirm }: { pendi
         <pre className="confirm-sql">{preview}</pre>
         {risky && (
           <label className="confirm-type">
-            Type <b>{connection.name}</b> to run it
+            {place(t("ui.confirm_run.type_name"), { connection: <b>{connection.name}</b> })}
             <input ref={input} value={typed} onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ready && onConfirm()} spellCheck={false} autoComplete="off" />
           </label>
         )}
         <div className="confirm-actions">
           <button type="button" ref={cancel} className="btn" onClick={onCancel}>
-            Cancel
+            {t("ui.common.cancel")}
           </button>
           <button type="button" className="btn danger" disabled={!ready} onClick={onConfirm}>
-            Run on {connection.name}
+            {t("ui.confirm_run.run_on", { connection: connection.name })}
           </button>
         </div>
       </div>

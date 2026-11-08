@@ -2,6 +2,7 @@ import { Check, ChevronRight, Info } from "lucide-react";
 import { useState } from "react";
 import type { Report } from "../gen/Report";
 import { engineLimitations } from "../lib/engines";
+import { t } from "../lib/i18n";
 
 /** The pipeline's evidence assessment. No finding alone never means fine. */
 export function CheckedFine({ report }: { report: Report }) {
@@ -14,17 +15,17 @@ export function CheckedFine({ report }: { report: Report }) {
     <div className="checked-fine">
       <button type="button" className="checked-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <ChevronRight size={13} className={open ? "turned" : ""} />
-        <span>Check coverage <span className="n">{assessed.length} assessed without a finding · {limited.length} limited</span></span>
+        <span>{t("ui.checked_fine.title")} <span className="n">{t("ui.checked_fine.counts", { assessed: assessed.length, limited: limited.length })}</span></span>
       </button>
       {open && <>
         {assessed.length > 0 && <ul>{assessed.map((c) => <li key={c.check}>
-          <Check size={13} className="ok" /><span><span className="t">{c.title}</span><span className="d">No finding from the measurements available in this scan.</span></span>
+          <Check size={13} className="ok" /><span><span className="t">{c.title}</span><span className="d">{t("ui.checked_fine.no_finding")}</span></span>
         </li>)}</ul>}
-        {limited.length > 0 && <details><summary>Limited evidence · {limited.length}</summary><p className="muted">These checks could not establish a negative result. Any supported observations remain in Findings.</p><ul>{limited.map((c) => <li key={c.check}>
-          <Info size={13} /><span><span className="t">{c.title} · {c.status === "unavailable" ? "Unavailable" : "Insufficient evidence"}</span><span className="d">{c.reason}</span></span>
+        {limited.length > 0 && <details><summary>{t("ui.checked_fine.limited", { count: limited.length })}</summary><p className="muted">{t("ui.checked_fine.limited_note")}</p><ul>{limited.map((c) => <li key={c.check}>
+          <Info size={13} /><span><span className="t">{c.title} · {c.status === "unavailable" ? t("ui.checked_fine.unavailable") : t("ui.checked_fine.insufficient")}</span><span className="d">{c.reason}</span></span>
         </li>)}</ul></details>}
-        {inapplicable.length > 0 && <details><summary>Not applicable · {inapplicable.length}</summary><ul>{inapplicable.map((c) => <li key={c.check}><span><span className="t">{c.title}</span><span className="d">{c.reason}</span></span></li>)}</ul></details>}
-        <details><summary>What these sources cannot establish</summary><ul>{engineLimitations(report.snapshot.server.engine).map((text) => <li key={text}><Info size={13} /><span>{text}</span></li>)}</ul></details>
+        {inapplicable.length > 0 && <details><summary>{t("ui.checked_fine.not_applicable", { count: inapplicable.length })}</summary><ul>{inapplicable.map((c) => <li key={c.check}><span><span className="t">{c.title}</span><span className="d">{c.reason}</span></span></li>)}</ul></details>}
+        <details><summary>{t("ui.checked_fine.cannot_establish")}</summary><ul>{engineLimitations(report.snapshot.server.engine).map((text) => <li key={text}><Info size={13} /><span>{text}</span></li>)}</ul></details>
       </>}
     </div>
   );

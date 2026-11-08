@@ -2,6 +2,7 @@ import { Flag } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../lib/api";
 import { eventsChanged } from "../lib/events";
+import { t } from "../lib/i18n";
 import { toast } from "../lib/store";
 import "./timeline.css";
 
@@ -16,7 +17,7 @@ function localInput(t: number): string {
  * charts and What changed line queries up with it; CI and coding agents do the same with `culprit mark` and the
  * `mark` MCP tool.
  */
-export function MarkButton({ connection, label = "Mark" }: { connection: string; label?: string }) {
+export function MarkButton({ connection, label = t("ui.mark_button.mark") }: { connection: string; label?: string }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [at, setAt] = useState(() => localInput(Date.now()));
@@ -37,17 +38,17 @@ export function MarkButton({ connection, label = "Mark" }: { connection: string;
 
   const save = async () => {
     if (!text.trim() || busy) return;
-    const t = Date.parse(at);
+    const time = Date.parse(at);
     setBusy(true);
     try {
       const client = await api();
       // Within a minute of now means "now"; an earlier time is kept as entered.
-      const when = Number.isFinite(t) && Date.now() - t > 60_000 ? new Date(t).toISOString() : null;
+      const when = Number.isFinite(time) && Date.now() - time > 60_000 ? new Date(time).toISOString() : null;
       await client.mark(connection, text.trim(), when);
       setText("");
       setOpen(false);
       eventsChanged();
-      toast("Marked on the timeline");
+      toast(t("ui.mark_button.marked"));
     } catch (e) {
       setError(errorMessage(e).message);
     } finally {
@@ -57,14 +58,14 @@ export function MarkButton({ connection, label = "Mark" }: { connection: string;
 
   return (
     <span className="mark-anchor" ref={box}>
-      <button type="button" className="btn small" onClick={() => setOpen((o) => !o)} title="Put a deploy or a change on the timeline" aria-expanded={open}>
+      <button type="button" className="btn small" onClick={() => setOpen((o) => !o)} title={t("ui.mark_button.hint")} aria-expanded={open}>
         <Flag size={12} /> {label}
       </button>
       {open && (
         <div
           className="mark-pop"
           role="dialog"
-          aria-label="Mark the timeline"
+          aria-label={t("ui.mark_button.title")}
           onKeyDown={(e) => {
             e.stopPropagation();
             if (e.key === "Escape") setOpen(false);
@@ -72,24 +73,24 @@ export function MarkButton({ connection, label = "Mark" }: { connection: string;
           }}
         >
           <h4>
-            <Flag size={13} /> Mark the timeline
+            <Flag size={13} /> {t("ui.mark_button.title")}
           </h4>
-          <p>A deploy, a migration, a setting you changed. Charts and What changed line queries up with it.</p>
+          <p>{t("ui.mark_button.explain")}</p>
           <label>
-            What happened
-            <input ref={input} value={text} maxLength={200} placeholder="deploy v2.3.0" onChange={(e) => setText(e.target.value)} />
+            {t("ui.mark_button.what")}
+            <input ref={input} value={text} maxLength={200} placeholder={t("ui.mark_button.placeholder")} onChange={(e) => setText(e.target.value)} />
           </label>
           <label>
-            When
+            {t("ui.mark_button.when")}
             <input type="datetime-local" value={at} max={localInput(Date.now())} onChange={(e) => setAt(e.target.value)} />
           </label>
           {error && <div className="warn-text" style={{ fontSize: "var(--fs-ui-sm)", marginBottom: 6 }}>{error}</div>}
           <div className="row">
             <button type="button" className="btn small ghost" onClick={() => setOpen(false)}>
-              Cancel
+              {t("ui.common.cancel")}
             </button>
             <button type="button" className="btn small primary" onClick={() => void save()} disabled={!text.trim() || busy}>
-              {busy ? "Marking…" : "Mark"}
+              {busy ? t("ui.mark_button.marking") : t("ui.mark_button.mark")}
             </button>
           </div>
         </div>
