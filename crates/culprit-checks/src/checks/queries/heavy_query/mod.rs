@@ -574,7 +574,7 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
     f.verify = vec![match &case.verify {
         Verify::Scan(expect) => verify_line(snapshot, q, *expect),
         Verify::Quoted(line) => line.clone(),
-        Verify::StatisticsRefreshes => "Compare the frequency and duration of subsequent statistics refreshes under comparable load, together with query performance. A completed maintenance operation can remain in Query Store's history after any scheduling change.".into(),
+        Verify::StatisticsRefreshes => t!("check.heavy_query.verify.statistics_refreshes"),
     }];
     f.queries = vec![QueryRef { id: q.id.clone(), plan_node: case.plan_node, note: None }];
     f
@@ -607,27 +607,29 @@ pub(super) enum Expect {
 /// reads and averages move; on a source of running totals two of Culprit's scans show it, in What changed, which
 /// carries runs and time and no reads ([`verify_between_scans`]).
 fn verify_line(snapshot: &Snapshot, q: &QueryStat, expect: Expect) -> String {
+    // MySQL counts the rows a statement examined, the other engines the pages it read.
     let mysql = snapshot.server.engine == Engine::Mysql;
-    let reads = if mysql { "rows examined" } else { "pages read" };
     if matches!(expect, Expect::Measure) {
-        return format!(
-            "Use an actual plan to check row counts, and collect IO measurements for the same run to locate the reads. After a change supported by that evidence, compare equivalent runs: {reads} and time per run should fall without changing the result."
-        );
+        return if mysql {
+            t!("check.heavy_query.verify.measure_rows_examined")
+        } else {
+            t!("check.heavy_query.verify.measure_pages")
+        };
     }
     // The storage wait's share now: "most" where a parallel plan's waits pass the whole.
-    let storage_now = |share: f64| if share >= 1.0 { "most".to_string() } else { format::percent(share) };
+    let storage_now = |share: f64| (if share >= 1.0 { "most" } else { "share" }, format::percent(share));
     let between = match expect {
         Expect::Measure => unreachable!(),
         Expect::Storage(share) => {
-            let now = storage_now(share);
-            format!("its time per run should drop, as less of it waits for storage ({now} of it now)")
+            let (part, share) = storage_now(share);
+            t!("check.heavy_query.verify.between.storage", part = part, share = share)
         }
         Expect::CheaperRuns => Shows::CheaperRuns.between().to_string(),
         Expect::FewerRuns => Shows::FewerRuns.between().to_string(),
-        Expect::Counter => "compare time and avoidable calls for equivalent work, preserving numbering, metadata updates, returned values and transaction guarantees".into(),
-        Expect::Session => "compare avoidable session-call overhead for equivalent useful work, preserving transaction guarantees and session isolation; required calls need not decrease".to_string(),
-        Expect::Average => "its time per run should drop toward what its reads take".to_string(),
-        Expect::TimeOrStops => "its time should drop, or it should stop running".to_string(),
+        Expect::Counter => t!("check.heavy_query.verify.between.counter"),
+        Expect::Session => t!("check.heavy_query.verify.between.session"),
+        Expect::Average => t!("check.heavy_query.verify.between.average"),
+        Expect::TimeOrStops => t!("check.heavy_query.verify.between.time_or_stops"),
     };
     if let Some(line) = verify_between_scans(snapshot, q, &between) {
         return line;
@@ -636,23 +638,16 @@ fn verify_line(snapshot: &Snapshot, q: &QueryStat, expect: Expect) -> String {
     match expect {
         Expect::Measure => unreachable!(),
         Expect::Storage(share) => {
-            let now = storage_now(share);
-            format!(
-                "Compare equivalent runs before and after a justified change: time per run and storage wait time per run should fall ({now} of elapsed time was storage waiting). If the change avoids calls instead, compare total runs and total database time for the same useful work."
-            )
+            let (part, share) = storage_now(share);
+            t!("check.heavy_query.verify.storage", part = part, share = share)
         }
-        Expect::CheaperRuns => format!(
-            "After the change ships, re-scan: this query's {reads} and time per run should drop, and its share of {time} with them."
-        ),
-        Expect::FewerRuns => format!(
-            "After the change ships, re-scan: this query should run fewer times and take a smaller share of {time}, while what one run reads and takes can stay as it is, or rise."
-        ),
-        Expect::Counter => "Compare time and any avoidable calls under equivalent workload, checking that numbering, metadata updates, returned values and transaction guarantees remain correct. Required atomic calls need not decrease.".into(),
-        Expect::Session => {
-            "Compare avoidable session-call overhead for equivalent useful work. Verify transaction guarantees and session isolation; required calls need not decrease.".to_string()
-        }
-        Expect::Average => "Re-scan after the change: its average duration drops toward what its reads take.".into(),
-        Expect::TimeOrStops => "Re-scan after the change: this statement's time drops or it stops running.".into(),
+        Expect::CheaperRuns if mysql => t!("check.heavy_query.verify.cheaper_runs_rows_examined", time = time),
+        Expect::CheaperRuns => t!("check.heavy_query.verify.cheaper_runs_pages", time = time),
+        Expect::FewerRuns => t!("check.heavy_query.verify.fewer_runs", time = time),
+        Expect::Counter => t!("check.heavy_query.verify.counter"),
+        Expect::Session => t!("check.heavy_query.verify.session"),
+        Expect::Average => t!("check.heavy_query.verify.average"),
+        Expect::TimeOrStops => t!("check.heavy_query.verify.time_or_stops"),
     }
 }
 

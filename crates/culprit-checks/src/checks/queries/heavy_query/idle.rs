@@ -209,40 +209,21 @@ impl IdleKind {
     /// What to do about where the time goes. Where it waits for a lock, how to find the holder is the one every check
     /// that names a lock wait gives ([`find_lock_holder`]): Live only for waits that come often enough to catch.
     pub(super) fn fix(self, snapshot: &Snapshot, q: &QueryStat) -> Fix {
-        let holder = || find_lock_holder(snapshot, q, None);
+        // A lock's holder is found first, then what to change.
+        let after_holder = |then: String| {
+            let LockHolder { lead, sql } = find_lock_holder(snapshot, q, None);
+            ([lead, then].join(" "), sql)
+        };
         let (summary, sql) = match self {
-            IdleKind::AppLock => {
-                let LockHolder { lead, sql } = holder();
-                (
-                    format!(
-                        "{lead} Shorten the work done while the lock is held, or take the lock without waiting (a try-lock, or a lock timeout) and retry later."
-                    ),
-                    sql,
-                )
-            }
-            IdleKind::Locks => {
-                let LockHolder { lead, sql } = holder();
-                (
-                    format!(
-                        "{lead} Keep those transactions short: commit sooner, and don't wait for a user or another service inside a transaction. An index or a rewrite of this statement won't shorten the wait."
-                    ),
-                    sql,
-                )
-            }
-            _ => (self.advice(), None),
+            IdleKind::AppLock => after_holder(t!("check.heavy_query.fix.idle.app_lock")),
+            IdleKind::Locks => after_holder(t!("check.heavy_query.fix.idle.locks")),
+            IdleKind::Sleep => (t!("check.heavy_query.fix.idle.sleep"), None),
+            IdleKind::Client => (t!("check.heavy_query.fix.idle.client"), None),
+            IdleKind::Memory => (t!("check.heavy_query.fix.idle.memory"), None),
+            IdleKind::Latch => (t!("check.heavy_query.fix.idle.latch"), None),
+            IdleKind::Unknown => (t!("check.heavy_query.fix.idle.unknown"), None),
         };
         Fix { summary, sql, cost: None }
-    }
-
-    fn advice(self) -> String {
-        match self {
-            IdleKind::Sleep => "Find who sends it (a health check, a test, a retry loop with a back-off) and whether the pause belongs in the database at all: while it sleeps it holds a connection, and any locks its transaction took.".into(),
-            IdleKind::AppLock | IdleKind::Locks => String::new(),
-            IdleKind::Client => "The application reads the results slowly, or row by row while it does other work. Read all rows first and process them afterwards, or fetch fewer.".into(),
-            IdleKind::Memory => "It waits for a memory grant while other queries hold the memory: find the queries with the largest grants (Health) and reduce them, usually with better estimates or an index that avoids a big sort or hash.".into(),
-            IdleKind::Latch => "Sessions queue for the same pages: typically inserts at the end of an index on an increasing key, or tempdb allocation. See the hot-rows and last-page findings, and Live while it happens.".into(),
-            IdleKind::Unknown => "Find what it waits for while it runs: Live shows each session's wait and any blocking chain. Typical causes are locks other transactions hold, a slow client reading the results, or a call outside the database.".into(),
-        }
     }
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use culprit_core::t;
 
 /// An enabled index on `schema.table` whose first key is `column`: one that holds every row first, since a filtered
 /// index serves only the statements whose conditions match its filter.
@@ -49,37 +50,48 @@ pub(super) fn narrowed_later_fix(
     narrowing: Narrowing,
 ) -> Fix {
     // Rounded as the evidence rounds it: 2.5 rows a run are "about 2.5", not "about 3".
-    let rows = if returned < 1.0 {
-        "less than a row a run".to_string()
+    let returned = if returned < 1.0 {
+        t!("check.heavy_query.rewrite.returned_less")
     } else {
-        let n = format::count(returned);
-        let n = n.strip_suffix(".0").unwrap_or(&n);
-        format!("about {n} row{} a run", if n == "1" { "" } else { "s" })
+        let rows = format::count(returned);
+        let rows = rows.strip_suffix(".0").unwrap_or(&rows);
+        // The noun agrees with the number shown: 1.02 rows a run show as "1 row".
+        let shown = if returned < 100.0 { (returned * 10.0).round() / 10.0 } else { returned };
+        t!("check.heavy_query.rewrite.returned_about", rows = rows, count = shown)
     };
-    let start = format!(
-        "The plan reads all of {table} and keeps about {} of its rows, but the statement returns {rows}: they are narrowed later in the plan",
-        format::percent(kept)
-    );
+    let kept = format::percent(kept);
     match narrowing {
-        Narrowing::OrAcrossTables(condition) => or_rewrite_fix(snapshot, plan, condition, &start),
-        Narrowing::Condition(condition) => advice(format!(
-            "{start}, by `{}`. Where that condition can be applied to {table} itself, an index on the columns it compares lets the plan read only the rows needed.",
-            super::super::plan_warnings::truncate(condition, 140)
+        Narrowing::OrAcrossTables(condition) => {
+            let opening = t!(
+                "check.heavy_query.rewrite.narrowed_or",
+                table = table,
+                kept = kept,
+                returned = returned,
+                condition = super::super::plan_warnings::truncate(condition, 140)
+            );
+            or_rewrite_fix(snapshot, plan, condition, opening)
+        }
+        Narrowing::Condition(condition) => advice(t!(
+            "check.heavy_query.rewrite.narrowed_condition",
+            table = table,
+            kept = kept,
+            returned = returned,
+            condition = super::super::plan_warnings::truncate(condition, 140)
         )),
-        Narrowing::Unseen => advice(format!(
-            "{start} (by a join or a limit). Open the plan to see where; a condition on {table} itself, with an index on the columns it compares, lets the plan read only the rows needed."
-        )),
+        Narrowing::Unseen => {
+            advice(t!("check.heavy_query.rewrite.narrowed_unseen", table = table, kept = kept, returned = returned))
+        }
     }
 }
 
-fn or_rewrite_fix(snapshot: &Snapshot, plan: &Plan, condition: &str, start: &str) -> Fix {
-    let sides = union_sides(snapshot, plan, condition)
-        .map(|sides| format!(" Existing coverage: {}.", sides.join("; ")))
-        .unwrap_or_default();
-    advice(format!(
-        "{start}, by `{}`. This OR spans different tables, so a single index on the scan's filter does not address it. Evaluate a UNION rewrite or an equivalent EXISTS form that lets each branch use its own access path. Preserve the original joins, permission checks, duplicate handling, NULL behavior, grouping and ordering. Compare representative rewritten plans and reads before deciding whether a branch needs another index.{sides} Keep this structural risk under review as table size or call volume grows.",
-        super::super::plan_warnings::truncate(condition, 140)
-    ))
+/// The advice for an OR across tables, after `opening`: the sentence that says where the plan reads and the OR.
+fn or_rewrite_fix(snapshot: &Snapshot, plan: &Plan, condition: &str, opening: String) -> Fix {
+    let mut fix = vec![opening, t!("check.heavy_query.rewrite.evaluate")];
+    if let Some(sides) = union_sides(snapshot, plan, condition) {
+        fix.push(t!("check.heavy_query.rewrite.coverage", sides = sides.join("; ")));
+    }
+    fix.push(t!("check.heavy_query.rewrite.review"));
+    advice(fix.join(" "))
 }
 
 /// Existing index coverage for each branch. Returned rows after joins do not establish a branch's selectivity,
@@ -98,17 +110,24 @@ fn union_sides(snapshot: &Snapshot, plan: &Plan, condition: &str) -> Option<Vec<
         let column = cols.equality.first().or(cols.range.first())?;
         let node = table_named(plan, qualifier)?;
         let (schema, table) = crate::indexes::split_object(node.object.as_deref()?)?;
+        let qualified = format!("{schema}.{table}");
         sides.push(match index_leading_with(snapshot, &schema, &table, column) {
-            Some(index) => format!(
-                "{} on {schema}.{table} leads with {column}{}",
-                index.name,
-                index
-                    .filter
-                    .as_deref()
-                    .map(|f| format!(" (partial index: verify the branch implies {f})"))
-                    .unwrap_or_default()
-            ),
-            None => format!("{schema}.{table} has no index that leads with {column}"),
+            Some(index) => match index.filter.as_deref() {
+                Some(filter) => t!(
+                    "check.heavy_query.rewrite.side_leads_partial",
+                    index = &index.name,
+                    table = &qualified,
+                    column = column.as_str(),
+                    filter = filter
+                ),
+                None => t!(
+                    "check.heavy_query.rewrite.side_leads",
+                    index = &index.name,
+                    table = &qualified,
+                    column = column.as_str()
+                ),
+            },
+            None => t!("check.heavy_query.rewrite.side_none", table = &qualified, column = column.as_str()),
         });
     }
     (sides.len() >= 2).then_some(sides)
@@ -149,20 +168,27 @@ pub(crate) fn late_filter_rewrite(
             Some(returned) => {
                 narrowed_later_fix(snapshot, plan, table, kept, returned, Narrowing::OrAcrossTables(condition))
             }
-            None => or_rewrite_fix(
-                snapshot,
-                plan,
-                condition,
-                &format!("The captured plan reads {table} before a filter across tables is applied"),
-            ),
+            None => {
+                let opening = t!(
+                    "check.heavy_query.rewrite.before_or",
+                    table = table,
+                    condition = super::super::plan_warnings::truncate(condition, 140)
+                );
+                or_rewrite_fix(snapshot, plan, condition, opening)
+            }
         };
         return Some(culprit_core::insights::PlanInsight {
-            rule: "cross-table-or".into(), area: culprit_core::insights::InsightArea::Query,
-            severity: Severity::Low, impact: 0.0, fixed_weight: true, nodes: vec![node.id],
-            title: "A filter across tables can require a whole-table read".into(),
-            detail: format!("The captured plan scans {table} before an OR across tables narrows its rows. This structure can become expensive as the tables grow; the plan does not measure the benefit or semantics of a rewrite."),
-            fix: fix.summary, fix_sql: None,
-            verify: "Compare results, representative parameters, plans, reads and execution time for the original and rewritten query. Preserve permission checks and duplicate/NULL behavior. Evaluate index keys only from the rewritten branch predicates and measured selectivity.".into(),
+            rule: "cross-table-or".into(),
+            area: culprit_core::insights::InsightArea::Query,
+            severity: Severity::Low,
+            impact: 0.0,
+            fixed_weight: true,
+            nodes: vec![node.id],
+            title: t!("check.heavy_query.rewrite.title"),
+            detail: t!("check.heavy_query.rewrite.detail", table = table),
+            fix: fix.summary,
+            fix_sql: None,
+            verify: t!("check.heavy_query.rewrite.verify"),
             index_hint: None,
         });
     }
