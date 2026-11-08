@@ -371,7 +371,7 @@ function EventLane({ events, from, to }: { events: ChartEvent[]; from: number; t
                     </span>
                   </div>
                 ))}
-                {g.events.length > 5 && <div className="muted tc-ev-more">{t("ui.time_chart.more", { count: String(g.events.length - 5) })}</div>}
+                {g.events.length > 5 && <div className="muted tc-ev-more">{t("ui.common.more", { count: String(g.events.length - 5) })}</div>}
                 {first.onClick && <div className="tc-ev-hint">{t("ui.time_chart.click_to_compare")}</div>}
               </div>
             )}

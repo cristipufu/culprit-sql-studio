@@ -8,7 +8,7 @@ import { api, errorMessage, type ApiError } from "../lib/api";
 import { count, duration, percent, rowCount } from "../lib/format";
 import { t } from "../lib/i18n";
 import { PlanDiagram } from "./PlanDiagram";
-import { Rich, slot } from "./Prose";
+import { slot, withElements } from "../views/message-parts";
 
 const REFRESH_MS = 1000;
 
@@ -164,13 +164,13 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
     <section className="qprog" ref={panel} aria-label={t("ui.query_progress.label", { session })}>
       <header className="qp-head">
         <span className="qp-title">
-          <Rich text={t("ui.query_progress.session", { session: slot("session") })} parts={{ session: <b className="mono">{session}</b> }} />
+          {withElements(t("ui.query_progress.session", { session: slot(0) }), [<b key="session" className="mono">{session}</b>])}
           {progress && <span className={`qp-state ${progress.running ? "running" : "finished"}`}>{progress.running ? progress.state ?? t("ui.query_progress.running") : t("ui.query_progress.not_running")}</span>}
         </span>
         <span className="spacer" />
         <span className={`freshness ${live ? "live" : ""}`} title={t("ui.query_progress.refresh_title")}>
           <span className="dot" />
-          {paused ? t("ui.query_progress.paused") : !visible ? t("ui.query_progress.paused_hidden") : load.status === "error" ? t("ui.query_progress.cant_refresh") : progress && !progress.running ? t("ui.query_progress.stopped") : age != null ? age < 1 ? t("ui.query_progress.live_now") : t("ui.query_progress.live_ago", { seconds: age.toFixed(0) }) : t("ui.query_progress.connecting")}
+          {paused ? t("ui.query_progress.paused") : !visible ? t("ui.common.paused_while_hidden") : load.status === "error" ? t("ui.query_progress.cant_refresh") : progress && !progress.running ? t("ui.query_progress.stopped") : age != null ? age < 1 ? t("ui.query_progress.live_now") : t("ui.query_progress.live_ago", { seconds: age.toFixed(0) }) : t("ui.query_progress.connecting")}
         </span>
         <button type="button" className="btn ghost small" onClick={() => setPaused((p) => !p)} title={paused ? t("ui.query_progress.resume") : t("ui.query_progress.pause")}>
           {paused ? <Play size={12} /> : <Pause size={12} />}
@@ -219,17 +219,17 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
               )}
               {progress.cpu_ms != null && (
                 <span>
-                  <Rich text={t("ui.query_progress.cpu", { time: slot("time") })} parts={{ time: <b>{duration(progress.cpu_ms)}</b> }} />
+                  {withElements(t("ui.query_progress.cpu", { time: slot(0) }), [<b key="time">{duration(progress.cpu_ms)}</b>])}
                 </span>
               )}
               {progress.logical_reads != null && (
                 <span>
-                  <Rich text={t("ui.query_progress.reads", { reads: slot("reads") })} parts={{ reads: <b>{count(progress.logical_reads)}</b> }} />
+                  {withElements(t("ui.query_progress.reads", { reads: slot(0) }), [<b key="reads">{count(progress.logical_reads)}</b>])}
                 </span>
               )}
               {progress.rows_examined != null && (
                 <span>
-                  <Rich text={t("ui.query_progress.rows_examined", { rows: slot("rows") })} parts={{ rows: <b>{count(progress.rows_examined)}</b> }} />
+                  {withElements(t("ui.query_progress.rows_examined", { rows: slot(0) }), [<b key="rows">{count(progress.rows_examined)}</b>])}
                 </span>
               )}
             </div>
@@ -261,7 +261,7 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
               <div className="qp-hot">
                 <Flame size={13} />
                 <span>
-                  <Rich text={t("ui.query_progress.working_on", { operator: slot("operator") })} parts={{ operator: <b>{hotNode.op}</b> }} />
+                  {withElements(t("ui.query_progress.working_on", { operator: slot(0) }), [<b key="operator">{hotNode.op}</b>])}
                   {hotNode.object && <span className="mono"> {hotNode.object.split(".").pop()}</span>}
                   {byId.get(hotNode.id) && (
                     <span className="muted">

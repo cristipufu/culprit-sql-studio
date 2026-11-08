@@ -30,7 +30,7 @@ const COLUMNS: { key: SortKey; label: () => string; title: () => string; actual?
   { key: "est", label: () => t("ui.plan_operations.column.est"), title: () => t("ui.plan_operations.column.est_title") },
   { key: "act", label: () => t("ui.plan_operations.column.act"), title: () => t("ui.plan_operations.column.act_title"), actual: true },
   { key: "error", label: () => t("ui.plan_operations.column.error"), title: () => t("ui.plan_operations.column.error_title"), actual: true },
-  { key: "runs", label: () => t("ui.plan_operations.column.runs"), title: () => t("ui.plan_operations.column.runs_title") },
+  { key: "runs", label: () => t("common.metric.runs"), title: () => t("ui.plan_operations.column.runs_title") },
   { key: "read", label: () => t("ui.plan_operations.column.read"), title: () => t("ui.plan_operations.column.read_title") },
   { key: "time", label: () => t("ui.plan_operations.column.time"), title: () => t("ui.plan_operations.column.time_title"), actual: true },
   { key: "issues", label: () => t("ui.plan_operations.column.issues"), title: () => t("ui.plan_operations.column.issues_title") },

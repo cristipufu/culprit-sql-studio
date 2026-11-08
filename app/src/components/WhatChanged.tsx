@@ -387,7 +387,7 @@ function Summary({ changes }: { changes: Changes }) {
         )}
       </div>
       <div className="wc-stat">
-        <span className="label">{t("ui.what_changed.runs")}</span>
+        <span className="label">{t("common.metric.runs")}</span>
         <span className="value">
           {count(changes.baseline_total.executions)}
           <ArrowRight size={13} />
@@ -431,7 +431,7 @@ function Detail({ q, changes, report, inReport }: { q: QueryChange; changes: Cha
           </tr>
         </thead>
         <tbody>
-          {row(t("ui.what_changed.runs"), (s) => count(s.executions))}
+          {row(t("common.metric.runs"), (s) => count(s.executions))}
           {row(t("ui.what_changed.average"), (s) => runTime(s.mean_ms))}
           {(q.baseline?.min_ms != null || q.recent?.min_ms != null) && row(t("ui.what_changed.fastest"), (s) => (s.min_ms != null ? runTime(s.min_ms) : "—"))}
           {(q.baseline?.max_ms != null || q.recent?.max_ms != null) && row(t("ui.what_changed.slowest"), (s) => (s.max_ms != null ? runTime(s.max_ms) : "—"))}

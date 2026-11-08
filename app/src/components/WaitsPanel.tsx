@@ -1,5 +1,5 @@
 import { ArrowUpRight, Info, Lightbulb, Radio, RotateCw, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Report } from "../gen/Report";
 import type { WaitCategory } from "../gen/WaitCategory";
 import type { WaitSample } from "../gen/WaitSample";
@@ -15,7 +15,7 @@ import type { WaitsTab } from "./Waits";
 import type { Engine } from "../gen/Engine";
 import { can, isMariadb, serverName, waitSampling } from "../lib/engines";
 import { t } from "../lib/i18n";
-import { Rich, slot } from "./Prose";
+import { slot, withElements } from "../views/message-parts";
 
 type Loaded = { status: "loading" } | { status: "ready"; report: WaitsReport | null } | { status: "error"; error: ApiError };
 
@@ -241,18 +241,15 @@ function WaitsView({
           </button>
         ))}
         <div className="waits-keys">
-          <Rich
-            text={t("ui.waits_panel.keys", { arrows: slot("arrows"), escape: slot("escape") })}
-            parts={{
-              arrows: (
-                <>
-                  <span className="kbd">↑</span>
-                  <span className="kbd">↓</span>
-                </>
-              ),
-              escape: <span className="kbd">Esc</span>,
-            }}
-          />
+          {withElements(t("ui.waits_panel.keys", { arrows: slot(0), escape: slot(1) }), [
+            <Fragment key="arrows">
+              <span className="kbd">↑</span>
+              <span className="kbd">↓</span>
+            </Fragment>,
+            <span key="escape" className="kbd">
+              Esc
+            </span>,
+          ])}
         </div>
       </div>
       <div className="waits-detail" key={current.key}>

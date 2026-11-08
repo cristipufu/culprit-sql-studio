@@ -4,7 +4,7 @@ import type { Timeline } from "../gen/Timeline";
 import type { Workload } from "../gen/Workload";
 import { count, duration } from "../lib/format";
 import { t } from "../lib/i18n";
-import { Rich, slot } from "./Prose";
+import { slot, withElements } from "../views/message-parts";
 import { isPartial, TimeChart, VH, VW, when, type Bucket, type ChartEvent, type Flag, type Range } from "./TimeChart";
 
 /** Colors that tell plans apart, the same in chips, flags and lanes. */
@@ -101,8 +101,8 @@ export function WorkloadTrend({ timeline, windowStart, flags, onSelect, selectio
             {onCompare && <span className="muted trend-hint">{t("ui.trends.drag_to_compare")}</span>}
             {actions}
             {onCompare && (
-              <button type="button" className="btn small" onClick={onCompare} title={t("ui.trends.compare_title")}>
-                {t("ui.trends.what_changed")}
+              <button type="button" className="btn small" onClick={onCompare} title={t("ui.common.compare_periods", { key: "V" })}>
+                {t("ui.common.what_changed")}
               </button>
             )}
           </span>
@@ -134,7 +134,7 @@ export function WorkloadTrend({ timeline, windowStart, flags, onSelect, selectio
             </>
           ) : (
             <>
-              <Rich text={t("ui.trends.time_per", { unit: unit.unit, time: slot("time") })} parts={{ time: <b>{duration(rate[i] ?? 0)}</b> }} />
+              {withElements(t("ui.trends.time_per", { unit: unit.unit, time: slot(0) }), [<b key="time">{duration(rate[i] ?? 0)}</b>])}
               <span className="muted">
                 {" "}
                 · {t("ui.trends.runs", { runs: count(timeline.executions[i] ?? 0) })}{buckets[i] && isPartial(buckets[i]!) ? ` · ${t("ui.trends.partial")}` : ""}
@@ -291,7 +291,7 @@ export function QueryTrend({ query, timeline, onSince }: { query: QueryStat; tim
           ariaLabel={t("ui.trends.time_per_run_label")}
           readout={(i) => (
             <>
-              <Rich text={t("ui.trends.per_run", { time: slot("time") })} parts={{ time: <b>{points[i] != null ? duration(points[i]!) : "—"}</b> }} />
+              {withElements(t("ui.trends.per_run", { time: slot(0) }), [<b key="time">{points[i] != null ? duration(points[i]!) : "—"}</b>])}
               <span className="muted"> · {runs[i] != null ? t("ui.trends.runs", { runs: count(runs[i]!) }) : b[i]?.unknown ? t("ui.trends.not_known") : t("ui.trends.not_tracked")}</span>
             </>
           )}
@@ -299,7 +299,7 @@ export function QueryTrend({ query, timeline, onSince }: { query: QueryStat; tim
           {({ x, y }) => <path className="trend-line" d={linePath(points, b, x, y)} />}
         </TimeChart>
         <div className="trend-head">
-          <span className="label">{t("ui.trends.runs_label")}</span>
+          <span className="label">{t("common.metric.runs")}</span>
         </div>
         <TimeChart
           buckets={b}
@@ -316,7 +316,7 @@ export function QueryTrend({ query, timeline, onSince }: { query: QueryStat; tim
           }
           readout={(i) => (
             <>
-              <Rich text={t("ui.trends.runs", { runs: slot("runs") })} parts={{ runs: <b>{runs[i] != null ? count(runs[i]!) : "—"}</b> }} />
+              {withElements(t("ui.trends.runs", { runs: slot(0) }), [<b key="runs">{runs[i] != null ? count(runs[i]!) : "—"}</b>])}
             </>
           )}
         >

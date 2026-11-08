@@ -1,6 +1,5 @@
 import { Activity, ChevronsUpDown, CircleAlert, CircleArrowUp, CircleDot, Gauge, GitCompareArrows, ListOrdered, Monitor, Moon, Plus, RefreshCw, RotateCw, Search, SquareTerminal, Sun, Table2 } from "lucide-react";
 import type { ReactNode } from "react";
-import type { Environment } from "../gen/Environment";
 import { ago } from "../lib/format";
 import { EngineBadge } from "./EngineBadge";
 import { groupByEnvironment } from "../lib/environments";
@@ -45,13 +44,6 @@ function UpdateItem() {
   }
 }
 
-const ENVIRONMENT: Record<Environment, () => string> = {
-  production: () => t("ui.sidebar.environment.production"),
-  staging: () => t("ui.sidebar.environment.staging"),
-  development: () => t("ui.sidebar.environment.development"),
-  local: () => t("ui.sidebar.environment.local"),
-};
-
 function ConnectionList() {
   const connections = useStore((s) => s.connections);
   const active = useStore((s) => s.active);
@@ -59,7 +51,7 @@ function ConnectionList() {
   return (
     <div className="side-connections">
       <div className="sidebar-section side-section-row">
-        {t("ui.sidebar.connections")}
+        {t("ui.common.view.connections")}
         <button type="button" className="side-add" onClick={() => setState({ view: "connections" })} aria-label={t("ui.sidebar.manage_connections")} title={t("ui.sidebar.manage_connections")}>
           <Plus size={13} />
         </button>
@@ -69,7 +61,7 @@ function ConnectionList() {
           <button type="button"
             key={c.name}
             className={`nav-item conn-item ${c.name === active ? "active" : ""}`}
-            title={`${c.display} · ${ENVIRONMENT[c.environment]()}`}
+            title={`${c.display} · ${t("ui.common.environment", { environment: c.environment })}`}
             onClick={() => (c.name === active ? setState({ view: "dashboard" }) : openConnection(c.name))}
           >
             <EngineBadge engine={c.engine} environment={c.environment} product={c.last_report?.product} />
@@ -83,13 +75,13 @@ function ConnectionList() {
 }
 
 const NAV: { view: View; label: () => string; key: string; icon: ReactNode }[] = [
-  { view: "dashboard", label: () => t("ui.sidebar.nav.dashboard"), key: "1", icon: <Gauge size={15} /> },
-  { view: "overview", label: () => t("ui.sidebar.nav.findings"), key: "2", icon: <CircleDot size={15} /> },
-  { view: "queries", label: () => t("ui.sidebar.nav.queries"), key: "3", icon: <ListOrdered size={15} /> },
-  { view: "live", label: () => t("ui.sidebar.nav.live"), key: "4", icon: <Activity size={15} /> },
-  { view: "schema", label: () => t("ui.sidebar.nav.schema"), key: "5", icon: <Table2 size={15} /> },
-  { view: "editor", label: () => t("ui.sidebar.nav.editor"), key: "6", icon: <SquareTerminal size={15} /> },
-  { view: "plans", label: () => t("ui.sidebar.nav.plans"), key: "7", icon: <GitCompareArrows size={15} /> },
+  { view: "dashboard", label: () => t("ui.common.view.dashboard"), key: "1", icon: <Gauge size={15} /> },
+  { view: "overview", label: () => t("ui.common.view.findings"), key: "2", icon: <CircleDot size={15} /> },
+  { view: "queries", label: () => t("ui.common.view.queries"), key: "3", icon: <ListOrdered size={15} /> },
+  { view: "live", label: () => t("ui.common.view.live"), key: "4", icon: <Activity size={15} /> },
+  { view: "schema", label: () => t("ui.common.view.schema"), key: "5", icon: <Table2 size={15} /> },
+  { view: "editor", label: () => t("ui.common.view.editor"), key: "6", icon: <SquareTerminal size={15} /> },
+  { view: "plans", label: () => t("ui.common.view.plans"), key: "7", icon: <GitCompareArrows size={15} /> },
 ];
 
 export function Sidebar() {

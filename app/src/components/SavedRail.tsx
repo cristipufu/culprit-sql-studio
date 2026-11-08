@@ -6,7 +6,7 @@ import { api, errorMessage } from "../lib/api";
 import { serverName } from "../lib/engines";
 import { loadSaved, toast, useStore } from "../lib/store";
 import { EngineBadge } from "./EngineBadge";
-import { Rich, slot } from "./Prose";
+import { slot, withElements } from "../views/message-parts";
 import { keys } from "../lib/keys";
 import { t } from "../lib/i18n";
 
@@ -101,7 +101,7 @@ export function SavedRail({ current, saved, active, onOpen, onRenamed, onDeleted
         {saved === null && <div className="muted saved-empty">{t("ui.saved_rail.loading")}</div>}
         {saved?.length === 0 && (
           <div className="saved-empty">
-            <Rich text={t("ui.saved_rail.empty", { shortcut: slot("shortcut") })} parts={{ shortcut: <span className="kbd">{keys("⌘S")}</span> }} />
+            {withElements(t("ui.saved_rail.empty", { shortcut: slot(0) }), [<span key="shortcut" className="kbd">{keys("⌘S")}</span>])}
           </div>
         )}
         {list.map((q) => (

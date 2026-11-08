@@ -3,7 +3,7 @@ import type { Actionability } from "../gen/Actionability";
 import type { OperationalCounterKind } from "../gen/OperationalCounterKind";
 import { bytes, count, percent } from "../lib/format";
 import { t } from "../lib/i18n";
-import { Rich, slot } from "./Prose";
+import { slot, withElements } from "../views/message-parts";
 import { TerminationHistoryView } from "./TerminationHistory";
 import { NodeResourcesView } from "./NodeResources";
 
@@ -48,14 +48,14 @@ export function OperationalHealth({ report }: { report: Report }) {
       const growth = s.growth_enabled === null ? "unmeasured" : s.growth_enabled ? "configured" : "unavailable";
       return <div className="operational-card" key={`${s.scope}:${s.name}`}>
         <h4>{s.name}</h4>
-        <p><Rich text={t("ui.operational_health.space_used", { used: slot("used"), total: bytes(s.total_bytes) })} parts={{ used: <b>{bytes(s.used_bytes)}</b> }} /></p>
+        <p>{withElements(t("ui.operational_health.space_used", { used: slot(0), total: bytes(s.total_bytes) }), [<b key="used">{bytes(s.used_bytes)}</b>])}</p>
         <p className="muted">{scopeLabel(s.scope)} · {s.limit_bytes !== null ? t("ui.operational_health.growth_limit", { growth, limit: bytes(s.limit_bytes) }) : t("ui.operational_health.growth", { growth })} {t("ui.operational_health.free_space_unmeasured")}</p>
         {s.parts.length > 0 && <dl>{s.parts.map((p) => <div key={p.name}><dt>{p.name}</dt><dd>{bytes(p.bytes)}</dd></div>)}</dl>}
-        {s.reuse_wait && <p><Rich text={t("ui.operational_health.log_reuse", { reason: slot("reason") })} parts={{ reason: <code>{s.reuse_wait}</code> }} /></p>}
+        {s.reuse_wait && <p>{withElements(t("ui.operational_health.log_reuse", { reason: slot(0) }), [<code key="reason">{s.reuse_wait}</code>])}</p>}
       </div>;
     })}</div>}
     {o.sqlite && <div className="operational-card">
-      <h4>{t("ui.operational_health.sqlite_wal")}</h4><p><Rich text={t("ui.operational_health.sqlite_wal_size", { size: slot("size") })} parts={{ size: <b>{bytes(o.sqlite.wal_bytes)}</b> }} /></p>
+      <h4>{t("ui.operational_health.sqlite_wal")}</h4><p>{withElements(t("ui.operational_health.sqlite_wal_size", { size: slot(0) }), [<b key="size">{bytes(o.sqlite.wal_bytes)}</b>])}</p>
       <p className="muted">{t("ui.operational_health.sqlite_wal_note")}</p>
     </div>}
     {o.cluster && <div className="operational-card">
@@ -65,7 +65,7 @@ export function OperationalHealth({ report }: { report: Report }) {
       {o.cluster.flow_control_paused !== null && <p className="muted">{t("ui.operational_health.flow_control", { share: percent(o.cluster.flow_control_paused) })}</p>}
     </div>}
     {o.counters.length > 0 && <details><summary>{t("ui.operational_health.counters", { count: String(o.counters.length) })}</summary><div className="operational-grid">{o.counters.map((c) => <div className="operational-card" key={`${c.kind}:${c.subject}`}>
-      <h4>{COUNTERS[c.kind]()}</h4><p><Rich text={t("ui.operational_health.counter_recorded", { subject: c.subject, count: slot("count") })} parts={{ count: <b>{count(c.count)}</b> }} /></p>
+      <h4>{COUNTERS[c.kind]()}</h4><p>{withElements(t("ui.operational_health.counter_recorded", { subject: c.subject, count: slot(0) }), [<b key="count">{count(c.count)}</b>])}</p>
       <p className="muted">{c.since ? t("ui.operational_health.counter_since", { scope: scopeLabel(c.scope), since: c.since }) : t("ui.operational_health.counter_reset_unknown", { scope: scopeLabel(c.scope) })}</p>
       {c.before && <p>{t("ui.operational_health.counter_between", { count: count(c.count - c.before.count), from: c.before.at, to: report.snapshot.taken_at })}</p>}
       {c.last_event_at && <p className="muted">{t("ui.operational_health.counter_last_event", { at: c.last_event_at })}</p>}

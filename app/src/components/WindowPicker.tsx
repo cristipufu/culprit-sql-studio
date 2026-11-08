@@ -1,6 +1,6 @@
 import { CalendarClock, Check, ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { windowLabel } from "../lib/format";
+import { windowSpan } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
 import { t } from "../lib/i18n";
 import { setWindow, useStore, WINDOW_OPTIONS, type WindowMinutes } from "../lib/store";
@@ -48,7 +48,7 @@ export function WindowPicker({ coveredHours, source }: { coveredHours: number | 
   useHotkeys({ w: cycle, Escape: () => setOpen(false) });
 
   const short = coveredHours != null && coveredHours < (minutes / 60) * 0.9;
-  const held = coveredHours != null ? windowLabel(coveredHours).replace("last ", "") : "";
+  const held = coveredHours != null ? windowSpan(coveredHours) : "";
   // A window longer than the history shows nothing a shorter one doesn't, once the shortest such window covers it all.
   const same = (d: WindowMinutes) => coveredHours != null && WINDOW_OPTIONS.some((o) => o < d && coveredHours < (o / 60) * 0.9);
 

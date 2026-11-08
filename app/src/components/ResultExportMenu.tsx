@@ -50,7 +50,7 @@ export function ResultExportMenu({ result }: { result: ResultSet }) {
       const file = await resultFile(result, format);
       const where = await (await api()).saveFile(file.name, file.contents);
       const shown = where.split(/[\\/]/).slice(-2).join("/");
-      toast(file.protectedCells ? t("ui.result_export_menu.saved_escaped", { file: shown, count: file.protectedCells }) : t("ui.result_export_menu.saved", { file: shown }));
+      toast(file.protectedCells ? t("ui.result_export_menu.saved_escaped", { file: shown, count: file.protectedCells }) : t("ui.common.saved_file", { file: shown }));
     } catch (error) {
       toast(errorMessage(error).message);
     } finally {
