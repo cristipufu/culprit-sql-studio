@@ -8,6 +8,7 @@ import type { Report } from "../gen/Report";
 import type { TableStat } from "../gen/TableStat";
 import { serverName, statementMetrics } from "../lib/engines";
 import { bytes, count, duration, percent, rowCount, when } from "../lib/format";
+import { t } from "../lib/i18n";
 import { waitKey } from "../lib/waits";
 import { querySignalStatus, replicaStatus, storageStatus, tableSignalWarning, worstFinding } from "../lib/health";
 import { SignalTile } from "./Health";
@@ -47,17 +48,29 @@ function costRows(report: Report, q: QueryStat): Row[] {
     const rate = (aborted + failed) / runs;
     const timeout = c.aborted_mean_ms != null && [15, 30, 60, 120].some((s) => Math.abs(c.aborted_mean_ms! / 1000 - s) <= s * 0.1);
     const parts: string[] = [];
-    if (aborted > 0) parts.push(`${count(aborted)} cancelled${c.aborted_mean_ms != null ? ` after ${duration(c.aborted_mean_ms)} on average` : ""}${timeout ? ", a client timeout" : ""}`);
-    if (failed > 0) parts.push(`${count(failed)} errors${c.top_error ? `, recently ${c.top_error}` : ""}`);
-    if (c.warnings) parts.push(`${count(c.warnings)} warnings`);
+    if (aborted > 0) {
+      const mean = c.aborted_mean_ms;
+      parts.push(
+        mean == null
+          ? t("ui.beyond_time.cancelled", { count: count(aborted) })
+          : timeout
+            ? t("ui.beyond_time.cancelled_timeout", { count: count(aborted), duration: duration(mean) })
+            : t("ui.beyond_time.cancelled_after", { count: count(aborted), duration: duration(mean) }),
+      );
+    }
+    if (failed > 0) parts.push(c.top_error ? t("ui.beyond_time.errors_recently", { count: count(failed), error: c.top_error }) : t("ui.beyond_time.errors", { count: count(failed) }));
+    if (c.warnings) parts.push(t("ui.beyond_time.warnings", { count: count(c.warnings) }));
     const status = "info" as const;
+    // Why runs don't finish, when the evidence says: a client timeout, else the recent error.
+    const cause = timeout ? "timeout" : failed > 0 && c.top_error ? "error" : "other";
+    const error = c.top_error ?? "";
     rows.push({
       key: "unfinished",
-      label: "Didn't finish",
-      value: aborted + failed === 0 ? "none" : `${percent(rate)} of runs`,
-      note: parts.length ? parts.join(" · ") : "Every run finished",
+      label: t("ui.beyond_time.unfinished"),
+      value: aborted + failed === 0 ? t("ui.beyond_time.none") : t("ui.beyond_time.of_runs", { share: percent(rate) }),
+      note: parts.length ? parts.join(" · ") : t("ui.beyond_time.every_run_finished"),
       status,
-      takeaway: `${rate >= 0.999 ? "No run finishes" : `${percent(rate)} of runs don't finish`}${timeout ? ": they hit a client timeout" : failed > 0 && c.top_error ? `: ${c.top_error}` : ""}`,
+      takeaway: rate >= 0.999 ? t("ui.beyond_time.takeaway.none_finish", { cause, error }) : t("ui.beyond_time.takeaway.some_unfinished", { cause, error, share: percent(rate) }),
     });
   }
 
@@ -67,23 +80,23 @@ function costRows(report: Report, q: QueryStat): Row[] {
     rows.push({
       key: "planning",
       label: metrics.planning_label,
-      value: `${percent(share)} of its time`,
-      note: `${duration(c.plan_ms / plans)} per plan · ${plans >= runs * 0.9 ? "a new plan every run" : `each plan reused about ${count(runs / plans)} times`}`,
+      value: t("ui.beyond_time.of_its_time", { share: percent(share) }),
+      note: plans >= runs * 0.9 ? t("ui.beyond_time.plan_every_run", { duration: duration(c.plan_ms / plans) }) : t("ui.beyond_time.plan_reused", { duration: duration(c.plan_ms / plans), times: count(runs / plans) }),
       status: "info",
-      takeaway: `${metrics.planning_label} takes ${percent(share)} of its time`,
+      takeaway: t("ui.beyond_time.takeaway.planning", { label: metrics.planning_label, share: percent(share) }),
     });
   } else if (metrics.planning_setting) {
     const tracking = report.snapshot.settings.find((s) => s.name === metrics.planning_setting);
     if (tracking && tracking.value !== "on")
-      rows.push({ key: "planning", label: metrics.planning_label, value: "not measured", note: `${metrics.planning_setting} is off`, status: "info" });
+      rows.push({ key: "planning", label: metrics.planning_label, value: t("ui.beyond_time.not_measured"), note: t("ui.beyond_time.setting_off", { setting: metrics.planning_setting }), status: "info" });
   }
 
   if (metrics.compilation_history && c?.plan_ms == null) {
     const history = c?.compile_history;
     rows.push({
-      key: "compile-history", label: "Compilation history",
-      value: history ? `${count(history.count)} compiles · ${duration(history.total_ms)}` : "not measured for this period",
-      note: history ? "Retained Query Store entry totals; compilation timestamps do not isolate the selected period" : "No compilation count measured for the selected period",
+      key: "compile-history", label: t("ui.beyond_time.compile_history"),
+      value: history ? t("ui.beyond_time.compiles", { count: count(history.count), duration: duration(history.total_ms) }) : t("ui.beyond_time.compiles_unmeasured"),
+      note: history ? t("ui.beyond_time.compile_history_note") : t("ui.beyond_time.compile_history_missing"),
       status: "info",
     });
   }
@@ -92,11 +105,11 @@ function costRows(report: Report, q: QueryStat): Row[] {
     const share = c.jit_ms / q.total_time_ms;
     rows.push({
       key: "jit",
-      label: "JIT",
-      value: `${percent(share)} of run time`,
-      note: `${duration(c.jit_ms / runs)} per run${c.jit_functions ? ` · ${count(c.jit_functions)} functions compiled` : ""}`,
+      label: t("ui.beyond_time.jit"),
+      value: t("ui.beyond_time.of_run_time", { share: percent(share) }),
+      note: c.jit_functions ? t("ui.beyond_time.jit_per_run_functions", { duration: duration(c.jit_ms / runs), functions: count(c.jit_functions) }) : t("ui.beyond_time.per_run", { amount: duration(c.jit_ms / runs) }),
       status: "info",
-      takeaway: share >= 0.5 ? "JIT compiling takes longer than running it" : `JIT takes ${percent(share)} of its run time`,
+      takeaway: share >= 0.5 ? t("ui.beyond_time.takeaway.jit_longer") : t("ui.beyond_time.takeaway.jit", { share: percent(share) }),
     });
   }
 
@@ -105,11 +118,11 @@ function costRows(report: Report, q: QueryStat): Row[] {
     const share = Math.min(1, lock / Math.max(1, q.total_time_ms));
     rows.push({
       key: "lock",
-      label: "Lock waits",
-      value: `${percent(share)} of its time`,
-      note: `${duration(lock / runs)} per run, waiting for rows other sessions hold`,
+      label: t("ui.beyond_time.lock_waits"),
+      value: t("ui.beyond_time.of_its_time", { share: percent(share) }),
+      note: t("ui.beyond_time.lock_note", { duration: duration(lock / runs) }),
       status: "info",
-      takeaway: `It waits on locks for ${percent(share)} of its time`,
+      takeaway: t("ui.beyond_time.takeaway.lock", { share: percent(share) }),
     });
   }
 
@@ -120,10 +133,10 @@ function costRows(report: Report, q: QueryStat): Row[] {
     rows.push({
       key: "log",
       label: metrics.log_label,
-      value: `${bytes(c.log_bytes / runs)} per run`,
-      note: [c.log_share != null ? `${percent(c.log_share)} of all ${log}` : null, perRow != null ? `${bytes(perRow)} per row` : null].filter(Boolean).join(" · ") || "",
+      value: t("ui.beyond_time.per_run", { amount: bytes(c.log_bytes / runs) }),
+      note: [c.log_share != null ? t("ui.beyond_time.of_all_log", { share: percent(c.log_share), log }) : null, perRow != null ? t("ui.beyond_time.per_row", { size: bytes(perRow) }) : null].filter(Boolean).join(" · ") || "",
       status: "info",
-      takeaway: perRow != null && perRow >= 4096 ? `It writes ${bytes(perRow)} of ${log} per row it changes` : `It writes ${percent(c.log_share ?? 0)} of the ${log}`,
+      takeaway: perRow != null && perRow >= 4096 ? t("ui.beyond_time.takeaway.log_per_row", { size: bytes(perRow), log }) : t("ui.beyond_time.takeaway.log_share", { share: percent(c.log_share ?? 0), log }),
     });
   }
 
@@ -133,11 +146,11 @@ function costRows(report: Report, q: QueryStat): Row[] {
     const width = c?.row_bytes ?? null;
     rows.push({
       key: "result",
-      label: "Result",
-      value: `${rowCount(perRun)}${width ? ` ≈ ${bytes(perRun * width)}` : ""}`,
-      note: `per run${width ? ` · about ${bytes(width)} a row, from the plan` : ""}`,
+      label: t("ui.beyond_time.result"),
+      value: width ? t("ui.beyond_time.result_size", { rows: rowCount(perRun), size: bytes(perRun * width) }) : rowCount(perRun),
+      note: width ? t("ui.beyond_time.result_width", { size: bytes(width) }) : t("ui.beyond_time.result_per_run"),
       status: "info",
-      takeaway: `It returns ${rowCount(perRun)}${width ? ` (≈ ${bytes(perRun * width)})` : ""} per run`,
+      takeaway: width ? t("ui.beyond_time.takeaway.result_size", { rows: rowCount(perRun), size: bytes(perRun * width) }) : t("ui.beyond_time.takeaway.result", { rows: rowCount(perRun) }),
     });
   }
   const checks: Record<string, string[]> = {
@@ -158,11 +171,12 @@ export function QueryCostsPanel({ report, query }: { report: Report; query: Quer
   const rows = costRows(report, query);
   if (rows.length === 0) return null;
   const worst = [...rows].sort((a, b) => RANK[a.status] - RANK[b.status])[0]!;
-  const lead = worst.status === "bad" || worst.status === "watch" ? `${worst.takeaway}.` : "Recorded costs for this query.";
+  // A warning leads with its takeaway; a row without one (a signal that wasn't measured) leads with the plain line.
+  const lead = (worst.status === "bad" || worst.status === "watch" ? worst.takeaway : null) ?? t("ui.beyond_time.recorded_costs");
   const footer = notKept(report, query);
   return (
     <section className="beyond">
-      <h3>Beyond run time</h3>
+      <h3>{t("ui.beyond_time.title")}</h3>
       <p className={`beyond-lead ${worst.status}`}>{lead}</p>
       <div className="beyond-rows" role="list">
         {rows.map((r) => (
@@ -181,7 +195,18 @@ export function QueryCostsPanel({ report, query }: { report: Report; query: Quer
 
 // ── storage and replication ─────────────────────────────────────────────────────────────────────
 
-const KIND_LABEL: Record<FileIo["kind"], string> = { data: "data", log: "log", temp: "temp", other: "other" };
+function kindLabel(kind: FileIo["kind"]): string {
+  switch (kind) {
+    case "data":
+      return t("ui.beyond_time.file_kind.data");
+    case "log":
+      return t("ui.beyond_time.file_kind.log");
+    case "temp":
+      return t("ui.beyond_time.file_kind.temp");
+    case "other":
+      return t("ui.beyond_time.file_kind.other");
+  }
+}
 
 /** Storage latency in µs below a tenth of a millisecond, where cache hits and fast SSDs live. */
 function latency(ms: number | null): string {
@@ -195,37 +220,46 @@ function avg(ms: number | null, n: number): number | null {
 
 function fileName(f: FileIo): string {
   const name = f.database && !f.name.startsWith(f.database) ? `${f.database} · ${f.name}` : f.name;
-  const scope = f.scope === "server" ? "whole server" : f.scope === "database" ? (f.database ?? "this database") : "scope not recorded";
-  return scope ? `${name} (${scope})` : name;
+  const scope = f.scope === "server" ? t("ui.beyond_time.scope.server") : f.scope === "database" ? (f.database ?? t("ui.beyond_time.scope.this_database")) : t("ui.beyond_time.scope.unrecorded");
+  return scope ? t("ui.beyond_time.file_scope", { file: name, scope }) : name;
 }
 
 function storageLead(files: FileIo[], engine: Engine, report: Report): { text: string; status: Status } {
   const timed = files.filter((f) => f.read_ms != null || f.write_ms != null);
   if (timed.length === 0) {
     return engine === "postgres"
-      ? { text: "PostgreSQL isn't timing reads and writes: turn on track_io_timing to see storage latency.", status: "info" }
-      : { text: "The server counts reads and writes but doesn't time them.", status: "info" };
+      ? { text: t("ui.beyond_time.storage.untimed_postgres"), status: "info" }
+      : { text: t("ui.beyond_time.storage.untimed"), status: "info" };
   }
   const slow = [...files].map((f) => ({ f, s: storageStatus(report, f) })).sort((a, b) => RANK[a.s] - RANK[b.s])[0];
   if (slow && (slow.s === "bad" || slow.s === "watch")) {
     const f = slow.f;
     const finding = worstFinding(report, (f) => f.check === "slow-storage");
-    return { text: finding ? `${finding.title}.` : `Recorded I/O for ${fileName(f)}.`, status: slow.s };
+    return { text: finding ? t("ui.beyond_time.finding_lead", { title: finding.title }) : t("ui.beyond_time.storage.recorded", { file: fileName(f) }), status: slow.s };
   }
   const reads = files.filter((f) => f.kind !== "log" && f.read_ms != null).reduce((a, f) => ({ ms: a.ms + (f.read_ms ?? 0), n: a.n + f.reads }), { ms: 0, n: 0 });
   const logs = files.filter((f) => f.kind === "log" && f.write_ms != null).reduce((a, f) => ({ ms: a.ms + (f.write_ms ?? 0), n: a.n + f.writes }), { ms: 0, n: 0 });
-  const sentence = [reads.n > 0 ? `reads average ${latency(reads.ms / reads.n)}` : null, logs.n > 0 ? `log ${files.some((f) => f.kind === "log" && f.write_operation === "flush") ? "flushes" : "writes"} ${latency(logs.ms / logs.n)}` : null]
-    .filter(Boolean)
-    .join(" and ");
-  return { text: sentence ? `${sentence[0]!.toUpperCase()}${sentence.slice(1)} over the recorded history.` : "No timed operations in this scan.", status: "info" };
+  const kind = files.some((f) => f.kind === "log" && f.write_operation === "flush") ? "flushes" : "writes";
+  const read = reads.n > 0 ? latency(reads.ms / reads.n) : null;
+  const log = logs.n > 0 ? latency(logs.ms / logs.n) : null;
+  const text =
+    read != null && log != null
+      ? t("ui.beyond_time.storage.reads_and_log", { reads: read, kind, log })
+      : read != null
+        ? t("ui.beyond_time.storage.reads", { reads: read })
+        : log != null
+          ? t("ui.beyond_time.storage.log", { kind, log })
+          : t("ui.beyond_time.storage.none_timed");
+  return { text, status: "info" };
 }
 
-function Latency({ ms, n, label }: { ms: number | null; n: number; label: string }) {
+/** One file's average time for one kind of operation (`reads`, `writes` or `flushes`), with how many it averages. */
+function Latency({ ms, n, kind }: { ms: number | null; n: number; kind: "reads" | "writes" | "flushes" }) {
   if (n <= 0) return <span className="io-cell muted">—</span>;
   const a = avg(ms, n);
   return (
-    <span className="io-cell" title={`${count(n)} ${label}${ms != null ? `, ${duration(ms)} in all` : ", not timed"}`}>
-      <b>{a == null ? "untimed" : latency(a)}</b>
+    <span className="io-cell" title={ms != null ? t("ui.beyond_time.latency_total", { count: count(n), kind, total: duration(ms) }) : t("ui.beyond_time.latency_untimed", { count: count(n), kind })}>
+      <b>{a == null ? t("ui.beyond_time.untimed") : latency(a)}</b>
       <span className="muted"> × {count(n)}</span>
     </span>
   );
@@ -237,35 +271,35 @@ export function StorageLatency({ files, engine, report, compact }: { files: File
   const lead = storageLead(files, engine, report);
   const written = files.filter((f) => f.writes > 0);
   const hasFlushes = written.some((f) => f.write_operation === "flush");
-  const writeHeading = hasFlushes ? (written.every((f) => f.write_operation === "flush") ? "Flushes" : "Writes / flushes") : "Writes";
+  const writeHeading = hasFlushes ? (written.every((f) => f.write_operation === "flush") ? t("ui.beyond_time.flushes") : t("ui.beyond_time.writes_flushes")) : t("ui.beyond_time.writes");
   return (
     <section className="io-panel">
       {!compact && (
         <div className="io-head">
-          <h4>Storage</h4>
+          <h4>{t("ui.beyond_time.storage.title")}</h4>
           <span className="muted">
-            recorded average per operation · each row states its scope{engine === "postgres" ? "; reads include those the OS cache served" : ""}
+            {engine === "postgres" ? t("ui.beyond_time.storage.about_postgres") : t("ui.beyond_time.storage.about")}
           </span>
         </div>
       )}
       <p className={`beyond-lead ${lead.status}`}>{lead.text}</p>
-      <div className="io-table" role="table" aria-label="Storage latency per file">
+      <div className="io-table" role="table" aria-label={t("ui.beyond_time.storage.label")}>
         <IoRow className="io-th">
-          <IoHeader>File</IoHeader>
-          <IoHeader>Reads</IoHeader>
+          <IoHeader>{t("ui.beyond_time.file")}</IoHeader>
+          <IoHeader>{t("ui.beyond_time.reads")}</IoHeader>
           <IoHeader>{writeHeading}</IoHeader>
         </IoRow>
         {files.slice(0, compact ? 8 : 12).map((f) => (
           <IoRow key={`${f.database ?? ""}:${f.name}`}>
             <span className="io-name" role="cell">
               <i className={`sig-dot ${storageStatus(report, f)}`} aria-hidden />
-              <span className="io-file" title={`${fileName(f)} · ${f.stats_reset ? `statistics since ${f.stats_reset}` : "statistics period not recorded"}`}>
+              <span className="io-file" title={f.stats_reset ? t("ui.beyond_time.stats_since", { file: fileName(f), reset: f.stats_reset }) : t("ui.beyond_time.stats_unrecorded", { file: fileName(f) })}>
                 {fileName(f)}
               </span>
-              <span className={`io-kind ${f.kind}`}>{KIND_LABEL[f.kind]}</span>
+              <span className={`io-kind ${f.kind}`}>{kindLabel(f.kind)}</span>
             </span>
-            <Latency ms={f.read_ms} n={f.reads} label="reads" />
-            <Latency ms={f.write_ms} n={f.writes} label={f.write_operation === "flush" ? "flushes" : "writes"} />
+            <Latency ms={f.read_ms} n={f.reads} kind="reads" />
+            <Latency ms={f.write_ms} n={f.writes} kind={f.write_operation === "flush" ? "flushes" : "writes"} />
           </IoRow>
         ))}
       </div>
@@ -273,7 +307,16 @@ export function StorageLatency({ files, engine, report, compact }: { files: File
   );
 }
 
-const ROLE: Record<Replica["role"], string> = { replica: "replica", "this-server": "this server", slot: "slot" };
+function roleLabel(role: Replica["role"]): string {
+  switch (role) {
+    case "replica":
+      return t("ui.beyond_time.role.replica");
+    case "this-server":
+      return t("ui.beyond_time.role.this_server");
+    case "slot":
+      return t("ui.beyond_time.role.slot");
+  }
+}
 
 /** Replicas, this server's own lag when it is one, and replication slots. */
 export function Replication({ replicas, report }: { replicas: Replica[]; report: Report }) {
@@ -281,29 +324,29 @@ export function Replication({ replicas, report }: { replicas: Replica[]; report:
   const worst = [...replicas].sort((a, b) => RANK[replicaStatus(report, a)] - RANK[replicaStatus(report, b)])[0]!;
   const ws = replicaStatus(report, worst);
   const finding = worstFinding(report, (f) => f.check === "replica-lag");
-  const lead = finding ? `${finding.title}.` : "Recorded replication state.";
+  const lead = finding ? t("ui.beyond_time.finding_lead", { title: finding.title }) : t("ui.beyond_time.replication.recorded");
   return (
     <section className="io-panel">
       <div className="io-head">
-        <h4>Replication</h4>
+        <h4>{t("ui.beyond_time.replication.title")}</h4>
       </div>
       <p className={`beyond-lead ${ws}`}>{lead}</p>
-      <div className="io-table" role="table" aria-label="Replicas">
+      <div className="io-table" role="table" aria-label={t("ui.beyond_time.replication.label")}>
         {replicas.map((r) => (
           <IoRow key={`${r.role}:${r.name}`} className="repl">
             <span className="io-name" role="cell">
               <i className={`sig-dot ${replicaStatus(report, r)}`} aria-hidden />
               <span className="io-file">{r.name}</span>
-              <span className="io-kind">{ROLE[r.role]}</span>
+              <span className="io-kind">{roleLabel(r.role)}</span>
             </span>
             <span className="io-cell" role="cell">
               {[r.state, r.sync].filter(Boolean).join(" · ") || "—"}
             </span>
             <span className="io-cell" role="cell">
               {[
-                r.lag_seconds != null ? `${duration(r.lag_seconds * 1000)} behind` : null,
-                r.lag_bytes != null ? `${bytes(r.lag_bytes)} ${r.role === "slot" ? "kept" : "to apply"}` : null,
-                r.unsent_bytes ? `${bytes(r.unsent_bytes)} unsent` : null,
+                r.lag_seconds != null ? t("ui.beyond_time.replication.behind", { duration: duration(r.lag_seconds * 1000) }) : null,
+                r.lag_bytes != null ? (r.role === "slot" ? t("ui.beyond_time.replication.kept", { size: bytes(r.lag_bytes) }) : t("ui.beyond_time.replication.to_apply", { size: bytes(r.lag_bytes) })) : null,
+                r.unsent_bytes ? t("ui.beyond_time.replication.unsent", { size: bytes(r.unsent_bytes) }) : null,
                 r.error,
               ]
                 .filter(Boolean)
@@ -335,19 +378,19 @@ export function TableSignalFacts({ report, table }: { report: Report; table: Tab
   const s = table.storage ?? null;
   if (s?.docdb) {
     const native = s.docdb;
-    facts.push(<Fact key="docdb-tablets" label="DocDB tablets" value={native.tablets == null ? "unknown" : count(native.tablets)} detail={native.colocated ? "Shared with its colocated tablegroup" : "Distributed LSM storage over Raft"} />);
-    facts.push(<Fact key="docdb-sharding" label="Sharding" value={native.hash_key_columns == null ? "unknown" : native.hash_key_columns > 0 ? `${native.hash_key_columns} hash key column${native.hash_key_columns === 1 ? "" : "s"}` : "range"} detail={native.colocated ? "Logical size is unavailable for shared allocation" : "PostgreSQL heap and vacuum counters do not apply"} />);
+    facts.push(<Fact key="docdb-tablets" label={t("ui.beyond_time.docdb.tablets")} value={native.tablets == null ? t("ui.beyond_time.unknown") : count(native.tablets)} detail={native.colocated ? t("ui.beyond_time.docdb.colocated") : t("ui.beyond_time.docdb.distributed")} />);
+    facts.push(<Fact key="docdb-sharding" label={t("ui.beyond_time.docdb.sharding")} value={native.hash_key_columns == null ? t("ui.beyond_time.unknown") : native.hash_key_columns > 0 ? t("ui.beyond_time.docdb.hash_columns", { n: native.hash_key_columns }) : t("ui.beyond_time.docdb.range")} detail={native.colocated ? t("ui.beyond_time.docdb.shared_size") : t("ui.beyond_time.docdb.no_heap")} />);
   }
   if (s?.hot_updates != null && (table.updates ?? 0) >= 100) {
     const ratio = s.hot_updates / Math.max(1, table.updates ?? 1);
     facts.push(
       <Fact
         key="hot"
-        label="HOT updates"
+        label={t("ui.beyond_time.hot.label")}
         value={percent(ratio)}
         warn={tableSignalWarning(report, table, ["hot-updates"])}
-        detail={`fillfactor ${s.fillfactor ?? 100}${s.new_page_updates != null ? ` · ${count(s.new_page_updates)} moved to a new page` : ""}`}
-        title="Updates that stayed on their page and wrote no index entries"
+        detail={s.new_page_updates != null ? t("ui.beyond_time.hot.fillfactor_moved", { fillfactor: String(s.fillfactor ?? 100), moved: count(s.new_page_updates) }) : t("ui.beyond_time.hot.fillfactor", { fillfactor: String(s.fillfactor ?? 100) })}
+        title={t("ui.beyond_time.hot.hint")}
       />,
     );
   }
@@ -357,11 +400,11 @@ export function TableSignalFacts({ report, table }: { report: Report; table: Tab
     facts.push(
       <Fact
         key="bloat"
-        label="Empty space"
+        label={t("ui.beyond_time.bloat.label")}
         value={`≈ ${bytes(s.bloat_bytes)}`}
         warn={tableSignalWarning(report, table, ["table-bloat"])}
-        detail={`${percent(share)} of the table, estimated`}
-        title="Estimated from row counts and column widths in pg_stats"
+        detail={t("ui.beyond_time.bloat.share", { share: percent(share) })}
+        title={t("ui.beyond_time.bloat.hint")}
       />,
     );
   }
@@ -374,11 +417,11 @@ export function TableSignalFacts({ report, table }: { report: Report; table: Tab
       facts.push(
         <Fact
           key="locks"
-          label="Lock waits"
+          label={t("ui.beyond_time.lock_waits")}
           value={duration(lockMs)}
           warn={tableSignalWarning(report, table, ["hot-rows", "lock-escalations"])}
-          detail={`${count(waits)} waits · most on ${worst.name}`}
-          title="Row and page lock waits since the indexes were loaded"
+          detail={t("ui.beyond_time.locks.detail", { waits: count(waits), index: worst.name })}
+          title={t("ui.beyond_time.locks.hint")}
         />,
       );
     const latch = contended.reduce((a, i) => a + i.contention!.page_latch_wait_ms, 0);
@@ -387,10 +430,10 @@ export function TableSignalFacts({ report, table }: { report: Report; table: Tab
       facts.push(
         <Fact
           key="latch"
-          label="Page latch waits"
+          label={t("ui.beyond_time.latch.label")}
           value={duration(latch)}
           warn={tableSignalWarning(report, table, ["last-page-insert"])}
-          detail={sequential ? `last-page inserts on ${sequential.name}` : "hot pages"}
+          detail={sequential ? t("ui.beyond_time.latch.last_page", { index: sequential.name }) : t("ui.beyond_time.latch.hot_pages")}
         />,
       );
   }
@@ -399,8 +442,8 @@ export function TableSignalFacts({ report, table }: { report: Report; table: Tab
     facts.push(
       <Fact
         key="constraints"
-        label={snapshot.server.engine === "postgres" ? "Not validated" : "Untrusted"}
-        value={`${untrusted.length} constraint${untrusted.length === 1 ? "" : "s"}`}
+        label={snapshot.server.engine === "postgres" ? t("ui.beyond_time.constraints.not_validated") : t("ui.beyond_time.constraints.untrusted")}
+        value={t("ui.beyond_time.constraints.count", { n: untrusted.length })}
         warn
         detail={untrusted.map((c) => c.name).join(", ")}
       />,
@@ -411,9 +454,9 @@ export function TableSignalFacts({ report, table }: { report: Report; table: Tab
     facts.push(
       <Fact
         key="histograms"
-        label={columns.some((h) => h.kind == null) ? "Column statistics" : "Histograms"}
-        value={columns.length ? `${columns.length} column${columns.length === 1 ? "" : "s"}` : "none"}
-        detail={columns.length ? columns.map((h) => h.column).join(", ") : "the optimizer guesses for unindexed filters"}
+        label={columns.some((h) => h.kind == null) ? t("ui.beyond_time.histograms.column_statistics") : t("ui.beyond_time.histograms.label")}
+        value={columns.length ? t("ui.beyond_time.histograms.columns", { n: columns.length }) : t("ui.beyond_time.none")}
+        detail={columns.length ? columns.map((h) => h.column).join(", ") : t("ui.beyond_time.histograms.none")}
       />,
     );
   }
@@ -431,12 +474,14 @@ const ESCALATIONS_SINCE = "Escalations since the previous scan";
 /** SQL Server counts escalations from when it started, with no time for each: what the counts cover, and how many came since the scan before. */
 function escalationsSince(startedAt: string | null, previousScan: string | undefined, finding: Finding): string {
   const counted = startedAt
-    ? `Counted since SQL Server started (${when(startedAt).short}), with no time for each.`
-    : "Counted since each index was loaded into memory, with no time for each.";
+    ? t("ui.beyond_time.escalations.since_start", { started: when(startedAt).short })
+    : t("ui.beyond_time.escalations.since_load");
   const since = finding.metrics.find((m) => m.label === ESCALATIONS_SINCE)?.value;
-  if (since === undefined || !previousScan) return `${counted} The next scan says whether any happen after this one.`;
+  if (since === undefined || !previousScan) return `${counted} ${t("ui.beyond_time.escalations.next_scan")}`;
   const at = when(previousScan).short;
-  return since > 0 ? `${counted} ${count(since)} since the previous scan (${at}).` : `${counted} None since the previous scan (${at}).`;
+  return since > 0
+    ? `${counted} ${t("ui.beyond_time.escalations.since_previous", { count: count(since), at })}`
+    : `${counted} ${t("ui.beyond_time.escalations.none_since_previous", { at })}`;
 }
 
 export function SignalEvidence({ report, finding }: { report: Report; finding: Finding }) {
@@ -446,14 +491,14 @@ export function SignalEvidence({ report, finding }: { report: Report; finding: F
     case "slow-storage":
       return p?.files?.length ? (
         <section>
-          <h3>Evidence</h3>
+          <h3>{t("ui.beyond_time.evidence")}</h3>
           <StorageLatency files={p.files} engine={snapshot.server.engine} report={report} compact />
         </section>
       ) : null;
     case "replica-lag":
       return p?.replicas?.length ? (
         <section>
-          <h3>Evidence</h3>
+          <h3>{t("ui.beyond_time.evidence")}</h3>
           <Replication replicas={p.replicas} report={report} />
         </section>
       ) : null;
@@ -461,7 +506,7 @@ export function SignalEvidence({ report, finding }: { report: Report; finding: F
       const signals = (p?.signals ?? []).filter((s) => CHURN.includes(s.key));
       return signals.length ? (
         <section>
-          <h3>Evidence</h3>
+          <h3>{t("ui.beyond_time.evidence")}</h3>
           <div className="signal-grid compact">
             {signals.map((s) => (
               <SignalTile key={s.key} signal={s} />
@@ -479,12 +524,12 @@ export function SignalEvidence({ report, finding }: { report: Report; finding: F
       const table = indexes[0]!.table;
       return (
         <section>
-          <h3>Evidence</h3>
-          <div className="io-table" role="table" aria-label={`Lock escalations on ${table}`}>
+          <h3>{t("ui.beyond_time.evidence")}</h3>
+          <div className="io-table" role="table" aria-label={t("ui.beyond_time.escalations.label", { table })}>
             <IoRow className="io-th">
-              <IoHeader>On {table}</IoHeader>
-              <IoHeader>Table locks</IoHeader>
-              <IoHeader>Lock waits</IoHeader>
+              <IoHeader>{t("ui.beyond_time.on", { object: table })}</IoHeader>
+              <IoHeader>{t("ui.beyond_time.escalations.table_locks")}</IoHeader>
+              <IoHeader>{t("ui.beyond_time.lock_waits")}</IoHeader>
             </IoRow>
             {indexes.map((i) => {
               const c = i.contention!;
@@ -495,17 +540,17 @@ export function SignalEvidence({ report, finding }: { report: Report; finding: F
                     {i.name}
                   </span>
                   <span className="io-cell" role="cell">
-                    {c.lock_escalations > 0 ? <b>{count(c.lock_escalations)}</b> : "none"}
+                    {c.lock_escalations > 0 ? <b>{count(c.lock_escalations)}</b> : t("ui.beyond_time.none")}
                   </span>
                   <span className="io-cell" role="cell">
-                    {waits > 0 ? `${count(waits)}, ${duration(c.row_lock_wait_ms + c.page_lock_wait_ms)}` : "none"}
+                    {waits > 0 ? `${count(waits)}, ${duration(c.row_lock_wait_ms + c.page_lock_wait_ms)}` : t("ui.beyond_time.none")}
                   </span>
                 </IoRow>
               );
             })}
           </div>
           <p className="beyond-foot">
-            Each table lock replaced one statement's row locks on that index, and every other writer waited for it.{" "}
+            {t("ui.beyond_time.escalations.explain")}{" "}
             {escalationsSince(snapshot.server.started_at, snapshot.escalations_before?.taken_at, finding)}
           </p>
         </section>
@@ -517,19 +562,19 @@ export function SignalEvidence({ report, finding }: { report: Report; finding: F
       const c = index?.contention;
       if (!index || !c) return null;
       const rows: [string, number, number][] = [
-        ["Row locks", c.row_lock_waits, c.row_lock_wait_ms],
-        ["Page locks", c.page_lock_waits, c.page_lock_wait_ms],
-        ["Page latches", c.page_latch_waits, c.page_latch_wait_ms],
+        [t("ui.beyond_time.waits.row_locks"), c.row_lock_waits, c.row_lock_wait_ms],
+        [t("ui.beyond_time.waits.page_locks"), c.page_lock_waits, c.page_lock_wait_ms],
+        [t("ui.beyond_time.waits.page_latches"), c.page_latch_waits, c.page_latch_wait_ms],
       ];
       return (
         <section>
-          <h3>Evidence</h3>
-          <div className="io-table" role="table" aria-label={`Waits on ${index.name}`}>
+          <h3>{t("ui.beyond_time.evidence")}</h3>
+          <div className="io-table" role="table" aria-label={t("ui.beyond_time.waits.label", { index: index.name })}>
             <IoRow className="four io-th">
-              <IoHeader>On {index.name}</IoHeader>
-              <IoHeader>Waits</IoHeader>
-              <IoHeader>In all</IoHeader>
-              <IoHeader>Average</IoHeader>
+              <IoHeader>{t("ui.beyond_time.on", { object: index.name })}</IoHeader>
+              <IoHeader>{t("ui.beyond_time.waits.waits")}</IoHeader>
+              <IoHeader>{t("ui.beyond_time.waits.in_all")}</IoHeader>
+              <IoHeader>{t("ui.beyond_time.waits.average")}</IoHeader>
             </IoRow>
             {rows.map(([label, n, ms]) => (
               <IoRow key={label} className={`four ${n > 0 ? "" : "quiet"}`}>
@@ -537,7 +582,7 @@ export function SignalEvidence({ report, finding }: { report: Report; finding: F
                   {label}
                 </span>
                 <span className="io-cell" role="cell">
-                  {n > 0 ? count(n) : "none"}
+                  {n > 0 ? count(n) : t("ui.beyond_time.none")}
                 </span>
                 <span className="io-cell" role="cell">
                   {n > 0 ? duration(ms) : "—"}
@@ -549,9 +594,9 @@ export function SignalEvidence({ report, finding }: { report: Report; finding: F
             ))}
           </div>
           <p className="beyond-foot">
-            {c.lock_escalations > 0 ? `${count(c.lock_escalations)} escalations to a table lock. ` : ""}
-            {c.sequential_key ? `${index.columns[0] ?? "The key"} only grows, so inserts land on the last page. ` : ""}
-            Counted since the index was loaded into memory.
+            {c.lock_escalations > 0 ? `${t("ui.beyond_time.waits.escalations", { count: count(c.lock_escalations) })} ` : ""}
+            {c.sequential_key ? `${index.columns[0] != null ? t("ui.beyond_time.waits.column_grows", { column: index.columns[0] }) : t("ui.beyond_time.waits.key_grows")} ` : ""}
+            {t("ui.beyond_time.waits.since_loaded")}
           </p>
         </section>
       );
