@@ -107,6 +107,12 @@ The **Editor** keeps your query tabs across restarts (⌘T new, ⌘⇧W close, �
 
 Findings whose queries stopped running well before the end of the data window (relative to how often they used to run) move to a "Stopped running" group: usually a deploy changed or fixed them.
 
+**One thing per tab:** while a tab runs, plans or waits for a production confirmation, another run there waits its turn (open another tab to run in parallel). Closing a tab stops its batch: nothing after the statement in flight is sent, and that statement finishes on the database.
+
+### Upgrading
+
+Connections, saved passwords, saved queries and editor tabs carry over. Scans and reports are read only in the format the installed version saves: when an upgrade changes that format (the release notes say so), scans an earlier version saved are set aside, and history (trends, What changed, digests) starts again with your first scan after upgrading. A saved plan is read as it was saved; a later fix to a plan parser reaches a plan when it is explained or scanned again.
+
 ## Coding agents
 
 Culprit is built to be driven by coding agents. Every command prints JSON when stdout isn't a terminal (or SARIF 2.1.0 with `--format sarif`), finding ids are stable, and connections are referenced by name, so agents never handle credentials.

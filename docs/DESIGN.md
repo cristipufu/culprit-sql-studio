@@ -308,6 +308,15 @@ Fuzzy search over views, findings, queries, tables, connections and actions (re-
 
 The desktop app checks the latest published release once a day, in the background and well after start-up, so a check never slows opening it. An update is offered quietly at the foot of the sidebar ("Update to 0.2.1"), never in a dialog: one click downloads it with its progress shown there, verifies its signature against the public key built into the app, and installs it; the app keeps running the old version until the person clicks "Restart to update". The signature is bound to the release's version (`requireSignedVersion`), so a tampered manifest can't pass an older package off as newer, and each kind of install (macOS app, Windows installer, AppImage, .deb) only updates from its own kind of package. A check that finds nothing counts for the day; one that finds an update, or can't reach GitHub, is asked again, so an update offered yesterday is still offered after a restart. The command palette checks on demand and turns the daily check off. The CLI never checks on its own (see `culprit update`).
 
+**What survives an upgrade.** Connections, saved passwords, saved queries, editor tabs and preferences carry over (a
+preference an older build stored in another form falls back to its default).
+Scans, reports and plans are read only in the format the running version saves (`SNAPSHOT_FORMAT`): ones an earlier
+version saved in another format are passed over as if absent, never misread. So after an upgrade that changes the
+format, history starts again with the first scan: trends, What changed, digests and baselines build from there, and
+opening a connection scans instead of showing an older report. A saved plan is read as it was saved: a later fix to an
+engine's plan parser reaches a plan when it is explained or scanned again, not one already saved, so a saved reading
+stays the evidence it was. Release notes say when the format changes.
+
 ### SQL Server tuning, statement families and health
 
 - **tuning-advice** (SQL Server): automatic tuning's plan-forcing recommendations still waiting (Active or Pending; a Verifying or Success one was applied and shows among the forced plans) ("SQL Server suggests forcing plan 815 for a read from orders (estimated 73% less CPU per run)"; a `regression` or `plan-regression` finding for the same query becomes its timeline evidence, and plans used side by side make it a caveat on `parameter-sensitive`) with the exact `sp_query_store_force_plan` to copy; forced plans that stopped applying (with the reason, e.g. NO_INDEX); forced plans that apply but scan a table an index leads with, the way the scan filters it, when the scan keeps under a tenth of the rows (a hundredth when the index doesn't hold the columns it returns; Medium, with the `sp_query_store_unforce_plan` to copy, and "forced before the index existed" only when the index is dated as newer); the other forced plans in one Low finding (by hand or by automatic tuning, since when, not run since); Azure SQL Database's CreateIndex and DropIndex recommendations, unless the missing-index finding for the same keys (which then says Azure recommends it too) or the unused- and duplicate-index findings already have them; one an existing index already covers (its keys and included columns) is skipped, since it predates that index and expires on its own, and one whose keys an index leads with but lacks its included columns says widening that index does the same; Query Store hints that fail; and automatic plan correction that is off while fixes wait, or set but not running.
@@ -390,27 +399,11 @@ Agents connect through `culprit mcp` (stdio, so no port and no token). What they
 
 Every tool call is appended to a private `audit.jsonl`, with the SQL text for `explain` and `run_query`. Tool descriptions and the server instructions tell agents that database-sourced text is data, not instructions.
 
-## What it finds (v0.1)
+## What it finds
 
-| Check | Engines | Signal |
-|---|---|---|
-| `missing-index` | SQL Server | Missing-index DMVs, merged and de-duplicated against existing indexes, linked to the queries that asked for them (the scan keeps them with its top queries, 2019+). A request an existing filtered index would serve if the query wrote its filter as a literal instead of a parameter becomes that rewrite, not a new index; what the index can't serve after it (a range, included columns) is an index filtered the same way |
-| `filtered-scan` | both | Heavy queries whose plan reads a large table in full to keep a few rows; suggests the index from the filter's columns |
-| `unindexed-fk` | both | Foreign key columns with no index starting with them |
-| `unused-index` | both | Indexes with writes but no reads since stats reset, with uptime-based confidence; not before an index may be a week old (`indexes[].created_at_latest`: a scan saw it appear, or its table changed before the first scan) |
-| `duplicate-index` | both | Identical or left-prefix-redundant indexes |
-| `heavy-query` | both | Queries that dominate database time or read far more than they return (reads per row only for reads, not aggregates or writes); one that sleeps, waits for a lock or reads too little to fill its run time says it is waiting |
-| `chatty-query` | both | Very frequent tiny statements: reuse or cache valid results; batch calls where the caller loops over items |
-| `plan-warnings` | SQL Server | Implicit conversions, spills, key lookups, no join predicate in cached plans |
-| `plan-regression` | SQL Server | Query Store: the plan running now is markedly slower than one it replaced (that one stopped before it started; plans used side by side are `parameter-sensitive`), on a real part of the workload |
-| `regression` | all | The query's average duration stepped up at least 2× (and 2 ms) at a point in the timeline and stayed up; says when, and the plan change if one coincides (then it replaces `plan-regression` for that query, with the force-plan fix) |
-| `unstable-query` | all | Wildly different durations that one slow run can't explain (the same plan on SQL Server), rated by the time in the slow runs |
-| `stale-stats` | both | Statistics with many modifications since last update |
-| `heap-table` | SQL Server | Large tables without a clustered index |
-| `dead-rows` | Postgres | Tables with many dead tuples and lagging autovacuum |
-| `xid-age` | Postgres | Transaction ID age approaching wraparound |
-| `temp-spill` | Postgres, MySQL | Queries writing temp files (work_mem, for the application's role) or on-disk temporary tables, when the spill can be a real part of the run; rated by it |
-| `config` | both | Query Store off or read-only, stale compatibility level, `random_page_cost` on SSD storage, missing `pg_stat_statements` |
+`culprit checks` lists every check with the engines it runs on and what it reads, and the user guide's
+[What it finds](guide.md#what-it-finds) describes them. The first release's list and its out-of-scope items are kept in
+[history/v0.1.md](history/v0.1.md).
 
 ## Architecture
 
@@ -501,7 +494,3 @@ Conventions:
 - Exit codes: `0` success, `1` error, `3` findings at or above `--fail-on <severity>`.
 - `--report <file>` on read-only commands and `culprit analyze <file>` let agents work from a saved or shared report without database access.
 - `conn add --password-env VAR` reads the password from an environment variable at connect time (CI, agents); nothing is stored.
-
-## Out of scope for v0.1
-
-MySQL, applying fixes from the app, HypoPG what-if, prod ⇄ alpha pairing and plan diff, scheduled scans, declarative checks. The architecture leaves room for each.
