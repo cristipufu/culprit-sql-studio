@@ -811,7 +811,10 @@ fn fuzz_sql_lexer_and_classifiers_never_panic_or_accept_injected_writes() {
 #[test]
 fn refusals_and_warnings_read_in_english() {
     let mut out = Vec::new();
-    let error = |e: crate::Error| format!("{} | {}", e.message, e.hint.unwrap_or_default());
+    let error = |e: crate::Error| match e.hint {
+        Some(hint) => format!("{} | {hint}", e.message),
+        None => e.message,
+    };
     for (engine, sql) in [
         (Engine::Postgres, "SELECT 1; SELECT 2"),
         (Engine::Postgres, "   ;"),
@@ -825,7 +828,7 @@ fn refusals_and_warnings_read_in_english() {
     ] {
         out.push(format!(
             "{engine:?} {sql:?}: {}",
-            single_statement(sql, engine).map_err(error).err().unwrap_or_default()
+            single_statement(sql, engine).map_err(error).err().unwrap_or_else(|| "one statement".into())
         ));
         let c = check(sql, engine);
         out.push(format!("  check: {:?} | {:?}", c.problem, c.warning));
@@ -861,21 +864,21 @@ fn refusals_and_warnings_read_in_english() {
         got,
         r#"Postgres "SELECT 1; SELECT 2": This text holds more than one statement | Run or explain one statement at a time: select it in the editor first.
   check: Some("This text holds more than one statement") | None
-Postgres "   ;": There is no statement to run | 
+Postgres "   ;": There is no statement to run
   check: Some("There is no statement to run") | None
 Mssql "SELECT 1 COMMIT": This text holds more than one statement | SQL Server reads `COMMIT` here as the start of another statement. Run or explain one statement at a time.
   check: Some("This text holds more than one statement") | None
-Postgres "SELECT 'never closed": A quoted string or name is never closed | 
+Postgres "SELECT 'never closed": A quoted string or name is never closed
   check: Some("A quoted string or name is never closed") | None
-Postgres "SELECT 1 /* never closed": A /* comment */ is never closed | 
+Postgres "SELECT 1 /* never closed": A /* comment */ is never closed
   check: Some("A /* comment */ is never closed") | None
-Postgres "SELECT $$never closed": A $$-quoted string is never closed | 
+Postgres "SELECT $$never closed": A $$-quoted string is never closed
   check: Some("A $$-quoted string is never closed") | None
-Mysql "SELECT /*! 1 */ 2": Executable comments (/*! … */) aren't allowed here | 
+Mysql "SELECT /*! 1 */ 2": Executable comments (/*! … */) aren't allowed here
   check: Some("Executable comments (/*! … */) aren't allowed here") | None
-Postgres "SELECT\u{200b}1": The text has a control character or unusual whitespace outside a string; retype it with plain spaces | 
+Postgres "SELECT\u{200b}1": The text has a control character or unusual whitespace outside a string; retype it with plain spaces
   check: Some("The text has a control character or unusual whitespace outside a string; retype it with plain spaces") | None
-Postgres "SELECT 1 -- note\u{2028}": 
+Postgres "SELECT 1 -- note\u{2028}": one statement
   check: None | None
 UPDATE t SET a = 1: Some("There is no WHERE clause, so this changes every row in the table.")
 DELETE FROM t: Some("There is no WHERE clause, so this changes every row in the table.")
@@ -884,9 +887,9 @@ DROP TABLE t: Some("This removes the object and everything in it.")
 ALTER TABLE t ADD c int: Some("This changes the structure; a large table can be locked while it runs.")
 SELECT * FROM t FOR UPDATE: Some("Culprit can't prove this only reads: it locks rows, writes into a table, or calls a function with side effects.")
 INSERT INTO t VALUES (1): None
-Choose a schema and table to preview | 
+Choose a schema and table to preview
 The quick filter is too long | Use the SQL editor for larger queries
 Enter a WHERE expression, without query clauses or statements | For example: status = 'open' AND amount > 100. Use the column headers to sort.
-A quoted string or name is never closed | "#
+A quoted string or name is never closed"#
     );
 }
