@@ -9,7 +9,7 @@ pub const MAX_WINDOW_MINUTES: u32 = 90 * MINUTES_PER_DAY;
 /// Returns the window in minutes, or a sentence saying what's wrong with it.
 pub fn parse_window(text: &str) -> Result<u32, String> {
     let given = text.trim().to_ascii_lowercase();
-    let invalid = || format!("\"{}\" isn't a window: write it as 6h, 90m, 2d or 1d12h.", text.trim());
+    let invalid = || crate::t!("model.window_input.invalid", text = text.trim());
     if given.is_empty() {
         return Err(invalid());
     }
@@ -42,10 +42,10 @@ pub fn parse_window(text: &str) -> Result<u32, String> {
         return Err(invalid());
     }
     if total == 0 {
-        return Err(format!("\"{}\" is an empty window: give it at least a minute.", text.trim()));
+        return Err(crate::t!("model.window_input.empty", text = text.trim()));
     }
     if total > u64::from(MAX_WINDOW_MINUTES) {
-        return Err(format!("\"{}\" is longer than the 90 days a scan reads at most.", text.trim()));
+        return Err(crate::t!("model.window_input.too_long", text = text.trim()));
     }
     Ok(total as u32)
 }

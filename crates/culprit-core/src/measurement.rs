@@ -2,7 +2,7 @@
 //! A scan that doesn't say where its database is compares with none; a known endpoint is never filled in from today's
 //! connection.
 
-use crate::{Engine, Period, Snapshot, Workload, WorkloadKind, format::epoch_seconds};
+use crate::{Engine, Period, Snapshot, Workload, WorkloadKind, format::epoch_seconds, t};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -48,17 +48,17 @@ pub enum ComparisonReason {
 }
 
 impl ComparisonReason {
-    pub fn explanation(&self) -> &'static str {
+    pub fn explanation(&self) -> String {
         match self {
-            Self::DifferentEngine => "The scans describe different database engines.",
-            Self::DifferentDatabase => "The scans describe different databases or database incarnations.",
-            Self::DifferentEndpoint => "The scans describe different server endpoints or database files.",
-            Self::UnknownIdentity => "One scan does not record enough database identity to establish a comparison.",
-            Self::DifferentSource => "The measurements come from different sources.",
-            Self::DifferentScope => "The measurements cover different scopes.",
-            Self::DifferentPeriod => "The measurements cover different kinds or lengths of periods.",
-            Self::Reset => "The measurement counters started over between these scans.",
-            Self::InvalidTime => "The measurements do not establish a valid earlier and later time.",
+            Self::DifferentEngine => t!("model.comparison.different_engine"),
+            Self::DifferentDatabase => t!("model.comparison.different_database"),
+            Self::DifferentEndpoint => t!("model.comparison.different_endpoint"),
+            Self::UnknownIdentity => t!("model.comparison.unknown_identity"),
+            Self::DifferentSource => t!("model.comparison.different_source"),
+            Self::DifferentScope => t!("model.comparison.different_scope"),
+            Self::DifferentPeriod => t!("model.comparison.different_period"),
+            Self::Reset => t!("model.comparison.reset"),
+            Self::InvalidTime => t!("model.comparison.invalid_time"),
         }
     }
 }

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::model::{Capability, Engine, Snapshot};
+use crate::t;
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
@@ -333,18 +334,18 @@ impl Report {
         if let Some(lock) = self.locked.iter().find(|l| l.check.id == check) {
             let names: Vec<_> = lock.missing.iter().map(|c| c.label().to_string()).collect();
             return Some(if names.is_empty() {
-                "A capability is missing.".into()
+                t!("model.absence.capability_missing")
             } else {
-                format!("Needs {}.", crate::format::list(&names))
+                t!("model.absence.needs", capabilities = crate::format::list(&names))
             });
         }
         let Some(assessment) = self.assessments.iter().find(|a| a.check == check) else {
-            return Some("This check was not run in the new scan.".into());
+            return Some(t!("model.absence.check_not_run"));
         };
         use crate::CheckStatus;
         match assessment.status {
             CheckStatus::Unavailable | CheckStatus::InsufficientEvidence => {
-                Some(assessment.reason.clone().unwrap_or_else(|| "The required evidence is incomplete.".into()))
+                Some(assessment.reason.clone().unwrap_or_else(|| t!("model.absence.evidence_incomplete")))
             }
             CheckStatus::Findings => assessment.reason.clone(),
             CheckStatus::Assessed | CheckStatus::NotApplicable => None,
@@ -370,7 +371,7 @@ impl Report {
                 || self.locked.iter().any(|l| l.check.id == check)
                 || !self.assessments.iter().any(|a| a.check == check && a.status != crate::CheckStatus::Unavailable)
             {
-                return Some("The plan-regression check could not assess the affected statement.".into());
+                return Some(t!("model.absence.plan_regression_unassessed"));
             }
             return baseline.recovery_problem(&self.snapshot).or_else(|| self.refinement_absence_problem(finding));
         }
@@ -379,7 +380,7 @@ impl Report {
                 && !a.assessed_queries.is_empty()
                 && queries.iter().any(|q| !a.assessed_queries.iter().any(|id| id == q))
         }) {
-            return Some("The affected statement was not measured sufficiently in the new scan.".into());
+            return Some(t!("model.absence.statement_unmeasured"));
         }
         let measured = !queries.is_empty()
             && !self.locked.iter().any(|l| l.check.id == check)
@@ -393,14 +394,14 @@ impl Report {
 
     fn refinement_absence_problem(&self, finding: &str) -> Option<String> {
         self.refinement
-                .iter()
-                .any(|decision| {
-                    decision.finding.as_deref() == Some(finding)
-                        && matches!(
-                            decision.outcome,
-                            crate::RefinementOutcome::Absorbed { .. } | crate::RefinementOutcome::Covered { .. }
-                        )
-                })
-                .then(|| "This finding was combined with another observation during analysis; its disappearance does not verify a fix.".into())
+            .iter()
+            .any(|decision| {
+                decision.finding.as_deref() == Some(finding)
+                    && matches!(
+                        decision.outcome,
+                        crate::RefinementOutcome::Absorbed { .. } | crate::RefinementOutcome::Covered { .. }
+                    )
+            })
+            .then(|| t!("model.absence.combined"))
     }
 }

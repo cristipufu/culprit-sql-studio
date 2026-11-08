@@ -52,9 +52,7 @@ pub trait Check: Send + Sync {
     }
     /// Embedders can declare positive evidence too. Existing plugins still run, without claiming a negative result.
     fn evidence(&self, _snapshot: &Snapshot) -> CheckEvidence {
-        CheckEvidence::Insufficient(
-            "This check does not declare the evidence needed to establish a negative result.".into(),
-        )
+        CheckEvidence::Insufficient(crate::t!("evidence.undeclared"))
     }
 }
 
@@ -78,9 +76,7 @@ pub trait Diagnosis: Send + Sync {
     }
     /// See [`Check::evidence`].
     fn evidence(&self, _snapshot: &Snapshot) -> CheckEvidence {
-        CheckEvidence::Insufficient(
-            "This check does not declare the evidence needed to establish a negative result.".into(),
-        )
+        CheckEvidence::Insufficient(crate::t!("evidence.undeclared"))
     }
 }
 

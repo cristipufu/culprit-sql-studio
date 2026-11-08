@@ -10,6 +10,7 @@ use ts_rs::TS;
 
 use crate::cloud::CloudProvider;
 use crate::model::Engine;
+use crate::t;
 
 /// A managed service a database runs on. A server you run yourself has none.
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -76,25 +77,17 @@ impl Platform {
     /// Where a server setting is changed when SQL can't (no superuser, no configuration file): a sentence's object,
     /// "Set work_mem to 64MB in {this}." `None` where the engine's own SQL does it (sp_configure on a managed
     /// instance) or where server settings aren't the person's to change (Azure SQL Database).
-    pub fn settings_control(self) -> Option<&'static str> {
+    pub fn settings_control(self) -> Option<String> {
         Some(match self {
-            Platform::AmazonRds => "the instance's DB parameter group",
-            Platform::AmazonAurora => "the cluster's (or instance's) DB parameter group",
-            Platform::AzureDatabase => "the server parameters (Azure portal or `az … server parameter set`)",
-            Platform::GoogleCloudSql => {
-                "the instance's database flags (Cloud SQL console or `gcloud sql instances patch --database-flags`)"
-            }
-            Platform::GoogleAlloyDb => {
-                "the instance's database flags (AlloyDB console or `gcloud alloydb instances update --database-flags`)"
-            }
-            Platform::Neon => {
-                "Neon's settings for the compute (most server settings are Neon's; per-database ones take ALTER DATABASE … SET)"
-            }
-            Platform::Supabase => "Supabase's database settings (dashboard or `supabase postgres-config update`)",
-            Platform::TigerData => {
-                "the service configuration in Tiger Cloud (service-managed parameters require Tiger Data support)"
-            }
-            Platform::MariaDbCloud => "the service's configuration in the MariaDB Cloud portal",
+            Platform::AmazonRds => t!("model.platform.settings.amazon_rds"),
+            Platform::AmazonAurora => t!("model.platform.settings.amazon_aurora"),
+            Platform::AzureDatabase => t!("model.platform.settings.azure_database"),
+            Platform::GoogleCloudSql => t!("model.platform.settings.google_cloud_sql"),
+            Platform::GoogleAlloyDb => t!("model.platform.settings.google_alloydb"),
+            Platform::Neon => t!("model.platform.settings.neon"),
+            Platform::Supabase => t!("model.platform.settings.supabase"),
+            Platform::TigerData => t!("model.platform.settings.tiger_data"),
+            Platform::MariaDbCloud => t!("model.platform.settings.mariadb_cloud"),
             Platform::AzureSqlDatabase | Platform::AzureSqlManagedInstance => return None,
         })
     }
@@ -102,24 +95,15 @@ impl Platform {
     /// How to add a library to `shared_preload_libraries` (pg_stat_statements) where that isn't a configuration file.
     pub fn preload_library(self, library: &str) -> Option<String> {
         Some(match self {
-            Platform::AmazonRds | Platform::AmazonAurora => format!(
-                "Add {library} to shared_preload_libraries in the DB parameter group, reboot the instance, then run CREATE EXTENSION {library};"
-            ),
-            Platform::AzureDatabase => format!(
-                "Add {library} to shared_preload_libraries and azure.extensions in the server parameters, restart, then run CREATE EXTENSION {library};"
-            ),
-            Platform::GoogleCloudSql | Platform::Neon | Platform::Supabase => {
-                format!(
-                    "Run CREATE EXTENSION {library}; in this database ({} preloads it).",
-                    self.label(Engine::Postgres)
-                )
+            Platform::AmazonRds | Platform::AmazonAurora => {
+                t!("model.platform.preload.parameter_group", library = library)
             }
-            Platform::GoogleAlloyDb => format!(
-                "Run CREATE EXTENSION {library}; in this database. If its view then asks for shared_preload_libraries, add {library} with the instance's database flags."
-            ),
-            Platform::TigerData => format!(
-                "Ask the service administrator to enable {library} for this Tiger Cloud service, then create its extension in this database. Service-managed preload settings require Tiger Data support."
-            ),
+            Platform::AzureDatabase => t!("model.platform.preload.azure_database", library = library),
+            Platform::GoogleCloudSql | Platform::Neon | Platform::Supabase => {
+                t!("model.platform.preload.preloaded", library = library, platform = self.label(Engine::Postgres))
+            }
+            Platform::GoogleAlloyDb => t!("model.platform.preload.google_alloydb", library = library),
+            Platform::TigerData => t!("model.platform.preload.tiger_data", library = library),
             Platform::AzureSqlDatabase | Platform::AzureSqlManagedInstance | Platform::MariaDbCloud => return None,
         })
     }

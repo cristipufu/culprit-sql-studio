@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::finding::{Finding, Report};
-use crate::format;
+use crate::{format, t};
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -78,7 +78,7 @@ pub fn compare_reports(before: &Report, after: &Report, ids: &[String]) -> Verif
                 status: VerifyStatus::Unknown,
                 before: was.map(|f| f.impact.label),
                 after: now.map(|f| f.impact.label),
-                note: Some(reason.explanation().into()),
+                note: Some(reason.explanation()),
             });
             continue;
         }
@@ -100,16 +100,21 @@ pub fn compare_reports(before: &Report, after: &Report, ids: &[String]) -> Verif
                     status: VerifyStatus::Unknown,
                     before: Some(was.impact.label.clone()),
                     after: None,
-                    note: Some(format!(
-                        "The new scan has no query history ({}), so this can't be confirmed.",
-                        after.summary.no_workload.as_deref().unwrap_or("no statement statistics").trim_end_matches('.')
+                    note: Some(t!(
+                        "model.verify.no_query_history",
+                        why = after
+                            .summary
+                            .no_workload
+                            .as_deref()
+                            .map(|why| why.trim_end_matches('.').to_string())
+                            .unwrap_or_else(|| t!("model.verify.no_statement_statistics"))
                     )),
                 }
             }
             (Some(was), None) if was.verification_basis == crate::VerificationBasis::CounterChange => VerifiedFinding {
                 id: id.clone(), title: was.title.clone(), status: VerifyStatus::Unknown,
                 before: Some(was.impact.label.clone()), after: None,
-                note: Some("This observation uses cumulative counters. A reset, removed index or unavailable counter can make it disappear without verifying a fix. Compare new counts and waits under representative load.".into()),
+                note: Some(t!("model.verify.cumulative_counters")),
             },
             (Some(was), None) => match after.finding_absence_problem_with_baseline(
                 &was.id, &was.check, &was.queries.iter().map(|q| q.id.as_str()).collect::<Vec<_>>(), was.facts.plan_baseline.as_ref()
@@ -120,7 +125,7 @@ pub fn compare_reports(before: &Report, after: &Report, ids: &[String]) -> Verif
                     status: VerifyStatus::Unknown,
                     before: Some(was.impact.label.clone()),
                     after: None,
-                    note: Some(format!("The new scan cannot establish that this is fixed. {missing}")),
+                    note: Some([t!("model.verify.cannot_establish_fixed"), missing].join(" ")),
                 },
                 None => VerifiedFinding {
                     id: id.clone(),
@@ -137,7 +142,7 @@ pub fn compare_reports(before: &Report, after: &Report, ids: &[String]) -> Verif
                 status: VerifyStatus::StillPresent,
                 before: None,
                 after: Some(now.impact.label.clone()),
-                note: Some("The earlier scan didn't report it; the new one does.".into()),
+                note: Some(t!("model.verify.newly_reported")),
             },
             (None, None) => VerifiedFinding {
                 id: id.clone(),
@@ -186,65 +191,53 @@ pub fn compare_reports(before: &Report, after: &Report, ids: &[String]) -> Verif
 
 fn still_present_note(was: &Finding, now: &Finding, after: &Report) -> Option<String> {
     if !now.is_actionable() {
-        return Some(format!(
-            "{}: retained as context. This does not demonstrate that a change was verified under representative load.",
-            now.actionability.label()
-        ));
+        let kind = match now.actionability {
+            crate::Actionability::History => "history",
+            _ => "information",
+        };
+        return Some(t!("model.verify.retained_as_context", kind = kind));
     }
     if !now.queries.is_empty()
         && let Some(w) = after.snapshot.workload.as_ref()
     {
         let span = format::duration(w.measurement_hours() * 3_600_000.0);
         return Some(if let Some(log) = &w.log {
-            format!(
-                "It is measured from the {log} log Culprit read, which still includes runs from before the change. \
-                 Scan again with a log written since."
-            )
+            t!("model.verify.still_in_the_log", log = log)
         } else if w.is_windowed() {
-            format!(
-                "It is measured over the last {span} of workload, which still includes runs from before the change. \
-                 Check again once that window has moved past it, or scan with a shorter window."
-            )
+            t!("model.verify.still_in_the_window", span = span)
         } else {
             // A week moves a years-long total by a hair: the difference between two scans shows the change.
-            format!(
-                "{} keeps running totals since its statistics were reset ({span} ago), so runs from before the change \
-                 still count, and it stays listed. What changed, with Since at the ship time (`culprit changes {} \
-                 --since <ship time>`), compares the runs since then with the runs before, from Culprit's scans.",
-                w.source,
-                if after.snapshot.connection.trim().is_empty() { "<connection>" } else { &after.snapshot.connection }
-            )
+            // The connection's name in the command, or its placeholder (command syntax, said as it is).
+            let connection =
+                if after.snapshot.connection.trim().is_empty() { "<connection>" } else { &after.snapshot.connection };
+            t!("model.verify.still_in_the_totals", source = &w.source, span = span, connection = connection)
         });
     }
     let (b, a) = (was.impact.score, now.impact.score);
-    (b > 0.0 && a < b * 0.5).then(|| format!("Smaller than before: {} → {}.", was.impact.label, now.impact.label))
+    (b > 0.0 && a < b * 0.5).then(|| t!("model.verify.smaller", before = &was.impact.label, now = &now.impact.label))
 }
 
 fn summary(findings: &[VerifiedFinding], new: usize) -> String {
     let n = |s: VerifyStatus| findings.iter().filter(|f| f.status == s).count();
     let (fixed, still, unknown) = (n(VerifyStatus::Fixed), n(VerifyStatus::StillPresent), n(VerifyStatus::Unknown));
-    let mut parts = Vec::new();
-    if findings.len() == 1 {
-        parts.push(
-            match findings[0].status {
-                VerifyStatus::Fixed => "Fixed: the new scan no longer reports it",
-                VerifyStatus::StillPresent => "Still present in the new scan",
-                _ => "Can't tell from the new scan",
-            }
-            .to_string(),
-        );
+    let mut out = if findings.len() == 1 {
+        match findings[0].status {
+            VerifyStatus::Fixed => t!("model.verify.one_fixed"),
+            VerifyStatus::StillPresent => t!("model.verify.one_still_present"),
+            _ => t!("model.verify.one_unknown"),
+        }
     } else {
-        parts.push(format!("{fixed} of {} fixed", findings.len()));
-        if still > 0 {
-            parts.push(format!("{still} still present"));
-        }
-        if unknown > 0 {
-            parts.push(format!("{unknown} can't be checked"));
-        }
-    }
-    let mut out = parts.join("; ") + ".";
+        t!(
+            "model.verify.several",
+            fixed = fixed.to_string(),
+            total = findings.len().to_string(),
+            still = still.to_string(),
+            unknown = unknown.to_string()
+        )
+    };
     if new > 0 {
-        out.push_str(&format!(" {new} new finding{}.", if new == 1 { "" } else { "s" }));
+        out.push(' ');
+        out.push_str(&t!("model.verify.new_findings", n = new, count = new.to_string()));
     }
     out
 }
@@ -306,5 +299,90 @@ mod counter_verification_tests {
             assessed_queries: Vec::new(),
         });
         assert_eq!(compare_reports(&before, &after, &[]).findings[0].status, VerifyStatus::Fixed);
+    }
+
+    // What verifying says, word for word, as English has always said it.
+    #[test]
+    fn verification_reads_as_english_writes_it() {
+        let said = |status: VerifyStatus| VerifiedFinding {
+            id: "x".into(),
+            title: "x".into(),
+            status,
+            before: None,
+            after: None,
+            note: None,
+        };
+        let mut out = Vec::new();
+        for status in [VerifyStatus::Fixed, VerifyStatus::StillPresent, VerifyStatus::Unknown] {
+            out.push(summary(&[said(status)], 0));
+        }
+        out.push(summary(&[said(VerifyStatus::Fixed)], 1));
+        out.push(summary(&[said(VerifyStatus::Fixed), said(VerifyStatus::Fixed)], 2));
+        out.push(summary(
+            &[said(VerifyStatus::Fixed), said(VerifyStatus::StillPresent), said(VerifyStatus::Unknown)],
+            0,
+        ));
+        out.push(summary(&[said(VerifyStatus::Fixed), said(VerifyStatus::Unknown)], 0));
+        let before: Report = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.report.json")).unwrap();
+        let (was, mut now) = (before.findings[0].clone(), before.findings[0].clone());
+        out.push(still_present_note(&was, &now, &before).unwrap_or_default());
+        let mut totals = before.clone();
+        let w = totals.snapshot.workload.as_mut().unwrap();
+        (w.windowed, w.source) = (false, "pg_stat_statements".into());
+        totals.snapshot.connection = String::new();
+        out.push(still_present_note(&was, &now, &totals).unwrap_or_default());
+        totals.snapshot.workload.as_mut().unwrap().log = Some("Rails".into());
+        out.push(still_present_note(&was, &now, &totals).unwrap_or_default());
+        now.queries.clear();
+        now.impact.score = was.impact.score * 0.2;
+        now.impact.label = "1% of DB time".into();
+        out.push(still_present_note(&was, &now, &before).unwrap_or_default());
+        for actionability in [crate::Actionability::History, crate::Actionability::Information] {
+            now.actionability = actionability;
+            out.push(still_present_note(&was, &now, &before).unwrap_or_default());
+        }
+        let mut after = before.clone();
+        after.findings.clear();
+        after.snapshot.workload = None;
+        after.summary.no_workload = None;
+        let ids = vec![was.id.clone()];
+        out.push(compare_reports(&before, &after, &ids).findings[0].note.clone().unwrap_or_default());
+        after.summary.no_workload = Some("Query Store is OFF on this database.".into());
+        out.push(compare_reports(&before, &after, &ids).findings[0].note.clone().unwrap_or_default());
+        let mut later = before.clone();
+        later.findings.clear();
+        out.push(compare_reports(&later, &before, &ids).findings[0].note.clone().unwrap_or_default());
+        let window = "It is measured over the last 4 h 34 min of workload, which still includes runs from before the \
+                      change. Check again once that window has moved past it, or scan with a shorter window.";
+        let totals = "pg_stat_statements keeps running totals since its statistics were reset (4 h 34 min ago), so \
+                      runs from before the change still count, and it stays listed. What changed, with Since at the \
+                      ship time (`culprit changes <connection> --since <ship time>`), compares the runs since then \
+                      with the runs before, from Culprit's scans.";
+        let context = "retained as context. This does not demonstrate that a change was verified under representative \
+                       load.";
+        assert_eq!(
+            out,
+            [
+                "Fixed: the new scan no longer reports it.".to_string(),
+                "Still present in the new scan.".into(),
+                "Can't tell from the new scan.".into(),
+                "Fixed: the new scan no longer reports it. 1 new finding.".into(),
+                "2 of 2 fixed. 2 new findings.".into(),
+                "1 of 3 fixed; 1 still present; 1 can't be checked.".into(),
+                "1 of 2 fixed; 1 can't be checked.".into(),
+                window.into(),
+                totals.into(),
+                "It is measured from the Rails log Culprit read, which still includes runs from before the change. \
+                 Scan again with a log written since."
+                    .into(),
+                "Smaller than before: 100% of runs fail → 1% of DB time.".into(),
+                format!("History: {context}"),
+                format!("Information: {context}"),
+                "The new scan has no query history (no statement statistics), so this can't be confirmed.".into(),
+                "The new scan has no query history (Query Store is OFF on this database), so this can't be confirmed."
+                    .into(),
+                "The earlier scan didn't report it; the new one does.".into(),
+            ]
+        );
     }
 }
