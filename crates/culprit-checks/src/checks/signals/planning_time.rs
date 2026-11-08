@@ -142,8 +142,12 @@ fn planning_time_finding(snapshot: &Snapshot, case: PlanningTime<'_>) -> Finding
         Fix { summary: t!("check.planning_time.fix.slow_compiles"), sql: None, cost: None }
     });
     // On running totals the planning time holds every plan from before the change: two scans show it.
-    let now =
-        t!("check.planning_time.verify.now", plan_ms = format::duration(plan_ms), runs = format::count(q.executions));
+    let now = t!(
+        "check.planning_time.verify.now",
+        plan_ms = format::duration(plan_ms),
+        n = q.executions,
+        runs = format::count(q.executions)
+    );
     f.verify = vec![match crate::queries::running_totals(snapshot) {
         Some(source) => t!("check.planning_time.verify.between_scans", source = source, now = now),
         None => t!("check.planning_time.verify.rescan"),

@@ -61,7 +61,7 @@ pub(super) fn top_queries(s: &Snapshot) -> Tile {
     match stopped {
         0 => {}
         n if n == top.len() => detail.push(t!("view.dashboard.top_queries.all_stopped")),
-        n => detail.push(t!("view.dashboard.top_queries.some_stopped", count = n.to_string())),
+        n => detail.push(t!("view.dashboard.top_queries.some_stopped", n = n, count = n.to_string())),
     }
     tile.detail = Some(detail.join(" "));
     tile.metrics = vec![

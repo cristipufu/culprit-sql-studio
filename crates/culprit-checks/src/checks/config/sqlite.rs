@@ -56,12 +56,13 @@ pub(super) fn render(snapshot: &Snapshot, case: Case<'_>) -> Finding {
                 subject(SubjectKind::Table, t.qualified()),
             );
             let count = missing.len().to_string();
-            f.title = t!("check.config.sqlite_index_statistics.title", table = &t.name, count = &count);
+            f.title =
+                t!("check.config.sqlite_index_statistics.title", table = &t.name, n = missing.len(), count = &count);
             f.summary = t!("check.config.sqlite_index_statistics.summary");
             f.severity = Severity::Low;
             f.confidence = Confidence::High;
             f.impact.score = base_score(Severity::Low);
-            f.impact.label = t!("check.config.sqlite_index_statistics.impact", count = &count);
+            f.impact.label = t!("check.config.sqlite_index_statistics.impact", n = missing.len(), count = &count);
             f.metrics.push(Metric::text(
                 t!("check.config.sqlite_index_statistics.metric.indexes"),
                 missing.iter().map(|i| i.name.as_str()).collect::<Vec<_>>().join(", "),

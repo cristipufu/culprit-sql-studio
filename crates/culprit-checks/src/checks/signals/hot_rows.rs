@@ -172,6 +172,7 @@ fn hot_rows_finding(_: &Snapshot, hot: ContendedTable<'_>) -> Finding {
             } else {
                 t!(
                     "check.hot_rows.title.waits",
+                    n = n,
                     waits = format::count(n),
                     table = &table,
                     average = format::duration(per_run(ms, n)),
@@ -182,13 +183,14 @@ fn hot_rows_finding(_: &Snapshot, hot: ContendedTable<'_>) -> Finding {
         None if waits == 1.0 => {
             t!("check.hot_rows.title.one_historical", table = &table, time = format::duration(wait_ms))
         }
-        None => t!("check.hot_rows.title.historical", table = &table, waits = format::count(waits)),
+        None => t!("check.hot_rows.title.historical", table = &table, n = waits, waits = format::count(waits)),
     };
     let mut summary = Vec::new();
     if let Some((b, _, n, ms)) = measured {
         summary.push(t!(
             "check.hot_rows.summary.between",
-            when = crate::queries::when_phrase(&b.taken_at),
+            when = crate::queries::short_when(&b.taken_at),
+            n = n,
             waits = format::count(n),
             time = format::duration(ms),
             table = &table
@@ -203,6 +205,7 @@ fn hot_rows_finding(_: &Snapshot, hot: ContendedTable<'_>) -> Finding {
         [one] => t!(
             "check.hot_rows.summary.waited_on_index",
             index = &one.name,
+            n = waits,
             waits = count,
             table = &table,
             total = total,
@@ -211,6 +214,7 @@ fn hot_rows_finding(_: &Snapshot, hot: ContendedTable<'_>) -> Finding {
         _ => t!(
             "check.hot_rows.summary.waited_on_indexes",
             indexes = format::list(&indexes.iter().map(|i| i.name.clone()).collect::<Vec<_>>()),
+            n = waits,
             waits = count,
             table = &table,
             total = total,
@@ -218,7 +222,7 @@ fn hot_rows_finding(_: &Snapshot, hot: ContendedTable<'_>) -> Finding {
         ),
     });
     if escalations > 0.0 {
-        summary.push(t!("check.hot_rows.summary.escalated", escalations = format::count(escalations)));
+        summary.push(t!("check.hot_rows.summary.escalated", n = escalations, escalations = format::count(escalations)));
     }
     summary.push(t!("check.hot_rows.summary.causes"));
     if measured.is_some() {

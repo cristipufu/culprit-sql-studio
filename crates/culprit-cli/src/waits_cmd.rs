@@ -110,7 +110,9 @@ fn print_report(name: &str, snapshot: &Snapshot, waits: Option<&WaitsReport>) {
             if let Some(activity) = &w.activity {
                 let observations = t!(
                     "cli.waits.observations",
+                    retained_n = activity.period.observations,
                     retained = format::count(activity.period.observations),
+                    weighted_n = activity.period.weighted_observations,
                     weighted = format::count(activity.period.weighted_observations)
                 );
                 let partial = if activity.period.partial { t!("cli.waits.partial") } else { String::new() };
@@ -291,8 +293,13 @@ fn print_report(name: &str, snapshot: &Snapshot, waits: Option<&WaitsReport>) {
     }
     for c in &o.counters {
         let since = c.since.clone().unwrap_or_else(|| t!("cli.waits.unknown_reset"));
-        let recorded =
-            t!("cli.waits.counter", count = format::count(c.count), scope = scope_label(c.scope), since = since);
+        let recorded = t!(
+            "cli.waits.counter",
+            n = c.count,
+            count = format::count(c.count),
+            scope = scope_label(c.scope),
+            since = since
+        );
         println!(
             "{} · {}: {recorded} {}",
             culprit_core::wire_name(&c.kind).replace('-', " "),

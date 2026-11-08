@@ -227,13 +227,7 @@ fn summary(findings: &[VerifiedFinding], new: usize) -> String {
             _ => t!("model.verify.one_unknown"),
         }
     } else {
-        t!(
-            "model.verify.several",
-            fixed = fixed.to_string(),
-            total = findings.len().to_string(),
-            still = still.to_string(),
-            unknown = unknown.to_string()
-        )
+        t!("model.verify.several", fixed = fixed, total = findings.len().to_string(), still = still, unknown = unknown)
     };
     if new > 0 {
         out.push(' ');

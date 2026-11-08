@@ -1418,9 +1418,9 @@ fn sqlite_tables_say_which_indexes_lack_statistics() {
         "config_sqlite_index_statistics",
         &found,
         r#"id: config:sqlite-statistics:main.customers · Low · High · score 8 · share None
-title: customers has 1 indexes without planner statistics
+title: customers has 1 index without planner statistics
 summary: sqlite_stat1 exists, but these indexes have no entry. Other tables having statistics does not tell SQLite how selective these keys are. This can follow adding an index after maintenance; it does not by itself establish a slow query.
-impact: 1 indexes without statistics
+impact: 1 index without statistics
 metric: Indexes: sqlite_autoindex_customers_1
 fix: Analyze this table, then run PRAGMA optimize periodically from the application.
 sql: ANALYZE "main"."customers";

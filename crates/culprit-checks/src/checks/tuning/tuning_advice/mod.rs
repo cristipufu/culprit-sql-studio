@@ -331,6 +331,7 @@ fn forcing_fails_finding(_snapshot: &Snapshot, failing: ForcingFails<'_>) -> Fin
     f.title = t!(
         "check.tuning_advice.forcing_fails.title",
         statement = statement(failing.query, &p.query_id),
+        n = p.failures,
         count = &count,
         reason = &reason
     );
@@ -340,6 +341,7 @@ fn forcing_fails_finding(_snapshot: &Snapshot, failing: ForcingFails<'_>) -> Fin
             "check.tuning_advice.forcing_fails.summary",
             plan = &p.plan_id,
             query = &p.query_id,
+            n = p.failures,
             count = &count,
             reason = &reason
         ),
@@ -348,7 +350,7 @@ fn forcing_fails_finding(_snapshot: &Snapshot, failing: ForcingFails<'_>) -> Fin
     .join(" ");
     f.severity = failing.severity;
     f.impact.score = base_score(f.severity) + p.failures.log10().max(0.0);
-    f.impact.label = t!("check.tuning_advice.forcing_fails.impact", count = &count);
+    f.impact.label = t!("check.tuning_advice.forcing_fails.impact", n = p.failures, count = &count);
     f.confidence = Confidence::High;
     f.metrics.push(Metric::new(t!("check.tuning_advice.metric.forcing_failures"), p.failures, Unit::Count));
     f.metrics.push(Metric::text(t!("check.tuning_advice.metric.last_reason"), reason));
@@ -375,11 +377,23 @@ fn hint_fails_finding(h: &QueryHint) -> Finding {
     );
     let reason = h.last_failure_reason.clone().unwrap_or_else(|| t!("check.tuning_advice.unknown_reason"));
     let count = format::count(h.failures);
-    f.title = t!("check.tuning_advice.hint_fails.title", query = &h.query_id, count = &count, reason = reason);
-    f.summary = t!("check.tuning_advice.hint_fails.summary", hint = h.hint.trim(), query = &h.query_id, count = &count);
+    f.title = t!(
+        "check.tuning_advice.hint_fails.title",
+        query = &h.query_id,
+        n = h.failures,
+        count = &count,
+        reason = reason
+    );
+    f.summary = t!(
+        "check.tuning_advice.hint_fails.summary",
+        hint = h.hint.trim(),
+        query = &h.query_id,
+        n = h.failures,
+        count = &count
+    );
     f.severity = Severity::Low;
     f.impact.score = base_score(f.severity);
-    f.impact.label = t!("check.tuning_advice.hint_fails.impact", count = &count);
+    f.impact.label = t!("check.tuning_advice.hint_fails.impact", n = h.failures, count = &count);
     f.confidence = Confidence::High;
     f.fix = Some(Fix {
         summary: t!("check.tuning_advice.hint_fails.fix"),

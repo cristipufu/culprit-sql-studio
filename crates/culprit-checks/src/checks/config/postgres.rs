@@ -249,8 +249,8 @@ pub(super) fn render(snapshot: &Snapshot, case: Case<'_>) -> Finding {
             let mut f = setting_finding(
                 "wal_buffers",
                 Severity::Low,
-                t!("check.config.wal_buffers.title", count = &count, since = &since),
-                t!("check.config.wal_buffers.summary", current = current, count = &count, since = &since),
+                t!("check.config.wal_buffers.title", n = full, count = &count, since = &since),
+                t!("check.config.wal_buffers.summary", current = current, n = full, count = &count, since = &since),
                 Fix {
                     summary: [t!("check.config.wal_buffers.fix"), change.how, t!("check.config.restart_needed")]
                         .join(" "),
@@ -414,6 +414,7 @@ fn statements_evicted(
         let beside = evicted.beside();
         let said = t!(
             "check.config.statements_evicted.summary.recent",
+            n = new,
             rounds = format::count(new),
             when = &when,
             estimate = estimate,
@@ -437,6 +438,7 @@ fn statements_evicted(
     let title = match &recent {
         Some((new, new_entries, _, when)) => t!(
             "check.config.statements_evicted.title.since_scan",
+            n = *new,
             rounds = format::count(*new),
             when = when,
             estimate = estimate,
@@ -444,6 +446,7 @@ fn statements_evicted(
         ),
         None => t!(
             "check.config.statements_evicted.title",
+            n = rounds,
             rounds = format::count(rounds),
             estimate = estimate,
             entries = format::count(entries)
@@ -459,6 +462,7 @@ fn statements_evicted(
             "check.config.statements_evicted.summary.rounds",
             reset = reset,
             date = &reset_on,
+            n = rounds,
             rounds = format::count(rounds),
             each = match (max, raised_from) {
                 (Some(_), Some(_)) => "raised",

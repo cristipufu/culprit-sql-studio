@@ -640,7 +640,7 @@ fn support_phrases_read_as_english_writes_them() {
         (
             "Mssql rare",
             format!(
-                "Its waits can come from as few as 1 runs in the last 5 hours, too few to count on catching one while \
+                "Its waits can come from as few as 1 run in the last 5 hours, too few to count on catching one while \
                  it happens. {reported}"
             ),
         ),
@@ -656,7 +656,7 @@ fn support_phrases_read_as_english_writes_them() {
         ("Postgres live", live.into()),
         (
             "Postgres rare",
-            "Its waits can come from as few as 1 runs in the 5 hours since statistics were reset, too few to count on \
+            "Its waits can come from as few as 1 run in the 5 hours since statistics were reset, too few to count on \
              catching one while it happens. Have the next ones logged instead. Set log_lock_waits to on and reload \
              the configuration (settings marked as needing a restart take effect after one). log_lock_waits then \
              logs each lock wait longer than deadlock_timeout (1 s by default) with the process holding the lock."
@@ -754,7 +754,7 @@ fn support_phrases_read_as_english_writes_them() {
         ("runs few", "once in the 2 days since statistics were reset".into()),
         (
             "mysql rare",
-            "Its waits can come from as few as 1 runs in the 2 days since statistics were reset, too few to count on \
+            "Its waits can come from as few as 1 run in the 2 days since statistics were reset, too few to count on \
              catching one while it happens. Have the next ones logged instead. Set slow_query_log to ON and \
              long_query_time to 1; SET PERSIST keeps it across restarts. The slow query log then keeps each statement \
              slower than 1 s with its lock time and when it ran; MySQL keeps no record of who held the lock, so match \

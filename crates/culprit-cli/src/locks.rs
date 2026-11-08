@@ -237,7 +237,7 @@ mod tests {
         assert_eq!(count_line(0, 0.0, "file"), "No deadlocks (file).");
         assert_eq!(count_line(0, 24.0, "file"), "No deadlocks in the last 24 hours (file).");
         assert_eq!(count_line(1, 168.0, "Query Store"), "1 deadlock in the last 7 days (Query Store).");
-        assert_eq!(count_line(2, 1.0, ""), "2 deadlocks in the last 1 hours.");
+        assert_eq!(count_line(2, 1.0, ""), "2 deadlocks in the last 1 hour.");
         assert_eq!(count_line(2, 0.5, ""), "2 deadlocks in the last 30 minutes.");
         assert_eq!(count_line(12, 50.0, ""), "12 deadlocks in the last 50 hours.");
     }

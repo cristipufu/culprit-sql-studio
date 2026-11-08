@@ -1688,7 +1688,7 @@ fn hot_rows_without_an_earlier_scan() {
         &findings,
         r#"id: hot-rows:shop.customers
 title: One historical lock wait on customers took 20.0 s
-summary: Since its index pk_customers was loaded into memory, sessions waited 1 times for locks on the rows and pages of customers, 20.0 s in all, 20.0 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change. No comparable earlier counters place these waits in the selected window or establish that contention continues.
+summary: Since its index pk_customers was loaded into memory, sessions waited once for locks on the rows and pages of customers, 20.0 s in all, 20.0 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change. No comparable earlier counters place these waits in the selected window or establish that contention continues.
 impact: 20.0 s waiting on locks
 metric: Historical lock waits
 metric: Historical time waiting
@@ -1723,7 +1723,7 @@ fn hot_rows_since_an_earlier_scan() {
         &findings,
         r#"id: hot-rows:shop.customers
 title: 5 lock waits on customers averaged 4.0 s since Oct 11, 10:13 UTC
-summary: Between on Oct 11 at 10:13 UTC and this scan, 5 lock waits totaling 20.0 s were recorded on customers. Since its index pk_customers was loaded into memory, sessions waited 15 times for locks on the rows and pages of customers, 25.0 s in all, 1.7 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change.
+summary: Between Oct 11, 10:13 UTC and this scan, 5 lock waits totaling 20.0 s were recorded on customers. Since its index pk_customers was loaded into memory, sessions waited 15 times for locks on the rows and pages of customers, 25.0 s in all, 1.7 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change.
 impact: 20.0 s waiting on locks
 metric: Historical lock waits
 metric: Historical time waiting
@@ -1739,7 +1739,7 @@ caveat: Counted since the indexes' metadata was loaded into memory, usually sinc
 
 id: hot-rows:shop.customers
 title: One lock wait on customers took 5.0 s since Oct 10, 06:13 UTC
-summary: Between on Oct 10 at 06:13 UTC and this scan, 1 lock waits totaling 5.0 s were recorded on customers. Since its index pk_customers was loaded into memory, sessions waited 11 times for locks on the rows and pages of customers, 10.0 s in all, 909 ms each on average. 2 times SQL Server escalated many row locks to a lock on the whole table, which can block sessions needing incompatible locks. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change.
+summary: Between Oct 10, 06:13 UTC and this scan, 1 lock wait totaling 5.0 s was recorded on customers. Since its index pk_customers was loaded into memory, sessions waited 11 times for locks on the rows and pages of customers, 10.0 s in all, 909 ms each on average. 2 times SQL Server escalated many row locks to a lock on the whole table, which can block sessions needing incompatible locks. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change.
 impact: 5.0 s waiting on locks
 metric: Historical lock waits
 metric: Historical time waiting
@@ -1755,7 +1755,7 @@ caveat: Counted since the indexes' metadata was loaded into memory, usually sinc
 
 id: hot-rows:shop.customers
 title: No new lock waits on customers since Oct 5, 06:13 UTC
-summary: Between on Oct 5 at 06:13 UTC and this scan, 0 lock waits totaling 0 ms were recorded on customers. The earlier waits do not establish contention in the selected window. Since its index pk_customers was loaded into memory, sessions waited 10 times for locks on the rows and pages of customers, 20.0 s in all, 2.0 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change.
+summary: Between Oct 5, 06:13 UTC and this scan, 0 lock waits totaling 0 ms were recorded on customers. The earlier waits do not establish contention in the selected window. Since its index pk_customers was loaded into memory, sessions waited 10 times for locks on the rows and pages of customers, 20.0 s in all, 2.0 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change.
 impact: No new lock waits
 metric: Historical lock waits
 metric: Historical time waiting
@@ -1770,7 +1770,7 @@ caveat: Counted since the indexes' metadata was loaded into memory, usually sinc
 
 id: hot-rows:shop.customers
 title: Recorded lock wait time on customers grew by 15.0 s since Oct 10, 06:13 UTC
-summary: Between on Oct 10 at 06:13 UTC and this scan, 0 lock waits totaling 15.0 s were recorded on customers. Since its index pk_customers was loaded into memory, sessions waited 10 times for locks on the rows and pages of customers, 35.0 s in all, 3.5 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change.
+summary: Between Oct 10, 06:13 UTC and this scan, 0 lock waits totaling 15.0 s were recorded on customers. Since its index pk_customers was loaded into memory, sessions waited 10 times for locks on the rows and pages of customers, 35.0 s in all, 3.5 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change.
 impact: 15.0 s waiting on locks
 metric: Historical lock waits
 metric: Historical time waiting
@@ -1785,7 +1785,7 @@ caveat: Counted since the indexes' metadata was loaded into memory, usually sinc
 
 id: hot-rows:shop.customers
 title: 10 lock waits on customers averaged 2.0 s since Sep 29, 00:13 UTC
-summary: Between on Sep 29 at 00:13 UTC and this scan, 10 lock waits totaling 20.0 s were recorded on customers. Since its index pk_customers was loaded into memory, sessions waited 20 times for locks on the rows and pages of customers, 25.0 s in all, 1.2 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change. This counter interval extends beyond the selected window, so the scan cannot place these waits inside that window.
+summary: Between Sep 29, 00:13 UTC and this scan, 10 lock waits totaling 20.0 s were recorded on customers. Since its index pk_customers was loaded into memory, sessions waited 20 times for locks on the rows and pages of customers, 25.0 s in all, 1.2 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change. This counter interval extends beyond the selected window, so the scan cannot place these waits inside that window.
 impact: 20.0 s waiting on locks
 metric: Historical lock waits
 metric: Historical time waiting
@@ -1799,7 +1799,7 @@ caveat: Counted since the indexes' metadata was loaded into memory, usually sinc
 
 id: hot-rows:shop.customers
 title: 10 lock waits on customers averaged 2.0 s since Oct 11, 11:43 UTC
-summary: Between on Oct 11 at 11:43 UTC and this scan, 10 lock waits totaling 20.0 s were recorded on customers. Since its index pk_customers was loaded into memory, sessions waited 20 times for locks on the rows and pages of customers, 25.0 s in all, 1.2 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change.
+summary: Between Oct 11, 11:43 UTC and this scan, 10 lock waits totaling 20.0 s were recorded on customers. Since its index pk_customers was loaded into memory, sessions waited 20 times for locks on the rows and pages of customers, 25.0 s in all, 1.2 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change.
 impact: 20.0 s waiting on locks
 metric: Historical lock waits
 metric: Historical time waiting

@@ -285,7 +285,7 @@ pub(super) fn render(snapshot: &Snapshot, case: Case<'_>) -> Finding {
             let mut f = setting_finding(
                 "innodb_buffer_pool_wait_free",
                 severity,
-                t!("check.config.buffer_pool_wait_free.title", count = &count),
+                t!("check.config.buffer_pool_wait_free.title", n = waits, count = &count),
                 t!("check.config.buffer_pool_wait_free.summary", count = &count, since = since_phrase(snapshot)),
                 Fix { summary: t!("check.config.buffer_pool_wait_free.fix"), sql: None, cost: None },
             );

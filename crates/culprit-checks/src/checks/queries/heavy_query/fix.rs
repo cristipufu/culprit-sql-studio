@@ -647,12 +647,13 @@ fn finds_nothing_mostly(q: &QueryStat, kind: StatementKind) -> bool {
 /// The fix for a read whose runs spend most of their time waiting for storage. Waiting alone cannot distinguish
 /// cache pressure, cold pages or storage latency; preserve that uncertainty before suggesting more memory.
 fn storage_fix(snapshot: &Snapshot, q: &QueryStat, cheap_plan: bool, finds_nothing_mostly: bool) -> String {
-    let mut fix = match q.reads_per_execution().map(|r| format::count(r.round().max(1.0))) {
-        Some(reads) => {
+    let mut fix = match q.reads_per_execution().map(|r| r.round().max(1.0)) {
+        Some(n) => {
+            let reads = format::count(n);
             // What the engine counts a statement's reads in: rows examined (MySQL) or pages.
             let mut opening = vec![match snapshot.server.engine.spec().statement_metrics().reads {
-                ReadUnit::RowsExamined => t!("check.heavy_query.fix.storage.reads_rows_examined", reads = reads),
-                ReadUnit::Pages => t!("check.heavy_query.fix.storage.reads_pages", reads = reads),
+                ReadUnit::RowsExamined => t!("check.heavy_query.fix.storage.reads_rows_examined", n = n, reads = reads),
+                ReadUnit::Pages => t!("check.heavy_query.fix.storage.reads_pages", n = n, reads = reads),
             }];
             // A plan measured cheap reads no more than it needs.
             if !cheap_plan {
@@ -759,12 +760,12 @@ impl ResidualRead<'_> {
             )
         };
         // What the engine counts a statement's reads in: rows examined (MySQL) or pages.
-        let (reads, returns) = (format::count(self.reads), self.returns.select());
+        let (n, reads, returns) = (self.reads, format::count(self.reads), self.returns.select());
         let runs = match self.engine.spec().statement_metrics().reads {
             ReadUnit::RowsExamined => {
-                t!("check.heavy_query.lookups.runs_rows_examined", reads = reads, returns = returns)
+                t!("check.heavy_query.lookups.runs_rows_examined", n = n, reads = reads, returns = returns)
             }
-            ReadUnit::Pages => t!("check.heavy_query.lookups.runs_pages", reads = reads, returns = returns),
+            ReadUnit::Pages => t!("check.heavy_query.lookups.runs_pages", n = n, reads = reads, returns = returns),
         };
         [shape, runs].join(" ")
     }

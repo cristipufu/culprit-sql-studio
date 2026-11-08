@@ -102,9 +102,9 @@ fn connection_churn_finding(snapshot: &Snapshot, churn: ConnectionChurn) -> Find
     // PostgreSQL counts sessions to this database; SQL Server's logins and MySQL's connections count the whole server,
     // every database and application on it.
     f.title = if engine == Engine::Postgres {
-        t!("check.connection_churn.title.database", rate = &rate)
+        t!("check.connection_churn.title.database", n = churn.rate, rate = &rate)
     } else {
-        t!("check.connection_churn.title.server", rate = &rate)
+        t!("check.connection_churn.title.server", n = churn.rate, rate = &rate)
     };
     let mut summary = vec![t!(
         "check.connection_churn.summary.accepted",

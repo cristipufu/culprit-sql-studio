@@ -93,9 +93,9 @@ impl Idle {
             .map(|r| {
                 let reads = format::count(r);
                 if engine == Engine::Mysql {
-                    t!("check.heavy_query.idle.reads_per_run_rows_examined", reads = reads)
+                    t!("check.heavy_query.idle.reads_per_run_rows_examined", n = r, reads = reads)
                 } else {
-                    t!("check.heavy_query.idle.reads_per_run_pages", reads = reads)
+                    t!("check.heavy_query.idle.reads_per_run_pages", n = r, reads = reads)
                 }
             })
             .unwrap_or_default();

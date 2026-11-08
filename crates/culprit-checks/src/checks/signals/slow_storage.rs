@@ -135,6 +135,24 @@ pub(super) fn file_label(snapshot: &Snapshot, g: &FileGroup) -> FileLabel {
     }
 }
 
+/// The files as a finding's subject names them: a name, without the article a sentence gives them.
+fn label_name(label: &FileLabel) -> String {
+    match label {
+        FileLabel::Tempdb => "tempdb".into(),
+        FileLabel::Log(db) => t!("check.slow_storage.name.log", database = db),
+        FileLabel::DataFile(db, name) => t!("check.slow_storage.name.data_file", database = db, file = name),
+        FileLabel::DataFiles(db) => t!("check.slow_storage.name.data_files", database = db),
+        FileLabel::Wal => t!("check.slow_storage.name.wal"),
+        FileLabel::TempTables => t!("check.slow_storage.name.temp_tables"),
+        FileLabel::TableFiles => t!("check.slow_storage.name.table_files"),
+        FileLabel::File(name) => name.clone(),
+        FileLabel::Files(FileKind::Temp) => t!("check.slow_storage.name.temp_files"),
+        FileLabel::Files(FileKind::Log) => t!("check.slow_storage.name.log_files"),
+        FileLabel::Files(_) => t!("check.slow_storage.name.files"),
+    }
+}
+
+/// The files as a sentence says them ("Reads from the log files took ..."), with the article the language needs.
 fn label_words(label: &FileLabel) -> String {
     match label {
         FileLabel::Tempdb => "tempdb".into(),
@@ -265,7 +283,8 @@ fn slow_storage_finding(snapshot: &Snapshot, slow: SlowFiles) -> Finding {
     let op = slow.operation.key();
     let key =
         format!("{}:{}", slow.database.as_deref().unwrap_or(""), culprit_core::redact::shareable_name(&slow.what));
-    let mut f = finding("slow-storage", &key, Category::Configuration, subject(SubjectKind::Database, &label));
+    let mut f =
+        finding("slow-storage", &key, Category::Configuration, subject(SubjectKind::Database, label_name(&slow.label)));
     let avg = format::duration(slow.avg_ms);
     f.title = if slow.bulk {
         t!(
@@ -297,6 +316,7 @@ fn slow_storage_finding(snapshot: &Snapshot, slow: SlowFiles) -> Finding {
         operation = op,
         label = &label,
         average = &avg,
+        n = slow.ops,
         count = format::count(slow.ops),
         period = period
     )];

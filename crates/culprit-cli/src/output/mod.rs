@@ -504,7 +504,7 @@ impl Out {
                 .count();
             let coverage = format!(
                 "{} {}",
-                t!("cli.findings.coverage", assessed = assessed.to_string(), limited = limited.to_string()),
+                t!("cli.findings.coverage", assessed = assessed, limited = limited),
                 t!("cli.findings.coverage_json")
             );
             println!("\n{}", self.paint(DIM, &coverage));

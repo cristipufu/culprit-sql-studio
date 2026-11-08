@@ -1064,7 +1064,7 @@ pub fn find_lock_holder(snapshot: &Snapshot, q: &QueryStat, waits: Option<f64>) 
     let logged = log_next_waits(snapshot, None);
     let window = snapshot.workload.as_ref().map(|w| w.window_phrase()).unwrap_or_default();
     let few = match waits {
-        Some(n) => t!("support.lock_holder.few_waits", count = format::count(n.ceil()), window = window),
+        Some(n) => t!("support.lock_holder.few_waits", n = n.ceil(), count = format::count(n.ceil()), window = window),
         None => t!("support.lock_holder.few_runs", runs = runs_of(snapshot, q)),
     };
     LockHolder { lead: [few, logged.lead].join(" "), sql: logged.sql }

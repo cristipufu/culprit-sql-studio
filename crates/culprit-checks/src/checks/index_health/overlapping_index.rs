@@ -151,9 +151,11 @@ fn overlapping_index_finding(snapshot: &Snapshot, o: OverlappingIndex<'_>) -> Fi
         t!(
             "check.overlapping_index.summary.reads",
             index = &a.name,
+            n = o.reads,
             reads = format::count(o.reads),
             since = since_phrase(snapshot),
             wider = &b.name,
+            wider_n = o.wider_reads,
             wider_reads = format::count(o.wider_reads)
         ),
         t!("check.overlapping_index.summary.seek", lead = o.lead, table = &table_name),

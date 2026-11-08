@@ -126,9 +126,9 @@ fn untrusted_constraint_finding(snapshot: &Snapshot, u: UntrustedTable<'_>) -> F
     f.severity = if disabled > 0 { Severity::Medium } else { Severity::Low };
     severity_score(&mut f);
     f.impact.label = if ysql {
-        t!("check.untrusted_constraint.impact.not_validated", count = &count)
+        t!("check.untrusted_constraint.impact.not_validated", n = n, count = &count)
     } else {
-        t!("check.untrusted_constraint.impact.untrusted", count = &count)
+        t!("check.untrusted_constraint.impact.untrusted", n = n, count = &count)
     };
     f.confidence = Confidence::High;
     f.metrics = vec![Metric::new(t!("check.untrusted_constraint.metric.constraints"), n as f64, Unit::Count)];

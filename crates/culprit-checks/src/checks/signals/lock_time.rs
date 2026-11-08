@@ -209,7 +209,12 @@ fn lock_time_finding(snapshot: &Snapshot, wait: LockWait<'_>) -> Finding {
         cost: None,
     });
     // On running totals the lock time holds every run from before the change: two scans show it.
-    let now = t!("check.lock_time.verify.now", lock = format::duration(lock), runs = format::count(q.executions));
+    let now = t!(
+        "check.lock_time.verify.now",
+        lock = format::duration(lock),
+        n = q.executions,
+        runs = format::count(q.executions)
+    );
     f.verify = vec![match crate::queries::running_totals(snapshot) {
         Some(source) => t!("check.lock_time.verify.between_scans", source = source, now = now),
         None => t!("check.lock_time.verify.rescan"),

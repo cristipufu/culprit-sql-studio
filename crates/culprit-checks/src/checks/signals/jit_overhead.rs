@@ -137,7 +137,12 @@ fn jit_overhead_finding(snapshot: &Snapshot, case: JitOverhead<'_>) -> Finding {
         }
     });
     // On running totals the JIT time holds every run from before the change: two scans show it.
-    let now = t!("check.jit_overhead.verify.now", jit = format::duration(jit), runs = format::count(q.executions));
+    let now = t!(
+        "check.jit_overhead.verify.now",
+        jit = format::duration(jit),
+        n = q.executions,
+        runs = format::count(q.executions)
+    );
     f.verify = vec![match crate::queries::running_totals(snapshot) {
         Some(source) => t!("check.jit_overhead.verify.between_scans", source = source, now = now),
         None => t!("check.jit_overhead.verify.rescan"),

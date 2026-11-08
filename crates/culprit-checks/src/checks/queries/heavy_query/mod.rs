@@ -388,13 +388,14 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
             ),
             _ => t!("check.heavy_query.title.share", handle = &handle, tense = tense, share = &share, time = &time),
         },
-        TitleForm::ReadsForNothing { reads, returns } => {
-            let (reads, returns) = (format::count(reads), returns.select());
+        TitleForm::ReadsForNothing { reads: n, returns } => {
+            let (reads, returns) = (format::count(n), returns.select());
             if mysql {
                 t!(
                     "check.heavy_query.title.reads_for_nothing_rows_examined",
                     handle = &handle,
                     tense = tense,
+                    n = n,
                     reads = reads,
                     returns = returns
                 )
@@ -403,6 +404,7 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
                     "check.heavy_query.title.reads_for_nothing_pages",
                     handle = &handle,
                     tense = tense,
+                    n = n,
                     reads = reads,
                     returns = returns
                 )
@@ -415,10 +417,11 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
                     "check.heavy_query.title.reads_per_row_rows_examined",
                     handle = &handle,
                     tense = tense,
+                    n = r,
                     reads = reads
                 )
             } else {
-                t!("check.heavy_query.title.reads_per_row_pages", handle = &handle, tense = tense, reads = reads)
+                t!("check.heavy_query.title.reads_per_row_pages", handle = &handle, tense = tense, n = r, reads = reads)
             }
         }
     };
@@ -494,11 +497,12 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
         Lead::Lookups(lookups) => summary.push(lookups.evidence()),
         Lead::CheapWrite => summary.push(write_cost(snapshot, q)),
         Lead::CheapPlan { storage_reads: Some(reads) } => {
-            let reads = format::count(reads.round().max(1.0));
+            let n = reads.round().max(1.0);
+            let reads = format::count(n);
             summary.push(if mysql {
-                t!("check.heavy_query.summary.cheap_plan_reads_rows_examined", reads = reads)
+                t!("check.heavy_query.summary.cheap_plan_reads_rows_examined", n = n, reads = reads)
             } else {
-                t!("check.heavy_query.summary.cheap_plan_reads_pages", reads = reads)
+                t!("check.heavy_query.summary.cheap_plan_reads_pages", n = n, reads = reads)
             });
         }
         Lead::CheapPlan { storage_reads: None } => summary.push(t!("check.heavy_query.summary.cheap_plan")),
@@ -684,6 +688,7 @@ fn rows_metric((per_run_label, total_label): (String, String), per_run: f64, run
             "check.heavy_query.metric.rows_in_runs",
             rows = format::count(rows),
             count = rows,
+            runs_n = runs,
             runs = format::count(runs)
         );
         return Metric::text(total_label, counted);

@@ -1420,7 +1420,7 @@ TopQueries Info Top queries: 1 query is 25% of database time.
   metric Queries: 16
   item a read from customers: 25%
 TopQueries Info Top queries: Three queries make up 60% of database time.
-  detail: 16 queries tracked over the last 2 days. 1 of these stopped running before the window ended: a deploy may have changed them.
+  detail: 16 queries tracked over the last 2 days. 1 of these stopped running before the window ended: a deploy may have changed it.
   metric Top query: 20%
   metric Top five: 80%
   metric Queries: 16

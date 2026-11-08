@@ -255,13 +255,14 @@ fn log_of_writers(snapshot: &Snapshot, writers: &[(&QueryStat, &'static str, f64
             match per_row {
                 Some(per_row) => t!(
                     "refine.writes.one_kind_per_row",
+                    n = *n,
                     count = count,
                     verb = *verb,
                     bytes = bytes,
                     log = log,
                     per_row = per_row
                 ),
-                None => t!("refine.writes.one_kind", count = count, verb = *verb, bytes = bytes, log = log),
+                None => t!("refine.writes.one_kind", n = *n, count = count, verb = *verb, bytes = bytes, log = log),
             }
         }
         _ => {
@@ -284,6 +285,7 @@ fn log_of_writers(snapshot: &Snapshot, writers: &[(&QueryStat, &'static str, f64
                 .collect();
             t!(
                 "refine.writes.kinds",
+                n = writers.len(),
                 count = writers.len().to_string(),
                 total = format::bytes(total),
                 log = log,

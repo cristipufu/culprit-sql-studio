@@ -536,9 +536,9 @@ sql: EXEC sys.sp_query_store_clear_hints @query_id = 7;
 verify: Re-scan: the hint's failure count stops growing.
 
 id: tuning-advice:hint-failing:9 · Low · High · score 8 · share None
-title: A Query Store hint on query 9 failed 1 times (unknown reason)
-summary: The hint OPTION (RECOMPILE) is set for query 9, but SQL Server could not apply it 1 times, so the query ran without it.
-impact: 1 failed hints
+title: A Query Store hint on query 9 failed once (unknown reason)
+summary: The hint OPTION (RECOMPILE) is set for query 9, but SQL Server could not apply it once, so the query ran without it.
+impact: 1 failed hint
 fix: Fix or clear the hint.
 sql: EXEC sys.sp_query_store_clear_hints @query_id = 9;
 verify: Re-scan: the hint's failure count stops growing."#,

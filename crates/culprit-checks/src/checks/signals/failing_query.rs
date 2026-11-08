@@ -186,9 +186,15 @@ fn failing_query_finding(snapshot: &Snapshot, runs: FailingRuns<'_>) -> Finding 
     };
     let (runs_all, ran) = (format::count(q.executions), ran_phrase(snapshot, q));
     let mut parts = vec![if unfinished >= q.executions {
-        t!("check.failing_query.summary.none_finished", runs = runs_all, ran = ran)
+        t!("check.failing_query.summary.none_finished", n = q.executions, runs = runs_all, ran = ran)
     } else {
-        t!("check.failing_query.summary.unfinished", unfinished = format::count(unfinished), runs = runs_all, ran = ran)
+        t!(
+            "check.failing_query.summary.unfinished",
+            n = unfinished,
+            unfinished = format::count(unfinished),
+            runs = runs_all,
+            ran = ran
+        )
     }];
     if aborted > 0.0 {
         let cancelled = format::count(aborted);
@@ -236,6 +242,7 @@ fn failing_query_finding(snapshot: &Snapshot, runs: FailingRuns<'_>) -> Finding 
     let now = t!(
         "check.failing_query.verify.now",
         unfinished = format::count(unfinished),
+        n = q.executions,
         runs = format::count(q.executions)
     );
     f.verify = vec![match crate::queries::running_totals(snapshot) {

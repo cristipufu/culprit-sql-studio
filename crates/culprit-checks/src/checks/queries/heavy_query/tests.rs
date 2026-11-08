@@ -1849,13 +1849,13 @@ verify: Compare equivalent runs before and after a justified change: time per ru
     (
         "lead/cheap-plan-storage-rows-examined",
         r#"title: A read from products takes 2% of database time
-summary: It ran 30K times in 2 minutes at 0.04 ms on average: 2% of all database time in the 2 minutes since statistics were reset. Its plan is cheap: each run examines about 1 rows, and no step of it is where the time goes. 86% of its time is spent waiting for data to come from storage because it wasn't in memory (performance_schema: wait/io/table/sql/handler).
+summary: It ran 30K times in 2 minutes at 0.04 ms on average: 2% of all database time in the 2 minutes since statistics were reset. Its plan is cheap: each run examines about 1 row, and no step of it is where the time goes. 86% of its time is spent waiting for data to come from storage because it wasn't in memory (performance_schema: wait/io/table/sql/handler).
 impact: 2% of DB time
 metric: Share of DB time
 metric: Average duration
 metric: Rows examined per run
 metric: Rows returned per run
-fix: Each run examines about 1 rows in total, and most of its elapsed time is storage waiting. Compare physical reads and storage latency under representative load to distinguish slow I/O, a cold cache and repeated cache misses. The wait share alone does not establish eviction or insufficient memory. Check independent cache-pressure evidence before considering a memory or service-tier change. Fewer runs (a result cached where it's safe to reuse, calls batched) also save the reads.
+fix: Each run examines about 1 row in total, and most of its elapsed time is storage waiting. Compare physical reads and storage latency under representative load to distinguish slow I/O, a cold cache and repeated cache misses. The wait share alone does not establish eviction or insufficient memory. Check independent cache-pressure evidence before considering a memory or service-tier change. Fewer runs (a result cached where it's safe to reuse, calls batched) also save the reads.
 verify: performance_schema keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there its time per run should drop, as less of it waits for storage (86% of it now). A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running."#,
     ),
     (
