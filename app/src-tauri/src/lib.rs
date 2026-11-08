@@ -219,19 +219,29 @@ async fn scan(ws: Ws<'_>, name: String, window_minutes: Option<u32>) -> Result<R
     ws.scan(&name, &options).await.map(for_ui)
 }
 
+/// Word what the app reads from now on (findings, notes, plan insights) in `code`, the language the app is shown in.
+/// Whether Culprit has that language; English stays otherwise.
+#[tauri::command]
+fn set_language(code: String) -> bool {
+    culprit_core::i18n::set_language(&code)
+}
+
+/// The brief a coding agent is given: in English whatever the app's language, report and all.
 #[tauri::command]
 async fn brief(ws: Ws<'_>, name: String, finding_id: String, window_minutes: Option<u32>) -> Result<String> {
     blocking_workspace(ws.inner().clone(), move |ws| {
-        let window = requested_window(window_minutes);
-        let selected = ws.latest_report(&name, window)?;
-        let report = if selected.is_none() && window.is_some() { ws.latest_report(&name, None)? } else { selected }
-            .ok_or_else(|| Error::not_found(format!("No report for {name}")))?;
-        let finding = report
-            .findings
-            .iter()
-            .find(|f| f.id == finding_id)
-            .ok_or_else(|| Error::not_found(format!("No finding {finding_id}")))?;
-        Ok(culprit_engine::agent_brief(&report, finding))
+        culprit_core::i18n::scope("en", || {
+            let window = requested_window(window_minutes);
+            let selected = ws.latest_report(&name, window)?;
+            let report = if selected.is_none() && window.is_some() { ws.latest_report(&name, None)? } else { selected }
+                .ok_or_else(|| Error::not_found(format!("No report for {name}")))?;
+            let finding = report
+                .findings
+                .iter()
+                .find(|f| f.id == finding_id)
+                .ok_or_else(|| Error::not_found(format!("No finding {finding_id}")))?;
+            Ok(culprit_engine::agent_brief(&report, finding))
+        })
     })
     .await
 }
@@ -804,6 +814,7 @@ pub fn run_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            set_language,
             connections,
             parse_connection,
             test_connection,

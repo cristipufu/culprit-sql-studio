@@ -1,3 +1,4 @@
+import { language } from "./i18n";
 import { lazyResource } from "./requests";
 import { discoveryRequests } from "./discovery-requests";
 import { ownedRequests } from "./owned-requests";
@@ -59,6 +60,8 @@ export type ScreenArea = { x: number; y: number; width: number; height: number }
 
 export interface Api {
   readonly kind: "desktop" | "demo";
+  /** Write what the desktop app words (findings, notes, plan insights) in `code`, the language the app is shown in. */
+  setLanguage(code: string): Promise<void>;
   connections(): Promise<ConnectionInfo[]>;
   /** What `input` connects to, read as `engine` wherever the text leaves the engine open. */
   parseConnection(input: string, engine: Engine | null, ssh?: boolean): Promise<ParsedConnection>;
@@ -174,8 +177,11 @@ async function desktopApi(): Promise<Api> {
   const { invoke } = await import("@tauri-apps/api/core");
   const discover = discoveryRequests(invoke);
   const preview = ownedRequests(invoke, "begin_preview", "cancel_preview");
+  // Before anything is read: the backend words what it reads in the app's language.
+  await invoke("set_language", { code: language() }).catch(() => {});
   return {
     kind: "desktop",
+    setLanguage: (code) => invoke("set_language", { code }),
     connections: () => invoke("connections"),
     parseConnection: (input, engine, ssh = false) => invoke("parse_connection", { input, engine, ssh }),
     testConnection: (input) => invoke("test_connection", { input }),

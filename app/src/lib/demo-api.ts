@@ -286,6 +286,8 @@ export async function demoApi(): Promise<Api> {
     discoverAzure: async (terms) => discoveryPage(await sampleFor("azure", terms)),
     discoverAws: async (terms, regions) =>
       discoveryPage((await sampleFor("aws", terms)).filter((d) => regions.length === 0 || regions.includes(d.region ?? ""))),
+    // The demo's reports were worded when they were saved: the app's own words follow the language.
+    setLanguage: async () => {},
     setPassword: async (name, password) => {
       const current = connections.find((c) => c.name === name);
       if (!current) return Promise.reject({ code: "not_found", message: `No connection named '${name}'`, hint: null });

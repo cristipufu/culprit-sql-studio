@@ -13,7 +13,7 @@ mod message;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 #[cfg(test)]
 pub(crate) use message::parse;
@@ -110,9 +110,25 @@ thread_local! {
     static CURRENT: RefCell<Option<Arc<Lang>>> = const { RefCell::new(None) };
 }
 
-/// The language messages are said in on this thread: the one [`scope`] set, English otherwise.
+/// The language this process speaks where no [`scope`] says otherwise.
+static PROCESS: RwLock<Option<Arc<Lang>>> = RwLock::new(None);
+
+/// Speak `code` in this process from now on, wherever no [`scope`] says otherwise: the desktop app's choice, the CLI's
+/// `--lang`. Whether Culprit has that language (it keeps the one before when it doesn't). Output for coding agents
+/// (the brief, digests, MCP tools) stays in English by its own scope.
+pub fn set_language(code: &str) -> bool {
+    let Some(lang) = language(code) else { return false };
+    *PROCESS.write().unwrap_or_else(|e| e.into_inner()) = Some(lang);
+    true
+}
+
+/// The language messages are said in on this thread: the one [`scope`] set, else the process's ([`set_language`]),
+/// else English.
 pub fn current() -> Arc<Lang> {
-    CURRENT.with(|c| c.borrow().clone()).unwrap_or_else(english)
+    CURRENT
+        .with(|c| c.borrow().clone())
+        .or_else(|| PROCESS.read().unwrap_or_else(|e| e.into_inner()).clone())
+        .unwrap_or_else(english)
 }
 
 /// Run `f` with its messages in `code` (English for a language Culprit doesn't have), restoring the language before.

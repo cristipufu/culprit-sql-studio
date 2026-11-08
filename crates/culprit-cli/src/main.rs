@@ -36,6 +36,10 @@ struct Cli {
     /// Shorthand for --format json.
     #[arg(long, global = true)]
     json: bool,
+    /// The language to write findings and notes in (`es`, `fr`, `de`; English by default). JSON output, read by
+    /// scripts and coding agents, stays in English.
+    #[arg(long, global = true, env = "CULPRIT_LANG", value_name = "CODE")]
+    lang: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
@@ -414,6 +418,13 @@ fn main() -> ExitCode {
         _ => Format::Json,
     };
     let out = Out::new(format);
+    if let Some(code) = cli.lang.as_deref().filter(|_| format != Format::Json) {
+        // A language Culprit doesn't have: English, with a word on stderr (the output itself stays clean).
+        if !culprit_core::i18n::set_language(code) {
+            let known: Vec<String> = culprit_core::i18n::languages().iter().map(|l| l.code.clone()).collect();
+            eprintln!("culprit: no language {code:?} (known: {}); writing English", known.join(", "));
+        }
+    }
     // Markdown is written by the commands whose output is meant for a pull request or a ticket; elsewhere it would be
     // plain text under a Markdown label.
     if format == Format::Md && !writes_markdown(&cli.command) {

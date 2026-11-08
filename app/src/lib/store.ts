@@ -233,6 +233,12 @@ export async function setWindow(minutes: WindowMinutes): Promise<void> {
   await reports.open(name, minutes, true);
 }
 
+/** Read the open connection's report again, without scanning: reports are worded as they are read. */
+export async function reread(): Promise<void> {
+  const { active, windowMinutes } = getState();
+  if (active) await reports.open(active, windowMinutes, false);
+}
+
 /** Refresh only the current report session; a stale view cannot start work for a different connection. */
 export async function scan(name: string): Promise<void> {
   await reports.scan(name, getState().windowMinutes);

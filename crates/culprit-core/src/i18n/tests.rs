@@ -81,8 +81,11 @@ fn a_scope_speaks_its_language_and_restores_the_one_before() {
     });
     assert_eq!(inner, ("de".to_string(), "fr".to_string()));
     assert_eq!(current().code, "en");
-    // A language Culprit doesn't have speaks English.
+    // A language Culprit doesn't have speaks English, and can't become the process's (tests never set one: every
+    // other test reads English).
     assert_eq!(scope("xx", || current().code.clone()), "en");
+    assert!(!set_language("xx"));
+    assert_eq!(current().code, "en");
     // A key no catalog has reads as itself rather than vanishing.
     assert_eq!(t("no.such.key", &[]), "no.such.key");
 }
