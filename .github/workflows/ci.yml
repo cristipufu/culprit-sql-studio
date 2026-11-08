@@ -197,6 +197,10 @@ jobs:
         run: |
           bun install --frozen-lockfile
           bun run build
+      # Languages are compiled into the app, never read from disk: every locales/*.json and its keys are in the bundle.
+      - name: Every language is inside the built UI
+        working-directory: app
+        run: bun scripts/check-bundled-locales.ts
       - name: Clippy (desktop app)
         run: cargo clippy --locked -p culprit-app --all-targets -- -D warnings
       # The workspace tests leave the desktop crate out; its own run here, on each platform it ships for.

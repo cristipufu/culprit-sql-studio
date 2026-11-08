@@ -124,6 +124,7 @@ jobs:
         run: |
           set -euo pipefail
           (cd app && bunx tauri build --target universal-apple-darwin --bundles app --config src-tauri/tauri.release.conf.json)
+          (cd app && bun scripts/check-bundled-locales.ts)
           cargo build --locked --release -p culprit-cli --target aarch64-apple-darwin
           cargo build --locked --release -p culprit-cli --target x86_64-apple-darwin
           mkdir -p dist
@@ -254,6 +255,7 @@ jobs:
         run: |
           set -euo pipefail
           (cd app && bun install --frozen-lockfile && bunx tauri build --bundles nsis --config src-tauri/tauri.release.conf.json)
+          (cd app && bun scripts/check-bundled-locales.ts)
           cargo build --locked --release -p culprit-cli
           mkdir -p out
           cp target/release/bundle/nsis/*-setup.exe out/Culprit-SQL-Studio-Windows-x64-setup.exe
@@ -311,6 +313,7 @@ jobs:
         run: |
           set -euo pipefail
           (cd app && bun install --frozen-lockfile && bunx tauri build --bundles appimage,deb --config src-tauri/tauri.release.conf.json)
+          (cd app && bun scripts/check-bundled-locales.ts)
           cargo build --locked --release -p culprit-cli
           mkdir -p out
           cp target/release/bundle/appimage/*.AppImage out/Culprit-SQL-Studio-Linux-x86_64.AppImage
