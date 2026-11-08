@@ -85,18 +85,17 @@ export class EditorTabStorage {
     const fresh = newEditorTab(placeholder);
     this.initial = { tabs: [fresh], active: fresh.id };
     if (!storage) { this.error = UNAVAILABLE; return; }
-    let protectScopedData = true;
     try {
       const raw = storage.getItem(this.scope);
-      protectScopedData = raw !== null;
       if (raw !== null) {
         this.initial = load(raw, storage);
         this.index = metadata(this.initial);
         this.bodies = new Map(this.initial.tabs.map((t) => [t.id, t.sql]));
       }
     } catch {
+      // Unreadable storage or saved tabs that don't parse: never overwrite what may be there.
       this.error = INVALID;
-      this.blocked = protectScopedData;
+      this.blocked = true;
     }
   }
 

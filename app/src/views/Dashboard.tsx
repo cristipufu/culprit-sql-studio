@@ -93,19 +93,12 @@ export default function Dashboard({ report, connection }: { report: Report; conn
   if (!model) return <DashboardSkeleton />;
 
   const { tiles, headline, attention: keys } = model;
-  // A dashboard built by an older Culprit lacks newer tiles: they say so instead of breaking the page.
-  const tile = (key: TileKey): Tile =>
-    tiles.find((t) => t.key === key) ?? {
-      key,
-      title: key.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase()),
-      status: "unavailable",
-      takeaway: "Scan again to fill this tile.",
-      detail: null,
-      metrics: [],
-      items: [],
-      fix_sql: null,
-      next: null,
-    };
+  // The dashboard is built by this build's Rust, with every tile (crates/culprit-checks/tests/dashboard.rs).
+  const tile = (key: TileKey): Tile => {
+    const found = tiles.find((t) => t.key === key);
+    if (!found) throw new Error(`The dashboard has no ${key} tile.`);
+    return found;
+  };
   const noWorkload = !report.snapshot.workload;
   const worst: TileStatus = keys[0] ? tile(keys[0]).status : "good";
   const focusTile = (key: TileKey) => gridRef.current?.querySelector<HTMLElement>(`[data-tile="${key}"]`)?.focus();

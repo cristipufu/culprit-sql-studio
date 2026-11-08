@@ -7,7 +7,7 @@ import { partial } from "../test/fixtures";
 const q = { id: "new-upsert", executions: 3917, total_time_ms: 4000, mean_time_ms: 1 } as QueryStat;
 const report = partial<Report>({
   snapshot: { workload: { windowed: false, window_hours: 1282 * 24, total_time_ms: 4000000, window_start: "2023-04-17T00:00:00Z" } },
-  summary: { over_scans: [{ query: q.id, share: 0.001, mean_ms: 1, counted: 825, runs: "at least 825 runs observed over 14 hours between scans", runs_per_day: null, over: null, totals: null, activity: { runs: 825, time_ms: 700, incomplete: true, over: "14 hours between scans" } }] },
+  summary: { runs_said: [], over_scans: [{ query: q.id, share: 0.001, mean_ms: 1, counted: 825, runs: "at least 825 runs observed over 14 hours between scans", runs_per_day: null, over: null, totals: null, activity: { runs: 825, time_ms: 700, incomplete: true, over: "14 hours between scans" } }] },
 });
 test("rates: observed calls retain their period without inventing a daily rate, share or average", () => {
   const f = figures(report, q);

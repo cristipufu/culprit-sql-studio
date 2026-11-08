@@ -39,9 +39,9 @@ export function windowPhrase(w: Workload): string {
 
 /** How the runs of statements a rate a day would misstate are said, by query id: those that came in bursts ("750 runs
  * on Oct 11, 15:51–15:55 UTC") and those that ran fewer times than the window has days (the core's `Summary::runs_said`,
- * from `Workload::cadence`). A report saved before it said so has none. */
-export function runsSaid(summary: { runs_said?: { query: string; runs: string }[] }): Map<string, string> {
-  return new Map((summary.runs_said ?? []).map((r) => [r.query, r.runs]));
+ * from `Workload::cadence`). */
+export function runsSaid(summary: { runs_said: { query: string; runs: string }[] }): Map<string, string> {
+  return new Map(summary.runs_said.map((r) => [r.query, r.runs]));
 }
 
 /** Per-day rates for windows long enough to mean something, measured totals otherwise. */
@@ -88,7 +88,7 @@ function figureIndex(summary: Summary): FigureIndex {
   const cached = figureIndexes.get(summary);
   if (cached && cached.scansSource === summary.over_scans && cached.saidSource === summary.runs_said) return cached;
   const scans = new Map<string, Summary["over_scans"][number]>();
-  for (const scan of summary.over_scans ?? []) {
+  for (const scan of summary.over_scans) {
     // Preserve the first matching entry, as the earlier array lookup did.
     if (!scans.has(scan.query)) scans.set(scan.query, scan);
   }

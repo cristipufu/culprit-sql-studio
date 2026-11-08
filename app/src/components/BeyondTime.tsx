@@ -394,7 +394,7 @@ export function TableSignalFacts({ report, table }: { report: Report; table: Tab
         />,
       );
   }
-  const untrusted = (snapshot.constraints ?? []).filter((c) => c.schema === table.schema && c.table === table.name);
+  const untrusted = snapshot.constraints.filter((c) => c.schema === table.schema && c.table === table.name);
   if (untrusted.length)
     facts.push(
       <Fact

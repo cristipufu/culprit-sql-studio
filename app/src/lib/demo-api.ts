@@ -627,7 +627,7 @@ export async function demoApi(): Promise<Api> {
         schema: t.schema,
         name: t.name,
         view: false,
-        columns: (snapshot.columns ?? []).filter((c) => c.schema === t.schema && c.table === t.name).sort((a, b) => a.ordinal - b.ordinal).map((c) => ({ name: c.name, data_type: c.data_type })),
+        columns: snapshot.columns.filter((c) => c.schema === t.schema && c.table === t.name).sort((a, b) => a.ordinal - b.ordinal).map((c) => ({ name: c.name, data_type: c.data_type })),
       }));
       return { databases: [], tables, truncated: false };
     },
