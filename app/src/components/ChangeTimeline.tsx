@@ -109,7 +109,7 @@ export function AroundThen({ changes, onFocusQuery }: { changes: Changes; onFocu
       </ol>
       {events.length > limit && (
         <button type="button" className="link-button around-toggle" onClick={() => setAll((v) => !v)}>
-          {all ? t("ui.change_timeline.show_fewer") : t("ui.change_timeline.show_all", { count: events.length })}
+          {all ? t("ui.change_timeline.show_fewer") : t("ui.change_timeline.show_all", { count: String(events.length) })}
         </button>
       )}
     </section>

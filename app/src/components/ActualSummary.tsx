@@ -76,7 +76,7 @@ export function ActualSummary({ plan, onPick }: { plan: Plan; onPick?: (id: numb
       tone: "warn",
       icon: <Users size={13} />,
       text: (
-        <>{place(t("ui.actual_summary.skew", { threads: f.skew.threads, share: percent(f.skew.busiest) }), { operator: <b>{where(f.skew.node)}</b> })}</>
+        <>{place(t("ui.actual_summary.skew", { threads: String(f.skew.threads), share: percent(f.skew.busiest) }), { operator: <b>{where(f.skew.node)}</b> })}</>
       ),
       node: f.skew.node.id,
       title: t("ui.actual_summary.skew_hint"),
@@ -102,7 +102,7 @@ export function ActualSummary({ plan, onPick }: { plan: Plan; onPick?: (id: numb
           </span>
         )}
         <span className="as-stats">
-          {f.cpuMs != null && <Stat icon={<Cpu size={12} />} value={duration(f.cpuMs)} label={t("ui.actual_summary.cpu")} title={f.workers ? t("ui.actual_summary.across_workers", { workers: f.workers }) : undefined} />}
+          {f.cpuMs != null && <Stat icon={<Cpu size={12} />} value={duration(f.cpuMs)} label={t("ui.actual_summary.cpu")} title={f.workers ? t("ui.actual_summary.across_workers", { workers: String(f.workers) }) : undefined} />}
           {f.logicalReads != null && (
             <Stat
               icon={<Database size={12} />}

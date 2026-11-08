@@ -32,9 +32,9 @@ export function NodeResourcesView({ resources: r }: { resources: NodeResources }
     </tr>)}</tbody></table></div>}
     {nodes.length > PAGE_SIZE && <div className="actions">
       <button type="button" className="btn" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>{t("ui.node_resources.previous")}</button>
-      <span className="muted">{t("ui.node_resources.page", { from: currentPage * PAGE_SIZE + 1, to: Math.min((currentPage + 1) * PAGE_SIZE, nodes.length), total: nodes.length })}</span>
+      <span className="muted">{t("ui.node_resources.page", { from: String(currentPage * PAGE_SIZE + 1), to: String(Math.min((currentPage + 1) * PAGE_SIZE, nodes.length)), total: String(nodes.length) })}</span>
       <button type="button" className="btn" disabled={(currentPage + 1) * PAGE_SIZE >= nodes.length} onClick={() => setPage(currentPage + 1)}>{t("ui.node_resources.next")}</button>
     </div>}
-    {r.nodes.length > nodes.length && <p className="muted">{t("ui.node_resources.truncated", { shown: nodes.length, total: r.nodes.length })}</p>}
+    {r.nodes.length > nodes.length && <p className="muted">{t("ui.node_resources.truncated", { shown: String(nodes.length), total: String(r.nodes.length) })}</p>}
   </section>;
 }

@@ -46,7 +46,7 @@ function ActivityDetail({ category: c, onClose }: { category: ActivityCategory; 
     </table>
     {c.events.length > PAGE_SIZE && <div className="actions">
       <button type="button" className="btn" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>{t("ui.common.previous")}</button>
-      <span className="muted">{t("ui.activity_history.page", { from: currentPage * PAGE_SIZE + 1, to: Math.min((currentPage + 1) * PAGE_SIZE, c.events.length), total: c.events.length })}</span>
+      <span className="muted">{t("ui.activity_history.page", { from: String(currentPage * PAGE_SIZE + 1), to: String(Math.min((currentPage + 1) * PAGE_SIZE, c.events.length)), total: String(c.events.length) })}</span>
       <button type="button" className="btn" disabled={(currentPage + 1) * PAGE_SIZE >= c.events.length} onClick={() => setPage(currentPage + 1)}>{t("ui.common.next")}</button>
     </div>}
     <h4 className="section-title">{t("ui.activity_history.queries")}</h4>

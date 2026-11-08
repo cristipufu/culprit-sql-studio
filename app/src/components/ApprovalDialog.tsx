@@ -143,7 +143,7 @@ export default function ApprovalDialog() {
         {production && <p className="approval-prod">{t("ui.approval_dialog.production")}</p>}
         <div className="approval-actions">
           <span className="muted" aria-live="polite">
-            {waiting.length > 1 ? t("ui.approval_dialog.countdown_waiting", { seconds: secondsLeft, more: waiting.length - 1 }) : t("ui.approval_dialog.countdown", { seconds: secondsLeft })}
+            {waiting.length > 1 ? t("ui.approval_dialog.countdown_waiting", { seconds: String(secondsLeft), more: String(waiting.length - 1) }) : t("ui.approval_dialog.countdown", { seconds: String(secondsLeft) })}
           </span>
           <span style={{ flex: 1 }} />
           <button type="button" className="btn" autoFocus onClick={() => decide(false)}>
