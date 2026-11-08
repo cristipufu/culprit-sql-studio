@@ -23,6 +23,7 @@ mod one_off;
 mod partitions;
 mod pins;
 mod plan_cache;
+mod plan_insights;
 mod plan_warnings;
 mod plugin;
 mod pressure_config_maintenance;

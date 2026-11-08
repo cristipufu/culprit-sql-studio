@@ -4,8 +4,8 @@
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
 use culprit_core::insights::PlanInsight;
 use culprit_core::{
-    Capability, Category, CheckInfo, Confidence, Engine, Finding, Fix, Metric, PlanKind, QueryRef, QueryStat, Severity,
-    Snapshot, SubjectKind, Unit, format,
+    Capability, Category, CheckInfo, Confidence, Engine, Finding, Fix, Metric, Plan, PlanKind, QueryRef, QueryStat,
+    Severity, Snapshot, SubjectKind, Unit, format, t,
 };
 
 use crate::support::*;
@@ -26,27 +26,66 @@ const WEIGHED_BY_THE_STATEMENT: &[&str] = &["automatic-index"];
 pub fn plan_insights_info() -> CheckInfo {
     CheckInfo {
         id: "plan-insights".into(),
-        title: "Plan insights".into(),
+        title: t!("check.plan_insights.info.title"),
         category: Category::Queries,
         engines: vec![Engine::Mssql, Engine::Postgres, Engine::Yugabyte, Engine::Mysql, Engine::Sqlite],
         requires: vec![Capability::QueryPlans],
-        description: "Key lookups, functions on filtered columns, leading wildcards, NOT IN, scalar functions, eager spools, misestimates and repeated loops in the plans of queries that matter.".into(),
+        description: t!("check.plan_insights.info.description"),
     }
 }
 
-check!(PlanInsightsCheck: plan_insights_info, plan_insights, &[Evidence::Query(QueryMeasure::CapturedPlans)]);
+check!(
+    PlanInsightsCheck: plan_insights_info,
+    decide = plan_insight_cases,
+    render = plan_insight_finding,
+    case<'s> = PlanInsightCase<'s>,
+    evidence = &[Evidence::Query(QueryMeasure::CapturedPlans)],
+);
 
-pub fn plan_insights(snapshot: &Snapshot) -> Vec<Finding> {
-    plan_insights_for_queries(snapshot, app_queries(snapshot))
+/// One plan problem on one table (or in one statement's plan as a whole), and every statement whose plan shows it.
+pub struct PlanInsightCase<'s> {
+    /// The first statement whose plan shows it, that plan, and the insight as that plan states it.
+    query: &'s QueryStat,
+    plan: &'s Plan,
+    insight: PlanInsight,
+    /// `<rule>:<table>`, or `<rule>:query-<id>` for an insight about the whole plan.
+    key: String,
+    /// The table the insight's step reads, when it names one.
+    object: Option<String>,
+    severity: Severity,
+    /// Every statement whose plan shows it, the first one first, with the step it points at.
+    steps: Vec<(&'s QueryStat, Option<u32>)>,
+    /// What they take together, when the workload says.
+    impact: Option<QueryImpact>,
+    /// How many statements those are.
+    queries: usize,
+}
+
+/// The plan-insights findings of `snapshot`: its cases, each worded.
+#[cfg(test)]
+pub(crate) fn plan_insights(snapshot: &Snapshot) -> Vec<Finding> {
+    culprit_core::Check::run(&PlanInsightsCheck, snapshot)
+}
+
+fn plan_insight_cases(snapshot: &Snapshot) -> Vec<PlanInsightCase<'_>> {
+    cases_for_queries(snapshot, app_queries(snapshot))
 }
 
 /// Rebuild a grouped observation from selected statements while retaining the snapshot's original workload,
 /// catalog and measurement context. Refinement never clones or narrows the database-time denominator.
 pub(crate) fn plan_insights_for_queries<'a>(
-    snapshot: &Snapshot,
+    snapshot: &'a Snapshot,
     queries: impl IntoIterator<Item = &'a QueryStat>,
 ) -> Vec<Finding> {
-    let mut out: Vec<Finding> = Vec::new();
+    cases_for_queries(snapshot, queries).into_iter().map(|case| plan_insight_finding(snapshot, case)).collect()
+}
+
+/// The plan problems the statements' plans show that matter, one case per problem and table.
+fn cases_for_queries<'s>(
+    snapshot: &'s Snapshot,
+    queries: impl IntoIterator<Item = &'s QueryStat>,
+) -> Vec<PlanInsightCase<'s>> {
+    let mut out: Vec<PlanInsightCase> = Vec::new();
     for q in queries {
         let Some(plan) = &q.plan else { continue };
         let Some(impact) = query_impact(snapshot, &[q]) else { continue };
@@ -67,55 +106,42 @@ pub(crate) fn plan_insights_for_queries<'a>(
                 i.rule,
                 object.as_deref().map(str::to_ascii_lowercase).unwrap_or_else(|| format!("query-{}", q.id))
             );
-            let reference = QueryRef { id: q.id.clone(), plan_node: step, note: Some(rule_label(&i)) };
-            match out.iter_mut().find(|f| f.id == format!("plan-insights:{key}")) {
+            match out.iter_mut().find(|c| c.key == key) {
                 Some(existing) => {
-                    if !existing.queries.iter().any(|r| r.id == q.id) {
-                        existing.queries.push(reference);
+                    if !existing.steps.iter().any(|(r, _)| r.id == q.id) {
+                        existing.steps.push((q, step));
                     }
                 }
-                None => out.push(build(snapshot, q, &i, &key, object, reference, plan)),
+                None => {
+                    let severity = severity_of(snapshot, q, &i);
+                    out.push(PlanInsightCase {
+                        query: q,
+                        plan,
+                        insight: i,
+                        key,
+                        object,
+                        severity,
+                        steps: vec![(q, step)],
+                        impact: None,
+                        queries: 0,
+                    });
+                }
             }
         }
     }
-    for f in out.iter_mut() {
+    for case in &mut out {
         let queries: Vec<&QueryStat> =
-            f.queries.iter().filter_map(|r| snapshot.workload.as_ref()?.query(&r.id)).collect();
-        let Some(impact) = query_impact(snapshot, &queries) else { continue };
-        apply_query_impact(f, &impact);
-        f.metrics.retain(|m| m.label != "Share of DB time");
-        f.metrics.insert(0, Metric::new("Share of DB time", impact.share, Unit::Ratio));
-        if queries.len() > 1 {
-            f.summary.push_str(&format!(
-                " The same problem shows up in {} queries that together take {} of database time.",
-                queries.len(),
-                format::percent(impact.share)
-            ));
-            f.metrics.insert(1, Metric::new("Queries affected", queries.len() as f64, Unit::Count));
-        }
+            case.steps.iter().filter_map(|(r, _)| snapshot.workload.as_ref()?.query(&r.id)).collect();
+        case.impact = query_impact(snapshot, &queries);
+        case.queries = queries.len();
     }
     out
 }
 
-fn build(
-    snapshot: &Snapshot,
-    q: &QueryStat,
-    i: &PlanInsight,
-    key: &str,
-    object: Option<String>,
-    reference: QueryRef,
-    plan: &culprit_core::Plan,
-) -> Finding {
-    let actual = plan.kind == PlanKind::Actual;
-    let weighed = plan.weighed();
-    let subject = match &object {
-        Some(o) => subject(SubjectKind::Table, o.clone()),
-        None => subject(SubjectKind::Query, q.id.clone()),
-    };
-    let mut f = finding("plan-insights", key, Category::Queries, subject);
+/// A plan problem matters as much as the query it slows down: a 1% query never becomes a top finding, and one that
+/// costs seconds a day is Low whatever its share.
+fn severity_of(snapshot: &Snapshot, q: &QueryStat, i: &PlanInsight) -> Severity {
     let share = query_impact(snapshot, &[q]).map_or(0.0, |impact| impact.share);
-    // A plan problem matters as much as the query it slows down: a 1% query never becomes a top finding, and one that
-    // costs seconds a day is Low whatever its share.
     let by_share = match severity_for_share(share) {
         Severity::Low => Severity::Medium,
         _ => Severity::High,
@@ -124,26 +150,51 @@ fn build(
     let cap = by_share.min(amount_severity_of(snapshot, &[q], share));
     // An engine verdict the plan can't weigh (SQLite's automatic index) takes the statement's weight, at most Medium:
     // the plan doesn't say how much of the run the throwaway index costs.
-    f.severity = if WEIGHED_BY_THE_STATEMENT.contains(&i.rule.as_str()) {
-        cap.min(Severity::Medium)
-    } else {
-        i.severity.min(cap)
+    if WEIGHED_BY_THE_STATEMENT.contains(&i.rule.as_str()) { cap.min(Severity::Medium) } else { i.severity.min(cap) }
+}
+
+fn plan_insight_finding(_: &Snapshot, case: PlanInsightCase<'_>) -> Finding {
+    let PlanInsightCase { query: q, plan, insight: i, .. } = case;
+    let actual = plan.kind == PlanKind::Actual;
+    let subject = match &case.object {
+        Some(o) => subject(SubjectKind::Table, o.clone()),
+        None => subject(SubjectKind::Query, q.id.clone()),
     };
+    let mut f = finding("plan-insights", &case.key, Category::Queries, subject);
+    f.severity = case.severity;
     f.confidence = if actual { Confidence::High } else { Confidence::Medium };
     f.title = i.title.clone();
-    f.summary = format!("{} Seen in {}.", i.detail, query_handle(q));
-    f.queries = vec![reference];
+    let mut summary = vec![i.detail.clone(), t!("check.plan_insights.summary.seen_in", query = query_handle(q))];
+    let label = rule_label(&i);
+    f.queries = case
+        .steps
+        .iter()
+        .map(|(r, step)| QueryRef { id: r.id.clone(), plan_node: *step, note: Some(label.clone()) })
+        .collect();
     // A share of the plan's work only where the plan states one (`insights::stated_share`): a plan without costs
     // (SQLite) has none, a rule's weight is no measurement, and a cheap plan's or a guessed step's share isn't where the
     // statement's work is.
-    if let Some(share) = culprit_core::insights::stated_share(plan, i) {
-        f.metrics.push(Metric::new("Share of the plan's work", share, Unit::Ratio));
+    if let Some(impact) = &case.impact {
+        apply_query_impact(&mut f, impact);
+        f.metrics.push(Metric::new(t!("common.metric.share_of_db_time"), impact.share, Unit::Ratio));
+        if case.queries > 1 {
+            summary.push(t!(
+                "check.plan_insights.summary.shared",
+                count = case.queries.to_string(),
+                share = format::percent(impact.share)
+            ));
+            f.metrics.push(Metric::new(t!("common.metric.queries_affected"), case.queries as f64, Unit::Count));
+        }
     }
-    f.metrics.push(Metric::new("Average duration", q.mean_time_ms, Unit::Ms));
+    f.summary = summary.join(" ");
+    if let Some(share) = culprit_core::insights::stated_share(plan, &i) {
+        f.metrics.push(Metric::new(t!("check.plan_insights.metric.plan_share"), share, Unit::Ratio));
+    }
+    f.metrics.push(Metric::new(t!("common.metric.average_duration"), q.mean_time_ms, Unit::Ms));
     f.fix = Some(Fix { summary: i.fix.clone(), sql: i.fix_sql.clone(), cost: None });
-    f.verify = vec![i.verify.clone(), "Re-scan: this finding is gone.".into()];
-    if !actual && weighed {
-        f.caveats.push("Based on the estimated plan; actual row counts can tell a different story.".into());
+    f.verify = vec![i.verify.clone(), t!("check.plan_insights.verify.rescan")];
+    if !actual && plan.weighed() {
+        f.caveats.push(t!("check.plan_insights.caveat.estimated"));
     }
     f
 }
