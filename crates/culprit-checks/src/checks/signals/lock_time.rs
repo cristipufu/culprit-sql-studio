@@ -86,9 +86,8 @@ pub enum PerRun {
 fn lock_waits(snapshot: &Snapshot) -> Vec<LockWait<'_>> {
     let total_db = snapshot.workload.as_ref().map(|w| w.total_time_ms).unwrap_or(0.0);
     let mut cases: Vec<(LockWait<'_>, f64)> = app_queries(snapshot)
-        // A statement that names no table (SELECT SLEEP(…)) isn't waiting on the application's rows. Said in English
-        // whatever the reader's language: a decision never reads translated words.
-        .filter(|q| culprit_core::i18n::scope("en", || query_handle(q)) != "a query")
+        // A statement that names no table (SELECT SLEEP(…)) isn't waiting on the application's rows.
+        .filter(|q| !matches!(query_handle_of(q), Handle::Query))
         // Lock wait timeouts are already the failing-query finding, with the same fix.
         .filter(|q| !times_out_on_locks(q))
         // A lock time MariaDB made of the statement's whole run isn't waiting.
@@ -200,9 +199,10 @@ fn lock_time_finding(snapshot: &Snapshot, wait: LockWait<'_>) -> Finding {
     // enough to catch one.
     let LockHolder { lead, sql } = find_lock_holder(snapshot, q, None);
     f.fix = Some(Fix {
-        summary: match (wait.versioning, lead.strip_prefix("Find ")) {
-            (true, Some(rest)) => t!("check.lock_time.fix.versioning_find", rest = rest),
-            (true, None) => t!("check.lock_time.fix.versioning", lead = &lead),
+        // Caught live, the holder is found "without it" in the same sentence; otherwise the advice follows whole.
+        summary: match (wait.versioning, catches_live(snapshot, q, None)) {
+            (true, true) => t!("check.lock_time.fix.versioning_live"),
+            (true, false) => t!("check.lock_time.fix.versioning", lead = &lead),
             (false, _) => t!("check.lock_time.fix.holders", lead = &lead),
         },
         sql,

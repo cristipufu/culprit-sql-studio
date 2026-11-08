@@ -977,6 +977,14 @@ pub fn log_next_waits(snapshot: &Snapshot, slower_than: Option<f64>) -> LockHold
     }
 }
 
+/// Whether [`find_lock_holder`] has what holds `q`'s locks found live, while it waits: it still runs, more than once,
+/// and its waits (`waits`, at least; every run without it) come at least once an hour.
+pub fn catches_live(snapshot: &Snapshot, q: &QueryStat, waits: Option<f64>) -> bool {
+    !crate::ran_once(q)
+        && crate::query_stopped(snapshot, q).is_none()
+        && !too_rare_to_catch(snapshot, waits.unwrap_or(q.executions))
+}
+
 /// How to find what holds the locks statement `q` waits for, in the words every check that names a lock wait uses: Live
 /// while it waits, where its waits come at least once an hour (`waits`, at least; every run without it); otherwise the
 /// next ones logged ([`log_next_waits`]); and for a statement that no longer runs, nothing to catch until it comes back.
@@ -1012,7 +1020,7 @@ pub fn find_lock_holder(snapshot: &Snapshot, q: &QueryStat, waits: Option<f64>) 
             sql: None,
         };
     }
-    if !rare {
+    if catches_live(snapshot, q, waits) {
         return LockHolder { lead: t!("support.lock_holder.live"), sql: None };
     }
     let logged = log_next_waits(snapshot, None);

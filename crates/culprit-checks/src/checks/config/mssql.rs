@@ -465,7 +465,7 @@ pub(crate) fn read_committed_snapshot_off(snapshot: &Snapshot) -> bool {
 /// last committed version of the rows instead of waiting for a write's locks. Not a read that locks what it reads
 /// (UPDLOCK, HOLDLOCK): it waits with row versioning on too.
 pub(crate) fn versioning_spares_read(q: &culprit_core::QueryStat) -> bool {
-    statement_handle(&q.text).starts_with("a read")
+    matches!(statement_handle_of(&q.text), Handle::Read(_))
         && crate::queries::kind_of(q) != crate::queries::StatementKind::Locking
 }
 

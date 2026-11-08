@@ -214,7 +214,7 @@ fn slow_files(snapshot: &Snapshot) -> Vec<SlowFiles> {
             let write = g.write;
             let operation = if !write {
                 Operation::Read
-            } else if g.files.iter().all(|f| f.write_label() == "flush") {
+            } else if g.files.iter().all(|f| f.write_operation == Some(culprit_core::FileWriteOperation::Flush)) {
                 Operation::Flush
             } else {
                 Operation::Write
