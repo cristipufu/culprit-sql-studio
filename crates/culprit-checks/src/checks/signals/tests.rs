@@ -245,7 +245,7 @@ fn slow_tempdb_and_log() {
             file("shop_log", "shop", FileKind::Log, 0.0, 0.0, 50_000.0, 600_000.0),
         ];
     });
-    let titles: Vec<String> = slow_storage(&s).into_iter().map(|f| f.title).collect();
+    let titles: Vec<String> = SlowStorageCheck.run(&s).into_iter().map(|f| f.title).collect();
     assert_eq!(
         titles,
         vec!["Recorded reads from tempdb averaged 45 ms", "Recorded log writes to shop's log averaged 12 ms"]

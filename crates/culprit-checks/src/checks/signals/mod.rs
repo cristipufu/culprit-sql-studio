@@ -157,10 +157,8 @@ fn ran_phrase(snapshot: &Snapshot, q: &QueryStat) -> String {
 fn since_start(snapshot: &Snapshot) -> String {
     let name = engine_name(snapshot);
     match snapshot.pressure.as_ref().and_then(|p| p.uptime_hours) {
-        Some(h) => {
-            format!("since {name} started or its statistics were reset, {} ago", format::duration(h * 3_600_000.0))
-        }
-        None => format!("since {name} started"),
+        Some(h) => t!("common.signals.since_start.ago", engine = name, ago = format::duration(h * 3_600_000.0)),
+        None => t!("common.signals.since_start.unknown", engine = name),
     }
 }
 

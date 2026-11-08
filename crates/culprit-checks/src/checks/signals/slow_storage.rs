@@ -7,17 +7,20 @@ use std::collections::BTreeSet;
 pub fn slow_storage_info() -> CheckInfo {
     CheckInfo {
         id: "slow-storage".into(),
-        title: "Storage that's slow to read or write".into(),
+        title: t!("check.slow_storage.info.title"),
         category: Category::Configuration,
         engines: vec![Engine::Mssql, Engine::Postgres, Engine::Mysql],
         requires: vec![],
-        description: "Average read and write latency per database file since startup: sys.dm_io_virtual_file_stats, pg_stat_io (16+, with track_io_timing), performance_schema file I/O.".into(),
+        description: t!("check.slow_storage.info.description"),
     }
 }
 
 check!(
-    SlowStorageCheck: slow_storage_info, slow_storage,
-    &[Evidence::Pressure { signal: None, timed_files: true, complete: true }]
+    SlowStorageCheck: slow_storage_info,
+    decide = slow_files,
+    render = slow_storage_finding,
+    case<'s> = SlowFiles,
+    evidence = &[Evidence::Pressure { signal: None, timed_files: true, complete: true }],
 );
 
 /// Reads (or log writes) at least this large on average are bulk I/O: backups, CHECKDB, read-ahead of large scans. Each
@@ -90,130 +93,250 @@ pub(super) fn slow_groups<'a>(snapshot: &Snapshot, files: &'a [FileIo]) -> Vec<F
     groups.into_values().filter(|g| g.ops >= 1_000.0 && g.avg_ms() >= if g.write { 10.0 } else { 20.0 }).collect()
 }
 
-pub(super) fn file_label(snapshot: &Snapshot, g: &FileGroup) -> String {
+/// What a group of files is called: by the database and kind where the engine says, else by the file.
+#[derive(Clone)]
+pub enum FileLabel {
+    /// SQL Server's tempdb, by its name.
+    Tempdb,
+    /// A SQL Server database's log.
+    Log(String),
+    /// A SQL Server database's one data file: (database, file).
+    DataFile(String, String),
+    /// A SQL Server database's data files.
+    DataFiles(String),
+    /// PostgreSQL's WAL.
+    Wal,
+    /// PostgreSQL's temporary tables.
+    TempTables,
+    /// PostgreSQL's table and index files.
+    TableFiles,
+    /// The one file, by its name.
+    File(String),
+    /// Temporary files, log files or data files, by kind.
+    Files(FileKind),
+}
+
+pub(super) fn file_label(snapshot: &Snapshot, g: &FileGroup) -> FileLabel {
     let one = (g.files.len() == 1).then(|| g.files[0].name.clone());
     match (snapshot.server.engine, g.kind, g.database.as_deref()) {
-        (Engine::Mssql, _, Some("tempdb")) => "tempdb".into(),
-        (Engine::Mssql, FileKind::Log, Some(db)) => format!("{db}'s log"),
+        (Engine::Mssql, _, Some("tempdb")) => FileLabel::Tempdb,
+        (Engine::Mssql, FileKind::Log, Some(db)) => FileLabel::Log(db.into()),
         (Engine::Mssql, _, Some(db)) => match one {
-            Some(name) => format!("{db}'s data file {name}"),
-            None => format!("{db}'s data files"),
+            Some(name) => FileLabel::DataFile(db.into(), name),
+            None => FileLabel::DataFiles(db.into()),
         },
-        (Engine::Postgres, FileKind::Log, _) => "WAL".into(),
-        (Engine::Postgres, FileKind::Temp, _) => "temporary tables".into(),
-        (Engine::Postgres, _, _) => "table and index files".into(),
-        (Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite, kind, _) => one.unwrap_or_else(|| {
-            match kind {
-                FileKind::Temp => "temporary files",
-                FileKind::Log => "the log files",
-                _ => "data files",
-            }
-            .into()
-        }),
+        (Engine::Postgres, FileKind::Log, _) => FileLabel::Wal,
+        (Engine::Postgres, FileKind::Temp, _) => FileLabel::TempTables,
+        (Engine::Postgres, _, _) => FileLabel::TableFiles,
+        (Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite, kind, _) => match one {
+            Some(name) => FileLabel::File(name),
+            None => FileLabel::Files(kind),
+        },
     }
 }
 
-/// How storage that answers slowly is fixed depends on where it runs.
-pub(super) fn storage_fix(snapshot: &Snapshot) -> &'static str {
-    match snapshot.server.platform() {
-        // Azure SQL Database runs on storage you don't manage: the tier decides the latency and the I/O limits.
-        Some(culprit_core::Platform::AzureSqlDatabase) => {
-            "In Azure SQL Database the service tier decides this: General Purpose reads from remote storage (5 to 10 ms is normal there), Hyperscale serves most reads from a local cache and the rest from page servers, Business Critical uses local SSDs. Check avg_data_io_percent and avg_log_write_percent in sys.dm_db_resource_stats: near 100% means the tier's I/O limit is throttling, so add vCores or move to a faster tier; well below it, cut the reads instead (indexes, fewer full scans). A since-startup average hides bursts: sample Waits → Right now during the busy hour."
-        }
-        // Managed Instance General Purpose keeps each file on a remote disk sized from the file.
-        Some(culprit_core::Platform::AzureSqlManagedInstance) => {
-            "On Managed Instance General Purpose each data and log file is a remote disk whose IOPS and throughput come from the file's size (up to 128 GB about 500 IOPS, up to 512 GB about 2,300, up to 1 TB 5,000): growing a busy file past the next size step raises its limit, and the next-gen General Purpose tier sets IOPS apart from size. Business Critical uses local SSDs. Compare each file's latency in sys.dm_io_virtual_file_stats with its size, and cut the reads too (indexes, fewer full scans). A since-startup average hides bursts: sample Waits → Right now during the busy hour."
-        }
-        _ => {
-            "Check the volume's limits first: cloud disks throttle at their provisioned IOPS and throughput, and burst credits run out. Then look for other load on the same disk and antivirus scanning data files, and give the log its own low-latency volume. A since-startup average hides bursts: sample Waits → Right now during the busy hour."
+fn label_words(label: &FileLabel) -> String {
+    match label {
+        FileLabel::Tempdb => "tempdb".into(),
+        FileLabel::Log(db) => t!("check.slow_storage.label.log", database = db),
+        FileLabel::DataFile(db, name) => t!("check.slow_storage.label.data_file", database = db, file = name),
+        FileLabel::DataFiles(db) => t!("check.slow_storage.label.data_files", database = db),
+        FileLabel::Wal => t!("check.slow_storage.label.wal"),
+        FileLabel::TempTables => t!("check.slow_storage.label.temp_tables"),
+        FileLabel::TableFiles => t!("check.slow_storage.label.table_files"),
+        FileLabel::File(name) => name.clone(),
+        FileLabel::Files(FileKind::Temp) => t!("check.slow_storage.label.temp_files"),
+        FileLabel::Files(FileKind::Log) => t!("check.slow_storage.label.log_files"),
+        FileLabel::Files(_) => t!("check.slow_storage.label.files"),
+    }
+}
+
+/// Where the server runs, as the fix for storage that answers slowly depends on it.
+#[derive(Clone, Copy)]
+pub enum StorageHost {
+    /// Azure SQL Database: the service tier decides the latency and the I/O limits.
+    AzureSqlDatabase,
+    /// Managed Instance General Purpose keeps each file on a remote disk sized from the file.
+    ManagedInstance,
+    Volume,
+}
+
+/// The operation a group of files is judged on.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Operation {
+    Read,
+    Write,
+    /// Log writes that are flushes.
+    Flush,
+}
+
+impl Operation {
+    /// As the messages' `select` reads it.
+    fn key(self) -> &'static str {
+        match self {
+            Operation::Read => "read",
+            Operation::Write => "write",
+            Operation::Flush => "flush",
         }
     }
 }
 
-pub fn slow_storage(snapshot: &Snapshot) -> Vec<Finding> {
+/// One kind of file in one database whose average read (or log write) crosses its threshold over 1,000 operations.
+pub struct SlowFiles {
+    files: Vec<FileIo>,
+    database: Option<String>,
+    label: FileLabel,
+    /// The files' name in the finding's id: the one file's, or their kind's.
+    what: String,
+    operation: Operation,
+    avg_ms: f64,
+    ops: f64,
+    avg_bytes: Option<f64>,
+    /// Mostly large reads (backups, CHECKDB, read-ahead), whose average overstates what queries see.
+    bulk: bool,
+    /// Not this database's own files: context, not graded.
+    shared: bool,
+    severity: Severity,
+    host: StorageHost,
+}
+
+fn slow_files(snapshot: &Snapshot) -> Vec<SlowFiles> {
     let Some(p) = snapshot.pressure.as_ref() else { return Vec::new() };
     let files = culprit_core::signals::merge_logs(&p.files);
+    let host = match snapshot.server.platform() {
+        Some(culprit_core::Platform::AzureSqlDatabase) => StorageHost::AzureSqlDatabase,
+        Some(culprit_core::Platform::AzureSqlManagedInstance) => StorageHost::ManagedInstance,
+        _ => StorageHost::Volume,
+    };
     slow_groups(snapshot, &files)
         .into_iter()
         .map(|g| {
-            let (avg, ops, write) = (g.avg_ms(), g.ops, g.write);
-            let label = file_label(snapshot, &g);
-            let operation = if write && g.files.iter().all(|f| f.write_label() == "flush") { "flush" } else { "write" };
+            let write = g.write;
+            let operation = if !write {
+                Operation::Read
+            } else if g.files.iter().all(|f| f.write_label() == "flush") {
+                Operation::Flush
+            } else {
+                Operation::Write
+            };
             let what = match g.files.as_slice() {
                 [one] => one.name.clone(),
-                _ => format!("{} files", match g.kind {
-                    FileKind::Temp => "temp",
-                    FileKind::Log => "log",
-                    _ => "data",
-                }),
-            };
-            let coverage = g.files.iter().map(|f| f.coverage(snapshot)).collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>().join("; ");
-            let key = format!("{}:{}", g.database.as_deref().unwrap_or(""), culprit_core::redact::shareable_name(&what));
-            let mut f = finding("slow-storage", &key, Category::Configuration, subject(SubjectKind::Database, &label));
-            // Only reads come in bulk sizes that slow each one down; a log is judged on its commits.
-            let bulk = !write && g.bulk();
-            f.title = match (write, bulk) {
-                (true, _) => format!("Recorded log {} to {label} averaged {}", if operation == "flush" { "flushes" } else { "writes" }, format::duration(avg)),
-                (false, false) => format!("Recorded reads from {label} averaged {}", format::duration(avg)),
-                (false, true) => format!(
-                    "Recorded reads from {label} averaged {}, mostly large reads of {}",
-                    format::duration(avg),
-                    format::bytes(g.avg_bytes().unwrap_or(0.0))
+                _ => format!(
+                    "{} files",
+                    match g.kind {
+                        FileKind::Temp => "temp",
+                        FileKind::Log => "log",
+                        _ => "data",
+                    }
                 ),
             };
-            let cache_note = match snapshot.server.engine {
-                Engine::Postgres => " PostgreSQL's numbers include reads the operating system served from its cache, so reads that reached the disk were slower still.",
-                Engine::Mysql => " The timings include reads the operating system served from its cache unless InnoDB uses O_DIRECT.",
-                Engine::Mssql | Engine::Sqlite | Engine::Yugabyte => "",
-            };
-            // The label starts with a database name: never capitalize it, lead with the operation instead.
-            f.summary = format!(
-                "{} {} took {} on average across {} {} {}. Healthy SSD storage answers in a few milliseconds{}; when it happens during a query it can delay reads that miss memory{}. This historical average does not establish a delay now.{}",
-                if write && operation == "flush" { "Flushes to" } else if write { "Writes to" } else { "Reads from" },
-                label,
-                format::duration(avg),
-                format::count(ops),
-                if write && operation == "flush" { "flushes" } else if write { "writes" } else { "reads" },
-                if snapshot.server.engine == Engine::Postgres { format!("({coverage})") } else { since_start(snapshot) },
-                if write && operation == "flush" { " and log flushes in under 2 ms" } else if write { " and log writes in under 2 ms" } else { "" },
-                if write { " and every commit" } else { "" },
-                cache_note
-            );
-            if bulk {
-                f.summary.push_str(&format!(
-                    " These reads average {} each: mostly large sequential reads (backups, CHECKDB, read-ahead of big scans), which take longer each than the page-sized reads queries wait on, so the average overstates what queries see.",
-                    format::bytes(g.avg_bytes().unwrap_or(0.0))
-                ));
-            }
+            // Only reads come in bulk sizes that slow each one down; a log is judged on its commits.
+            let bulk = !write && g.bulk();
             let shared = snapshot.server.engine != Engine::Mssql
                 || g.database.as_deref().is_none_or(|db| !db.eq_ignore_ascii_case(&snapshot.server.database));
             let amount = counter_rate_per_day(snapshot, g.ms);
             // Historical/shared averages do not establish a current incident in this database. A slow read also
             // needs an amount behind it: a thousand old reads on a mostly idle database need no urgent warning.
-            f.severity = if bulk || shared || amount.is_none_or(|ms| ms < MEDIUM_MS_A_DAY) {
+            let severity = if bulk || shared || amount.is_none_or(|ms| ms < MEDIUM_MS_A_DAY) {
                 Severity::Low
-            } else { Severity::Medium };
-            severity_score(&mut f);
-            f.impact.label = format!("{} per {}", format::duration(avg), if write { operation } else { "read" });
-            f.confidence = Confidence::Medium;
-            f.metrics = vec![
-                Metric::new(if write && operation == "flush" { "Average flush" } else if write { "Average write" } else { "Average read" }, avg, Unit::Ms),
-                Metric::new(if write && operation == "flush" { "Flushes" } else if write { "Writes" } else { "Reads" }, ops, Unit::Count),
-                Metric::text(
-                    if g.files.len() == 1 { "File" } else { "Files" },
-                    g.files.iter().map(|f| f.name.clone()).collect::<Vec<_>>().join(", "),
-                ),
-            ];
-            if let Some(b) = g.avg_bytes().filter(|_| !write) {
-                f.metrics.push(Metric::new("Average read size", b, Unit::Bytes));
+            } else {
+                Severity::Medium
+            };
+            SlowFiles {
+                label: file_label(snapshot, &g),
+                files: g.files.iter().map(|f| (*f).clone()).collect(),
+                database: g.database.clone(),
+                what,
+                operation,
+                avg_ms: g.avg_ms(),
+                ops: g.ops,
+                avg_bytes: g.avg_bytes(),
+                bulk,
+                shared,
+                severity,
+                host,
             }
-            f.fix = Some(Fix { summary: storage_fix(snapshot).into(), sql: None, cost: None });
-            f.verify = vec![format!("Compare two readings after the change with the same source and reset period: divide the additional {} time by the additional operation count. Measure during representative load; the cumulative average includes older operations.", if write { operation } else { "read" })];
-            f.caveats.push("Historical averages: a slow hour long ago still counts, and a later scan does not isolate new operations without comparing counter differences.".into());
-            if shared {
-                f.caveats.push("Historical file statistics do not establish that this database's queries are slow now; check the stated source scope and measure recent operations alongside query waits.".into());
-            }
-            f
         })
         .collect()
+}
+
+fn slow_storage_finding(snapshot: &Snapshot, slow: SlowFiles) -> Finding {
+    let label = label_words(&slow.label);
+    let op = slow.operation.key();
+    let key =
+        format!("{}:{}", slow.database.as_deref().unwrap_or(""), culprit_core::redact::shareable_name(&slow.what));
+    let mut f = finding("slow-storage", &key, Category::Configuration, subject(SubjectKind::Database, &label));
+    let avg = format::duration(slow.avg_ms);
+    f.title = if slow.bulk {
+        t!(
+            "check.slow_storage.title.bulk",
+            label = &label,
+            average = &avg,
+            size = format::bytes(slow.avg_bytes.unwrap_or(0.0))
+        )
+    } else {
+        t!("check.slow_storage.title.average", operation = op, label = &label, average = &avg)
+    };
+    // PostgreSQL says what each file's statistics cover; the others count since the server started.
+    let period = if snapshot.server.engine == Engine::Postgres {
+        let coverage = slow
+            .files
+            .iter()
+            .map(|f| f.coverage(snapshot))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
+            .join("; ");
+        t!("check.slow_storage.coverage", coverage = coverage)
+    } else {
+        since_start(snapshot)
+    };
+    // The label starts with a database name: never capitalize it, lead with the operation instead.
+    let mut summary = vec![t!(
+        "check.slow_storage.summary.took",
+        operation = op,
+        label = &label,
+        average = &avg,
+        count = format::count(slow.ops),
+        period = period
+    )];
+    match snapshot.server.engine {
+        Engine::Postgres => summary.push(t!("check.slow_storage.summary.cache_postgres")),
+        Engine::Mysql => summary.push(t!("check.slow_storage.summary.cache_mysql")),
+        Engine::Mssql | Engine::Sqlite | Engine::Yugabyte => {}
+    }
+    if slow.bulk {
+        summary.push(t!("check.slow_storage.summary.bulk", size = format::bytes(slow.avg_bytes.unwrap_or(0.0))));
+    }
+    f.summary = summary.join(" ");
+    f.severity = slow.severity;
+    severity_score(&mut f);
+    f.impact.label = t!("check.slow_storage.impact", average = &avg, operation = op);
+    f.confidence = Confidence::Medium;
+    f.metrics = vec![
+        Metric::new(t!("check.slow_storage.metric.average", operation = op), slow.avg_ms, Unit::Ms),
+        Metric::new(t!("check.slow_storage.metric.count", operation = op), slow.ops, Unit::Count),
+        Metric::text(
+            t!("check.slow_storage.metric.files", n = slow.files.len()),
+            slow.files.iter().map(|f| f.name.clone()).collect::<Vec<_>>().join(", "),
+        ),
+    ];
+    if let Some(b) = slow.avg_bytes.filter(|_| slow.operation == Operation::Read) {
+        f.metrics.push(Metric::new(t!("check.slow_storage.metric.read_size"), b, Unit::Bytes));
+    }
+    f.fix = Some(Fix {
+        summary: match slow.host {
+            StorageHost::AzureSqlDatabase => t!("check.slow_storage.fix.azure_sql_database"),
+            StorageHost::ManagedInstance => t!("check.slow_storage.fix.managed_instance"),
+            StorageHost::Volume => t!("check.slow_storage.fix.volume"),
+        },
+        sql: None,
+        cost: None,
+    });
+    f.verify = vec![t!("check.slow_storage.verify", operation = op)];
+    f.caveats.push(t!("check.slow_storage.caveat.historical"));
+    if slow.shared {
+        f.caveats.push(t!("check.slow_storage.caveat.shared"));
+    }
+    f
 }
