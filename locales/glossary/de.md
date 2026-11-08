@@ -145,6 +145,16 @@ Baseline, Dashboard, Live, Cache, Latch, Flush, Query Store, JIT, HOT, Tablet, S
 | connection string | Verbindungszeichenfolge | Microsoft Learn |
 | it / its (a query, a table) | name the noun again („Die Abfrage …“, „Die Tabelle …“) | a bare „Sie“/„Ihr“ reads as the reader |
 | uptime | Betriebszeit | |
+| planner, checkpoint, full-page image | Planer, Checkpoint, Full-Page-Image | |
+| rows examined (MySQL) | untersuchte Zeilen | |
+| replication lag, primary, subscription, consumer | Replikationsverzögerung, Primärserver, Subskription, Consumer | |
+| batch, round trip, chatty queries | Batch, Roundtrip, „Abfragen mit zu vielen Roundtrips“ | |
+| locking hint, row versioning | Sperrhinweis, Zeilenversionsverwaltung | |
+| automatic tuning, compatibility level | automatische Optimierung, Kompatibilitätsgrad | |
+| slow query log | Slow Query Log | |
+| parameter sensitivity | Parameterempfindlichkeit | |
+| hidden index (MySQL) | unsichtbar | |
+| cleanup holder | Bereinigungsblocker | |
 
 ## UI verbs
 
