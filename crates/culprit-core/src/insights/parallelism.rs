@@ -18,16 +18,12 @@ pub(super) fn spill(cx: &Cx) -> Vec<Draft> {
     for n in cx.nodes.iter().filter(|n| n.facts().exchange_spill == Some(true)) {
         let mut d = Draft::new("spill", InsightArea::Parallelism, cx.share(n), vec![n.id]);
         d.title = match spilled_bytes(n) {
-            Some(b) => format!(
-                "The {} exchange wrote {} to tempdb to keep its threads from waiting on each other",
-                n.op,
-                format::bytes(b)
-            ),
-            None => format!("The {} exchange wrote to tempdb to keep its threads from waiting on each other", n.op),
+            Some(b) => t!("insight.spill.exchange.title_size", op = &n.op, size = format::bytes(b)),
+            None => t!("insight.spill.exchange.title", op = &n.op),
         };
-        d.detail = "SQL Server spills an exchange's buffers to tempdb when its parallel threads would otherwise wait on each other for good, usually at an exchange that keeps rows in order (merging streams) fed unevenly. It isn't a memory grant problem.".into();
-        d.fix = "Remove the need for order at that exchange (an ORDER BY or merge join above it that an index or a hash join could serve), and check whether one value holds most of the rows; comparing a run with OPTION (MAXDOP 1) shows what parallelism costs here.".into();
-        d.verify = "Run with an actual plan: no ExchangeSpillDetails on the Parallelism operator.".into();
+        d.detail = t!("insight.spill.exchange.detail");
+        d.fix = t!("insight.spill.exchange.fix");
+        d.verify = t!("insight.spill.exchange.verify");
         out.push(d);
     }
     // Underestimates by the rule behind the Misestimate warning: 30 rows where 2 were expected sized no grant.
@@ -53,75 +49,55 @@ pub(super) fn spill(cx: &Cx) -> Vec<Draft> {
                 let batches = n.facts().hash_batches.map(f64::from).filter(|b| *b > 1.0);
                 let agg_batches = n.facts().hash_aggregate_batches.map(f64::from).filter(|b| *b > 1.0);
                 d.title = match (disk_kb, batches, agg_batches, spilled_bytes(n)) {
-                    (Some(kb), _, _, _) => format!(
-                        "The sort writes {} to disk because it didn't fit in work_mem",
-                        format::bytes(kb * 1024.0)
-                    ),
-                    (None, Some(b), _, _) => format!(
-                        "The hash split its input into {} batches on disk because it didn't fit in work_mem",
-                        format::count(b)
-                    ),
-                    (None, None, _, Some(bytes)) => format!(
-                        "{} writes {} of temporary files because it didn't fit in work_mem",
-                        n.op,
-                        format::bytes(bytes)
-                    ),
-                    (None, None, Some(b), None) => format!(
-                        "{} split its groups into {} batches on disk because they didn't fit in work_mem",
-                        n.op,
-                        format::count(b)
-                    ),
-                    (None, None, None, None) => {
-                        format!("{} wrote temporary files because it didn't fit in work_mem", n.op)
+                    (Some(kb), _, _, _) => t!("insight.spill.work_mem.title_sort", size = format::bytes(kb * 1024.0)),
+                    (None, Some(b), _, _) => {
+                        t!("insight.spill.work_mem.title_hash", n = b, batches = format::count(b))
                     }
+                    (None, None, _, Some(bytes)) => {
+                        t!("insight.spill.work_mem.title_files", op = &n.op, size = format::bytes(bytes))
+                    }
+                    (None, None, Some(b), None) => {
+                        t!("insight.spill.work_mem.title_groups", op = &n.op, n = b, batches = format::count(b))
+                    }
+                    (None, None, None, None) => t!("insight.spill.work_mem.title", op = &n.op),
                 };
-                d.detail = format!(
-                    "Disk is many times slower than memory for sorting and hashing.{}",
-                    if underestimated {
-                        " The rows feeding it were badly underestimated, so it was planned with too little memory."
-                    } else {
-                        ""
-                    }
-                );
-                d.fix = "Give this workload more memory for sorts and hashes, per role or per session rather than server-wide, or add an index that returns rows already ordered so the sort disappears.".into();
+                let mut detail = vec![t!("insight.spill.work_mem.detail")];
+                if underestimated {
+                    detail.push(t!("insight.spill.work_mem.underestimated"));
+                }
+                d.detail = detail.join(" ");
+                d.fix = t!("insight.spill.work_mem.fix");
                 d.fix_sql = Some("-- Try it in your session first:\nSET work_mem = '64MB';\n-- Then for the application's role:\n-- ALTER ROLE app_user SET work_mem = '64MB';".into());
-                d.verify =
-                    "Explain analyze again: Sort Method is quicksort/top-N (in memory) and Hash Batches is 1.".into();
+                d.verify = t!("insight.spill.work_mem.verify");
             }
             // MariaDB's ANALYZE counts a sort's merge passes: it didn't fit in sort_buffer_size.
             Engine::Mysql => {
                 let passes = n.facts().sort_merge_passes.map(f64::from).unwrap_or(1.0);
-                d.title = format!(
-                    "The sort needed {} through temporary files because it didn't fit in sort_buffer_size",
-                    plural(passes, "merge pass", "merge passes")
-                );
-                d.detail = format!(
-                    "Each merge pass writes the sorted runs to a temporary file and reads them back.{}",
-                    if underestimated { " The rows feeding it were badly underestimated." } else { "" }
-                );
-                d.fix = "Raise sort_buffer_size for the session that runs it rather than server-wide (it's allocated per sort), or add an index that returns rows already in order so the sort disappears.".into();
+                d.title = t!("insight.spill.sort_buffer.title", n = plural_n(passes), count = rows_text(passes));
+                let mut detail = vec![t!("insight.spill.sort_buffer.detail")];
+                if underestimated {
+                    detail.push(t!("insight.spill.sort_buffer.underestimated"));
+                }
+                d.detail = detail.join(" ");
+                d.fix = t!("insight.spill.sort_buffer.fix");
                 d.fix_sql =
                     Some("-- Try it in your session first:\nSET SESSION sort_buffer_size = 8 * 1024 * 1024;".into());
-                d.verify = "Run ANALYZE again: r_sort_passes is 0.".into();
+                d.verify = t!("insight.spill.sort_buffer.verify");
             }
             Engine::Mssql => {
                 d.title = match crate::plan_facts::spill_pages(n) {
                     Some(pages) => {
-                        format!("{} ran out of memory and wrote {} to tempdb", n.op, format::bytes(pages * 8192.0))
+                        t!("insight.spill.tempdb.title_size", op = &n.op, size = format::bytes(pages * 8192.0))
                     }
-                    None => format!("{} ran out of memory and wrote to tempdb", n.op),
+                    None => t!("insight.spill.tempdb.title", op = &n.op),
                 };
-                d.detail = format!(
-                    "The memory granted to {} was too small for the rows it got, so part of the work went to disk in tempdb.{}",
-                    n.op,
-                    if underestimated {
-                        " The rows feeding it were badly underestimated; the grant was sized for the estimate."
-                    } else {
-                        ""
-                    }
-                );
-                d.fix = "Fix the row estimate first (update statistics on the tables feeding it); an index that returns rows in the needed order removes the sort altogether. SQL Server 2019+ also grows the grant on later runs (memory grant feedback, compatibility level 150).".into();
-                d.verify = "Run with an actual plan: no spill warning on that operator.".into();
+                let mut detail = vec![t!("insight.spill.tempdb.detail", op = &n.op)];
+                if underestimated {
+                    detail.push(t!("insight.spill.tempdb.underestimated"));
+                }
+                d.detail = detail.join(" ");
+                d.fix = t!("insight.spill.tempdb.fix");
+                d.verify = t!("insight.spill.tempdb.verify");
             }
         }
         out.push(d);
@@ -159,30 +135,17 @@ pub(super) fn parallelism_blocked(cx: &Cx) -> Vec<Draft> {
             .is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_digit()))
     });
     let (database, server) = (facts.database_maxdop, facts.server_maxdop);
-    let maxdop_one = if hinted {
-        "its statement says OPTION (MAXDOP 1)".to_string()
+    // Which setting keeps MAXDOP at 1, as far as the plan and the snapshot say.
+    let maxdop = if hinted {
+        Maxdop::Hint
     } else if database == Some(1) {
-        "the database's MAXDOP setting is 1".to_string()
+        Maxdop::Database
     } else if database.is_none_or(|d| d == 0) && server == Some(1) {
-        "the server's max degree of parallelism is 1".to_string()
+        Maxdop::Server
     } else if database.is_some() && server.is_some() {
-        "MAXDOP is 1, though neither its statement nor the database's or server's setting says so now (a Query Store \
-         hint, a Resource Governor workload group, or a setting changed since it was compiled)"
-            .to_string()
+        Maxdop::Elsewhere
     } else {
-        "MAXDOP is 1 (a query hint, or the database or server setting)".to_string()
-    };
-    let plain = match reason {
-        "MaxDOPSetToOne" => maxdop_one.as_str(),
-        "EstimatedDOPIsOne" => "only one CPU is available to it",
-        "NoParallelPlansInDesktopOrExpressEdition" => "this SQL Server edition doesn't run parallel plans",
-        "CouldNotGenerateValidParallelPlan" => "SQL Server couldn't build a valid parallel plan for it",
-        "NonParallelizableIntrinsicFunction" => "the query calls a built-in function that can't run in parallel",
-        "TableVariableTransactionsDoNotSupportParallelNestedTransaction" => "it writes to a table variable",
-        "NoParallelForMemoryOptimizedTables" => "it touches memory-optimized tables",
-        "UpdatingWritebackVariable" => "it assigns to a variable",
-        "CLRUserDefinedFunctionRequiresDataAccess" => "it calls a CLR function that reads data",
-        _ => "",
+        Maxdop::Unknown
     };
     let mut d = Draft::new("parallelism-blocked", InsightArea::Parallelism, 0.1, vec![cx.plan.root.id]);
     d.fixed_weight = true;
@@ -190,53 +153,57 @@ pub(super) fn parallelism_blocked(cx: &Cx) -> Vec<Draft> {
     d.cap = if cost >= COMMON_THRESHOLD { Severity::Medium } else { Severity::Low };
     // SQL Server's own reason on a plan expensive enough to go parallel is Medium; a cheap one's is Low.
     d.floor = d.cap;
-    d.title = if plain.is_empty() {
-        format!("This plan runs on one CPU: SQL Server reports {reason}")
-    } else {
-        format!("This plan runs on one CPU because {plain}")
+    d.title = match reason {
+        "MaxDOPSetToOne" => match maxdop {
+            Maxdop::Hint => t!("insight.parallelism_blocked.title.maxdop_hint"),
+            Maxdop::Database => t!("insight.parallelism_blocked.title.maxdop_database"),
+            Maxdop::Server => t!("insight.parallelism_blocked.title.maxdop_server"),
+            Maxdop::Elsewhere => t!("insight.parallelism_blocked.title.maxdop_elsewhere"),
+            Maxdop::Unknown => t!("insight.parallelism_blocked.title.maxdop_unknown"),
+        },
+        "EstimatedDOPIsOne" => t!("insight.parallelism_blocked.title.one_cpu"),
+        "NoParallelPlansInDesktopOrExpressEdition" => t!("insight.parallelism_blocked.title.edition"),
+        "CouldNotGenerateValidParallelPlan" => t!("insight.parallelism_blocked.title.no_valid_plan"),
+        "NonParallelizableIntrinsicFunction" => t!("insight.parallelism_blocked.title.intrinsic_function"),
+        "TableVariableTransactionsDoNotSupportParallelNestedTransaction" => {
+            t!("insight.parallelism_blocked.title.table_variable")
+        }
+        "NoParallelForMemoryOptimizedTables" => t!("insight.parallelism_blocked.title.memory_optimized"),
+        "UpdatingWritebackVariable" => t!("insight.parallelism_blocked.title.writeback_variable"),
+        "CLRUserDefinedFunctionRequiresDataAccess" => t!("insight.parallelism_blocked.title.clr_function"),
+        _ => t!("insight.parallelism_blocked.title.reported", reason = reason),
     };
+    // The plan's estimated cost and the thresholds, as whole numbers.
+    let whole = |v: f64| format::digits(format!("{v:.0}"));
     d.detail = match threshold {
-        Some(t) if t <= DEFAULT_THRESHOLD => format!(
-            "Its estimated cost is {cost:.0}, above this server's cost threshold for parallelism ({t:.0}) and the \
-             {COMMON_THRESHOLD:.0} it's commonly raised to, so SQL Server would consider a parallel plan for it either \
-             way; the whole run happens on a single core instead."
+        Some(t) if t <= DEFAULT_THRESHOLD => t!(
+            "insight.parallelism_blocked.detail.default_threshold",
+            cost = whole(cost),
+            threshold = whole(t),
+            common = whole(COMMON_THRESHOLD)
         ),
-        Some(t) => format!(
-            "Its estimated cost is {cost:.0}, above this server's cost threshold for parallelism ({t:.0}), so SQL Server \
-             would consider a parallel plan for it; the whole run happens on a single core instead."
-        ),
-        None => format!(
-            "Its estimated cost is {cost:.0}. SQL Server considers a parallel plan above the server's cost threshold for parallelism (5 by default, often raised to 50){}; the whole run happens on a single core instead.",
+        Some(t) => t!("insight.parallelism_blocked.detail.threshold", cost = whole(cost), threshold = whole(t)),
+        None => [
+            t!("insight.parallelism_blocked.detail.cost", cost = whole(cost)),
             if cost >= COMMON_THRESHOLD {
-                ", which this plan passes either way"
+                t!("insight.parallelism_blocked.detail.unknown_threshold_passed")
             } else {
-                ", so whether it would split depends on that setting"
-            }
-        ),
+                t!("insight.parallelism_blocked.detail.unknown_threshold")
+            },
+        ]
+        .join(" "),
     };
     d.fix = match reason {
-        "MaxDOPSetToOne" if hinted => {
-            "Remove OPTION (MAXDOP 1) from the statement, unless something needs it to run on one CPU.".into()
-        }
-        "MaxDOPSetToOne" if database == Some(1) => {
-            "Raise the database's MAXDOP (ALTER DATABASE SCOPED CONFIGURATION SET MAXDOP), or give this statement \
-             OPTION (MAXDOP n) where it should run in parallel."
-                .into()
-        }
-        "MaxDOPSetToOne" if server == Some(1) => {
-            "Raise the server's max degree of parallelism, or set the database's MAXDOP (ALTER DATABASE SCOPED \
-             CONFIGURATION SET MAXDOP), which overrides it for this database."
-                .into()
-        }
+        "MaxDOPSetToOne" if hinted => t!("insight.parallelism_blocked.fix.maxdop_hint"),
+        "MaxDOPSetToOne" if database == Some(1) => t!("insight.parallelism_blocked.fix.maxdop_database"),
+        "MaxDOPSetToOne" if server == Some(1) => t!("insight.parallelism_blocked.fix.maxdop_server"),
         "MaxDOPSetToOne" if database.is_some() && server.is_some() => {
-            "Look for what sets it: a Query Store hint on this query (sys.query_store_query_hints), or the workload \
-             group its session runs in (MAX_DOP)."
-                .into()
+            t!("insight.parallelism_blocked.fix.maxdop_elsewhere")
         }
-        "MaxDOPSetToOne" => "Remove OPTION (MAXDOP 1) if the query has it; otherwise check MAXDOP for the database (ALTER DATABASE SCOPED CONFIGURATION) and the server.".into(),
-        _ => "Remove what prevents parallelism if the query allows it; otherwise make the single-threaded run cheaper (indexes, fewer rows).".into(),
+        "MaxDOPSetToOne" => t!("insight.parallelism_blocked.fix.maxdop_unknown"),
+        _ => t!("insight.parallelism_blocked.fix.other"),
     };
-    d.verify = "Explain again: no NonParallelPlanReason, and Parallelism operators appear.".into();
+    d.verify = t!("insight.parallelism_blocked.verify");
     vec![d]
 }
 
@@ -254,13 +221,34 @@ pub(super) fn parallel_skew(cx: &Cx) -> Vec<Draft> {
         let has_top = cx.nodes.iter().any(|x| x.op == "Top" || x.op == "Limit");
         let mut d = Draft::new("parallel-skew", InsightArea::Parallelism, cx.share(n) * 0.3, vec![n.id]);
         d.cap = if has_top || total < 100_000.0 { Severity::Low } else { Severity::Medium };
-        let who = if cx.engine() == Engine::Postgres { "process" } else { "thread" };
-        d.title = format!("One {who} of {} handled {} of the rows in {}", workers, format::percent(max / total), n.op);
-        d.detail = format!("Parallel work is only as fast as its busiest {who}; the others finished early and waited.");
-        d.fix = "Uneven work usually means one key value holds most of the rows (check the distribution of the join or filter column) or a parallel scan over a small range; update statistics and consider filtering that value separately.".into();
-        d.verify = format!("Run with actual rows: each {who} handles a similar share.");
+        // PostgreSQL's parallel workers are processes; SQL Server's are threads.
+        let (workers, share) = (format::digits(workers.to_string()), format::percent(max / total));
+        if cx.engine() == Engine::Postgres {
+            d.title = t!("insight.parallel_skew.title_process", workers = workers, share = share, op = &n.op);
+            d.detail = t!("insight.parallel_skew.detail_process");
+            d.verify = t!("insight.parallel_skew.verify_process");
+        } else {
+            d.title = t!("insight.parallel_skew.title_thread", workers = workers, share = share, op = &n.op);
+            d.detail = t!("insight.parallel_skew.detail_thread");
+            d.verify = t!("insight.parallel_skew.verify_thread");
+        }
+        d.fix = t!("insight.parallel_skew.fix");
         out.push(d);
     }
     out.sort_by(|a, b| b.impact.total_cmp(&a.impact));
     out.into_iter().take(1).collect()
+}
+
+/// Which setting makes MAXDOP 1 for a plan SQL Server ran serially for that reason.
+enum Maxdop {
+    /// The statement's own OPTION (MAXDOP 1).
+    Hint,
+    /// The database's MAXDOP.
+    Database,
+    /// The server's max degree of parallelism, the database leaving it to the server.
+    Server,
+    /// Neither, though both are known: a Query Store hint, a workload group, or a setting changed since.
+    Elsewhere,
+    /// The snapshot doesn't say.
+    Unknown,
 }

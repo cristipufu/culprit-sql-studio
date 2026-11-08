@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use crate::model::Engine;
 use crate::plan::{INDEX_KEEPS_AT_MOST, NodeKind, Plan, PlanNode};
 use crate::sql::{balanced_parens as balanced, identifier_parts, split_top_level_and as top_level_and};
+use crate::t;
 
 use super::{Cx, MANY_ROWS, column_leaf, conditions, rows_read};
 
@@ -575,23 +576,16 @@ pub(super) fn same_type(now: &str, converted_to: &str) -> bool {
 /// from either side. Which side is right depends on the schema (a team that keeps text as Unicode changes the column),
 /// so both are offered. The one wording for every type mismatch, in plan insights and in findings.
 pub fn mismatch_fix(column: Option<&str>, target: Option<&str>) -> String {
-    let col = column.unwrap_or("the column");
-    let change = match target {
-        Some(t) => format!("change {col} to {t}"),
-        None => format!("change {col} to the type the application sends"),
-    };
+    let (named, col) = (super::known(column.is_some()), column.unwrap_or_default());
+    let (typed, to) = (super::known(target.is_some()), target.unwrap_or_default());
     let unicode = target.is_some_and(|t| {
         let t = t.to_ascii_lowercase();
         t.starts_with("nvarchar") || t.starts_with("nchar")
     });
     if unicode {
-        format!(
-            "Make the types match: send the value as non-Unicode text (SqlDbType.VarChar in .NET, sql.VarChar in Node's mssql, a non-Unicode mapping in your ORM), or, if your schema keeps text as Unicode, {change}. Changing a column rewrites it and the indexes on it."
-        )
+        t!("insight.implicit_conversion.fix_unicode", named = named, column = col, target = to)
     } else {
-        format!(
-            "Make the types match: send the value with {col}'s own type, or {change} if that's what it should hold. Changing a column rewrites it and the indexes on it."
-        )
+        t!("insight.implicit_conversion.fix", named = named, column = col, typed = typed, target = to)
     }
 }
 

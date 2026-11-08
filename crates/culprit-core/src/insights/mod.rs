@@ -18,6 +18,7 @@ use crate::model::Engine;
 use crate::model::{ColumnInfo, IndexStat, Snapshot};
 use crate::plan::{INDEX_KEEPS_AT_MOST, MISESTIMATE_FACTOR, NodeKind, Plan, PlanKind, PlanNode, PlanWarning};
 use crate::sql::{clean_identifier, split_top_level_and as top_level_and};
+use crate::{key, t};
 
 mod catalog;
 mod growth;
@@ -110,56 +111,59 @@ pub struct PlanInsights {
 }
 
 /// Every rule, for docs and `culprit checks`-style listings: (id, engines, one line).
-pub const RULES: &[(&str, &[Engine], &str)] = &[
-    ("deep-pagination", ALL, "A literal OFFSET skips many matches before returning a later page"),
+pub const RULES: &[(&str, &[Engine], RuleLine)] = &[
+    ("deep-pagination", ALL, RuleLine(key!("insight.deep_pagination.rule"))),
+    ("partition-filtering", &[Engine::Postgres], RuleLine(key!("insight.partition_filtering.rule"))),
+    ("cross-table-or", ALL, RuleLine(key!("insight.cross_table_or.rule"))),
+    ("key-lookups", &[Engine::Mssql], RuleLine(key!("insight.key_lookups.rule"))),
+    ("scan-filter", ALL, RuleLine(key!("insight.scan_filter.rule"))),
+    ("missing-index-hint", &[Engine::Mssql], RuleLine(key!("insight.missing_index_hint.rule"))),
+    ("implicit-conversion", &[Engine::Mssql], RuleLine(key!("insight.implicit_conversion.rule"))),
+    ("non-sargable", ALL, RuleLine(key!("insight.non_sargable.rule"))),
+    ("leading-wildcard", ALL, RuleLine(key!("insight.leading_wildcard.rule"))),
+    ("not-in", ALL, RuleLine(key!("insight.not_in.rule"))),
+    ("scalar-udf", &[Engine::Mssql], RuleLine(key!("insight.scalar_udf.rule"))),
+    ("table-variable", &[Engine::Mssql], RuleLine(key!("insight.table_variable.rule"))),
+    ("parallelism-blocked", &[Engine::Mssql], RuleLine(key!("insight.parallelism_blocked.rule"))),
+    ("parallel-skew", &[Engine::Mssql, Engine::Postgres], RuleLine(key!("insight.parallel_skew.rule"))),
+    ("eager-spool", &[Engine::Mssql], RuleLine(key!("insight.eager_spool.rule"))),
+    ("automatic-index", &[Engine::Sqlite], RuleLine(key!("insight.automatic_index.rule"))),
+    ("spill", ALL, RuleLine(key!("insight.spill.rule"))),
+    ("memory-grant", &[Engine::Mssql], RuleLine(key!("insight.memory_grant.rule"))),
+    ("misestimate", ALL, RuleLine(key!("insight.misestimate.rule"))),
+    ("nested-loops", ALL, RuleLine(key!("insight.nested_loops.rule"))),
+    ("big-sort", ALL, RuleLine(key!("insight.big_sort.rule"))),
+    ("no-join-predicate", ALL, RuleLine(key!("insight.no_join_predicate.rule"))),
+    ("missing-statistics", &[Engine::Mssql], RuleLine(key!("insight.missing_statistics.rule"))),
+    ("optimizer-timeout", &[Engine::Mssql], RuleLine(key!("insight.optimizer_timeout.rule"))),
+    ("legacy-ce", &[Engine::Mssql], RuleLine(key!("insight.legacy_ce.rule"))),
+    ("slow-compile", &[Engine::Mssql, Engine::Postgres, Engine::Yugabyte], RuleLine(key!("insight.slow_compile.rule"))),
+    ("many-to-many", &[Engine::Mssql], RuleLine(key!("insight.many_to_many.rule"))),
+    ("remote-query", &[Engine::Mssql], RuleLine(key!("insight.remote_query.rule"))),
+    ("heap-fetches", &[Engine::Postgres], RuleLine(key!("insight.heap_fetches.rule"))),
+    ("lossy-bitmap", &[Engine::Postgres], RuleLine(key!("insight.lossy_bitmap.rule"))),
+    ("workers-short", &[Engine::Postgres], RuleLine(key!("insight.workers_short.rule"))),
+    ("jit", &[Engine::Postgres], RuleLine(key!("insight.jit.rule"))),
     (
-        "partition-filtering",
-        &[Engine::Postgres],
-        "A measured run visits many partitions and filters most rows afterwards; inspect intended pruning",
+        "correlated-subquery",
+        &[Engine::Postgres, Engine::Yugabyte, Engine::Mysql],
+        RuleLine(key!("insight.correlated_subquery.rule")),
     ),
-    (
-        "cross-table-or",
-        ALL,
-        "A filter across tables after a scan; evaluate a semantics-preserving rewrite before indexing",
-    ),
-    ("key-lookups", &[Engine::Mssql], "Thousands of key or RID lookups back into the table"),
-    ("scan-filter", ALL, "A scan reads far more rows than its filter keeps"),
-    ("missing-index-hint", &[Engine::Mssql], "The optimizer's own index suggestion"),
-    ("implicit-conversion", &[Engine::Mssql], "A type mismatch that blocks an index seek (CONVERT_IMPLICIT)"),
-    ("non-sargable", ALL, "A function or cast around a filtered column"),
-    ("leading-wildcard", ALL, "LIKE '%…' that can't use an index"),
-    ("not-in", ALL, "NOT IN that checks the subquery row by row"),
-    ("scalar-udf", &[Engine::Mssql], "A scalar function called once per row"),
-    ("table-variable", &[Engine::Mssql], "A table variable estimated at one row"),
-    ("parallelism-blocked", &[Engine::Mssql], "An expensive plan that can't go parallel"),
-    ("parallel-skew", &[Engine::Mssql, Engine::Postgres], "One thread or worker doing most of the work"),
-    ("eager-spool", &[Engine::Mssql], "A temporary index built on every run"),
-    ("automatic-index", &[Engine::Sqlite], "SQLite builds a throwaway index on every run because none fits"),
-    ("spill", ALL, "A sort or hash that ran out of memory and wrote to disk, or an exchange that spilled"),
-    ("memory-grant", &[Engine::Mssql], "A memory grant far larger than what the query uses, or a wait for one"),
-    ("misestimate", ALL, "Actual rows far from the estimate"),
-    ("nested-loops", ALL, "A nested loop rereading its inner side thousands of times"),
-    ("big-sort", ALL, "A large sort that dominates the plan"),
-    ("no-join-predicate", ALL, "Two inputs joined without a condition"),
-    ("missing-statistics", &[Engine::Mssql], "Columns without statistics"),
-    ("optimizer-timeout", &[Engine::Mssql], "The optimizer stopped before finding the best plan"),
-    ("legacy-ce", &[Engine::Mssql], "Planned with the legacy cardinality estimator"),
-    (
-        "slow-compile",
-        &[Engine::Mssql, Engine::Postgres, Engine::Yugabyte],
-        "Planning takes long, or longer than running",
-    ),
-    ("many-to-many", &[Engine::Mssql], "A many-to-many merge join working through tempdb"),
-    ("remote-query", &[Engine::Mssql], "Rows pulled from a linked server"),
-    ("heap-fetches", &[Engine::Postgres], "An index-only scan that still visits the table"),
-    ("lossy-bitmap", &[Engine::Postgres], "A bitmap scan that ran out of work_mem"),
-    ("workers-short", &[Engine::Postgres], "Fewer parallel workers started than planned"),
-    ("jit", &[Engine::Postgres], "JIT compilation taking a large share of the run"),
-    ("correlated-subquery", &[Engine::Postgres, Engine::Yugabyte, Engine::Mysql], "A subquery run once per outer row"),
-    ("join-buffer", &[Engine::Mysql], "A join without an index (join buffer / hash join over a scan)"),
-    ("temp-table-sort", &[Engine::Mysql], "Grouping in a temporary table, then a filesort"),
-    ("index-ignored", &[Engine::Mysql], "An index was possible but the whole table was read"),
+    ("join-buffer", &[Engine::Mysql], RuleLine(key!("insight.join_buffer.rule"))),
+    ("temp-table-sort", &[Engine::Mysql], RuleLine(key!("insight.temp_table_sort.rule"))),
+    ("index-ignored", &[Engine::Mysql], RuleLine(key!("insight.index_ignored.rule"))),
 ];
+
+/// A rule's one line in [`RULES`]: the key of its message, said in the reader's language wherever it is shown
+/// (`to_string`, `{}`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuleLine(&'static str);
+
+impl std::fmt::Display for RuleLine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&crate::i18n::t(self.0, &[]))
+    }
+}
 
 const ALL: &[Engine] = &[Engine::Mssql, Engine::Postgres, Engine::Yugabyte, Engine::Mysql];
 
@@ -175,7 +179,10 @@ const MANY_ROWS: f64 = 10_000.0;
 /// its own (compiling, JIT, waiting for memory) is material when that time reaches this.
 pub const MATERIAL_MS: f64 = 10.0;
 
-const STATISTICS_NOTE: &str = "This plan updates optimizer statistics. Reading and sorting samples is maintenance work, so ordinary query index, ORDER BY and parallelism advice does not apply. Review its frequency and sampling only if measured maintenance cost warrants it.";
+/// The note on a plan that updates optimizer statistics: no query advice applies to it.
+fn statistics_note() -> String {
+    t!("insight.note.statistics_maintenance")
+}
 
 /// Compute and attach insights (and the coverage note) to a plan.
 pub fn annotate(plan: &mut Plan) {
@@ -205,56 +212,36 @@ pub fn changes_schema(plan: &Plan) -> bool {
 pub fn coverage_note(plan: &Plan) -> Option<String> {
     if plan.kind != PlanKind::Actual && (plan.kind == PlanKind::Generic || plan.facts().generic_plan_reason.is_some()) {
         if plan.engine == Engine::Sqlite {
-            return Some("Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values.".into());
+            return Some(t!("insight.note.generic_sqlite"));
         }
-        return Some("This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.".into());
+        return Some(t!("insight.note.generic"));
     }
     if updates_statistics(plan) {
-        return Some(STATISTICS_NOTE.into());
+        return Some(statistics_note());
     }
     if changes_schema(plan) {
-        return Some(
-            "This plan builds an index or changes the schema: reading and sorting the table is the work it's for, so \
-             no advice is read from it."
-                .into(),
-        );
+        return Some(t!("insight.note.changes_schema"));
     }
     let actual = has_actuals(plan);
     let mariadb = is_mariadb(plan);
     match (plan.engine, actual) {
-        (Engine::Sqlite, _) => Some(
-            "SQLite's EXPLAIN QUERY PLAN shows the access path only: no estimated or actual rows, costs or timings.".into(),
-        ),
-        (Engine::Mysql, false) if mariadb => Some(
-            "MariaDB's EXPLAIN has no actual rows or timings; ANALYZE adds them, with pages read and sort spills.".into(),
-        ),
-        (Engine::Mysql, true) if mariadb => {
-            Some("MariaDB plans don't record memory grants or parallel threads, so those checks don't apply.".into())
-        }
-        (Engine::Mssql, false) => Some(
-            "Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.".into(),
-        ),
+        (Engine::Sqlite, _) => Some(t!("insight.note.sqlite")),
+        (Engine::Mysql, false) if mariadb => Some(t!("insight.note.mariadb_estimated")),
+        (Engine::Mysql, true) if mariadb => Some(t!("insight.note.mariadb_actual")),
+        (Engine::Mssql, false) => Some(t!("insight.note.mssql_estimated")),
         (Engine::Mssql, true) => None,
-        (Engine::Yugabyte, false) => Some("Without EXPLAIN ANALYZE DIST, actual DocDB RPCs, storage rows scanned and execution timings are unknown.".into()),
-        (Engine::Yugabyte, true) => Some("DocDB storage RPCs and rows scanned are distinct from PostgreSQL buffer pages. RPC timings may overlap and are not exclusive shares of execution time.".into()),
-        (Engine::Postgres, false) => Some(
-            "Without EXPLAIN ANALYZE there are no actual rows, spills or timings to check. PostgreSQL plans never carry index suggestions; Culprit reads filters instead.".into(),
-        ),
-        (Engine::Postgres, true) => Some(
-            "PostgreSQL plans carry no index suggestions or memory grants; index advice comes from the filters.".into(),
-        ),
+        (Engine::Yugabyte, false) => Some(t!("insight.note.yugabyte_estimated")),
+        (Engine::Yugabyte, true) => Some(t!("insight.note.yugabyte_actual")),
+        (Engine::Postgres, false) => Some(t!("insight.note.postgres_estimated")),
+        (Engine::Postgres, true) => Some(t!("insight.note.postgres_actual")),
         // EXPLAIN ANALYZE arrived in MySQL 8.0.18: older servers can't add actual rows at all.
         (Engine::Mysql, false)
             if plan.facts().server_version.as_ref().is_some_and(|v| !crate::version_at_least(v, [8, 0, 18])) =>
         {
-            Some("MySQL's EXPLAIN has no actual rows, spills, memory or threads, and this version can't measure a run (EXPLAIN ANALYZE arrived in MySQL 8.0.18).".into())
+            Some(t!("insight.note.mysql_cannot_analyze"))
         }
-        (Engine::Mysql, false) => Some(
-            "MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.".into(),
-        ),
-        (Engine::Mysql, true) => {
-            Some("MySQL plans don't record spills, memory grants or parallel threads, so those checks don't apply.".into())
-        }
+        (Engine::Mysql, false) => Some(t!("insight.note.mysql_estimated")),
+        (Engine::Mysql, true) => Some(t!("insight.note.mysql_actual")),
     }
 }
 
@@ -316,13 +303,9 @@ pub fn insights(plan: &Plan) -> Vec<PlanInsight> {
             if insight.area == InsightArea::Index
                 && let Some(table) = insight.nodes.iter().find_map(|id| cx.node(*id)?.facts().table_missing.clone())
             {
-                insight.fix = format!(
-                    "Nothing to create: {} isn't in the database's catalog any more, so it was dropped or renamed \
-                     since this plan was captured.",
-                    table_leaf(&table)
-                );
+                insight.fix = t!("insight.table_gone.fix", table = table_leaf(&table));
                 insight.fix_sql = None;
-                insight.verify = "Nothing to check while the table is gone.".into();
+                insight.verify = t!("insight.table_gone.verify");
             }
             out.push(insight);
         }
@@ -436,14 +419,10 @@ impl<'a> Cx<'a> {
         }
     }
 
-    /// " 45% of this plan's work." where the plan states the share of these steps ([`stated_share`]), else nothing: a
+    /// "45% of this plan's work." where the plan states the share of these steps ([`stated_share`]), else nothing: a
     /// cheap plan's or a guessed step's share of the cost isn't where the statement's work is.
-    fn work_sentence(&self, impact: f64, nodes: &[u32]) -> String {
-        if self.states_share(nodes) {
-            format!(" {} of this plan's work.", capitalize(&format::percent(impact)))
-        } else {
-            String::new()
-        }
+    fn work_sentence(&self, impact: f64, nodes: &[u32]) -> Option<String> {
+        self.states_share(nodes).then(|| t!("insight.work_share", share = format::percent(impact)))
     }
 
     /// Whether the plan states a share of its work for these steps: the one rule of [`stated_share`].
@@ -796,8 +775,15 @@ fn first_object(n: &PlanNode) -> Option<String> {
     n.children.iter().find_map(first_object)
 }
 
-fn plural(n: f64, one: &str, many: &str) -> String {
-    format!("{} {}", rows_text(n), if (n - 1.0).abs() < 0.05 { one } else { many })
+/// `n` as a message's plural number, for a count written with [`rows_text`]: exactly 1 where it rounds to one, so it
+/// agrees with the "1" written.
+fn plural_n(n: f64) -> f64 {
+    if (n - 1.0).abs() < 0.05 { 1.0 } else { n }
+}
+
+/// Whether something a message names is known, for its `select` (`{named, select, true {{columns}} other {..}}`).
+fn known(yes: bool) -> &'static str {
+    if yes { "true" } else { "false" }
 }
 
 /// Row counts read as whole rows once they're past a handful (14, not 14.0); averages below 10 keep a decimal.
@@ -887,12 +873,4 @@ pub fn engine_built_indexes(plan: &Plan) -> Vec<EngineBuiltIndex> {
             Some(EngineBuiltIndex { node: n.id, table, keys })
         })
         .collect()
-}
-
-fn capitalize(s: &str) -> String {
-    let mut c = s.chars();
-    match c.next() {
-        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-        None => String::new(),
-    }
 }

@@ -70,46 +70,52 @@ pub(super) fn key_lookups(cx: &Cx) -> Vec<Draft> {
         let mut nodes = vec![n.id];
         nodes.extend(seek.map(|s| s.id));
         // The share only where the plan states one (`stated_share`).
-        let together = if cx.states_share(&nodes) {
-            format!(" Together that's {} of this plan's work.", format::percent(impact))
-        } else {
-            String::new()
-        };
+        let together =
+            cx.states_share(&nodes).then(|| t!("insight.key_lookups.together", share = format::percent(impact)));
         let mut d = Draft::new("key-lookups", InsightArea::Index, impact, nodes);
         // An estimated plan says how many lookups the optimizer expects, not how many a run made.
         let measured = n.act_executions.is_some() || n.act_rows.is_some();
-        d.title = format!(
-            "{} {} in {table} one at a time",
-            if measured { "Looks up" } else { "Estimated to look up" },
-            plural(runs, "row", "rows")
-        );
-        let heap = n.op.starts_with("RID");
-        d.detail = match (&index, cols.is_empty()) {
-            (Some(ix), false) => format!(
-                "{ix} finds the rows but doesn't hold {}, so SQL Server goes back to {table} for each one ({}).{together}",
-                format::list(&cols),
-                n.op,
-            ),
-            _ => format!("Each row found by the index needs a second read from {table} ({}).{together}", n.op),
+        let (many, count) = (plural_n(runs), rows_text(runs));
+        d.title = if measured {
+            t!("insight.key_lookups.title.measured", n = many, count = count, table = &table)
+        } else {
+            t!("insight.key_lookups.title.estimated", n = many, count = count, table = &table)
         };
+        let heap = n.op.starts_with("RID");
+        let mut detail = vec![match (&index, cols.is_empty()) {
+            (Some(ix), false) => t!(
+                "insight.key_lookups.detail.index",
+                index = ix,
+                columns = format::list(&cols),
+                table = &table,
+                op = &n.op
+            ),
+            _ => t!("insight.key_lookups.detail.lookup", table = &table, op = &n.op),
+        }];
+        detail.extend(together);
+        d.detail = detail.join(" ");
         // Said in words only: rebuilding the index needs its whole definition (key order, existing included columns,
         // uniqueness, filter, compression), which the plan doesn't carry.
-        let include = if cols.is_empty() { "the looked-up columns".to_string() } else { format::list(&cols) };
+        let (named, columns) = (known(!cols.is_empty()), format::list(&cols));
+        let (indexed, index_name) = (known(index.is_some()), index.clone().unwrap_or_default());
         d.fix = match (&index, heap) {
-            (_, true) => format!(
-                "{table} has no clustered index, so every lookup follows a row pointer. Give it a clustered index, or add {include} to {} as included columns.",
-                index.as_deref().unwrap_or("the index")
-            ),
-            (Some(ix), false) => format!(
-                "Add {include} to {ix} as included columns (keep its keys and its existing included columns) so the seek answers the query by itself, or select fewer columns."
-            ),
-            (None, false) => format!("Add {include} to the index as included columns, or select fewer columns."),
+            (_, true) => [
+                t!("insight.key_lookups.fix.heap", table = &table),
+                t!(
+                    "insight.key_lookups.fix.heap_cover",
+                    named = named,
+                    columns = &columns,
+                    indexed = indexed,
+                    index = &index_name
+                ),
+            ]
+            .join(" "),
+            (Some(ix), false) => {
+                t!("insight.key_lookups.fix.cover_index", named = named, columns = &columns, index = ix)
+            }
+            (None, false) => t!("insight.key_lookups.fix.cover", named = named, columns = &columns),
         };
-        d.verify = format!(
-            "Explain again: the {} is gone and {} returns the rows by itself.",
-            n.op,
-            index.as_deref().unwrap_or("the seek")
-        );
+        d.verify = t!("insight.key_lookups.verify", op = &n.op, indexed = indexed, index = &index_name);
         out.push(d);
     }
     out
@@ -152,27 +158,42 @@ pub(super) fn missing_index_hint(cx: &Cx) -> Vec<Draft> {
             let keys: Vec<String> = h.equality.iter().chain(&h.inequality).map(|c| clean_identifier(c)).collect();
             let include: Vec<String> = h.include.iter().map(|c| clean_identifier(c)).collect();
             let impact = node.map_or(0.0, |n| cx.share(n)).max(h.impact_pct / 100.0 * 0.5);
-            let mut d = Draft::new("missing-index-hint", InsightArea::Index, impact, node.map(|n| vec![n.id]).unwrap_or_default());
+            let mut d = Draft::new(
+                "missing-index-hint",
+                InsightArea::Index,
+                impact,
+                node.map(|n| vec![n.id]).unwrap_or_default(),
+            );
             d.index_hint = Some(h.clone());
-            d.title = format!(
-                "SQL Server estimates an index on {} ({}) would make this {} cheaper",
-                h.table,
-                format::list(&keys),
-                format::percent(h.impact_pct / 100.0)
+            d.title = t!(
+                "insight.missing_index_hint.title",
+                table = &h.table,
+                keys = format::list(&keys),
+                share = format::percent(h.impact_pct / 100.0)
             );
-            d.detail = format!(
-                "The optimizer noticed it had to read {} without a fitting index{}. Its estimate is a guide, not a promise: check the columns against the other queries on {}.",
-                h.table,
-                node.map(|n| format!(" ({} rows read by {})", format::count(rows_read(n)), n.op)).unwrap_or_default(),
-                table_leaf(&h.table)
-            );
+            let leaf = table_leaf(&h.table);
+            d.detail = match node {
+                Some(n) => t!(
+                    "insight.missing_index_hint.detail_read",
+                    table = &h.table,
+                    n = rows_read(n),
+                    rows = format::count(rows_read(n)),
+                    op = &n.op,
+                    leaf = &leaf
+                ),
+                None => t!("insight.missing_index_hint.detail", table = &h.table, leaf = &leaf),
+            };
             d.fix = if include.is_empty() {
-                format!("Create the index on {}.", format::list(&keys))
+                t!("insight.missing_index_hint.fix", keys = format::list(&keys))
             } else {
-                format!("Create the index on {} and include {}.", format::list(&keys), format::list(&include))
+                t!(
+                    "insight.missing_index_hint.fix_include",
+                    keys = format::list(&keys),
+                    include = format::list(&include)
+                )
             };
             d.fix_sql = index_sql(Engine::Mssql, &h.table, &keys, &include, None);
-            d.verify = format!("Explain again: the suggestion is gone and the read of {} becomes a seek.", table_leaf(&h.table));
+            d.verify = t!("insight.missing_index_hint.verify", table = &leaf);
             d
         })
         .collect()
@@ -225,23 +246,26 @@ pub(super) fn scan_filter(cx: &Cx) -> Vec<Draft> {
         let kept = read * filter_keeps(cx, n).unwrap_or(1.0);
         let impact = cx.share(n).max(cx.subtree(n) * 0.5);
         let mut d = Draft::new("scan-filter", InsightArea::Index, impact, vec![n.id]);
-        d.title = format!("Reads {} of {table} to keep {}", plural(read, "row", "rows"), rows_text(kept));
+        d.title = t!(
+            "insight.scan_filter.title",
+            n = plural_n(read),
+            count = rows_text(read),
+            table = &table,
+            kept = rows_text(kept)
+        );
         let estimated = n.act_rows.is_none();
         // What the statement's runs measured of the filter, where the analysis put it on the scan.
         let measured = estimated && n.facts().measured_kept_share.is_some();
-        d.detail = format!(
-            "{} {} reads the rows and checks `{}` on each one, so most of the reading is thrown away.{}",
-            if measured {
-                "As the statement's runs measured, the"
-            } else if estimated {
-                "As planned, the"
-            } else {
-                "The"
-            },
-            n.op,
-            format::predicate(&filter),
-            cx.work_sentence(impact, &[n.id])
-        );
+        let (op, checked) = (&n.op, format::predicate(&filter));
+        let mut detail = vec![if measured {
+            t!("insight.scan_filter.detail.measured", op = op, filter = checked)
+        } else if estimated {
+            t!("insight.scan_filter.detail.planned", op = op, filter = checked)
+        } else {
+            t!("insight.scan_filter.detail.actual", op = op, filter = checked)
+        }];
+        detail.extend(cx.work_sentence(impact, &[n.id]));
+        d.detail = detail.join(" ");
         // What the catalog says the table has, where the snapshot marked it: an index that already starts with one of
         // these columns (or for a seek, covers all of them), or none.
         let leaf = table_leaf(&table);
@@ -273,47 +297,41 @@ pub(super) fn scan_filter(cx: &Cx) -> Vec<Draft> {
         // Equality columns go in any order: the filter's isn't the data's. The SQL below takes the filter's order, and
         // the note says so rather than advise an order the SQL doesn't have.
         let order = if equality.len() >= 2 {
-            format!(
-                " {} can go in any order, and the SQL below takes the filter's ({} first). Put {} first instead if it \
-                 has more distinct values, or if another index you add on {leaf} leads with it: then that one index \
-                 serves this query too.",
-                format::list(&equality),
-                equality[0],
-                if equality.len() == 2 { equality[1].as_str() } else { "another one" }
-            )
+            vec![
+                t!("insight.scan_filter.order.any", columns = format::list(&equality), first = &equality[0]),
+                t!(
+                    "insight.scan_filter.order.instead",
+                    pair = known(equality.len() == 2),
+                    second = &equality[1],
+                    table = &leaf
+                ),
+            ]
         } else {
-            String::new()
+            Vec::new()
         };
         match has {
             Some(Some((index, keys))) => {
-                d.fix = format!(
-                    "{index} already starts with {}, yet this plan reads {leaf} instead: refresh {leaf}'s statistics \
-                     first, then check that the filter compares the column as it is (no function or conversion on it).",
-                    keys[0]
-                );
+                d.fix = t!("insight.scan_filter.fix.has_index", index = &index, key = &keys[0], table = &leaf);
                 d.fix_sql = Some(cx.engine().dialect().refresh_statistics(&qualified(cx.engine(), &table)));
             }
             Some(None) => {
-                let starts_with = if n.kind == NodeKind::Seek {
-                    format::list(&cols)
-                } else {
-                    format::list(&cols).replace(" and ", " or ")
-                };
-                d.fix = format!(
-                    "No index on {leaf} starts with {starts_with}: one on {} lets the database go straight to the matching rows.{order}",
-                    format::list(&cols)
+                let starts_with = if n.kind == NodeKind::Seek { format::list(&cols) } else { format::list_or(&cols) };
+                let fix = t!(
+                    "insight.scan_filter.fix.no_index",
+                    table = &leaf,
+                    starts_with = starts_with,
+                    columns = format::list(&cols)
                 );
+                d.fix = std::iter::once(fix).chain(order).collect::<Vec<_>>().join(" ");
                 d.fix_sql = index_sql(cx.engine(), &table, &cols, &[], n.facts().table_kind.as_deref());
             }
             None => {
-                d.fix = format!(
-                    "An index on {} lets the database go straight to the matching rows; if one already exists, the optimizer didn't use it, so refresh the table's statistics first.{order}",
-                    format::list(&cols)
-                );
+                let fix = t!("insight.scan_filter.fix.index", columns = format::list(&cols));
+                d.fix = std::iter::once(fix).chain(order).collect::<Vec<_>>().join(" ");
                 d.fix_sql = index_sql(cx.engine(), &table, &cols, &[], n.facts().table_kind.as_deref());
             }
         }
-        d.verify = format!("Explain again: {} reads about as many rows as it keeps.", table_leaf(&table));
+        d.verify = t!("insight.scan_filter.verify", table = table_leaf(&table));
         out.push(d);
     }
     out
@@ -347,18 +365,18 @@ pub(super) fn big_sort(cx: &Cx) -> Vec<Draft> {
         }
         let mut d = Draft::new("big-sort", InsightArea::Index, share, vec![n.id]);
         d.title = if cx.states_share(&[n.id]) {
-            format!("Sorting {} rows is {} of this plan's work", format::count(rows), format::percent(share))
+            t!("insight.big_sort.title_share", n = rows, count = format::count(rows), share = format::percent(share))
         } else {
-            format!("Sorts {} rows", format::count(rows))
+            t!("insight.big_sort.title", n = rows, count = format::count(rows))
         };
         let key =
             n.detail.as_deref().and_then(|d| d.split(" · ").find(|p| p.starts_with("sort key")).map(str::to_string));
-        d.detail = format!(
-            "The rows arrive in a different order than the query needs{}, so they're all collected and sorted before the first one comes out.",
-            key.map(|k| format!(" ({k})")).unwrap_or_default()
-        );
-        d.fix = "An index whose key order matches the ORDER BY (with the WHERE equality columns first) returns rows already sorted; or sort fewer rows by filtering earlier or limiting the result.".into();
-        d.verify = "Explain again: no Sort, or one over far fewer rows.".into();
+        d.detail = match key {
+            Some(key) => t!("insight.big_sort.detail_key", key = key),
+            None => t!("insight.big_sort.detail"),
+        };
+        d.fix = t!("insight.big_sort.fix");
+        d.verify = t!("insight.big_sort.verify");
         out.push(d);
     }
     out
@@ -367,7 +385,7 @@ pub(super) fn big_sort(cx: &Cx) -> Vec<Draft> {
 pub(super) fn eager_spool(cx: &Cx) -> Vec<Draft> {
     let mut out = Vec::new();
     for n in cx.nodes.iter().filter(|n| n.op == "Index Spool" && n.detail.as_deref() == Some("Eager Spool")) {
-        let table = first_object(n).unwrap_or_else(|| "the table".into());
+        let table = first_object(n);
         // The spool's keys as columns of the table: an optimizer value (Expr1003, computed below the spool) is no
         // column an index on the table could have.
         let keys: Vec<String> = filter_columns(n.seek_predicate.as_deref().unwrap_or(""))
@@ -379,20 +397,24 @@ pub(super) fn eager_spool(cx: &Cx) -> Vec<Draft> {
         let impact = cx.subtree(n);
         let mut d = Draft::new("eager-spool", InsightArea::Index, impact, vec![n.id]);
         d.floor = Severity::Medium;
-        d.title = format!("SQL Server builds a temporary index on {} every time this runs", table_leaf(&table));
-        d.detail = format!(
-            "The Index Spool copies {} rows of {} into a temporary index in tempdb on each run and drops it afterwards, because no index fits the lookup{}.",
-            format::count(rows),
-            table_leaf(&table),
-            if keys.is_empty() { String::new() } else { format!(" on {}", format::list(&keys)) }
-        );
-        d.fix = if keys.is_empty() {
-            "It seeks on a value computed in the plan, not on a column of the table: rewrite the join or subquery above the spool to compare columns, so an index on them can replace the spool.".into()
+        let (named, leaf) = (known(table.is_some()), table.as_deref().map(table_leaf).unwrap_or_default());
+        d.title = t!("insight.eager_spool.title", named = named, table = &leaf);
+        d.detail = if keys.is_empty() {
+            t!("insight.eager_spool.detail", n = rows, rows = format::count(rows), named = named, table = &leaf)
         } else {
-            "Create that index permanently, so the work happens once instead of on every run.".into()
+            t!(
+                "insight.eager_spool.detail_keys",
+                n = rows,
+                rows = format::count(rows),
+                named = named,
+                table = &leaf,
+                keys = format::list(&keys)
+            )
         };
-        d.fix_sql = index_sql(Engine::Mssql, &table, &keys, &include, None);
-        d.verify = "Explain again: the Index Spool is gone and the lookup seeks the new index.".into();
+        d.fix = if keys.is_empty() { t!("insight.eager_spool.fix_computed") } else { t!("insight.eager_spool.fix") };
+        // Nothing to create on a table the plan doesn't name.
+        d.fix_sql = table.and_then(|table| index_sql(Engine::Mssql, &table, &keys, &include, None));
+        d.verify = t!("insight.eager_spool.verify");
         out.push(d);
     }
     out
@@ -406,16 +428,18 @@ pub(super) fn automatic_index(cx: &Cx) -> Vec<Draft> {
     for EngineBuiltIndex { node, table, keys } in engine_built_indexes(cx.plan) {
         let mut d = Draft::new("automatic-index", InsightArea::Index, 1.0, vec![node]);
         d.fixed_weight = true;
-        d.title = format!("SQLite builds a temporary index on {} every time this runs", table_leaf(&table));
-        d.detail = format!(
-            "No index on {} fits this {}, so SQLite builds one{} for each run and throws it away.",
-            table_leaf(&table),
-            if cx.statement().contains("join") { "join" } else { "search" },
-            if keys.is_empty() { String::new() } else { format!(" on {}", format::list(&keys)) }
-        );
-        d.fix = "Create that index once, so the work happens one time instead of on every run.".into();
+        let leaf = table_leaf(&table);
+        d.title = t!("insight.automatic_index.title", table = &leaf);
+        // What the index is for: a join, or the statement's own search.
+        let serves = if cx.statement().contains("join") { "join" } else { "search" };
+        d.detail = if keys.is_empty() {
+            t!("insight.automatic_index.detail", table = &leaf, serves = serves)
+        } else {
+            t!("insight.automatic_index.detail_keys", table = &leaf, serves = serves, keys = format::list(&keys))
+        };
+        d.fix = t!("insight.automatic_index.fix");
         d.fix_sql = index_sql(Engine::Sqlite, &table, &keys, &[], None);
-        d.verify = "Explain again: no AUTOMATIC INDEX, and a SEARCH using the new index.".into();
+        d.verify = t!("insight.automatic_index.verify");
         out.push(d);
     }
     out
@@ -429,10 +453,10 @@ pub(super) fn many_to_many(cx: &Cx) -> Vec<Draft> {
         .map(|n| {
             let mut d = Draft::new("many-to-many", InsightArea::Index, cx.share(n), vec![n.id]);
             d.cap = Severity::Medium;
-            d.title = "The merge join is many-to-many, so it replays duplicates through a tempdb worktable".into();
-            d.detail = "When neither input is unique on the join columns, SQL Server rewinds the inner side for every duplicate on the outer side.".into();
-            d.fix = "If one side really is unique on the join columns, declare it (a unique index or constraint); otherwise a hash join is usually cheaper.".into();
-            d.verify = "Explain again: the Merge Join no longer shows ManyToMany.".into();
+            d.title = t!("insight.many_to_many.title");
+            d.detail = t!("insight.many_to_many.detail");
+            d.fix = t!("insight.many_to_many.fix");
+            d.verify = t!("insight.many_to_many.verify");
             d
         })
         .collect()
@@ -476,18 +500,26 @@ pub(super) fn join_buffer(cx: &Cx) -> Vec<Draft> {
         let impact = cx.share(n).max(cx.subtree(n) * 0.5);
         let mut d = Draft::new("join-buffer", InsightArea::Index, impact, vec![n.id]);
         let leaf = table_leaf(&table);
-        let join_cols = if cols.is_empty() { "the join column".to_string() } else { format::list(&cols) };
+        let (named, columns) = (known(!cols.is_empty()), format::list(&cols));
+        let read = rows_read(n);
         // MySQL listed indexes it could use on this table, yet joins through the buffer: it judged a full read
         // cheaper, or those indexes serve another condition. Either way the plan doesn't show an index is missing.
         match (!n.facts().possible_index_names.is_empty()).then(|| n.facts().possible_index_names.join(", ")) {
             Some(keys) => {
-                d.title = format!("Joins {leaf} through a join buffer ({how}) over a full read instead of an index");
-                d.detail = format!(
-                    "MySQL listed {keys} as possible for {leaf}, yet reads all {} rows into a join buffer and matches them there, rather than looking up each row's matches.",
-                    format::count(rows_read(n))
+                d.title = t!("insight.join_buffer.title_possible", table = &leaf, how = &how);
+                d.detail = t!(
+                    "insight.join_buffer.detail_possible",
+                    keys = &keys,
+                    table = &leaf,
+                    n = read,
+                    rows = format::count(read)
                 );
-                d.fix = format!(
-                    "Check whether {keys} starts with {join_cols}: if not, an index that does lets MySQL look rows up directly; if it does, refresh {leaf}'s statistics so MySQL weighs it right."
+                d.fix = t!(
+                    "insight.join_buffer.fix_possible",
+                    keys = &keys,
+                    named = named,
+                    columns = &columns,
+                    table = &leaf
                 );
                 d.fix_sql =
                     n.object.as_ref().map(|t| Engine::Mysql.dialect().refresh_statistics(&qualified(Engine::Mysql, t)));
@@ -502,17 +534,13 @@ pub(super) fn join_buffer(cx: &Cx) -> Vec<Draft> {
                 if before.is_some_and(|outer| outer * 10.0 >= rows_read(n)) {
                     continue;
                 }
-                d.title = format!("Joins {leaf} without an index ({how} over a full read)");
-                d.detail = format!(
-                    "MySQL has no index to look up matching rows of {leaf} for each row it joins, so it reads all {} rows into a join buffer and matches them there.",
-                    format::count(rows_read(n))
-                );
-                d.fix = format!("Index {leaf} on {join_cols} so MySQL can look rows up directly.");
+                d.title = t!("insight.join_buffer.title", table = &leaf, how = &how);
+                d.detail = t!("insight.join_buffer.detail", table = &leaf, n = read, rows = format::count(read));
+                d.fix = t!("insight.join_buffer.fix", table = &leaf, named = named, columns = &columns);
                 d.fix_sql = index_sql(Engine::Mysql, &table, &cols, &[], None);
             }
         }
-        d.verify =
-            format!("Explain again: {} is read with ref or eq_ref access, without a join buffer.", table_leaf(&table));
+        d.verify = t!("insight.join_buffer.verify", table = &leaf);
         out.push(d);
     }
     out

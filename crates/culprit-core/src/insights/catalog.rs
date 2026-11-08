@@ -9,7 +9,7 @@ use crate::plan::{NodeKind, Plan, PlanNode};
 use crate::sql::identifier_parts;
 
 use super::predicates::{column_reference, convert_calls, is_column_operand, same_type};
-use super::{STATISTICS_NOTE, conditions, is_system_object, table_leaf};
+use super::{conditions, is_system_object, statistics_note, table_leaf};
 
 const STATISTICS_MAINTENANCE: &str = "Statistics maintenance";
 
@@ -44,19 +44,24 @@ const POSSIBLE_KEY_COLUMNS: &str = "possible_keys_columns";
 pub(super) fn updates_statistics(plan: &Plan) -> bool {
     plan.engine == Engine::Mssql
         && (plan.facts().statistics_maintenance.is_some()
-            || plan.statement.as_deref().and_then(|s| statistics_maintenance_note(plan.engine, s)).is_some())
+            || plan.statement.as_deref().is_some_and(|s| maintains_statistics(plan.engine, s)))
 }
 
 /// The recorded operation is authoritative when SQL Server captures its internal SELECT/sort instead of the
 /// enclosing UPDATE STATISTICS. A user SELECT with a similar shape establishes no maintenance operation.
-pub fn statistics_maintenance_note(engine: Engine, statement: &str) -> Option<&'static str> {
-    (engine == Engine::Mssql && crate::sql::mssql_statistics_target(statement).is_some()).then_some(STATISTICS_NOTE)
+pub fn statistics_maintenance_note(engine: Engine, statement: &str) -> Option<String> {
+    maintains_statistics(engine, statement).then(statistics_note)
+}
+
+/// Whether `statement` is SQL Server's UPDATE STATISTICS: the one test behind [`statistics_maintenance_note`].
+fn maintains_statistics(engine: Engine, statement: &str) -> bool {
+    engine == Engine::Mssql && crate::sql::mssql_statistics_target(statement).is_some()
 }
 
 pub fn mark_query(plan: &mut Plan, statement: &str) {
     plan.facts_mut().statistics_maintenance = None;
     plan.props.remove(STATISTICS_MAINTENANCE);
-    if statistics_maintenance_note(plan.engine, statement).is_some() {
+    if maintains_statistics(plan.engine, statement) {
         plan.facts_mut().statistics_maintenance = Some("UPDATE STATISTICS".into());
         plan.props.insert(STATISTICS_MAINTENANCE.into(), "UPDATE STATISTICS".into());
     }

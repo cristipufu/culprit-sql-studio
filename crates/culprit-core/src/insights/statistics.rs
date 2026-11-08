@@ -57,72 +57,67 @@ pub(super) fn misestimate(cx: &Cx) -> Vec<Draft> {
                 d.floor = Severity::Low;
                 d.cap = Severity::Low;
             }
-            d.title = format!(
-                "Expected {} from {}, got {} ({}× {})",
-                plural(est, "row", "rows"),
-                table_leaf(&subject),
-                rows_text(act),
-                rows_text(factor.abs()),
-                if factor >= 0.0 { "more" } else { "fewer" }
-            );
+            let (many, count, from) = (plural_n(est), rows_text(est), table_leaf(&subject));
+            let (got, times) = (rows_text(act), rows_text(factor.abs()));
+            d.title = if factor >= 0.0 {
+                t!("insight.misestimate.title_more", n = many, count = count, table = from, got = got, factor = times)
+            } else {
+                t!("insight.misestimate.title_fewer", n = many, count = count, table = from, got = got, factor = times)
+            };
             let cond = conditions(n);
             // Multi-column statistics only describe plain columns; a filter on an expression (id % 4, lower(x)) needs
             // expression statistics instead, so the advice changes.
             let on_expression = cond.split([' ', '(', ')']).any(|t| matches!(t, "%" | "+" | "-" | "*" | "/"))
                 || wrapped_column(&cond, cx.engine()).is_some();
             let cols: Vec<String> = if on_expression { Vec::new() } else { filter_columns(&cond) };
-            d.detail = format!(
-                "{}{}",
-                if consumers {
-                    format!(
-                        "Everything above this operator was planned for the wrong number of rows: join types, memory grants and parallelism{}.",
-                        if spill_above { " (here a sort or hash above it ran out of memory as a result)" } else { "" }
-                    )
-                } else {
-                    "Nothing above it in this plan was sized from that estimate, but the same statistics decide every plan that reads this table.".to_string()
-                },
-                if cols.len() >= 2 {
-                    format!(" The filter combines {}; databases assume such columns are independent, which is wrong when they move together.", format::list(&cols))
-                } else if on_expression {
-                    " The filter compares an expression, not a plain column, so the column's statistics can't predict it.".to_string()
-                } else {
-                    String::new()
-                }
-            );
+            let mut detail = vec![if !consumers {
+                t!("insight.misestimate.detail.unused")
+            } else if spill_above {
+                t!("insight.misestimate.detail.planned_spilled")
+            } else {
+                t!("insight.misestimate.detail.planned")
+            }];
+            if cols.len() >= 2 {
+                detail.push(t!("insight.misestimate.detail.correlated", columns = format::list(&cols)));
+            } else if on_expression {
+                detail.push(t!("insight.misestimate.detail.expression"));
+            }
+            d.detail = detail.join(" ");
             let mysql_histograms = !cx.plan.facts().server_version.as_deref()
                 .is_some_and(|v| !v.contains("MariaDB") && !crate::version_at_least(v, [8, 0, 0]));
             let (fix, sql) = match (cx.engine(), &table) {
                 // Table variables have no statistics, and a temporary table's belong to the session that filled it:
                 // nothing Culprit could hand over to run would reach them.
-                (Engine::Mssql, Some(t)) if table_variable_of(n).is_some() => (
-                    format!("{} is a table variable, so it has no statistics: use a temporary table instead, or add OPTION (RECOMPILE) so the row count at run time is used.", table_leaf(t)),
-                    None,
-                ),
-                (Engine::Mssql, Some(t)) if table_leaf(t).starts_with('#') => (
-                    format!("{} is a temporary table: update its statistics in the session that fills it, after loading it, or add OPTION (RECOMPILE) to the query that reads it.", table_leaf(t)),
-                    None,
-                ),
+                (Engine::Mssql, Some(t)) if table_variable_of(n).is_some() => {
+                    (t!("insight.misestimate.fix.table_variable", table = table_leaf(t)), None)
+                }
+                (Engine::Mssql, Some(t)) if table_leaf(t).starts_with('#') => {
+                    (t!("insight.misestimate.fix.temporary_table", table = table_leaf(t)), None)
+                }
                 (Engine::Mssql, Some(t)) => (
-                    format!("Refresh the statistics on {} with a full scan{}.", table_leaf(t), if cols.len() >= 2 { ", and create statistics on the filtered columns together" } else { "" }),
+                    if cols.len() >= 2 {
+                        t!("insight.misestimate.fix.mssql_columns", table = table_leaf(t))
+                    } else {
+                        t!("insight.misestimate.fix.mssql", table = table_leaf(t))
+                    },
                     Some(if cols.len() >= 2 {
                         format!("UPDATE STATISTICS {} WITH FULLSCAN;\nCREATE STATISTICS st_{}_{} ON {} ({});", qualified(Engine::Mssql, t), table_leaf(t).to_ascii_lowercase(), cols.join("_").to_ascii_lowercase(), qualified(Engine::Mssql, t), cols.iter().map(|c| quote(Engine::Mssql, c)).collect::<Vec<_>>().join(", "))
                     } else {
                         format!("UPDATE STATISTICS {} WITH FULLSCAN;", qualified(Engine::Mssql, t))
                     }),
                 ),
-                (Engine::Yugabyte, Some(t)) => (format!("Refresh YSQL optimizer statistics on {} and compare a measured plan with representative values.", table_leaf(t)), Some(Engine::Yugabyte.dialect().refresh_statistics(&qualified(Engine::Yugabyte, t)))),
+                (Engine::Yugabyte, Some(t)) => (
+                    t!("insight.misestimate.fix.yugabyte", table = table_leaf(t)),
+                    Some(Engine::Yugabyte.dialect().refresh_statistics(&qualified(Engine::Yugabyte, t))),
+                ),
                 (Engine::Postgres, Some(t)) => (
-                    format!(
-                        "Analyze {}{}.",
-                        table_leaf(t),
-                        if cols.len() >= 2 {
-                            ", and tell PostgreSQL the filtered columns are related with extended statistics"
-                        } else if on_expression {
-                            "; on PostgreSQL 14+ statistics on the expression itself help (CREATE STATISTICS … ON (expression) FROM table)"
-                        } else {
-                            ""
-                        }
-                    ),
+                    if cols.len() >= 2 {
+                        t!("insight.misestimate.fix.postgres_columns", table = table_leaf(t))
+                    } else if on_expression {
+                        t!("insight.misestimate.fix.postgres_expression", table = table_leaf(t))
+                    } else {
+                        t!("insight.misestimate.fix.postgres", table = table_leaf(t))
+                    },
                     Some(if cols.len() >= 2 {
                         format!("ANALYZE {};\nCREATE STATISTICS {}_{}_stats (dependencies, mcv) ON {} FROM {};\nANALYZE {};", qualified(Engine::Postgres, t), table_leaf(t).to_ascii_lowercase(), cols.join("_").to_ascii_lowercase(), cols.iter().map(|c| quote(Engine::Postgres, c)).collect::<Vec<_>>().join(", "), qualified(Engine::Postgres, t), qualified(Engine::Postgres, t))
                     } else {
@@ -131,26 +126,26 @@ pub(super) fn misestimate(cx: &Cx) -> Vec<Draft> {
                 ),
                 // MariaDB collects histograms with its engine-independent statistics; MySQL has them from 8.0.
                 (Engine::Mysql, Some(t)) if cx.mariadb() && !cols.is_empty() => (
-                    format!("Refresh the statistics on {}, with column statistics (histograms) on {}.", table_leaf(t), format::list(&cols)),
+                    t!("insight.misestimate.fix.mariadb_columns", table = table_leaf(t), columns = format::list(&cols)),
                     Some(format!("ANALYZE TABLE {} PERSISTENT FOR COLUMNS ({}) INDEXES ();", qualified(Engine::Mysql, t), cols.iter().map(|c| quote(Engine::Mysql, c)).collect::<Vec<_>>().join(", "))),
                 ),
                 (Engine::Mysql, Some(t)) if mysql_histograms && !cols.is_empty() => (
-                    format!("Refresh the statistics on {} and add a histogram on {}.", table_leaf(t), format::list(&cols)),
+                    t!("insight.misestimate.fix.mysql_columns", table = table_leaf(t), columns = format::list(&cols)),
                     Some(format!("ANALYZE TABLE {} UPDATE HISTOGRAM ON {};", qualified(Engine::Mysql, t), cols.iter().map(|c| quote(Engine::Mysql, c)).collect::<Vec<_>>().join(", "))),
                 ),
                 (Engine::Mysql, Some(t)) => (
-                    format!("Refresh the statistics on {}.", table_leaf(t)),
+                    t!("insight.misestimate.fix.refresh", table = table_leaf(t)),
                     Some(Engine::Mysql.dialect().refresh_statistics(&qualified(Engine::Mysql, t))),
                 ),
                 (Engine::Sqlite, Some(t)) => (
-                    format!("Refresh the statistics on {}.", table_leaf(t)),
+                    t!("insight.misestimate.fix.refresh", table = table_leaf(t)),
                     Some(Engine::Sqlite.dialect().refresh_statistics(&qualified(Engine::Sqlite, t))),
                 ),
-                (_, None) => ("Refresh statistics on the tables below this operator.".into(), None),
+                (_, None) => (t!("insight.misestimate.fix.below"), None),
             };
             d.fix = fix;
             d.fix_sql = sql;
-            d.verify = "Run with actual rows again: the estimate is within about 10× of the actual count.".into();
+            d.verify = t!("insight.misestimate.verify");
             d
         })
         .collect()
@@ -162,20 +157,21 @@ pub(super) fn missing_statistics(cx: &Cx) -> Vec<Draft> {
         .filter(|n| warns_of_no_statistics(n))
         .take(1)
         .map(|n| {
-            let cols = (!n.facts().columns_without_statistics.is_empty()).then(|| n.facts().columns_without_statistics.join(", "));
+            let columns = &n.facts().columns_without_statistics;
             let mut d = Draft::new("missing-statistics", InsightArea::Statistics, cx.subtree(n), vec![n.id]);
             d.cap = Severity::Low;
-            d.title = format!(
-                "The captured plan reported no usable statistics on {}",
-                cols.unwrap_or_else(|| "some columns".into())
+            d.title = t!(
+                "insight.missing_statistics.title",
+                named = known(!columns.is_empty()),
+                columns = columns.join(", ")
             );
             d.detail = match keys_without_statistics(cx, n) {
                 Some(context) => stale_index_statistics_detail(&context, None),
-                None => "SQL Server reported ColumnsWithNoStatistics when this plan was compiled. This is a compilation-time warning, not a measurement of current statistics or proof of a slow plan. Query Store can retain the original plan XML after statistics change.".into(),
+                None => t!("insight.missing_statistics.detail"),
             };
-            d.fix = "Inspect the current column and index statistics and AUTO_CREATE_STATISTICS before choosing a change. An index histogram describes only its first key, so a column appearing in a seek does not prove that it has a usable histogram. Refresh or create statistics only where current evidence supports it; compare actual rows with estimates if the query is costly.".into();
+            d.fix = t!("insight.missing_statistics.fix");
             d.fix_sql = Some("SELECT name, is_auto_create_stats_on, is_read_only\n  FROM sys.databases\n WHERE database_id = DB_ID();".into());
-            d.verify = "Capture a newly compiled plan after any justified statistics change and compare its warning and row estimates with representative runs. Reopening Query Store's original saved XML alone cannot verify that the warning is still current or has cleared.".into();
+            d.verify = t!("insight.missing_statistics.verify");
             d
         })
         .collect()
@@ -230,12 +226,13 @@ fn keys_without_statistics(cx: &Cx, n: &PlanNode) -> Option<StaleIndexStatistics
 /// Context for a compilation-time warning. A seek key proves an index exists, not that this column leads its
 /// histogram, that its statistics were stale then, or that any current statistics need updating.
 pub fn stale_index_statistics_detail(s: &StaleIndexStatistics, catalog: Option<&str>) -> String {
-    let now = catalog.map(|said| format!(" Current catalog: {}.", said.trim_end_matches('.'))).unwrap_or_default();
-    format!(
-        "SQL Server reported no usable statistics on {} when this plan was compiled. These columns appear in seek keys of {}. An index has statistics, but its histogram describes only the first key; the seek alone does not establish that each named column has a histogram or that the statistics are out of date. Query Store can retain the original warning after statistics change.{now}",
-        format::list(&s.columns),
-        format::list(&s.indexes),
-    )
+    let mut detail = vec![t!(
+        "insight.missing_statistics.seek_keys",
+        columns = format::list(&s.columns),
+        indexes = format::list(&s.indexes)
+    )];
+    detail.extend(catalog.map(|said| t!("insight.missing_statistics.catalog", said = said.trim_end_matches('.'))));
+    detail.join(" ")
 }
 
 /// The index of `table` the plan seeks on `column`, which makes the column that index's key. SQL Server writes each of a
@@ -266,17 +263,16 @@ pub(super) fn index_ignored(cx: &Cx) -> Vec<Draft> {
         let kept = filter_keeps(cx, n).unwrap_or(1.0);
         let mut d = Draft::new("index-ignored", InsightArea::Statistics, cx.share(n), vec![n.id]);
         d.cap = Severity::Medium;
-        d.title = format!("MySQL could use {} but reads all of {} instead", keys.join(", "), table_leaf(&what(n)));
-        d.detail = format!(
-            "{} {} of {} rows, yet MySQL judged {} not worth it; that usually means stale statistics or a type mismatch in the comparison.",
-            if n.act_rows.is_some() { "The filter kept" } else { "MySQL expects the filter to keep" },
-            format::percent(kept),
-            format::count(rows_read(n)),
-            if keys.len() == 1 { "the index" } else { "those indexes" }
-        );
-        d.fix = "Refresh the table's statistics and compare the column with a value of its own type; if it still scans, compare with FORCE INDEX to see which is really faster.".into();
+        d.title = t!("insight.index_ignored.title", keys = keys.join(", "), table = table_leaf(&what(n)));
+        let (kept, rows, indexes) = (format::percent(kept), format::count(rows_read(n)), keys.len());
+        d.detail = if n.act_rows.is_some() {
+            t!("insight.index_ignored.detail_kept", kept = kept, rows = rows, indexes = indexes)
+        } else {
+            t!("insight.index_ignored.detail_expected", kept = kept, rows = rows, indexes = indexes)
+        };
+        d.fix = t!("insight.index_ignored.fix");
         d.fix_sql = n.object.as_ref().map(|t| Engine::Mysql.dialect().refresh_statistics(&qualified(Engine::Mysql, t)));
-        d.verify = "Explain again: access_type is ref or range on the index.".into();
+        d.verify = t!("insight.index_ignored.verify");
         out.push(d);
     }
     out

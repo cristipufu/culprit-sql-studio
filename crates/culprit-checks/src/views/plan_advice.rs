@@ -48,7 +48,7 @@ pub fn present_retained_plan(plan: &mut Plan, note: &str) {
 /// growing tables even when the selected workload does not justify treating them as current incidents.
 pub fn query_plan_insights(snapshot: &Snapshot, query: &QueryStat, plan: &Plan) -> PlanInsights {
     if let Some(note) = culprit_core::insights::statistics_maintenance_note(plan.engine, &query.text) {
-        return PlanInsights { items: Vec::new(), note: Some(note.into()) };
+        return PlanInsights { items: Vec::new(), note: Some(note) };
     }
     let mut items = catalog_insights(snapshot, query, plan);
     if let Some(rewrite) = crate::queries::late_filter_rewrite(snapshot, query, plan) {
