@@ -2,12 +2,15 @@ import type { EditorView } from "@codemirror/view";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import type { Finding } from "../../gen/Finding";
 import { api } from "../../lib/api";
+import { t } from "../../lib/i18n";
 import { keys } from "../../lib/keys";
 import { remember, rememberedAs } from "../../lib/prefs";
 import { setLintEffect } from "./codemirror";
 
-/** The text a new tab starts with: never run, saved or linted. */
-export const PLACEHOLDER = keys("-- Write a query. ⌘↵ runs it (or the selection), ⌘E shows its plan without running it, ⌘S saves it.\n");
+/** The text a new tab starts with, in the app's language: never run, saved or linted. */
+export function placeholder(): string {
+  return `${t("ui.editor.placeholder", { run: keys("⌘↵"), explain: keys("⌘E"), save: keys("⌘S") })}\n`;
+}
 
 /** SQL that could hold DDL; anything else skips the migration linter altogether. */
 const HAS_DDL = /\b(create|alter|drop|truncate|rename|reindex|vacuum|cluster)\b/i;
@@ -31,7 +34,7 @@ export function useLiveLint(connection: string, tab: { id: string; sql: string }
       show([]);
     }
     const sql = tab.sql;
-    if (!sql || sql === PLACEHOLDER.trim() || !HAS_DDL.test(sql)) {
+    if (!sql || sql === placeholder().trim() || !HAS_DDL.test(sql)) {
       show([]);
       return;
     }

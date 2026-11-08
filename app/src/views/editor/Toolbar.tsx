@@ -2,6 +2,7 @@ import { Play, RefreshCw, Save, ScanSearch, Zap } from "lucide-react";
 import type { Engine } from "../../gen/Engine";
 import type { ExplainMode } from "../../gen/ExplainMode";
 import { can, measuresRuns } from "../../lib/engines";
+import { t } from "../../lib/i18n";
 import { keys } from "../../lib/keys";
 
 type Props = {
@@ -27,20 +28,20 @@ type Props = {
 export function Toolbar({ engine, production, savedName, naming, onNaming, onRun, onExplain, onSave, onCancelNaming, catalogBusy, tables, onRefreshCatalog }: Props) {
   return (
     <div className="toolbar">
-      <button type="button" className="btn primary" onClick={onRun} title="Run the selection, or the whole tab">
-        <Play size={13} /> Run <span className="kbd">{keys("⌘↵")}</span>
+      <button type="button" className="btn primary" onClick={onRun} title={t("ui.editor.run_title")}>
+        <Play size={13} /> {t("ui.editor.toolbar.run")} <span className="kbd">{keys("⌘↵")}</span>
       </button>
-      <button type="button" className="btn" onClick={() => onExplain("estimated")} title="Show the plan without running the statement">
-        <ScanSearch size={14} /> Explain <span className="kbd">{keys("⌘E")}</span>
+      <button type="button" className="btn" onClick={() => onExplain("estimated")} title={t("ui.editor.toolbar.explain_title")}>
+        <ScanSearch size={14} /> {t("ui.editor.toolbar.explain")} <span className="kbd">{keys("⌘E")}</span>
       </button>
       {measuresRuns(engine) && (
-        <button type="button" className="btn" onClick={() => onExplain("analyze")} title="Run the statement and measure each step">
-          <Zap size={13} /> Analyze <span className="kbd">{keys("⌘⇧E")}</span>
+        <button type="button" className="btn" onClick={() => onExplain("analyze")} title={t("ui.editor.toolbar.analyze_title")}>
+          <Zap size={13} /> {t("ui.editor.toolbar.analyze")} <span className="kbd">{keys("⌘⇧E")}</span>
         </button>
       )}
       {naming === null ? (
-        <button type="button" className="btn" onClick={() => onSave()} title={savedName ? `Update “${savedName}”` : "Save as a named query"}>
-          <Save size={13} /> {savedName ? "Save" : "Save as…"} <span className="kbd">{keys("⌘S")}</span>
+        <button type="button" className="btn" onClick={() => onSave()} title={savedName ? t("ui.editor.toolbar.update_title", { name: savedName }) : t("ui.editor.save_as_title")}>
+          <Save size={13} /> {savedName ? t("ui.common.save") : t("ui.editor.toolbar.save_as")} <span className="kbd">{keys("⌘S")}</span>
         </button>
       ) : (
         <form
@@ -50,15 +51,19 @@ export function Toolbar({ engine, production, savedName, naming, onNaming, onRun
             if (naming.trim()) onSave(naming.trim());
           }}
         >
-          <input autoFocus value={naming} placeholder="Name it, e.g. Open orders by customer" onChange={(e) => onNaming(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (onNaming(null), onCancelNaming())} />
+          <input autoFocus value={naming} placeholder={t("ui.editor.toolbar.name_placeholder")} onChange={(e) => onNaming(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (onNaming(null), onCancelNaming())} />
           <button className="btn primary" type="submit" disabled={!naming.trim()}>
-            Save
+            {t("ui.common.save")}
           </button>
         </form>
       )}
       <span className="spacer" />
       <RunsHere engine={engine} production={production} />
-      <button type="button" className="icon-btn" title={catalogBusy ? "Loading table and column names…" : `Reload table and column names${tables !== null ? ` (${tables} tables)` : ""}`} onClick={onRefreshCatalog} disabled={catalogBusy}>
+      <button type="button" className="icon-btn" title={catalogBusy
+        ? t("ui.editor.toolbar.catalog_loading")
+        : tables !== null
+          ? t("ui.editor.toolbar.catalog_reload_count", { n: tables, count: String(tables) })
+          : t("ui.editor.toolbar.catalog_reload")} onClick={onRefreshCatalog} disabled={catalogBusy}>
         <RefreshCw size={13} className={catalogBusy ? "spin" : ""} />
       </button>
     </div>
@@ -69,21 +74,21 @@ export function Toolbar({ engine, production, savedName, naming, onNaming, onRun
 function RunsHere({ engine, production }: { engine: Engine; production: boolean }) {
   if (!can(engine, "writes")) {
     return (
-      <span className="env-note" title="Culprit opens the file read-only: statements that read run; anything that would change it is refused">
-        Read-only file
+      <span className="env-note" title={t("ui.editor.toolbar.read_only_title")}>
+        {t("ui.editor.toolbar.read_only")}
       </span>
     );
   }
   if (production) {
     return (
-      <span className="env-chip env-production" title="Reads run as they are; anything that changes data asks first, and statements that touch every row need the connection's name typed">
-        Production · changes ask first
+      <span className="env-chip env-production" title={t("ui.editor.toolbar.production_title")}>
+        {t("ui.editor.toolbar.production")}
       </span>
     );
   }
   return (
-    <span className="env-note" title="Statements Culprit can prove only read run in a read-only transaction; anything else commits">
-      Reads roll back · changes commit
+    <span className="env-note" title={t("ui.editor.toolbar.commits_title")}>
+      {t("ui.editor.toolbar.commits")}
     </span>
   );
 }

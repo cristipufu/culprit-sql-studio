@@ -19,25 +19,25 @@ import { allLintFixes, lintFix } from "../lib/lint-fixes";
 import { type Acted, EditorExecution, type Output } from "../lib/editor-execution";
 import type { PendingRun } from "../lib/run-batch";
 import { remember, rememberedChoice } from "../lib/prefs";
+import { t } from "../lib/i18n";
 import { currentReport, getState, loadSaved, setState, toast, useStore } from "../lib/store";
 import { sqlLanguage } from "./editor/codemirror";
-import { PLACEHOLDER, useLiveLint, useSplit } from "./editor/hooks";
+import { placeholder, useLiveLint, useSplit } from "./editor/hooks";
 import { LintPanel } from "./editor/LintPanel";
 import { EmptyOutput, OutputPane } from "./editor/OutputPane";
 import { TabStrip } from "./editor/TabStrip";
 import { useTabViews } from "./editor/tab-views";
 import { Toolbar } from "./editor/Toolbar";
+import { slot, withElements } from "./message-parts";
 
 const RAIL_KEY = "culprit.editor.rail";
 const ROW_LIMIT = 1000;
-const BUSY = "This tab is still running: wait for it, or run in another tab";
-const STILL_RUNNING = "The statement already sent finishes on the database; nothing after it runs";
 
 /** Catalogs fetched this session, per connection. */
 const catalogs = new Map<string, Catalog>();
 
 export default function Editor({ connection }: { connection: ConnectionInfo }) {
-  const [tabStorage] = useState(() => new EditorTabStorage(connection, PLACEHOLDER));
+  const [tabStorage] = useState(() => new EditorTabStorage(connection, placeholder()));
   const [tabs, setTabs] = useState<Tabs>(tabStorage.initial);
   const [persistenceError, setPersistenceError] = useState(tabStorage.error);
   const mounted = useRef(true);
@@ -63,7 +63,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
           }),
       ),
   );
-  useEffect(() => () => { if (execution.retireAll() > 0) toast(STILL_RUNNING); }, [execution]);
+  useEffect(() => () => { if (execution.retireAll() > 0) toast(t("ui.editor.still_running")); }, [execution]);
   const [naming, setNaming] = useState<string | null>(null);
   const [rail, setRail] = useState(() => rememberedChoice(RAIL_KEY, "open", ["open", "closed"] as const));
   const [look, setLook] = useState<PlanLook>(rememberedLook);
@@ -138,23 +138,23 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
     const { changes, applied } = allLintFixes(editor.state.doc.toString(), liveLint);
     if (applied === 0) return;
     editor.dispatch({ changes });
-    toast(`Applied ${applied} safe DDL fixes`);
+    toast(t("ui.editor.applied_fixes", { count: applied }));
   };
 
   // ── actions ────────────────────────────────────────────────────────────────────────────────────
   /** What a tab's action came to, for what follows it here: a refusal said, a saved query's run counted. */
   const settle = (tab: string, acted: Acted) => {
-    if (acted === "busy") return toast(BUSY);
+    if (acted === "busy") return toast(t("ui.editor.busy"));
     if (acted !== "rows") return;
     const name = tabsRef.current.tabs.find((t) => t.id === tab)?.saved;
     if (name) void api().then((client) => client.savedQueryRan(name)).then(() => loadSaved(), () => {});
   };
 
   const run = async (sql: string) => {
-    if (!sql || sql === PLACEHOLDER.trim()) return;
+    if (!sql || sql === placeholder().trim()) return;
     const statements = splitSqlStatements(sql);
     if (statements.length === 0) {
-      return toast("No runnable SQL statement — uncomment a statement or fill in placeholders first");
+      return toast(t("ui.editor.nothing_to_run"));
     }
     const tab = tabsRef.current.active;
     const batch = { connection: connection.name, engine: connection.engine, sql, statements, limit: ROW_LIMIT, production, confirmed: false };
@@ -163,10 +163,10 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
 
   const explain = async (mode: ExplainMode) => {
     const raw = views.target();
-    if (!raw || raw === PLACEHOLDER.trim() || (mode === "analyze" && !measuresRuns(connection.engine))) return;
+    if (!raw || raw === placeholder().trim() || (mode === "analyze" && !measuresRuns(connection.engine))) return;
     const statements = splitSqlStatements(raw);
     if (statements.length === 0) {
-      return toast("No runnable SQL statement — uncomment a statement or fill in placeholders first");
+      return toast(t("ui.editor.nothing_to_run"));
     }
     const sql = statements[statements.length - 1]!;
     const tab = tabsRef.current.active;
@@ -177,7 +177,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
     const tab = tabsRef.current.tabs.find((t) => t.id === tabsRef.current.active);
     if (!tab) return;
     const text = views.text().trim();
-    if (!text || text === PLACEHOLDER.trim()) return toast("Write a query before saving it");
+    if (!text || text === placeholder().trim()) return toast(t("ui.editor.write_first"));
     const existing = getState().saved?.find((q) => q.name === tab.saved);
     if (!tab.saved && !name) return setNaming("");
     try {
@@ -191,7 +191,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
       updateTabs((t) => ({ ...t, tabs: t.tabs.map((x) => (x.id === tab.id ? { ...x, saved: stored.name, title: stored.name } : x)) }));
       setNaming(null);
       await loadSaved();
-      toast(`Saved “${stored.name}”`);
+      toast(t("ui.editor.saved", { name: stored.name }));
     } catch (e) {
       toast(errorMessage(e).message);
     }
@@ -210,7 +210,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
   const newTab = useCallback(
     (sql = "", title?: string, savedName: string | null = null) => {
       if (tabsRef.current.tabs.length >= MAX_EDITOR_TABS) {
-        toast(`Close a tab before opening another (${MAX_EDITOR_TABS} tabs open)`);
+        toast(t("ui.editor.tabs_full", { count: MAX_EDITOR_TABS }));
         return null;
       }
       const tab = newEditorTab(sql, title ?? tabTitle(sql, tabsRef.current.tabs.length + 1), savedName);
@@ -225,7 +225,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
     (id: string) => {
       const list = tabsRef.current.tabs;
       if (!list.some((t) => t.id === id)) return;
-      if (execution.retire(id)) toast(STILL_RUNNING);
+      if (execution.retire(id)) toast(t("ui.editor.still_running"));
       forget(id);
       if (list.length === 1) {
         setOutputs({});
@@ -340,7 +340,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
       />
       {persistenceError && <div className="editor-storage-error" role="alert">
         <TriangleAlert size={15} /><span>{persistenceError}</span>
-        <button type="button" className="btn" onClick={() => save()}>Save query</button>
+        <button type="button" className="btn" onClick={() => save()}>{t("ui.editor.save_query")}</button>
       </div>}
       <div className="editor-main">
         {rail === "open" && <SavedRail current={connection} saved={saved} active={activeTab.saved} onOpen={openQuery} onRenamed={(from, to) => updateTabs((t) => ({ ...t, tabs: t.tabs.map((x) => (x.saved === from ? { ...x, saved: to, title: to } : x)) }))} onDeleted={(name) => updateTabs((t) => ({ ...t, tabs: t.tabs.map((x) => (x.saved === name ? { ...x, saved: null } : x)) }))} />}
@@ -361,7 +361,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
           />
           {savedQuery?.connection && savedQuery.connection !== connection.name && (
             <div className="editor-note">
-              Saved for <b>{savedQuery.connection}</b>; running on <b>{connection.name}</b>.
+              {withElements(t("ui.editor.saved_elsewhere", { saved: slot(0), running: slot(1) }), [<b key="saved">{savedQuery.connection}</b>, <b key="running">{connection.name}</b>])}
             </div>
           )}
           <LintPanel findings={liveLint} onFix={applyLintFix} onFixAll={applyAllLintFixes} />

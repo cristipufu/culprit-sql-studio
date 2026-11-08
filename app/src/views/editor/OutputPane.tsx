@@ -5,28 +5,23 @@ import { ResultGrid } from "../../components/ResultGrid";
 import type { ResultSet } from "../../gen/ResultSet";
 import type { SavedQuery } from "../../gen/SavedQuery";
 import { duration, oneLine } from "../../lib/format";
+import { t } from "../../lib/i18n";
 import { keys } from "../../lib/keys";
 import type { Output } from "../../lib/editor-execution";
 import type { StatementResult } from "../../lib/run-batch";
 
-
 /** "1,000 rows (first 1,000; more exist)": how many rows came back, and whether the server had more. */
 function rowCount(r: ResultSet): string {
-  const n = r.rows.length.toLocaleString();
-  return `${n} row${r.rows.length === 1 ? "" : "s"}${r.truncated ? ` (first ${n}; more exist)` : ""}`;
-}
-
-function statements(n: number): string {
-  return `${n} statement${n === 1 ? "" : "s"}`;
+  return r.truncated ? t("ui.editor.output.rows_truncated", { count: r.rows.length }) : t("ui.editor.output.rows", { count: r.rows.length });
 }
 
 /** Before anything ran: the shortcuts, and this connection's saved queries one click away. */
 export function EmptyOutput({ saved, onOpen }: { saved: SavedQuery[]; onOpen: (q: SavedQuery) => void }) {
   const shortcuts: [string, string][] = [
-    [keys("⌘↵"), "Run the selection, or the whole tab"],
-    [keys("⌘E"), "Plan without running"],
-    [keys("⌘⇧E"), "Run and measure each step"],
-    [keys("⌘S"), "Save as a named query"],
+    [keys("⌘↵"), t("ui.editor.run_title")],
+    [keys("⌘E"), t("ui.editor.output.plan_key")],
+    [keys("⌘⇧E"), t("ui.editor.output.analyze_key")],
+    [keys("⌘S"), t("ui.editor.save_as_title")],
   ];
   return (
     <div className="editor-empty">
@@ -39,7 +34,7 @@ export function EmptyOutput({ saved, onOpen }: { saved: SavedQuery[]; onOpen: (q
       </ul>
       {saved.length > 0 && (
         <div className="editor-recent">
-          <div className="eyebrow">Saved for this connection</div>
+          <div className="eyebrow">{t("ui.editor.output.saved_here")}</div>
           {saved.map((q) => (
             <button type="button" key={q.name} className="editor-recent-item" onClick={() => onOpen(q)}>
               <Bookmark size={12} />
@@ -97,7 +92,7 @@ function Results({ results }: { results: StatementResult[] }) {
     if (r.columns.length === 0) {
       return (
         <div className="result-message">
-          <b>{r.messages.join(" ") || "Done."}</b> <span className="muted">· {duration(r.elapsed_ms)}</span>
+          <b>{r.messages.join(" ") || t("ui.editor.output.done")}</b> <span className="muted">· {duration(r.elapsed_ms)}</span>
         </div>
       );
     }
@@ -112,7 +107,7 @@ function Results({ results }: { results: StatementResult[] }) {
   if (rowResults.length === 0) {
     return (
       <div className="result-message">
-        <b>{commandMessages.join(" · ") || `${statements(commandResults.length)} completed.`}</b>{" "}
+        <b>{commandMessages.join(" · ") || t("ui.editor.output.statements_completed_sentence", { count: commandResults.length })}</b>{" "}
         <span className="muted">· {duration(commandElapsed)}</span>
       </div>
     );
@@ -120,7 +115,7 @@ function Results({ results }: { results: StatementResult[] }) {
 
   if (rowResults.length === 1 && commandResults.length > 0) {
     const r = rowResults[0]!.result;
-    const commands = `${statements(commandResults.length)} completed (${duration(commandElapsed)})`;
+    const commands = t("ui.editor.output.statements_completed_in", { count: commandResults.length, duration: duration(commandElapsed) });
     return <ResultGrid result={r} summary={`${commands} · ${rowCount(r)} · ${duration(r.elapsed_ms)}`} />;
   }
 
@@ -128,7 +123,7 @@ function Results({ results }: { results: StatementResult[] }) {
     <div className="multi-results" style={{ display: "flex", flexDirection: "column", gap: 12, height: "100%", overflowY: "auto", paddingBottom: 12 }}>
       {commandResults.length > 0 && (
         <div className="result-message" style={{ paddingBottom: 0 }}>
-          <b>{commandMessages.join(" · ") || `${statements(commandResults.length)} completed`}</b>{" "}
+          <b>{commandMessages.join(" · ") || t("ui.editor.output.statements_completed", { count: commandResults.length })}</b>{" "}
           <span className="muted">· {duration(commandElapsed)}</span>
         </div>
       )}
@@ -136,7 +131,7 @@ function Results({ results }: { results: StatementResult[] }) {
         const r = item.result;
         const rawSnippet = oneLine(item.sql.replace(/--.*$/gm, "").trim());
         const snippet = rawSnippet.length > 72 ? `${rawSnippet.slice(0, 71)}…` : rawSnippet;
-        const summary = `Result ${idx + 1} · ${rowCount(r)} · ${duration(r.elapsed_ms)}${snippet ? ` · ${snippet}` : ""}`;
+        const summary = `${t("ui.editor.output.result", { number: String(idx + 1) })} · ${rowCount(r)} · ${duration(r.elapsed_ms)}${snippet ? ` · ${snippet}` : ""}`;
         return (
           <div key={idx} className="multi-result-pane" style={{ minHeight: 220, flex: "1 0 auto", display: "flex", flexDirection: "column", borderTop: idx > 0 || commandResults.length > 0 ? "1px solid var(--border)" : undefined }}>
             <ResultGrid result={r} summary={summary} />

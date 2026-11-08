@@ -1,6 +1,7 @@
 import { Bookmark, PanelLeftClose, PanelLeftOpen, Plus, X } from "lucide-react";
 import { useRef, useState, type KeyboardEvent } from "react";
 import { MAX_EDITOR_TABS, type EditorTab as Tab } from "../../lib/editor-tabs";
+import { t } from "../../lib/i18n";
 import { keys } from "../../lib/keys";
 
 type Props = {
@@ -42,7 +43,7 @@ export function TabStrip({ tabs, activeId, dirty, production, railOpen, onToggle
   };
   return (
     <div className={`editor-tabs ${production ? "is-production" : ""}`} role="tablist">
-      <button type="button" className="icon-btn" title={railOpen ? "Hide saved queries" : "Show saved queries"} onClick={onToggleRail}>
+      <button type="button" className="icon-btn" title={railOpen ? t("ui.editor.tabs.hide_saved") : t("ui.editor.tabs.show_saved")} onClick={onToggleRail}>
         {railOpen ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
       </button>
       <div className="tab-strip" ref={strip}>
@@ -58,18 +59,18 @@ export function TabStrip({ tabs, activeId, dirty, production, railOpen, onToggle
             className={`editor-tab ${tab.id === activeId ? "on" : ""}`}
             onClick={() => onActivate(tab.id)}
             onAuxClick={(e) => e.button === 1 && onClose(tab.id)}
-            title={tab.saved ? `Saved query “${tab.saved}”` : tab.title}
+            title={tab.saved ? t("ui.editor.tabs.saved_query", { name: tab.saved }) : tab.title}
           >
             {tab.saved && <Bookmark size={11} className="tab-saved" />}
             <span className="tab-title">{tab.title}</span>
-            {dirty(tab) && <span className="tab-dirty" title="Changed since it was saved" />}
+            {dirty(tab) && <span className="tab-dirty" title={t("ui.editor.tabs.changed")} />}
             {/* Out of the Tab order: Delete closes the focused tab. */}
-            <button type="button" className="tab-close" tabIndex={-1} title={keys("Close tab (⌘⇧W)")} onClick={(e) => (e.stopPropagation(), onClose(tab.id))}>
+            <button type="button" className="tab-close" tabIndex={-1} title={t("ui.editor.tabs.close", { key: keys("⌘⇧W") })} onClick={(e) => (e.stopPropagation(), onClose(tab.id))}>
               <X size={11} />
             </button>
           </div>
         ))}
-        <button type="button" className="icon-btn" title={full ? "Close a tab before opening another" : keys("New tab (⌘T)")} disabled={full} onClick={onNew}>
+        <button type="button" className="icon-btn" title={full ? t("ui.editor.tabs.full") : t("ui.editor.tabs.new", { key: keys("⌘T") })} disabled={full} onClick={onNew}>
           <Plus size={14} />
         </button>
       </div>

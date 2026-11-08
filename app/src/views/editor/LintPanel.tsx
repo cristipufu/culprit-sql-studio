@@ -1,5 +1,6 @@
 import { TriangleAlert, WandSparkles } from "lucide-react";
 import type { Finding } from "../../gen/Finding";
+import { t } from "../../lib/i18n";
 
 /** The live DDL linter's findings above the editor, each with its quick fix, and one button for all of them. */
 export function LintPanel({ findings, onFix, onFixAll }: { findings: Finding[]; onFix: (f: Finding) => void; onFixAll: () => void }) {
@@ -11,11 +12,11 @@ export function LintPanel({ findings, onFix, onFixAll }: { findings: Finding[]; 
         <div className="editor-lint-row">
           <WandSparkles size={13} className="editor-lint-icon" />
           <div className="editor-lint-copy">
-            <strong>{fixable} auto-fixable DDL warnings</strong>
-            <span>Rewrite all fixable statements in place with non-blocking DDL</span>
+            <strong>{t("ui.editor.lint.fixable", { count: fixable })}</strong>
+            <span>{t("ui.editor.lint.fixable_detail")}</span>
           </div>
-          <button type="button" className="btn ghost sm" onClick={onFixAll} title="Apply all safe DDL fixes">
-            <WandSparkles size={12} /> Apply all fixes
+          <button type="button" className="btn ghost sm" onClick={onFixAll} title={t("ui.editor.lint.fix_all_title")}>
+            <WandSparkles size={12} /> {t("ui.editor.lint.fix_all")}
           </button>
         </div>
       )}
@@ -27,8 +28,8 @@ export function LintPanel({ findings, onFix, onFixAll }: { findings: Finding[]; 
             <span>{f.fix?.summary ?? f.summary}</span>
           </div>
           {f.fix?.sql && (
-            <button type="button" className="btn ghost sm" onClick={() => onFix(f)} title="Replace statement with safer DDL">
-              <WandSparkles size={12} /> Quick fix
+            <button type="button" className="btn ghost sm" onClick={() => onFix(f)} title={t("ui.editor.lint.fix_title")}>
+              <WandSparkles size={12} /> {t("ui.editor.lint.fix")}
             </button>
           )}
         </div>
