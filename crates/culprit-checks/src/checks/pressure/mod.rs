@@ -5,7 +5,7 @@
 use culprit_core::waits::category_key;
 use culprit_core::{
     Category, CheckInfo, CleanupHolder, Confidence, Engine, Finding, Fix, GrantStat, Metric, Pressure, QueryStat,
-    Severity, SignalStatus, SignalUnit, Snapshot, SubjectKind, Unit, format,
+    Severity, SignalStatus, SignalUnit, Snapshot, SubjectKind, TransactionActivity, Unit, format,
 };
 
 use culprit_core::{Check, key, t};

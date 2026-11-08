@@ -87,7 +87,7 @@ pub fn report(report: &Report) -> Value {
         "replication": snapshot.pressure.as_ref().map(|p| p.replicas.clone()).unwrap_or_default(),
         "operations": snapshot.operations.counters_only(),
         "oldest_open_transaction": snapshot.pressure.as_ref().and_then(|p| p.oldest_transaction.as_ref()).map(|t| json!({
-            "session": t.session, "open_for": format::duration(t.seconds * 1000.0), "state": t.state, "program": t.program,
+            "session": t.session, "open_for": format::duration(t.seconds * 1000.0), "state": t.state_words(), "program": t.program,
         })),
     });
     if let Some(activity) = activity {

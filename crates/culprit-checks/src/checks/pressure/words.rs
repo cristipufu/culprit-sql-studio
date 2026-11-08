@@ -338,7 +338,7 @@ fn session(id: &str, seconds: f64) -> OpenTransaction {
         session: id.into(),
         seconds,
         program: Some("billing-worker".into()),
-        state: Some("idle in transaction".into()),
+        activity: TransactionActivity::IdleInTransaction,
         holder: CleanupHolder::Session,
         ..OpenTransaction::default()
     }
@@ -347,9 +347,9 @@ fn session(id: &str, seconds: f64) -> OpenTransaction {
 #[test]
 fn held_cleanup_words() {
     let gb = 1024.0 * 1024.0 * 1024.0;
-    let slot = |catalog_only: bool, state: &str| OpenTransaction {
+    let slot = |catalog_only: bool, activity: TransactionActivity| OpenTransaction {
         session: "standby_1".into(),
-        state: Some(state.into()),
+        activity,
         holder: CleanupHolder::ReplicationSlot,
         xid_age: Some(150_000_000.0),
         catalog_only,
@@ -358,7 +358,7 @@ fn held_cleanup_words() {
     let prepared = |program: Option<&str>, behind: Option<f64>| OpenTransaction {
         session: "tx-17".into(),
         seconds: 7200.0,
-        state: Some("prepared".into()),
+        activity: TransactionActivity::Prepared,
         holder: CleanupHolder::PreparedTransaction,
         program: program.map(str::to_string),
         xid_age: behind,
@@ -397,7 +397,11 @@ fn held_cleanup_words() {
                     &HeldCleanupCheck,
                     &holding(
                         Engine::Mssql,
-                        OpenTransaction { wrote: Some(true), state: Some("running".into()), ..session("71", 3600.0) },
+                        OpenTransaction {
+                            wrote: Some(true),
+                            activity: TransactionActivity::Running,
+                            ..session("71", 3600.0)
+                        },
                     ),
                 ),
             ),
@@ -407,7 +411,11 @@ fn held_cleanup_words() {
                     &HeldCleanupCheck,
                     &holding(
                         Engine::Mssql,
-                        OpenTransaction { wrote: Some(true), state: Some("snapshot".into()), ..session("72", 3600.0) },
+                        OpenTransaction {
+                            wrote: Some(true),
+                            activity: TransactionActivity::Snapshot,
+                            ..session("72", 3600.0)
+                        },
                     ),
                 ),
             ),
@@ -421,9 +429,18 @@ fn held_cleanup_words() {
                     ),
                 ),
             ),
-            ("pg-slot", said(&HeldCleanupCheck, &holding(Engine::Postgres, slot(false, "inactive slot")))),
-            ("pg-active-slot", said(&HeldCleanupCheck, &holding(Engine::Postgres, slot(false, "active slot")))),
-            ("pg-catalog-slot", said(&HeldCleanupCheck, &holding(Engine::Postgres, slot(true, "active slot")))),
+            (
+                "pg-slot",
+                said(&HeldCleanupCheck, &holding(Engine::Postgres, slot(false, TransactionActivity::SlotInactive))),
+            ),
+            (
+                "pg-active-slot",
+                said(&HeldCleanupCheck, &holding(Engine::Postgres, slot(false, TransactionActivity::SlotActive))),
+            ),
+            (
+                "pg-catalog-slot",
+                said(&HeldCleanupCheck, &holding(Engine::Postgres, slot(true, TransactionActivity::SlotActive))),
+            ),
             (
                 "pg-prepared",
                 said(&HeldCleanupCheck, &holding(Engine::Postgres, prepared(Some("tm-coordinator"), Some(40_000.0)))),
@@ -445,7 +462,12 @@ fn held_cleanup_words() {
                     &HeldCleanupCheck,
                     &holding(
                         Engine::Postgres,
-                        OpenTransaction { program: None, state: Some("active".into()), ..session("4243", 2400.0) },
+                        OpenTransaction {
+                            program: None,
+                            activity: TransactionActivity::Reported,
+                            state: Some("active".into()),
+                            ..session("4243", 2400.0)
+                        },
                     ),
                 ),
             ),

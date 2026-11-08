@@ -1,6 +1,7 @@
 import { isActionable } from "./findings";
 import { t } from "./i18n";
 import type { FileIo } from "../gen/FileIo";
+import type { OpenTransaction } from "../gen/OpenTransaction";
 import type { Finding } from "../gen/Finding";
 import type { QueryStat } from "../gen/QueryStat";
 import type { Replica } from "../gen/Replica";
@@ -37,6 +38,32 @@ export function storageStatus(report: Report, file: FileIo): SignalStatus {
 
 export function replicaStatus(report: Report, replica: Replica): SignalStatus {
   return findingStatus(worstFinding(report, (f) => f.check === "replica-lag" && f.subject.name === replica.name));
+}
+
+/**
+ * What an open transaction is doing, in the app's language: its activity said from the catalog, or the engine's own
+ * word where it gives one (as `OpenTransaction::state_words` says it in Rust).
+ */
+export function transactionState(txn: OpenTransaction): string | null {
+  const own = txn.state ?? null;
+  switch (txn.activity) {
+    case "reported":
+      return own;
+    case "idle_in_transaction":
+      return own ?? t("model.transaction.state.idle_in_transaction");
+    case "running":
+      return t("model.transaction.state.running");
+    case "snapshot":
+      return t("model.transaction.state.snapshot");
+    case "slot_active":
+      return t("model.transaction.state.slot_active");
+    case "slot_inactive":
+      return t("model.transaction.state.slot_inactive");
+    case "prepared":
+      return t("model.transaction.state.prepared");
+    default:
+      return own;
+  }
 }
 
 /**

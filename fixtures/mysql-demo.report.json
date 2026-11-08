@@ -2153,6 +2153,7 @@
       "grants": [],
       "numa_nodes": null,
       "oldest_transaction": {
+        "activity": "idle_in_transaction",
         "catalog_only": false,
         "database": null,
         "held_bytes": null,
@@ -2160,7 +2161,7 @@
         "program": "mysql",
         "seconds": 5.0,
         "session": "104",
-        "state": "idle in transaction",
+        "state": null,
         "wrote": null,
         "xid_age": null
       },

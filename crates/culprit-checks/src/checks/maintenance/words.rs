@@ -31,6 +31,7 @@ fn session(behind: f64) -> OpenTransaction {
     OpenTransaction {
         session: "4242".into(),
         seconds: 7200.0,
+        activity: culprit_core::TransactionActivity::IdleInTransaction,
         state: Some("idle in transaction".into()),
         holder: CleanupHolder::Session,
         xid_age: Some(behind),

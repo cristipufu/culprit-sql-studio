@@ -7,7 +7,7 @@ import type { SignalStatus } from "../gen/SignalStatus";
 import type { ResourceSample } from "../gen/ResourceSample";
 import type { Signal } from "../gen/Signal";
 import { dateFormat, duration, percent, percentValue } from "../lib/format";
-import { findingStatus, worstFinding } from "../lib/health";
+import { findingStatus, transactionState, worstFinding } from "../lib/health";
 import { t } from "../lib/i18n";
 import { tx } from "../lib/message-parts";
 import { SIGNAL_SCOPE, signalValue } from "../lib/waits";
@@ -50,7 +50,7 @@ function OpenTransactionCard({ txn, status }: { txn: OpenTransaction; status: Si
             : txn.holder === "prepared-transaction"
               ? tx("ui.health.oldest_prepared", { duration: duration(txn.seconds * 1000) }, { session })
               : tx("ui.health.oldest_open", { duration: duration(txn.seconds * 1000) }, { session })}
-          {txn.state ? ` · ${txn.state}` : ""}
+          {transactionState(txn) ? ` · ${transactionState(txn)}` : ""}
         </div>
         <div className="open-txn-meta">
           {txn.program ? `${t("ui.health.from_program", { program: txn.program })} ` : ""}

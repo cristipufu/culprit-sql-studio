@@ -2539,6 +2539,7 @@
       "grants": [],
       "numa_nodes": null,
       "oldest_transaction": {
+        "activity": "idle_in_transaction",
         "catalog_only": false,
         "database": null,
         "held_bytes": null,

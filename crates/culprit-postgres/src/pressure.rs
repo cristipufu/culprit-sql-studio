@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use culprit_core::{
-    CleanupHolder, Coverage, Engine, OpenTransaction, Pressure, Result, Signal, SignalScope, SignalUnit, WaitSample,
-    WaitStat, t,
+    CleanupHolder, Coverage, Engine, OpenTransaction, Pressure, Result, Signal, SignalScope, SignalUnit,
+    TransactionActivity, WaitSample, WaitStat, t,
 };
 use tokio_postgres::Client;
 
@@ -290,6 +290,12 @@ async fn cleanup_holder(client: &Client, coverage: &mut Coverage) -> Option<Open
             session: r.string("session"),
             seconds: r.number("seconds").unwrap_or(0.0),
             program: r.text("program").filter(|s| !s.is_empty()),
+            // pg_stat_activity's own state stays its word; idle in a transaction is a fact held-cleanup decides on.
+            activity: if r.text("state").is_some_and(|s| s.starts_with("idle")) {
+                TransactionActivity::IdleInTransaction
+            } else {
+                TransactionActivity::Reported
+            },
             state: r.text("state"),
             holder: CleanupHolder::Session,
             xid_age: r.number("xid_age"),
@@ -300,7 +306,11 @@ async fn cleanup_holder(client: &Client, coverage: &mut Coverage) -> Option<Open
         found.push(OpenTransaction {
             catalog_only: r.flag("catalog_only"),
             session: r.string("session"),
-            state: Some(if r.flag("active") { "active slot" } else { "inactive slot" }.into()),
+            activity: if r.flag("active") {
+                TransactionActivity::SlotActive
+            } else {
+                TransactionActivity::SlotInactive
+            },
             holder: CleanupHolder::ReplicationSlot,
             xid_age: r.number("xid_age"),
             ..OpenTransaction::default()
@@ -311,7 +321,7 @@ async fn cleanup_holder(client: &Client, coverage: &mut Coverage) -> Option<Open
             session: r.string("session"),
             seconds: r.number("seconds").unwrap_or(0.0),
             program: r.text("owner").filter(|s| !s.is_empty()),
-            state: Some("prepared".into()),
+            activity: TransactionActivity::Prepared,
             holder: CleanupHolder::PreparedTransaction,
             xid_age: r.number("xid_age"),
             ..OpenTransaction::default()

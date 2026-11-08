@@ -310,6 +310,31 @@ pub enum CleanupHolder {
     PreparedTransaction,
 }
 
+/// What an open transaction (or a slot, or a prepared transaction) is doing, as its provider establishes it: what
+/// held-cleanup decides on, said from the catalog ([`OpenTransaction::state_words`]). `Reported` leaves the engine's own
+/// word in [`OpenTransaction::state`].
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum TransactionActivity {
+    /// As the engine says in `state` (PostgreSQL's pg_stat_activity.state: active, fastpath function call).
+    #[default]
+    Reported,
+    /// Its session is idle with the transaction open (MySQL Sleep, SQL Server sleeping, PostgreSQL idle in
+    /// transaction; `state` keeps PostgreSQL's own word).
+    IdleInTransaction,
+    /// Its session is running a statement (MySQL, SQL Server).
+    Running,
+    /// A SQL Server snapshot reader: it keeps row versions in the version store.
+    Snapshot,
+    /// A replication slot with a consumer attached.
+    SlotActive,
+    /// A replication slot without a consumer.
+    SlotInactive,
+    /// A prepared transaction waiting to be committed or rolled back.
+    Prepared,
+}
+
 /// The open transaction that holds the scanned database's cleanup back: the one whose snapshot or changes keep old row
 /// versions (or log) alive. Collectors report only a transaction that does hold it: one in this database with a
 /// snapshot or changes of its own (SQL Server, PostgreSQL), or one with a read view on a server whose undo history is
@@ -323,7 +348,11 @@ pub struct OpenTransaction {
     /// How long it has been open. Zero when the engine doesn't say (a replication slot).
     pub seconds: f64,
     pub program: Option<String>,
-    /// What it's doing: "idle in transaction", "running", "snapshot".
+    /// What it's doing, as a fact: what held-cleanup decides on, and what [`OpenTransaction::state_words`] says.
+    #[serde(default)]
+    pub activity: TransactionActivity,
+    /// The engine's own word for what it's doing (PostgreSQL's pg_stat_activity.state), shown as data; `None` where
+    /// the activity says it all.
     pub state: Option<String>,
     /// Bytes of old versions held (SQL Server version store of this database).
     pub held_bytes: Option<f64>,
@@ -337,6 +366,25 @@ pub struct OpenTransaction {
     /// The database its session is connected to, when that may not be the scanned one (MySQL: InnoDB's purge is the
     /// whole server's, so a transaction in another database holds this one's cleanup too).
     pub database: Option<String>,
+}
+
+impl OpenTransaction {
+    /// What it's doing, in the reader's language: the activity said from the catalog, or the engine's own word where it
+    /// gives one ("idle in transaction", "snapshot", "inactive slot").
+    pub fn state_words(&self) -> Option<String> {
+        let own = || self.state.clone();
+        Some(match self.activity {
+            TransactionActivity::Reported => return own(),
+            TransactionActivity::IdleInTransaction => {
+                own().unwrap_or_else(|| t!("model.transaction.state.idle_in_transaction"))
+            }
+            TransactionActivity::Running => t!("model.transaction.state.running"),
+            TransactionActivity::Snapshot => t!("model.transaction.state.snapshot"),
+            TransactionActivity::SlotActive => t!("model.transaction.state.slot_active"),
+            TransactionActivity::SlotInactive => t!("model.transaction.state.slot_inactive"),
+            TransactionActivity::Prepared => t!("model.transaction.state.prepared"),
+        })
+    }
 }
 
 /// Pressure signals from cheap counters, collected with every scan.

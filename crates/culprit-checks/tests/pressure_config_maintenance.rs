@@ -410,7 +410,7 @@ fn a_slot_holding_vacuum_back_joins_its_replica_finding() {
     assert!(slot.is_some(), "the demo keeps an inactive slot");
     s.pressure.as_mut().unwrap().oldest_transaction = Some(OpenTransaction {
         session: "analytics_slot".into(),
-        state: Some("inactive slot".into()),
+        activity: culprit_core::TransactionActivity::SlotInactive,
         holder: CleanupHolder::ReplicationSlot,
         xid_age: Some(5_000_000.0),
         ..OpenTransaction::default()

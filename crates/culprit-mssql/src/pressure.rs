@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use culprit_core::{
-    CleanupHolder, Coverage, Engine, GrantStat, OpenTransaction, Pressure, Signal, SignalScope, SignalUnit, WaitSample,
-    WaitStat, format, t,
+    CleanupHolder, Coverage, Engine, GrantStat, OpenTransaction, Pressure, Signal, SignalScope, SignalUnit,
+    TransactionActivity, WaitSample, WaitStat, format, t,
 };
 
 use crate::conn::{MsClient, OWN_QUERY_MARKER, query};
@@ -355,11 +355,12 @@ pub(crate) async fn collect(client: &mut MsClient, probe: &Probe) -> (Pressure, 
             session: r.string("session_id"),
             seconds: r.f64_or_zero("seconds"),
             program: r.str("program_name").filter(|s| !s.trim().is_empty()),
-            state: Some(match (r.str("status").as_deref(), r.f64_or_zero("is_snapshot") > 0.0) {
-                (Some("sleeping"), _) => "idle in transaction".into(),
-                (_, true) => "snapshot".into(),
-                _ => "running".into(),
-            }),
+            activity: match (r.str("status").as_deref(), r.f64_or_zero("is_snapshot") > 0.0) {
+                (Some("sleeping"), _) => TransactionActivity::IdleInTransaction,
+                (_, true) => TransactionActivity::Snapshot,
+                _ => TransactionActivity::Running,
+            },
+            state: None,
             held_bytes: version_store.filter(|_| r.f64_or_zero("is_snapshot") > 0.0),
             holder: CleanupHolder::Session,
             xid_age: None,

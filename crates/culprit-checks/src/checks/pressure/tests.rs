@@ -202,7 +202,7 @@ fn transaction(session: &str, seconds: f64) -> OpenTransaction {
         session: session.into(),
         seconds,
         program: Some("billing-worker".into()),
-        state: Some("idle in transaction".into()),
+        activity: TransactionActivity::IdleInTransaction,
         holder: CleanupHolder::Session,
         ..OpenTransaction::default()
     }
@@ -245,8 +245,11 @@ fn a_young_mysql_transaction_is_not_blamed_for_the_servers_history() {
 #[test]
 fn sql_server_says_what_the_transaction_holds() {
     let mut s = with_signals(Engine::Mssql, vec![]);
-    s.pressure.as_mut().unwrap().oldest_transaction =
-        Some(OpenTransaction { wrote: Some(true), state: Some("running".into()), ..transaction("71", 3600.0) });
+    s.pressure.as_mut().unwrap().oldest_transaction = Some(OpenTransaction {
+        wrote: Some(true),
+        activity: TransactionActivity::Running,
+        ..transaction("71", 3600.0)
+    });
     let f = held_cleanup(&s);
     assert!(f[0].title.contains("uncommitted changes"), "{}", f[0].title);
     assert!(f[0].summary.contains("can't reuse the transaction log"));
@@ -259,7 +262,7 @@ fn postgres_slots_and_prepared_transactions_get_their_own_fix() {
     let mut s = with_signals(Engine::Postgres, vec![]);
     s.pressure.as_mut().unwrap().oldest_transaction = Some(OpenTransaction {
         session: "standby_1".into(),
-        state: Some("inactive slot".into()),
+        activity: TransactionActivity::SlotInactive,
         holder: CleanupHolder::ReplicationSlot,
         xid_age: Some(150_000_000.0),
         ..OpenTransaction::default()
@@ -274,7 +277,7 @@ fn postgres_slots_and_prepared_transactions_get_their_own_fix() {
     s.pressure.as_mut().unwrap().oldest_transaction = Some(OpenTransaction {
         session: "tx-17".into(),
         seconds: 7200.0,
-        state: Some("prepared".into()),
+        activity: TransactionActivity::Prepared,
         holder: CleanupHolder::PreparedTransaction,
         xid_age: Some(40_000.0),
         ..OpenTransaction::default()

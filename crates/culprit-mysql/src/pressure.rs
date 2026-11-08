@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::time::{Duration, Instant};
 
 use culprit_core::{
-    CleanupHolder, Coverage, Engine, OpenTransaction, Pressure, Result, Signal, SignalScope, SignalUnit, WaitSample,
-    WaitStat, format, t,
+    CleanupHolder, Coverage, Engine, OpenTransaction, Pressure, Result, Signal, SignalScope, SignalUnit,
+    TransactionActivity, WaitSample, WaitStat, format, t,
 };
 use mysql_async::{Conn, Value};
 
@@ -227,11 +227,11 @@ pub async fn collect(conn: &mut Conn) -> (Pressure, Coverage) {
             session: row.string("session"),
             seconds: row.number("seconds").unwrap_or(0.0),
             program: row.text("program").filter(|s| !s.is_empty()),
-            state: Some(if row.text("command").as_deref() == Some("Sleep") {
-                "idle in transaction".into()
+            activity: if row.text("command").as_deref() == Some("Sleep") {
+                TransactionActivity::IdleInTransaction
             } else {
-                "running".into()
-            }),
+                TransactionActivity::Running
+            },
             holder: CleanupHolder::Session,
             wrote: row.number("modified").map(|m| m > 0.0),
             database: row.text("db").filter(|d| !d.is_empty()),

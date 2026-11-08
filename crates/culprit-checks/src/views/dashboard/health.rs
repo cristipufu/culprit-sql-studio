@@ -122,7 +122,7 @@ pub(super) fn health(report: &Report) -> Tile {
             t!("view.dashboard.health.oldest_transaction"),
         );
         let open = format::duration(tx.seconds * 1000.0);
-        item.value = Some(match tx.state.as_deref() {
+        item.value = Some(match tx.state_words() {
             Some(state) => t!("view.dashboard.health.oldest_transaction_state", duration = open, state = state),
             None => open,
         });

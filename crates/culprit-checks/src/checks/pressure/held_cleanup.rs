@@ -86,15 +86,15 @@ fn held_cleanups(snapshot: &Snapshot) -> Vec<HeldCleanup<'_>> {
         (Engine::Yugabyte, _) => return Vec::new(),
         (Engine::Mssql, _) => Holding::Mssql {
             version_store: t.held_bytes.filter(|b| *b > 0.0),
-            snapshot_reader: t.held_bytes.is_some_and(|b| b > 0.0) || t.state.as_deref() == Some("snapshot"),
+            snapshot_reader: t.held_bytes.is_some_and(|b| b > 0.0) || t.activity == TransactionActivity::Snapshot,
             wrote: t.wrote == Some(true),
         },
         (Engine::Postgres, CleanupHolder::ReplicationSlot) => {
-            Holding::PgSlot { catalog_only: t.catalog_only, inactive: t.state.as_deref() == Some("inactive slot") }
+            Holding::PgSlot { catalog_only: t.catalog_only, inactive: t.activity == TransactionActivity::SlotInactive }
         }
         (Engine::Postgres, CleanupHolder::PreparedTransaction) => Holding::PgPrepared { by: t.program.as_deref() },
         (Engine::Postgres, CleanupHolder::Session) => {
-            Holding::PgSession { idle: t.state.as_deref().is_some_and(|s| s.contains("idle")) }
+            Holding::PgSession { idle: t.activity == TransactionActivity::IdleInTransaction }
         }
         (Engine::Mysql, _) => Holding::Mysql {
             history: signal(snapshot, "history-length").filter(|h| *h > 0.0),
