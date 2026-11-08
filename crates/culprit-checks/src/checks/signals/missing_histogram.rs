@@ -6,18 +6,36 @@ use crate::evidence::{QueryMeasure, Requirement as Evidence};
 pub fn missing_histogram_info() -> CheckInfo {
     CheckInfo {
         id: "missing-histogram".into(),
-        title: "Filter columns the optimizer has to guess about".into(),
+        title: t!("check.missing_histogram.info.title"),
         category: Category::Maintenance,
         engines: vec![Engine::Mysql],
         requires: vec![],
-        description: "Columns that heavy queries filter on with no index leading on them and no histogram (MySQL 8 COLUMN_STATISTICS, MariaDB mysql.column_stats), so the optimizer assumes a fixed share of rows match.".into(),
+        description: t!("check.missing_histogram.info.description"),
     }
 }
 
 check!(
-    MissingHistogramCheck: missing_histogram_info, missing_histogram,
-    &[Evidence::Query(QueryMeasure::Histograms)]
+    MissingHistogramCheck: missing_histogram_info,
+    decide = guessed_filters,
+    render = missing_histogram_finding,
+    case<'s> = GuessedFilter<'s>,
+    evidence = &[Evidence::Query(QueryMeasure::Histograms)],
 );
+
+/// A table whose heavy statements filter on columns the optimizer has only its fixed guess for.
+pub struct GuessedFilter<'s> {
+    schema: String,
+    table: String,
+    /// The columns no index leads with and no histogram describes.
+    columns: Vec<String>,
+    /// The share EXPLAIN showed for the step, in percent: the guess.
+    guess: f64,
+    queries: Vec<&'s QueryStat>,
+    /// MariaDB counts the condition as keeping every row and collects column statistics; MySQL guesses a fixed share
+    /// and builds histograms.
+    mariadb: bool,
+    severity: Severity,
+}
 
 /// The table name a plan node reads, without schema or quotes.
 pub(super) fn node_table(object: &str) -> String {
@@ -51,7 +69,7 @@ fn no_choice(snapshot: &Snapshot, q: &QueryStat, plan: &culprit_core::Plan, node
     tables.len() == 1 && node.kind == culprit_core::NodeKind::Scan && !possible_keys && !ordered
 }
 
-pub fn missing_histogram(snapshot: &Snapshot) -> Vec<Finding> {
+fn guessed_filters(snapshot: &Snapshot) -> Vec<GuessedFilter<'_>> {
     let Some(histograms) = snapshot.histograms.as_ref() else { return Vec::new() };
     let mariadb = is_mariadb(snapshot);
     let has_histogram = |table: &str, column: &str| {
@@ -119,67 +137,96 @@ pub fn missing_histogram(snapshot: &Snapshot) -> Vec<Finding> {
             }
         }
     }
-    let engine = engine_name(snapshot);
     by_table
         .into_iter()
         .map(|((schema, table), (columns, guess, queries))| {
-            let name = format!("{schema}.{table}");
-            let mut f = finding("missing-histogram", &name, Category::Maintenance, subject(SubjectKind::Table, &name));
-            let list = format::list(&columns);
-            f.title = format!(
-                "{engine} guesses how many {table} rows match {list}: no {}",
-                if mariadb { "column statistics" } else { "histogram" }
-            );
-            let who = match queries.len() {
-                1 => format!("{} filters", capitalize(&query_handle(queries[0]))),
-                n => format!("{n} of the heaviest queries filter"),
-            };
-            f.summary = if mariadb {
-                // MariaDB doesn't guess a share: without statistics for a column it counts the condition as keeping
-                // every row.
-                format!(
-                    "{who} {table} on {list}, which no index starts with and no statistics describe, so {engine} assumes the condition keeps every row (EXPLAIN shows filtered = {guess:.0}%). When it actually keeps few, common for status flags and skewed values, it picks the wrong join order or access path. Column statistics cost nothing at query time and change only when you run ANALYZE again."
-                )
-            } else {
-                format!(
-                    "{who} {table} on {list}, which no index starts with and no histogram describes, so {engine} assumes a fixed share of rows match (10% for =, a third for ranges); EXPLAIN shows filtered = {guess:.2}%, from those guesses. When the real share is far off, common for status flags and skewed values, it picks the wrong join order or access path. A histogram costs nothing at query time and changes only when you run ANALYZE again."
-                )
-            };
-            f.queries = query_refs(&queries);
-            let impact = query_impact(snapshot, &queries);
-            let share = impact.as_ref().map(|i| i.share).unwrap_or(0.0);
-            if let Some(impact) = impact {
-                apply_query_impact(&mut f, &impact);
-            }
+            let share = query_impact(snapshot, &queries).map(|i| i.share).unwrap_or(0.0);
             // A fixed guess the plan shows, behind a real amount of time (the rule every time-based finding follows), on
             // the basis its share is on.
-            f.severity = if share >= 0.05 && severity_for_statement_share(snapshot, &queries, share) >= Severity::Medium {
-                Severity::Medium
-            } else {
-                Severity::Low
-            };
-            severity_score(&mut f);
-            f.confidence = Confidence::High;
-            f.metrics =
-                vec![Metric::text("Columns", columns.join(", ")), Metric::new("EXPLAIN filtered", guess / 100.0, Unit::Ratio)];
-            let target = qualified(Engine::Mysql, &schema, &table);
-            f.facts.histogram_columns = columns.clone();
-            let quoted = columns.iter().map(|c| quote(Engine::Mysql, c)).collect::<Vec<_>>().join(", ");
-            f.fix = Some(if mariadb {
-                Fix {
-                    summary: "Collect a histogram for these columns. MariaDB uses it when use_stat_tables is PREFERABLY_FOR_QUERIES and optimizer_use_condition_selectivity is 4 or more, the defaults since 10.4. Run it again after large data changes.".into(),
-                    sql: Some(format!("ANALYZE TABLE {target} PERSISTENT FOR COLUMNS ({quoted}) INDEXES ();")),
-                    cost: Some("Reads the whole table".into()),
-                }
-            } else {
-                Fix {
-                    summary: "Build a histogram for these columns. It reads the table once; MySQL doesn't refresh it on its own, so run it again after large data changes.".into(),
-                    sql: Some(format!("ANALYZE TABLE {target} UPDATE HISTOGRAM ON {quoted} WITH 64 BUCKETS;")),
-                    cost: Some("Reads the table".into()),
-                }
-            });
-            f.verify = vec!["Re-scan: the columns should have histograms, and EXPLAIN ANALYZE should show estimated rows close to actual for that filter.".into()];
-            f
+            let severity =
+                if share >= 0.05 && severity_for_statement_share(snapshot, &queries, share) >= Severity::Medium {
+                    Severity::Medium
+                } else {
+                    Severity::Low
+                };
+            GuessedFilter { schema, table, columns, guess, queries, mariadb, severity }
         })
         .collect()
+}
+
+fn missing_histogram_finding(snapshot: &Snapshot, guessed: GuessedFilter<'_>) -> Finding {
+    let GuessedFilter { schema, table, columns, guess, queries, mariadb, .. } = guessed;
+    let engine = engine_name(snapshot);
+    let name = format!("{schema}.{table}");
+    let mut f = finding("missing-histogram", &name, Category::Maintenance, subject(SubjectKind::Table, &name));
+    let list = format::list(&columns);
+    f.title = if mariadb {
+        t!("check.missing_histogram.title.mariadb", engine = engine, table = &table, columns = &list)
+    } else {
+        t!("check.missing_histogram.title.mysql", engine = engine, table = &table, columns = &list)
+    };
+    // MariaDB doesn't guess a share: without statistics for a column it counts the condition as keeping every row.
+    f.summary = match (mariadb, queries.as_slice()) {
+        (true, [one]) => t!(
+            "check.missing_histogram.summary.mariadb_one",
+            handle = capitalize(&query_handle(one)),
+            table = &table,
+            columns = &list,
+            engine = engine,
+            guess = format!("{guess:.0}")
+        ),
+        (true, _) => t!(
+            "check.missing_histogram.summary.mariadb_many",
+            count = queries.len().to_string(),
+            table = &table,
+            columns = &list,
+            engine = engine,
+            guess = format!("{guess:.0}")
+        ),
+        (false, [one]) => t!(
+            "check.missing_histogram.summary.mysql_one",
+            handle = capitalize(&query_handle(one)),
+            table = &table,
+            columns = &list,
+            engine = engine,
+            guess = format!("{guess:.2}")
+        ),
+        (false, _) => t!(
+            "check.missing_histogram.summary.mysql_many",
+            count = queries.len().to_string(),
+            table = &table,
+            columns = &list,
+            engine = engine,
+            guess = format!("{guess:.2}")
+        ),
+    };
+    f.queries = query_refs(&queries);
+    if let Some(impact) = query_impact(snapshot, &queries) {
+        apply_query_impact(&mut f, &impact);
+    }
+    f.severity = guessed.severity;
+    severity_score(&mut f);
+    f.confidence = Confidence::High;
+    f.metrics = vec![
+        Metric::text(t!("check.missing_histogram.metric.columns"), columns.join(", ")),
+        Metric::new(t!("check.missing_histogram.metric.filtered"), guess / 100.0, Unit::Ratio),
+    ];
+    let target = qualified(Engine::Mysql, &schema, &table);
+    f.facts.histogram_columns = columns.clone();
+    let quoted = columns.iter().map(|c| quote(Engine::Mysql, c)).collect::<Vec<_>>().join(", ");
+    f.fix = Some(if mariadb {
+        Fix {
+            summary: t!("check.missing_histogram.fix.mariadb"),
+            sql: Some(format!("ANALYZE TABLE {target} PERSISTENT FOR COLUMNS ({quoted}) INDEXES ();")),
+            cost: Some(t!("check.missing_histogram.fix.cost_mariadb")),
+        }
+    } else {
+        Fix {
+            summary: t!("check.missing_histogram.fix.mysql"),
+            sql: Some(format!("ANALYZE TABLE {target} UPDATE HISTOGRAM ON {quoted} WITH 64 BUCKETS;")),
+            cost: Some(t!("check.missing_histogram.fix.cost_mysql")),
+        }
+    });
+    f.verify = vec![t!("check.missing_histogram.verify")];
+    f
 }

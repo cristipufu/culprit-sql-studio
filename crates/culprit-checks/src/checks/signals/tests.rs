@@ -701,7 +701,7 @@ fn histograms_for_guessed_filter_columns() {
     // As the parser records it: the plan's facts, not its display properties, are what the checks read.
     plan.root.facts_mut().estimated_filtered_percent = Some(10.0);
     s.histograms = Some(vec![]);
-    let all = missing_histogram(&s);
+    let all = MissingHistogramCheck.run(&s);
     let f: Vec<&Finding> = all.iter().filter(|f| f.subject.name.ends_with(&format!(".{}", table.name))).collect();
     assert_eq!(f.len(), 1, "{all:?}");
     assert_eq!(f[0].title, format!("MySQL guesses how many {} rows match flavor: no histogram", table.name));
@@ -713,23 +713,23 @@ fn histograms_for_guessed_filter_columns() {
         kind: Some("singleton".into()),
         buckets: Some(3.0),
     }]);
-    assert!(!missing_histogram(&s).iter().any(|f| f.title.contains("flavor")));
+    assert!(!MissingHistogramCheck.run(&s).iter().any(|f| f.title.contains("flavor")));
     // MariaDB collects them with ANALYZE … PERSISTENT. Its guess is that the condition keeps every row: MySQL's 10%
     // isn't one there.
     s.histograms = Some(vec![]);
     s.server.product = "MariaDB 11.8.9".into();
-    assert!(missing_histogram(&s).iter().all(|f| !f.title.contains("flavor")));
+    assert!(MissingHistogramCheck.run(&s).iter().all(|f| !f.title.contains("flavor")));
     let q = s.workload.as_mut().unwrap().queries.iter_mut().find(|q| q.plan.is_some()).unwrap();
     let root = &mut q.plan.as_mut().unwrap().root;
     root.props.insert("filtered".into(), "100".into());
     root.facts_mut().estimated_filtered_percent = Some(100.0);
-    let maria = missing_histogram(&s);
+    let maria = MissingHistogramCheck.run(&s);
     let f = maria.iter().find(|f| f.title.contains("flavor")).unwrap();
     assert!(f.title.starts_with("MariaDB guesses"));
     assert!(f.fix.as_ref().unwrap().sql.as_ref().unwrap().contains("PERSISTENT FOR COLUMNS (`flavor`) INDEXES ()"));
     // MySQL 5.7 has no histograms: no finding at all.
     s.histograms = None;
-    assert!(missing_histogram(&s).is_empty());
+    assert!(MissingHistogramCheck.run(&s).is_empty());
 }
 
 #[test]

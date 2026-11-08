@@ -1811,3 +1811,73 @@ caveat: Counted since the indexes' metadata was loaded into memory, usually sinc
 caveat: The comparison covers less than an hour: only its measured total is graded, without extrapolating a daily rate."#,
     );
 }
+
+// ── missing-histogram ──────────────────────────────────────────────────────────────────────────────
+
+/// The MySQL demo's statements with plans made to filter `table` on `flavor` with the optimizer's fixed guess.
+fn guessed(product: &str, filtered: f64, statements: usize) -> Vec<Finding> {
+    let mut s = fixture("mysql-demo");
+    s.server.product = product.into();
+    let table = s.tables.iter().find(|t| t.rows.unwrap_or(0.0) >= 1_000.0).expect("a table").clone();
+    let w = s.workload.as_mut().expect("workload");
+    w.queries.sort_by(|a, b| b.total_time_ms.total_cmp(&a.total_time_ms));
+    let mut planted = 0;
+    for q in w.queries.iter_mut().filter(|q| q.plan.is_some()) {
+        if planted == statements {
+            q.plan = None;
+            continue;
+        }
+        q.text = format!("SELECT * FROM `{}` WHERE `flavor` = ? AND `size` > ?", table.name);
+        let plan = q.plan.as_mut().unwrap();
+        plan.root.object = Some(format!("`{}`.`{}`", table.schema, table.name));
+        plan.root.predicate =
+            Some(format!("((`{0}`.`{1}`.`flavor` = 'x') and (`{0}`.`{1}`.`size` > 3))", table.schema, table.name));
+        plan.root.props.insert("filtered".into(), format!("{filtered}"));
+        plan.root.facts_mut().estimated_filtered_percent = Some(filtered);
+        planted += 1;
+    }
+    s.histograms = Some(vec![]);
+    run("missing-histogram", &s).into_iter().filter(|f| f.subject.name.ends_with(&format!(".{}", table.name))).collect()
+}
+
+#[test]
+fn guessed_filters_on_mysql_and_mariadb() {
+    let mut findings = guessed("MySQL 8.4.11", 100.0 / 30.0, 1);
+    findings.extend(guessed("MySQL 8.4.11", 100.0 / 30.0, 2));
+    findings.extend(guessed("MariaDB 11.8.9", 100.0, 1));
+    says(
+        &findings,
+        r#"id: missing-histogram:shop.customers
+title: MySQL guesses how many customers rows match flavor and size: no histogram
+summary: A read from customers filters customers on flavor and size, which no index starts with and no histogram describes, so MySQL assumes a fixed share of rows match (10% for =, a third for ranges); EXPLAIN shows filtered = 3.33%, from those guesses. When the real share is far off, common for status flags and skewed values, it picks the wrong join order or access path. A histogram costs nothing at query time and changes only when you run ANALYZE again.
+impact: 77% of DB time
+metric: Columns = flavor, size
+metric: EXPLAIN filtered
+fix: Build a histogram for these columns. It reads the table once; MySQL doesn't refresh it on its own, so run it again after large data changes.
+cost: Reads the table
+sql: ANALYZE TABLE `shop`.`customers` UPDATE HISTOGRAM ON `flavor`, `size` WITH 64 BUCKETS;
+verify: Re-scan: the columns should have histograms, and EXPLAIN ANALYZE should show estimated rows close to actual for that filter.
+
+id: missing-histogram:shop.customers
+title: MySQL guesses how many customers rows match flavor and size: no histogram
+summary: 2 of the heaviest queries filter customers on flavor and size, which no index starts with and no histogram describes, so MySQL assumes a fixed share of rows match (10% for =, a third for ranges); EXPLAIN shows filtered = 3.33%, from those guesses. When the real share is far off, common for status flags and skewed values, it picks the wrong join order or access path. A histogram costs nothing at query time and changes only when you run ANALYZE again.
+impact: 86% of DB time
+metric: Columns = flavor, size
+metric: EXPLAIN filtered
+fix: Build a histogram for these columns. It reads the table once; MySQL doesn't refresh it on its own, so run it again after large data changes.
+cost: Reads the table
+sql: ANALYZE TABLE `shop`.`customers` UPDATE HISTOGRAM ON `flavor`, `size` WITH 64 BUCKETS;
+verify: Re-scan: the columns should have histograms, and EXPLAIN ANALYZE should show estimated rows close to actual for that filter.
+
+id: missing-histogram:shop.customers
+title: MariaDB guesses how many customers rows match flavor and size: no column statistics
+summary: A read from customers filters customers on flavor and size, which no index starts with and no statistics describe, so MariaDB assumes the condition keeps every row (EXPLAIN shows filtered = 100%). When it actually keeps few, common for status flags and skewed values, it picks the wrong join order or access path. Column statistics cost nothing at query time and change only when you run ANALYZE again.
+impact: 77% of DB time
+metric: Columns = flavor, size
+metric: EXPLAIN filtered
+fix: Collect a histogram for these columns. MariaDB uses it when use_stat_tables is PREFERABLY_FOR_QUERIES and optimizer_use_condition_selectivity is 4 or more, the defaults since 10.4. Run it again after large data changes.
+cost: Reads the whole table
+sql: ANALYZE TABLE `shop`.`customers` PERSISTENT FOR COLUMNS (`flavor`, `size`) INDEXES ();
+verify: Re-scan: the columns should have histograms, and EXPLAIN ANALYZE should show estimated rows close to actual for that filter."#,
+    );
+}
