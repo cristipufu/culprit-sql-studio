@@ -2,10 +2,6 @@
 
 use super::*;
 
-/// The sentence `check.config.slow_query_log.fix_cost.mariadb_lock_time` says, for the lock-holder advice that still
-/// words itself (`crate::support`); the finding here says it from the catalog.
-pub(crate) const MARIADB_TABLE_LOCK_TIME: &str = "Written to a table (TABLE in log_output), MariaDB counts the whole run of each statement it logs as that statement's lock time, so their lock time says nothing (Culprit reads it as unknown); written to a file (FILE), it is the real wait.";
-
 /// What MySQL's and MariaDB's settings establish, one finding each.
 pub enum Case<'s> {
     /// The buffer pool, smaller than half the InnoDB data, serving under 99% of reads from memory.

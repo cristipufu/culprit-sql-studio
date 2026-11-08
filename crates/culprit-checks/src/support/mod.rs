@@ -949,7 +949,7 @@ pub fn log_next_waits(snapshot: &Snapshot, slower_than: Option<f64>) -> LockHold
                     t!("support.lock_holder.mysql.keeps", logging = logging, bar = &bar, server = server.name());
                 // MariaDB writing its slow log to a table counts a statement's whole run as its lock time.
                 if server.is_mariadb() {
-                    [keeps, crate::config::MARIADB_TABLE_LOCK_TIME.into()].join(" ")
+                    [keeps, t!("check.config.slow_query_log.fix_cost.mariadb_lock_time")].join(" ")
                 } else {
                     keeps
                 }
