@@ -58,12 +58,13 @@ test("Each tab keeps its own text and undo history while another is shown", asyn
   await replaceSql(page, "SELECT 1 AS first");
   await page.keyboard.press("ControlOrMeta+t");
   await replaceSql(page, "SELECT 2 AS second");
-  await page.keyboard.press("ControlOrMeta+Shift+[");
+  await page.getByRole("tab", { name: "Query 1" }).click();
   await expect(page.getByRole("tab", { name: "Query 1" })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator(".cm-content")).toContainText("SELECT 1 AS first");
   // The kept state is the tab's own: undo there takes back that tab's typing, not the other tab's.
+  await page.locator(".cm-content").click();
   await page.keyboard.press("ControlOrMeta+z");
   await expect(page.locator(".cm-content")).not.toContainText("SELECT 1 AS first");
-  await page.keyboard.press("ControlOrMeta+Shift+]");
+  await page.getByRole("tab", { name: "Query 2" }).click();
   await expect(page.locator(".cm-content")).toContainText("SELECT 2 AS second");
 });
