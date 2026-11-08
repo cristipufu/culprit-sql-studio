@@ -8,6 +8,7 @@ mod escalations;
 mod file_pickers;
 mod fuzz;
 mod golden;
+mod insight_words;
 mod insights;
 mod invariants;
 mod measurement;

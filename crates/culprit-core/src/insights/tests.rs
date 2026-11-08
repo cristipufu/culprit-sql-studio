@@ -2179,3 +2179,156 @@ fn nested_loop_memoize_cache_misses_rereading_inner_table_are_flagged() {
     let p = plan(Engine::Postgres, join);
     assert!(rules(&p).contains(&"nested-loops".to_string()), "{:?}", rules(&p));
 }
+
+// ── what the insights say, word for word ─────────────────────────────────────────────────────────────────────────
+// Their messages come from locales/en.json: these pin the English of what no captured plan says (each engine's note on
+// what its plans can't show, every rule's one line, the type-mismatch fix, the statistics warning's context).
+
+/// A plan of `engine` for its note: estimated, or measured (`actual`).
+fn noted(engine: Engine, actual: bool) -> Plan {
+    let mut p = plan(engine, node(0, "Sort", NodeKind::Sort));
+    if actual {
+        p.kind = PlanKind::Actual;
+    }
+    p
+}
+
+fn said_words() -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    for (rule, engines, line) in RULES {
+        let _ = writeln!(out, "rule {rule} {engines:?}: {line}");
+    }
+    let mut notes: Vec<(&str, Plan)> = Vec::new();
+    let mut generic = noted(Engine::Postgres, false);
+    generic.kind = PlanKind::Generic;
+    notes.push(("generic", generic));
+    let mut generic = noted(Engine::Sqlite, false);
+    generic.kind = PlanKind::Generic;
+    notes.push(("generic sqlite", generic));
+    let mut stats = noted(Engine::Mssql, false);
+    stats.statement = Some("UPDATE STATISTICS dbo.orders WITH FULLSCAN".into());
+    notes.push(("statistics maintenance", stats));
+    let mut schema = noted(Engine::Postgres, false);
+    schema.statement = Some("CREATE INDEX ix_orders_status ON orders (status)".into());
+    notes.push(("schema change", schema));
+    notes.push(("sqlite", noted(Engine::Sqlite, false)));
+    for actual in [false, true] {
+        let mut maria = noted(Engine::Mysql, actual);
+        maria.facts_mut().flavor = Some("MariaDB".into());
+        notes.push(("mariadb", maria));
+        notes.push(("mssql", noted(Engine::Mssql, actual)));
+        notes.push(("yugabyte", noted(Engine::Yugabyte, actual)));
+        notes.push(("postgres", noted(Engine::Postgres, actual)));
+        notes.push(("mysql", noted(Engine::Mysql, actual)));
+    }
+    let mut old = noted(Engine::Mysql, false);
+    old.facts_mut().server_version = Some("5.7.44-log".into());
+    notes.push(("mysql 5.7", old));
+    for (what, p) in &notes {
+        let kind = if p.kind == PlanKind::Actual { "actual" } else { "estimated" };
+        let _ = writeln!(out, "note {what} {kind}: {:?}", coverage_note(p));
+    }
+    let _ = writeln!(
+        out,
+        "statistics note: {:?}",
+        statistics_maintenance_note(Engine::Mssql, "UPDATE STATISTICS dbo.orders WITH FULLSCAN")
+    );
+    for (column, target) in [
+        (Some("customers.email"), Some("nvarchar(256)")),
+        (Some("customers.email"), Some("nchar(10)")),
+        (Some("orders.total"), Some("int")),
+        (Some("orders.total"), None),
+        (None, Some("nvarchar(64)")),
+        (None, None),
+    ] {
+        let _ = writeln!(out, "mismatch {column:?} {target:?}: {}", mismatch_fix(column, target));
+    }
+    let stale = StaleIndexStatistics {
+        table: "app.orders".into(),
+        columns: vec!["tenant_id".into(), "status".into()],
+        indexes: vec!["ix_orders_tenant".into()],
+        table_rows: Some(1_000.0),
+    };
+    let _ = writeln!(out, "stale: {}", stale_index_statistics_detail(&stale, None));
+    let _ =
+        writeln!(out, "stale with catalog: {}", stale_index_statistics_detail(&stale, Some("both have statistics.")));
+    out
+}
+
+#[test]
+fn notes_rules_and_shared_fixes_say_the_same_english_word_for_word() {
+    let actual = said_words();
+    let (mut a, mut e) = (actual.lines(), SAID.lines());
+    let mut line = 0;
+    loop {
+        line += 1;
+        match (a.next(), e.next()) {
+            (None, None) => break,
+            (got, wanted) => assert_eq!(got, wanted, "line {line} of what the insights say"),
+        }
+    }
+}
+
+const SAID: &str = r##"rule deep-pagination [Mssql, Postgres, Yugabyte, Mysql]: A literal OFFSET skips many matches before returning a later page
+rule partition-filtering [Postgres]: A measured run visits many partitions and filters most rows afterwards; inspect intended pruning
+rule cross-table-or [Mssql, Postgres, Yugabyte, Mysql]: A filter across tables after a scan; evaluate a semantics-preserving rewrite before indexing
+rule key-lookups [Mssql]: Thousands of key or RID lookups back into the table
+rule scan-filter [Mssql, Postgres, Yugabyte, Mysql]: A scan reads far more rows than its filter keeps
+rule missing-index-hint [Mssql]: The optimizer's own index suggestion
+rule implicit-conversion [Mssql]: A type mismatch that blocks an index seek (CONVERT_IMPLICIT)
+rule non-sargable [Mssql, Postgres, Yugabyte, Mysql]: A function or cast around a filtered column
+rule leading-wildcard [Mssql, Postgres, Yugabyte, Mysql]: LIKE '%…' that can't use an index
+rule not-in [Mssql, Postgres, Yugabyte, Mysql]: NOT IN that checks the subquery row by row
+rule scalar-udf [Mssql]: A scalar function called once per row
+rule table-variable [Mssql]: A table variable estimated at one row
+rule parallelism-blocked [Mssql]: An expensive plan that can't go parallel
+rule parallel-skew [Mssql, Postgres]: One thread or worker doing most of the work
+rule eager-spool [Mssql]: A temporary index built on every run
+rule automatic-index [Sqlite]: SQLite builds a throwaway index on every run because none fits
+rule spill [Mssql, Postgres, Yugabyte, Mysql]: A sort or hash that ran out of memory and wrote to disk, or an exchange that spilled
+rule memory-grant [Mssql]: A memory grant far larger than what the query uses, or a wait for one
+rule misestimate [Mssql, Postgres, Yugabyte, Mysql]: Actual rows far from the estimate
+rule nested-loops [Mssql, Postgres, Yugabyte, Mysql]: A nested loop rereading its inner side thousands of times
+rule big-sort [Mssql, Postgres, Yugabyte, Mysql]: A large sort that dominates the plan
+rule no-join-predicate [Mssql, Postgres, Yugabyte, Mysql]: Two inputs joined without a condition
+rule missing-statistics [Mssql]: Columns without statistics
+rule optimizer-timeout [Mssql]: The optimizer stopped before finding the best plan
+rule legacy-ce [Mssql]: Planned with the legacy cardinality estimator
+rule slow-compile [Mssql, Postgres, Yugabyte]: Planning takes long, or longer than running
+rule many-to-many [Mssql]: A many-to-many merge join working through tempdb
+rule remote-query [Mssql]: Rows pulled from a linked server
+rule heap-fetches [Postgres]: An index-only scan that still visits the table
+rule lossy-bitmap [Postgres]: A bitmap scan that ran out of work_mem
+rule workers-short [Postgres]: Fewer parallel workers started than planned
+rule jit [Postgres]: JIT compilation taking a large share of the run
+rule correlated-subquery [Postgres, Yugabyte, Mysql]: A subquery run once per outer row
+rule join-buffer [Mysql]: A join without an index (join buffer / hash join over a scan)
+rule temp-table-sort [Mysql]: Grouping in a temporary table, then a filesort
+rule index-ignored [Mysql]: An index was possible but the whole table was read
+note generic estimated: Some("This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.")
+note generic sqlite estimated: Some("Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values.")
+note statistics maintenance estimated: Some("This plan updates optimizer statistics. Reading and sorting samples is maintenance work, so ordinary query index, ORDER BY and parallelism advice does not apply. Review its frequency and sampling only if measured maintenance cost warrants it.")
+note schema change estimated: Some("This plan builds an index or changes the schema: reading and sorting the table is the work it's for, so no advice is read from it.")
+note sqlite estimated: Some("SQLite's EXPLAIN QUERY PLAN shows the access path only: no estimated or actual rows, costs or timings.")
+note mariadb estimated: Some("MariaDB's EXPLAIN has no actual rows or timings; ANALYZE adds them, with pages read and sort spills.")
+note mssql estimated: Some("Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.")
+note yugabyte estimated: Some("Without EXPLAIN ANALYZE DIST, actual DocDB RPCs, storage rows scanned and execution timings are unknown.")
+note postgres estimated: Some("Without EXPLAIN ANALYZE there are no actual rows, spills or timings to check. PostgreSQL plans never carry index suggestions; Culprit reads filters instead.")
+note mysql estimated: Some("MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.")
+note mariadb actual: Some("MariaDB plans don't record memory grants or parallel threads, so those checks don't apply.")
+note mssql actual: None
+note yugabyte actual: Some("DocDB storage RPCs and rows scanned are distinct from PostgreSQL buffer pages. RPC timings may overlap and are not exclusive shares of execution time.")
+note postgres actual: Some("PostgreSQL plans carry no index suggestions or memory grants; index advice comes from the filters.")
+note mysql actual: Some("MySQL plans don't record spills, memory grants or parallel threads, so those checks don't apply.")
+note mysql 5.7 estimated: Some("MySQL's EXPLAIN has no actual rows, spills, memory or threads, and this version can't measure a run (EXPLAIN ANALYZE arrived in MySQL 8.0.18).")
+statistics note: Some("This plan updates optimizer statistics. Reading and sorting samples is maintenance work, so ordinary query index, ORDER BY and parallelism advice does not apply. Review its frequency and sampling only if measured maintenance cost warrants it.")
+mismatch Some("customers.email") Some("nvarchar(256)"): Make the types match: send the value as non-Unicode text (SqlDbType.VarChar in .NET, sql.VarChar in Node's mssql, a non-Unicode mapping in your ORM), or, if your schema keeps text as Unicode, change customers.email to nvarchar(256). Changing a column rewrites it and the indexes on it.
+mismatch Some("customers.email") Some("nchar(10)"): Make the types match: send the value as non-Unicode text (SqlDbType.VarChar in .NET, sql.VarChar in Node's mssql, a non-Unicode mapping in your ORM), or, if your schema keeps text as Unicode, change customers.email to nchar(10). Changing a column rewrites it and the indexes on it.
+mismatch Some("orders.total") Some("int"): Make the types match: send the value with orders.total's own type, or change orders.total to int if that's what it should hold. Changing a column rewrites it and the indexes on it.
+mismatch Some("orders.total") None: Make the types match: send the value with orders.total's own type, or change orders.total to the type the application sends if that's what it should hold. Changing a column rewrites it and the indexes on it.
+mismatch None Some("nvarchar(64)"): Make the types match: send the value as non-Unicode text (SqlDbType.VarChar in .NET, sql.VarChar in Node's mssql, a non-Unicode mapping in your ORM), or, if your schema keeps text as Unicode, change the column to nvarchar(64). Changing a column rewrites it and the indexes on it.
+mismatch None None: Make the types match: send the value with the column's own type, or change the column to the type the application sends if that's what it should hold. Changing a column rewrites it and the indexes on it.
+stale: SQL Server reported no usable statistics on tenant_id and status when this plan was compiled. These columns appear in seek keys of ix_orders_tenant. An index has statistics, but its histogram describes only the first key; the seek alone does not establish that each named column has a histogram or that the statistics are out of date. Query Store can retain the original warning after statistics change.
+stale with catalog: SQL Server reported no usable statistics on tenant_id and status when this plan was compiled. These columns appear in seek keys of ix_orders_tenant. An index has statistics, but its histogram describes only the first key; the seek alone does not establish that each named column has a histogram or that the statistics are out of date. Query Store can retain the original warning after statistics change. Current catalog: both have statistics.
+"##;
