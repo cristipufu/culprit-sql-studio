@@ -2,21 +2,102 @@
 
 use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
+use culprit_core::insights::{PlanInsight, StaleIndexStatistics};
+use culprit_core::t;
 
 pub fn plan_warnings_info() -> CheckInfo {
     CheckInfo {
         id: "plan-warnings".into(),
-        title: "Plan warnings".into(),
+        title: t!("check.plan_warnings.info.title"),
         category: Category::Queries,
         engines: vec![Engine::Mssql, Engine::Postgres, Engine::Yugabyte, Engine::Mysql],
         requires: vec![Capability::QueryPlans],
-        description: "Implicit conversions, spills, missing join predicates and missing statistics in the plans of heavy queries.".into(),
+        description: t!("check.plan_warnings.info.description"),
     }
 }
 
-check!(PlanWarningsCheck: plan_warnings_info, plan_warnings, &[Evidence::Query(QueryMeasure::CapturedPlans)]);
+check!(
+    PlanWarningsCheck: plan_warnings_info,
+    decide = plan_warning_cases,
+    render = plan_warning_finding,
+    case<'s> = PlanWarningCase<'s>,
+    evidence = &[Evidence::Query(QueryMeasure::CapturedPlans)],
+);
 
-pub fn plan_warnings(snapshot: &Snapshot) -> Vec<Finding> {
+/// A warning in the plans of one or more statements, and what it establishes: one cause (a type mismatch on one
+/// column) is one case, however many statements' plans show it.
+pub struct PlanWarningCase<'s> {
+    /// The first statement whose plan warned.
+    query: &'s QueryStat,
+    impact: QueryImpact,
+    /// What the plan warned of, as the first statement's plan shows it.
+    warned: Warned,
+    /// The type mismatch to describe, where several statements show it: SQL Server's verdict that it stops a seek, from
+    /// whichever statement's plan says so.
+    said: Option<Conversion>,
+    severity: Severity,
+    confidence: Confidence,
+    /// A warning about a plan that runs cheaply, or one a saved plan alone can't establish: information.
+    informational: bool,
+    /// Every statement whose plan shows it, with the step it warned on.
+    steps: Vec<(&'s QueryStat, Option<u32>)>,
+    /// What several statements that share it take together, and whether they all stopped.
+    shared: Option<Shared>,
+}
+
+struct Shared {
+    impact: QueryImpact,
+    queries: usize,
+    stopped: bool,
+}
+
+/// What one statement's plan warned of.
+enum Warned {
+    Conversion(Conversion),
+    Spill,
+    NoJoinPredicate(JoinCondition),
+    MissingStatistics {
+        /// The plan's own reading of the warning.
+        insight: Option<PlanInsight>,
+        /// The index keys it names, where every column it names is one.
+        stale: Option<StaleIndexStatistics>,
+        /// What the catalog says of those statistics now.
+        now: Option<StatisticsNow>,
+    },
+}
+
+/// A type mismatch: the database converts a column to compare it with a parameter of another type.
+#[derive(Clone)]
+struct Conversion {
+    /// The column converted, and the type it is converted to, where the plan says.
+    column: Option<String>,
+    target: Option<String>,
+    /// SQL Server says the conversion stops a seek ("Seek Plan"), not only that it affects estimates.
+    blocks_seek: bool,
+    /// The conversion as the plan writes it.
+    expression: Option<String>,
+    /// The parameters the application declares.
+    parameters: Option<String>,
+}
+
+/// What the catalog says now of the statistics a plan warned held nothing usable.
+struct StatisticsNow {
+    indexes: Vec<IndexStatistics>,
+    /// The table's rows when the plan was compiled, and now.
+    table_then: Option<f64>,
+    table_now: Option<f64>,
+}
+
+struct IndexStatistics {
+    index: String,
+    updated: String,
+    /// The table's rows when they were updated, and the changes counted since.
+    rows: Option<f64>,
+    changes: Option<f64>,
+}
+
+/// Every plan warning worth a finding, one case per cause.
+fn plan_warning_cases(snapshot: &Snapshot) -> Vec<PlanWarningCase<'_>> {
     let mut out = Vec::new();
     for q in app_queries(snapshot) {
         let Some(plan) = &q.plan else { continue };
@@ -36,85 +117,79 @@ pub fn plan_warnings(snapshot: &Snapshot) -> Vec<Finding> {
             if nodes.is_empty() && !plan.warnings.contains(&warning) {
                 continue;
             }
-            if let Some(f) = plan_warning_finding(snapshot, q, &impact, warning, nodes.first().copied()) {
-                out.push(f);
+            if let Some(case) = plan_warning_case(snapshot, q, &impact, warning, nodes.first().copied()) {
+                out.push(case);
             }
         }
     }
     merge_same_cause(snapshot, out)
 }
 
-/// One root cause (a type mismatch on one column) is one finding, however many queries hit it. It stops them seeking an
+impl PlanWarningCase<'_> {
+    /// The finding's id: a type mismatch's column, so every statement that shows it is one finding.
+    fn id(&self) -> String {
+        match &self.warned {
+            Warned::Conversion(Conversion { column: Some(c), .. }) => format!("plan-warnings:implicit-conversion:{c}"),
+            _ => format!("plan-warnings:{}:{}", self.query.id, warning_key(self.warning())),
+        }
+    }
+
+    fn warning(&self) -> PlanWarning {
+        match self.warned {
+            Warned::Conversion(_) => PlanWarning::ImplicitConversion,
+            Warned::Spill => PlanWarning::Spill,
+            Warned::NoJoinPredicate(_) => PlanWarning::NoJoinPredicate,
+            Warned::MissingStatistics { .. } => PlanWarning::MissingStatistics,
+        }
+    }
+}
+
+/// One root cause (a type mismatch on one column) is one case, however many queries hit it. It stops them seeking an
 /// index only where SQL Server said so of one of them (a "Seek Plan" warning, kept as High confidence); otherwise the
 /// conversion slows them, and their share doesn't raise it. Seeking, not using: the plan may still scan the index.
-pub(super) fn merge_same_cause(snapshot: &Snapshot, findings: Vec<Finding>) -> Vec<Finding> {
-    let mut merged: Vec<Finding> = Vec::new();
-    for f in findings {
-        match merged.iter_mut().find(|m| m.id == f.id) {
+fn merge_same_cause<'s>(snapshot: &'s Snapshot, cases: Vec<PlanWarningCase<'s>>) -> Vec<PlanWarningCase<'s>> {
+    let mut merged: Vec<PlanWarningCase> = Vec::new();
+    for c in cases {
+        match merged.iter_mut().find(|m| m.id() == c.id()) {
             Some(m) => {
-                if f.confidence == Confidence::High && m.confidence != Confidence::High {
+                if c.confidence == Confidence::High && m.confidence != Confidence::High {
                     m.confidence = Confidence::High;
-                    m.severity = m.severity.max(f.severity);
-                    m.summary = f.summary.clone();
+                    m.severity = m.severity.max(c.severity);
+                    m.said = match &c.warned {
+                        Warned::Conversion(conversion) => Some(conversion.clone()),
+                        _ => None,
+                    };
                 }
-                for r in f.queries {
-                    if !m.queries.iter().any(|x| x.id == r.id) {
-                        m.queries.push(r);
+                for step in c.steps {
+                    if !m.steps.iter().any(|(q, _)| q.id == step.0.id) {
+                        m.steps.push(step);
                     }
                 }
             }
-            None => merged.push(f),
+            None => merged.push(c),
         }
     }
-    for m in merged.iter_mut().filter(|m| m.queries.len() > 1) {
+    for m in merged.iter_mut().filter(|m| m.steps.len() > 1) {
         let queries: Vec<&QueryStat> =
-            m.queries.iter().filter_map(|r| snapshot.workload.as_ref()?.query(&r.id)).collect();
+            m.steps.iter().filter_map(|(r, _)| snapshot.workload.as_ref()?.query(&r.id)).collect();
         let Some(impact) = query_impact(snapshot, &queries) else { continue };
-        apply_query_impact(m, &impact);
-        let column = m.subject.name.clone();
-        // Queries that all stopped running are told in the past.
-        let stopped = crate::all_stopped(snapshot, &queries);
         if m.confidence == Confidence::High {
             m.severity = m.severity.max(severity_for_impact(snapshot, &queries, &impact));
-            let stops = if stopped { "stopped" } else { "stops" };
-            m.title = format!("A type mismatch on {column} {stops} {} queries from seeking an index", queries.len());
-        } else {
-            let slows = if stopped { "slowed" } else { "slows" };
-            m.title = format!("A type mismatch on {column} {slows} down {} queries", queries.len());
         }
-        m.summary.push_str(&format!(
-            " The same mismatch appears in {} queries that together take {} of database time.",
-            queries.len(),
-            format::percent(impact.share)
-        ));
-        m.metrics.retain(|x| x.label != "Share of DB time" && x.label != "Average duration");
-        m.metrics.insert(0, Metric::new("Share of DB time", impact.share, Unit::Ratio));
-        m.metrics.insert(1, Metric::new("Queries affected", queries.len() as f64, Unit::Count));
-        if let Some(per_day_ms) = impact.per_day_ms {
-            m.metrics.insert(2, Metric::new("DB time per day", per_day_ms, Unit::Ms));
-        }
+        m.shared = Some(Shared { queries: queries.len(), stopped: crate::all_stopped(snapshot, &queries), impact });
     }
     merged
 }
 
-pub(super) fn plan_warning_finding(
-    snapshot: &Snapshot,
-    q: &QueryStat,
+fn plan_warning_case<'s>(
+    snapshot: &'s Snapshot,
+    q: &'s QueryStat,
     impact: &QueryImpact,
     warning: PlanWarning,
     node: Option<&PlanNode>,
-) -> Option<Finding> {
-    let key = format!("{}:{}", q.id, warning_key(warning));
-    let mut f = finding("plan-warnings", &key, Category::Queries, subject(SubjectKind::Query, &q.id));
-    apply_impact(snapshot, &mut f, impact);
-    f.queries = vec![QueryRef { id: q.id.clone(), plan_node: node.map(|n| n.id), note: Some(warning.label()) }];
-    f.metrics.push(Metric::new(share_metric_label(snapshot), impact.share, Unit::Ratio));
-    f.metrics.push(Metric::new("Average duration", q.mean_time_ms, Unit::Ms));
-    let handle = query_handle(q);
-    // A statement that stopped running is told in the past: `tense(present, past)`.
-    let stopped = crate::all_stopped(snapshot, &[q]);
-    let tense = |present: &'static str, past: &'static str| if stopped { past } else { present };
-    match warning {
+) -> Option<PlanWarningCase<'s>> {
+    let mut informational = false;
+    let (warned, severity, confidence) = match warning {
         PlanWarning::ImplicitConversion => {
             let mut named: Vec<culprit_core::PlanConversion> =
                 node.into_iter().flat_map(|n| n.facts().conversions.clone()).collect();
@@ -146,177 +221,264 @@ pub(super) fn plan_warning_finding(
                 .find(|c| c.issue == culprit_core::PlanConversionIssue::SeekPlan)
                 .or(lines.first())
                 .copied();
+            // "Can't seek an index" is SQL Server's verdict (a "Seek Plan" warning), not a reading of the conversion:
+            // without it the plan may still seek (a range through the conversion), and the warning is about its
+            // estimates. With it, the plan may still scan the index, so the index isn't unused: it can't be searched.
             let blocks_seek = issue.is_some_and(|c| c.issue == culprit_core::PlanConversionIssue::SeekPlan);
             let converted = issue.and_then(|c| current_conversions(q.plan.as_ref()?, &c.expression).into_iter().next());
-            let column = converted.as_ref().map(|(c, _)| c.clone());
-            let target = converted.map(|(_, t)| t);
-            let unicode = target.as_deref().is_some_and(|t| t.to_ascii_lowercase().starts_with("nvarchar"));
-            let convert = issue.map(|c| c.expression.clone());
-            // "Can't seek an index" is SQL Server's verdict (a "Seek Plan" warning), not a reading of the conversion: without
-            // it the plan may still seek (a range through the conversion), and the warning is about its estimates. With it,
-            // the plan may still scan the index, so the index isn't unused: it can't be searched.
-            f.title = match &column {
-                Some(c) if blocks_seek => {
-                    format!("A type mismatch on {c} {} {handle} from seeking an index", tense("stops", "stopped"))
-                }
-                Some(c) => format!("A type mismatch on {c} {} down {handle}", tense("slows", "slowed")),
-                None => format!("A type mismatch {} down {handle}", tense("slows", "slowed")),
+            let conversion = Conversion {
+                column: converted.as_ref().map(|(c, _)| c.clone()),
+                target: converted.map(|(_, t)| t),
+                blocks_seek,
+                expression: issue.map(|c| c.expression.clone()),
+                parameters: q.parameters.clone(),
             };
-            f.summary = format!(
-                "The database has to convert {} before comparing it with a parameter of a different type{}. {}{}",
-                column.as_deref().unwrap_or("a column"),
-                convert.map(|c| format!(" (`{}`)", truncate(&c, 140))).unwrap_or_default(),
-                if blocks_seek {
-                    "SQL Server warns that the conversion keeps it from searching an index, so it reads every row instead."
-                } else {
-                    "SQL Server warns that the conversion may affect its row estimates, which can lead it to a poorer plan; it doesn't say an index can't be used."
-                },
-                match &q.parameters {
-                    Some(p) if p.to_ascii_lowercase().contains("nvarchar") => format!(" The application declares its parameters as `{}`: Unicode strings compared with a non-Unicode column.", truncate(p, 120)),
-                    Some(p) => format!(" The application declares its parameters as `{}`.", truncate(p, 120)),
-                    None if unicode => " This often happens when an application sends strings as nvarchar (Unicode) to a varchar column.".to_string(),
-                    None => String::new(),
-                }
-            );
-            f.severity = if blocks_seek { severity_for_impact(snapshot, &[q], impact) } else { Severity::Low };
-            f.confidence = if blocks_seek { Confidence::High } else { Confidence::Medium };
-            f.fix = Some(Fix { summary: mismatch_fix(column.as_deref(), target.as_deref()), sql: None, cost: None });
-            if let Some(c) = &column {
-                f.id = format!("plan-warnings:implicit-conversion:{c}");
-                f.subject = subject(SubjectKind::Table, c);
-                f.metrics.push(Metric::text("Column", c.clone()));
-            }
+            let severity = if blocks_seek { severity_for_impact(snapshot, &[q], impact) } else { Severity::Low };
+            (Warned::Conversion(conversion), severity, if blocks_seek { Confidence::High } else { Confidence::Medium })
         }
         PlanWarning::Spill => {
-            f.title = format!(
-                "{} {} to disk",
-                capitalize(&handle),
-                tense("runs out of memory and spills", "ran out of memory and spilled")
-            );
-            f.summary = "A sort or hash in this plan needed more memory than it was granted and wrote the overflow to disk (tempdb or temp files). Spills usually come from a row estimate that was far too low, or a sort the index could have avoided.".into();
             // A spill too small to matter stays Low, as the plan's own `spill` insight rates it.
-            f.severity = if q.plan.as_ref().is_some_and(culprit_core::insights::spills_are_minor) {
+            let severity = if q.plan.as_ref().is_some_and(culprit_core::insights::spills_are_minor) {
                 Severity::Low
             } else {
                 severity_for_impact(snapshot, &[q], impact)
             };
-            f.confidence = Confidence::High;
-            f.fix = Some(Fix {
-                summary: match snapshot.server.engine {
-                    Engine::Mssql => "Update statistics on the tables involved; if the estimate is still far off, add an index that delivers rows in the needed order so the sort disappears.".into(),
-                    Engine::Postgres | Engine::Yugabyte => "Raise work_mem for this workload (per role or per session), or add an index that delivers rows in the needed order so the sort disappears.".into(),
-                    Engine::Sqlite => "Give the sort an index that returns rows in the order asked for; otherwise PRAGMA temp_store = MEMORY keeps temporary b-trees in memory, and a larger cache_size helps them fit.".into(),
-                    Engine::Mysql => "Raise tmp_table_size and max_heap_table_size for this workload so the temporary table stays in memory, or add an index that returns rows already ordered or grouped.".into(),
-                },
-                sql: None,
-                cost: None,
-            });
+            (Warned::Spill, severity, Confidence::High)
         }
         PlanWarning::NoJoinPredicate => {
-            let engine = snapshot.server.name();
-            match join_condition(&q.text) {
-                JoinCondition::Missing => {
-                    f.title =
-                        format!("{} {} tables without a join condition", capitalize(&handle), tense("joins", "joined"));
-                    f.summary = "Part of this plan combines every row of one input with every row of another (a cross join), and the statement has no condition joining them: no ON clause and no comparison of one table's column with another's. A missing join condition multiplies the rows the query reads and returns.".into();
-                    f.severity = severity_for_impact(snapshot, &[q], impact);
-                    f.confidence = Confidence::Medium;
-                    f.fix = Some(Fix {
-                        summary: "Check the query's joins and add the missing condition.".into(),
-                        sql: None,
-                        cost: None,
-                    });
-                }
+            let join = join_condition(&q.text);
+            let severity = match join {
+                JoinCondition::Missing => severity_for_impact(snapshot, &[q], impact),
                 JoinCondition::Present => {
-                    if q.plan.as_ref().is_some_and(|p| culprit_core::insights::runs_cheaply(p, q)) {
-                        f.informational();
-                    }
-                    f.title = format!(
-                        "{}'s plan {} two inputs without a join condition",
-                        capitalize(&handle),
-                        tense("joins", "joined")
-                    );
-                    f.summary = format!(
-                        "Part of this plan combines every row of one input with every row of another, though the statement does join them. {engine} does this when both join columns are compared with the same value (a.x = @v AND a.x = b.x): it filters each side by the value and drops the join condition as redundant. That is harmless while both sides keep few rows."
-                    );
-                    f.severity = Severity::Low;
-                    f.confidence = Confidence::Medium;
-                    f.fix = Some(Fix {
-                        summary: "Nothing to change while both inputs keep few rows. If the plan multiplies many rows, check the join columns and the filters on them in the plan.".into(),
-                        sql: None,
-                        cost: None,
-                    });
+                    informational = q.plan.as_ref().is_some_and(|p| culprit_core::insights::runs_cheaply(p, q));
+                    Severity::Low
                 }
-                JoinCondition::CrossJoin => {
-                    f.title = format!("{} {} for a cross join", capitalize(&handle), tense("asks", "asked"));
-                    f.summary = "Part of this plan combines every row of one input with every row of another, and the statement asks for it (CROSS JOIN or CROSS APPLY). That multiplies rows: fine for a small list of values, costly for two large tables.".into();
-                    f.severity = Severity::Low;
-                    f.confidence = Confidence::Medium;
-                    f.fix = Some(Fix {
-                        summary: "Make sure the cross join is intended and both inputs stay small.".into(),
-                        sql: None,
-                        cost: None,
-                    });
-                }
-            }
+                JoinCondition::CrossJoin => Severity::Low,
+            };
+            (Warned::NoJoinPredicate(join), severity, Confidence::Medium)
         }
         PlanWarning::MissingStatistics => {
-            f.informational();
-            f.title = format!("The captured plan for {handle} reported a statistics warning");
-            f.summary = "SQL Server reported unavailable statistics at compilation time. The saved warning alone does not establish missing or stale statistics now, or a slow plan.".into();
-            f.severity = Severity::Low;
-            f.confidence = Confidence::Medium;
+            informational = true;
             // The plan viewer and finding use the same compilation-time evidence and diagnostic guidance.
             let insight = q
                 .plan
                 .as_ref()
                 .and_then(|p| culprit_core::insights::insights(p).into_iter().find(|i| i.rule == "missing-statistics"));
-            let stale = q.plan.as_ref().and_then(culprit_core::insights::stale_index_statistics);
-            f.fix = Some(match insight {
-                Some(i) => {
-                    f.summary = i.detail;
-                    // The catalog is current context; a saved compilation warning cannot establish staleness now.
-                    if let Some(stale) = &stale {
-                        f.title = format!(
-                            "The captured plan for {} reported a statistics warning on {}",
-                            handle,
-                            format::list(&stale.columns)
-                        );
-                        if let Some(said) = statistics_now(snapshot, stale) {
-                            f.summary = culprit_core::insights::stale_index_statistics_detail(stale, Some(&said));
-                        }
-                    }
-                    Fix { summary: i.fix, sql: i.fix_sql, cost: None }
-                }
-                None => Fix {
-                    summary: "Inspect current column statistics and automatic statistics settings, then compare a newly compiled plan before choosing a statistics change.".into(),
-                    sql: None,
-                    cost: None,
-                },
-            });
+            // The catalog is current context; a saved compilation warning cannot establish staleness now.
+            let stale = insight.as_ref().and(q.plan.as_ref()).and_then(culprit_core::insights::stale_index_statistics);
+            let now = stale.as_ref().and_then(|stale| statistics_now(snapshot, stale));
+            (Warned::MissingStatistics { insight, stale, now }, Severity::Low, Confidence::Medium)
         }
         _ => return None,
+    };
+    Some(PlanWarningCase {
+        query: q,
+        impact: query_impact(snapshot, &[q])?,
+        warned,
+        said: None,
+        severity,
+        confidence,
+        informational,
+        steps: vec![(q, node.map(|n| n.id))],
+        shared: None,
+    })
+}
+
+fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Finding {
+    let q = case.query;
+    let id = case.id();
+    let warning = case.warning();
+    let mut f = finding(
+        "plan-warnings",
+        &format!("{}:{}", q.id, warning_key(warning)),
+        Category::Queries,
+        subject(SubjectKind::Query, &q.id),
+    );
+    apply_impact(snapshot, &mut f, &case.impact);
+    f.queries = case
+        .steps
+        .iter()
+        .map(|(r, step)| QueryRef { id: r.id.clone(), plan_node: *step, note: Some(warning.label().into()) })
+        .collect();
+    let share_metric = Metric::new(share_metric_label(snapshot), case.impact.share, Unit::Ratio);
+    f.metrics.push(share_metric.clone());
+    f.metrics.push(Metric::new(t!("common.metric.average_duration"), q.mean_time_ms, Unit::Ms));
+    let query = query_handle(q);
+    // A statement that stopped running is told in the past.
+    let tense = if crate::all_stopped(snapshot, &[q]) { "past" } else { "present" };
+    if case.informational {
+        f.informational();
+    }
+    f.severity = case.severity;
+    f.confidence = case.confidence;
+    match &case.warned {
+        Warned::Conversion(conversion) => {
+            f.title = match &conversion.column {
+                Some(c) if conversion.blocks_seek => {
+                    t!("check.plan_warnings.title.conversion_stops_seek", column = c, query = query, tense = tense)
+                }
+                Some(c) => t!("check.plan_warnings.title.conversion", column = c, query = query, tense = tense),
+                None => t!("check.plan_warnings.title.conversion_unknown", query = query, tense = tense),
+            };
+            f.summary = conversion_summary(case.said.as_ref().unwrap_or(conversion));
+            f.fix = Some(Fix {
+                summary: mismatch_fix(conversion.column.as_deref(), conversion.target.as_deref()),
+                sql: None,
+                cost: None,
+            });
+            if let Some(c) = &conversion.column {
+                f.id = id;
+                f.subject = subject(SubjectKind::Table, c);
+                f.metrics.push(Metric::text(t!("check.plan_warnings.metric.column"), c.clone()));
+            }
+        }
+        Warned::Spill => {
+            f.title = t!("check.plan_warnings.title.spill", query = capitalize(&query), tense = tense);
+            f.summary = t!("check.plan_warnings.summary.spill");
+            f.fix = Some(Fix {
+                summary: match snapshot.server.engine {
+                    Engine::Mssql => t!("check.plan_warnings.fix.spill.mssql"),
+                    Engine::Postgres | Engine::Yugabyte => t!("check.plan_warnings.fix.spill.postgres"),
+                    Engine::Sqlite => t!("check.plan_warnings.fix.spill.sqlite"),
+                    Engine::Mysql => t!("check.plan_warnings.fix.spill.mysql"),
+                },
+                sql: None,
+                cost: None,
+            });
+        }
+        Warned::NoJoinPredicate(join) => {
+            let (title, summary, fix) = match join {
+                JoinCondition::Missing => (
+                    t!("check.plan_warnings.title.join_missing", query = capitalize(&query), tense = tense),
+                    t!("check.plan_warnings.summary.join_missing"),
+                    t!("check.plan_warnings.fix.join_missing"),
+                ),
+                JoinCondition::Present => (
+                    t!("check.plan_warnings.title.join_dropped", query = capitalize(&query), tense = tense),
+                    t!("check.plan_warnings.summary.join_dropped", engine = snapshot.server.name()),
+                    t!("check.plan_warnings.fix.join_dropped"),
+                ),
+                JoinCondition::CrossJoin => (
+                    t!("check.plan_warnings.title.cross_join", query = capitalize(&query), tense = tense),
+                    t!("check.plan_warnings.summary.cross_join"),
+                    t!("check.plan_warnings.fix.cross_join"),
+                ),
+            };
+            (f.title, f.summary) = (title, summary);
+            f.fix = Some(Fix { summary: fix, sql: None, cost: None });
+        }
+        Warned::MissingStatistics { insight, stale, now } => {
+            f.title = t!("check.plan_warnings.title.statistics", query = &query);
+            f.summary = t!("check.plan_warnings.summary.statistics");
+            f.fix = Some(match insight {
+                Some(i) => {
+                    f.summary = i.detail.clone();
+                    if let Some(stale) = stale {
+                        f.title = t!(
+                            "check.plan_warnings.title.statistics_on",
+                            query = &query,
+                            columns = format::list(&stale.columns)
+                        );
+                        if let Some(now) = now {
+                            f.summary = culprit_core::insights::stale_index_statistics_detail(
+                                stale,
+                                Some(&statistics_now_said(snapshot, now)),
+                            );
+                        }
+                    }
+                    Fix { summary: i.fix.clone(), sql: i.fix_sql.clone(), cost: None }
+                }
+                None => Fix { summary: t!("check.plan_warnings.fix.statistics"), sql: None, cost: None },
+            });
+        }
     }
     f.verify = vec![if warning == PlanWarning::MissingStatistics {
-        "Capture a newly compiled plan after any justified statistics change and compare its warning and estimates with representative runs. Query Store may retain the original XML, so a re-scan of that saved plan alone cannot verify the change.".into()
+        t!("check.plan_warnings.verify.statistics")
     } else {
-        "Re-scan after the change; the warning should be gone from this query's plan.".into()
+        t!("check.plan_warnings.verify.rescan")
     }];
-    Some(f)
+    // Statements that share one cause: what they take together, said once.
+    if let Some(shared) = &case.shared {
+        apply_query_impact(&mut f, &shared.impact);
+        let column = f.subject.name.clone();
+        let tense = if shared.stopped { "past" } else { "present" };
+        f.title = if f.confidence == Confidence::High {
+            t!(
+                "check.plan_warnings.title.shared_stops_seek",
+                column = column,
+                count = shared.queries.to_string(),
+                tense = tense
+            )
+        } else {
+            t!("check.plan_warnings.title.shared", column = column, count = shared.queries.to_string(), tense = tense)
+        };
+        f.summary = [
+            f.summary.clone(),
+            t!(
+                "check.plan_warnings.summary.shared",
+                count = shared.queries.to_string(),
+                share = format::percent(shared.impact.share)
+            ),
+        ]
+        .join(" ");
+        let mut metrics = vec![
+            Metric::new(t!("common.metric.share_of_db_time"), shared.impact.share, Unit::Ratio),
+            Metric::new(t!("common.metric.queries_affected"), shared.queries as f64, Unit::Count),
+        ];
+        if let Some(per_day_ms) = shared.impact.per_day_ms {
+            metrics.push(Metric::new(t!("common.metric.db_time_per_day"), per_day_ms, Unit::Ms));
+        }
+        // The share of logged slow-run time stays: it is of the first statement alone.
+        if slow_log_only(snapshot) {
+            metrics.push(share_metric);
+        }
+        metrics.extend(f.metrics.drain(..).skip(2));
+        f.metrics = metrics;
+    }
+    f
+}
+
+/// What a type mismatch makes the database do, what SQL Server says it costs, and what the application declares.
+fn conversion_summary(c: &Conversion) -> String {
+    let column = c.column.clone().unwrap_or_else(|| t!("check.plan_warnings.summary.a_column"));
+    let mut summary = vec![
+        match &c.expression {
+            Some(expression) => t!(
+                "check.plan_warnings.summary.convert_expression",
+                column = column,
+                expression = truncate(expression, 140)
+            ),
+            None => t!("check.plan_warnings.summary.convert", column = column),
+        },
+        if c.blocks_seek {
+            t!("check.plan_warnings.summary.blocks_seek")
+        } else {
+            t!("check.plan_warnings.summary.estimates")
+        },
+    ];
+    let unicode = c.target.as_deref().is_some_and(|t| t.to_ascii_lowercase().starts_with("nvarchar"));
+    summary.extend(match &c.parameters {
+        Some(p) if p.to_ascii_lowercase().contains("nvarchar") => {
+            Some(t!("check.plan_warnings.summary.parameters_unicode", parameters = truncate(p, 120)))
+        }
+        Some(p) => Some(t!("check.plan_warnings.summary.parameters", parameters = truncate(p, 120))),
+        None if unicode => Some(t!("check.plan_warnings.summary.unicode")),
+        None => None,
+    });
+    summary.join(" ")
 }
 
 /// What the catalog says now of the statistics a plan warned held nothing usable: when each was last updated, from how
 /// many rows, and the changes counted since, with the table's rows when the plan was compiled and now. None when the
 /// scan read none of them.
-fn statistics_now(snapshot: &Snapshot, stale: &culprit_core::insights::StaleIndexStatistics) -> Option<String> {
+fn statistics_now(snapshot: &Snapshot, stale: &StaleIndexStatistics) -> Option<StatisticsNow> {
     let (schema, table) = match stale.table.rsplit_once('.') {
         Some((schema, table)) => (schema.rsplit('.').next(), table),
         None => (None, stale.table.as_str()),
     };
     let same_table =
         |s: &str, t: &str| t.eq_ignore_ascii_case(table) && schema.is_none_or(|schema| s.eq_ignore_ascii_case(schema));
-    let rows = |n: f64| format!("{} {}", format::count(n), if n == 1.0 { "row" } else { "rows" });
-    let said: Vec<String> = stale
+    let indexes: Vec<IndexStatistics> = stale
         .indexes
         .iter()
         .filter_map(|index| {
@@ -324,40 +486,69 @@ fn statistics_now(snapshot: &Snapshot, stale: &culprit_core::insights::StaleInde
                 .statistics
                 .iter()
                 .find(|st| same_table(&st.schema, &st.table) && st.name.eq_ignore_ascii_case(index))?;
-            let when = st.last_updated.as_deref().map(|at| {
-                format!(
-                    " were last updated on {}{}",
-                    format::friendly_date(at, &snapshot.taken_at),
-                    st.rows.map(|n| format!(", when the table had {}", rows(n))).unwrap_or_default()
-                )
-            })?;
-            let since = match st.modifications {
-                Some(m) if m > 0.0 => {
-                    format!(
-                        ", and have counted {} {} since",
-                        format::count(m),
-                        if m == 1.0 { "change" } else { "changes" }
-                    )
-                }
-                Some(_) => ", with no changes counted since".into(),
-                None => String::new(),
-            };
-            Some(format!("The statistics of {index}{when}{since}"))
+            Some(IndexStatistics {
+                index: index.clone(),
+                updated: st.last_updated.clone()?,
+                rows: st.rows,
+                changes: st.modifications,
+            })
         })
         .collect();
-    if said.is_empty() {
+    if indexes.is_empty() {
         return None;
     }
-    let now = snapshot.tables.iter().find(|t| same_table(&t.schema, &t.name)).and_then(|t| t.rows);
-    let table_rows = match (stale.table_rows, now) {
+    let table_now = snapshot.tables.iter().find(|t| same_table(&t.schema, &t.name)).and_then(|t| t.rows);
+    Some(StatisticsNow { indexes, table_then: stale.table_rows, table_now })
+}
+
+/// [`StatisticsNow`] in a sentence: each index's statistics, then the table's rows.
+fn statistics_now_said(snapshot: &Snapshot, now: &StatisticsNow) -> String {
+    let rows = |n: f64| t!("check.plan_warnings.statistics.rows", n = n, count = format::count(n));
+    let mut clauses: Vec<String> = now
+        .indexes
+        .iter()
+        .map(|st| {
+            let (index, date) = (&st.index, format::friendly_date(&st.updated, &snapshot.taken_at));
+            let changes = |m: f64| t!("check.plan_warnings.statistics.changes", n = m, count = format::count(m));
+            match (st.rows, st.changes) {
+                (Some(n), Some(m)) if m > 0.0 => t!(
+                    "check.plan_warnings.statistics.updated_rows_changes",
+                    index = index,
+                    date = date,
+                    rows = rows(n),
+                    changes = changes(m)
+                ),
+                (Some(n), Some(_)) => {
+                    t!(
+                        "check.plan_warnings.statistics.updated_rows_unchanged",
+                        index = index,
+                        date = date,
+                        rows = rows(n)
+                    )
+                }
+                (Some(n), None) => {
+                    t!("check.plan_warnings.statistics.updated_rows", index = index, date = date, rows = rows(n))
+                }
+                (None, Some(m)) if m > 0.0 => t!(
+                    "check.plan_warnings.statistics.updated_changes",
+                    index = index,
+                    date = date,
+                    changes = changes(m)
+                ),
+                (None, Some(_)) => t!("check.plan_warnings.statistics.updated_unchanged", index = index, date = date),
+                (None, None) => t!("check.plan_warnings.statistics.updated", index = index, date = date),
+            }
+        })
+        .collect();
+    clauses.extend(match (now.table_then, now.table_now) {
         (Some(then), Some(now)) => {
-            format!("; the table held {} when this plan was compiled, and holds {} now", rows(then), format::count(now))
+            Some(t!("check.plan_warnings.statistics.table_then_now", then = rows(then), now = format::count(now)))
         }
-        (Some(then), None) => format!("; the table held {} when this plan was compiled", rows(then)),
-        (None, Some(now)) => format!("; the table holds {} now", rows(now)),
-        (None, None) => String::new(),
-    };
-    Some(format!("{}{table_rows}.", said.join("; ")))
+        (Some(then), None) => Some(t!("check.plan_warnings.statistics.table_then", then = rows(then))),
+        (None, Some(now)) => Some(t!("check.plan_warnings.statistics.table_now", now = rows(now))),
+        (None, None) => None,
+    });
+    t!("check.plan_warnings.statistics.said", clauses = clauses.join("; "))
 }
 
 pub(super) fn warning_key(w: PlanWarning) -> &'static str {
