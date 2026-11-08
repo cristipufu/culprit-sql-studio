@@ -87,18 +87,18 @@ export function NowTile({ tile, live, sessions }: { tile: Tile; live: LiveNow; s
   // An engine without sessions (SQLite): the scan's own word on it, with no live read to wait for.
   if (!sessions) return <Frame tile={tile} />;
   const freshness = live.hidden
-    ? t("ui.dashboard.now_tile.paused")
+    ? t("ui.common.paused_while_hidden")
     : live.error && !live.state
       ? t("ui.dashboard.now_tile.read_failed")
       : live.age == null
         ? t("ui.dashboard.now_tile.reading")
         : live.age <= 1
-          ? t("ui.dashboard.now_tile.updated_now")
-          : t("ui.dashboard.now_tile.updated_ago", { seconds: String(live.age) });
+          ? t("ui.common.updated_just_now")
+          : t("ui.common.updated_seconds_ago", { seconds: String(live.age) });
   const blocking = tile.items.filter((i) => i.status === "bad");
   const foot = (
     <p className={`dash-live ${live.hidden || (live.error && !live.state) ? "paused" : ""}`} title={live.state ? t("ui.dashboard.now_tile.read_at", { time: new Date(live.state.taken_at).toLocaleTimeString() }) : undefined}>
-      <span className="live-dot" aria-hidden /> {t("ui.dashboard.now_tile.live", { freshness })}
+      <span className="live-dot" aria-hidden /> {t("ui.common.live_freshness", { freshness })}
     </p>
   );
   if (!live.state && !live.error) {

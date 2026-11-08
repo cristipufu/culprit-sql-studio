@@ -208,8 +208,8 @@ export function FindingDetail({ report, finding }: { report: Report; finding: Fi
           <VerifyButton running={verify.result?.status === "running"} onRun={verify.run} />
           <FindingShareMenu report={report} finding={finding} />
           <span className="spacer" />
-          <button type="button" className="btn ghost dismiss" onClick={() => toggleDismissed(finding.id)} aria-label={dismissed ? t("ui.finding_detail.restore") : t("ui.finding_detail.dismiss")} title={dismissed ? t("ui.finding_detail.restore_title", { key: "D" }) : t("ui.finding_detail.dismiss_title", { key: "D" })}>
-            <EyeOff size={13} /> <span className="btn-label">{dismissed ? t("ui.finding_detail.restore") : t("ui.finding_detail.dismiss")}</span> <span className="kbd">D</span>
+          <button type="button" className="btn ghost dismiss" onClick={() => toggleDismissed(finding.id)} aria-label={dismissed ? t("ui.finding_detail.restore") : t("ui.common.dismiss")} title={dismissed ? t("ui.finding_detail.restore_title", { key: "D" }) : t("ui.finding_detail.dismiss_title", { key: "D" })}>
+            <EyeOff size={13} /> <span className="btn-label">{dismissed ? t("ui.finding_detail.restore") : t("ui.common.dismiss")}</span> <span className="kbd">D</span>
           </button>
         </div>
       </div>

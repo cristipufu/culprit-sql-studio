@@ -9,56 +9,67 @@ import type { DeadlockReport } from "../gen/DeadlockReport";
 import type { Engine } from "../gen/Engine";
 import { api, errorMessage, type ApiError } from "../lib/api";
 import { useHotkeys } from "../lib/hotkeys";
+import { t } from "../lib/i18n";
 import { currentReport, setState, toast, useStore } from "../lib/store";
 import { keys } from "../lib/keys";
 import { copyAndTell } from "../lib/clipboard";
+import { slot, withElements } from "./message-parts";
 
-const PATTERN: Record<DeadlockPattern, string> = {
-  "key-lookup": "Key lookup",
-  "lock-conversion": "Read, then update",
-  "opposite-order": "Opposite order",
-  "lock-escalation": "Lock escalation",
-  parallelism: "Parallelism",
-  cycle: "Lock cycle",
-};
+function patternLabel(pattern: DeadlockPattern): string {
+  switch (pattern) {
+    case "key-lookup":
+      return t("ui.deadlocks.pattern.key_lookup");
+    case "lock-conversion":
+      return t("ui.deadlocks.pattern.lock_conversion");
+    case "opposite-order":
+      return t("ui.deadlocks.pattern.opposite_order");
+    case "lock-escalation":
+      return t("ui.deadlocks.pattern.lock_escalation");
+    case "parallelism":
+      return t("ui.deadlocks.pattern.parallelism");
+    case "cycle":
+      return t("ui.deadlocks.pattern.cycle");
+  }
+}
 
-const RANGES = [
-  { hours: 24, label: "24 hours" },
-  { hours: 168, label: "7 days" },
-] as const;
+const RANGES = [24, 168] as const;
+
+function rangeLabel(hours: number): string {
+  return hours === 168 ? t("ui.deadlocks.range.week") : t("ui.deadlocks.range.day");
+}
 
 type Load = { status: "loading" } | { status: "ready"; report: DeadlockReport } | { status: "error"; error: ApiError };
 
 function when(iso: string | null): { short: string; full: string } {
-  if (!iso) return { short: "Time unknown", full: "The engine didn't record when" };
+  if (!iso) return { short: t("ui.deadlocks.time_unknown"), full: t("ui.deadlocks.time_unknown_full") };
   const d = new Date(iso);
   const today = new Date();
   const sameDay = d.toDateString() === today.toDateString();
   const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  const short = sameDay ? `Today ${time}` : `${d.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
+  const short = sameDay ? t("ui.deadlocks.today", { time }) : `${d.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
   return { short, full: d.toLocaleString() };
 }
 
 /** Whose transaction was rolled back, said as Rust's `deadlocks::victim_text` says it: "session 202 (login root)",
  * never a bare login a reader takes for something else. */
 function victimText(p: DeadlockProcess): string {
-  const by = p.application ?? (p.login ? `login ${p.login}` : null);
-  if (p.session) return by ? `session ${p.session} (${by})` : `session ${p.session}`;
-  return by ? `a session of ${by}` : p.id;
+  const by = p.application ?? (p.login ? t("ui.deadlocks.victim.login", { login: p.login }) : null);
+  if (p.session) return by ? t("ui.deadlocks.victim.session_by", { session: p.session, by }) : t("ui.deadlocks.victim.session", { session: p.session });
+  return by ? t("ui.deadlocks.victim.by", { by }) : p.id;
 }
 
 function sourceLine(engine: Engine): string {
   switch (engine) {
     case "mssql":
-      return "Culprit reads SQL Server's built-in system_health session: its event files and the in-memory buffer.";
+      return t("ui.deadlocks.source.mssql");
     case "mysql":
-      return "Culprit reads InnoDB's latest deadlock report (SHOW ENGINE INNODB STATUS).";
+      return t("ui.deadlocks.source.mysql");
     case "postgres":
-      return "PostgreSQL counts deadlocks but keeps the details in the server log.";
+      return t("ui.deadlocks.source.postgres");
     case "yugabyte":
-      return "DocDB distributed deadlocks require YSQL error and YB-TServer evidence. PostgreSQL heap deadlock counters do not establish this database's distributed deadlocks.";
+      return t("ui.deadlocks.source.yugabyte");
     case "sqlite":
-      return "SQLite has no deadlocks to record: a writer that can't get the lock waits busy_timeout, then gets SQLITE_BUSY in the application.";
+      return t("ui.deadlocks.source.sqlite");
   }
 }
 
@@ -95,7 +106,7 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
       setPasted((p) => [...found, ...p.filter((x) => !found.some((f) => f.id === x.id))]);
       setSelected(found[0]?.id ?? null);
       setPasteError(null);
-      toast(found.length === 1 ? "Deadlock explained" : `${found.length} deadlocks explained`);
+      toast(t("ui.deadlocks.explained", { n: found.length, count: String(found.length) }));
     } catch (e) {
       setPasteError(errorMessage(e));
     }
@@ -150,10 +161,10 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
       <div className="dl-toolbar">
         {/* PostgreSQL only counts deadlocks since its statistics were reset: there's no window to choose. */}
         {engine !== "postgres" && (
-          <span className="seg" role="radiogroup" aria-label="How far back">
+          <span className="seg" role="radiogroup" aria-label={t("ui.deadlocks.how_far_back")}>
             {RANGES.map((r) => (
-              <button type="button" key={r.hours} role="radio" aria-checked={hours === r.hours} className={hours === r.hours ? "on" : ""} onClick={() => setHours(r.hours)}>
-                {r.label}
+              <button type="button" key={r} role="radio" aria-checked={hours === r} className={hours === r ? "on" : ""} onClick={() => setHours(r)}>
+                {rangeLabel(r)}
               </button>
             ))}
           </span>
@@ -161,7 +172,7 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
         <span className="muted dl-source">{sourceLine(engine)}</span>
         <span className="spacer" />
         <span className="muted dl-paste-hint">
-          <ClipboardPaste size={12} /> Paste <span className="kbd">{keys("⌘V")}</span> or drop a deadlock to explain it
+          <ClipboardPaste size={12} /> {withElements(t("ui.deadlocks.paste_hint", { key: slot(0) }), [<span key="key" className="kbd">{keys("⌘V")}</span>])}
         </span>
       </div>
 
@@ -170,7 +181,7 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
           <span className="sev medium" aria-hidden /> {pasteError.message}
           {pasteError.hint && <span className="muted"> {pasteError.hint}</span>}
           <button type="button" className="btn ghost small" onClick={() => setPasteError(null)}>
-            Dismiss
+            {t("ui.common.dismiss")}
           </button>
         </div>
       )}
@@ -180,7 +191,7 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
       ) : load.status === "error" && all.length === 0 ? (
         <div className="dl-empty">
           <FileWarning size={22} />
-          <h3>Couldn't read deadlocks</h3>
+          <h3>{t("ui.deadlocks.read_failed")}</h3>
           <p>{load.error.message}</p>
           {load.error.hint && <p className="muted">{load.error.hint}</p>}
         </div>
@@ -191,16 +202,19 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
               <div className="dl-counter">
                 <span className="dl-counter-value">{counted.toLocaleString()}</span>
                 <span className="dl-counter-label">
-                  deadlock{counted === 1 ? "" : "s"} since statistics were reset
-                  {load.status === "ready" && load.report.counted_since ? ` (${when(load.report.counted_since).short})` : ""}
+                  {load.status === "ready" && load.report.counted_since
+                    ? t("ui.deadlocks.counted_since", { n: counted, time: when(load.report.counted_since).short })
+                    : t("ui.deadlocks.counted", { n: counted })}
                 </span>
               </div>
               <p>
-                PostgreSQL keeps only this counter. The details (who waited for whom, and both statements) go to the server log:
-                paste the lines from <code>deadlock detected</code> to <code>STATEMENT</code> below and Culprit draws the cycle and names the fix.
+                {withElements(t("ui.deadlocks.postgres_counter", { from: slot(0), to: slot(1) }), [
+                  <code key="from">deadlock detected</code>,
+                  <code key="to">STATEMENT</code>,
+                ])}
               </p>
               {load.status === "ready" && load.report.note?.includes("log_lock_waits") && (
-                <p className="muted">Tip: turn on log_lock_waits to also log lock waits longer than deadlock_timeout.</p>
+                <p className="muted">{t("ui.deadlocks.log_lock_waits_tip")}</p>
               )}
             </>
           ) : (
@@ -209,8 +223,10 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
               {/* A counter (PostgreSQL) covers the time since statistics were reset, not the range. */}
               <h3>
                 {counted != null
-                  ? `No deadlocks since statistics were reset${load.status === "ready" && load.report.counted_since ? ` (${when(load.report.counted_since).short})` : ""}`
-                  : `No deadlocks in the last ${RANGES.find((r) => r.hours === hours)?.label}`}
+                  ? load.status === "ready" && load.report.counted_since
+                    ? t("ui.deadlocks.none_since_reset_at", { time: when(load.report.counted_since).short })
+                    : t("ui.deadlocks.none_since_reset")
+                  : t("ui.deadlocks.none_in_range", { range: rangeLabel(hours) })}
               </h3>
               <p className="muted">{load.status === "ready" && load.report.note ? load.report.note : sourceLine(engine)}</p>
             </>
@@ -219,10 +235,10 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
         </div>
       ) : (
         <div className="dl-split">
-          <div className="dl-list" ref={listRef} role="listbox" aria-label="Deadlocks">
+          <div className="dl-list" ref={listRef} role="listbox" aria-label={t("ui.live.tab.deadlocks")}>
             {all.map((d) => {
               const victim = d.processes.find((p) => p.victim);
-              const t = when(d.at);
+              const at = when(d.at);
               return (
                 <button type="button"
                   key={d.id}
@@ -234,13 +250,13 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
                   onClick={() => setSelected(d.id)}
                 >
                   <span className="dl-item-top">
-                    <span className="dl-pattern">{PATTERN[d.pattern]}</span>
-                    <span className="muted" title={t.full}>
-                      {d.source === "pasted" ? "Pasted" : t.short}
+                    <span className="dl-pattern">{patternLabel(d.pattern)}</span>
+                    <span className="muted" title={at.full}>
+                      {d.source === "pasted" ? t("ui.deadlocks.pasted") : at.short}
                     </span>
                   </span>
-                  <span className="dl-item-objects">{d.objects.length ? d.objects.join(", ") : "Objects not named"}</span>
-                  {victim && <span className="dl-item-victim muted">Rolled back: {victimText(victim)}</span>}
+                  <span className="dl-item-objects">{d.objects.length ? d.objects.join(", ") : t("ui.deadlocks.objects_unnamed")}</span>
+                  {victim && <span className="dl-item-victim muted">{t("ui.deadlocks.rolled_back_victim", { victim: victimText(victim) })}</span>}
                 </button>
               );
             })}
@@ -249,16 +265,16 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
           {current && (
             <article className="dl-detail" key={current.id}>
               <div className="dl-detail-meta">
-                <span className="dl-pattern">{PATTERN[current.pattern]}</span>
+                <span className="dl-pattern">{patternLabel(current.pattern)}</span>
                 <span className="muted" title={when(current.at).full}>
-                  {current.source === "pasted" ? "Pasted" : when(current.at).short} · {current.source}
+                  {current.source === "pasted" ? t("ui.deadlocks.pasted") : when(current.at).short} · {current.source}
                 </span>
               </div>
               <h2 className="dl-headline">{current.headline}</h2>
               <DeadlockGraph deadlock={current} onPick={(p: DeadlockProcess) => document.getElementById(`dl-proc-${p.id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" })} />
               <p className="dl-explain">{current.explanation}</p>
 
-              <h3 className="dl-section">How to fix it</h3>
+              <h3 className="dl-section">{t("ui.deadlocks.how_to_fix")}</h3>
               <ol className="dl-fixes">
                 {current.fixes.map((f, i) => {
                   const related = findingTitle(f.finding);
@@ -269,14 +285,14 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
                       {f.sql && (
                         <div className="dl-fix-sql">
                           <Sql text={f.sql} pretty={false} />
-                          <button type="button" className="btn ghost small" onClick={() => copyAndTell(f.sql!, "Copied")} aria-label="Copy SQL">
-                            <Copy size={12} /> Copy
+                          <button type="button" className="btn ghost small" onClick={() => copyAndTell(f.sql!, t("ui.common.copied"))} aria-label={t("ui.deadlocks.copy_sql")}>
+                            <Copy size={12} /> {t("ui.common.copy")}
                           </button>
                         </div>
                       )}
                       {related && f.finding && (
                         <button type="button" className="link-button dl-related" onClick={() => setState({ view: "overview", finding: f.finding })}>
-                          Same fix as the finding “{related}” <ArrowUpRight size={12} />
+                          {t("ui.deadlocks.same_fix", { finding: related })} <ArrowUpRight size={12} />
                         </button>
                       )}
                     </li>
@@ -284,20 +300,20 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
                 })}
               </ol>
 
-              <h3 className="dl-section">Who was involved</h3>
+              <h3 className="dl-section">{t("ui.deadlocks.involved")}</h3>
               <div className="dl-procs">
                 {current.processes.map((p) => (
                   <div key={p.id} id={`dl-proc-${p.id}`} className={`dl-proc-card ${p.victim ? "victim" : ""}`}>
                     <div className="dl-proc-head">
-                      <strong>{p.session ? `Session ${p.session}` : `Process ${p.id}`}</strong>
-                      {p.victim && <span className="pill victim">rolled back</span>}
+                      <strong>{p.session ? t("ui.deadlocks.session", { session: p.session }) : t("ui.deadlocks.process", { id: p.id })}</strong>
+                      {p.victim && <span className="pill victim">{t("ui.deadlocks.rolled_back")}</span>}
                     </div>
                     <div className="dl-proc-facts muted">
-                      {[p.application, p.login && p.host ? `${p.login}@${p.host}` : (p.login ?? p.host), p.isolation, p.wait_mode ? `wanted ${p.wait_mode}` : null, p.procedure ? `in ${p.procedure}` : null]
+                      {[p.application, p.login && p.host ? `${p.login}@${p.host}` : (p.login ?? p.host), p.isolation, p.wait_mode ? t("ui.deadlocks.wanted", { mode: p.wait_mode }) : null, p.procedure ? t("ui.deadlocks.in_procedure", { procedure: p.procedure }) : null]
                         .filter(Boolean)
                         .join(" · ")}
                     </div>
-                    {p.statement ? <Sql text={p.statement} className="dl-proc-sql" /> : <p className="muted">The engine didn't record the statement.</p>}
+                    {p.statement ? <Sql text={p.statement} className="dl-proc-sql" /> : <p className="muted">{t("ui.deadlocks.no_statement")}</p>}
                   </div>
                 ))}
               </div>
@@ -305,7 +321,7 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
           )}
         </div>
       )}
-      {dragging && <div className="dl-drop-overlay">Drop to explain this deadlock</div>}
+      {dragging && <div className="dl-drop-overlay">{t("ui.deadlocks.drop")}</div>}
     </div>
   );
 }
@@ -316,18 +332,18 @@ function DropZone({ onText }: { onText: (text: string) => Promise<void> }) {
     <div className="dl-dropzone">
       <ClipboardPaste size={16} />
       <div>
-        <strong>Have a deadlock from somewhere else?</strong>
-        <p className="muted">Paste a SQL Server deadlock graph (.xdl), the LATEST DETECTED DEADLOCK section from MySQL or MariaDB, or PostgreSQL log lines from “deadlock detected”. Culprit names the pattern and the fix.</p>
+        <strong>{t("ui.deadlocks.dropzone.heading")}</strong>
+        <p className="muted">{t("ui.deadlocks.dropzone.detail")}</p>
         <textarea
-          aria-label="Paste a deadlock"
-          placeholder={keys("Paste here, or press ⌘V anywhere on this page")}
+          aria-label={t("ui.deadlocks.dropzone.label")}
+          placeholder={t("ui.deadlocks.dropzone.placeholder", { key: keys("⌘V") })}
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={3}
           spellCheck={false}
         />
         <button type="button" className="btn small" disabled={!text.trim()} onClick={() => onText(text).then(() => setText(""))}>
-          Explain
+          {t("ui.deadlocks.explain")}
         </button>
       </div>
     </div>
@@ -336,7 +352,7 @@ function DropZone({ onText }: { onText: (text: string) => Promise<void> }) {
 
 function Skeleton() {
   return (
-    <div className="dl-split" role="status" aria-busy="true" aria-label="Loading deadlocks">
+    <div className="dl-split" role="status" aria-busy="true" aria-label={t("ui.deadlocks.loading")}>
       <div className="dl-list">
         {[0, 1, 2].map((i) => (
           <div key={i} className="dl-item skeleton">

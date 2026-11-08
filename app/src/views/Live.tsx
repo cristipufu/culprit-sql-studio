@@ -8,9 +8,11 @@ import { api, errorMessage, type ApiError } from "../lib/api";
 import { can, serverName } from "../lib/engines";
 import { count, duration, oneLine } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
+import { t } from "../lib/i18n";
 import { currentReport, setState, toast, useStore } from "../lib/store";
 import { remember, rememberedChoice } from "../lib/prefs";
 import { tabListKeys } from "../lib/keys";
+import { slot, withElements } from "./message-parts";
 
 const Deadlocks = lazy(() => import("./Deadlocks"));
 
@@ -41,10 +43,8 @@ export function Live({ connection }: { connection: string }) {
   if (engine && !can(engine, "sessions")) {
     return (
       <div className="empty" style={{ padding: 40 }}>
-        <h3>No sessions to show</h3>
-        <p className="muted">
-          {serverName(engine)} has no server: the application opens the file itself, so there are no sessions, blocking or deadlocks for Culprit to read. A writer that can't get the lock waits its busy_timeout, then fails with SQLITE_BUSY in the application: its logs say when.
-        </p>
+        <h3>{t("ui.live.no_sessions")}</h3>
+        <p className="muted">{t("ui.live.no_server", { server: serverName(engine) })}</p>
       </div>
     );
   }
@@ -132,7 +132,7 @@ function LiveSessions({ connection }: { connection: string }) {
 
   const interrupt = async (session: Session, action: SessionAction) => {
     await (await api()).interruptSession(connection, session.id, action);
-    toast(action === "cancel" ? `Cancelled the statement in session ${session.id}` : `Ended session ${session.id}`);
+    toast(action === "cancel" ? t("ui.live.cancelled", { session: session.id }) : t("ui.live.ended", { session: session.id }));
     setRefresh((n) => n + 1);
   };
   const actions = state?.session_actions ?? [];
@@ -144,22 +144,32 @@ function LiveSessions({ connection }: { connection: string }) {
   const chains = state?.blocking?.chains ?? [];
   const activeNow = sessions.filter((s) => s.state !== "idle" && s.state !== "sleeping").length;
   const age = state ? Math.max(0, Math.round((now - Date.parse(state.taken_at)) / 1000)) : null;
-  const freshness = paused ? "Paused" : hidden ? "Paused while hidden" : tab === "deadlocks" ? "Paused on Deadlocks" : age == null ? "Connecting…" : age <= 1 ? "Updated just now" : `Updated ${age} s ago`;
+  const freshness = paused
+    ? t("ui.live.paused")
+    : hidden
+      ? t("ui.common.paused_while_hidden")
+      : tab === "deadlocks"
+        ? t("ui.live.paused_on_deadlocks")
+        : age == null
+          ? t("ui.live.connecting")
+          : age <= 1
+            ? t("ui.common.updated_just_now")
+            : t("ui.common.updated_seconds_ago", { seconds: String(age) });
 
   return (
     <div className="view live-view" style={{ overflow: "hidden" }}>
       <div className="live-top">
-        <span className={`live-status ${paused || hidden || tab === "deadlocks" ? "paused" : ""}`} title={state ? `Last read ${new Date(state.taken_at).toLocaleTimeString()}` : undefined}>
-          <span className="live-dot" aria-hidden /> Live · <span className="live-age">{freshness}</span>
+        <span className={`live-status ${paused || hidden || tab === "deadlocks" ? "paused" : ""}`} title={state ? t("ui.live.last_read", { time: new Date(state.taken_at).toLocaleTimeString() }) : undefined}>
+          <span className="live-dot" aria-hidden /> {withElements(t("ui.common.live_freshness", { freshness: slot(0) }), [<span key="age" className="live-age">{freshness}</span>])}
         </span>
         {tab === "sessions" && <Sparkline samples={history} />}
-        <span className="seg live-tabs" role="tablist" aria-label="Live" onKeyDown={tabListKeys}>
+        <span className="seg live-tabs" role="tablist" aria-label={t("ui.common.view.live")} onKeyDown={tabListKeys}>
           <button type="button" role="tab" aria-selected={tab === "sessions"} tabIndex={tab === "sessions" ? 0 : -1} className={tab === "sessions" ? "on" : ""} onClick={() => chooseTab("sessions")}>
-            Sessions
-            {blocked.length > 0 && <span className="tab-count warn">{blocked.length} waiting</span>}
+            {t("ui.live.tab.sessions")}
+            {blocked.length > 0 && <span className="tab-count warn">{t("ui.live.waiting", { n: blocked.length, count: String(blocked.length) })}</span>}
           </button>
           <button type="button" role="tab" aria-selected={tab === "deadlocks"} tabIndex={tab === "deadlocks" ? 0 : -1} className={tab === "deadlocks" ? "on" : ""} onClick={() => chooseTab("deadlocks")}>
-            Deadlocks
+            {t("ui.live.tab.deadlocks")}
             {recentDeadlocks > 0 && <span className="tab-count">{recentDeadlocks}</span>}
           </button>
         </span>
@@ -167,10 +177,10 @@ function LiveSessions({ connection }: { connection: string }) {
         {tab === "sessions" && (
           <>
             <label className="muted live-idle">
-              <input type="checkbox" checked={showIdle} onChange={(e) => setShowIdle(e.target.checked)} /> Show idle
+              <input type="checkbox" checked={showIdle} onChange={(e) => setShowIdle(e.target.checked)} /> {t("ui.live.show_idle")}
             </label>
             <button type="button" className="btn" onClick={() => setPaused((p) => !p)} aria-pressed={paused}>
-              {paused ? <Play size={13} /> : <Pause size={13} />} {paused ? "Resume" : "Pause"} <span className="kbd">Space</span>
+              {paused ? <Play size={13} /> : <Pause size={13} />} {paused ? t("ui.live.resume") : t("ui.live.pause")} <span className="kbd">Space</span>
             </button>
           </>
         )}
@@ -197,32 +207,41 @@ function LiveSessions({ connection }: { connection: string }) {
         />
       ) : blocked.length > 0 ? (
         <div className="live-calm">
-          <span className="sev medium" aria-hidden /> {blocked.length} {blocked.length === 1 ? "session waits" : "sessions wait"} on {heads.length === 1 ? `session ${heads[0]}` : `${heads.length} sessions`}.
+          <span className="sev medium" aria-hidden />{" "}
+          {heads.length === 1
+            ? t("ui.live.waits_on_session", { n: blocked.length, count: String(blocked.length), session: heads[0]! })
+            : t("ui.live.waits_on_sessions", { n: blocked.length, count: String(blocked.length), heads: String(heads.length) })}
         </div>
       ) : (
         <div className="live-calm good">
-          <span className="pulse" aria-hidden /> {state?.sessions.some((s) => s.wait?.toLowerCase().includes("lock")) ? "Lock waits observed; no complete blocking chain was resolved" : state?.notes?.length ? "No blocking chain resolved; collection has limitations" : "No blocking observed"}{state ? ` · ${activeNow} active ${activeNow === 1 ? "session" : "sessions"}` : ""}
+          <span className="pulse" aria-hidden />{" "}
+          {state?.sessions.some((s) => s.wait?.toLowerCase().includes("lock"))
+            ? t("ui.live.lock_waits")
+            : state?.notes?.length
+              ? t("ui.live.limited")
+              : t("ui.live.no_blocking")}
+          {state ? ` · ${t("ui.live.active_sessions", { n: activeNow, count: String(activeNow) })}` : ""}
           {state?.session_actions_note && (
-            <span className="muted live-note" title="Cancelling statements and ending sessions is only offered on non-production connections.">
+            <span className="muted live-note" title={t("ui.live.actions_note")}>
               <Lock size={12} /> {state.session_actions_note}
             </span>
           )}
         </div>
       )}
-      {state?.notes?.length ? <details className="notice"><summary>Live collection limitations · {state.notes.length}</summary>{state.notes.map((note) => <p key={note}>{note}</p>)}</details> : null}
+      {state?.notes?.length ? <details className="notice"><summary>{t("ui.live.limitations", { count: String(state.notes.length) })}</summary>{state.notes.map((note) => <p key={note}>{note}</p>)}</details> : null}
       <div className="table-wrap" ref={tableRef} style={watching ? { flex: "0 1 auto", maxHeight: "34%" } : undefined}>
         <table className="grid">
           <thead>
             <tr>
-              <th>Session</th>
-              <th>State</th>
-              <th className="r">Running for</th>
-              <th>Waiting on</th>
-              <th>Blocked by</th>
-              <th className="r">CPU</th>
-              <th className="r">Reads</th>
-              <th>Statement</th>
-              <th>Application</th>
+              <th>{t("ui.live.col.session")}</th>
+              <th>{t("ui.live.col.state")}</th>
+              <th className="r">{t("ui.live.col.running_for")}</th>
+              <th>{t("ui.live.col.waiting_on")}</th>
+              <th>{t("ui.live.col.blocked_by")}</th>
+              <th className="r">{t("ui.live.col.cpu")}</th>
+              <th className="r">{t("ui.live.col.reads")}</th>
+              <th>{t("ui.live.col.statement")}</th>
+              <th>{t("ui.live.col.application")}</th>
               {actions.length > 0 && <th className="r" />}
             </tr>
           </thead>
@@ -234,8 +253,8 @@ function LiveSessions({ connection }: { connection: string }) {
         </table>
         {state && visible.length === 0 && (
           <div className="empty" style={{ height: 240 }}>
-            <h3>Quiet</h3>
-            <p>No active sessions right now.</p>
+            <h3>{t("ui.live.quiet")}</h3>
+            <p>{t("ui.live.quiet_detail")}</p>
           </div>
         )}
       </div>
@@ -266,8 +285,10 @@ function Sparkline({ samples }: { samples: Sample[] }) {
   const area = `${line("active")} L ${x(samples.length - 1).toFixed(1)} ${h} L ${x(0).toFixed(1)} ${h} Z`;
   const blockedPeak = Math.max(...samples.map((s) => s.blocked));
   return (
-    <svg className="live-spark" width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label={`Active sessions over the last ${Math.round((samples.length * REFRESH_MS) / 60000) || 1} minutes: peak ${peak}${anyBlocked ? `; up to ${blockedPeak} blocked` : ""}`}>
-      <title>{`Active sessions, last 5 minutes · peak ${peak}${anyBlocked ? ` · up to ${blockedPeak} blocked` : ""}`}</title>
+    <svg className="live-spark" width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label={anyBlocked
+      ? t("ui.live.spark.label_blocked", { minutes: String(Math.round((samples.length * REFRESH_MS) / 60000) || 1), peak: String(peak), blocked: String(blockedPeak) })
+      : t("ui.live.spark.label", { minutes: String(Math.round((samples.length * REFRESH_MS) / 60000) || 1), peak: String(peak) })}>
+      <title>{anyBlocked ? t("ui.live.spark.title_blocked", { peak: String(peak), blocked: String(blockedPeak) }) : t("ui.live.spark.title", { peak: String(peak) })}</title>
       <path d={area} className="spark-area" />
       <path d={line("active")} className="spark-line" />
       {anyBlocked && <path d={line("blocked")} className="spark-blocked" />}
@@ -275,10 +296,12 @@ function Sparkline({ samples }: { samples: Sample[] }) {
   );
 }
 
-const ACTION_COPY: Record<SessionAction, { button: string; confirm: string; explain: string }> = {
-  cancel: { button: "Cancel", confirm: "Cancel statement", explain: "Stops the running statement; the session stays connected." },
-  terminate: { button: "End", confirm: "End session", explain: "Closes the session; its open transaction rolls back." },
-};
+/** What a session action's buttons say; `confirm` names the session. */
+function actionCopy(action: SessionAction, session: string): { button: string; confirm: string; explain: string } {
+  return action === "cancel"
+    ? { button: t("ui.common.cancel"), confirm: t("ui.live.action.cancel_confirm", { session }), explain: t("ui.live.action.cancel_explain") }
+    : { button: t("ui.live.action.end"), confirm: t("ui.live.action.end_confirm", { session }), explain: t("ui.live.action.end_explain") };
+}
 
 type RowAction = { status: "idle" } | { status: "confirm"; action: SessionAction } | { status: "busy" } | { status: "error"; message: string };
 
@@ -318,13 +341,13 @@ function SessionRow({
       className={`row ${row.status === "confirm" ? "confirming" : ""} ${s.transaction_ms != null && (s.state === "idle in transaction" || s.state === "sleeping") ? "idle-tx" : ""} ${located ? "located" : ""} ${open ? "selected" : ""} ${s.state !== "idle" ? "openable" : ""}`}
       tabIndex={s.state !== "idle" ? 0 : undefined}
       aria-expanded={s.state !== "idle" ? open : undefined}
-      title={s.state !== "idle" ? "Show how far along its statement is (Enter)" : undefined}
+      title={s.state !== "idle" ? t("ui.live.progress_title", { key: "Enter" }) : undefined}
       onClick={(e) => s.state !== "idle" && !(e.target as HTMLElement).closest("button") && onOpen()}
       onKeyDown={(e) => s.state !== "idle" && e.key === "Enter" && e.target === e.currentTarget && onOpen()}
     >
       <td className="mono">
         {s.id}
-        {isHead && <span className="tag high" style={{ marginLeft: 6 }}>blocking</span>}
+        {isHead && <span className="tag high" style={{ marginLeft: 6 }}>{t("ui.live.blocking")}</span>}
       </td>
       <td>{s.state}</td>
       <td className="r">{duration(s.elapsed_ms)}</td>
@@ -340,17 +363,17 @@ function SessionRow({
         <td className="r session-actions">
           {row.status === "idle" &&
             offered.map((a) => (
-              <button type="button" key={a} className="btn ghost small" title={ACTION_COPY[a].explain} onClick={() => setRow({ status: "confirm", action: a })}>
-                {ACTION_COPY[a].button}
+              <button type="button" key={a} className="btn ghost small" title={actionCopy(a, s.id).explain} onClick={() => setRow({ status: "confirm", action: a })}>
+                {actionCopy(a, s.id).button}
               </button>
             ))}
           {row.status === "confirm" && (
             <span className="inline-confirm" onKeyDown={(e) => e.key === "Escape" && setRow({ status: "idle" })}>
-              <button type="button" className="btn danger small" autoFocus title={ACTION_COPY[row.action].explain} onClick={() => run(row.action)}>
-                {ACTION_COPY[row.action].confirm} {s.id}
+              <button type="button" className="btn danger small" autoFocus title={actionCopy(row.action, s.id).explain} onClick={() => run(row.action)}>
+                {actionCopy(row.action, s.id).confirm}
               </button>
               <button type="button" className="btn ghost small" onClick={() => setRow({ status: "idle" })}>
-                Keep
+                {t("ui.live.keep")}
               </button>
             </span>
           )}
@@ -361,7 +384,7 @@ function SessionRow({
                 {row.message}
               </span>
               <button type="button" className="btn ghost small" onClick={() => setRow({ status: "idle" })}>
-                OK
+                {t("ui.common.ok")}
               </button>
             </span>
           )}
