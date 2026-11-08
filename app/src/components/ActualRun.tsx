@@ -1,11 +1,12 @@
 import { Activity, Check, Copy, History, Play, SquarePen } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useState } from "react";
 import type { Engine } from "../gen/Engine";
 import type { Plan } from "../gen/Plan";
 import type { QueryStat } from "../gen/QueryStat";
 import { api, errorMessage, type ApiError } from "../lib/api";
 import { canOpenQueryInEditor, prepareQueryForEditor } from "../lib/editor-sql";
 import { serverName } from "../lib/engines";
+import { t } from "../lib/i18n";
 import { currentReport, setState, useStore } from "../lib/store";
 import { PlanSurface, type PlanLook } from "./PlanSurface";
 import { copyAndTell } from "../lib/clipboard";
@@ -15,15 +16,20 @@ export type PlanSource = "plan" | "actual";
 
 const TURN_ON = "ALTER DATABASE SCOPED CONFIGURATION SET LAST_QUERY_PLAN_STATS = ON;";
 
+/** A message whose `{name}` arguments are elements: t() leaves them as `{name}`, and each is put in its place. */
+function place(message: string, elements: Record<string, ReactNode>): ReactNode[] {
+  return message.split(/\{(\w+)\}/).map((piece, i) => (i % 2 ? <Fragment key={i}>{elements[piece] ?? `{${piece}}`}</Fragment> : piece));
+}
+
 /** "Estimated" (what the optimizer planned) or "Last run" (what actually happened). */
 export function PlanSourceToggle({ value, onChange }: { value: PlanSource; onChange: (v: PlanSource) => void }) {
   return (
-    <span className="seg" role="tablist" aria-label="Which plan" onKeyDown={tabListKeys}>
-      <button type="button" role="tab" aria-selected={value === "plan"} tabIndex={value === "plan" ? 0 : -1} className={value === "plan" ? "on" : ""} onClick={() => onChange("plan")} title="The plan the optimizer chose, with its estimates">
-        Estimated
+    <span className="seg" role="tablist" aria-label={t("ui.actual_run.which_plan")} onKeyDown={tabListKeys}>
+      <button type="button" role="tab" aria-selected={value === "plan"} tabIndex={value === "plan" ? 0 : -1} className={value === "plan" ? "on" : ""} onClick={() => onChange("plan")} title={t("ui.actual_run.estimated_hint")}>
+        {t("ui.actual_run.estimated")}
       </button>
-      <button type="button" role="tab" aria-selected={value === "actual"} tabIndex={value === "actual" ? 0 : -1} className={value === "actual" ? "on" : ""} onClick={() => onChange("actual")} title="Real row counts (and timings, when measured) from a run of this query">
-        <History size={12} /> Last run
+      <button type="button" role="tab" aria-selected={value === "actual"} tabIndex={value === "actual" ? 0 : -1} className={value === "actual" ? "on" : ""} onClick={() => onChange("actual")} title={t("ui.actual_run.last_run_hint")}>
+        <History size={12} /> {t("ui.common.last_run")}
       </button>
     </span>
   );
@@ -81,7 +87,7 @@ export function LastActualRun(props: { connection: string; engine: Engine; query
           <span />
           <span />
         </div>
-        <div className="muted">{state.status === "measuring" ? "Running it once and measuring every step…" : "Reading the last run…"}</div>
+        <div className="muted">{state.status === "measuring" ? t("ui.actual_run.measuring") : t("ui.actual_run.loading")}</div>
       </div>
     );
   }
@@ -90,7 +96,7 @@ export function LastActualRun(props: { connection: string; engine: Engine; query
       <>
         {state.measured && (
           <div className="actual-origin">
-            <Activity size={12} /> Measured just now: Culprit ran the statement once {engine === "mysql" ? "inside a read-only transaction" : "inside a transaction that was rolled back"}.
+            <Activity size={12} /> {engine === "mysql" ? t("ui.actual_run.measured_read_only") : t("ui.actual_run.measured_rolled_back")}
           </div>
         )}
         <PlanSurface key={`actual-${query.id}-${planId}`} plan={state.plan} look={look} />
@@ -102,17 +108,15 @@ export function LastActualRun(props: { connection: string; engine: Engine; query
   const canRun = runnable(query.text);
   return (
     <div className="actual-missing">
-      <div className="am-title">{settingOff ? "SQL Server isn't keeping actual plans for this database yet" : state.error.message}</div>
+      <div className="am-title">{settingOff ? t("ui.actual_run.setting_off") : state.error.message}</div>
       <p className="am-body">
         {settingOff ? (
-          <>
-            With <span className="mono">LAST_QUERY_PLAN_STATS</span> on, SQL Server keeps the real row counts of every cached query's latest run, so you can see which estimate was wrong without running anything.
-          </>
+          place(t("ui.actual_run.setting_explain"), { setting: <span className="mono">LAST_QUERY_PLAN_STATS</span> })
         ) : engine === "mssql" ? (
           state.error.hint
         ) : (
           <>
-            {serverName(engine, product)} only reports what a query actually did while you measure it. {canRun ? "You can run it once now and see real rows and timings for every step." : "Its recorded text has placeholders instead of values, so open it in the editor, fill in real values and measure it there."}
+            {t("ui.actual_run.only_while_measured", { engine: serverName(engine, product) })} {canRun ? t("ui.actual_run.can_run") : t("ui.actual_run.placeholders")}
           </>
         )}
       </p>
@@ -129,14 +133,14 @@ export function LastActualRun(props: { connection: string; engine: Engine; query
               })
             }
           >
-            {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? "Copied" : "Copy"}
+            {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? t("ui.common.copied") : t("ui.common.copy")}
           </button>
         </div>
       )}
       <div className="am-actions">
         {canRun && (
-          <button type="button" className="btn primary" onClick={measure} title="Runs the statement once; reads only on production, and writes are rolled back elsewhere">
-            <Play size={13} /> Measure it once
+          <button type="button" className="btn primary" onClick={measure} title={t("ui.actual_run.measure_hint")}>
+            <Play size={13} /> {t("ui.actual_run.measure")}
           </button>
         )}
         {(() => {
@@ -144,7 +148,7 @@ export function LastActualRun(props: { connection: string; engine: Engine; query
           return (
             canOpenQueryInEditor(query.text, editorSql) && (
               <button type="button" className="btn" onClick={() => setState({ view: "editor", editorSql })}>
-                <SquarePen size={13} /> Open in editor
+                <SquarePen size={13} /> {t("ui.common.open_in_editor")}
               </button>
             )
           );

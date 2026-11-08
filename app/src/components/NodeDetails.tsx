@@ -4,20 +4,33 @@ import type { PlanInsight } from "../gen/PlanInsight";
 import type { Plan } from "../gen/Plan";
 import type { PlanNode } from "../gen/PlanNode";
 import { duration, percent } from "../lib/format";
+import { t } from "../lib/i18n";
 import { cost, estRowsForRuns, exact, misestimate, operatorRuns, propValue } from "../lib/plan-format";
 import { OpIcon } from "./OpIcon";
 import { DocdbWork } from "./DocdbWork";
 import { shortPredicate } from "./PlanView";
 
-const WARNING_LABEL: Record<string, string> = {
-  "implicit-conversion": "Type conversion in a comparison",
-  spill: "Spilled to disk",
-  "no-join-predicate": "Join without a condition",
-  "missing-statistics": "Columns without statistics",
-  "memory-grant": "Memory grant warning",
-  misestimate: "Actual rows far from the estimate",
-  "residual-predicate": "Filters after reading most rows",
-};
+/** A plan warning in words; one the app doesn't know reads as the engine named it. */
+function warningLabel(warning: string): string {
+  switch (warning) {
+    case "implicit-conversion":
+      return t("ui.node_details.warning.implicit_conversion");
+    case "spill":
+      return t("ui.node_details.warning.spill");
+    case "no-join-predicate":
+      return t("ui.node_details.warning.no_join_predicate");
+    case "missing-statistics":
+      return t("ui.node_details.warning.missing_statistics");
+    case "memory-grant":
+      return t("ui.node_details.warning.memory_grant");
+    case "misestimate":
+      return t("ui.node_details.warning.misestimate");
+    case "residual-predicate":
+      return t("ui.node_details.warning.residual_predicate");
+    default:
+      return warning;
+  }
+}
 
 /** Properties shown in the sections above, so the full list doesn't repeat them. */
 const SHOWN = new Set([
@@ -43,7 +56,7 @@ const SHOWN = new Set([
 function ratio(plan: Plan | undefined, n: PlanNode) {
   const factor = misestimate(plan, n);
   if (factor == null || Math.abs(factor) < 2) return null;
-  return <span className={`nd-ratio ${n.warnings.includes("misestimate") ? "bad" : ""}`}>{`×${exact(Math.round(Math.abs(factor)))} ${factor > 0 ? "more than expected" : "fewer than expected"}`}</span>;
+  return <span className={`nd-ratio ${n.warnings.includes("misestimate") ? "bad" : ""}`}>{factor > 0 ? t("ui.node_details.more_than_expected", { factor: exact(Math.round(Math.abs(factor))) }) : t("ui.node_details.fewer_than_expected", { factor: exact(Math.round(Math.abs(factor))) })}</span>;
 }
 
 /** One operator, explained: what it does, its rows and cost, what's wrong with it, then every raw property on demand. */
@@ -104,13 +117,13 @@ export function NodeDetails({
         </div>
         {estimates &&
           (share != null ? (
-            <span className="nd-share" title="Share of the plan's work done by this operator itself">
+            <span className="nd-share" title={t("ui.node_details.share_hint")}>
               {percent(share)}
-              <span className="muted"> of the work</span>
+              <span className="muted"> {t("ui.node_details.of_the_work")}</span>
             </span>
           ) : (
             <span className="nd-share muted" title={noShare ?? undefined}>
-              no share of the work
+              {t("ui.node_details.no_share_of_work")}
             </span>
           ))}
       </div>
@@ -130,16 +143,16 @@ export function NodeDetails({
       <div className="nd-grid">
         {(node.seek_predicate || node.predicate) && (
           <section className="nd-card wide">
-            <h4>What it does</h4>
+            <h4>{t("ui.node_details.what_it_does")}</h4>
             {node.seek_predicate && (
               <div className="nd-cond">
-                <span className="nd-k">{node.kind === "seek" || node.kind === "lookup" ? "Seeks on" : "Index condition"}</span>
+                <span className="nd-k">{node.kind === "seek" || node.kind === "lookup" ? t("ui.node_details.seeks_on") : t("ui.node_details.index_condition")}</span>
                 <code>{shortPredicate(node.seek_predicate)}</code>
               </div>
             )}
             {node.predicate && (
               <div className="nd-cond">
-                <span className="nd-k">Then filters</span>
+                <span className="nd-k">{t("ui.node_details.then_filters")}</span>
                 <code>{shortPredicate(node.predicate)}</code>
               </div>
             )}
@@ -147,13 +160,13 @@ export function NodeDetails({
         )}
         {estimates && (
         <section className="nd-card">
-          <h4>Rows</h4>
+          <h4>{t("ui.node_details.rows")}</h4>
           <dl>
-            <dt>Estimated</dt>
-            <dd title={node.act_executions != null ? "Rows per run as estimated, times the runs that happened" : undefined}>{exact(estRowsForRuns(plan, node))}</dd>
+            <dt>{t("ui.node_details.estimated")}</dt>
+            <dd title={node.act_executions != null ? t("ui.node_details.estimated_hint") : undefined}>{exact(estRowsForRuns(plan, node))}</dd>
             {node.act_rows != null && (
               <>
-                <dt>Actual</dt>
+                <dt>{t("ui.node_details.actual")}</dt>
                 <dd>
                   {exact(node.act_rows)} {ratio(plan, node)}
                 </dd>
@@ -161,25 +174,25 @@ export function NodeDetails({
             )}
             {executions > 1 && (
               <>
-                <dt>{node.act_executions != null ? "Ran" : "Expected runs"}</dt>
-                <dd>{exact(executions)} times</dd>
+                <dt>{node.act_executions != null ? t("ui.node_details.ran") : t("ui.node_details.expected_runs")}</dt>
+                <dd>{t("ui.node_details.times", { count: exact(executions) })}</dd>
               </>
             )}
             {node.rows_read != null && (
               <>
-                <dt>{actual ? "Read" : "Expected to read"}</dt>
+                <dt>{actual ? t("ui.node_details.read") : t("ui.node_details.expected_to_read")}</dt>
                 <dd>{exact(node.rows_read)}</dd>
               </>
             )}
             {removed && (
               <>
-                <dt>Thrown away by the filter</dt>
+                <dt>{t("ui.node_details.filtered_out")}</dt>
                 <dd>{propValue(removed)}</dd>
               </>
             )}
             {node.table_rows != null && (
               <>
-                <dt>In the table</dt>
+                <dt>{t("ui.node_details.in_table")}</dt>
                 <dd>{exact(node.table_rows)}</dd>
               </>
             )}
@@ -188,28 +201,28 @@ export function NodeDetails({
         )}
         {estimates && (
         <section className="nd-card">
-          <h4>Cost</h4>
+          <h4>{t("ui.node_details.cost")}</h4>
           <dl>
-            <dt>This operator</dt>
+            <dt>{t("ui.node_details.this_operator")}</dt>
             <dd>
-              {share != null ? percent(share) : "no share"} <span className="muted">· {plan?.facts.estimated_cost_unavailable ? "cost unavailable" : `${cost(node.self_cost)} units`}</span>
+              {share != null ? percent(share) : t("ui.node_details.no_share")} <span className="muted">· {plan?.facts.estimated_cost_unavailable ? t("ui.node_details.cost_unavailable") : t("ui.node_details.units", { cost: cost(node.self_cost) })}</span>
             </dd>
             {subtreeShare != null && (
               <>
-                <dt>With its inputs</dt>
+                <dt>{t("ui.node_details.with_inputs")}</dt>
                 <dd>{percent(subtreeShare)}</dd>
               </>
             )}
             {node.act_time_ms != null && (
               <>
-                <dt>Actual time</dt>
+                <dt>{t("ui.node_details.actual_time")}</dt>
                 <dd>{duration(node.act_time_ms)}</dd>
               </>
             )}
           </dl>
           {share == null && noShare && <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>{noShare}</p>}
           {split != null && (
-            <div className="nd-split" title={`CPU ${percent(split)} · I/O ${percent(1 - split)} of the estimate`}>
+            <div className="nd-split" title={t("ui.node_details.split_hint", { cpu: percent(split), io: percent(1 - split) })}>
               <div className="nd-split-bar">
                 <span className="cpu" style={{ width: `${split * 100}%` }} />
                 <span className="io" style={{ width: `${(1 - split) * 100}%` }} />
@@ -217,11 +230,11 @@ export function NodeDetails({
               <div className="nd-split-legend">
                 <span>
                   <i className="cpu" />
-                  CPU {percent(split)}
+                  {t("ui.node_details.cpu_share", { share: percent(split) })}
                 </span>
                 <span>
                   <i className="io" />
-                  I/O {percent(1 - split)}
+                  {t("ui.node_details.io_share", { share: percent(1 - split) })}
                 </span>
               </div>
             </div>
@@ -231,11 +244,11 @@ export function NodeDetails({
         {node.warnings.length > 0 && (
           <section className="nd-card nd-warn">
             <h4>
-              <TriangleAlert size={12} /> Warnings
+              <TriangleAlert size={12} /> {t("ui.node_details.warnings")}
             </h4>
             <ul>
               {node.warnings.map((w) => (
-                <li key={w}>{WARNING_LABEL[w] ?? w}</li>
+                <li key={w}>{warningLabel(w)}</li>
               ))}
             </ul>
           </section>
@@ -245,11 +258,11 @@ export function NodeDetails({
       {Object.keys(node.props).length > 0 && (
         <details className="nd-all">
           <summary>
-            <ChevronRight size={13} className="chev" /> All properties <span className="muted">{props.length}</span>
+            <ChevronRight size={13} className="chev" /> {t("ui.node_details.all_properties")} <span className="muted">{props.length}</span>
           </summary>
           <label className="search nd-search">
             <Search size={12} />
-            <input value={filter} placeholder="Find a property" onChange={(e) => setFilter(e.target.value)} />
+            <input value={filter} placeholder={t("ui.node_details.find_property")} onChange={(e) => setFilter(e.target.value)} />
           </label>
           <dl className="nd-props">
             {props.map(([k, v]) => (

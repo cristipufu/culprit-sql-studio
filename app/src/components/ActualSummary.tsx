@@ -1,8 +1,9 @@
 import { Clock, Cpu, Database, Gauge, HardDrive, Scale, TriangleAlert, Users } from "lucide-react";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import type { Plan } from "../gen/Plan";
 import { actualFacts } from "../lib/actual";
 import { count, duration, percent, rowCount, when } from "../lib/format";
+import { t } from "../lib/i18n";
 import { estRowsForRuns } from "../lib/plan-format";
 
 function kb(value: number): string {
@@ -13,7 +14,12 @@ function kb(value: number): string {
 
 function where(node: { op: string; object: string | null }): string {
   const table = node.object?.split(".").pop();
-  return table ? `${node.op} on ${table}` : node.op;
+  return table ? t("ui.actual_summary.op_on", { op: node.op, table }) : node.op;
+}
+
+/** A message whose `{name}` arguments are elements: t() leaves them as `{name}`, and each is put in its place. */
+function place(message: string, elements: Record<string, ReactNode>): ReactNode[] {
+  return message.split(/\{(\w+)\}/).map((piece, i) => (i % 2 ? <Fragment key={i}>{elements[piece] ?? `{${piece}}`}</Fragment> : piece));
 }
 
 function Stat({ icon, value, label, title }: { icon: ReactNode; value: string; label: string; title?: string }) {
@@ -43,12 +49,10 @@ export function ActualSummary({ plan, onPick }: { plan: Plan; onPick?: (id: numb
       tone: "hot",
       icon: <Gauge size={13} />,
       text: (
-        <>
-          Most operator time: <b>{where(f.slowest.node)}</b> · {duration(f.slowest.ms)} ({percent(f.slowest.share)} of timed operators)
-        </>
+        <>{place(t("ui.actual_summary.slowest", { time: duration(f.slowest.ms), share: percent(f.slowest.share) }), { operator: <b>{where(f.slowest.node)}</b> })}</>
       ),
       node: f.slowest.node.id,
-      title: "The step that spent the most time on its own work, not counting its inputs",
+      title: t("ui.actual_summary.slowest_hint"),
     });
   }
   if (f.worstEstimate) {
@@ -60,12 +64,10 @@ export function ActualSummary({ plan, onPick }: { plan: Plan; onPick?: (id: numb
       tone: "warn",
       icon: <Scale size={13} />,
       text: (
-        <>
-          Expected {rowCount(expected)}, got <b>{count(n.act_rows ?? 0)}</b> at <b>{where(n)}</b> · ×{count(Math.abs(f.worstEstimate.factor))} off
-        </>
+        <>{place(t("ui.actual_summary.estimate", { expected: rowCount(expected), factor: count(Math.abs(f.worstEstimate.factor)) }), { actual: <b>{count(n.act_rows ?? 0)}</b>, operator: <b>{where(n)}</b> })}</>
       ),
       node: f.worstEstimate.node.id,
-      title: "The optimizer chose this plan for a row count that turned out wrong; that is often why a plan is slow",
+      title: t("ui.actual_summary.estimate_hint"),
     });
   }
   if (f.skew) {
@@ -74,12 +76,10 @@ export function ActualSummary({ plan, onPick }: { plan: Plan; onPick?: (id: numb
       tone: "warn",
       icon: <Users size={13} />,
       text: (
-        <>
-          One of {f.skew.threads} workers did {percent(f.skew.busiest)} of <b>{where(f.skew.node)}</b>
-        </>
+        <>{place(t("ui.actual_summary.skew", { threads: f.skew.threads, share: percent(f.skew.busiest) }), { operator: <b>{where(f.skew.node)}</b> })}</>
       ),
       node: f.skew.node.id,
-      title: "Parallel work was uneven, so the other workers mostly waited",
+      title: t("ui.actual_summary.skew_hint"),
     });
   }
   if (f.spilled) {
@@ -87,32 +87,32 @@ export function ActualSummary({ plan, onPick }: { plan: Plan; onPick?: (id: numb
       key: "spill",
       tone: "warn",
       icon: <HardDrive size={13} />,
-      text: f.spillPages > 0 ? <>Ran out of memory and wrote {count(f.spillPages)} pages to disk</> : <>Ran out of memory and spilled to disk</>,
-      title: "A sort or hash didn't fit in its memory grant and used tempdb / temp files instead",
+      text: f.spillPages > 0 ? t("ui.actual_summary.spill_pages", { pages: count(f.spillPages) }) : t("ui.actual_summary.spill"),
+      title: t("ui.actual_summary.spill_hint"),
     });
   }
   return (
     <div className="actual-summary">
       <div className="as-head">
-        <span className="as-kicker">{f.lastRunAt ? "Last run" : "Measured run"}</span>
+        <span className="as-kicker">{f.lastRunAt ? t("ui.common.last_run") : t("ui.actual_summary.measured_run")}</span>
         {f.elapsedMs != null && (
-          <span className="as-elapsed" title="Elapsed time of the statement">
+          <span className="as-elapsed" title={t("ui.actual_summary.elapsed")}>
             <Clock size={14} />
             {duration(f.elapsedMs)}
           </span>
         )}
         <span className="as-stats">
-          {f.cpuMs != null && <Stat icon={<Cpu size={12} />} value={duration(f.cpuMs)} label="CPU" title={f.workers ? `Across ${f.workers} worker threads` : undefined} />}
+          {f.cpuMs != null && <Stat icon={<Cpu size={12} />} value={duration(f.cpuMs)} label={t("ui.actual_summary.cpu")} title={f.workers ? t("ui.actual_summary.across_workers", { workers: f.workers }) : undefined} />}
           {f.logicalReads != null && (
             <Stat
               icon={<Database size={12} />}
               value={count(f.logicalReads)}
-              label={f.physicalReads ? `reads · ${count(f.physicalReads)} from disk` : "reads"}
-              title="Pages (SQL Server) or buffers (PostgreSQL) read, from memory or disk"
+              label={f.physicalReads ? t("ui.actual_summary.reads_from_disk", { disk: count(f.physicalReads) }) : t("ui.actual_summary.reads")}
+              title={t("ui.actual_summary.reads_hint")}
             />
           )}
-          {f.rows != null && <Stat icon={null} value={count(f.rows)} label={f.rows === 1 ? "row" : "rows"} />}
-          {f.workers != null && f.workers > 1 && <Stat icon={<Users size={12} />} value={String(f.workers)} label="workers" />}
+          {f.rows != null && <Stat icon={null} value={count(f.rows)} label={t("ui.actual_summary.rows", { n: f.rows })} />}
+          {f.workers != null && f.workers > 1 && <Stat icon={<Users size={12} />} value={String(f.workers)} label={t("ui.actual_summary.workers", { n: f.workers })} />}
         </span>
         {f.lastRunAt && (
           <span className="as-when" title={when(f.lastRunAt.endsWith("Z") ? f.lastRunAt : `${f.lastRunAt}Z`).full}>
@@ -121,26 +121,26 @@ export function ActualSummary({ plan, onPick }: { plan: Plan; onPick?: (id: numb
         )}
       </div>
       {memory && (
-        <div className="as-memory" title="Memory SQL Server reserved for sorts and hashes, and how much the run actually used">
-          <span className="as-label">Memory</span>
+        <div className="as-memory" title={t("ui.actual_summary.memory_hint")}>
+          <span className="as-label">{t("ui.actual_summary.memory")}</span>
           <span className="as-bar" aria-hidden>
             <span style={{ width: `${Math.min(100, (memory.used / memory.granted) * 100)}%` }} />
           </span>
           <span>
-            used <b>{kb(memory.used)}</b> of {kb(memory.granted)} granted
-            {idle >= 0.75 && memory.granted >= 10 * 1024 && <span className="muted"> · {percent(idle)} sat idle, other queries may have waited for it</span>}
+            {place(t("ui.actual_summary.memory_used", { granted: kb(memory.granted) }), { used: <b>{kb(memory.used)}</b> })}
+            {idle >= 0.75 && memory.granted >= 10 * 1024 && <span className="muted"> · {t("ui.actual_summary.memory_idle", { share: percent(idle) })}</span>}
           </span>
         </div>
       )}
-      {f.grantedKb != null && f.grantedKb > 0 && f.usedKb == null && <p className="as-note">Memory granted: {kb(f.grantedKb)}. Memory used was not recorded.</p>}
-      {f.triggers.length > 0 && <section className="actual-triggers" aria-label="Measured trigger work">
-        <h4>Trigger work</h4>
-        <p className="muted">AFTER trigger time is outside the operator tree. BEFORE trigger time also appears in its modifying operator; these totals must not be added together.</p>
-        <ul>{f.triggers.map((trigger, i) => <li key={`${trigger.name}-${i}`}><span><b>{trigger.name}</b>{trigger.relation && <> on {trigger.relation}</>}</span><span>{duration(trigger.ms)} · {trigger.calls == null ? "call count not recorded" : `${count(trigger.calls)} calls`}</span></li>)}</ul>
+      {f.grantedKb != null && f.grantedKb > 0 && f.usedKb == null && <p className="as-note">{t("ui.actual_summary.memory_unrecorded", { granted: kb(f.grantedKb) })}</p>}
+      {f.triggers.length > 0 && <section className="actual-triggers" aria-label={t("ui.actual_summary.triggers_label")}>
+        <h4>{t("ui.actual_summary.triggers")}</h4>
+        <p className="muted">{t("ui.actual_summary.triggers_note")}</p>
+        <ul>{f.triggers.map((trigger, i) => <li key={`${trigger.name}-${i}`}><span>{trigger.relation ? place(t("ui.actual_summary.trigger_on", { relation: trigger.relation }), { trigger: <b>{trigger.name}</b> }) : <b>{trigger.name}</b>}</span><span>{duration(trigger.ms)} · {trigger.calls == null ? t("ui.actual_summary.calls_unrecorded") : t("ui.actual_summary.calls", { calls: count(trigger.calls) })}</span></li>)}</ul>
       </section>}
       {!f.timed && (
         <div className="as-note">
-          <TriangleAlert size={12} /> Actual row counts only: {f.lastRunAt ? "SQL Server keeps rows, not time, for past runs" : "this run reported no per-step time"}. Shares are of the estimated cost.
+          <TriangleAlert size={12} /> {f.lastRunAt ? t("ui.actual_summary.untimed_past") : t("ui.actual_summary.untimed_run")}
         </div>
       )}
       {callouts.length > 0 && (

@@ -16,16 +16,19 @@ import { checkForUpdates, installUpdate, restartToUpdate, setAutoCheck, useAutoC
 /** `rank` orders equally good matches: findings keep the report's impact order. */
 type Item = { id: string; section: string; title: string; hint?: string; icon?: ReactNode; run: () => void; rank?: number };
 
-const VIEWS: { view: View; title: string; icon: ReactNode }[] = [
-  { view: "dashboard", title: "Dashboard", icon: <Gauge size={13} /> },
-  { view: "overview", title: "Findings", icon: <CircleDot size={13} /> },
-  { view: "queries", title: "Queries", icon: <ListOrdered size={13} /> },
-  { view: "live", title: "Live sessions", icon: <Activity size={13} /> },
-  { view: "schema", title: "Schema", icon: <Table2 size={13} /> },
-  { view: "editor", title: "Editor", icon: <SquareTerminal size={13} /> },
-  { view: "plans", title: "Plans", icon: <GitCompareArrows size={13} /> },
-  { view: "connections", title: "Connections", icon: <Database size={13} /> },
-];
+/** The views the palette goes to, each with its name in the app's language. */
+function views(): { view: View; title: string; icon: ReactNode }[] {
+  return [
+    { view: "dashboard", title: t("ui.palette.view.dashboard"), icon: <Gauge size={13} /> },
+    { view: "overview", title: t("ui.palette.view.overview"), icon: <CircleDot size={13} /> },
+    { view: "queries", title: t("ui.palette.view.queries"), icon: <ListOrdered size={13} /> },
+    { view: "live", title: t("ui.palette.view.live"), icon: <Activity size={13} /> },
+    { view: "schema", title: t("ui.palette.view.schema"), icon: <Table2 size={13} /> },
+    { view: "editor", title: t("ui.palette.view.editor"), icon: <SquareTerminal size={13} /> },
+    { view: "plans", title: t("ui.palette.view.plans"), icon: <GitCompareArrows size={13} /> },
+    { view: "connections", title: t("ui.palette.view.connections"), icon: <Database size={13} /> },
+  ];
+}
 
 const SEVERITY_COLOR: Record<string, string> = { high: "var(--high-text)", medium: "var(--medium-text)", low: "var(--low-text)" };
 
@@ -33,17 +36,17 @@ const icon = (node: ReactNode) => <span className="p-icon">{node}</span>;
 
 function score(text: string, query: string): number {
   if (!query) return 1;
-  const t = text.toLowerCase();
+  const lower = text.toLowerCase();
   const q = query.toLowerCase();
-  const direct = t.indexOf(q);
+  const direct = lower.indexOf(q);
   // A match at the start of a word ranks above one inside it.
-  if (direct >= 0) return 100 - direct + (direct === 0 || /[\s._\-·/]/.test(t[direct - 1] ?? "") ? 50 : 0);
+  if (direct >= 0) return 100 - direct + (direct === 0 || /[\s._\-·/]/.test(lower[direct - 1] ?? "") ? 50 : 0);
   // One or two letters scattered through a title match almost everything: short queries need a real substring.
   if (q.length < 3) return 0;
   let ti = 0;
   let hits = 0;
   for (const ch of q) {
-    const found = t.indexOf(ch, ti);
+    const found = lower.indexOf(ch, ti);
     if (found < 0) return 0;
     hits += found === ti ? 2 : 1;
     ti = found + 1;
@@ -53,10 +56,10 @@ function score(text: string, query: string): number {
 
 /** How a match reads: 2 at the start of a word, 1 inside one, 0 for scattered letters. */
 function matchTier(text: string, query: string): number {
-  const t = text.toLowerCase();
-  const at = t.indexOf(query.toLowerCase());
+  const lower = text.toLowerCase();
+  const at = lower.indexOf(query.toLowerCase());
   if (at < 0) return 0;
-  return at === 0 || /[\s._\-·/]/.test(t[at - 1] ?? "") ? 2 : 1;
+  return at === 0 || /[\s._\-·/]/.test(lower[at - 1] ?? "") ? 2 : 1;
 }
 
 export function CommandPalette() {
@@ -80,72 +83,74 @@ export function CommandPalette() {
   const items = useMemo<Item[]>(() => {
     const close = () => setState({ palette: false });
     const list: Item[] = [];
+    const actions = t("ui.palette.section.actions");
+    const goTo = t("ui.palette.section.go_to");
     if (active) {
-      list.push({ id: "rescan", section: "Actions", title: "Scan now", hint: keys("⌘R"), icon: icon(<RefreshCw size={13} />), run: () => (close(), scan(active)) });
-      list.push({ id: "new-tab", section: "Actions", title: "New query tab", hint: keys("⌘T"), icon: icon(<Plus size={13} />), run: () => setState({ view: "editor", editorSql: " ", palette: false }) });
+      list.push({ id: "rescan", section: actions, title: t("ui.palette.scan_now"), hint: keys("⌘R"), icon: icon(<RefreshCw size={13} />), run: () => (close(), scan(active)) });
+      list.push({ id: "new-tab", section: actions, title: t("ui.palette.new_tab"), hint: keys("⌘T"), icon: icon(<Plus size={13} />), run: () => setState({ view: "editor", editorSql: " ", palette: false }) });
     }
     if (canScreenshot()) {
-      list.push({ id: "screenshot", section: "Actions", title: "Screenshot this view", hint: "copy as PNG", icon: icon(<Camera size={13} />), run: () => void screenshotWorkspace() });
+      list.push({ id: "screenshot", section: actions, title: t("ui.palette.screenshot"), hint: t("ui.palette.screenshot_hint"), icon: icon(<Camera size={13} />), run: () => void screenshotWorkspace() });
     }
-    list.push({ id: "paste-plan", section: "Actions", title: "Open or compare a plan", icon: icon(<GitCompareArrows size={13} />), run: () => setState({ view: "plans", palette: false }) });
+    list.push({ id: "paste-plan", section: actions, title: t("ui.palette.open_plan"), icon: icon(<GitCompareArrows size={13} />), run: () => setState({ view: "plans", palette: false }) });
     const dark = theme === "dark" || (theme === "system" && window.matchMedia?.("(prefers-color-scheme: dark)").matches);
     list.push({
       id: "theme",
-      section: "Actions",
-      title: dark ? "Switch to light theme" : "Switch to dark theme",
+      section: actions,
+      title: dark ? t("ui.palette.light_theme") : t("ui.palette.dark_theme"),
       icon: icon(dark ? <Sun size={13} /> : <Moon size={13} />),
       run: () => (setTheme(dark ? "light" : "dark"), close()),
     });
     for (const l of languages().filter((l) => l.code !== language)) {
-      list.push({ id: `language-${l.code}`, section: "Actions", title: t("ui.palette.show_in", { language: l.name }), hint: l.englishName, icon: icon(<Languages size={13} />), run: () => (setLanguage(l.code), close()) });
+      list.push({ id: `language-${l.code}`, section: actions, title: t("ui.palette.show_in", { language: l.name }), hint: l.englishName, icon: icon(<Languages size={13} />), run: () => (setLanguage(l.code), close()) });
     }
     if (update.status === "available" || update.status === "failed") {
-      list.push({ id: "update-install", section: "Actions", title: `Update to Culprit ${update.info.version}`, icon: icon(<CircleArrowUp size={13} />), run: () => (close(), void installUpdate()) });
+      list.push({ id: "update-install", section: actions, title: t("ui.palette.update", { version: update.info.version }), icon: icon(<CircleArrowUp size={13} />), run: () => (close(), void installUpdate()) });
     } else if (update.status === "ready") {
-      list.push({ id: "update-restart", section: "Actions", title: `Restart to finish updating to ${update.info.version}`, icon: icon(<RotateCw size={13} />), run: () => void restartToUpdate() });
+      list.push({ id: "update-restart", section: actions, title: t("ui.palette.restart_to_update", { version: update.info.version }), icon: icon(<RotateCw size={13} />), run: () => void restartToUpdate() });
     } else {
-      list.push({ id: "update-check", section: "Actions", title: "Check for updates", icon: icon(<CircleArrowUp size={13} />), run: () => (close(), void checkForUpdates(true)) });
+      list.push({ id: "update-check", section: actions, title: t("ui.palette.check_updates"), icon: icon(<CircleArrowUp size={13} />), run: () => (close(), void checkForUpdates(true)) });
     }
     list.push({
       id: "update-auto",
-      section: "Actions",
-      title: autoCheck ? "Stop checking for updates daily" : "Check for updates daily",
-      hint: autoCheck ? "on" : "off",
+      section: actions,
+      title: autoCheck ? t("ui.palette.stop_daily_check") : t("ui.palette.daily_check"),
+      hint: autoCheck ? t("ui.palette.on") : t("ui.palette.off"),
       icon: icon(<CircleArrowUp size={13} />),
       run: () => (setAutoCheck(!autoCheck), close()),
     });
     const engine = connections.find((c) => c.name === active)?.engine;
     const sessions = !engine || can(engine, "sessions");
-    VIEWS.filter((v) => (active || v.view === "plans" || v.view === "connections") && (v.view !== "live" || sessions)).forEach((v) =>
-      list.push({ id: `view:${v.view}`, section: "Go to", title: v.title, icon: icon(v.icon), run: () => setState({ view: v.view, palette: false }) }),
+    views().filter((v) => (active || v.view === "plans" || v.view === "connections") && (v.view !== "live" || sessions)).forEach((v) =>
+      list.push({ id: `view:${v.view}`, section: goTo, title: v.title, icon: icon(v.icon), run: () => setState({ view: v.view, palette: false }) }),
     );
     if (active && engine && can(engine, "deadlocks")) {
-      list.push({ id: "view:deadlocks", section: "Go to", title: "Deadlocks", hint: "Live", icon: icon(<Skull size={13} />), run: () => (close(), openLive("deadlocks")) });
+      list.push({ id: "view:deadlocks", section: goTo, title: t("ui.palette.deadlocks"), hint: t("ui.palette.deadlocks_hint"), icon: icon(<Skull size={13} />), run: () => (close(), openLive("deadlocks")) });
     }
     saved?.forEach((q) => {
-      const where = q.connection ? ` · ${q.connection}` : "";
-      list.push({ id: `s:${q.name}`, section: "Saved queries", title: `Run ${q.name}`, hint: `saved query${where}`, icon: icon(<Bookmark size={13} />), run: () => setState({ view: "editor", editorSaved: { name: q.name, run: true }, palette: false }) });
+      const hint = q.connection ? t("ui.palette.saved_query_on", { connection: q.connection }) : t("ui.palette.saved_query");
+      list.push({ id: `s:${q.name}`, section: t("ui.palette.section.saved"), title: t("ui.palette.run_saved", { name: q.name }), hint, icon: icon(<Bookmark size={13} />), run: () => setState({ view: "editor", editorSaved: { name: q.name, run: true }, palette: false }) });
     });
     report?.findings.forEach((f, rank) =>
-      list.push({ id: `f:${f.id}`, section: "Findings", title: f.title, hint: f.impact.label, rank, icon: icon(<CircleDot size={12} color={SEVERITY_COLOR[f.severity]} />), run: () => setState({ view: "overview", finding: f.id, palette: false }) }),
+      list.push({ id: `f:${f.id}`, section: t("ui.palette.section.findings"), title: f.title, hint: f.impact.label, rank, icon: icon(<CircleDot size={12} color={SEVERITY_COLOR[f.severity]} />), run: () => setState({ view: "overview", finding: f.id, palette: false }) }),
     );
-    report?.snapshot.tables.forEach((t) =>
+    report?.snapshot.tables.forEach((table) =>
       list.push({
-        id: `t:${t.schema}.${t.name}`,
-        section: "Tables",
-        title: `${t.schema}.${t.name}`,
-        hint: t.rows != null ? rowCount(t.rows) : "table",
+        id: `t:${table.schema}.${table.name}`,
+        section: t("ui.palette.section.tables"),
+        title: `${table.schema}.${table.name}`,
+        hint: table.rows != null ? rowCount(table.rows) : t("ui.palette.table"),
         icon: icon(<Table2 size={13} />),
-        run: () => setState({ view: "schema", schemaTable: `${t.schema}.${t.name}`, palette: false }),
+        run: () => setState({ view: "schema", schemaTable: `${table.schema}.${table.name}`, palette: false }),
       }),
     );
     report?.snapshot.workload?.queries.forEach((q) =>
-      list.push({ id: `q:${q.id}`, section: "Queries", title: q.text.replace(/\s+/g, " ").slice(0, 120), hint: `query ${q.id}`, icon: icon(<TextSearch size={13} />), run: () => setState({ view: "queries", query: q.id, palette: false }) }),
+      list.push({ id: `q:${q.id}`, section: t("ui.palette.section.queries"), title: q.text.replace(/\s+/g, " ").slice(0, 120), hint: t("ui.palette.query", { id: q.id }), icon: icon(<TextSearch size={13} />), run: () => setState({ view: "queries", query: q.id, palette: false }) }),
     );
     connections.forEach((c) =>
-      list.push({ id: `c:${c.name}`, section: "Connections", title: c.name, hint: c.display, icon: <EngineBadge engine={c.engine} environment={c.environment} product={c.last_report?.product} />, run: () => (close(), openConnection(c.name)) }),
+      list.push({ id: `c:${c.name}`, section: t("ui.palette.section.connections"), title: c.name, hint: c.display, icon: <EngineBadge engine={c.engine} environment={c.environment} product={c.last_report?.product} />, run: () => (close(), openConnection(c.name)) }),
     );
-    list.push({ id: "new", section: "Actions", title: "Add a connection", icon: icon(<Plus size={13} />), run: () => setState({ view: "connections", palette: false }) });
+    list.push({ id: "new", section: actions, title: t("ui.palette.add_connection"), icon: icon(<Plus size={13} />), run: () => setState({ view: "connections", palette: false }) });
     return list;
   }, [connections, report, active, saved, theme, setTheme, update, autoCheck, language]);
 
@@ -170,7 +175,7 @@ export function CommandPalette() {
 
   return (
     <div className="overlay" onMouseDown={() => setState({ palette: false })}>
-      <div ref={panel} className="palette" role="dialog" aria-modal="true" aria-label="Command palette" onMouseDown={(e) => e.stopPropagation()}>
+      <div ref={panel} className="palette" role="dialog" aria-modal="true" aria-label={t("ui.palette.label")} onMouseDown={(e) => e.stopPropagation()}>
         <input
           autoFocus
           role="combobox"
@@ -178,9 +183,9 @@ export function CommandPalette() {
           aria-controls="palette-results"
           aria-autocomplete="list"
           aria-activedescendant={results[index] ? `palette-item-${index}` : undefined}
-          aria-label="Search findings, queries, tables and actions"
+          aria-label={t("ui.palette.search_label")}
           value={query}
-          placeholder="Search findings, queries, tables, actions…"
+          placeholder={t("ui.palette.search")}
           onChange={(e) => {
             setQuery(e.target.value);
             setIndex(0);
@@ -198,7 +203,7 @@ export function CommandPalette() {
             }
           }}
         />
-        <div className="results" id="palette-results" role="listbox" aria-label="Results">
+        <div className="results" id="palette-results" role="listbox" aria-label={t("ui.palette.results")}>
           {results.map((item, i) => (
             <div key={item.id} role="presentation">
               {(i === 0 || results[i - 1]?.section !== item.section) && (
@@ -221,18 +226,18 @@ export function CommandPalette() {
               </button>
             </div>
           ))}
-          {results.length === 0 && <div className="muted" style={{ padding: 12 }}>No matches</div>}
+          {results.length === 0 && <div className="muted" style={{ padding: 12 }}>{t("ui.palette.no_matches")}</div>}
         </div>
         <div className="palette-foot" aria-hidden="true">
           <span>
             <span className="kbd">↑</span>
-            <span className="kbd">↓</span> move
+            <span className="kbd">↓</span> {t("ui.palette.move")}
           </span>
           <span>
-            <span className="kbd">↵</span> open
+            <span className="kbd">↵</span> {t("ui.palette.open")}
           </span>
           <span>
-            <span className="kbd">esc</span> close
+            <span className="kbd">esc</span> {t("ui.palette.close")}
           </span>
         </div>
       </div>
