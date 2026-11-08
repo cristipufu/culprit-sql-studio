@@ -408,6 +408,120 @@ fn a_new_untimed_storage_error_cannot_inherit_an_old_successful_runs_history() {
     );
 }
 
+// What logged-errors says, word for word, of every code it knows (dated, recent or not, and undated) and of one it
+// doesn't: its messages come from locales/en.json.
+#[test]
+fn logged_errors_say_what_each_code_means_in_english() {
+    assert_eq!(
+        crate::info("logged-errors"),
+        "SQL errors recorded by the application\n\
+        Recognized error codes in structured query logs, including errors with no duration. Counts describe log records, not failed business requests or zero-cost executions."
+    );
+    let said = |code: &str, last_at: Option<&str>| {
+        let mut s = snapshot(Engine::Sqlite);
+        s.server.capabilities.push(culprit_core::Capability::QueryLog);
+        s.operations.log_failures.push(LoggedFailure {
+            query_id: "shape".into(),
+            statement: "INSERT INTO items VALUES (?)".into(),
+            code: code.into(),
+            count: 1_200.0,
+            first_at: last_at.map(str::to_string),
+            last_at: last_at.map(str::to_string),
+        });
+        let r = culprit_checks::analyze(s);
+        crate::words(r.findings.iter().find(|f| f.check == "logged-errors").expect("a logged error"))
+    };
+    let (recent, old) = (Some("2026-10-20T11:59:00Z"), Some("2026-10-01T08:00:00Z"));
+    let codes = [
+        ("SQLITE_BUSY", None),
+        ("SQLITE_LOCKED", old),
+        ("SQLITE_BUSY_SNAPSHOT", recent),
+        ("SQLITE_CONSTRAINT", None),
+        ("SQLITE_FULL", recent),
+        ("SQLITE_READONLY", None),
+        ("SQLITE_IOERR", old),
+        ("SQLITE_CORRUPT", recent),
+        ("SQLITE_MISMATCH", None),
+    ];
+    assert_eq!(
+        codes.map(|(code, at)| said(code, at)),
+        [
+            "SQLITE_BUSY appears in 1.2K application log records · Low · High\n\
+                SQLite reported a conflicting connection or transaction. The caller may already retry successfully; these records do not establish failed user requests. These are records in the supplied log, which can include retries or duplicate logging. Their dates are unknown. Missing durations are not counted as instant executions.\n\
+                impact: 1.2K logged records\n\
+                metric: Code: SQLITE_BUSY\n\
+                metric: Normalized statement: INSERT INTO items VALUES (?)\n\
+                metric: Log records\n\
+                fix: Inspect transaction duration and retry outcomes on the application's own connections. Keep write transactions short and serialize writers where appropriate. Set a suitable busy handler on each application connection; changing Culprit's connection does not change the app.\n\
+                verify: Compare a fresh, dated log interval and application request/retry outcomes. Confirm the operation succeeds with its intended transaction semantics; old log records need not disappear.",
+            "SQLITE_LOCKED appears in 1.2K application log records · Low · High\n\
+                SQLite reported a conflict within the connection or a shared-cache connection. This differs from ordinary cross-connection SQLITE_BUSY and can require finishing an outstanding statement. These are records in the supplied log, which can include retries or duplicate logging. Latest dated record: 2026-10-01T08:00:00Z. Missing durations are not counted as instant executions.\n\
+                impact: 1.2K logged records\n\
+                metric: Code: SQLITE_LOCKED\n\
+                metric: Normalized statement: INSERT INTO items VALUES (?)\n\
+                metric: Log records\n\
+                fix: Inspect open statements and cursors on the application's connection, schema changes and any shared-cache use. Finalize or reset the conflicting statement when correct. A longer busy timeout does not resolve SQLITE_LOCKED; preserve transaction semantics when retrying.\n\
+                verify: Compare a fresh, dated log interval and application request/retry outcomes. Confirm the operation succeeds with its intended transaction semantics; old log records need not disappear.",
+            "SQLITE_BUSY_SNAPSHOT appears in 1.2K application log records · Low · High\n\
+                A read transaction could not upgrade its older WAL snapshot to a writer. Waiting longer cannot make that snapshot current. These are records in the supplied log, which can include retries or duplicate logging. Latest dated record: 2026-10-20T11:59:00Z. Missing durations are not counted as instant executions.\n\
+                impact: 1.2K logged records\n\
+                metric: Code: SQLITE_BUSY_SNAPSHOT\n\
+                metric: Normalized statement: INSERT INTO items VALUES (?)\n\
+                metric: Log records\n\
+                fix: Roll back and retry the complete transaction with a fresh snapshot. If appropriate for its semantics, obtain the write transaction before reading (BEGIN IMMEDIATE). Do not retry only the failed statement inside the same obsolete snapshot.\n\
+                verify: Compare a fresh, dated log interval and application request/retry outcomes. Confirm the operation succeeds with its intended transaction semantics; old log records need not disappear.",
+            "SQLITE_CONSTRAINT appears in 1.2K application log records · Low · High\n\
+                A constraint rejected an operation. Some applications deliberately use this for uniqueness or conflict handling. These are records in the supplied log, which can include retries or duplicate logging. Their dates are unknown. Missing durations are not counted as instant executions.\n\
+                impact: 1.2K logged records\n\
+                metric: Code: SQLITE_CONSTRAINT\n\
+                metric: Normalized statement: INSERT INTO items VALUES (?)\n\
+                metric: Log records\n\
+                fix: Check the constraint and caller's intended conflict behavior. Keep integrity checks; verify the application handles expected conflicts correctly before changing SQL or the schema.\n\
+                verify: Compare a fresh, dated log interval and application request/retry outcomes. Confirm the operation succeeds with its intended transaction semantics; old log records need not disappear.",
+            "SQLITE_FULL appears in 1.2K application log records · Medium · High\n\
+                SQLite could not extend storage because a database or filesystem limit was reached. This is an observed error, not a claim that the limit is still reached now. These are records in the supplied log, which can include retries or duplicate logging. Latest dated record: 2026-10-20T11:59:00Z. Missing durations are not counted as instant executions.\n\
+                impact: 1.2K logged records\n\
+                metric: Code: SQLITE_FULL\n\
+                metric: Normalized statement: INSERT INTO items VALUES (?)\n\
+                metric: Log records\n\
+                fix: Check current filesystem headroom, database page limits and the application's storage quota. Restore capacity with the owner while preserving the database, WAL and a valid backup.\n\
+                verify: Compare a fresh, dated log interval and application request/retry outcomes. Confirm the operation succeeds with its intended transaction semantics; old log records need not disappear.",
+            "SQLITE_READONLY appears in 1.2K application log records · Low · High\n\
+                The application's connection could not perform a write. Culprit's own read-only connection is separate. These are records in the supplied log, which can include retries or duplicate logging. Their dates are unknown. Missing durations are not counted as instant executions.\n\
+                impact: 1.2K logged records\n\
+                metric: Code: SQLITE_READONLY\n\
+                metric: Normalized statement: INSERT INTO items VALUES (?)\n\
+                metric: Log records\n\
+                fix: Check the application's open mode, filesystem access and WAL/sidecar access using its own process identity. Preserve intended read-only deployments.\n\
+                verify: Compare a fresh, dated log interval and application request/retry outcomes. Confirm the operation succeeds with its intended transaction semantics; old log records need not disappear.",
+            "SQLITE_IOERR appears in 1.2K application log records · Low · High\n\
+                The application recorded a storage or database-integrity error. The log alone cannot establish its extent or whether recovery succeeded. These are records in the supplied log, which can include retries or duplicate logging. Latest dated record: 2026-10-01T08:00:00Z. Missing durations are not counted as instant executions.\n\
+                impact: 1.2K logged records\n\
+                metric: Code: SQLITE_IOERR\n\
+                metric: Normalized statement: INSERT INTO items VALUES (?)\n\
+                metric: Log records\n\
+                fix: Preserve the original files and logs. Investigate storage and restore/recovery options with the owner before any repair; use an appropriate backup and offline integrity investigation rather than rewriting the live file.\n\
+                verify: Compare a fresh, dated log interval and application request/retry outcomes. Confirm the operation succeeds with its intended transaction semantics; old log records need not disappear.",
+            "SQLITE_CORRUPT appears in 1.2K application log records · Medium · High\n\
+                The application recorded a storage or database-integrity error. The log alone cannot establish its extent or whether recovery succeeded. These are records in the supplied log, which can include retries or duplicate logging. Latest dated record: 2026-10-20T11:59:00Z. Missing durations are not counted as instant executions.\n\
+                impact: 1.2K logged records\n\
+                metric: Code: SQLITE_CORRUPT\n\
+                metric: Normalized statement: INSERT INTO items VALUES (?)\n\
+                metric: Log records\n\
+                fix: Preserve the original files and logs. Investigate storage and restore/recovery options with the owner before any repair; use an appropriate backup and offline integrity investigation rather than rewriting the live file.\n\
+                verify: Compare a fresh, dated log interval and application request/retry outcomes. Confirm the operation succeeds with its intended transaction semantics; old log records need not disappear.",
+            "SQLITE_MISMATCH appears in 1.2K application log records · Low · High\n\
+                The log records a SQL error whose detailed code is not recognized. Its raw message and values were not retained. These are records in the supplied log, which can include retries or duplicate logging. Their dates are unknown. Missing durations are not counted as instant executions.\n\
+                impact: 1.2K logged records\n\
+                metric: Code: SQLITE_MISMATCH\n\
+                metric: Normalized statement: INSERT INTO items VALUES (?)\n\
+                metric: Log records\n\
+                fix: Inspect the original error in the application's log, its transaction context and retry outcome. Measure a representative successful execution separately when timing is missing.\n\
+                verify: Compare a fresh, dated log interval and application request/retry outcomes. Confirm the operation succeeds with its intended transaction semantics; old log records need not disappear.",
+        ]
+    );
+}
+
 #[test]
 fn catalog_only_holds_do_not_explain_application_dead_rows() {
     let mut s = snapshot(Engine::Postgres);
