@@ -4,7 +4,7 @@
     python3 dev/catalog.py todo <code> [prefix]     the messages <code> lacks, as JSON {key: English}, to translate
     python3 dev/catalog.py add <code> <file.json>   put the translated {key: message} pairs in <file.json> into the catalog
     python3 dev/catalog.py status                   how much of English each language says
-    python3 dev/catalog.py prune <code>             drop messages English no longer has (after a key is renamed)
+    python3 dev/catalog.py prune <code>             drop messages English no longer has, or whose arguments it changed
 
 `add` refuses a key English doesn't have, so a typo can't slip in; `app/src/lib/catalogs.test.ts` and the Rust catalog
 test then check that every message reads and keeps English's arguments. See docs/localization.md.
@@ -46,13 +46,58 @@ def add(code, path):
     print(f"{code}: {len(found)} messages added or replaced, {len(own) - 1} of {len(english) - 1}")
 
 
+def arguments(message):
+    """The arguments a message uses, {name: kind}, as app/src/lib/message-format.ts reads them: `{x}` is text,
+    `{x, plural, ...}` and `{x, select, ...}` name their kind; the text of a case is not an argument."""
+    found, i = {}, 0
+
+    def body(i):  # text and arguments up to the "}" closing a case (or the end); returns the index after it
+        while i < len(message):
+            c = message[i]
+            if c == "}":
+                return i + 1
+            if c == "{":
+                i = argument(i + 1)
+            else:
+                i += 1
+        return i
+
+    def argument(i):  # just after "{": name, then "}" or ", kind, cases }"
+        j = i
+        while j < len(message) and message[j] not in ",}":
+            j += 1
+        name = message[i:j].strip()
+        if j >= len(message) or message[j] == "}":
+            found.setdefault(name, "text")
+            return j + 1
+        k = message.index(",", j + 1) if "," in message[j + 1:] else len(message)
+        kind = message[j + 1:k].strip()
+        found[name] = kind
+        i = k + 1
+        while i < len(message):
+            while i < len(message) and message[i].isspace():
+                i += 1
+            if i < len(message) and message[i] == "}":
+                return i + 1
+            while i < len(message) and message[i] != "{":  # the case's selector: one, other, =0, a select value
+                i += 1
+            i = body(i + 1)
+        return i
+
+    body(i)
+    return found
+
+
 def prune(code):
     english, own = load("en"), load(code)
     gone = sorted(k for k in own if k != "_meta" and k not in english)
-    for k in gone:
+    changed = sorted(k for k in own if k != "_meta" and k in english and arguments(own[k]) != arguments(english[k]))
+    for k in gone + changed:
         del own[k]
     save(code, own)
     print(f"{code}: {len(gone)} messages English no longer has removed" + (": " + ", ".join(gone) if gone else ""))
+    print(f"{code}: {len(changed)} messages whose arguments English changed removed, to translate again"
+          + (": " + ", ".join(changed) if changed else ""))
 
 
 def status():

@@ -224,12 +224,12 @@ export function QueryProgressPanel({ connection, session, onClose }: { connectio
               )}
               {progress.logical_reads != null && (
                 <span>
-                  {withElements(t("ui.query_progress.reads", { reads: slot(0) }), [<b key="reads">{count(progress.logical_reads)}</b>])}
+                  {withElements(t("ui.query_progress.reads", { n: progress.logical_reads, reads: slot(0) }), [<b key="reads">{count(progress.logical_reads)}</b>])}
                 </span>
               )}
               {progress.rows_examined != null && (
                 <span>
-                  {withElements(t("ui.query_progress.rows_examined", { rows: slot(0) }), [<b key="rows">{count(progress.rows_examined)}</b>])}
+                  {withElements(t("ui.query_progress.rows_examined", { n: progress.rows_examined, rows: slot(0) }), [<b key="rows">{count(progress.rows_examined)}</b>])}
                 </span>
               )}
             </div>

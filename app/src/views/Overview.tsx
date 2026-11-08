@@ -246,11 +246,11 @@ function Header({
         <div className="vital">
           <div className="label">{short ? t("ui.overview.db_time") : t("ui.overview.db_time_per_day")}</div>
           <div className="value">{w ? duration(short ? w.total_time_ms : perDay(w.total_time_ms, w.window_hours)) : "—"}</div>
-          <div className="hint" title={w ? t("ui.overview.workload_title", { queries: count(w.query_count), runs: count(w.total_executions), span }) : undefined}>
+          <div className="hint" title={w ? t("ui.overview.workload_title", { queryCount: w.query_count, queries: count(w.query_count), runCount: w.total_executions, runs: count(w.total_executions), span }) : undefined}>
             {w
               ? short
                 ? span
-                : t("ui.overview.workload_hint", { span, queries: count(w.query_count), runs: count(perDay(w.total_executions, w.window_hours)) })
+                : t("ui.overview.workload_hint", { span, queryCount: w.query_count, queries: count(w.query_count), runCount: perDay(w.total_executions, w.window_hours), runs: count(perDay(w.total_executions, w.window_hours)) })
               : t("ui.overview.no_workload")}
           </div>
         </div>

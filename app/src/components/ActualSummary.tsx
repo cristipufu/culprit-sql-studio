@@ -84,7 +84,7 @@ export function ActualSummary({ plan, onPick }: { plan: Plan; onPick?: (id: numb
       key: "spill",
       tone: "warn",
       icon: <HardDrive size={13} />,
-      text: f.spillPages > 0 ? t("ui.actual_summary.spill_pages", { pages: count(f.spillPages) }) : t("ui.actual_summary.spill"),
+      text: f.spillPages > 0 ? t("ui.actual_summary.spill_pages", { n: f.spillPages, pages: count(f.spillPages) }) : t("ui.actual_summary.spill"),
       title: t("ui.actual_summary.spill_hint"),
     });
   }
@@ -133,7 +133,7 @@ export function ActualSummary({ plan, onPick }: { plan: Plan; onPick?: (id: numb
       {f.triggers.length > 0 && <section className="actual-triggers" aria-label={t("ui.actual_summary.triggers_label")}>
         <h4>{t("ui.actual_summary.triggers")}</h4>
         <p className="muted">{t("ui.actual_summary.triggers_note")}</p>
-        <ul>{f.triggers.map((trigger, i) => <li key={`${trigger.name}-${i}`}><span>{trigger.relation ? tx("ui.actual_summary.trigger_on", { relation: trigger.relation }, { trigger: <b>{trigger.name}</b> }) : <b>{trigger.name}</b>}</span><span>{duration(trigger.ms)} · {trigger.calls == null ? t("ui.actual_summary.calls_unrecorded") : t("ui.actual_summary.calls", { calls: count(trigger.calls) })}</span></li>)}</ul>
+        <ul>{f.triggers.map((trigger, i) => <li key={`${trigger.name}-${i}`}><span>{trigger.relation ? tx("ui.actual_summary.trigger_on", { relation: trigger.relation }, { trigger: <b>{trigger.name}</b> }) : <b>{trigger.name}</b>}</span><span>{duration(trigger.ms)} · {trigger.calls == null ? t("ui.actual_summary.calls_unrecorded") : t("ui.actual_summary.calls", { n: trigger.calls, calls: count(trigger.calls) })}</span></li>)}</ul>
       </section>}
       {!f.timed && (
         <div className="as-note">

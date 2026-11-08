@@ -201,7 +201,7 @@ export default function IndexAdvisor({ report, onOpenTable }: { report: Report; 
   const freed = a.cleanups.reduce((sum, c) => sum + (c.size_bytes ?? 0), 0);
   const empty = a.candidates.length + a.cleanups.length + a.tables.length === 0;
   const indexCount = report.snapshot.indexes.length;
-  const checkedArgs = { indexes: count(indexCount), tables: count(report.snapshot.tables.length) };
+  const checkedArgs = { indexCount, indexes: count(indexCount), tableCount: report.snapshot.tables.length, tables: count(report.snapshot.tables.length) };
   const requests = a.engine === "mssql";
   const usage = report.snapshot.server.capabilities.includes("index-usage");
 
@@ -403,10 +403,10 @@ function Links({ onFinding, hasFinding, onTable }: { onFinding: () => void; hasF
 
 function CandidateRow({ c, rank, focused, onFocus, expanded, onToggle, onCopy, onFinding, onTable, onQuery }: RowProps & { c: IndexCandidate; rank: number }) {
   const facts: string[] = [];
-  if (c.lookups != null) facts.push(t("ui.index_advisor.lookups", { count: count(c.lookups) }));
+  if (c.lookups != null) facts.push(t("ui.index_advisor.lookups", { n: c.lookups, count: count(c.lookups) }));
   if (c.estimated_improvement != null) facts.push(t("ui.index_advisor.cheaper", { share: percent(c.estimated_improvement) }));
   if (c.table_rows != null) facts.push(t("ui.index_advisor.in_table", { rows: rowCount(c.table_rows) }));
-  if (c.writes_per_day != null) facts.push(t("ui.index_advisor.writes_per_day", { count: count(c.writes_per_day) }));
+  if (c.writes_per_day != null) facts.push(t("ui.index_advisor.writes_per_day", { n: c.writes_per_day, count: count(c.writes_per_day) }));
   return (
     <div className={`ia-item ${focused ? "focus" : ""} ${expanded ? "expanded" : ""}`}>
       <button type="button" className="ia-row" onClick={onToggle} onFocus={onFocus} aria-expanded={expanded}>
@@ -448,7 +448,7 @@ function CandidateRow({ c, rank, focused, onFocus, expanded, onToggle, onCopy, o
                 <div key={i} className="ia-request">
                   <Keys keys={[...r.equality, ...r.inequality]} include={r.include} />
                   <span className="muted">
-                    {t("ui.index_advisor.lookups", { count: count(r.lookups) })} · {t("ui.index_advisor.cheaper", { share: percent(r.improvement) })}
+                    {t("ui.index_advisor.lookups", { n: r.lookups, count: count(r.lookups) })} · {t("ui.index_advisor.cheaper", { share: percent(r.improvement) })}
                   </span>
                 </div>
               ))}
@@ -470,7 +470,7 @@ function cleanupMeta(c: IndexCleanup): string {
   const other = c.other ?? "";
   switch (c.kind) {
     case "unused":
-      return [t("ui.index_advisor.never_read"), c.writes ? t("ui.index_advisor.writes", { count: count(c.writes) }) : null, c.other ? t("ui.index_advisor.also_covered_by", { index: c.other }) : null].filter(Boolean).join(" · ");
+      return [t("ui.index_advisor.never_read"), c.writes ? t("ui.index_advisor.writes", { n: c.writes, count: count(c.writes) }) : null, c.other ? t("ui.index_advisor.also_covered_by", { index: c.other }) : null].filter(Boolean).join(" · ");
     case "duplicate":
       return [t("ui.index_advisor.same_keys_as", { index: other }), reads].filter(Boolean).join(" · ");
     case "prefix":
@@ -526,10 +526,10 @@ function TableRow({ table, focused, onFocus, expanded, onToggle, onCopy, onFindi
   const kind = tableKind(table.kind);
   const facts: string[] = [];
   if (table.full_scans_per_day != null) facts.push(t("ui.index_advisor.full_reads_per_day", { count: count(table.full_scans_per_day) }));
-  if (table.rows_scanned_per_day != null) facts.push(t("ui.index_advisor.rows_per_day", { count: count(table.rows_scanned_per_day) }));
+  if (table.rows_scanned_per_day != null) facts.push(t("ui.index_advisor.rows_per_day", { n: table.rows_scanned_per_day, count: count(table.rows_scanned_per_day) }));
   if (table.forwarded_per_day != null) facts.push(t("ui.index_advisor.forwarded_per_day", { count: count(table.forwarded_per_day) }));
-  if (table.indexes != null && table.kind === "over-indexed") facts.push(t("ui.index_advisor.indexes", { count: count(table.indexes) }));
-  if (table.writes_per_day != null) facts.push(t("ui.index_advisor.writes_per_day", { count: count(table.writes_per_day) }));
+  if (table.indexes != null && table.kind === "over-indexed") facts.push(t("ui.index_advisor.indexes", { n: table.indexes, count: count(table.indexes) }));
+  if (table.writes_per_day != null) facts.push(t("ui.index_advisor.writes_per_day", { n: table.writes_per_day, count: count(table.writes_per_day) }));
   return (
     <div className={`ia-item ${focused ? "focus" : ""} ${expanded ? "expanded" : ""}`}>
       <button type="button" className="ia-row" onClick={onToggle} onFocus={onFocus} aria-expanded={expanded}>

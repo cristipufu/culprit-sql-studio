@@ -137,7 +137,7 @@ export function WorkloadTrend({ timeline, windowStart, flags, onSelect, selectio
               {withElements(t("ui.trends.time_per", { unit: unit.unit, time: slot(0) }), [<b key="time">{duration(rate[i] ?? 0)}</b>])}
               <span className="muted">
                 {" "}
-                · {t("ui.trends.runs", { runs: count(timeline.executions[i] ?? 0) })}{buckets[i] && isPartial(buckets[i]!) ? ` · ${t("ui.trends.partial")}` : ""}
+                · {t("ui.trends.runs", { n: timeline.executions[i] ?? 0, runs: count(timeline.executions[i] ?? 0) })}{buckets[i] && isPartial(buckets[i]!) ? ` · ${t("ui.trends.partial")}` : ""}
               </span>
             </>
           )
@@ -292,7 +292,7 @@ export function QueryTrend({ query, timeline, onSince }: { query: QueryStat; tim
           readout={(i) => (
             <>
               {withElements(t("ui.trends.per_run", { time: slot(0) }), [<b key="time">{points[i] != null ? duration(points[i]!) : "—"}</b>])}
-              <span className="muted"> · {runs[i] != null ? t("ui.trends.runs", { runs: count(runs[i]!) }) : b[i]?.unknown ? t("ui.trends.not_known") : t("ui.trends.not_tracked")}</span>
+              <span className="muted"> · {runs[i] != null ? t("ui.trends.runs", { n: runs[i]!, runs: count(runs[i]!) }) : b[i]?.unknown ? t("ui.trends.not_known") : t("ui.trends.not_tracked")}</span>
             </>
           )}
         >
@@ -316,7 +316,7 @@ export function QueryTrend({ query, timeline, onSince }: { query: QueryStat; tim
           }
           readout={(i) => (
             <>
-              {withElements(t("ui.trends.runs", { runs: slot(0) }), [<b key="runs">{runs[i] != null ? count(runs[i]!) : "—"}</b>])}
+              {withElements(t("ui.trends.runs", { n: runs[i] ?? 0, runs: slot(0) }), [<b key="runs">{runs[i] != null ? count(runs[i]!) : "—"}</b>])}
             </>
           )}
         >

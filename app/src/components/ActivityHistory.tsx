@@ -40,7 +40,7 @@ function ActivityDetail({ category: c, onClose }: { category: ActivityCategory; 
   const events = c.events.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
   return <div className="waits-detail">
     <div className="detail-head"><h3>{c.label}</h3><span className="pill">{t("ui.activity_history.share_of_weight", { share: percent(c.share) })}</span></div>
-    <p className="muted">{t("ui.activity_history.category_summary", { observations: count(c.observations), weight: count(c.weighted_observations) })}</p>
+    <p className="muted">{t("ui.activity_history.category_summary", { n: c.observations, observations: count(c.observations), weight: count(c.weighted_observations) })}</p>
     <table className="grid"><thead><tr><th>{t("ui.common.node")}</th><th>{t("ui.activity_history.component")}</th><th>{t("ui.activity_history.native_event")}</th><th className="r">{t("ui.activity_history.observations")}</th><th className="r">{t("ui.activity_history.weight_heading")}</th></tr></thead>
       <tbody>{events.map((e, i) => <tr key={i}><td className="mono" title={e.node}>{e.node?.slice(0, 8) ?? t("ui.common.unknown")}</td><td>{e.component}</td><td className="mono" style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>{e.wait_event}{e.query_id && <div className="muted">{t("ui.common.query_id", { id: e.query_id })}</div>}</td><td className="r">{count(e.observations)}</td><td className="r">{count(e.weighted_observations)}</td></tr>)}</tbody>
     </table>

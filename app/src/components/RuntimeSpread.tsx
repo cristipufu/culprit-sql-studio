@@ -186,7 +186,7 @@ export function RuntimeSpread({
                   {l.label}
                 </span>
                 <span className="muted">
-                  {t("ui.runtime_spread.runs", { runs: count(l.runs) })}{query.executions > 0 && ls.length > 1 ? ` · ${percent(l.runs / query.executions)}` : ""}
+                  {t("ui.runtime_spread.runs", { n: l.runs, runs: count(l.runs) })}{query.executions > 0 && ls.length > 1 ? ` · ${percent(l.runs / query.executions)}` : ""}
                 </span>
                 {l.compiled && (
                   <span className="rs-compiled" title={t("ui.runtime_spread.compiled_title")}>
@@ -200,7 +200,7 @@ export function RuntimeSpread({
                     key={i}
                     className="rs-hist"
                     style={{ left: `${pos(h[0] || lo)}%`, width: `max(2px, calc(${pos(h[1])}% - ${pos(h[0] || lo)}%))`, height: `${Math.max(8, (h[2] / histMax) * 100)}%` }}
-                    title={t("ui.runtime_spread.bucket_title", { runs: count(h[2]), from: duration(h[0]), to: duration(h[1]) })}
+                    title={t("ui.runtime_spread.bucket_title", { n: h[2], runs: count(h[2]), from: duration(h[0]), to: duration(h[1]) })}
                   />
                 ))}
                 {l.min != null && l.max != null && <span className="rs-whisker" style={{ left: `${pos(l.min)}%`, width: `${pos(l.max) - pos(l.min)}%` }} />}

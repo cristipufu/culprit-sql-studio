@@ -102,7 +102,7 @@ export function Header({ report, table, findings }: { report: Report; table: Tab
             warn={tableSignalWarning(report, table, ["stale-stats"])}
             detail={
               table.modifications_since_analyze
-                ? t("ui.table_header.changes_since", { count: count(table.modifications_since_analyze) })
+                ? t("ui.table_header.changes_since", { n: table.modifications_since_analyze, count: count(table.modifications_since_analyze) })
                 : stats.length > 1
                   ? t("ui.table_header.oldest_of", { count: stats.length })
                   : null

@@ -366,7 +366,7 @@ function QueryDetail({ report, query }: { report: Report; query: QueryStat }) {
             <RuntimeSpread query={query} engine={report.snapshot.server.engine} windowed={w.windowed} product={report.snapshot.server.product} kind={workloadKind(w)} />
             {query.requests && <section>
               <h3>{t("ui.queries.requests.heading")}</h3>
-              <p>{t("ui.queries.requests.summary", { requests: count(query.requests.requests), repeated: count(query.requests.repeated_requests), calls: count(query.requests.most_calls) })}</p>
+              <p>{t("ui.queries.requests.summary", { requestCount: query.requests.requests, requests: count(query.requests.requests), repeatedCount: query.requests.repeated_requests, repeated: count(query.requests.repeated_requests), callCount: query.requests.most_calls, calls: count(query.requests.most_calls) })}</p>
               <p className="muted">{query.requests.sample_truncated ? t("ui.queries.requests.note_partial") : t("ui.queries.requests.note")}</p>
             </section>}
             <QueryCostsPanel report={report} query={query} />
@@ -573,7 +573,7 @@ function QueryPlans(props: { report: Report; query: QueryStat; focus: number | n
                 {v.is_forced && <span className="tag medium" style={{ marginLeft: 6 }}>{t("ui.queries.forced")}</span>}
               </span>
               <span className="v-stats">
-                {withElements(t("ui.queries.variant_stats", { duration: slot(0), runs: count(v.executions) }), [
+                {withElements(t("ui.queries.variant_stats", { duration: slot(0), n: v.executions, runs: count(v.executions) }), [
                   <b key="avg" className={!cachedHistory && best != null && v.mean_time_ms > best * 2 ? "slow" : ""}>{duration(v.mean_time_ms)}</b>,
                 ])}
                 {v.last_seen && (

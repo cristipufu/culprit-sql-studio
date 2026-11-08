@@ -175,7 +175,7 @@ export function NodeDetails({
             {executions > 1 && (
               <>
                 <dt>{node.act_executions != null ? t("ui.node_details.ran") : t("ui.node_details.expected_runs")}</dt>
-                <dd>{t("ui.node_details.times", { count: exact(executions) })}</dd>
+                <dd>{t("ui.node_details.times", { n: executions, count: exact(executions) })}</dd>
               </>
             )}
             {node.rows_read != null && (
