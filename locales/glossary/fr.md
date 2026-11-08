@@ -178,3 +178,12 @@ say in English (Query Store, autovacuum, tempdb, buffer pool, DocDB, tablet, tab
 | timeline | chronologie (f.) | |
 | chunk, hypertable, columnstore, rowstore | kept | TimescaleDB and SQL Server names |
 | needs attention / worth a look | à traiter / à surveiller | status labels |
+| checkpoint (the operation) | point de contrôle (m.) | Microsoft Learn, PostgreSQL FR; setting and view names stay |
+| Health (the view), Right now (the waits scope) | Santé, En ce moment | |
+| replication slot, standby, replay | slot de réplication, serveur standby, rejeu | |
+| chatty (queries), heartbeat, poll | bavardes, signal de vie, guetter | |
+| forced parameterization, hint, trace flag | paramétrage forcé, indicateur, indicateur de trace | |
+| planner, automatic tuning, unforce | planificateur, réglage automatique, annuler le forçage | |
+| full-page image, wraparound, freeze, backfill | image de page complète, bouclage, geler, remplissage rétroactif | |
+| an application request, a SQL Server request | requête HTTP, demande | |
+| (service) tier, row versioning | niveau de service, versionnage des lignes | |
