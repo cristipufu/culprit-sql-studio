@@ -5,7 +5,7 @@ use crate::{
     ConnectionInfo, EventLog, EventsRequest, changes, cloud, connection::Connections, history, marks,
     reporting::Reports, reports, trends,
 };
-use culprit_core::{Engine, Error, ErrorCode, Result};
+use culprit_core::{Engine, Error, ErrorCode, Result, t};
 
 pub(crate) struct Events<'a> {
     pub connections: Connections<'a>,
@@ -48,11 +48,9 @@ impl Events<'_> {
         if let Some(log) = context.log {
             return Err(Error::new(
                 ErrorCode::Unsupported,
-                format!("{} keeps no statement history to compare two periods of", info.engine.label()),
+                t!("engine.events.no_history", engine = info.engine.label()),
             )
-            .with_hint(format!(
-                "The {log} log Culprit read is one period: scan again with a log written after the change, and compare the two reports' queries."
-            )));
+            .with_hint(t!("engine.events.no_history_hint", log = &log)));
         }
         // A database with no statement history of its own (SQLite) has no two periods to compare.
         if !info.engine.abilities().periods {
@@ -80,7 +78,7 @@ impl Events<'_> {
                     {
                         Ok(events) => events,
                         Err(error) => {
-                            out.notes.push(format!("Database change events were unavailable: {}", error.message));
+                            out.notes.push(t!("engine.events.database_events_unavailable", error = &error.message));
                             Vec::new()
                         }
                     };
@@ -168,7 +166,7 @@ impl Events<'_> {
         {
             Ok(events) => events,
             Err(error) => {
-                notes.push(format!("Saved change events unavailable: {}", error.message));
+                notes.push(t!("engine.events.saved_events_unavailable", error = &error.message));
                 Vec::new()
             }
         };
@@ -176,8 +174,12 @@ impl Events<'_> {
             match cloud::signals(&dir, info, start, end, false).await {
                 Ok(signals) => events.extend(signals.events()),
                 Err(e) => notes.push(match e.hint {
-                    Some(hint) => format!("Cloud metrics unavailable: {} ({hint}).", e.message.trim_end_matches('.')),
-                    None => format!("Cloud metrics unavailable: {}.", e.message.trim_end_matches('.')),
+                    Some(hint) => t!(
+                        "engine.events.cloud_unavailable_hint",
+                        error = e.message.trim_end_matches('.'),
+                        hint = &hint
+                    ),
+                    None => t!("engine.events.cloud_unavailable", error = e.message.trim_end_matches('.')),
                 }),
             }
         }

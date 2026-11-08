@@ -2,7 +2,7 @@ use culprit_core::cloud::{
     CloudPoint, CloudProvider, CloudSeries, CloudSignals, CloudUnit, Rule, ThrottleEpisode, ThrottleKind, episodes,
     gp2_baseline_iops, rds_cpu_baseline, rds_vcpus, sum_series,
 };
-use culprit_core::{Error, ErrorCode, Result, format};
+use culprit_core::{Error, ErrorCode, Result, format, key, t};
 use serde_json::Value;
 
 use super::{CloudAssessment, Resource, finish, iso, normalize_time, period_for};
@@ -21,11 +21,10 @@ pub(super) async fn resolve_rds(region: &str, id: &str, cluster: bool, reader: b
         "json",
     ])
     .await?;
-    let i = json
-        .get("DBInstances")
-        .and_then(|x| x.as_array())
-        .and_then(|a| a.first())
-        .ok_or_else(|| Error::not_found(format!("AWS has no RDS instance '{instance}' in {region}")))?;
+    let i =
+        json.get("DBInstances").and_then(|x| x.as_array()).and_then(|a| a.first()).ok_or_else(|| {
+            Error::not_found(t!("engine.cloud.rds.no_instance", instance = &instance, region = region))
+        })?;
     let text = |k: &str| i.get(k).and_then(|v| v.as_str()).map(str::to_string);
     let number = |k: &str| i.get(k).and_then(|v| v.as_f64());
     Ok(Resource {
@@ -42,6 +41,7 @@ pub(super) async fn resolve_rds(region: &str, id: &str, cluster: bool, reader: b
     })
 }
 
+/// The AWS product's name, which no language translates.
 fn rds_service(engine: &str) -> String {
     let product = match engine {
         e if e.starts_with("aurora-postgresql") => return "Amazon Aurora PostgreSQL".into(),
@@ -80,17 +80,18 @@ async fn cluster_member(region: &str, cluster: &str, reader: bool) -> Result<Str
         .filter(|m| m.get("IsClusterWriter").and_then(|w| w.as_bool()) == Some(!reader))
         .chain(members.iter())
         .find_map(|m| m.get("DBInstanceIdentifier").and_then(|i| i.as_str()).map(str::to_string))
-        .ok_or_else(|| Error::not_found(format!("Aurora cluster '{cluster}' has no instances in {region}")))
+        .ok_or_else(|| {
+            Error::not_found(t!("engine.cloud.rds.no_cluster_instances", cluster = cluster, region = region))
+        })
 }
 
 async fn aws_json(args: &[&str]) -> Result<Value> {
     let bytes = aws::run(args).await.map_err(|e| match e.code {
-        ErrorCode::PermissionDenied => e.with_hint(
-            "The signed-in AWS identity needs rds:DescribeDBInstances, rds:DescribeDBClusters and cloudwatch:GetMetricData",
-        ),
+        ErrorCode::PermissionDenied => e.with_hint(t!("engine.cloud.rds.permissions_hint")),
         _ => e,
     })?;
-    serde_json::from_slice(&bytes).map_err(|e| Error::internal(format!("Unexpected AWS CLI output: {e}")))
+    serde_json::from_slice(&bytes)
+        .map_err(|e| Error::internal(t!("engine.cloud.rds.unexpected_output", error = e.to_string())))
 }
 
 /// (query id, CloudWatch metric, statistic)
@@ -113,7 +114,7 @@ const RDS_METRICS: &[(&str, &str, &str)] = &[
 
 pub(super) async fn rds_signals(resource: &Resource, start: f64, end: f64) -> Result<CloudSignals> {
     let (Some(region), Some(instance)) = (&resource.region, &resource.instance) else {
-        return Err(Error::internal("RDS resource without a region or instance"));
+        return Err(Error::internal(t!("engine.cloud.rds.incomplete_resource")));
     };
     let period = period_for(end - start);
     let queries: Vec<Value> = RDS_METRICS
@@ -185,20 +186,17 @@ pub(super) fn rds_judge(
     let mut series = Vec::new();
     let mut found: Vec<ThrottleEpisode> = Vec::new();
 
-    let cpu = CloudSeries::new("CPUUtilization", "CPU", CloudUnit::Percent, take("cpu"));
+    let cpu = CloudSeries::new("CPUUtilization", &t!("engine.cloud.series.cpu"), CloudUnit::Percent, take("cpu"));
     let cpu = match baseline {
-        Some(b) => cpu.limit(b, format!("baseline {b:.0}%")),
+        Some(b) => cpu.limit(b, t!("engine.cloud.rds.limit.cpu_baseline", percent = whole(b))),
         None => cpu,
     };
-    let saturated = |worst: f64, lasted: &str| {
-        format!(
-            "CPU was above 90% in the recorded samples over {lasted}, peaking at {worst:.0}%. That leaves little headroom; these metrics alone do not measure query delays."
-        )
-    };
+    let saturated = |worst: f64, lasted: &str| t!("engine.cloud.rds.detail.cpu", lasted = lasted, worst = whole(worst));
+    let title = t!("engine.cloud.episode.cpu_high");
     found.extend(episodes(
         &cpu,
         period,
-        &rule("CPUUtilization", ThrottleKind::CpuLimit, 90.0, false, 3, "CPU use was high", &saturated),
+        &rule("CPUUtilization", ThrottleKind::CpuLimit, 90.0, false, 3, &title, &saturated),
     ));
     series.push(cpu);
 
@@ -209,58 +207,51 @@ pub(super) fn rds_judge(
         let b = baseline.unwrap_or_default();
         let detail = move |_: f64, lasted: &str| {
             if unlimited {
-                format!(
-                    "The credit balance was zero in samples over {lasted}, and surplus credits were used. Unlimited mode can continue above the {b:.0}% baseline; these counters alone do not establish query delays."
-                )
+                t!("engine.cloud.rds.detail.credits_unlimited", lasted = lasted, baseline = whole(b))
             } else {
-                format!(
-                    "The credit balance was zero in samples over {lasted}. In standard mode, demand above its {b:.0}% CPU baseline is limited; unlimited mode can keep bursting. Credit balance alone does not establish longer query times."
-                )
+                t!("engine.cloud.rds.detail.credits_standard", lasted = lasted, baseline = whole(b))
             }
         };
-        let s = CloudSeries::new("CPUCreditBalance", "CPU credits", CloudUnit::Credits, credits).floor();
+        let s =
+            CloudSeries::new("CPUCreditBalance", &t!("engine.cloud.series.cpu_credits"), CloudUnit::Credits, credits)
+                .floor();
+        let title = t!("engine.cloud.episode.cpu_credits");
         found.extend(episodes(
             &s,
             period,
-            &rule("CPUCreditBalance", ThrottleKind::CpuCredits, 0.0, true, 2, "CPU credits ran out", &detail),
+            &rule("CPUCreditBalance", ThrottleKind::CpuCredits, 0.0, true, 2, &title, &detail),
         ));
         series.push(s);
     }
 
     let (read, write) = (take("riops"), take("wiops"));
-    let read = CloudSeries::new("ReadIOPS", "Read IOPS", CloudUnit::Iops, read);
-    let write = CloudSeries::new("WriteIOPS", "Write IOPS", CloudUnit::Iops, write);
-    if let Some(iops) = sum_series("IOPS", "IOPS", CloudUnit::Iops, &[&read, &write]) {
+    let read = CloudSeries::new("ReadIOPS", &t!("engine.cloud.rds.series.read_iops"), CloudUnit::Iops, read);
+    let write = CloudSeries::new("WriteIOPS", &t!("engine.cloud.rds.series.write_iops"), CloudUnit::Iops, write);
+    if let Some(iops) = sum_series("IOPS", &t!("engine.cloud.series.iops"), CloudUnit::Iops, &[&read, &write]) {
         let provisioned = resource.iops.filter(|i| *i > 0.0 && matches!(storage.as_str(), "gp3" | "io1" | "io2"));
         let iops = match (provisioned, storage.as_str()) {
             (Some(limit), _) => {
-                let limit_words = format!("provisioned {} IOPS", format::count(limit));
+                let limit_words = t!("engine.cloud.rds.limit.provisioned_iops", iops = format::count(limit));
                 let detail = move |worst: f64, lasted: &str| {
-                    format!(
-                        "Reads and writes reached {} IOPS against the provisioned {} in samples over {lasted}. Near a provisioned limit leaves little headroom; confirm read and write latency before changing capacity.",
-                        format::count(worst),
-                        format::count(limit)
+                    t!(
+                        "engine.cloud.rds.detail.provisioned_iops",
+                        worst = format::count(worst),
+                        limit = format::count(limit),
+                        lasted = lasted,
                     )
                 };
                 let s = iops.limit(limit, limit_words);
+                let title = t!("engine.cloud.rds.episode.provisioned_iops");
                 found.extend(episodes(
                     &s,
                     period,
-                    &rule(
-                        "IOPS",
-                        ThrottleKind::IoLimit,
-                        limit * 0.95,
-                        false,
-                        3,
-                        "IOPS were near the provisioned limit",
-                        &detail,
-                    ),
+                    &rule("IOPS", ThrottleKind::IoLimit, limit * 0.95, false, 3, &title, &detail),
                 ));
                 s
             }
             (None, "gp2") if gb > 0.0 => {
                 let base = gp2_baseline_iops(gb);
-                iops.limit(base, format!("baseline {} IOPS (3 per GB)", format::count(base)))
+                iops.limit(base, t!("engine.cloud.rds.limit.gp2_baseline", iops = format::count(base)))
             }
             _ => iops,
         };
@@ -271,71 +262,82 @@ pub(super) fn rds_judge(
     if !burst.is_empty() {
         let base = gp2_baseline_iops(gb);
         let detail = move |_: f64, lasted: &str| {
-            format!(
-                "The volume's burst balance was depleted in samples over {lasted}; its baseline is {} IOPS. This alone does not establish query delays.",
-                format::count(base)
-            )
+            t!("engine.cloud.rds.detail.burst", lasted = lasted, iops = format::count(base))
         };
-        let s = CloudSeries::new("BurstBalance", "Storage burst balance", CloudUnit::Percent, burst).floor();
+        let label = t!("engine.cloud.rds.series.burst_balance");
+        let s = CloudSeries::new("BurstBalance", &label, CloudUnit::Percent, burst).floor();
+        let title = t!("engine.cloud.rds.episode.burst");
         found.extend(episodes(
             &s,
             period,
-            &rule("BurstBalance", ThrottleKind::IoCredits, 0.0, true, 2, "Storage burst credits ran out", &detail),
+            &rule("BurstBalance", ThrottleKind::IoCredits, 0.0, true, 2, &title, &detail),
         ));
         series.push(s);
     }
 
-    for (id, metric, label) in
-        [("ebsio", "EBSIOBalance%", "EBS IO balance"), ("ebsbytes", "EBSByteBalance%", "EBS throughput balance")]
-    {
+    for (id, metric, label) in [
+        ("ebsio", "EBSIOBalance%", key!("engine.cloud.rds.series.ebs_io_balance")),
+        ("ebsbytes", "EBSByteBalance%", key!("engine.cloud.rds.series.ebs_throughput_balance")),
+    ] {
         let points = take(id);
         if points.is_empty() {
             continue;
         }
         let class_words = class.clone();
-        let detail = move |_: f64, lasted: &str| {
-            format!(
-                "{class_words}'s EBS burst balance was depleted in samples over {lasted}. Demand above the baseline can be limited; compare actual I/O demand and latency before changing capacity."
-            )
-        };
-        let s = CloudSeries::new(metric, label, CloudUnit::Percent, points).floor();
-        found.extend(episodes(
-            &s,
-            period,
-            &rule(metric, ThrottleKind::IoCredits, 0.0, true, 2, "EBS burst ran out", &detail),
-        ));
+        let detail =
+            move |_: f64, lasted: &str| t!("engine.cloud.rds.detail.ebs_burst", class = &class_words, lasted = lasted);
+        let s = CloudSeries::new(metric, &culprit_core::i18n::t(label, &[]), CloudUnit::Percent, points).floor();
+        let title = t!("engine.cloud.rds.episode.ebs_burst");
+        found.extend(episodes(&s, period, &rule(metric, ThrottleKind::IoCredits, 0.0, true, 2, &title, &detail)));
         series.push(s);
     }
 
-    let read_lat = CloudSeries::new("ReadLatency", "Read latency", CloudUnit::Ms, scale(take("rlat"), 1000.0));
-    let write_lat = CloudSeries::new("WriteLatency", "Write latency", CloudUnit::Ms, scale(take("wlat"), 1000.0));
-    if let Some(latency) = max_series("DiskLatency", "Disk latency", CloudUnit::Ms, &read_lat, &write_lat) {
+    let read_lat = CloudSeries::new(
+        "ReadLatency",
+        &t!("engine.cloud.rds.series.read_latency"),
+        CloudUnit::Ms,
+        scale(take("rlat"), 1000.0),
+    );
+    let write_lat = CloudSeries::new(
+        "WriteLatency",
+        &t!("engine.cloud.rds.series.write_latency"),
+        CloudUnit::Ms,
+        scale(take("wlat"), 1000.0),
+    );
+    let label = t!("engine.cloud.rds.series.disk_latency");
+    if let Some(latency) = max_series("DiskLatency", &label, CloudUnit::Ms, &read_lat, &write_lat) {
         let detail = |worst: f64, lasted: &str| {
-            format!("Reads or writes took {} on average at worst, above 20 ms for {lasted}.", format::duration(worst))
+            t!("engine.cloud.rds.detail.disk_latency", worst = format::duration(worst), lasted = lasted)
         };
+        let title = t!("engine.cloud.rds.episode.disk_latency");
         found.extend(episodes(
             &latency,
             period,
-            &rule("DiskLatency", ThrottleKind::DiskLatency, 20.0, false, 3, "Storage answered slowly", &detail),
+            &rule("DiskLatency", ThrottleKind::DiskLatency, 20.0, false, 3, &title, &detail),
         ));
         series.push(latency);
     }
 
     let load = take("load");
     if !load.is_empty() {
-        let s = CloudSeries::new("DBLoad", "DB load", CloudUnit::Sessions, load);
+        let s = CloudSeries::new("DBLoad", &t!("engine.cloud.rds.series.db_load"), CloudUnit::Sessions, load);
         let s = match vcpus {
             Some(v) => {
                 let detail = move |worst: f64, lasted: &str| {
-                    format!(
-                        "The recorded active-session count peaked at {worst:.1} on {v:.0} vCPUs over {lasted}. Active sessions can be running or waiting on many kinds of events; this count alone does not establish a CPU shortage."
+                    t!(
+                        "engine.cloud.rds.detail.load",
+                        worst = format::digits(format!("{worst:.1}")),
+                        n = v,
+                        count = whole(v),
+                        lasted = lasted,
                     )
                 };
-                let s = s.limit(v, format!("{v:.0} vCPUs"));
+                let s = s.limit(v, t!("engine.cloud.rds.limit.vcpus", n = v, count = whole(v)));
+                let title = t!("engine.cloud.rds.episode.load");
                 found.extend(episodes(
                     &s,
                     period,
-                    &rule("DBLoad", ThrottleKind::Load, v * 1.5, false, 3, "More work than vCPUs", &detail),
+                    &rule("DBLoad", ThrottleKind::Load, v * 1.5, false, 3, &title, &detail),
                 ));
                 s
             }
@@ -348,57 +350,54 @@ pub(super) fn rds_judge(
     if !free.is_empty() && gb > 0.0 {
         let floor = gb * 1e9 * 0.05;
         let detail = |worst: f64, lasted: &str| {
-            format!("Free storage fell to {} for {lasted}; writes fail when it runs out.", format::bytes(worst))
+            t!("engine.cloud.rds.detail.free_storage", worst = format::bytes(worst), lasted = lasted)
         };
-        let s = CloudSeries::new("FreeStorageSpace", "Free storage", CloudUnit::Bytes, free)
-            .floor()
-            .limit(floor, format!("alert below {} (5% of {gb:.0} GB)", format::bytes(floor)));
+        let s =
+            CloudSeries::new("FreeStorageSpace", &t!("engine.cloud.rds.series.free_storage"), CloudUnit::Bytes, free)
+                .floor()
+                .limit(floor, t!("engine.cloud.rds.limit.free_storage", floor = format::bytes(floor), gb = whole(gb)));
+        let title = t!("engine.cloud.episode.storage_full");
         found.extend(episodes(
             &s,
             period,
-            &rule("FreeStorageSpace", ThrottleKind::Storage, floor, true, 2, "Storage nearly full", &detail),
+            &rule("FreeStorageSpace", ThrottleKind::Storage, floor, true, 2, &title, &detail),
         ));
         series.push(s);
     }
     let mem = take("mem");
     if !mem.is_empty() {
-        series.push(CloudSeries::new("FreeableMemory", "Freeable memory", CloudUnit::Bytes, mem).floor());
+        let label = t!("engine.cloud.rds.series.freeable_memory");
+        series.push(CloudSeries::new("FreeableMemory", &label, CloudUnit::Bytes, mem).floor());
     }
     let conns = take("conns");
     if !conns.is_empty() {
-        series.push(CloudSeries::new("DatabaseConnections", "Connections", CloudUnit::Sessions, conns));
+        let label = t!("engine.cloud.series.connections");
+        series.push(CloudSeries::new("DatabaseConnections", &label, CloudUnit::Sessions, conns));
     }
 
     let mut tier = vec![];
     if !class.is_empty() {
-        let mut words = class.clone();
-        let mut extra = vec![];
-        if baseline.is_some() {
-            extra.push("burstable".to_string());
-        }
-        if let Some(v) = vcpus {
-            extra.push(format!("{v:.0} vCPUs"));
-        }
-        if !extra.is_empty() {
-            words = format!("{words} ({})", extra.join(", "));
-        }
-        tier.push(words);
+        tier.push(match (baseline.is_some(), vcpus) {
+            (true, Some(v)) => t!("engine.cloud.rds.tier.burstable_vcpus", class = &class, n = v, count = whole(v)),
+            (true, None) => t!("engine.cloud.rds.tier.burstable", class = &class),
+            (false, Some(v)) => t!("engine.cloud.rds.tier.vcpus", class = &class, n = v, count = whole(v)),
+            (false, None) => class.clone(),
+        });
     }
     if !storage.is_empty() {
-        let mut words = storage.clone();
-        if gb > 0.0 {
-            words = format!("{words}, {gb:.0} GB");
-        }
-        if let Some(iops) = resource.iops.filter(|i| *i > 0.0) {
-            words = format!("{words}, {} IOPS", format::count(iops));
-        }
-        tier.push(words);
+        let size = (gb > 0.0).then(|| whole(gb));
+        tier.push(match (size, resource.iops.filter(|i| *i > 0.0).map(format::count)) {
+            (Some(gb), Some(iops)) => {
+                t!("engine.cloud.rds.tier.storage_size_iops", storage = &storage, gb = gb, iops = iops)
+            }
+            (Some(gb), None) => t!("engine.cloud.rds.tier.storage_size", storage = &storage, gb = gb),
+            (None, Some(iops)) => t!("engine.cloud.rds.tier.storage_iops", storage = &storage, iops = iops),
+            (None, None) => storage.clone(),
+        });
     }
     let mut notes = Vec::new();
     if !resource.insights {
-        notes.push(
-            "Performance Insights is off, so DB load isn't measured; turning it on adds the DBLoad metric.".to_string(),
-        );
+        notes.push(t!("engine.cloud.rds.note.no_insights"));
     }
     finish(CloudAssessment {
         provider: CloudProvider::Aws,
@@ -410,8 +409,14 @@ pub(super) fn rds_judge(
         start,
         end,
         period,
+        // A product's name, which no language translates.
         source: "CloudWatch",
     })
+}
+
+/// `value` rounded to a whole number, in the current language's digits.
+fn whole(value: f64) -> String {
+    format::digits(format!("{value:.0}"))
 }
 
 fn rule<'a>(

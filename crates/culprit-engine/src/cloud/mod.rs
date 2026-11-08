@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use culprit_core::changes::{epoch, short_time};
 use culprit_core::cloud::{CloudProvider, CloudSeries, CloudSignals, ThrottleEpisode, summarize};
-use culprit_core::{Engine, Error, ErrorCode, Result, format};
+use culprit_core::{Engine, Error, ErrorCode, Result, format, t};
 use serde::{Deserialize, Serialize};
 
 use crate::{ConnectionInfo, aws as aws_cli, private_fs};
@@ -128,6 +128,8 @@ struct Cache {
 pub(super) struct Fetch {
     pub(super) signals: CloudSignals,
     pub(super) at: f64,
+    /// The language its words were said in: a fetch in another isn't reused.
+    pub(super) lang: String,
 }
 
 fn cache_path(dir: &Path) -> PathBuf {
@@ -179,7 +181,8 @@ pub(super) fn reusable(fetch: &Fetch, start: f64, end: f64, now: f64) -> bool {
     let step = f64::from(fetch.signals.period_seconds);
     let (from, to) = (epoch(&fetch.signals.start).unwrap_or(f64::MAX), epoch(&fetch.signals.end).unwrap_or(0.0));
     let fresh = now - fetch.at < FRESH_SECONDS;
-    ((to - from) - (end - start)).abs() < 2.0
+    fetch.lang == culprit_core::i18n::current().code
+        && ((to - from) - (end - start)).abs() < 2.0
         && from <= start + step
         && (to >= end - step || fresh)
         && fetch.signals.period_seconds <= period_for(end - start)
@@ -188,14 +191,8 @@ pub(super) fn reusable(fetch: &Fetch, start: f64, end: f64, now: f64) -> bool {
 /// The cloud's view of `info` between `start` and `end` (epoch seconds), from the cache when it is fresh.
 pub async fn signals(dir: &Path, info: &ConnectionInfo, start: f64, end: f64, refresh: bool) -> Result<CloudSignals> {
     let target = target(info).ok_or_else(|| {
-        Error::new(
-            ErrorCode::Unsupported,
-            format!("'{}' isn't a cloud database Culprit can read metrics for", info.name),
-        )
-        .with_hint(
-            "Cloud metrics cover Amazon RDS and Aurora (*.rds.amazonaws.com) and Azure SQL Database or Azure Database \
-                 for PostgreSQL/MySQL (*.database.windows.net, *.database.azure.com) endpoints",
-        )
+        Error::new(ErrorCode::Unsupported, t!("engine.cloud.not_cloud", name = &info.name))
+            .with_hint(t!("engine.cloud.not_cloud_hint"))
     })?;
     let now = now();
     let end = end.min(now);
@@ -225,7 +222,7 @@ pub async fn signals(dir: &Path, info: &ConnectionInfo, start: f64, end: f64, re
         }
     };
     cache.fetches.retain(|f| f.signals.period_seconds != signals.period_seconds);
-    cache.fetches.push(Fetch { signals: signals.clone(), at: now });
+    cache.fetches.push(Fetch { signals: signals.clone(), at: now, lang: culprit_core::i18n::current().code.clone() });
     write_cache(dir, &cache);
     Ok(signals)
 }
@@ -238,16 +235,20 @@ async fn resolve(target: &Target) -> Result<Resource> {
     }
 }
 
-/// "last 24 h", or "6 h up to Tue 14:00 UTC" for a period in the past.
+/// "last 24 h", or "6 h up to Tue 14:00 UTC" for a period in the past: what a sentence says after "the" (the length is
+/// written with an abbreviated unit, which the words around it don't agree with).
 fn span_words(start: f64, end: f64) -> String {
     let length = format::duration((end - start) * 1000.0);
-    if now() - end < 900.0 { format!("last {length}") } else { format!("{length} up to {}", short_time(&iso(end))) }
+    if now() - end < 900.0 {
+        t!("engine.cloud.span.recent", length = length)
+    } else {
+        t!("engine.cloud.span.until", length = length, time = short_time(&iso(end)))
+    }
 }
 
 async fn timed<T>(work: impl std::future::Future<Output = Result<T>>) -> Result<T> {
     tokio::time::timeout(CLI_TIMEOUT, work).await.map_err(|_| {
-        Error::new(ErrorCode::Timeout, "The cloud CLI didn't answer in time")
-            .with_hint("Check the network and the CLI's sign-in, then try again")
+        Error::new(ErrorCode::Timeout, t!("engine.cloud.timeout")).with_hint(t!("engine.cloud.timeout_hint"))
     })?
 }
 
@@ -271,10 +272,10 @@ pub(super) fn finish(assessment: CloudAssessment<'_>) -> CloudSignals {
     let span = span_words(start, end);
     let no_data = series.iter().all(|s| s.points.is_empty());
     if no_data {
-        notes.push(format!("{source} returned no data points for this period."));
+        notes.push(t!("engine.cloud.no_points", source = source));
     }
     let minutes = format::duration(f64::from(period) * 1000.0);
-    notes.push(format!("From {source}, one point per {minutes}."));
+    notes.push(t!("engine.cloud.resolution", source = source, period = minutes));
     CloudSignals {
         provider,
         service: resource.service.clone(),
@@ -283,11 +284,7 @@ pub(super) fn finish(assessment: CloudAssessment<'_>) -> CloudSignals {
         start: iso(start),
         end: iso(end),
         period_seconds: period,
-        summary: if no_data {
-            format!("No cloud measurements were available for the {span}.")
-        } else {
-            summarize(&episodes, &span)
-        },
+        summary: if no_data { t!("engine.cloud.no_measurements", span = &span) } else { summarize(&episodes, &span) },
         series,
         episodes,
         notes,

@@ -1,7 +1,7 @@
 use culprit_core::cloud::{
     CloudPoint, CloudProvider, CloudSeries, CloudSignals, CloudUnit, Rule, ThrottleKind, episodes,
 };
-use culprit_core::{Engine, Error, ErrorCode, Result, format};
+use culprit_core::{Engine, Error, ErrorCode, Result, format, key, t};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -22,10 +22,11 @@ pub(super) async fn resolve_azure_sql(server: &str, database: &str) -> Result<Re
          | project id, name, sku = tostring(sku.name), tier = tostring(sku.tier)"
     );
     let row = discover::resource_graph::<Row>(&query).await?.into_iter().next().ok_or_else(|| {
-        Error::not_found(format!("Azure Resource Graph has no database '{database}' on server '{server}'"))
-            .with_hint("Sign in with `az login` to the tenant and subscription that hold it")
+        Error::not_found(t!("engine.cloud.azure.no_database", database = database, server = server))
+            .with_hint(t!("engine.cloud.azure.sign_in_hint"))
     })?;
     Ok(Resource {
+        // Product names, which no language translates.
         service: "Azure SQL Database".into(),
         name: format!("{server}/{}", row.name),
         azure_id: Some(row.id),
@@ -52,8 +53,8 @@ pub(super) async fn resolve_azure_flexible(engine: Engine, server: &str) -> Resu
            iops = todouble(properties.storage.iops), size = todouble(properties.storage.storageSizeGB)"
     );
     let row = discover::resource_graph::<Row>(&query).await?.into_iter().next().ok_or_else(|| {
-        Error::not_found(format!("Azure Resource Graph has no flexible server '{server}'"))
-            .with_hint("Sign in with `az login` to the tenant and subscription that hold it")
+        Error::not_found(t!("engine.cloud.azure.no_flexible_server", server = server))
+            .with_hint(t!("engine.cloud.azure.sign_in_hint"))
     })?;
     Ok(Resource {
         service: format!(
@@ -79,31 +80,31 @@ fn az_interval(period: u32) -> &'static str {
     }
 }
 
-/// (metric, label, unit) per resource kind.
+/// (metric, its label's message key, unit) per resource kind.
 fn azure_metrics(target: &Target) -> &'static [(&'static str, &'static str, CloudUnit)] {
     match target {
         Target::AzureSql { .. } => &[
-            ("cpu_percent", "CPU", CloudUnit::Percent),
-            ("physical_data_read_percent", "Data IO", CloudUnit::Percent),
-            ("log_write_percent", "Log writes", CloudUnit::Percent),
-            ("workers_percent", "Workers", CloudUnit::Percent),
-            ("sessions_percent", "Sessions", CloudUnit::Percent),
+            ("cpu_percent", key!("engine.cloud.series.cpu"), CloudUnit::Percent),
+            ("physical_data_read_percent", key!("engine.cloud.azure.series.data_io"), CloudUnit::Percent),
+            ("log_write_percent", key!("engine.cloud.azure.series.log_writes"), CloudUnit::Percent),
+            ("workers_percent", key!("engine.cloud.azure.series.workers"), CloudUnit::Percent),
+            ("sessions_percent", key!("engine.cloud.azure.series.sessions"), CloudUnit::Percent),
         ],
         Target::AzureFlexible { engine: Engine::Postgres, .. } => &[
-            ("cpu_percent", "CPU", CloudUnit::Percent),
-            ("memory_percent", "Memory", CloudUnit::Percent),
-            ("disk_iops_consumed_percentage", "IOPS used", CloudUnit::Percent),
-            ("cpu_credits_remaining", "CPU credits", CloudUnit::Credits),
-            ("storage_percent", "Storage used", CloudUnit::Percent),
-            ("active_connections", "Connections", CloudUnit::Sessions),
+            ("cpu_percent", key!("engine.cloud.series.cpu"), CloudUnit::Percent),
+            ("memory_percent", key!("engine.cloud.azure.series.memory"), CloudUnit::Percent),
+            ("disk_iops_consumed_percentage", key!("engine.cloud.azure.series.iops_used"), CloudUnit::Percent),
+            ("cpu_credits_remaining", key!("engine.cloud.series.cpu_credits"), CloudUnit::Credits),
+            ("storage_percent", key!("engine.cloud.azure.series.storage_used"), CloudUnit::Percent),
+            ("active_connections", key!("engine.cloud.series.connections"), CloudUnit::Sessions),
         ],
         _ => &[
-            ("cpu_percent", "CPU", CloudUnit::Percent),
-            ("memory_percent", "Memory", CloudUnit::Percent),
-            ("io_consumption_percent", "IO used", CloudUnit::Percent),
-            ("cpu_credits_remaining", "CPU credits", CloudUnit::Credits),
-            ("storage_percent", "Storage used", CloudUnit::Percent),
-            ("active_connections", "Connections", CloudUnit::Sessions),
+            ("cpu_percent", key!("engine.cloud.series.cpu"), CloudUnit::Percent),
+            ("memory_percent", key!("engine.cloud.azure.series.memory"), CloudUnit::Percent),
+            ("io_consumption_percent", key!("engine.cloud.azure.series.io_used"), CloudUnit::Percent),
+            ("cpu_credits_remaining", key!("engine.cloud.series.cpu_credits"), CloudUnit::Credits),
+            ("storage_percent", key!("engine.cloud.azure.series.storage_used"), CloudUnit::Percent),
+            ("active_connections", key!("engine.cloud.series.connections"), CloudUnit::Sessions),
         ],
     }
 }
@@ -128,8 +129,7 @@ async fn az_metrics(id: &str, metrics: &[&str], start: f64, end: f64, period: u3
     command.args(&args);
     crate::cloud_process::output(command).await.map_err(|error| {
         if error.code == ErrorCode::NotFound {
-            Error::new(ErrorCode::AuthFailed, "The Azure CLI was not found in PATH or standard install locations")
-                .with_hint("Install the Azure CLI and run `az login`")
+            Error::new(ErrorCode::AuthFailed, t!("engine.azure_cli.missing")).with_hint(t!("engine.azure_cli.install"))
         } else {
             error
         }
@@ -146,15 +146,15 @@ fn parse_az_metrics(output: std::process::Output) -> Result<Value> {
         } else {
             ErrorCode::QueryFailed
         };
-        return Err(Error::new(code, format!("Azure Monitor query failed: {stderr}")).with_hint(
-            "Run `az login`; reading metrics needs the Monitoring Reader role (or Reader) on the resource",
-        ));
+        return Err(Error::new(code, t!("engine.cloud.azure.monitor_failed", error = &stderr))
+            .with_hint(t!("engine.cloud.azure.monitor_hint")));
     }
-    serde_json::from_slice(&output.stdout).map_err(|e| Error::internal(format!("Unexpected Azure CLI output: {e}")))
+    serde_json::from_slice(&output.stdout)
+        .map_err(|e| Error::internal(t!("engine.cloud.azure.unexpected_output", error = e.to_string())))
 }
 
 pub(super) async fn azure_signals(target: &Target, resource: &Resource, start: f64, end: f64) -> Result<CloudSignals> {
-    let id = resource.azure_id.clone().ok_or_else(|| Error::internal("Azure resource without an id"))?;
+    let id = resource.azure_id.clone().ok_or_else(|| Error::internal(t!("engine.cloud.azure.no_id")))?;
     let period = period_for(end - start);
     let wanted = azure_metrics(target);
     let names: Vec<&str> = wanted.iter().map(|(m, _, _)| *m).collect();
@@ -164,7 +164,7 @@ pub(super) async fn azure_signals(target: &Target, resource: &Resource, start: f
     let json = match parse_az_metrics(az_metrics(&id, &names, start, end, period).await?) {
         Ok(json) => json,
         Err(e) if e.code == ErrorCode::QueryFailed => {
-            notes.push("Some metrics aren't published for this tier; showing CPU, memory and storage.".to_string());
+            notes.push(t!("engine.cloud.azure.note.basic_metrics"));
             let basic: Vec<&str> = names
                 .iter()
                 .copied()
@@ -197,7 +197,7 @@ pub(super) async fn azure_signals(target: &Target, resource: &Resource, start: f
 }
 
 /// How an Azure metric is judged: the kind of episode, the threshold, whether lower is worse, the title and the sentence.
-type Judged = (ThrottleKind, f64, bool, &'static str, Box<dyn Fn(f64, &str) -> String>);
+type Judged = (ThrottleKind, f64, bool, String, Box<dyn Fn(f64, &str) -> String>);
 
 pub(super) fn azure_judge(
     target: &Target,
@@ -208,7 +208,7 @@ pub(super) fn azure_judge(
     end: f64,
     period: u32,
 ) -> CloudSignals {
-    let sku = resource.sku.clone().unwrap_or_else(|| "this tier".to_string());
+    let sku = resource.sku.clone().unwrap_or_else(|| t!("engine.cloud.azure.this_tier"));
     let burstable = resource.sku_tier.as_deref().is_some_and(|t| t.eq_ignore_ascii_case("burstable"));
     let mut series = Vec::new();
     let mut found = Vec::new();
@@ -217,13 +217,19 @@ pub(super) fn azure_judge(
         if points.is_empty() {
             continue;
         }
-        let mut s = CloudSeries::new(metric, label, *unit, points);
+        let mut s = CloudSeries::new(metric, &culprit_core::i18n::t(label, &[]), *unit, points);
         let sku_words = sku.clone();
-        let limit_detail = move |what: &'static str, waits: &'static str| {
+        // The sentence `key` says of a metric near its tier's limit.
+        let limit_detail = move |key: &'static str| {
             let sku_words = sku_words.clone();
             move |worst: f64, lasted: &str| {
-                format!(
-                    "{what} reached {worst:.0}% of {sku_words}'s limit in recorded samples over {lasted}. Near a limit leaves little headroom; actual throttling or query delay is not measured by this percentage{waits}."
+                culprit_core::i18n::t(
+                    key,
+                    &[
+                        ("worst", format::digits(format!("{worst:.0}")).into()),
+                        ("sku", sku_words.as_str().into()),
+                        ("lasted", lasted.into()),
+                    ],
                 )
             }
         };
@@ -232,46 +238,50 @@ pub(super) fn azure_judge(
                 ThrottleKind::CpuLimit,
                 95.0,
                 false,
-                "CPU was near the tier's limit",
-                Box::new(limit_detail("CPU", "")),
+                t!("engine.cloud.azure.episode.cpu_limit"),
+                Box::new(limit_detail(key!("engine.cloud.azure.detail.cpu"))),
             )),
-            ("cpu_percent", _) => {
-                Some((ThrottleKind::CpuLimit, 95.0, false, "CPU use was high", Box::new(limit_detail("CPU", ""))))
-            }
+            ("cpu_percent", _) => Some((
+                ThrottleKind::CpuLimit,
+                95.0,
+                false,
+                t!("engine.cloud.episode.cpu_high"),
+                Box::new(limit_detail(key!("engine.cloud.azure.detail.cpu"))),
+            )),
             ("physical_data_read_percent", _) => Some((
                 ThrottleKind::IoLimit,
                 95.0,
                 false,
-                "Data IO was near the tier's limit",
-                Box::new(limit_detail("Data IO", "")),
+                t!("engine.cloud.azure.episode.data_io"),
+                Box::new(limit_detail(key!("engine.cloud.azure.detail.data_io"))),
             )),
             ("log_write_percent", _) => Some((
                 ThrottleKind::LogRate,
                 95.0,
                 false,
-                "Log writes were near the tier's limit",
-                Box::new(limit_detail("Log writes", "")),
+                t!("engine.cloud.azure.episode.log_writes"),
+                Box::new(limit_detail(key!("engine.cloud.azure.detail.log_writes"))),
             )),
             ("workers_percent", _) => Some((
                 ThrottleKind::Workers,
                 90.0,
                 false,
-                "Worker use neared the tier's limit",
-                Box::new(limit_detail("Workers in use", "; requests can be refused at the cap")),
+                t!("engine.cloud.azure.episode.workers"),
+                Box::new(limit_detail(key!("engine.cloud.azure.detail.workers"))),
             )),
             ("sessions_percent", _) => Some((
                 ThrottleKind::Workers,
                 90.0,
                 false,
-                "Sessions neared the tier's limit",
-                Box::new(limit_detail("Sessions", "; connections can be refused at 100%")),
+                t!("engine.cloud.azure.episode.sessions"),
+                Box::new(limit_detail(key!("engine.cloud.azure.detail.sessions"))),
             )),
             ("disk_iops_consumed_percentage" | "io_consumption_percent", _) => Some((
                 ThrottleKind::IoLimit,
                 95.0,
                 false,
-                "Storage IOPS were near their limit",
-                Box::new(limit_detail("IOPS", "")),
+                t!("engine.cloud.azure.episode.iops"),
+                Box::new(limit_detail(key!("engine.cloud.azure.detail.iops"))),
             )),
             // Allocated memory can include useful cache; a high percentage alone establishes no shortage.
             ("memory_percent", _) => None,
@@ -279,24 +289,20 @@ pub(super) fn azure_judge(
                 ThrottleKind::Storage,
                 95.0,
                 false,
-                "Storage nearly full",
-                Box::new(limit_detail("Storage used", "")),
+                t!("engine.cloud.episode.storage_full"),
+                Box::new(limit_detail(key!("engine.cloud.azure.detail.storage"))),
             )),
             ("cpu_credits_remaining", _) if burstable => Some((
                 ThrottleKind::CpuCredits,
                 0.0,
                 true,
-                "CPU credits ran out",
-                Box::new(|_: f64, lasted: &str| {
-                    format!(
-                        "The Burstable server's CPU-credit balance was zero in samples over {lasted}. Demand above baseline can be limited; these counters alone do not measure query delays."
-                    )
-                }),
+                t!("engine.cloud.episode.cpu_credits"),
+                Box::new(|_: f64, lasted: &str| t!("engine.cloud.azure.detail.credits", lasted = lasted)),
             )),
             _ => None,
         };
         if matches!(unit, CloudUnit::Percent) {
-            s = s.limit(100.0, "tier limit");
+            s = s.limit(100.0, t!("engine.cloud.azure.limit.tier"));
         }
         if *metric == "cpu_credits_remaining" {
             s = s.floor();
@@ -307,14 +313,14 @@ pub(super) fn azure_judge(
             found.extend(episodes(
                 &s,
                 period,
-                &Rule { metric, kind, threshold, floor, min_points: 2, title, detail: &*detail },
+                &Rule { metric, kind, threshold, floor, min_points: 2, title: &title, detail: &*detail },
             ));
         }
         series.push(s);
     }
     let tier = [resource.sku.clone(), resource.sku_tier.clone()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
     let tier = if let Some(iops) = resource.iops.filter(|i| *i > 0.0) {
-        vec![tier, format!("{} IOPS", format::count(iops))]
+        vec![tier, t!("engine.cloud.azure.tier.iops", iops = format::count(iops))]
     } else {
         vec![tier]
     };
@@ -329,6 +335,7 @@ pub(super) fn azure_judge(
         start,
         end,
         period,
+        // A product's name, which no language translates.
         source: "Azure Monitor",
     })
 }

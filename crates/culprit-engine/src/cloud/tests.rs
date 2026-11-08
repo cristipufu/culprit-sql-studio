@@ -28,11 +28,21 @@ fn a_cached_day_cannot_supply_an_hours_assessment() {
     let start = 1_791_720_000.0;
     let end = start + 86400.0;
     let signals = rds_judge(&Resource::default(), Default::default(), start, end, 300);
-    let fetch = Fetch { signals, at: end };
+    let fetch = Fetch { signals, at: end, lang: "en".into() };
     assert!(reusable(&fetch, start, end, end));
     assert!(!reusable(&fetch, end - 3600.0, end, end));
     assert!(!reusable(&fetch, end - 6.0 * 3600.0, end, end));
     assert!(!reusable(&fetch, start, end + 86400.0, end + 86400.0));
+}
+
+// A fetch's words are in the language it was said in: after the person picks another, it is fetched again.
+#[test]
+fn a_fetch_said_in_another_language_is_not_reused() {
+    let start = 1_791_720_000.0;
+    let end = start + 86400.0;
+    let signals = rds_judge(&Resource::default(), Default::default(), start, end, 300);
+    let fetch = Fetch { signals, at: end, lang: "fr".into() };
+    assert!(!reusable(&fetch, start, end, end));
 }
 
 #[test]
