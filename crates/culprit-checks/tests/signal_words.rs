@@ -1214,3 +1214,125 @@ fix: If it is an export or ETL job, leave it as it is, and run it on a replica o
 verify: Between two scans, the rows it returns per run should drop to what a page or a job actually uses: performance_schema keeps running totals, so compare its rows and runs in a scan taken once the change is live and one a day or more later (600K rows in 30 runs in this scan)."#,
     );
 }
+
+// ── lock-time ──────────────────────────────────────────────────────────────────────────────────────
+
+fn locked(name: &str, text: &str, runs: f64, total_ms: f64, lock_ms: f64, max_ms: Option<f64>) -> Snapshot {
+    let mut s = fixture(name);
+    let q = only(&mut s, text);
+    (q.executions, q.total_time_ms, q.mean_time_ms, q.max_time_ms) = (runs, total_ms, total_ms / runs, max_ms);
+    q.waits = vec![culprit_core::WaitStat {
+        category: "Lock".into(),
+        wait_type: Some("lock time".into()),
+        wait_ms: lock_ms,
+        tasks: None,
+    }];
+    s
+}
+
+#[test]
+fn lock_time_on_mysql() {
+    let s = locked(
+        "mysql-demo",
+        "UPDATE `stock` SET `qty` = `qty` - ? WHERE `sku` = ?",
+        1_000.0,
+        100_000.0,
+        60_000.0,
+        None,
+    );
+    says(
+        &run("lock-time", &s),
+        r#"id: lock-time:04cd7be9c366fadc
+title: An update of stock waits on locks for 60% of its time, 60 ms per run
+summary: Of its 2 min since its statistics began 2 minutes ago, 1 min went to waiting for locks other sessions held. That time belongs to the sessions holding the locks: making this statement faster won't help, shortening the transactions that hold the rows will. MySQL counts row-lock waits in a statement's lock time from 8.0.28; earlier versions count table locks only.
+impact: 1 min waiting on locks
+metric: Lock wait
+metric: Share of its time
+metric: Per run
+fix: Find what holds the locks while it waits (Live shows the blocking chain). Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere.
+verify: Between two scans, its lock time per run should drop: performance_schema keeps running totals, so compare its lock time and runs in a scan taken once the change is live and one a day or more later (1 min over 1.0K runs in this scan).
+caveat: The statistics don't cover enough time (an hour or more from a known start) to say how many minutes of waiting a day this is, so it isn't raised on its share alone."#,
+    );
+}
+
+#[test]
+fn lock_time_of_reads_that_row_versioning_would_spare() {
+    let read = |runs: f64, total: f64, lock: f64, max: Option<f64>| {
+        let mut s = locked("mssql-demo", "SELECT id FROM dbo.orders WHERE customer_id = @P1", runs, total, lock, max);
+        set(&mut s, "is_read_committed_snapshot_on", "0");
+        s
+    };
+    let mut findings = run("lock-time", &read(1.0, 10_500.0, 10_400.0, None));
+    findings.extend(run("lock-time", &read(2.0, 21_000.0, 15_000.0, Some(20_000.0))));
+    findings.extend(run("lock-time", &read(2_000.0, 100_000.0, 60_000.0, None)));
+    says(
+        &findings,
+        r#"id: lock-time:7
+title: A read from orders spends nearly all its time waiting on locks: its one run waited 10.4 s
+summary: Of its 10.5 s in the last 5 hours, 10.4 s went to waiting for locks other sessions held. That time belongs to the sessions holding the locks: making this statement faster won't help, shortening the transactions that hold the rows will.
+impact: 10.4 s waiting on locks
+metric: Lock wait
+metric: Share of its time
+metric: Per run
+fix: This is a read, and READ_COMMITTED_SNAPSHOT is off for this database, so under read committed it waits for any write holding a lock on the rows it reads. With row versioning on (config:read-committed-snapshot has the change), it would read the last committed version of the rows instead of waiting. Without it, it waits for the writers. It ran once in the last 5 hours, so there is no wait to catch now; if it runs again, have its lock waits logged (SQL Server's blocked process report names the holder) to see what holds them. Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere.
+verify: Re-scan: lock waits should be a small part of its time.
+
+id: lock-time:7
+title: A read from orders waits on locks for 71% of its time: one run waited at least 14.0 s
+summary: Of its 21.0 s in the last 5 hours, 15.0 s went to waiting for locks other sessions held. That time belongs to the sessions holding the locks: making this statement faster won't help, shortening the transactions that hold the rows will.
+impact: 15.0 s waiting on locks
+metric: Lock wait
+metric: Share of its time
+metric: Longest run
+fix: This is a read, and READ_COMMITTED_SNAPSHOT is off for this database, so under read committed it waits for any write holding a lock on the rows it reads. With row versioning on (config:read-committed-snapshot has the change), it would read the last committed version of the rows instead of waiting. Without it, it waits for the writers. It ran 2 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere.
+verify: Re-scan: lock waits should be a small part of its time.
+
+id: lock-time:7
+title: A read from orders waits on locks for 60% of its time, 30 ms per run
+summary: Of its 2 min in the last 5 hours, 1 min went to waiting for locks other sessions held. That time belongs to the sessions holding the locks: making this statement faster won't help, shortening the transactions that hold the rows will.
+impact: 1 min waiting on locks
+metric: Lock wait
+metric: Share of its time
+metric: Per run
+fix: This is a read, and READ_COMMITTED_SNAPSHOT is off for this database, so under read committed it waits for any write holding a lock on the rows it reads. With row versioning on (config:read-committed-snapshot has the change), it would read the last committed version of the rows instead of waiting. Without it, find what holds the locks while it waits (Live shows the blocking chain). Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere.
+verify: Re-scan: lock waits should be a small part of its time."#,
+    );
+}
+
+#[test]
+fn lock_time_of_a_write_that_stopped() {
+    let mut s =
+        locked("mssql-demo", "UPDATE dbo.orders SET status = 2 WHERE id = @P1", 2_000.0, 100_000.0, 97_000.0, None);
+    stopped(&mut s);
+    says(
+        &run("lock-time", &s),
+        r#"id: lock-time:7
+title: An update of orders spent nearly all its time waiting on locks, 48 ms per run
+summary: Of its 2 min in the last 3 days, 2 min went to waiting for locks other sessions held. That time belongs to the sessions holding the locks: making this statement faster won't help, shortening the transactions that hold the rows will.
+impact: 2 min waiting on locks
+metric: Lock wait
+metric: Share of its time
+metric: Per run
+fix: It no longer runs, so there is no wait to catch now; if it comes back, find what holds the locks while it waits (Live shows the blocking chain). Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere.
+verify: Re-scan: lock waits should be a small part of its time."#,
+    );
+}
+
+#[test]
+fn lock_time_of_a_write_that_waited_for_part_of_its_time_and_stopped() {
+    let mut s =
+        locked("mssql-demo", "UPDATE dbo.orders SET status = 2 WHERE id = @P1", 2_000.0, 100_000.0, 60_000.0, None);
+    stopped(&mut s);
+    says(
+        &run("lock-time", &s),
+        r#"id: lock-time:7
+title: An update of orders waited on locks for 60% of its time, 30 ms per run
+summary: Of its 2 min in the last 3 days, 1 min went to waiting for locks other sessions held. That time belongs to the sessions holding the locks: making this statement faster won't help, shortening the transactions that hold the rows will.
+impact: 1 min waiting on locks
+metric: Lock wait
+metric: Share of its time
+metric: Per run
+fix: It no longer runs, so there is no wait to catch now; if it comes back, find what holds the locks while it waits (Live shows the blocking chain). Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere.
+verify: Re-scan: lock waits should be a small part of its time."#,
+    );
+}

@@ -160,7 +160,7 @@ fn lock_time_share_of_the_query() {
     q.total_time_ms = 100_000.0;
     q.waits =
         vec![WaitStat { category: "Lock".into(), wait_type: Some("lock time".into()), wait_ms: 60_000.0, tasks: None }];
-    let f = lock_time(&s);
+    let f = LockTimeCheck.run(&s);
     assert_eq!(f[0].title, "An update of stock waits on locks for 60% of its time, 60 ms per run");
     assert!(f[0].summary.contains("8.0.28"));
 }
