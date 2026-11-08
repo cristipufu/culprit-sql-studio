@@ -238,3 +238,56 @@ fix: Check filesystem headroom and the file's growth/max-size configuration. Pla
 verify: Compare used/free allocation, growth settings and any log reuse reason in subsequent scans during representative load. Confirm writes can proceed and filesystem space remains available."#,
     );
 }
+
+// ── sqlite-wal ─────────────────────────────────────────────────────────────────────────────────────
+
+fn sqlite_wal(wal_mb: f64, before_mb: Option<f64>) -> Vec<Finding> {
+    let mut s = fixture("sqlite-demo");
+    s.operations.sqlite = Some(culprit_core::operations::SqliteFileHealth {
+        wal_bytes: Some(wal_mb * 1024.0 * 1024.0),
+        before: before_mb.map(|mb| culprit_core::operations::CounterReading {
+            at: "2026-10-16T09:00:00Z".into(),
+            count: mb * 1024.0 * 1024.0,
+            reference: None,
+        }),
+    });
+    run("sqlite-wal", &s)
+}
+
+#[test]
+fn sqlite_wal_without_an_earlier_size() {
+    says(
+        &sqlite_wal(80.0, None),
+        r#"id: sqlite-wal:demo.db
+title: The SQLite WAL file occupies 80.0 MB
+summary: The sidecar's allocated file length was read without checkpointing or inspecting contents. No earlier comparable size was recorded. A WAL can retain space after checkpointing and reuse it. Size or growth alone does not establish uncheckpointed work, checkpoint starvation, a long reader or disk exhaustion.
+impact: File allocation context
+metric: WAL file length
+fix: If this accompanies capacity or latency trouble, inspect the application's checkpoint results and open read transactions on its own connections. Confirm filesystem space and checkpoint policy. Do not delete the WAL or force a checkpoint just to reduce this number; live backups must preserve a consistent database/WAL state.
+verify: Compare WAL allocation across scans and correlate it with application checkpoint progress, latency and filesystem headroom. Reuse of a stable allocated WAL can be healthy; shrinking is not required."#,
+    );
+}
+
+#[test]
+fn sqlite_wal_that_grew_and_one_that_shrank() {
+    let mut both = sqlite_wal(40.0, Some(10.0));
+    both.extend(sqlite_wal(70.0, Some(90.0)));
+    says(
+        &both,
+        r#"id: sqlite-wal:demo.db
+title: The SQLite WAL file occupies 40.0 MB
+summary: The sidecar's allocated file length was read without checkpointing or inspecting contents. It changed by 30.0 MB since 2026-10-16T09:00:00Z. A WAL can retain space after checkpointing and reuse it. Size or growth alone does not establish uncheckpointed work, checkpoint starvation, a long reader or disk exhaustion.
+impact: File allocation context
+metric: WAL file length
+fix: If this accompanies capacity or latency trouble, inspect the application's checkpoint results and open read transactions on its own connections. Confirm filesystem space and checkpoint policy. Do not delete the WAL or force a checkpoint just to reduce this number; live backups must preserve a consistent database/WAL state.
+verify: Compare WAL allocation across scans and correlate it with application checkpoint progress, latency and filesystem headroom. Reuse of a stable allocated WAL can be healthy; shrinking is not required.
+
+id: sqlite-wal:demo.db
+title: The SQLite WAL file occupies 70.0 MB
+summary: The sidecar's allocated file length was read without checkpointing or inspecting contents. It changed by −20.0 MB since 2026-10-16T09:00:00Z. A WAL can retain space after checkpointing and reuse it. Size or growth alone does not establish uncheckpointed work, checkpoint starvation, a long reader or disk exhaustion.
+impact: File allocation context
+metric: WAL file length
+fix: If this accompanies capacity or latency trouble, inspect the application's checkpoint results and open read transactions on its own connections. Confirm filesystem space and checkpoint policy. Do not delete the WAL or force a checkpoint just to reduce this number; live backups must preserve a consistent database/WAL state.
+verify: Compare WAL allocation across scans and correlate it with application checkpoint progress, latency and filesystem headroom. Reuse of a stable allocated WAL can be healthy; shrinking is not required."#,
+    );
+}
