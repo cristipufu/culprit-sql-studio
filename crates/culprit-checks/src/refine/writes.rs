@@ -188,11 +188,10 @@ impl Refine for Rule {
                 f.summary.push_str(&said);
             }
             let total = writers.iter().map(|(_, _, bytes)| bytes).sum();
-            // The label this rule gives the metric, in the language it is said in.
-            let label = t!("refine.writes.metric.log_written_by_its_writes");
-            match f.metrics.iter_mut().find(|m| m.label == label) {
+            let metric = key!("refine.writes.metric.log_written_by_its_writes");
+            match f.metrics.iter_mut().find(|m| m.is(metric)) {
                 Some(m) => m.value = total,
-                None => f.metrics.push(culprit_core::Metric::new(label, total, culprit_core::Unit::Bytes)),
+                None => f.metrics.push(culprit_core::Metric::said(metric, total, culprit_core::Unit::Bytes)),
             }
             for (q, _, bytes) in &writers {
                 if let Some(r) = f.queries.iter_mut().find(|r| r.id == q.id && r.note.is_none()) {

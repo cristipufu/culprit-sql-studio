@@ -180,14 +180,18 @@ fn for_the_agent(text: &str) -> String {
     text.replace(" (copy the brief for your coding agent)", "").replace("(copy the brief for your coding agent) ", "")
 }
 
-/// Metrics that total a wait: said to the second under an hour (`signals::total_wait`), the way their findings' titles
-/// and summaries say them ("2 min 32 s", where a rounded "3 min" would disagree with the title above it).
-pub const TOTAL_WAIT_METRICS: &[&str] = &["Time waiting", "Time waiting since start"];
+/// Metrics that total a wait, by key: said to the second under an hour (`signals::total_wait`), the way their findings'
+/// titles and summaries say them ("2 min 32 s", where a rounded "3 min" would disagree with the title above it).
+pub const TOTAL_WAIT_METRICS: &[&str] = &[
+    culprit_core::key!("check.last_page_insert.metric.time"),
+    culprit_core::key!("check.lock_escalations.metric.time_waiting"),
+    culprit_core::key!("check.row_lock_waits.metric.time"),
+];
 
 /// A finding's metric as its *Evidence* line says it, on every surface that lists one (the brief, the exports).
 pub fn metric_text(m: &Metric) -> String {
     match m.unit {
-        Unit::Ms if TOTAL_WAIT_METRICS.contains(&m.label.as_str()) => crate::signals::total_wait(m.value),
+        Unit::Ms if TOTAL_WAIT_METRICS.contains(&m.key.as_str()) => crate::signals::total_wait(m.value),
         Unit::Ms => format::duration(m.value),
         Unit::Bytes => format::bytes(m.value),
         Unit::Ratio => format::percent(m.value),
@@ -195,5 +199,21 @@ pub fn metric_text(m: &Metric) -> String {
         Unit::Days => format::days(m.value),
         Unit::Text => m.text.clone().unwrap_or_default(),
         Unit::Count | Unit::Rows | Unit::Pages => format::count(m.value),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A metric that totals a wait is said to the second by what it is, whatever language its label is in.
+    #[test]
+    fn a_total_wait_is_said_to_the_second_in_another_language() {
+        culprit_core::i18n::scope("fr", || {
+            let waited = Metric::said(culprit_core::key!("check.row_lock_waits.metric.time"), 152_000.0, Unit::Ms);
+            assert_ne!(waited.label, "Time waiting since start");
+            assert_eq!(metric_text(&waited), crate::signals::total_wait(152_000.0));
+            assert_ne!(metric_text(&waited), format::duration(152_000.0));
+        });
     }
 }

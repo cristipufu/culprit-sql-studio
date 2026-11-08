@@ -500,13 +500,13 @@ fn lock_escalations_finding(snapshot: &Snapshot, e: EscalatedTable<'_>) -> Findi
         None => t!("check.lock_escalations.impact.total", n = total_n, count = &total),
     };
     f.confidence = Confidence::High;
-    f.metrics = vec![Metric::new(t!("check.lock_escalations.metric.escalations"), t.escalations, Unit::Count)];
+    f.metrics = vec![Metric::said(super::ESCALATIONS_METRIC, t.escalations, Unit::Count)];
     if let Some((_, n)) = new {
-        f.metrics.push(Metric::new(t!("check.lock_escalations.metric.since_previous"), n, Unit::Count));
+        f.metrics.push(Metric::said(key!("check.lock_escalations.metric.since_previous"), n, Unit::Count));
     }
     if t.lock_waits >= 1.0 {
         f.metrics.push(Metric::new(t!("check.lock_escalations.metric.lock_waits"), t.lock_waits, Unit::Count));
-        f.metrics.push(Metric::new(t!("check.lock_escalations.metric.time_waiting"), t.lock_wait_ms, Unit::Ms));
+        f.metrics.push(Metric::said(key!("check.lock_escalations.metric.time_waiting"), t.lock_wait_ms, Unit::Ms));
     }
     let target = qualified(Engine::Mssql, &schema, &table);
     let session = escalation_session_sql(&snapshot.server.database, azure);

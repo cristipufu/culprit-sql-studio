@@ -12,7 +12,7 @@ use culprit_core::{
     format, signals::plan_row_bytes,
 };
 
-use culprit_core::{Check, t};
+use culprit_core::{Check, key, t};
 
 use crate::support::*;
 
@@ -355,7 +355,7 @@ fn index_label(i: &IndexStat) -> String {
 }
 
 /// The metric `lock-escalations` (and `hot-rows`) report escalations under; the digest reads it back.
-pub(crate) const ESCALATIONS_METRIC: &str = "Escalations since SQL Server started";
+pub(crate) const ESCALATIONS_METRIC: &str = culprit_core::key!("check.lock_escalations.metric.escalations");
 
 /// The share of a table's row versions that are dead (not yet vacuumed), when the engine counts them.
 pub(crate) fn dead_share(t: &TableStat) -> Option<f64> {

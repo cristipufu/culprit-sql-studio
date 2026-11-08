@@ -452,11 +452,11 @@ fn environment_name(environment: Environment) -> &'static str {
 /// What a finding counts since startup, for the findings that count events: a later digest tells from it whether
 /// they happened again.
 fn event_count(f: &Finding) -> Option<f64> {
-    let label = match f.check.as_str() {
+    let metric = match f.check.as_str() {
         "lock-escalations" => crate::signals::ESCALATIONS_METRIC,
         _ => return None,
     };
-    f.metrics.iter().find(|m| m.label == label).map(|m| m.value)
+    f.metrics.iter().find(|m| m.is(metric)).map(|m| m.value)
 }
 
 /// How many happened between two scans of a count since startup. A count lower than before was reset after the
@@ -626,7 +626,7 @@ mod tests {
         );
         f.title = "Row locks on orders escalated to a lock on the whole table".into();
         f.metrics =
-            vec![culprit_core::Metric::new(crate::signals::ESCALATIONS_METRIC, count, culprit_core::Unit::Count)];
+            vec![culprit_core::Metric::said(crate::signals::ESCALATIONS_METRIC, count, culprit_core::Unit::Count)];
         r.findings.push(f);
         r
     }
@@ -649,6 +649,16 @@ mod tests {
         assert_eq!(again(2.0, 10.0), [Some(2.0)]);
         // A finding without a count since startup never shows here.
         assert!(digest(&report(), Some(&report()), 10, 5).since.expect("changes").again.is_empty());
+    }
+
+    // The count is found by what the metric is, whatever language the earlier report was said in.
+    #[test]
+    fn a_count_since_startup_is_read_in_a_report_said_in_another_language() {
+        let mut previous = culprit_core::i18n::scope("fr", || with_escalations(report(), 4.0));
+        assert_ne!(previous.findings.last().unwrap().metrics[0].label, "Escalations since SQL Server started");
+        previous.snapshot.taken_at = "2026-10-10T06:00:00Z".into();
+        let d = digest(&with_escalations(report(), 7.0), Some(&previous), 10, 5);
+        assert_eq!(d.since.expect("changes").again.iter().map(|f| f.count_since).collect::<Vec<_>>(), [Some(3.0)]);
     }
 
     #[test]

@@ -147,6 +147,24 @@ pub struct FileIo {
     pub write_operation: Option<FileWriteOperation>,
 }
 
+/// Two files of one log, as [`merge_logs`] makes them one.
+fn same_log(a: &FileIo, b: &FileIo) -> bool {
+    a.kind == FileKind::Log
+        && b.kind == FileKind::Log
+        && a.database == b.database
+        && a.scope == b.scope
+        && a.stats_reset == b.stats_reset
+        && a.write_operation == b.write_operation
+}
+
+/// The names of the files in `files` that [`merge_logs`] made `merged` of: its own, or each file of its log.
+pub fn merged_from(merged: &FileIo, files: &[FileIo]) -> Vec<String> {
+    if merged.kind != FileKind::Log {
+        return vec![merged.name.clone()];
+    }
+    files.iter().filter(|f| same_log(f, merged)).map(|f| f.name.clone()).collect()
+}
+
 /// Log files of the same database as one: MySQL 8.0.30+ spreads redo over many `#ib_redo*` files, each too quiet on
 /// its own to average, and what commits wait on is the log as a whole. Other files pass through unchanged.
 pub fn merge_logs(files: &[FileIo]) -> Vec<FileIo> {
@@ -156,13 +174,7 @@ pub fn merge_logs(files: &[FileIo]) -> Vec<FileIo> {
             out.push(f.clone());
             continue;
         }
-        match out.iter_mut().find(|o| {
-            o.kind == FileKind::Log
-                && o.database == f.database
-                && o.scope == f.scope
-                && o.stats_reset == f.stats_reset
-                && o.write_operation == f.write_operation
-        }) {
+        match out.iter_mut().find(|o| same_log(o, f)) {
             Some(log) => {
                 // Unknown timing or bytes for part of the log cannot become a zero and dilute its average.
                 let sum = |a: Option<f64>, b: Option<f64>| a.zip(b).map(|(a, b)| a + b);
@@ -874,6 +886,10 @@ mod merge_tests {
         let log = merged.iter().find(|f| f.kind == FileKind::Log).unwrap();
         assert_eq!((log.name.as_str(), log.writes, log.write_ms), ("redo log", 1_500.0, Some(9.0)));
         assert_eq!(merged.len(), 2);
+        // What it was made of, by the names the snapshot gives them.
+        assert_eq!(merged_from(log, &files), ["#ib_redo10", "#ib_redo11"]);
+        let data = merged.iter().find(|f| f.kind == FileKind::Data).unwrap();
+        assert_eq!(merged_from(data, &files), ["shop/orders.ibd"]);
     }
 
     #[test]

@@ -91,11 +91,11 @@ fn compile_pressure_finding(snapshot: &Snapshot, c: CompileContext) -> Finding {
     f.impact.label = t!("check.compile_pressure.impact", percent = &percent);
     f.confidence = Confidence::Medium;
     f.metrics = vec![
-        Metric::new(t!("check.compile_pressure.metric.compiles"), c.ratio, Unit::Count),
-        Metric::new(t!("check.compile_pressure.metric.per_minute"), c.per_min, Unit::Count),
+        Metric::said(key!("check.compile_pressure.metric.compiles"), c.ratio, Unit::Count),
+        Metric::said(key!("check.compile_pressure.metric.per_minute"), c.per_min, Unit::Count),
     ];
     if let Some(recompiles) = c.recompiles {
-        f.metrics.push(Metric::new(t!("check.compile_pressure.metric.recompiles"), recompiles, Unit::Count));
+        f.metrics.push(Metric::said(key!("check.compile_pressure.metric.recompiles"), recompiles, Unit::Count));
     }
     f.fix = Some(Fix { summary: t!("check.compile_pressure.fix"), sql: None, cost: None });
     f.verify = vec![t!("check.compile_pressure.verify")];

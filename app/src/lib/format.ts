@@ -1,5 +1,5 @@
 import type { Unit } from "../gen/Unit";
-import { language, locale, t } from "./i18n";
+import { key, language, locale, t } from "./i18n";
 import type { Args } from "./message-format";
 
 // Every number here reads as culprit_core::format writes it in findings and briefs, so a value reads the same on
@@ -181,13 +181,17 @@ export function totalWait(ms: number): string {
   return rest === 0 ? t("ui.format.duration.min", { value: String(minutes) }) : t("ui.format.duration.min_s", { minutes, seconds: rest });
 }
 
-/** Metrics that total a wait, said to the second as their findings' titles say them. Mirrors
+/** Metrics that total a wait, by key: said to the second as their findings' titles say them. Mirrors
  * culprit_checks::TOTAL_WAIT_METRICS. */
-const TOTAL_WAIT_METRICS = new Set(["Time waiting", "Time waiting since start"]);
+const TOTAL_WAIT_METRICS = new Set<string>([
+  key("check.last_page_insert.metric.time"),
+  key("check.lock_escalations.metric.time_waiting"),
+  key("check.row_lock_waits.metric.time"),
+]);
 
 /** A finding's metric as its Evidence says it. Mirrors culprit_checks::metric_text. */
-export function findingMetric(m: { label: string; value: number; unit: Unit; text?: string | null }): string {
-  return m.unit === "ms" && TOTAL_WAIT_METRICS.has(m.label) ? totalWait(m.value) : metric(m.value, m.unit, m.text);
+export function findingMetric(m: { key?: string; value: number; unit: Unit; text?: string | null }): string {
+  return m.unit === "ms" && m.key != null && TOTAL_WAIT_METRICS.has(m.key) ? totalWait(m.value) : metric(m.value, m.unit, m.text);
 }
 
 export function metric(value: number, unit: Unit, text?: string | null): string {

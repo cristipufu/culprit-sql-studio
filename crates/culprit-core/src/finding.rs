@@ -122,15 +122,41 @@ pub struct Metric {
     pub value: f64,
     pub unit: Unit,
     pub text: Option<String>,
+    /// What the metric is: the catalog key its label is said from (`check.stale_stats.metric.changes`). Code that
+    /// looks for a metric finds it by this, never by its label, which is words in the reader's language. Empty for a
+    /// metric said without one (a plugged-in check's).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub key: String,
 }
 
 impl Metric {
     pub fn new(label: impl Into<String>, value: f64, unit: Unit) -> Self {
-        Metric { label: label.into(), value, unit, text: None }
+        Metric { label: label.into(), value, unit, text: None, key: String::new() }
     }
 
     pub fn text(label: impl Into<String>, text: impl Into<String>) -> Self {
-        Metric { label: label.into(), value: 0.0, unit: Unit::Text, text: Some(text.into()) }
+        Metric { label: label.into(), value: 0.0, unit: Unit::Text, text: Some(text.into()), key: String::new() }
+    }
+
+    /// The metric `key` names (`key!("common.metric.runs")`), labelled with that message.
+    pub fn said(key: &str, value: f64, unit: Unit) -> Self {
+        Metric::new(crate::i18n::t(key, &[]), value, unit).keyed(key)
+    }
+
+    /// The text metric `key` names, labelled with that message.
+    pub fn said_text(key: &str, text: impl Into<String>) -> Self {
+        Metric::text(crate::i18n::t(key, &[]), text).keyed(key)
+    }
+
+    /// This metric as the one `key` names: for a label said with arguments (`t!(key, n = ..)`).
+    pub fn keyed(mut self, key: &str) -> Self {
+        self.key = key.to_string();
+        self
+    }
+
+    /// Whether this is the metric `key` names.
+    pub fn is(&self, key: &str) -> bool {
+        self.key == key
     }
 }
 

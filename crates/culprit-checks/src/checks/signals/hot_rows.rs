@@ -253,7 +253,7 @@ fn hot_rows_finding(_: &Snapshot, hot: ContendedTable<'_>) -> Finding {
         f.metrics.push(Metric::new(t!("check.hot_rows.metric.per_day"), r, Unit::Ms));
     }
     if escalations > 0.0 {
-        f.metrics.push(Metric::new(t!("check.lock_escalations.metric.escalations"), escalations, Unit::Count));
+        f.metrics.push(Metric::said(super::ESCALATIONS_METRIC, escalations, Unit::Count));
     }
     f.fix = Some(if !f.is_actionable() {
         Fix { summary: t!("check.hot_rows.fix.no_change"), sql: None, cost: None }

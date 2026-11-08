@@ -343,7 +343,10 @@ fn lock_escalations_add_up_per_table_and_name_the_write_that_changes_the_most_ro
     );
     assert_eq!(f[0].queries[0].id, id);
     assert_eq!(f[0].severity, Severity::High);
-    assert_eq!(f[0].metrics[0].label, ESCALATIONS_METRIC);
+    assert_eq!(
+        (f[0].metrics[0].key.as_str(), f[0].metrics[0].label.as_str()),
+        (ESCALATIONS_METRIC, "Escalations since SQL Server started")
+    );
     assert_eq!(f[0].metrics[0].value, 5.0);
     assert!(f[0].fix.as_ref().unwrap().sql.as_ref().unwrap().contains("DELETE TOP (1000) FROM [dbo].[orders]"));
 }
@@ -470,7 +473,7 @@ fn escalations_since_the_previous_scan_are_high_and_counted() {
         f.summary
     );
     assert_eq!(f.impact.label, "1 new table lock");
-    assert_eq!((f.metrics[0].label.as_str(), f.metrics[0].value), (ESCALATIONS_METRIC, 5.0));
+    assert_eq!((f.metrics[0].key.as_str(), f.metrics[0].value), (ESCALATIONS_METRIC, 5.0));
     assert_eq!((f.metrics[1].label.as_str(), f.metrics[1].value), ("Escalations since the previous scan", 1.0));
 }
 

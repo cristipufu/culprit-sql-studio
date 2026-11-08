@@ -145,7 +145,7 @@ fn big_result_finding(snapshot: &Snapshot, big: BigResult<'_>) -> Finding {
     f.confidence = if width.is_some() { Confidence::High } else { Confidence::Medium };
     f.metrics = vec![
         Metric::new(t!("check.big_result.metric.rows_per_run"), rows, Unit::Rows),
-        Metric::new(t!("common.metric.runs"), q.executions, Unit::Count),
+        Metric::said(key!("common.metric.runs"), q.executions, Unit::Count),
     ];
     if let Some(b) = bytes {
         f.metrics.push(Metric::new(t!("check.big_result.metric.bytes_per_run"), b, Unit::Bytes));

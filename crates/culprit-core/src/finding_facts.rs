@@ -19,6 +19,9 @@ pub struct FindingFacts {
     pub bloat: Option<FindingBloat>,
     pub log_write: Option<FindingLogWrite>,
     pub large_rows: Option<FindingLargeRows>,
+    /// The files a storage finding is about, by their names in the snapshot (a log said as one: each of its files).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub storage_files: Vec<String>,
 }
 impl FindingFacts {
     pub fn is_empty(&self) -> bool {

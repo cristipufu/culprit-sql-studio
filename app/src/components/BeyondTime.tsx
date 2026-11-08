@@ -8,7 +8,7 @@ import type { Report } from "../gen/Report";
 import type { TableStat } from "../gen/TableStat";
 import { serverName, statementMetrics } from "../lib/engines";
 import { bytes, count, duration, percent, rowCount, when } from "../lib/format";
-import { t } from "../lib/i18n";
+import { key, t } from "../lib/i18n";
 import { waitKey } from "../lib/waits";
 import { querySignalStatus, replicaStatus, storageStatus, tableSignalWarning, worstFinding } from "../lib/health";
 import { SignalTile } from "./Health";
@@ -470,14 +470,14 @@ const CHURN = ["new-connections", "session-length", "sessions-abandoned", "poole
 
 /** The data behind server and object findings, which have no query to show. */
 /** The metric the lock-escalations check counts new escalations under, when an earlier scan is there to compare with. */
-const ESCALATIONS_SINCE = "Escalations since the previous scan";
+const ESCALATIONS_SINCE = key("check.lock_escalations.metric.since_previous");
 
 /** SQL Server counts escalations from when it started, with no time for each: what the counts cover, and how many came since the scan before. */
 function escalationsSince(startedAt: string | null, previousScan: string | undefined, finding: Finding): string {
   const counted = startedAt
     ? t("ui.beyond_time.escalations.since_start", { started: when(startedAt).short })
     : t("ui.beyond_time.escalations.since_load");
-  const since = finding.metrics.find((m) => m.label === ESCALATIONS_SINCE)?.value;
+  const since = finding.metrics.find((m) => m.key === ESCALATIONS_SINCE)?.value;
   if (since === undefined || !previousScan) return `${counted} ${t("ui.beyond_time.escalations.next_scan")}`;
   const at = when(previousScan).short;
   return since > 0

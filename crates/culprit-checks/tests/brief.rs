@@ -955,8 +955,8 @@ fn a_total_wait_in_the_evidence_reads_as_its_title_says_it() {
     let postgres = report("postgres-demo.json");
     let mut f = finding(&postgres, "chatty-query:").clone();
     f.metrics = vec![
-        Metric::new("Time waiting since start", 152_000.0, Unit::Ms),
-        Metric::new("Time waiting", 88_960.0, Unit::Ms),
+        Metric::said(culprit_core::key!("check.row_lock_waits.metric.time"), 152_000.0, Unit::Ms),
+        Metric::said(culprit_core::key!("check.last_page_insert.metric.time"), 88_960.0, Unit::Ms),
         Metric::new("Average duration", 152_000.0, Unit::Ms),
     ];
     let brief = agent_brief(&postgres, &f);

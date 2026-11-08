@@ -216,7 +216,7 @@ fn failing_query_finding(snapshot: &Snapshot, runs: FailingRuns<'_>) -> Finding 
     f.impact.label = t!("check.failing_query.impact", share = &share);
     f.confidence = Confidence::High;
     f.metrics = vec![
-        Metric::new(t!("common.metric.runs"), q.executions, Unit::Count),
+        Metric::said(key!("common.metric.runs"), q.executions, Unit::Count),
         Metric::new(t!("check.failing_query.metric.unfinished"), rate, Unit::Ratio),
     ];
     if aborted > 0.0 {

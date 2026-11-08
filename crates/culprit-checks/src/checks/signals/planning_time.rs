@@ -126,7 +126,7 @@ fn planning_time_finding(snapshot: &Snapshot, case: PlanningTime<'_>) -> Finding
         Metric::new(t!("check.planning_time.metric.share"), share, Unit::Ratio),
         Metric::new(t!("check.planning_time.metric.per_plan"), per_plan, Unit::Ms),
         Metric::new(t!("check.planning_time.metric.plans"), plans, Unit::Count),
-        Metric::new(t!("common.metric.runs"), q.executions, Unit::Count),
+        Metric::said(key!("common.metric.runs"), q.executions, Unit::Count),
     ];
     f.fix = Some(if pg {
         Fix { summary: t!("check.planning_time.fix.prepare"), sql: None, cost: None }

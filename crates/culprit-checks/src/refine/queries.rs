@@ -120,7 +120,7 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Option<Decision
 }
 fn add_metrics(target: &mut Finding, source: &Finding, skip_runs: bool) {
     for m in &source.metrics {
-        if (!skip_runs || m.label != "Runs") && !target.metrics.iter().any(|x| x.label == m.label) {
+        if (!skip_runs || !m.is(key!("common.metric.runs"))) && !target.metrics.iter().any(|x| x.label == m.label) {
             target.metrics.push(m.clone());
         }
     }
@@ -224,5 +224,28 @@ impl Refine for Rule {
             }
         }
         trace
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use culprit_core::{Category, Metric, Unit};
+
+    // A result's runs are left out of the spill it joins by what the metric is, in any language.
+    #[test]
+    fn runs_are_left_out_by_key_in_another_language() {
+        culprit_core::i18n::scope("fr", || {
+            let subject = support::subject(SubjectKind::Query, "q1");
+            let mut source = support::finding("big-result", "q1", Category::Queries, subject.clone());
+            source.metrics = vec![
+                Metric::said(key!("common.metric.runs"), 30.0, Unit::Count),
+                Metric::new("Lignes par exécution", 5.0, Unit::Rows),
+            ];
+            assert_ne!(source.metrics[0].label, "Runs");
+            let mut target = support::finding("temp-spill", "q1", Category::Queries, subject);
+            add_metrics(&mut target, &source, true);
+            assert_eq!(target.metrics.iter().map(|m| m.label.as_str()).collect::<Vec<_>>(), ["Lignes par exécution"]);
+        });
     }
 }

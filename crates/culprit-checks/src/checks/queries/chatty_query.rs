@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
-use culprit_core::{ScanSpan, t};
+use culprit_core::{ScanSpan, key, t};
 
 pub fn chatty_query_info() -> CheckInfo {
     CheckInfo {
@@ -318,7 +318,7 @@ fn chatty_query_finding(snapshot: &Snapshot, chatty: ChattyQuery<'_>) -> Finding
             Unit::Count,
         )),
         // Runs that came in bursts: what was counted, never a rate a day.
-        None if chatty.burst => f.metrics.push(Metric::new(t!("common.metric.runs"), q.executions, Unit::Count)),
+        None if chatty.burst => f.metrics.push(Metric::said(key!("common.metric.runs"), q.executions, Unit::Count)),
         None => {}
     }
     if let (Some(s), Some(totals)) = (&chatty.scans, &beside)

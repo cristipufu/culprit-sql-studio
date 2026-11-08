@@ -7,4 +7,8 @@ import type { FindingPlanChange } from "./FindingPlanChange";
 import type { FindingPlanRecommendation } from "./FindingPlanRecommendation";
 import type { PlanBaseline } from "./PlanBaseline";
 
-export type FindingFacts = { histogram_columns: Array<string>, index_keys: Array<string>, network_wait_share: number | null, lock_wait: FindingLockWait | null, plan_change: FindingPlanChange | null, plan_baseline?: PlanBaseline, recommended_plan: FindingPlanRecommendation | null, usual_fast_plan: string | null, bloat: FindingBloat | null, log_write: FindingLogWrite | null, large_rows: FindingLargeRows | null, };
+export type FindingFacts = { histogram_columns: Array<string>, index_keys: Array<string>, network_wait_share: number | null, lock_wait: FindingLockWait | null, plan_change: FindingPlanChange | null, plan_baseline?: PlanBaseline, recommended_plan: FindingPlanRecommendation | null, usual_fast_plan: string | null, bloat: FindingBloat | null, log_write: FindingLogWrite | null, large_rows: FindingLargeRows | null, 
+/**
+ * The files a storage finding is about, by their names in the snapshot (a log said as one: each of its files).
+ */
+storage_files?: Array<string>, };

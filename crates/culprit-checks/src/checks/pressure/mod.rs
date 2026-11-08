@@ -8,7 +8,7 @@ use culprit_core::{
     Severity, SignalStatus, SignalUnit, Snapshot, SubjectKind, Unit, format,
 };
 
-use culprit_core::{Check, t};
+use culprit_core::{Check, key, t};
 
 use crate::support::*;
 

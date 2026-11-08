@@ -321,6 +321,9 @@ fn slow_storage_finding(snapshot: &Snapshot, slow: SlowFiles) -> Finding {
             slow.files.iter().map(|f| f.name.clone()).collect::<Vec<_>>().join(", "),
         ),
     ];
+    let snapshot_files = snapshot.pressure.as_ref().map_or(&[][..], |p| p.files.as_slice());
+    f.facts.storage_files =
+        slow.files.iter().flat_map(|merged| culprit_core::signals::merged_from(merged, snapshot_files)).collect();
     if let Some(b) = slow.avg_bytes.filter(|_| slow.operation == Operation::Read) {
         f.metrics.push(Metric::new(t!("check.slow_storage.metric.read_size"), b, Unit::Bytes));
     }

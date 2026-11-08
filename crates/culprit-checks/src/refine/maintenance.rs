@@ -26,6 +26,10 @@ impl Policy {
 }
 pub(super) struct Rule(pub Policy);
 
+/// The compile pressure metrics the plan cache finding carries: its compiles, not its recompiles.
+const COMPILES: [&str; 2] =
+    [key!("check.compile_pressure.metric.compiles"), key!("check.compile_pressure.metric.per_minute")];
+
 #[derive(Clone, Debug, PartialEq)]
 enum Evidence {
     Compiles,
@@ -62,7 +66,7 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Vec<Decision> {
                     let changes = f
                         .metrics
                         .iter()
-                        .find(|m| m.label == crate::checks::maintenance::CHANGES_SINCE_UPDATE)
+                        .find(|m| m.is(crate::checks::maintenance::CHANGES_SINCE_UPDATE))
                         .map(|m| m.value);
                     out.push(Decision { from, into, evidence: Evidence::Statistics { changes } });
                 }
@@ -125,11 +129,11 @@ impl Refine for Rule {
             f.impact.score = f.impact.score.max(source.impact.score);
             match d.evidence {
                 Evidence::Compiles => {
-                    f.metrics.extend(source.metrics.iter().filter(|m| m.label.starts_with("Compiles")).cloned())
+                    f.metrics.extend(source.metrics.iter().filter(|m| COMPILES.iter().any(|k| m.is(k))).cloned())
                 }
-                Evidence::Slot { .. } => {
-                    f.metrics.extend(source.metrics.iter().filter(|m| m.label == "Transactions behind").cloned())
-                }
+                Evidence::Slot { .. } => f
+                    .metrics
+                    .extend(source.metrics.iter().filter(|m| m.is(key!("check.held_cleanup.metric.behind"))).cloned()),
                 Evidence::Statistics { .. } => {
                     if let Some(fix) = f.fix.as_mut()
                         && !fix.sql.as_deref().is_some_and(|s| s.contains("ANALYZE"))
@@ -223,6 +227,53 @@ mod tests {
         assert!(findings[0].summary.contains("system-catalog cleanup"));
         assert!(!findings[0].summary.contains("any table, in any database"));
         assert!(findings[0].summary.contains("does not establish"));
+    }
+
+    // The metrics a rule carries or reads are found by what they are, in whatever language they were said.
+    #[test]
+    fn carried_metrics_are_found_by_key_in_another_language() {
+        use culprit_core::{Metric, Unit};
+        culprit_core::i18n::scope("fr", || {
+            let (s, mut findings) = slot();
+            findings[0].metrics = vec![
+                Metric::said(key!("check.held_cleanup.metric.open"), 60_000.0, Unit::Ms),
+                Metric::said(key!("check.held_cleanup.metric.behind"), 2_000_000.0, Unit::Count),
+            ];
+            assert_ne!(findings[0].metrics[1].label, "Transactions behind");
+            Rule(Policy::Slot).refine(&s, &mut findings);
+            let carried: Vec<_> = findings[0].metrics.iter().map(|m| m.key.as_str()).collect();
+            assert_eq!(carried, [key!("check.held_cleanup.metric.behind")]);
+
+            let compiles = |key: &str| Metric::said(key, 40.0, Unit::Count);
+            let mut pressure = support::finding(
+                "compile-pressure",
+                "server",
+                Category::Configuration,
+                support::subject(SubjectKind::Database, "shop"),
+            );
+            pressure.metrics = vec![
+                compiles(key!("check.compile_pressure.metric.compiles")),
+                compiles(key!("check.compile_pressure.metric.per_minute")),
+                compiles(key!("check.compile_pressure.metric.recompiles")),
+            ];
+            let cache = support::finding(
+                "query-family",
+                "plan-cache",
+                Category::Queries,
+                support::subject(SubjectKind::Database, "shop"),
+            );
+            let mut findings = vec![pressure, cache];
+            Rule(Policy::Compiles).refine(&s, &mut findings);
+            let carried: Vec<_> = findings[0].metrics.iter().map(|m| m.key.as_str()).collect();
+            assert_eq!(carried, COMPILES);
+
+            let table = support::subject(SubjectKind::Table, "public.orders");
+            let mut stats = support::finding("stale-stats", "public.orders", Category::Maintenance, table.clone());
+            stats.metrics = vec![Metric::said(crate::checks::maintenance::CHANGES_SINCE_UPDATE, 1234.0, Unit::Count)];
+            let dead = support::finding("dead-rows", "public.orders", Category::Maintenance, table);
+            let decided = decide(Policy::Statistics, &s, &[stats, dead]);
+            assert_eq!(decided[0].evidence, Evidence::Statistics { changes: Some(1234.0) });
+        });
     }
 
     #[test]

@@ -141,7 +141,7 @@ fn row_lock_waits_finding(snapshot: &Snapshot, r: RowLockWaits<'_>) -> Finding {
     f.confidence = Confidence::Medium;
     f.metrics = vec![
         Metric::new(t!("check.row_lock_waits.metric.waits"), r.count, Unit::Count),
-        Metric::new(t!("check.row_lock_waits.metric.time"), r.total_ms, Unit::Ms),
+        Metric::said(key!("check.row_lock_waits.metric.time"), r.total_ms, Unit::Ms),
         Metric::new(t!("check.row_lock_waits.metric.average"), r.avg_ms, Unit::Ms),
     ];
     f.caveats.push(t!("check.row_lock_waits.caveat.server_wide", engine = snapshot.server.name()));

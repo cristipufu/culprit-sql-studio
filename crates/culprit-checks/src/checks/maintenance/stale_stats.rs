@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::evidence::Requirement as Evidence;
-use culprit_core::{QueryStat, t};
+use culprit_core::{QueryStat, key, t};
 
 pub fn stale_stats_info() -> CheckInfo {
     CheckInfo {
@@ -29,25 +29,9 @@ pub(crate) fn stale_stats(snapshot: &Snapshot) -> Vec<Finding> {
     culprit_core::Check::run(&StaleStatsCheck, snapshot)
 }
 
-/// The label of the metric counting the changes since the statistics were updated (SQL Server's modification counter
-/// and PostgreSQL's n_mod_since_analyze count changes: a row updated twice is two), as refine finds it: a metric's
-/// label equals it when it is that label in the current language.
-pub(crate) const CHANGES_SINCE_UPDATE: ChangesSinceUpdate = ChangesSinceUpdate;
-
-/// See [`CHANGES_SINCE_UPDATE`].
-pub(crate) struct ChangesSinceUpdate;
-
-impl ChangesSinceUpdate {
-    fn label() -> String {
-        t!("check.stale_stats.metric.changes")
-    }
-}
-
-impl PartialEq<ChangesSinceUpdate> for String {
-    fn eq(&self, _: &ChangesSinceUpdate) -> bool {
-        *self == ChangesSinceUpdate::label()
-    }
-}
+/// The metric counting the changes since the statistics were updated (SQL Server's modification counter and
+/// PostgreSQL's n_mod_since_analyze count changes: a row updated twice is two), as refine finds it.
+pub(crate) const CHANGES_SINCE_UPDATE: &str = key!("check.stale_stats.metric.changes");
 
 pub struct Stale {
     schema: String,
@@ -164,7 +148,7 @@ fn stale_stats_finding(snapshot: &Snapshot, case: StaleTable<'_>) -> Finding {
     f.impact.label = t!("check.stale_stats.impact", changes = &changes);
     f.confidence = Confidence::Medium;
     f.queries = query_refs(&case.in_use);
-    f.metrics.push(Metric::new(ChangesSinceUpdate::label(), s.modifications, Unit::Count));
+    f.metrics.push(Metric::said(CHANGES_SINCE_UPDATE, s.modifications, Unit::Count));
     f.metrics.push(Metric::new(t!("check.stale_stats.metric.rows"), s.rows, Unit::Rows));
     if !s.names.is_empty() {
         f.metrics.push(Metric::text(t!("check.stale_stats.metric.statistics"), format::list(&s.names)));

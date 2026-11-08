@@ -8,7 +8,7 @@ mod tests;
 
 use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
-use culprit_core::t;
+use culprit_core::{key, t};
 use fix::*;
 pub(super) use idle::idle_time;
 use idle::{DominantWait, Idle, NOTHING_READS, WaitOn, dominant_wait};
@@ -537,7 +537,7 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
                     f.metrics.push(Metric::new(t!("common.metric.runs_per_day"), runs, Unit::Count))
                 }
                 // A day or more of window, but not runs that came a day at a time: what was counted.
-                Some((None, _)) => f.metrics.push(Metric::new(t!("common.metric.runs"), q.executions, Unit::Count)),
+                Some((None, _)) => f.metrics.push(Metric::said(key!("common.metric.runs"), q.executions, Unit::Count)),
                 None => {}
             }
             f.metrics.extend(average_metrics(snapshot, q));

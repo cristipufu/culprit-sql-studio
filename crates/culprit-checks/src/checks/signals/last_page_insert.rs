@@ -126,7 +126,7 @@ fn last_page_insert_finding(snapshot: &Snapshot, latch: LastPageLatch<'_>) -> Fi
     f.confidence = Confidence::Medium;
     f.metrics = vec![
         Metric::new(t!("check.last_page_insert.metric.waits"), c.page_latch_waits, Unit::Count),
-        Metric::new(t!("check.last_page_insert.metric.time"), c.page_latch_wait_ms, Unit::Ms),
+        Metric::said(key!("check.last_page_insert.metric.time"), c.page_latch_wait_ms, Unit::Ms),
     ];
     if let Some(inserts) = c.leaf_inserts {
         f.metrics.push(Metric::new(t!("check.last_page_insert.metric.inserts"), inserts, Unit::Count));

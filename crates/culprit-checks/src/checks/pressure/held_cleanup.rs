@@ -214,7 +214,7 @@ fn held_cleanup_finding(snapshot: &Snapshot, h: HeldCleanup<'_>) -> Finding {
         f.metrics.push(Metric::new(t!("check.held_cleanup.metric.version_store"), b, Unit::Bytes));
     }
     if h.behind > 0.0 {
-        f.metrics.push(Metric::new(t!("check.held_cleanup.metric.behind"), h.behind, Unit::Count));
+        f.metrics.push(Metric::said(key!("check.held_cleanup.metric.behind"), h.behind, Unit::Count));
     }
     f.fix = Some(match t.holder {
         CleanupHolder::ReplicationSlot => Fix {
