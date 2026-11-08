@@ -1,6 +1,7 @@
 //! Inventory is consumed in bounded pages. Only matched rows survive the current provider page.
 use std::{collections::BTreeSet, future::Future, time::Duration};
 
+use culprit_core::t;
 use serde_json::{Value, json};
 use tokio::{sync::Semaphore, time::Instant};
 
@@ -34,8 +35,7 @@ async fn az_output(args: &[&str]) -> Result<std::process::Output> {
     command.args(args);
     crate::cloud_process::output(command).await.map_err(|error| {
         if error.code == ErrorCode::NotFound {
-            Error::new(ErrorCode::AuthFailed, "The Azure CLI was not found in PATH or standard install locations")
-                .with_hint("Install the Azure CLI and run `az login`")
+            Error::new(ErrorCode::AuthFailed, t!("engine.azure_cli.missing")).with_hint(t!("engine.azure_cli.install"))
         } else {
             error
         }
@@ -47,7 +47,7 @@ impl Transport for Live {
     async fn aws(&self, args: &[String]) -> Result<Value> {
         let args: Vec<_> = args.iter().map(String::as_str).collect();
         serde_json::from_slice(&aws::run(&args).await?)
-            .map_err(|_| Error::new(ErrorCode::QueryFailed, "AWS returned invalid inventory JSON"))
+            .map_err(|_| Error::new(ErrorCode::QueryFailed, t!("engine.discover.aws_bad_json")))
     }
 
     async fn graph(&self, query: &str, token: Option<&str>) -> Result<Value> {
@@ -68,11 +68,11 @@ impl Transport for Live {
         ])
         .await?;
         if !output.status.success() {
-            return Err(Error::new(ErrorCode::QueryFailed, "Azure Resource Graph could not read this inventory page")
-                .with_hint("Check `az login` and Resource Graph permissions, then retry"));
+            return Err(Error::new(ErrorCode::QueryFailed, t!("engine.discover.graph_failed"))
+                .with_hint(t!("engine.discover.graph_failed_hint")));
         }
         serde_json::from_slice(&output.stdout)
-            .map_err(|_| Error::new(ErrorCode::QueryFailed, "Azure Resource Graph returned invalid JSON"))
+            .map_err(|_| Error::new(ErrorCode::QueryFailed, t!("engine.discover.graph_bad_json")))
     }
 
     async fn token(&self) -> Result<String> {
@@ -88,13 +88,13 @@ impl Transport for Live {
         ])
         .await?;
         if !output.status.success() || output.stdout.is_empty() {
-            return Err(Error::new(ErrorCode::AuthFailed, "The Azure CLI could not issue a Resource Manager token")
-                .with_hint("Run `az login`, then search again"));
+            return Err(Error::new(ErrorCode::AuthFailed, t!("engine.discover.no_arm_token"))
+                .with_hint(t!("engine.discover.no_arm_token_hint")));
         }
         let token = String::from_utf8(output.stdout)
-            .map_err(|_| Error::new(ErrorCode::AuthFailed, "The Azure CLI returned an unreadable token"))?;
+            .map_err(|_| Error::new(ErrorCode::AuthFailed, t!("engine.discover.unreadable_token")))?;
         if token.trim().is_empty() {
-            return Err(Error::new(ErrorCode::AuthFailed, "The Azure CLI returned an empty token"));
+            return Err(Error::new(ErrorCode::AuthFailed, t!("engine.discover.empty_token")));
         }
         Ok(token.trim().into())
     }
@@ -103,8 +103,8 @@ impl Transport for Live {
         let reply =
             crate::http::get_bearer_limited(url.into(), token.into(), crate::cloud_process::MAX_OUTPUT as u64).await?;
         if reply.status != 200 {
-            return Err(Error::new(ErrorCode::QueryFailed, "Azure could not list this server's databases")
-                .with_hint("Check the server state and Resource Manager permissions"));
+            return Err(Error::new(ErrorCode::QueryFailed, t!("engine.discover.arm_failed"))
+                .with_hint(t!("engine.discover.arm_failed_hint")));
         }
         Ok(reply.json)
     }
@@ -141,15 +141,12 @@ impl<'a> Search<'a> {
 
     async fn request<T>(&mut self, future: impl Future<Output = Result<T>>) -> Result<T> {
         if self.exhausted() {
-            return Err(Error::new(
-                ErrorCode::Timeout,
-                "Discovery reached its search budget; narrow the search or choose specific regions",
-            ));
+            return Err(Error::new(ErrorCode::Timeout, t!("engine.discover.budget_reached")));
         }
         self.requests += 1;
-        tokio::time::timeout_at(self.deadline.min(Instant::now() + REQUEST_TIMEOUT), future).await.map_err(|_| {
-            Error::new(ErrorCode::Timeout, "Cloud discovery timed out; narrow the search or choose specific regions")
-        })?
+        tokio::time::timeout_at(self.deadline.min(Instant::now() + REQUEST_TIMEOUT), future)
+            .await
+            .map_err(|_| Error::new(ErrorCode::Timeout, t!("engine.discover.timed_out")))?
     }
 
     fn accept(&mut self, rows: impl IntoIterator<Item = DiscoveredDatabase>) -> bool {
@@ -186,10 +183,7 @@ impl<'a> Search<'a> {
 
     fn finish(mut self) -> Result<DiscoveryResult> {
         if self.exhausted() && !self.full {
-            self.warning(Error::new(
-                ErrorCode::Timeout,
-                "Discovery reached its search budget; more matches may exist",
-            ))?;
+            self.warning(Error::new(ErrorCode::Timeout, t!("engine.discover.budget_more")))?;
         }
         if !self.success
             && let Some(error) = self.first_error
@@ -216,10 +210,7 @@ impl Cursor {
             return Ok(false);
         };
         if value.len() > MAX_CURSOR || value.chars().any(char::is_control) || !self.seen.insert(value.clone()) {
-            return Err(Error::new(
-                ErrorCode::QueryFailed,
-                "The cloud returned an invalid or repeated continuation token",
-            ));
+            return Err(Error::new(ErrorCode::QueryFailed, t!("engine.discover.bad_continuation")));
         }
         self.current = Some(value);
         Ok(true)
@@ -231,7 +222,7 @@ fn cursor(value: &Value, field: &str) -> Result<Option<String>> {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(s)) if s.is_empty() => Ok(None),
         Some(Value::String(s)) => Ok(Some(s.clone())),
-        _ => Err(Error::new(ErrorCode::QueryFailed, "The cloud returned an unreadable continuation token")),
+        _ => Err(Error::new(ErrorCode::QueryFailed, t!("engine.discover.unreadable_continuation"))),
     }
 }
 
@@ -240,13 +231,13 @@ fn entries<'a>(value: &'a Value, field: &str) -> Result<&'a [Value]> {
         .get(field)
         .and_then(Value::as_array)
         .map(Vec::as_slice)
-        .ok_or_else(|| Error::new(ErrorCode::QueryFailed, "The cloud returned an unreadable inventory page"))
+        .ok_or_else(|| Error::new(ErrorCode::QueryFailed, t!("engine.discover.unreadable_page")))
 }
 
 fn graph_entries(value: &Value) -> Result<&[Value]> {
     let rows = entries(value, "data")?;
     if rows.len() > PAGE_SIZE {
-        return Err(Error::new(ErrorCode::QueryFailed, "Azure exceeded the requested inventory page size"));
+        return Err(Error::new(ErrorCode::QueryFailed, t!("engine.discover.azure_page_too_large")));
     }
     Ok(rows)
 }
@@ -255,10 +246,7 @@ fn graph_cursor(value: &Value) -> Result<Option<String>> {
     let token = cursor(value, "$skipToken")?;
     let truncated = value.get("resultTruncated").is_some_and(|v| v == true || v == "true");
     if truncated && token.is_none() {
-        return Err(Error::new(
-            ErrorCode::QueryFailed,
-            "Azure truncated the inventory without a continuation token; refine the search",
-        ));
+        return Err(Error::new(ErrorCode::QueryFailed, t!("engine.discover.azure_truncated")));
     }
     Ok(token)
 }
@@ -270,7 +258,7 @@ pub(super) async fn resource_graph<T: serde::de::DeserializeOwned>(query: &str) 
         .cloned()
         .map(|row| {
             serde_json::from_value(row)
-                .map_err(|_| Error::new(ErrorCode::QueryFailed, "Azure returned an unreadable resource"))
+                .map_err(|_| Error::new(ErrorCode::QueryFailed, t!("engine.discover.unreadable_resource")))
         })
         .collect()
 }
@@ -280,8 +268,8 @@ pub(super) async fn azure(terms: &[String]) -> Result<DiscoveryResult> {
     let deadline = Instant::now() + SEARCH_TIMEOUT;
     let _permit = tokio::time::timeout_at(deadline, SEARCHES.acquire())
         .await
-        .map_err(|_| Error::new(ErrorCode::Timeout, "Cloud discovery is busy; retry shortly"))?
-        .map_err(|_| Error::internal("Cloud discovery is unavailable"))?;
+        .map_err(|_| Error::new(ErrorCode::Timeout, t!("engine.discover.busy")))?
+        .map_err(|_| Error::internal(t!("engine.discover.unavailable")))?;
     azure_with(&Live, terms, deadline).await
 }
 
@@ -308,7 +296,7 @@ async fn azure_sql(transport: &impl Transport, search: &mut Search<'_>) -> Resul
         search.success = true;
         for row in data {
             let row: Row = serde_json::from_value(row.clone())
-                .map_err(|_| Error::new(ErrorCode::QueryFailed, "Azure returned an unreadable SQL database"))?;
+                .map_err(|_| Error::new(ErrorCode::QueryFailed, t!("engine.discover.unreadable_sql_database")))?;
             let host = row
                 .fqdn
                 .filter(|host| !host.is_empty())
@@ -351,10 +339,7 @@ fn arm_next(initial: &str, next: String) -> Result<String> {
             .unwrap_or_default()
             .eq_ignore_ascii_case(initial.split('?').next().unwrap_or_default())
     {
-        return Err(Error::new(
-            ErrorCode::PermissionDenied,
-            "Azure returned a continuation outside the requested resource collection",
-        ));
+        return Err(Error::new(ErrorCode::PermissionDenied, t!("engine.discover.foreign_continuation")));
     }
     Ok(next)
 }
@@ -383,7 +368,7 @@ async fn flexible_children(
     bearer: &str,
 ) -> Result<()> {
     let url = flexible_server_url(&server.id, "databases", engine)
-        .ok_or_else(|| Error::new(ErrorCode::QueryFailed, "Azure returned an invalid flexible-server resource id"))?;
+        .ok_or_else(|| Error::new(ErrorCode::QueryFailed, t!("engine.discover.bad_flexible_id")))?;
     let entra = if engine == Engine::Postgres {
         server.entra.as_deref().is_some_and(|v| v.eq_ignore_ascii_case("enabled"))
     } else if let Some(admins) = flexible_server_url(&server.id, "administrators", engine) {
@@ -407,7 +392,7 @@ async fn flexible_children(
             let database = name
                 .get("name")
                 .and_then(Value::as_str)
-                .ok_or_else(|| Error::new(ErrorCode::QueryFailed, "Azure returned an unreadable database name"))?;
+                .ok_or_else(|| Error::new(ErrorCode::QueryFailed, t!("engine.discover.unreadable_database_name")))?;
             if system_database(engine, database) || (engine == Engine::Postgres && database == "postgres") {
                 continue;
             }
@@ -437,13 +422,10 @@ async fn azure_flexible(transport: &impl Transport, search: &mut Search<'_>) -> 
         search.success = true;
         for server in servers {
             let server: FlexibleServer = serde_json::from_value(server.clone())
-                .map_err(|_| Error::new(ErrorCode::QueryFailed, "Azure returned an unreadable flexible server"))?;
+                .map_err(|_| Error::new(ErrorCode::QueryFailed, t!("engine.discover.unreadable_flexible_server")))?;
             let Some(engine) = flexible_engine(&server.kind) else { continue };
             if server.state.as_deref().is_some_and(|v| !v.eq_ignore_ascii_case("ready")) {
-                search.warning(Error::new(
-                    ErrorCode::QueryFailed,
-                    "Some Azure servers are not ready; their databases could not be listed",
-                ))?;
+                search.warning(Error::new(ErrorCode::QueryFailed, t!("engine.discover.servers_not_ready")))?;
                 let entra = engine == Engine::Postgres
                     && server.entra.as_deref().is_some_and(|value| value.eq_ignore_ascii_case("enabled"));
                 search.accept([flexible_database(&server, engine, default_database(engine).into(), entra)]);
@@ -477,13 +459,13 @@ async fn azure_flexible(transport: &impl Transport, search: &mut Search<'_>) -> 
 pub(super) async fn aws_rds(regions: &[String], terms: &[String]) -> Result<DiscoveryResult> {
     validate_terms(terms)?;
     if regions.len() > MAX_REGIONS || regions.iter().any(|region| !aws::valid_region(region)) {
-        return Err(Error::invalid("Use at most 100 AWS region codes, such as us-east-1 or eu-central-1"));
+        return Err(Error::invalid(t!("engine.discover.bad_regions")));
     }
     let deadline = Instant::now() + SEARCH_TIMEOUT;
     let _permit = tokio::time::timeout_at(deadline, SEARCHES.acquire())
         .await
-        .map_err(|_| Error::new(ErrorCode::Timeout, "Cloud discovery is busy; retry shortly"))?
-        .map_err(|_| Error::internal("Cloud discovery is unavailable"))?;
+        .map_err(|_| Error::new(ErrorCode::Timeout, t!("engine.discover.busy")))?
+        .map_err(|_| Error::internal(t!("engine.discover.unavailable")))?;
     aws_with(&Live, regions, terms, deadline).await
 }
 
@@ -534,11 +516,10 @@ async fn enabled_regions(transport: &impl Transport, search: &mut Search<'_>) ->
         .map(str::to_string)
         .collect();
     if cursor(&value, "NextToken")?.is_some() || entries(&value, "Regions")?.len() > MAX_REGIONS {
-        search
-            .warning(Error::new(ErrorCode::QueryFailed, "The region listing is incomplete; choose specific regions"))?;
+        search.warning(Error::new(ErrorCode::QueryFailed, t!("engine.discover.regions_incomplete")))?;
     }
     if regions.is_empty() {
-        return Err(Error::new(ErrorCode::QueryFailed, "AWS returned no enabled regions"));
+        return Err(Error::new(ErrorCode::QueryFailed, t!("engine.discover.no_regions")));
     }
     regions.sort();
     regions.dedup();
@@ -566,7 +547,7 @@ async fn aws_with(
     let account = identity
         .get("Account")
         .and_then(Value::as_str)
-        .ok_or_else(|| Error::new(ErrorCode::QueryFailed, "AWS returned no account identity"))?;
+        .ok_or_else(|| Error::new(ErrorCode::QueryFailed, t!("engine.discover.no_account")))?;
     let mut regions =
         if regions.is_empty() { enabled_regions(transport, &mut search).await? } else { regions.to_vec() };
     regions.sort();
@@ -579,10 +560,7 @@ async fn aws_with(
                     search.request(transport.aws(&rds_args(operation, &region, page.current.as_deref()))).await;
                 let step = response.and_then(|value| {
                     if entries(&value, field)?.len() > PAGE_SIZE {
-                        return Err(Error::new(
-                            ErrorCode::QueryFailed,
-                            "AWS exceeded the requested inventory page size",
-                        ));
+                        return Err(Error::new(ErrorCode::QueryFailed, t!("engine.discover.aws_page_too_large")));
                     }
                     search.success = true;
                     let rows = if field == "DBInstances" {

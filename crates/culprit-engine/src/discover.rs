@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use culprit_core::{AuthKind, Engine, Environment, Error, ErrorCode, Result};
+use culprit_core::{AuthKind, Engine, Environment, Error, ErrorCode, Result, t};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -90,7 +90,7 @@ pub fn validate_terms(terms: &[String]) -> Result<()> {
     if ok {
         return Ok(());
     }
-    Err(Error::invalid("Use up to 16 search terms of 1–64 letters, digits, hyphens, underscores or dots"))
+    Err(Error::invalid(t!("engine.discover.bad_terms")))
 }
 
 fn query(terms: &[String]) -> String {
