@@ -17,18 +17,21 @@ import { splitSqlStatements } from "../lib/editor-sql";
 import { EditorTabStorage, MAX_EDITOR_TABS, newEditorTab, tabTitle, type EditorTab as Tab, type EditorTabs as Tabs } from "../lib/editor-tabs";
 import { measuresRuns } from "../lib/engines";
 import { allLintFixes, lintFix } from "../lib/lint-fixes";
-import { type PendingRun, runBatch } from "../lib/run-batch";
+import { type Acted, EditorExecution, type Output } from "../lib/editor-execution";
+import type { PendingRun } from "../lib/run-batch";
 import { remember, rememberedChoice } from "../lib/prefs";
 import { currentReport, getState, loadSaved, setState, toast, useStore } from "../lib/store";
 import { lintField, sqlColors, sqlLanguage } from "./editor/codemirror";
 import { PLACEHOLDER, useLiveLint, useSplit } from "./editor/hooks";
 import { LintPanel } from "./editor/LintPanel";
-import { EmptyOutput, OutputPane, type Output } from "./editor/OutputPane";
+import { EmptyOutput, OutputPane } from "./editor/OutputPane";
 import { TabStrip } from "./editor/TabStrip";
 import { Toolbar } from "./editor/Toolbar";
 
 const RAIL_KEY = "culprit.editor.rail";
 const ROW_LIMIT = 1000;
+const BUSY = "This tab is still running: wait for it, or run in another tab";
+const STILL_RUNNING = "The statement already sent finishes on the database; nothing after it runs";
 
 /** Catalogs fetched this session, per connection. */
 const catalogs = new Map<string, Catalog>();
@@ -49,7 +52,22 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   const [outputs, setOutputs] = useState<Record<string, Output>>({});
-  const [pending, setPending] = useState<PendingRun | null>(null);
+  // Questions before a production change, by the tab that asked.
+  const [asks, setAsks] = useState<Record<string, PendingRun>>({});
+  // One operation per tab: it alone shows that tab's output, and closing the tab ends it.
+  const [execution] = useState(
+    () =>
+      new EditorExecution(
+        api,
+        (tab, output) => setOutputs((o) => ({ ...o, [tab]: output })),
+        (tab, pending) =>
+          setAsks((a) => {
+            const { [tab]: _, ...others } = a;
+            return pending ? { ...others, [tab]: pending } : others;
+          }),
+      ),
+  );
+  useEffect(() => () => { if (execution.retireAll() > 0) toast(STILL_RUNNING); }, [execution]);
   const [naming, setNaming] = useState<string | null>(null);
   const [rail, setRail] = useState(() => rememberedChoice(RAIL_KEY, "open", ["open", "closed"] as const));
   const [look, setLook] = useState<PlanLook>(rememberedLook);
@@ -89,11 +107,6 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
     if (!state) return "";
     const selected = state.selection.ranges.map((r) => state.sliceDoc(r.from, r.to)).join("\n").trim();
     return selected || state.doc.toString().trim();
-  };
-
-  const setOutput = (id: string, value: Output) => {
-    if (!mounted.current || !tabsRef.current.tabs.some((t) => t.id === id)) return;
-    setOutputs((o) => ({ ...o, [id]: value }));
   };
 
   const stateFor = useCallback(
@@ -138,31 +151,23 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
   };
 
   // ── actions ────────────────────────────────────────────────────────────────────────────────────
-  const run = async (sql: string, confirmed = false) => {
+  /** What a tab's action came to, for what follows it here: a refusal said, a saved query's run counted. */
+  const settle = (tab: string, acted: Acted) => {
+    if (acted === "busy") return toast(BUSY);
+    if (acted !== "rows") return;
+    const name = tabsRef.current.tabs.find((t) => t.id === tab)?.saved;
+    if (name) void api().then((client) => client.savedQueryRan(name)).then(() => loadSaved(), () => {});
+  };
+
+  const run = async (sql: string) => {
     if (!sql || sql === PLACEHOLDER.trim()) return;
     const statements = splitSqlStatements(sql);
     if (statements.length === 0) {
       return toast("No runnable SQL statement — uncomment a statement or fill in placeholders first");
     }
     const tab = tabsRef.current.active;
-    const client = await api();
-    let started = false;
-    const outcome = await runBatch(
-      client,
-      { connection: connection.name, engine: connection.engine, sql, statements, limit: ROW_LIMIT, production, confirmed },
-      (label) => {
-        started = true;
-        setOutput(tab, { kind: "busy", label });
-      },
-    );
-    if (outcome.kind === "confirm") {
-      if (started) setOutput(tab, { kind: "none" });
-      return setPending(outcome.pending);
-    }
-    if (outcome.kind === "error") return setOutput(tab, { kind: "error", error: outcome.error });
-    setOutput(tab, { kind: "rows", results: outcome.results });
-    const name = tabsRef.current.tabs.find((t) => t.id === tab)?.saved;
-    if (name) void client.savedQueryRan(name).then(() => loadSaved());
+    const batch = { connection: connection.name, engine: connection.engine, sql, statements, limit: ROW_LIMIT, production, confirmed: false };
+    settle(tab, await execution.run(tab, batch));
   };
 
   const explain = async (mode: ExplainMode) => {
@@ -174,15 +179,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
     }
     const sql = statements[statements.length - 1]!;
     const tab = tabsRef.current.active;
-    setOutput(tab, { kind: "busy", label: mode === "analyze" ? "Running and measuring…" : "Planning…" });
-    try {
-      // No consent travels with a plan request: Culprit only measures provable reads on production, and the engine
-      // enforces that whatever the UI sends.
-      const plan = await (await api()).explain(connection.name, sql, mode, false);
-      setOutput(tab, { kind: "plan", plan });
-    } catch (e) {
-      setOutput(tab, { kind: "error", error: errorMessage(e) });
-    }
+    settle(tab, await execution.explain(tab, connection.name, sql, mode));
   };
 
   const save = async (name?: string) => {
@@ -243,6 +240,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
     (id: string) => {
       const list = tabsRef.current.tabs;
       if (!list.some((t) => t.id === id)) return;
+      if (execution.retire(id)) toast(STILL_RUNNING);
       if (list.length === 1) {
         states.current.delete(id);
         setOutputs({});
@@ -267,7 +265,7 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
         view.current.focus();
       }
     },
-    [stateFor, updateTabs],
+    [stateFor, updateTabs, execution],
   );
 
   const cycle = (delta: number) => {
@@ -372,6 +370,11 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
   const { split, body, drag } = useSplit();
 
   const savedQuery = saved?.find((q) => q.name === activeTab.saved);
+  // One question at a time: the active tab's when it asked one, else the first tab's that did.
+  const asking = (() => {
+    const tab = asks[activeTab.id] ? activeTab.id : Object.keys(asks)[0];
+    return tab ? { tab, pending: asks[tab]! } : null;
+  })();
   const dirty = (tab: Tab) => {
     const stored = saved?.find((q) => q.name === tab.saved);
     return stored ? stored.sql.trim() !== tab.sql.trim() : false;
@@ -438,19 +441,16 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
           </div>
         </div>
       </div>
-      {pending && (
+      {asking && (
         <ConfirmRun
-          pending={pending}
+          key={asking.tab}
+          pending={asking.pending}
           connection={connection}
           onCancel={() => {
-            setPending(null);
+            execution.cancel(asking.tab);
             view.current?.focus();
           }}
-          onConfirm={() => {
-            const sql = pending.sql;
-            setPending(null);
-            void run(sql, true);
-          }}
+          onConfirm={() => void execution.confirm(asking.tab).then((acted) => settle(asking.tab, acted))}
         />
       )}
     </div>

@@ -131,3 +131,15 @@ test("Text that isn't one statement isn't a change to confirm: the engine refuse
   expect(confirmationCheck([read, change("INSERT")], false)?.verb).toBe("INSERT");
   expect(confirmationCheck([read], true)).toEqual(read);
 });
+
+test("A batch whose owner stops sends no further statement, and says how many were sent", async () => {
+  const { api, ran } = fakeApi({});
+  let live = true;
+  const progress = (label: string) => {
+    // The tab closes while its first statement runs.
+    if (label.startsWith("Running 1")) live = false;
+  };
+  const result = await runBatch(api, batch(["SELECT 1", "SELECT 2", "SELECT 3"]), progress, () => live);
+  expect(result).toEqual({ kind: "stopped", ran: 1 });
+  expect(ran.map((r) => r.sql)).toEqual(["SELECT 1"]);
+});

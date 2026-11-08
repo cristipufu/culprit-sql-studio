@@ -2,21 +2,13 @@ import { Bookmark } from "lucide-react";
 import type { ReactNode } from "react";
 import { LookToggle, PlanSurface, type PlanLook } from "../../components/PlanSurface";
 import { ResultGrid } from "../../components/ResultGrid";
-import type { Plan } from "../../gen/Plan";
 import type { ResultSet } from "../../gen/ResultSet";
 import type { SavedQuery } from "../../gen/SavedQuery";
-import type { ApiError } from "../../lib/api";
 import { duration, oneLine } from "../../lib/format";
 import { keys } from "../../lib/keys";
+import type { Output } from "../../lib/editor-execution";
 import type { StatementResult } from "../../lib/run-batch";
 
-/** What a tab's last action left below the editor. */
-export type Output =
-  | { kind: "none" }
-  | { kind: "busy"; label: string }
-  | { kind: "plan"; plan: Plan }
-  | { kind: "rows"; results: StatementResult[] }
-  | { kind: "error"; error: ApiError };
 
 /** "1,000 rows (first 1,000; more exist)": how many rows came back, and whether the server had more. */
 function rowCount(r: ResultSet): string {

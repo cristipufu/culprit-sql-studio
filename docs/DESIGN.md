@@ -277,6 +277,11 @@ Keyboard: `j`/`k` move, `↵` opens, `c` copies the SQL, `o` opens the finding, 
 
 CodeMirror (loaded lazily). Run (⌘↵, read-only transaction), Explain (⌘E, estimated plan, safe everywhere), Explain Analyze (⌘⇧E, executes the query, needs confirmation on production). Pin a plan and run again to compare.
 
+Each tab does one thing at a time: while it runs, plans or waits for a production yes, another Run or Explain there is
+refused with a note, and only that operation's result fills the tab. Other tabs run independently. Closing a tab (or
+leaving the connection) ends its operation: no result lands, a batch sends no further statement, and its question is
+withdrawn. A statement the database is already running can't be called back; the editor says it finishes there.
+
 Open SQL tabs, their order, saved-query links and the selected tab are remembered per connection on this device.
 Switching connections restores that connection's own workspace; renaming a connection carries it along. Only SQL
 and tab metadata are retained, never results or execution consent. Restoring tabs does not run them. Typing saves
