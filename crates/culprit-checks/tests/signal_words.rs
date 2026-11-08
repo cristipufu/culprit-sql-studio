@@ -177,7 +177,7 @@ fn storage_capacity_at_a_hard_limit() {
         &storage_capacity(vec![data]),
         r#"id: storage-capacity:shop
 title: shop uses 97.0 GB of 100 GB available allocation
-summary: Measured when the scan ran: 3.0 GB free in this allocation. The files cannot grow beyond this allocation under their current settings.  This does not measure free filesystem space or predict when it will fill.
+summary: Measured when the scan ran: 3.0 GB free in this allocation. The files cannot grow beyond this allocation under their current settings. This does not measure free filesystem space or predict when it will fill.
 impact: 97% occupied
 metric: Used
 metric: Allocation
@@ -198,7 +198,7 @@ fn storage_capacity_of_a_log_held_by_its_reuse_reason() {
         &storage_capacity(vec![log]),
         r#"id: storage-capacity:shop_log
 title: shop_log uses 9.8 GB of 10.0 GB available allocation
-summary: Measured when the scan ran: 205 MB free in this allocation. The files cannot grow beyond this allocation under their current settings. SQL Server currently reports log_reuse_wait_desc = LOG_BACKUP.  This does not measure free filesystem space or predict when it will fill.
+summary: Measured when the scan ran: 205 MB free in this allocation. The files cannot grow beyond this allocation under their current settings. SQL Server currently reports log_reuse_wait_desc = LOG_BACKUP. This does not measure free filesystem space or predict when it will fill.
 impact: 98% occupied
 metric: Used
 metric: Allocation
@@ -219,7 +219,7 @@ fn storage_capacity_of_shared_tempdb_with_room_to_grow() {
         &storage_capacity(vec![temp, grown]),
         r#"id: storage-capacity:tempdb
 title: tempdb uses 9.5 GB of 10.2 GB configured capacity
-summary: Measured when the scan ran: 717 MB free in this allocation. These files are shared by the whole instance; this does not attribute their use to the selected database. Growth settings or additional storage may permit more space. Allocated space being mostly occupied alone is not an incident.  This does not measure free filesystem space or predict when it will fill.
+summary: Measured when the scan ran: 717 MB free in this allocation. These files are shared by the whole instance; this does not attribute their use to the selected database. Growth settings or additional storage may permit more space. Allocated space being mostly occupied alone is not an incident. This does not measure free filesystem space or predict when it will fill.
 impact: 93% occupied
 metric: Used
 metric: Allocation
@@ -229,7 +229,7 @@ verify: Compare used/free allocation, growth settings and any log reuse reason i
 
 id: storage-capacity:shop
 title: shop uses 9.5 GB of 10.0 GB currently allocated space
-summary: Measured when the scan ran: 512 MB free in this allocation. Growth settings or additional storage may permit more space. Allocated space being mostly occupied alone is not an incident.  This does not measure free filesystem space or predict when it will fill.
+summary: Measured when the scan ran: 512 MB free in this allocation. Growth settings or additional storage may permit more space. Allocated space being mostly occupied alone is not an incident. This does not measure free filesystem space or predict when it will fill.
 impact: 95% occupied
 metric: Used
 metric: Allocation
@@ -326,7 +326,7 @@ fn operational_errors_of_every_kind() {
         &run("operational-errors", &s),
         r#"id: operational-errors:archive:archiver
 title: WAL archive failures: 3 recorded in the source's history
-summary: archiver The archive command or library failed. This is a shared server counter, and a later successful archive may have resolved the incident. The total covers since 2026-10-01T00:00:00Z. It is context for the whole server and is not graded as a problem in this database.
+summary: archiver: the archive command or library failed. This is a shared server counter, and a later successful archive may have resolved the incident. The total covers since 2026-10-01T00:00:00Z. It is context for the whole server and is not graded as a problem in this database.
 impact: Historical counter
 metric: Source total
 fix: Check current archiver progress and server logs for the failure, archive destination capacity and access. Confirm retained WAL and backup/recovery requirements; never remove WAL files to clear the counter.
@@ -334,7 +334,7 @@ verify: Compare two scans over a stated interval: new errors or waits should sto
 
 id: operational-errors:subscription-apply:sub_orders
 title: Logical replication apply errors: 30 newly counted between scans
-summary: sub_orders The subscriber could not apply some incoming changes. Counters do not identify the conflicting row or establish that replication is still stopped. Its statistics period is unknown. The comparison covers 2026-10-11T10:54:21Z to 2026-10-11T11:54:21Z. These are newly recorded events over the stated interval, not proof that the cause persists now.
+summary: sub_orders: the subscriber could not apply some incoming changes. Counters do not identify the conflicting row or establish that replication is still stopped. Its statistics period is unknown. The comparison covers 2026-10-11T10:54:21Z to 2026-10-11T11:54:21Z. These are newly recorded events over the stated interval, not proof that the cause persists now.
 impact: 30 between scans
 metric: Source total
 metric: New events between scans
@@ -343,7 +343,7 @@ verify: Compare two scans over a stated interval: new errors or waits should sto
 
 id: operational-errors:subscription-sync:sub_items
 title: Logical replication synchronization errors: 5 recorded in the source's history
-summary: sub_items Initial table synchronization failed. A retained error count does not establish that the table is still unsynchronized. Its statistics period is unknown. No comparable counter interval inside the requested period establishes new failures; this is historical information.
+summary: sub_items: initial table synchronization failed. A retained error count does not establish that the table is still unsynchronized. Its statistics period is unknown. No comparable counter interval inside the requested period establishes new failures; this is historical information.
 impact: Historical counter
 metric: Source total
 fix: Inspect subscription relation states and the worker's server-log error. Repair permissions, schema or capacity as indicated, then verify affected tables finish synchronization.
@@ -351,7 +351,7 @@ verify: Compare two scans over a stated interval: new errors or waits should sto
 
 id: operational-errors:standby-conflicts:demo
 title: Standby queries cancelled for recovery: 2 newly counted between scans
-summary: demo Recovery cancelled queries whose snapshots, locks or buffers conflicted with replay. This records actual cancellations, not ordinary replica lag or a claim that every read failed. Its statistics period is unknown. The comparison covers 2026-10-11T10:54:21Z to 2026-10-11T11:54:21Z. These are newly recorded events over the stated interval, not proof that the cause persists now.
+summary: demo: recovery cancelled queries whose snapshots, locks or buffers conflicted with replay. This records actual cancellations, not ordinary replica lag or a claim that every read failed. Its statistics period is unknown. The comparison covers 2026-10-11T10:54:21Z to 2026-10-11T11:54:21Z. These are newly recorded events over the stated interval, not proof that the cause persists now.
 impact: 2 between scans
 metric: Source total
 metric: New events between scans
@@ -360,7 +360,7 @@ verify: Compare two scans over a stated interval: new errors or waits should sto
 
 id: operational-errors:redo-waits:server
 title: Redo buffer waits (whole server): 100 newly counted between scans
-summary: server InnoDB waited for redo buffer space to become available. This counter does not measure wait duration or prove that this database's requests were delayed. Its statistics period is unknown. The comparison covers 2026-10-11T10:54:21Z to 2026-10-11T11:54:21Z. It is context for the whole server and is not graded as a problem in this database.
+summary: server: InnoDB waited for redo buffer space to become available. This counter does not measure wait duration or prove that this database's requests were delayed. Its statistics period is unknown. The comparison covers 2026-10-11T10:54:21Z to 2026-10-11T11:54:21Z. It is context for the whole server and is not graded as a problem in this database.
 impact: 100 between scans
 metric: Source total
 metric: New events between scans
@@ -369,7 +369,7 @@ verify: Compare two scans over a stated interval: new errors or waits should sto
 
 id: operational-errors:checksum-failures:demo
 title: Data page checksum or I/O corruption: 2 recorded in the source's history
-summary: demo The storage engine recorded data pages that failed checksum verification or suffered a torn-page / I/O read error in this database. Its statistics period is unknown. Any recorded page checksum or I/O corruption in this database warrants immediate investigation of the server error log and backups.
+summary: demo: the storage engine recorded data pages that failed checksum verification or suffered a torn-page / I/O read error in this database. Its statistics period is unknown. Any recorded page checksum or I/O corruption in this database warrants immediate investigation of the server error log and backups.
 impact: 2 corrupt pages
 metric: Source total
 metric: Latest recorded event = 2026-10-11T09:00:00Z
@@ -378,7 +378,7 @@ verify: Compare two scans over a stated interval: new errors or waits should sto
 
 id: operational-errors:connection-failures:server
 title: Failed client connection handshakes (whole server): 40 recorded in the source's history
-summary: server Clients attempted to connect to the server and failed during authentication, TLS negotiation or packet read (Aborted_connects). This is a shared server counter. Its statistics period is unknown. It is context for the whole server and is not graded as a problem in this database.
+summary: server: clients attempted to connect to the server and failed during authentication, TLS negotiation or packet read (Aborted_connects). This is a shared server counter. Its statistics period is unknown. It is context for the whole server and is not graded as a problem in this database.
 impact: Historical counter
 metric: Source total
 fix: Inspect server connection logs and client configuration for bad credentials, TLS mismatches, connect_timeout settings, or health checks that close TCP sockets without completing the handshake.

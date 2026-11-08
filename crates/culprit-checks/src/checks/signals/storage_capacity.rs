@@ -127,7 +127,7 @@ fn storage_capacity_finding(_: &Snapshot, full: FullSpace<'_>) -> Finding {
         summary.push(t!("check.storage_capacity.summary.reuse", reason = reason));
     }
     // Two spaces before the last sentence, as this summary has always read.
-    f.summary = format!("{}  {}", summary.join(" "), t!("check.storage_capacity.summary.not_measured"));
+    f.summary = format!("{} {}", summary.join(" "), t!("check.storage_capacity.summary.not_measured"));
     f.severity = if full.actionable { Severity::Medium } else { Severity::Low };
     f.actionability = if full.actionable { Actionability::NeedsAttention } else { Actionability::Information };
     f.confidence = Confidence::High;
