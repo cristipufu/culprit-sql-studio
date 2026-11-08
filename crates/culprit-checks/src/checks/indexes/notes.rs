@@ -2,7 +2,7 @@
 //! the app states the checks' evidence instead of judging the counters itself (`Summary::index_notes`,
 //! `Summary::foreign_key_indexes`).
 
-use culprit_core::{ForeignKeyIndex, IndexNote, IndexState};
+use culprit_core::{ForeignKeyIndex, IndexNote, IndexState, t};
 
 use super::*;
 
@@ -34,9 +34,9 @@ pub(crate) fn index_notes(snapshot: &Snapshot, findings: &[Finding]) -> Vec<Inde
         }
         if let Some((_, b)) = covered.iter().find(|(a, _)| std::ptr::eq(*a, i)) {
             let text = if same_keys(i, b) {
-                format!("Same keys as {}: one of them is enough", b.name)
+                t!("view.index_notes.same_keys", other = &b.name)
             } else {
-                format!("Covered by {}: it leads with the same keys", b.name)
+                t!("view.index_notes.covered", other = &b.name)
             };
             note(Severity::Medium, text, finding_id(format!("duplicate-index:{}.{}.{}", i.schema, i.table, i.name)));
         }
@@ -47,17 +47,14 @@ pub(crate) fn index_notes(snapshot: &Snapshot, findings: &[Finding]) -> Vec<Inde
 /// What a disabled index is to the optimizer and to writes.
 fn disabled(i: &IndexStat) -> String {
     match i.state {
-        Some(IndexState::Invisible) => "Invisible to the optimizer; still maintained by writes".into(),
-        Some(IndexState::Ignored) => "Ignored by the optimizer; still maintained by writes".into(),
-        Some(IndexState::Invalid) => format!(
-            "Invalid: unavailable to the optimizer; {}",
-            match i.maintained {
-                None => "maintenance state was not recorded",
-                Some(true) => "still maintained by writes",
-                Some(false) => "not ready for write maintenance",
-            }
-        ),
-        _ => "Disabled: unavailable to the optimizer and not maintained".into(),
+        Some(IndexState::Invisible) => t!("view.index_notes.invisible"),
+        Some(IndexState::Ignored) => t!("view.index_notes.ignored"),
+        Some(IndexState::Invalid) => match i.maintained {
+            None => t!("view.index_notes.invalid"),
+            Some(true) => t!("view.index_notes.invalid_maintained"),
+            Some(false) => t!("view.index_notes.invalid_not_maintained"),
+        },
+        _ => t!("view.index_notes.disabled"),
     }
 }
 
@@ -74,48 +71,54 @@ fn unread(
 ) -> Option<(Severity, String, Option<String>)> {
     let fk = backs_foreign_key(snapshot, i);
     if unused.iter().any(|u| std::ptr::eq(*u, i)) {
-        let also = fk
-            .map(|fk| {
-                format!(
-                    "; it also backs foreign key {}, so deletes and updates of {} rows rely on it",
-                    fk.name, fk.ref_table
-                )
-            })
-            .unwrap_or_default();
-        let text = format!("Never read {since}, yet every write to {} maintains it{also}", i.table);
+        let text = match fk {
+            Some(fk) => t!(
+                "view.index_notes.unused_foreign_key",
+                since = since,
+                table = &i.table,
+                key = &fk.name,
+                parent = &fk.ref_table
+            ),
+            None => t!("view.index_notes.unused", since = since, table = &i.table),
+        };
         return Some((Severity::High, text, Some(format!("unused-index:{}.{}", i.schema, i.table))));
     }
     if let Some(fk) = fk {
-        let why = if snapshot.server.engine == Engine::Mysql {
-            "InnoDB requires it".to_string()
+        let text = if snapshot.server.engine == Engine::Mysql {
+            t!("view.index_notes.foreign_key_innodb", since = since, key = &fk.name)
         } else {
-            format!("without it, deleting or updating a {} row scans {}", fk.ref_table, i.table)
+            t!(
+                "view.index_notes.foreign_key_scan",
+                since = since,
+                key = &fk.name,
+                parent = &fk.ref_table,
+                table = &i.table
+            )
         };
-        return Some((Severity::Low, format!("Never read {since}, but it backs foreign key {}: {why}", fk.name), None));
+        return Some((Severity::Low, text, None));
     }
     if i.is_unique {
-        return Some((Severity::Low, format!("Never read {since}; it still enforces uniqueness"), None));
+        return Some((Severity::Low, t!("view.index_notes.unique", since = since), None));
     }
     if wider {
         return None;
     }
     let text = if too_new(snapshot, i) {
-        let created = i.created_at_latest.as_deref().map(|c| format::friendly_date(c, &snapshot.taken_at));
-        let by = created.map(|c| format!(" (it existed by {c})")).unwrap_or_default();
-        format!("Not read yet, but it may be new{by}: too soon to call it unused")
+        match i.created_at_latest.as_deref().map(|c| format::friendly_date(c, &snapshot.taken_at)) {
+            Some(date) => t!("view.index_notes.new_since", date = date),
+            None => t!("view.index_notes.new"),
+        }
     } else if !watched_long_enough(snapshot) {
         match crate::support::watched_days(snapshot) {
-            Some(_) => format!("No reads {since}; a week of counting is needed before calling it unused"),
-            None => "No reads recorded over a period the counters don't establish; a week of known counting is \
-                     needed before calling it unused"
-                .to_string(),
+            Some(_) => t!("view.index_notes.too_soon", since = since),
+            None => t!("view.index_notes.unknown_period"),
         }
     } else if i.is_clustered {
-        format!("Never read {since}; it holds the table's rows")
+        t!("view.index_notes.clustered", since = since)
     } else if let Some(size) = i.size_bytes {
-        format!("Never read {since}; at {} it costs too little to be worth dropping", format::bytes(size))
+        t!("view.index_notes.small", since = since, size = format::bytes(size))
     } else {
-        format!("Never read {since}; its size isn't known, so its upkeep can't be weighed")
+        t!("view.index_notes.unsized", since = since)
     };
     Some((Severity::Low, text, None))
 }
@@ -314,6 +317,110 @@ mod tests {
         assert_eq!(covered[0].finding.as_deref(), Some("duplicate-index:shop.orders.ix_status"));
         assert!(of("ix_status_created").is_empty());
     }
+
+    /// Every note, word for word: they come from the language catalog, and this holds the English to what the code
+    /// said when it wrote them itself.
+    #[test]
+    fn every_note_says_what_it_said() {
+        let fk = |table: &str| culprit_core::ForeignKey {
+            name: format!("fk_{table}_customer"),
+            schema: "shop".into(),
+            table: table.into(),
+            columns: vec!["customer_id".into()],
+            ref_schema: "shop".into(),
+            ref_table: "customers".into(),
+            ref_columns: vec!["id".into()],
+            delete_rule: None,
+        };
+        let mut out = Vec::new();
+        let mut say = |label: &str, s: &Snapshot| {
+            for n in index_notes(s, &[]) {
+                out.push(format!("{label} {} {:?}: {}", n.index, n.tone, n.text));
+            }
+        };
+        let mut s = snapshot(10);
+        let states = [
+            (Some(IndexState::Invisible), None),
+            (Some(IndexState::Ignored), None),
+            (Some(IndexState::Invalid), None),
+            (Some(IndexState::Invalid), Some(true)),
+            (Some(IndexState::Invalid), Some(false)),
+            (Some(IndexState::Disabled), None),
+            (None, None),
+        ];
+        s.indexes = states
+            .iter()
+            .enumerate()
+            .map(|(k, (state, maintained))| {
+                let mut i = index(&format!("ix_off_{k}"), &["channel"]);
+                (i.is_disabled, i.state, i.maintained) = (true, *state, *maintained);
+                i
+            })
+            .collect();
+        say("disabled", &s);
+
+        let mut s = snapshot(10);
+        s.foreign_keys = vec![fk("orders")];
+        let mut unused_fk = index("ix_orders_customer", &["customer_id"]);
+        unused_fk.size_bytes = Some(8.0 * 1024.0 * 1024.0);
+        let mut small_fk = index("ix_orders_customer_small", &["customer_id", "status"]);
+        small_fk.size_bytes = Some(16.0 * 1024.0);
+        s.indexes = vec![unused_fk, index("ix_orders_status", &["status"])];
+        say("unused", &s);
+        s.indexes = vec![small_fk];
+        say("fk", &s);
+        s.server.engine = Engine::Mysql;
+        say("fk mysql", &s);
+
+        let mut s = snapshot(10);
+        let mut young = index("ix_new", &["placed_at"]);
+        young.created_at_latest = Some("2026-10-09T09:00:00Z".into());
+        let mut unique = index("ux_orders_number", &["number"]);
+        unique.is_unique = true;
+        let mut clustered = index("cx_orders", &["id"]);
+        clustered.is_clustered = true;
+        let mut small = index("ix_small", &["channel"]);
+        small.size_bytes = Some(16.0 * 1024.0);
+        let mut unsized_index = index("ix_unsized", &["region"]);
+        unsized_index.size_bytes = None;
+        let narrow = index("ix_status", &["status", "total"]);
+        let mut wide = index("ix_status_created", &["status", "total", "created_at"]);
+        wide.reads = Some(90.0);
+        let mut twin = index("ix_status_created_twin", &["status", "total", "created_at"]);
+        twin.reads = Some(9.0);
+        s.indexes = vec![young, unique, clustered, small, unsized_index, narrow, wide, twin];
+        say("kept", &s);
+
+        let mut s = snapshot(2);
+        s.indexes = vec![index("ix_orders_status", &["status"])];
+        say("short", &s);
+        s.server.engine = Engine::Yugabyte;
+        say("unknown", &s);
+
+        let actual = out.join("\n");
+        assert!(actual == NOTE_WORDS, "said:\n{actual}");
+    }
+
+    const NOTE_WORDS: &str = r#"disabled ix_off_0 Medium: Invisible to the optimizer; still maintained by writes
+disabled ix_off_1 Medium: Ignored by the optimizer; still maintained by writes
+disabled ix_off_2 Medium: Invalid: unavailable to the optimizer; maintenance state was not recorded
+disabled ix_off_3 Medium: Invalid: unavailable to the optimizer; still maintained by writes
+disabled ix_off_4 Medium: Invalid: unavailable to the optimizer; not ready for write maintenance
+disabled ix_off_5 Medium: Disabled: unavailable to the optimizer and not maintained
+disabled ix_off_6 Medium: Disabled: unavailable to the optimizer and not maintained
+unused ix_orders_customer High: Never read in the 10 days since the server last restarted, yet every write to orders maintains it; it also backs foreign key fk_orders_customer, so deletes and updates of customers rows rely on it
+unused ix_orders_status High: Never read in the 10 days since the server last restarted, yet every write to orders maintains it
+fk ix_orders_customer_small Low: Never read in the 10 days since the server last restarted, but it backs foreign key fk_orders_customer: without it, deleting or updating a customers row scans orders
+fk mysql ix_orders_customer_small Low: Never read since userstat was turned on or its statistics last flushed, but it backs foreign key fk_orders_customer: InnoDB requires it
+kept ix_new Low: Not read yet, but it may be new (it existed by Oct 9): too soon to call it unused
+kept ux_orders_number Low: Never read in the 10 days since the server last restarted; it still enforces uniqueness
+kept cx_orders Low: Never read in the 10 days since the server last restarted; it holds the table's rows
+kept ix_small Low: Never read in the 10 days since the server last restarted; at 16.0 KB it costs too little to be worth dropping
+kept ix_unsized Low: Never read in the 10 days since the server last restarted; its size isn't known, so its upkeep can't be weighed
+kept ix_status Medium: Covered by ix_status_created: it leads with the same keys
+kept ix_status_created_twin Medium: Same keys as ix_status_created: one of them is enough
+short ix_orders_status Low: No reads in the 2 days since the server last restarted; a week of counting is needed before calling it unused
+unknown ix_orders_status Low: No reads recorded over a period the counters don't establish; a week of known counting is needed before calling it unused"#;
 
     #[test]
     fn yugabyte_counters_without_a_known_period_and_a_catalog_without_sharding_say_unknown() {

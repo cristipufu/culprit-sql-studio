@@ -282,3 +282,249 @@ fn yugabyte_absence_needs_complete_cluster_counters_and_their_own_reset_dates() 
         culprit_core::SourceState::Partial;
     assert!(unused_index(&s).is_empty(), "a skipped node can contain the missing reads");
 }
+
+/// What widening, bringing back and an index's write cost say, word for word, on every engine and in every case: their
+/// words come from the language catalog, and this holds the English to what the code said when it wrote them itself.
+#[test]
+fn widening_bringing_back_and_write_costs_say_what_they_said() {
+    let base: Snapshot = serde_json::from_str(include_str!("../../../../../fixtures/mssql-demo.json")).unwrap();
+    let mut plain = base.indexes.iter().find(|i| !i.is_primary_key && !i.is_clustered).unwrap().clone();
+    (plain.schema, plain.table, plain.name) = ("shop".into(), "orders".into(), "ix_orders_status".into());
+    (plain.columns, plain.include, plain.filter) = (vec!["status".into()], vec!["total".into()], None);
+    (plain.is_unique, plain.is_disabled, plain.size_bytes) = (false, false, Some(4.5 * 1024.0 * 1024.0));
+    let cols = |c: &[&str]| c.iter().map(|c| c.to_string()).collect::<Vec<_>>();
+    let words = |w: Widening| match w {
+        Widening::Sql(fix) => format!("sql: {} | cost: {}", fix.summary, fix.cost.unwrap_or_default()),
+        Widening::Refused(why) => format!("refused: {why}"),
+    };
+    let mut out = Vec::new();
+    for engine in Engine::ALL {
+        for version in ["16.0", "11.4", "MariaDB"] {
+            let mut s = base.clone();
+            s.server.engine = engine;
+            s.server.version = version.into();
+            if version == "MariaDB" {
+                s.server.product = "MariaDB".into();
+                s.server.version = "10.11.6-MariaDB".into();
+            }
+            let tag = format!("{engine:?} {}", s.server.version);
+            out.push(format!("{tag} held: {}", words(widen_index(&s, &plain, &cols(&["total"])))));
+            out.push(format!("{tag} add: {}", words(widen_index(&s, &plain, &cols(&["created_at", "total"])))));
+            let mut unique = plain.clone();
+            unique.is_unique = true;
+            out.push(format!("{tag} unique: {}", words(widen_index(&s, &unique, &cols(&["created_at"])))));
+            let mut clustered = plain.clone();
+            clustered.is_clustered = true;
+            out.push(format!("{tag} clustered: {}", words(widen_index(&s, &clustered, &cols(&["created_at"])))));
+            let mut pk = plain.clone();
+            pk.is_primary_key = true;
+            out.push(format!("{tag} pk: {}", words(widen_index(&s, &pk, &cols(&["created_at"])))));
+            let mut off = plain.clone();
+            off.is_disabled = true;
+            out.push(format!("{tag} off: {}", words(widen_index(&s, &off, &cols(&["created_at"])))));
+            out.push(format!("{tag} off-held: {}", words(widen_index(&s, &off, &cols(&["total"])))));
+            let mut off_pk = off.clone();
+            off_pk.is_primary_key = true;
+            out.push(format!("{tag} off-pk one: {}", words(widen_index(&s, &off_pk, &cols(&["created_at"])))));
+            out.push(format!(
+                "{tag} off-pk two: {}",
+                words(widen_index(&s, &off_pk, &cols(&["created_at", "channel"])))
+            ));
+            let fix = widen_fix(&s, &clustered, &cols(&["created_at"]));
+            out.push(format!("{tag} widen_fix: {} | {:?}", fix.summary, fix.cost));
+        }
+    }
+    // What an index costs the table's writes: none in a week of counters, none in counters that may have been reset,
+    // none in too short a time, and some.
+    let mut s = base.clone();
+    let table = s.tables[0].clone();
+    let (schema, name) = (table.schema.clone(), table.name.clone());
+    s.indexes.retain(|i| !(i.schema == schema && i.table == name));
+    let set = |s: &mut Snapshot, writes: f64| {
+        let t = s.tables.iter_mut().find(|t| t.schema == schema && t.name == name).unwrap();
+        (t.inserts, t.updates, t.deletes) = (Some(writes), Some(0.0), Some(0.0));
+    };
+    s.server.started_at = Some("2026-10-01T12:00:00Z".into());
+    s.taken_at = "2026-10-11T12:00:00Z".into();
+    s.pressure.get_or_insert_with(Default::default).uptime_hours = Some(240.0);
+    set(&mut s, 0.0);
+    out.push(format!("week none: {:?}", write_cost(&s, &schema, &name)));
+    out.push(format!("week none, any: {:?}", write_cost_of(&s, &schema, &name, "any index you add")));
+    set(&mut s, 50_000.0);
+    out.push(format!("week some: {:?}", write_cost(&s, &schema, &name)));
+    set(&mut s, 1.0);
+    out.push(format!("week one: {:?}", write_cost(&s, &schema, &name)));
+    s.pressure.get_or_insert_with(Default::default).uptime_hours = Some(10.0);
+    s.server.started_at = Some("2026-10-11T02:00:00Z".into());
+    set(&mut s, 0.0);
+    out.push(format!("short none: {:?}", write_cost(&s, &schema, &name)));
+    set(&mut s, 700.0);
+    out.push(format!("short some: {:?}", write_cost(&s, &schema, &name)));
+    // performance_schema's counters, reset since the server started: no length is said.
+    let mut m: Snapshot = serde_json::from_str(include_str!("../../../../../fixtures/mysql-demo.json")).unwrap();
+    m.server.started_at = Some("2026-10-11T10:00:00Z".into());
+    let t = m.tables.iter_mut().find(|t| t.name == "orders").unwrap();
+    (t.inserts, t.updates, t.deletes) = (Some(0.0), Some(0.0), Some(0.0));
+    m.indexes.retain(|i| i.table != "orders");
+    out.push(format!("reset none: {:?}", write_cost(&m, "shop", "orders")));
+    let actual = out.join("\n");
+    assert!(actual == WIDENING_WORDS, "said:\n{actual}");
+}
+
+const WIDENING_WORDS: &str = r#"Mssql 16.0 held: refused: ix_orders_status already has these keys and includes total.
+Mssql 16.0 add: sql: ix_orders_status already has the right keys but makes every matching row go back to the table for created_at. Rebuild it with those columns included so it covers the query. The statement keeps its keys, their order, its filter and the columns it already includes; restate DATA_COMPRESSION, FILLFACTOR or its partition scheme in it if the index uses them. | cost: The index grows from 4.5 MB; writes that touch the included columns maintain it.
+Mssql 16.0 unique: sql: ix_orders_status already has the right keys but makes every matching row go back to the table for created_at. Rebuild it with those columns included so it covers the query. The statement keeps its keys, their order, its filter and the columns it already includes; restate DATA_COMPRESSION, FILLFACTOR or its partition scheme in it if the index uses them. It stays unique. If ix_orders_status enforces a UNIQUE constraint rather than being a unique index, SQL Server refuses the rebuild (error 1907): create a separate index with these keys and included columns instead. | cost: The index grows from 4.5 MB; writes that touch the included columns maintain it.
+Mssql 16.0 clustered: refused: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it.
+Mssql 16.0 pk: refused: ix_orders_status enforces the primary key, and SQL Server won't change a constraint's index to include columns.
+Mssql 16.0 off: sql: ix_orders_status has the right keys but is disabled, so SQL Server neither maintains nor reads it. Rebuilding it brings it back, with created_at included so it covers the query; if it was disabled because nothing read it, the queries below now would. The statement keeps its keys, their order, its filter and the columns it already includes; restate DATA_COMPRESSION, FILLFACTOR or its partition scheme in it if the index uses them. | cost: The index grows from 4.5 MB; writes that touch the included columns maintain it.
+Mssql 16.0 off-held: sql: ix_orders_status has these keys, but it is disabled, so SQL Server neither maintains nor reads it. Rebuilding it brings it back as it was; if it was set aside because nothing read it, the queries below now would. | cost: 
+Mssql 16.0 off-pk one: sql: ix_orders_status has these keys, but it is disabled, so SQL Server neither maintains nor reads it. Rebuilding it brings it back as it was; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Mssql 16.0 off-pk two: sql: ix_orders_status has these keys, but it is disabled, so SQL Server neither maintains nor reads it. Rebuilding it brings it back as it was; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at and channel; once it's back, the optimizer says whether it still wants them. | cost: 
+Mssql 16.0 widen_fix: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it. | None
+Mssql 11.4 held: refused: ix_orders_status already has these keys and includes total.
+Mssql 11.4 add: sql: ix_orders_status already has the right keys but makes every matching row go back to the table for created_at. Rebuild it with those columns included so it covers the query. The statement keeps its keys, their order, its filter and the columns it already includes; restate DATA_COMPRESSION, FILLFACTOR or its partition scheme in it if the index uses them. | cost: The index grows from 4.5 MB; writes that touch the included columns maintain it.
+Mssql 11.4 unique: sql: ix_orders_status already has the right keys but makes every matching row go back to the table for created_at. Rebuild it with those columns included so it covers the query. The statement keeps its keys, their order, its filter and the columns it already includes; restate DATA_COMPRESSION, FILLFACTOR or its partition scheme in it if the index uses them. It stays unique. If ix_orders_status enforces a UNIQUE constraint rather than being a unique index, SQL Server refuses the rebuild (error 1907): create a separate index with these keys and included columns instead. | cost: The index grows from 4.5 MB; writes that touch the included columns maintain it.
+Mssql 11.4 clustered: refused: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it.
+Mssql 11.4 pk: refused: ix_orders_status enforces the primary key, and SQL Server won't change a constraint's index to include columns.
+Mssql 11.4 off: sql: ix_orders_status has the right keys but is disabled, so SQL Server neither maintains nor reads it. Rebuilding it brings it back, with created_at included so it covers the query; if it was disabled because nothing read it, the queries below now would. The statement keeps its keys, their order, its filter and the columns it already includes; restate DATA_COMPRESSION, FILLFACTOR or its partition scheme in it if the index uses them. | cost: The index grows from 4.5 MB; writes that touch the included columns maintain it.
+Mssql 11.4 off-held: sql: ix_orders_status has these keys, but it is disabled, so SQL Server neither maintains nor reads it. Rebuilding it brings it back as it was; if it was set aside because nothing read it, the queries below now would. | cost: 
+Mssql 11.4 off-pk one: sql: ix_orders_status has these keys, but it is disabled, so SQL Server neither maintains nor reads it. Rebuilding it brings it back as it was; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Mssql 11.4 off-pk two: sql: ix_orders_status has these keys, but it is disabled, so SQL Server neither maintains nor reads it. Rebuilding it brings it back as it was; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at and channel; once it's back, the optimizer says whether it still wants them. | cost: 
+Mssql 11.4 widen_fix: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it. | None
+Mssql 10.11.6-MariaDB held: refused: ix_orders_status already has these keys and includes total.
+Mssql 10.11.6-MariaDB add: sql: ix_orders_status already has the right keys but makes every matching row go back to the table for created_at. Rebuild it with those columns included so it covers the query. The statement keeps its keys, their order, its filter and the columns it already includes; restate DATA_COMPRESSION, FILLFACTOR or its partition scheme in it if the index uses them. | cost: The index grows from 4.5 MB; writes that touch the included columns maintain it.
+Mssql 10.11.6-MariaDB unique: sql: ix_orders_status already has the right keys but makes every matching row go back to the table for created_at. Rebuild it with those columns included so it covers the query. The statement keeps its keys, their order, its filter and the columns it already includes; restate DATA_COMPRESSION, FILLFACTOR or its partition scheme in it if the index uses them. It stays unique. If ix_orders_status enforces a UNIQUE constraint rather than being a unique index, SQL Server refuses the rebuild (error 1907): create a separate index with these keys and included columns instead. | cost: The index grows from 4.5 MB; writes that touch the included columns maintain it.
+Mssql 10.11.6-MariaDB clustered: refused: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it.
+Mssql 10.11.6-MariaDB pk: refused: ix_orders_status enforces the primary key, and SQL Server won't change a constraint's index to include columns.
+Mssql 10.11.6-MariaDB off: sql: ix_orders_status has the right keys but is disabled, so SQL Server neither maintains nor reads it. Rebuilding it brings it back, with created_at included so it covers the query; if it was disabled because nothing read it, the queries below now would. The statement keeps its keys, their order, its filter and the columns it already includes; restate DATA_COMPRESSION, FILLFACTOR or its partition scheme in it if the index uses them. | cost: The index grows from 4.5 MB; writes that touch the included columns maintain it.
+Mssql 10.11.6-MariaDB off-held: sql: ix_orders_status has these keys, but it is disabled, so SQL Server neither maintains nor reads it. Rebuilding it brings it back as it was; if it was set aside because nothing read it, the queries below now would. | cost: 
+Mssql 10.11.6-MariaDB off-pk one: sql: ix_orders_status has these keys, but it is disabled, so SQL Server neither maintains nor reads it. Rebuilding it brings it back as it was; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Mssql 10.11.6-MariaDB off-pk two: sql: ix_orders_status has these keys, but it is disabled, so SQL Server neither maintains nor reads it. Rebuilding it brings it back as it was; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at and channel; once it's back, the optimizer says whether it still wants them. | cost: 
+Mssql 10.11.6-MariaDB widen_fix: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it. | None
+Postgres 16.0 held: refused: ix_orders_status already has these keys and includes total.
+Postgres 16.0 add: refused: PostgreSQL can't add included columns to ix_orders_status in place; a new index has to be built.
+Postgres 16.0 unique: refused: PostgreSQL can't add included columns to ix_orders_status in place; a new index has to be built.
+Postgres 16.0 clustered: refused: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it.
+Postgres 16.0 pk: refused: ix_orders_status enforces the primary key, and SQL Server won't change a constraint's index to include columns.
+Postgres 16.0 off: sql: ix_orders_status has these keys, but it is invalid (a build that didn't finish), so PostgreSQL never reads it. Rebuilding it makes it usable; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Postgres 16.0 off-held: sql: ix_orders_status has these keys, but it is invalid (a build that didn't finish), so PostgreSQL never reads it. Rebuilding it makes it usable; if it was set aside because nothing read it, the queries below now would. | cost: 
+Postgres 16.0 off-pk one: sql: ix_orders_status has these keys, but it is invalid (a build that didn't finish), so PostgreSQL never reads it. Rebuilding it makes it usable; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Postgres 16.0 off-pk two: sql: ix_orders_status has these keys, but it is invalid (a build that didn't finish), so PostgreSQL never reads it. Rebuilding it makes it usable; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at and channel; once it's back, the optimizer says whether it still wants them. | cost: 
+Postgres 16.0 widen_fix: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it. | None
+Postgres 11.4 held: refused: ix_orders_status already has these keys and includes total.
+Postgres 11.4 add: refused: PostgreSQL can't add included columns to ix_orders_status in place; a new index has to be built.
+Postgres 11.4 unique: refused: PostgreSQL can't add included columns to ix_orders_status in place; a new index has to be built.
+Postgres 11.4 clustered: refused: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it.
+Postgres 11.4 pk: refused: ix_orders_status enforces the primary key, and SQL Server won't change a constraint's index to include columns.
+Postgres 11.4 off: sql: ix_orders_status has these keys, but it is invalid (a build that didn't finish), so PostgreSQL never reads it. Rebuilding it makes it usable (this version can't rebuild concurrently: writes to the table wait meanwhile); if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Postgres 11.4 off-held: sql: ix_orders_status has these keys, but it is invalid (a build that didn't finish), so PostgreSQL never reads it. Rebuilding it makes it usable (this version can't rebuild concurrently: writes to the table wait meanwhile); if it was set aside because nothing read it, the queries below now would. | cost: 
+Postgres 11.4 off-pk one: sql: ix_orders_status has these keys, but it is invalid (a build that didn't finish), so PostgreSQL never reads it. Rebuilding it makes it usable (this version can't rebuild concurrently: writes to the table wait meanwhile); if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Postgres 11.4 off-pk two: sql: ix_orders_status has these keys, but it is invalid (a build that didn't finish), so PostgreSQL never reads it. Rebuilding it makes it usable (this version can't rebuild concurrently: writes to the table wait meanwhile); if it was set aside because nothing read it, the queries below now would. It doesn't include created_at and channel; once it's back, the optimizer says whether it still wants them. | cost: 
+Postgres 11.4 widen_fix: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it. | None
+Postgres 10.11.6-MariaDB held: refused: ix_orders_status already has these keys and includes total.
+Postgres 10.11.6-MariaDB add: refused: PostgreSQL can't add included columns to ix_orders_status in place; a new index has to be built.
+Postgres 10.11.6-MariaDB unique: refused: PostgreSQL can't add included columns to ix_orders_status in place; a new index has to be built.
+Postgres 10.11.6-MariaDB clustered: refused: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it.
+Postgres 10.11.6-MariaDB pk: refused: ix_orders_status enforces the primary key, and SQL Server won't change a constraint's index to include columns.
+Postgres 10.11.6-MariaDB off: sql: ix_orders_status has these keys, but it is invalid (a build that didn't finish), so PostgreSQL never reads it. Rebuilding it makes it usable (this version can't rebuild concurrently: writes to the table wait meanwhile); if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Postgres 10.11.6-MariaDB off-held: sql: ix_orders_status has these keys, but it is invalid (a build that didn't finish), so PostgreSQL never reads it. Rebuilding it makes it usable (this version can't rebuild concurrently: writes to the table wait meanwhile); if it was set aside because nothing read it, the queries below now would. | cost: 
+Postgres 10.11.6-MariaDB off-pk one: sql: ix_orders_status has these keys, but it is invalid (a build that didn't finish), so PostgreSQL never reads it. Rebuilding it makes it usable (this version can't rebuild concurrently: writes to the table wait meanwhile); if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Postgres 10.11.6-MariaDB off-pk two: sql: ix_orders_status has these keys, but it is invalid (a build that didn't finish), so PostgreSQL never reads it. Rebuilding it makes it usable (this version can't rebuild concurrently: writes to the table wait meanwhile); if it was set aside because nothing read it, the queries below now would. It doesn't include created_at and channel; once it's back, the optimizer says whether it still wants them. | cost: 
+Postgres 10.11.6-MariaDB widen_fix: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it. | None
+Yugabyte 16.0 held: refused: ix_orders_status already has these keys and includes total.
+Yugabyte 16.0 add: refused: YSQL cannot add included columns to ix_orders_status in place; build a separate covering index and verify its distributed cost.
+Yugabyte 16.0 unique: refused: YSQL cannot add included columns to ix_orders_status in place; build a separate covering index and verify its distributed cost.
+Yugabyte 16.0 clustered: refused: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it.
+Yugabyte 16.0 pk: refused: ix_orders_status enforces the primary key, and SQL Server won't change a constraint's index to include columns.
+Yugabyte 16.0 off: sql: ix_orders_status has these keys, but the DocDB index is not valid yet; check backfill progress on every node before repairing a failed build, and let an active backfill finish; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Yugabyte 16.0 off-held: sql: ix_orders_status has these keys, but the DocDB index is not valid yet; check backfill progress on every node before repairing a failed build, and let an active backfill finish; if it was set aside because nothing read it, the queries below now would. | cost: 
+Yugabyte 16.0 off-pk one: sql: ix_orders_status has these keys, but the DocDB index is not valid yet; check backfill progress on every node before repairing a failed build, and let an active backfill finish; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Yugabyte 16.0 off-pk two: sql: ix_orders_status has these keys, but the DocDB index is not valid yet; check backfill progress on every node before repairing a failed build, and let an active backfill finish; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at and channel; once it's back, the optimizer says whether it still wants them. | cost: 
+Yugabyte 16.0 widen_fix: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it. | None
+Yugabyte 11.4 held: refused: ix_orders_status already has these keys and includes total.
+Yugabyte 11.4 add: refused: YSQL cannot add included columns to ix_orders_status in place; build a separate covering index and verify its distributed cost.
+Yugabyte 11.4 unique: refused: YSQL cannot add included columns to ix_orders_status in place; build a separate covering index and verify its distributed cost.
+Yugabyte 11.4 clustered: refused: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it.
+Yugabyte 11.4 pk: refused: ix_orders_status enforces the primary key, and SQL Server won't change a constraint's index to include columns.
+Yugabyte 11.4 off: sql: ix_orders_status has these keys, but the DocDB index is not valid yet; check backfill progress on every node before repairing a failed build, and let an active backfill finish; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Yugabyte 11.4 off-held: sql: ix_orders_status has these keys, but the DocDB index is not valid yet; check backfill progress on every node before repairing a failed build, and let an active backfill finish; if it was set aside because nothing read it, the queries below now would. | cost: 
+Yugabyte 11.4 off-pk one: sql: ix_orders_status has these keys, but the DocDB index is not valid yet; check backfill progress on every node before repairing a failed build, and let an active backfill finish; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Yugabyte 11.4 off-pk two: sql: ix_orders_status has these keys, but the DocDB index is not valid yet; check backfill progress on every node before repairing a failed build, and let an active backfill finish; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at and channel; once it's back, the optimizer says whether it still wants them. | cost: 
+Yugabyte 11.4 widen_fix: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it. | None
+Yugabyte 10.11.6-MariaDB held: refused: ix_orders_status already has these keys and includes total.
+Yugabyte 10.11.6-MariaDB add: refused: YSQL cannot add included columns to ix_orders_status in place; build a separate covering index and verify its distributed cost.
+Yugabyte 10.11.6-MariaDB unique: refused: YSQL cannot add included columns to ix_orders_status in place; build a separate covering index and verify its distributed cost.
+Yugabyte 10.11.6-MariaDB clustered: refused: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it.
+Yugabyte 10.11.6-MariaDB pk: refused: ix_orders_status enforces the primary key, and SQL Server won't change a constraint's index to include columns.
+Yugabyte 10.11.6-MariaDB off: sql: ix_orders_status has these keys, but the DocDB index is not valid yet; check backfill progress on every node before repairing a failed build, and let an active backfill finish; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Yugabyte 10.11.6-MariaDB off-held: sql: ix_orders_status has these keys, but the DocDB index is not valid yet; check backfill progress on every node before repairing a failed build, and let an active backfill finish; if it was set aside because nothing read it, the queries below now would. | cost: 
+Yugabyte 10.11.6-MariaDB off-pk one: sql: ix_orders_status has these keys, but the DocDB index is not valid yet; check backfill progress on every node before repairing a failed build, and let an active backfill finish; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Yugabyte 10.11.6-MariaDB off-pk two: sql: ix_orders_status has these keys, but the DocDB index is not valid yet; check backfill progress on every node before repairing a failed build, and let an active backfill finish; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at and channel; once it's back, the optimizer says whether it still wants them. | cost: 
+Yugabyte 10.11.6-MariaDB widen_fix: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it. | None
+Mysql 16.0 held: refused: ix_orders_status already has these keys and includes total.
+Mysql 16.0 add: refused: MySQL has no included columns: an index there holds only its keys.
+Mysql 16.0 unique: refused: MySQL has no included columns: an index there holds only its keys.
+Mysql 16.0 clustered: refused: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it.
+Mysql 16.0 pk: refused: ix_orders_status enforces the primary key, and SQL Server won't change a constraint's index to include columns.
+Mysql 16.0 off: sql: ix_orders_status has these keys, but it is invisible to the optimizer. Making it visible again is instant; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Mysql 16.0 off-held: sql: ix_orders_status has these keys, but it is invisible to the optimizer. Making it visible again is instant; if it was set aside because nothing read it, the queries below now would. | cost: 
+Mysql 16.0 off-pk one: sql: ix_orders_status has these keys, but it is invisible to the optimizer. Making it visible again is instant; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Mysql 16.0 off-pk two: sql: ix_orders_status has these keys, but it is invisible to the optimizer. Making it visible again is instant; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at and channel; once it's back, the optimizer says whether it still wants them. | cost: 
+Mysql 16.0 widen_fix: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it. | None
+Mysql 11.4 held: refused: ix_orders_status already has these keys and includes total.
+Mysql 11.4 add: refused: MySQL has no included columns: an index there holds only its keys.
+Mysql 11.4 unique: refused: MySQL has no included columns: an index there holds only its keys.
+Mysql 11.4 clustered: refused: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it.
+Mysql 11.4 pk: refused: ix_orders_status enforces the primary key, and SQL Server won't change a constraint's index to include columns.
+Mysql 11.4 off: sql: ix_orders_status has these keys, but it is invisible to the optimizer. Making it visible again is instant; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Mysql 11.4 off-held: sql: ix_orders_status has these keys, but it is invisible to the optimizer. Making it visible again is instant; if it was set aside because nothing read it, the queries below now would. | cost: 
+Mysql 11.4 off-pk one: sql: ix_orders_status has these keys, but it is invisible to the optimizer. Making it visible again is instant; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Mysql 11.4 off-pk two: sql: ix_orders_status has these keys, but it is invisible to the optimizer. Making it visible again is instant; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at and channel; once it's back, the optimizer says whether it still wants them. | cost: 
+Mysql 11.4 widen_fix: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it. | None
+Mysql 10.11.6-MariaDB held: refused: ix_orders_status already has these keys and includes total.
+Mysql 10.11.6-MariaDB add: refused: MariaDB has no included columns: an index there holds only its keys.
+Mysql 10.11.6-MariaDB unique: refused: MariaDB has no included columns: an index there holds only its keys.
+Mysql 10.11.6-MariaDB clustered: refused: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it.
+Mysql 10.11.6-MariaDB pk: refused: ix_orders_status enforces the primary key, and SQL Server won't change a constraint's index to include columns.
+Mysql 10.11.6-MariaDB off: sql: ix_orders_status has these keys, but the optimizer is told to ignore it. Letting it use the index again is instant; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Mysql 10.11.6-MariaDB off-held: sql: ix_orders_status has these keys, but the optimizer is told to ignore it. Letting it use the index again is instant; if it was set aside because nothing read it, the queries below now would. | cost: 
+Mysql 10.11.6-MariaDB off-pk one: sql: ix_orders_status has these keys, but the optimizer is told to ignore it. Letting it use the index again is instant; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Mysql 10.11.6-MariaDB off-pk two: sql: ix_orders_status has these keys, but the optimizer is told to ignore it. Letting it use the index again is instant; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at and channel; once it's back, the optimizer says whether it still wants them. | cost: 
+Mysql 10.11.6-MariaDB widen_fix: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it. | None
+Sqlite 16.0 held: refused: ix_orders_status already has these keys and includes total.
+Sqlite 16.0 add: refused: SQLite has no included columns: an index there holds only its keys.
+Sqlite 16.0 unique: refused: SQLite has no included columns: an index there holds only its keys.
+Sqlite 16.0 clustered: refused: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it.
+Sqlite 16.0 pk: refused: ix_orders_status enforces the primary key, and SQL Server won't change a constraint's index to include columns.
+Sqlite 16.0 off: sql: ix_orders_status has these keys, but rebuilding it is all SQLite offers; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Sqlite 16.0 off-held: sql: ix_orders_status has these keys, but rebuilding it is all SQLite offers; if it was set aside because nothing read it, the queries below now would. | cost: 
+Sqlite 16.0 off-pk one: sql: ix_orders_status has these keys, but rebuilding it is all SQLite offers; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Sqlite 16.0 off-pk two: sql: ix_orders_status has these keys, but rebuilding it is all SQLite offers; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at and channel; once it's back, the optimizer says whether it still wants them. | cost: 
+Sqlite 16.0 widen_fix: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it. | None
+Sqlite 11.4 held: refused: ix_orders_status already has these keys and includes total.
+Sqlite 11.4 add: refused: SQLite has no included columns: an index there holds only its keys.
+Sqlite 11.4 unique: refused: SQLite has no included columns: an index there holds only its keys.
+Sqlite 11.4 clustered: refused: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it.
+Sqlite 11.4 pk: refused: ix_orders_status enforces the primary key, and SQL Server won't change a constraint's index to include columns.
+Sqlite 11.4 off: sql: ix_orders_status has these keys, but rebuilding it is all SQLite offers; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Sqlite 11.4 off-held: sql: ix_orders_status has these keys, but rebuilding it is all SQLite offers; if it was set aside because nothing read it, the queries below now would. | cost: 
+Sqlite 11.4 off-pk one: sql: ix_orders_status has these keys, but rebuilding it is all SQLite offers; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Sqlite 11.4 off-pk two: sql: ix_orders_status has these keys, but rebuilding it is all SQLite offers; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at and channel; once it's back, the optimizer says whether it still wants them. | cost: 
+Sqlite 11.4 widen_fix: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it. | None
+Sqlite 10.11.6-MariaDB held: refused: ix_orders_status already has these keys and includes total.
+Sqlite 10.11.6-MariaDB add: refused: SQLite has no included columns: an index there holds only its keys.
+Sqlite 10.11.6-MariaDB unique: refused: SQLite has no included columns: an index there holds only its keys.
+Sqlite 10.11.6-MariaDB clustered: refused: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it.
+Sqlite 10.11.6-MariaDB pk: refused: ix_orders_status enforces the primary key, and SQL Server won't change a constraint's index to include columns.
+Sqlite 10.11.6-MariaDB off: sql: ix_orders_status has these keys, but rebuilding it is all SQLite offers; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Sqlite 10.11.6-MariaDB off-held: sql: ix_orders_status has these keys, but rebuilding it is all SQLite offers; if it was set aside because nothing read it, the queries below now would. | cost: 
+Sqlite 10.11.6-MariaDB off-pk one: sql: ix_orders_status has these keys, but rebuilding it is all SQLite offers; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at; once it's back, the optimizer says whether it still wants it. | cost: 
+Sqlite 10.11.6-MariaDB off-pk two: sql: ix_orders_status has these keys, but rebuilding it is all SQLite offers; if it was set aside because nothing read it, the queries below now would. It doesn't include created_at and channel; once it's back, the optimizer says whether it still wants them. | cost: 
+Sqlite 10.11.6-MariaDB widen_fix: ix_orders_status is the table's clustered index: it already holds every column, so there is nothing to include in it. | None
+week none: Some("shop.customers received no writes in the 10 days since the server last restarted, so this index would cost next to nothing to maintain.")
+week none, any: Some("shop.customers received no writes in the 10 days since the server last restarted, so any index you add would cost next to nothing to maintain.")
+week some: Some("shop.customers receives about 5.0K writes a day; each one will also update this index.")
+week one: Some("shop.customers receives about 0.1 writes a day; each one will also update this index.")
+short none: Some("shop.customers had no writes in the 10 h its counters cover, too short to say it gets none (a weekly job may not have run yet); each write it gets will also update this index.")
+short some: Some("shop.customers receives 700 writes in the 10 hours since the server last restarted; each one will also update this index.")
+reset none: Some("shop.orders had no writes in what its counters cover, which may be short: performance_schema's counters start over when they are reset, and a weekly job may not have run since; each write it gets will also update this index.")"#;

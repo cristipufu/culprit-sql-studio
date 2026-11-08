@@ -3,7 +3,7 @@ use culprit_core::{
     QueryStat, Severity, Snapshot, SubjectKind, Unit, format,
 };
 
-use culprit_core::Check;
+use culprit_core::{Check, t};
 
 use crate::support::*;
 
@@ -62,36 +62,24 @@ pub(crate) fn widen_index(snapshot: &Snapshot, existing: &IndexStat, include: &[
         return Widening::Sql(bring_back(snapshot, existing, &add));
     }
     if add.is_empty() {
-        return Widening::Refused(format!(
-            "{} already has these keys and includes {}.",
-            existing.name,
-            format::list(include)
+        return Widening::Refused(t!(
+            "common.widen_index.held",
+            index = &existing.name,
+            columns = format::list(include)
         ));
     }
     if existing.is_clustered {
-        return Widening::Refused(format!(
-            "{} is the table's clustered index: it already holds every column, so there is nothing to include in it.",
-            existing.name
-        ));
+        return Widening::Refused(t!("common.widen_index.clustered", index = &existing.name));
     }
     if existing.is_primary_key {
-        return Widening::Refused(format!(
-            "{} enforces the primary key, and SQL Server won't change a constraint's index to include columns.",
-            existing.name
-        ));
+        return Widening::Refused(t!("common.widen_index.primary_key", index = &existing.name));
     }
     if engine != Engine::Mssql {
         return Widening::Refused(match engine {
-            Engine::Yugabyte => format!(
-                "YSQL cannot add included columns to {} in place; build a separate covering index and verify its distributed cost.",
-                existing.name
-            ),
-            Engine::Postgres => format!(
-                "PostgreSQL can't add included columns to {} in place; a new index has to be built.",
-                existing.name
-            ),
+            Engine::Yugabyte => t!("common.widen_index.yugabyte", index = &existing.name),
+            Engine::Postgres => t!("common.widen_index.postgres", index = &existing.name),
             Engine::Mssql | Engine::Mysql | Engine::Sqlite => {
-                format!("{} has no included columns: an index there holds only its keys.", snapshot.server.name())
+                t!("common.widen_index.no_include", engine = snapshot.server.name())
             }
         });
     }
@@ -118,39 +106,20 @@ pub(crate) fn widen_index(snapshot: &Snapshot, existing: &IndexStat, include: &[
         all_include.join(", "),
         options.join(", ")
     );
-    let mut summary = if existing.is_disabled {
-        format!(
-            "{} has the right keys but is disabled, so SQL Server neither maintains nor reads it. Rebuilding it brings it \
-             back, with {} included so it covers the query; if it was disabled because nothing read it, the queries \
-             below now would.",
-            existing.name,
-            format::list(&add)
-        )
+    let columns = format::list(&add);
+    let mut summary = vec![if existing.is_disabled {
+        t!("common.widen_index.disabled", index = &existing.name, columns = &columns)
     } else {
-        format!(
-            "{} already has the right keys but makes every matching row go back to the table for {}. Rebuild it with \
-             those columns included so it covers the query.",
-            existing.name,
-            format::list(&add)
-        )
-    };
-    summary.push_str(
-        " The statement keeps its keys, their order, its filter and the columns it already includes; restate \
-         DATA_COMPRESSION, FILLFACTOR or its partition scheme in it if the index uses them.",
-    );
+        t!("common.widen_index.lookups", index = &existing.name, columns = &columns)
+    }];
+    summary.push(t!("common.widen_index.keeps"));
     if existing.is_unique {
-        summary.push_str(&format!(
-            " It stays unique. If {} enforces a UNIQUE constraint rather than being a unique index, SQL Server refuses \
-             the rebuild (error 1907): create a separate index with these keys and included columns instead.",
-            existing.name
-        ));
+        summary.push(t!("common.widen_index.unique", index = &existing.name));
     }
     Widening::Sql(Fix {
-        summary,
+        summary: summary.join(" "),
         sql: Some(sql),
-        cost: existing.size_bytes.map(|b| {
-            format!("The index grows from {}; writes that touch the included columns maintain it.", format::bytes(b))
-        }),
+        cost: existing.size_bytes.map(|b| t!("common.widen_index.cost", size = format::bytes(b))),
     })
 }
 
@@ -175,54 +144,46 @@ fn bring_back(snapshot: &Snapshot, existing: &IndexStat, wanted: &[String]) -> F
     let target = qualified(engine, &existing.schema, &existing.table);
     let name = quote(engine, &existing.name);
 
+    let index = &existing.name;
     let (sql, how) = match engine {
         Engine::Yugabyte => (
             format!("REINDEX INDEX {};", qualified(engine, &existing.schema, &existing.name)),
-            "the DocDB index is not valid yet; check backfill progress on every node before repairing a failed build, and let an active backfill finish",
+            t!("common.bring_back.yugabyte", index = index),
         ),
         Engine::Mssql => {
             // SQL Server can't rebuild a disabled clustered index online.
             let online = supports_online_index(snapshot) && !existing.is_clustered;
             (
                 format!("ALTER INDEX {name} ON {target} REBUILD{};", if online { " WITH (ONLINE = ON)" } else { "" }),
-                "it is disabled, so SQL Server neither maintains nor reads it. Rebuilding it brings it back as it was",
+                t!("common.bring_back.mssql", index = index),
             )
         }
         Engine::Postgres if culprit_core::version_at_least(&snapshot.server.version, [12, 0, 0]) => (
             format!("REINDEX INDEX CONCURRENTLY {};", qualified(engine, &existing.schema, &existing.name)),
-            "it is invalid (a build that didn't finish), so PostgreSQL never reads it. Rebuilding it makes it usable",
+            t!("common.bring_back.postgres", index = index),
         ),
         Engine::Postgres => (
             format!("REINDEX INDEX {};", qualified(engine, &existing.schema, &existing.name)),
-            "it is invalid (a build that didn't finish), so PostgreSQL never reads it. Rebuilding it makes it usable \
-             (this version can't rebuild concurrently: writes to the table wait meanwhile)",
+            t!("common.bring_back.postgres_not_concurrently", index = index),
         ),
         Engine::Mysql if snapshot.server.is_mariadb() => (
             format!("ALTER TABLE {target} ALTER INDEX {name} NOT IGNORED;"),
-            "the optimizer is told to ignore it. Letting it use the index again is instant",
+            t!("common.bring_back.mariadb", index = index),
         ),
-        Engine::Mysql => (
-            format!("ALTER TABLE {target} ALTER INDEX {name} VISIBLE;"),
-            "it is invisible to the optimizer. Making it visible again is instant",
-        ),
+        Engine::Mysql => {
+            (format!("ALTER TABLE {target} ALTER INDEX {name} VISIBLE;"), t!("common.bring_back.mysql", index = index))
+        }
         // SQLite has no disabled or invisible indexes: rebuilding is all there is.
         Engine::Sqlite => (
             format!("REINDEX {};", qualified(engine, &existing.schema, &existing.name)),
-            "rebuilding it is all SQLite offers",
+            t!("common.bring_back.sqlite", index = index),
         ),
     };
-    let mut summary = format!(
-        "{} has these keys, but {how}; if it was set aside because nothing read it, the queries below now would.",
-        existing.name
-    );
+    let mut summary = vec![how];
     if !wanted.is_empty() {
-        summary.push_str(&format!(
-            " It doesn't include {}; once it's back, the optimizer says whether it still wants {}.",
-            format::list(wanted),
-            if wanted.len() == 1 { "it" } else { "them" }
-        ));
+        summary.push(t!("common.bring_back.wanted", n = wanted.len(), columns = format::list(wanted)));
     }
-    Fix { summary, sql: (engine != Engine::Yugabyte).then_some(sql), cost: None }
+    Fix { summary: summary.join(" "), sql: (engine != Engine::Yugabyte).then_some(sql), cost: None }
 }
 
 /// [`widen_index`] as a fix: the statement, or, where none is safe, the sentence that says why and no SQL.
@@ -277,7 +238,7 @@ pub(crate) fn new_index_fix(
 /// What an index to add costs the table's writes, for a fix whose SQL creates it ("this index"). A fix that only says
 /// to add one, with no SQL, names it [`write_cost_of`]'s way: "this index" is said only beside the SQL that creates it.
 pub(crate) fn write_cost(snapshot: &Snapshot, schema: &str, table: &str) -> Option<String> {
-    write_cost_of(snapshot, schema, table, "this index")
+    write_cost_of(snapshot, schema, table, &t!("common.write_cost.this_index"))
 }
 
 /// [`write_cost`], with the index named as the fix names it: "this index" beside SQL that creates it, "any index you
@@ -289,29 +250,26 @@ pub(crate) fn write_cost_of(snapshot: &Snapshot, schema: &str, table: &str, inde
     let reset = crate::support::counters_may_be_reset(snapshot);
     // No writes says the table gets none only after a week of counters (`watched_long_enough`: on counters that may
     // have been reset, a week of the digests'): a weekly job has had its chance to run.
+    let name = format!("{schema}.{table}");
     if writes <= 0.0 && watched_long_enough(snapshot) {
-        return Some(format!(
-            "{schema}.{table} received no writes {}, so {index} would cost next to nothing to maintain.",
-            since_phrase(snapshot)
-        ));
+        return Some(t!("common.write_cost.none", table = name, since = since_phrase(snapshot), index = index));
     }
     if writes <= 0.0 && reset {
-        return Some(format!(
-            "{schema}.{table} had no writes in what its counters cover, which may be short: performance_schema's \
-             counters start over when they are reset, and a weekly job may not have run since; each write it gets will \
-             also update {index}.",
-        ));
+        return Some(t!("common.write_cost.none_maybe_reset", table = name, index = index));
     }
     if writes <= 0.0 {
-        return Some(format!(
-            "{schema}.{table} had no writes in the {} its counters cover, too short to say it gets none (a weekly job \
-             may not have run yet); each write it gets will also update {index}.",
-            format::duration(days * 86_400_000.0)
+        return Some(t!(
+            "common.write_cost.none_too_short",
+            table = name,
+            span = format::duration(days * 86_400_000.0),
+            index = index
         ));
     }
-    Some(format!(
-        "{schema}.{table} receives {}; each one will also update {index}.",
-        how_many(snapshot, writes, days, culprit_core::key!("common.noun.write"))
+    Some(t!(
+        "common.write_cost.some",
+        table = name,
+        how_many = how_many(snapshot, writes, days, culprit_core::key!("common.noun.write")),
+        index = index
     ))
 }
 
