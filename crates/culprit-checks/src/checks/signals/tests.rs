@@ -761,9 +761,9 @@ fn bloat_needs_size_and_share() {
     t.data_bytes = Some(4.0 * GB);
     t.storage = Some(TableStorage { bloat_bytes: Some(2.4 * GB), ..Default::default() });
     let name = t.name.clone();
-    assert_eq!(table_bloat(&s)[0].title, format!("{name} is about 60% empty space (≈ 2.4 GB)"));
+    assert_eq!(TableBloatCheck.run(&s)[0].title, format!("{name} is about 60% empty space (≈ 2.4 GB)"));
     s.tables[0].storage.as_mut().unwrap().bloat_bytes = Some(50.0 * MB);
-    assert!(table_bloat(&s).is_empty());
+    assert!(TableBloatCheck.run(&s).is_empty());
 }
 
 /// The demo's support tickets (its events on PostgreSQL) made into a table of 9.7K rows taking 2.9 GB, almost all
@@ -1014,7 +1014,7 @@ fn bloated_default_partition_is_flagged() {
     part.data_bytes = Some(120.0 * MB);
     part.storage = Some(TableStorage { options: vec!["partition_bound=DEFAULT".into()], ..Default::default() });
     s.tables.push(part);
-    let out = table_bloat(&s);
+    let out = TableBloatCheck.run(&s);
     let f = out.iter().find(|f| f.id.starts_with("table-bloat:default-partition:")).expect("default partition finding");
     assert!(f.title.contains("DEFAULT partition events_default holds 250K rows"), "{}", f.title);
     assert!(f.summary.contains("ACCESS EXCLUSIVE lock"), "{}", f.summary);
@@ -1032,7 +1032,7 @@ fn expiring_range_partition_is_flagged_unless_default_exists() {
         ..Default::default()
     });
     s.tables.push(oct);
-    let out = table_bloat(&s);
+    let out = TableBloatCheck.run(&s);
     let f = out
         .iter()
         .find(|f| f.id == "table-bloat:expiring-partition:public.events")
@@ -1046,7 +1046,7 @@ fn expiring_range_partition_is_flagged_unless_default_exists() {
     def.partition_of = Some("public.events".into());
     def.storage = Some(TableStorage { options: vec!["partition_bound=DEFAULT".into()], ..Default::default() });
     s.tables.push(def);
-    assert!(!table_bloat(&s).iter().any(|f| f.id == "table-bloat:expiring-partition:public.events"));
+    assert!(!TableBloatCheck.run(&s).iter().any(|f| f.id == "table-bloat:expiring-partition:public.events"));
 
     // MySQL and SQL Server parent-level VALUES LESS THAN range partitions are also checked via sequence_capacity.
     let mut mysql = snapshot_with(Engine::Mysql);
@@ -1255,7 +1255,7 @@ fn large_btree_index_on_append_only_postgres_time_series_table_recommends_brin()
     idx.size_bytes = Some(420.0 * MB);
     s.indexes.push(idx);
 
-    let out = table_bloat(&s);
+    let out = TableBloatCheck.run(&s);
     let f = out
         .iter()
         .find(|f| f.id == "table-bloat:brin-candidate:public.audit_events.ix_audit_events_created_at")

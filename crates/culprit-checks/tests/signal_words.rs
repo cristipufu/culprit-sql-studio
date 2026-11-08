@@ -2801,3 +2801,196 @@ fix: The rows of support_tickets average 309 KB, almost all of it large values, 
 verify: Re-scan: its share of the transaction log and the bytes per row should drop."#,
     );
 }
+
+// ── table-bloat ────────────────────────────────────────────────────────────────────────────────────
+
+fn storage(options: &[&str]) -> Option<culprit_core::TableStorage> {
+    Some(culprit_core::TableStorage { options: options.iter().map(|o| o.to_string()).collect(), ..Default::default() })
+}
+
+/// A copy of `s`'s first table named `name`, a partition of `parent` bounded by `bound`.
+fn partition(s: &Snapshot, name: &str, parent: &str, bound: &str) -> culprit_core::TableStat {
+    let mut part = s.tables[0].clone();
+    part.name = name.into();
+    part.partition_of = Some(parent.into());
+    part.storage = storage(&[&format!("partition_bound={bound}")]);
+    part
+}
+
+#[test]
+fn bloated_tables() {
+    const GB: f64 = 1024.0 * MB;
+    let mut s = fixture("postgres-demo");
+    let events = s.tables.iter_mut().find(|t| t.name == "events").unwrap();
+    (events.data_bytes, events.dead_rows) = (Some(3.0 * GB), None);
+    events.storage = Some(culprit_core::TableStorage { bloat_bytes: Some(1.5 * GB), ..Default::default() });
+    let orders = s.tables.iter_mut().find(|t| t.name == "orders").unwrap();
+    (orders.data_bytes, orders.rows, orders.dead_rows) = (Some(400.0 * MB), Some(1_000.0), Some(1_000.0));
+    orders.storage = Some(culprit_core::TableStorage { bloat_bytes: Some(200.0 * MB), ..Default::default() });
+    says(
+        &run("table-bloat", &s),
+        r#"id: table-bloat:public.events
+title: events is about 50% empty space (≈ 1.5 GB)
+summary: From its row count and average row width, events's rows need about 1.5 GB; it takes 3.0 GB. New rows reuse freed space, but every scan still reads the empty pages, and the cache holds them. This is an estimate from statistics, good to tens of percent; pgstattuple measures it exactly.
+impact: ≈ 1.5 GB empty
+metric: Empty space (estimated)
+metric: Table size
+metric: Share
+fix: Measure it exactly first. To give the space back, rewrite the table: pg_repack does it online; VACUUM FULL does it while blocking all reads and writes. If the table keeps growing, make autovacuum visit it more often so freed space is reused sooner.
+cost: Rewrites the table
+sql: -- Exact numbers (needs the pgstattuple extension)
+SELECT * FROM pgstattuple('public.events');
+-- Rewrite offline: blocks reads and writes until it finishes
+-- VACUUM (FULL, ANALYZE) public.events;
+verify: Re-scan after the rewrite: the estimate should fall under 20%.
+
+id: table-bloat:public.orders
+title: orders is about 50% empty space (≈ 200 MB)
+summary: From its row count and average row width, orders's rows need about 200 MB; it takes 400 MB. New rows reuse freed space, but every scan still reads the empty pages, and the cache holds them. This is an estimate from statistics, good to tens of percent; pgstattuple measures it exactly. 50% of its row versions are dead rows VACUUM hasn't cleared yet, enough to be most of this space: vacuum it first and estimate again before rewriting it.
+impact: ≈ 200 MB empty
+metric: Empty space (estimated)
+metric: Table size
+metric: Share
+fix: Vacuum it: VACUUM clears the dead rows without blocking reads or writes, and new rows then reuse their space. Make autovacuum visit it sooner so they don't pile up again. Rewrite the table (pg_repack online, VACUUM FULL offline) only if the estimate stays high after a vacuum.
+cost: VACUUM doesn't block reads or writes
+sql: VACUUM (ANALYZE) public.orders;
+verify: Re-scan after the rewrite: the estimate should fall under 20%."#,
+    );
+}
+
+#[test]
+fn default_partitions_that_hold_rows() {
+    const GB: f64 = 1024.0 * MB;
+    let mut s = fixture("postgres-demo");
+    for (name, rows, bytes) in [("events_default", 250_000.0, 120.0 * MB), ("orders_default", 2_000_000.0, 2.0 * GB)] {
+        let mut part = partition(&s, name, &format!("public.{}", name.trim_end_matches("_default")), "DEFAULT");
+        (part.rows, part.data_bytes, part.total_bytes) = (Some(rows), Some(bytes), None);
+        s.tables.push(part);
+    }
+    let mut empty_size = partition(&s, "items_default", "public.order_items", "DEFAULT");
+    (empty_size.rows, empty_size.data_bytes, empty_size.total_bytes) = (Some(150_000.0), None, None);
+    s.tables.push(empty_size);
+    says(
+        &run("table-bloat", &s),
+        r#"id: table-bloat:default-partition:public.orders_default
+title: DEFAULT partition orders_default holds 2.0M rows (2.0 GB)
+summary: orders_default is the DEFAULT partition of public.orders, and holds 2.0M rows (2.0 GB). Rows whose partition key has no matching partition land here — often when scheduled partition creation falls behind. In PostgreSQL, adding or attaching a new partition on public.orders scans the DEFAULT partition under an ACCESS EXCLUSIVE lock and fails if any rows in orders_default belong in the new partition's range.
+impact: 2.0 GB in DEFAULT
+metric: Rows in DEFAULT partition
+metric: Size
+fix: Create the missing partitions on public.orders, move the matching rows out of orders_default into them (or detach orders_default, split its rows, and re-attach), and check the job that creates future partitions ahead of time.
+cost: Moving rows or attaching partitions locks the affected partitions.
+verify: Re-scan after moving the rows out: orders_default should be empty or small.
+
+id: table-bloat:default-partition:public.events_default
+title: DEFAULT partition events_default holds 250K rows (120 MB)
+summary: events_default is the DEFAULT partition of public.events, and holds 250K rows (120 MB). Rows whose partition key has no matching partition land here — often when scheduled partition creation falls behind. In PostgreSQL, adding or attaching a new partition on public.events scans the DEFAULT partition under an ACCESS EXCLUSIVE lock and fails if any rows in events_default belong in the new partition's range.
+impact: 120 MB in DEFAULT
+metric: Rows in DEFAULT partition
+metric: Size
+fix: Create the missing partitions on public.events, move the matching rows out of events_default into them (or detach events_default, split its rows, and re-attach), and check the job that creates future partitions ahead of time.
+cost: Moving rows or attaching partitions locks the affected partitions.
+verify: Re-scan after moving the rows out: events_default should be empty or small.
+
+id: table-bloat:default-partition:public.items_default
+title: DEFAULT partition items_default holds 150K rows
+summary: items_default is the DEFAULT partition of public.order_items, and holds 150K rows. Rows whose partition key has no matching partition land here — often when scheduled partition creation falls behind. In PostgreSQL, adding or attaching a new partition on public.order_items scans the DEFAULT partition under an ACCESS EXCLUSIVE lock and fails if any rows in items_default belong in the new partition's range.
+impact: 150K rows in DEFAULT
+metric: Rows in DEFAULT partition
+fix: Create the missing partitions on public.order_items, move the matching rows out of items_default into them (or detach items_default, split its rows, and re-attach), and check the job that creates future partitions ahead of time.
+cost: Moving rows or attaching partitions locks the affected partitions.
+verify: Re-scan after moving the rows out: items_default should be empty or small."#,
+    );
+}
+
+#[test]
+fn range_partitions_about_to_end_or_ended() {
+    let mut s = fixture("postgres-demo");
+    let parts = [
+        partition(&s, "events_2026_09", "public.events", "FOR VALUES FROM ('2026-09-01') TO ('2026-10-01')"),
+        partition(&s, "events_2026_10", "public.events", "FOR VALUES FROM ('2026-10-01') TO ('2026-10-15')"),
+        partition(&s, "orders_2026_10", "public.orders", "FOR VALUES FROM ('2026-10-01') TO ('2026-10-08')"),
+        partition(&s, "items_2026_10", "public.order_items", "FOR VALUES FROM ('2026-10-01') TO ('2026-10-12')"),
+    ];
+    s.tables.extend(parts);
+    says(
+        &run("table-bloat", &s),
+        r#"id: table-bloat:expiring-partition:public.order_items
+title: order_items's last partition (items_2026_10) ends on 2026-10-12 (in 12 h 6 min)
+summary: public.order_items has 1 range partition and no DEFAULT or MAXVALUE partition. Its latest partition (items_2026_10) covers values up to '2026-10-12': once timestamps reach '2026-10-12', INSERTs into public.order_items will fail with a partition-routing error.
+impact: ends in 12 h 6 min
+metric: Partitions
+metric: Days until upper bound
+fix: Create the next range partition(s) on public.order_items covering values from '2026-10-12' onward, and check the scheduled job or partition manager that pre-creates future partitions.
+cost: Creating a new empty partition is fast metadata DDL.
+verify: Re-scan after creating future partitions: public.order_items's highest partition bound should be more than 7 days ahead.
+
+id: table-bloat:expiring-partition:public.orders
+title: orders's last partition (orders_2026_10) ended on 2026-10-08
+summary: public.orders has 1 range partition and no DEFAULT or MAXVALUE partition. Its latest partition (orders_2026_10) covers values up to '2026-10-08': once timestamps reach '2026-10-08', INSERTs into public.orders will fail with a partition-routing error.
+impact: ended 2026-10-08
+metric: Partitions
+metric: Days until upper bound
+fix: Create the next range partition(s) on public.orders covering values from '2026-10-08' onward, and check the scheduled job or partition manager that pre-creates future partitions.
+cost: Creating a new empty partition is fast metadata DDL.
+verify: Re-scan after creating future partitions: public.orders's highest partition bound should be more than 7 days ahead.
+
+id: table-bloat:expiring-partition:public.events
+title: events's last partition (events_2026_10) ends on 2026-10-15 (in 3.5 days)
+summary: public.events has 2 range partitions and no DEFAULT or MAXVALUE partition. Its latest partition (events_2026_10) covers values up to '2026-10-15': once timestamps reach '2026-10-15', INSERTs into public.events will fail with a partition-routing error.
+impact: ends in 3.5 days
+metric: Partitions
+metric: Days until upper bound
+fix: Create the next range partition(s) on public.events covering values from '2026-10-15' onward, and check the scheduled job or partition manager that pre-creates future partitions.
+cost: Creating a new empty partition is fast metadata DDL.
+verify: Re-scan after creating future partitions: public.events's highest partition bound should be more than 7 days ahead."#,
+    );
+}
+
+#[test]
+fn a_brin_index_for_an_append_only_time_column() {
+    const GB: f64 = 1024.0 * MB;
+    let mut s = fixture("postgres-demo");
+    let t = s.tables.iter_mut().find(|t| t.name == "customers").unwrap();
+    (t.rows, t.data_bytes, t.dead_rows) = (Some(6_000_000.0), Some(600.0 * MB), Some(0.0));
+    (t.inserts, t.updates, t.deletes) = (Some(1_000_000.0), Some(0.0), Some(0.0));
+    let (schema, table) = (t.schema.clone(), t.name.clone());
+    let mut index = s.indexes.iter().find(|i| i.table == table).unwrap().clone();
+    index.name = "customers_created_at_idx".into();
+    index.columns = vec!["created_at".into()];
+    (index.is_unique, index.is_primary_key, index.is_disabled) = (false, false, false);
+    (index.filter, index.opclasses, index.partition_of) = (None, None, None);
+    index.include.clear();
+    (index.kind, index.reads, index.size_bytes) = ("btree".into(), Some(100.0), Some(2.0 * GB));
+    s.indexes.push(index);
+    let mut small = s.indexes.last().unwrap().clone();
+    (small.name, small.size_bytes) = ("customers_created_at_small_idx".into(), Some(200.0 * MB));
+    s.indexes.push(small);
+    let _ = schema;
+    says(
+        &run("table-bloat", &s),
+        r#"id: table-bloat:brin-candidate:public.customers.customers_created_at_idx
+title: customers_created_at_idx on append-only customers takes 2.0 GB as a B-tree (a BRIN index would take < 1%)
+summary: customers holds 6.0M rows (600 MB) and its recorded writes are 100% inserts (1.0M inserts vs 0 updates/deletes). customers_created_at_idx is a 2.0 GB B-tree index on `created_at`: because rows in an append-only table are stored on heap pages in roughly `created_at` order, a Block Range Index (BRIN) on `created_at` stores only the minimum and maximum timestamp per page range — taking kilobytes instead of 2.0 GB while still skipping non-matching heap blocks on time-range queries.
+impact: 2.0 GB B-tree on append-only time column
+metric: B-tree index size
+metric: Table rows
+metric: Inserts
+fix: If `created_at` is queried by time ranges rather than point lookups and rows are inserted in timestamp order, build a BRIN index concurrently and verify with `EXPLAIN` that range queries use a Bitmap Index Scan on it before retiring `customers_created_at_idx`.
+cost: CONCURRENTLY scans the table without blocking reads or writes; the resulting BRIN index is tiny.
+sql: CREATE INDEX CONCURRENTLY ix_customers_created_at_brin ON public.customers USING brin (created_at);
+verify: Re-scan after building `ix_customers_created_at_brin`: verify time-range queries use it before dropping `customers_created_at_idx`.
+
+id: table-bloat:brin-candidate:public.customers.customers_created_at_small_idx
+title: customers_created_at_small_idx on append-only customers takes 200 MB as a B-tree (a BRIN index would take < 1%)
+summary: customers holds 6.0M rows (600 MB) and its recorded writes are 100% inserts (1.0M inserts vs 0 updates/deletes). customers_created_at_small_idx is a 200 MB B-tree index on `created_at`: because rows in an append-only table are stored on heap pages in roughly `created_at` order, a Block Range Index (BRIN) on `created_at` stores only the minimum and maximum timestamp per page range — taking kilobytes instead of 200 MB while still skipping non-matching heap blocks on time-range queries.
+impact: 200 MB B-tree on append-only time column
+metric: B-tree index size
+metric: Table rows
+metric: Inserts
+fix: If `created_at` is queried by time ranges rather than point lookups and rows are inserted in timestamp order, build a BRIN index concurrently and verify with `EXPLAIN` that range queries use a Bitmap Index Scan on it before retiring `customers_created_at_small_idx`.
+cost: CONCURRENTLY scans the table without blocking reads or writes; the resulting BRIN index is tiny.
+sql: CREATE INDEX CONCURRENTLY ix_customers_created_at_brin ON public.customers USING brin (created_at);
+verify: Re-scan after building `ix_customers_created_at_brin`: verify time-range queries use it before dropping `customers_created_at_small_idx`."#,
+    );
+}

@@ -6,15 +6,21 @@ use crate::evidence::Requirement as Evidence;
 pub fn table_bloat_info() -> CheckInfo {
     CheckInfo {
         id: "table-bloat".into(),
-        title: "Tables that are mostly empty space".into(),
+        title: t!("check.table_bloat.info.title"),
         category: Category::Maintenance,
         engines: vec![Engine::Postgres],
         requires: vec![],
-        description: "Tables whose pages hold far fewer rows than they could, estimated from row counts and column widths in pg_stats (no extension needed). Every scan still reads the empty space.".into(),
+        description: t!("check.table_bloat.info.description"),
     }
 }
 
-check!(TableBloatCheck: table_bloat_info, table_bloat, &[Evidence::Tables(crate::evidence::TableMeasure::Bloat)]);
+check!(
+    TableBloatCheck: table_bloat_info,
+    decide = table_bloat,
+    render = table_bloat_finding,
+    case<'s> = TableBloat<'s>,
+    evidence = &[Evidence::Tables(crate::evidence::TableMeasure::Bloat)],
+);
 
 pub(super) fn table_heap_bytes(t: &TableStat) -> Option<f64> {
     t.data_bytes.or(t.total_bytes).filter(|b| *b > 0.0)
@@ -24,8 +30,72 @@ pub(super) fn table_heap_bytes(t: &TableStat) -> Option<f64> {
 /// share: the estimate is good to tens of percent.
 pub(crate) const DEAD_EXPLAINS_BLOAT: f64 = 0.9;
 
-pub fn table_bloat(snapshot: &Snapshot) -> Vec<Finding> {
-    let mut findings: Vec<Finding> = snapshot
+/// What table-bloat finds: a table that is mostly empty space, a DEFAULT partition that holds rows, a range-partitioned
+/// table about to run out of partitions, or a large B-tree a BRIN index could replace.
+pub enum TableBloat<'s> {
+    Bloated(Bloated<'s>),
+    DefaultPartition(DefaultPartition<'s>),
+    Expiring(ExpiringPartition),
+    Brin(BrinCandidate<'s>),
+}
+
+impl TableBloat<'_> {
+    fn severity(&self) -> Severity {
+        match self {
+            TableBloat::Bloated(b) => b.severity,
+            TableBloat::DefaultPartition(d) => d.severity,
+            TableBloat::Expiring(e) => e.severity,
+            TableBloat::Brin(b) => b.severity,
+        }
+    }
+}
+
+/// A table estimated 40% or more empty space (100 MB or more), or 30% of a gigabyte or more.
+pub struct Bloated<'s> {
+    table: &'s TableStat,
+    bloat: f64,
+    size: f64,
+    share: f64,
+    /// The share of its row versions that are dead, when they explain the empty space: VACUUM is the fix.
+    dead: Option<f64>,
+    severity: Severity,
+}
+
+/// A DEFAULT partition holding 100,000 rows or 100 MB or more.
+pub struct DefaultPartition<'s> {
+    table: &'s TableStat,
+    parent: &'s str,
+    rows: f64,
+    size: f64,
+    severity: Severity,
+}
+
+/// A range-partitioned table whose last partition ends within a week, or ended within one, with no DEFAULT or MAXVALUE
+/// partition to catch what comes after.
+pub struct ExpiringPartition {
+    parent: String,
+    parts: usize,
+    last_part: String,
+    bound_literal: String,
+    days_remaining: f64,
+    severity: Severity,
+}
+
+/// A large single-column B-tree on an append-only table's time column, which a BRIN index could replace.
+pub struct BrinCandidate<'s> {
+    table: &'s TableStat,
+    index: &'s IndexStat,
+    column: &'s str,
+    rows: f64,
+    size: f64,
+    index_bytes: f64,
+    inserts: f64,
+    changes: f64,
+    severity: Severity,
+}
+
+fn table_bloat(snapshot: &Snapshot) -> Vec<TableBloat<'_>> {
+    let mut bloated: Vec<Bloated<'_>> = snapshot
         .tables
         .iter()
         .filter_map(|t| {
@@ -34,65 +104,83 @@ pub fn table_bloat(snapshot: &Snapshot) -> Vec<Finding> {
             let share = (bloat / size).min(1.0);
             ((bloat >= 100.0 * MB && share >= 0.4) || (bloat >= GB && share >= 0.3)).then_some((t, bloat, size, share))
         })
-        .map(|(t, bloat, size, share)| {
-            let name = t.qualified();
-            let mut f = finding("table-bloat", &name, Category::Maintenance, subject(SubjectKind::Table, &name));
-            f.title = format!("{} is about {} empty space (≈ {})", t.name, format::percent(share), format::bytes(bloat));
-            f.facts.bloat = Some(culprit_core::FindingBloat {bytes:bloat,share});
+        .map(|(table, bloat, size, share)| {
             // The estimate counts every byte beyond the live rows, dead rows VACUUM hasn't cleared yet included. When
             // they account for it, VACUUM is the fix, not a rewrite.
-            let dead = dead_share(t).filter(|d| *d >= share * DEAD_EXPLAINS_BLOAT);
-            f.summary = format!(
-                "From its row count and average row width, {}'s rows need about {}; it takes {}. New rows reuse freed space, but every scan still reads the empty pages, and the cache holds them. This is an estimate from statistics, good to tens of percent; pgstattuple measures it exactly.{}",
-                t.name,
-                format::bytes((size - bloat).max(0.0)),
-                format::bytes(size),
-                dead.map(|d| format!(
-                    " {} of its row versions are dead rows VACUUM hasn't cleared yet, enough to be most of this space: vacuum it first and estimate again before rewriting it.",
-                    format::percent(d)
-                ))
-                .unwrap_or_default()
-            );
-            f.severity = if bloat >= GB && dead.is_none() { Severity::Medium } else { Severity::Low };
-            severity_score(&mut f);
-            f.impact.label = format!("≈ {} empty", format::bytes(bloat));
-            f.confidence = Confidence::Medium;
-            f.metrics = vec![
-                Metric::new("Empty space (estimated)", bloat, Unit::Bytes),
-                Metric::new("Table size", size, Unit::Bytes),
-                Metric::new("Share", share, Unit::Ratio),
-            ];
-            let target = qualified(Engine::Postgres, &t.schema, &t.name);
-            f.fix = Some(if dead.is_some() {
-                Fix {
-                    summary: "Vacuum it: VACUUM clears the dead rows without blocking reads or writes, and new rows then reuse their space. Make autovacuum visit it sooner so they don't pile up again. Rewrite the table (pg_repack online, VACUUM FULL offline) only if the estimate stays high after a vacuum.".into(),
-                    sql: Some(format!("VACUUM (ANALYZE) {target};")),
-                    cost: Some("VACUUM doesn't block reads or writes".into()),
-                }
-            } else {
-                Fix {
-                    summary: "Measure it exactly first. To give the space back, rewrite the table: pg_repack does it online; VACUUM FULL does it while blocking all reads and writes. If the table keeps growing, make autovacuum visit it more often so freed space is reused sooner.".into(),
-                    sql: Some(format!(
-                        "-- Exact numbers (needs the pgstattuple extension)\nSELECT * FROM pgstattuple('{}');\n-- Rewrite offline: blocks reads and writes until it finishes\n-- VACUUM (FULL, ANALYZE) {target};",
-                        target.replace('\'', "''")
-                    )),
-                    cost: Some("Rewrites the table".into()),
-                }
-            });
-            f.verify = vec!["Re-scan after the rewrite: the estimate should fall under 20%.".into()];
-            f
+            let dead = dead_share(table).filter(|d| *d >= share * DEAD_EXPLAINS_BLOAT);
+            let severity = if bloat >= GB && dead.is_none() { Severity::Medium } else { Severity::Low };
+            Bloated { table, bloat, size, share, dead, severity }
         })
         .collect();
-    findings.sort_by(|a, b| b.impact.score.total_cmp(&a.impact.score));
-    findings.truncate(5);
-    findings.extend(default_partitions(snapshot));
-    findings.extend(expiring_range_partitions(snapshot));
-    findings.extend(brin_opportunities(snapshot));
-    findings.sort_by(|a, b| b.impact.score.total_cmp(&a.impact.score));
-    findings
+    bloated.sort_by(|a, b| base_score(b.severity).total_cmp(&base_score(a.severity)));
+    bloated.truncate(5);
+    let mut cases: Vec<TableBloat<'_>> = bloated.into_iter().map(TableBloat::Bloated).collect();
+    cases.extend(default_partitions(snapshot).into_iter().map(TableBloat::DefaultPartition));
+    cases.extend(expiring_partitions(snapshot).into_iter().map(TableBloat::Expiring));
+    cases.extend(brin_opportunities(snapshot).into_iter().map(TableBloat::Brin));
+    cases.sort_by(|a, b| base_score(b.severity()).total_cmp(&base_score(a.severity())));
+    cases
 }
 
-pub(crate) fn expiring_range_partitions(snapshot: &Snapshot) -> Vec<Finding> {
+fn table_bloat_finding(snapshot: &Snapshot, case: TableBloat<'_>) -> Finding {
+    match case {
+        TableBloat::Bloated(b) => bloated_finding(b),
+        TableBloat::DefaultPartition(d) => default_partition_finding(d),
+        TableBloat::Expiring(e) => expiring_partition_finding(snapshot, e),
+        TableBloat::Brin(b) => brin_finding(b),
+    }
+}
+
+fn bloated_finding(b: Bloated<'_>) -> Finding {
+    let Bloated { table: t, bloat, size, share, dead, severity } = b;
+    let name = t.qualified();
+    let mut f = finding("table-bloat", &name, Category::Maintenance, subject(SubjectKind::Table, &name));
+    f.title =
+        t!("check.table_bloat.title", table = &t.name, share = format::percent(share), bloat = format::bytes(bloat));
+    f.facts.bloat = Some(culprit_core::FindingBloat { bytes: bloat, share });
+    let mut summary = vec![t!(
+        "check.table_bloat.summary.estimate",
+        table = &t.name,
+        needed = format::bytes((size - bloat).max(0.0)),
+        size = format::bytes(size)
+    )];
+    if let Some(d) = dead {
+        summary.push(t!("check.table_bloat.summary.dead", share = format::percent(d)));
+    }
+    f.summary = summary.join(" ");
+    f.severity = severity;
+    severity_score(&mut f);
+    f.impact.label = t!("check.table_bloat.impact", bloat = format::bytes(bloat));
+    f.confidence = Confidence::Medium;
+    f.metrics = vec![
+        Metric::new(t!("check.table_bloat.metric.empty"), bloat, Unit::Bytes),
+        Metric::new(t!("check.table_bloat.metric.size"), size, Unit::Bytes),
+        Metric::new(t!("check.table_bloat.metric.share"), share, Unit::Ratio),
+    ];
+    let target = qualified(Engine::Postgres, &t.schema, &t.name);
+    f.fix = Some(if dead.is_some() {
+        Fix {
+            summary: t!("check.table_bloat.fix.vacuum"),
+            sql: Some(format!("VACUUM (ANALYZE) {target};")),
+            cost: Some(t!("check.table_bloat.fix.vacuum_cost")),
+        }
+    } else {
+        Fix {
+            summary: t!("check.table_bloat.fix.rewrite"),
+            sql: Some(format!(
+                "-- Exact numbers (needs the pgstattuple extension)\nSELECT * FROM pgstattuple('{}');\n-- Rewrite offline: blocks reads and writes until it finishes\n-- VACUUM (FULL, ANALYZE) {target};",
+                target.replace('\'', "''")
+            )),
+            cost: Some(t!("check.table_bloat.fix.rewrite_cost")),
+        }
+    });
+    f.verify = vec![t!("check.table_bloat.verify")];
+    f
+}
+
+/// The range-partitioned tables whose last partition ends, or ended, within a week. sequence-capacity reports them on
+/// engines table-bloat doesn't run on.
+pub(crate) fn expiring_partitions(snapshot: &Snapshot) -> Vec<ExpiringPartition> {
     let Some(now_epoch) = parse_epoch_seconds(&snapshot.taken_at) else {
         return Vec::new();
     };
@@ -129,69 +217,80 @@ pub(crate) fn expiring_range_partitions(snapshot: &Snapshot) -> Vec<Finding> {
         .filter_map(|(parent, parts)| {
             let mut parsed = Vec::with_capacity(parts.len());
             for (part_name, bound) in &parts {
-                if bound.eq_ignore_ascii_case("default")
-                    || bound.to_ascii_uppercase().contains("MAXVALUE")
-                {
+                if bound.eq_ignore_ascii_case("default") || bound.to_ascii_uppercase().contains("MAXVALUE") {
                     return None;
                 }
                 let (literal, epoch) = parse_range_upper_bound(bound)?;
                 parsed.push((part_name.as_str(), literal, epoch));
             }
-            let (last_part, bound_literal, max_epoch) = parsed
-                .into_iter()
-                .max_by(|a, b| a.2.total_cmp(&b.2))?;
+            let (last_part, bound_literal, max_epoch) = parsed.into_iter().max_by(|a, b| a.2.total_cmp(&b.2))?;
             let days_remaining = (max_epoch - now_epoch) / 86_400.0;
             if !(-7.0..=7.0).contains(&days_remaining) {
                 return None;
             }
-            let parent_short = parent.rsplit('.').next().unwrap_or(&parent);
-            let bound_date = bound_literal.get(..10).unwrap_or(&bound_literal);
-            let mut f = finding(
-                "table-bloat",
-                &format!("expiring-partition:{parent}"),
-                Category::Maintenance,
-                subject(SubjectKind::Table, &parent),
-            );
-            if days_remaining > 0.0 {
-                f.title = format!(
-                    "{parent_short}'s last partition ({last_part}) ends on {bound_date} (in {})",
-                    format::days(days_remaining)
-                );
-                f.impact.label = format!("ends in {}", format::days(days_remaining));
-            } else {
-                f.title = format!(
-                    "{parent_short}'s last partition ({last_part}) ended on {bound_date}"
-                );
-                f.impact.label = format!("ended {bound_date}");
-            }
-            f.severity = if days_remaining <= 2.0 { Severity::High } else { Severity::Medium };
-            severity_score(&mut f);
-            f.confidence = Confidence::High;
-            f.summary = format!(
-                "{parent} has {} range {} and no DEFAULT or MAXVALUE partition. Its latest partition ({last_part}) \
-                 covers values up to '{bound_literal}': once timestamps reach '{bound_literal}', INSERTs into \
-                 {parent} will fail with a partition-routing error.",
-                parts.len(),
-                if parts.len() == 1 { "partition" } else { "partitions" },
-            );
-            f.metrics = vec![
-                Metric::new("Partitions", parts.len() as f64, Unit::Count),
-                Metric::new("Days until upper bound", days_remaining.max(0.0), Unit::Days),
-            ];
-            f.fix = Some(Fix {
-                summary: format!(
-                    "Create the next range partition(s) on {parent} covering values from '{bound_literal}' onward, \
-                     and check the scheduled job or partition manager that pre-creates future partitions."
-                ),
-                sql: None,
-                cost: Some("Creating a new empty partition is fast metadata DDL.".into()),
-            });
-            f.verify = vec![format!(
-                "Re-scan after creating future partitions: {parent}'s highest partition bound should be more than 7 days ahead."
-            )];
-            Some(f)
+            Some(ExpiringPartition {
+                last_part: last_part.to_string(),
+                parts: parts.len(),
+                parent,
+                bound_literal,
+                days_remaining,
+                severity: if days_remaining <= 2.0 { Severity::High } else { Severity::Medium },
+            })
         })
         .collect()
+}
+
+/// An expiring partition, worded. Its finding is table-bloat's, whichever check reports it.
+pub(crate) fn expiring_partition_finding(_: &Snapshot, e: ExpiringPartition) -> Finding {
+    let ExpiringPartition { parent, parts, last_part, bound_literal, days_remaining, severity } = e;
+    let parent_short = parent.rsplit('.').next().unwrap_or(&parent);
+    let bound_date = bound_literal.get(..10).unwrap_or(&bound_literal);
+    let mut f = finding(
+        "table-bloat",
+        &format!("expiring-partition:{parent}"),
+        Category::Maintenance,
+        subject(SubjectKind::Table, &parent),
+    );
+    if days_remaining > 0.0 {
+        f.title = t!(
+            "check.table_bloat.partition.title.ends",
+            parent = parent_short,
+            part = &last_part,
+            date = bound_date,
+            days = format::days(days_remaining)
+        );
+        f.impact.label = t!("check.table_bloat.partition.impact.ends", days = format::days(days_remaining));
+    } else {
+        f.title =
+            t!("check.table_bloat.partition.title.ended", parent = parent_short, part = &last_part, date = bound_date);
+        f.impact.label = t!("check.table_bloat.partition.impact.ended", date = bound_date);
+    }
+    f.severity = severity;
+    severity_score(&mut f);
+    f.confidence = Confidence::High;
+    f.summary = t!(
+        "check.table_bloat.partition.summary",
+        parent = &parent,
+        n = parts,
+        part = &last_part,
+        bound = &bound_literal
+    );
+    f.metrics = vec![
+        Metric::new(t!("check.table_bloat.partition.metric.partitions"), parts as f64, Unit::Count),
+        Metric::new(t!("check.table_bloat.partition.metric.days"), days_remaining.max(0.0), Unit::Days),
+    ];
+    f.fix = Some(Fix {
+        summary: t!("check.table_bloat.partition.fix", parent = &parent, bound = &bound_literal),
+        sql: None,
+        cost: Some(t!("check.table_bloat.partition.fix_cost")),
+    });
+    f.verify = vec![t!("check.table_bloat.partition.verify", parent = &parent)];
+    f
+}
+
+/// [`expiring_partitions`] worded: what sequence-capacity reports until it decides them itself.
+pub(crate) fn expiring_range_partitions(snapshot: &Snapshot) -> Vec<Finding> {
+    expiring_partitions(snapshot).into_iter().map(|e| expiring_partition_finding(snapshot, e)).collect()
 }
 
 fn parse_range_upper_bound(bound: &str) -> Option<(String, f64)> {
@@ -217,69 +316,6 @@ fn parse_range_upper_bound(bound: &str) -> Option<(String, f64)> {
     };
     Some((literal.to_string(), epoch))
 }
-
-fn default_partitions(snapshot: &Snapshot) -> Vec<Finding> {
-    snapshot
-        .tables
-        .iter()
-        .filter_map(|t| {
-            let parent = t.partition_of.as_deref()?;
-            let is_default = t.storage.as_ref().is_some_and(|s| s.is_default_partition());
-            if !is_default {
-                return None;
-            }
-            let rows = t.rows.or_else(|| t.storage.as_ref().and_then(|s| s.planner_rows)).unwrap_or(0.0);
-            let size = table_heap_bytes(t).unwrap_or(0.0);
-            if rows < 100_000.0 && size < 100.0 * MB {
-                return None;
-            }
-            let name = t.qualified();
-            let mut f = finding(
-                "table-bloat",
-                &format!("default-partition:{name}"),
-                Category::Maintenance,
-                subject(SubjectKind::Table, &name),
-            );
-            let size_note = if size > 0.0 { format!(" ({})", format::bytes(size)) } else { String::new() };
-            f.title = format!("DEFAULT partition {} holds {} rows{size_note}", t.name, format::count(rows));
-            f.severity = if rows >= 1_000_000.0 || size >= GB { Severity::Medium } else { Severity::Low };
-            severity_score(&mut f);
-            f.impact.label = if size > 0.0 {
-                format!("{} in DEFAULT", format::bytes(size))
-            } else {
-                format!("{} rows in DEFAULT", format::count(rows))
-            };
-            f.confidence = Confidence::High;
-            f.summary = format!(
-                "{} is the DEFAULT partition of {parent}, and holds {} rows{size_note}. Rows whose partition key has \
-                 no matching partition land here — often when scheduled partition creation falls behind. In PostgreSQL, \
-                 adding or attaching a new partition on {parent} scans the DEFAULT partition under an ACCESS EXCLUSIVE \
-                 lock and fails if any rows in {} belong in the new partition's range.",
-                t.name,
-                format::count(rows),
-                t.name
-            );
-            if rows > 0.0 {
-                f.metrics.push(Metric::new("Rows in DEFAULT partition", rows, Unit::Rows));
-            }
-            if size > 0.0 {
-                f.metrics.push(Metric::new("Size", size, Unit::Bytes));
-            }
-            f.fix = Some(Fix {
-                summary: format!(
-                    "Create the missing partitions on {parent}, move the matching rows out of {} into them (or detach \
-                     {}, split its rows, and re-attach), and check the job that creates future partitions ahead of time.",
-                    t.name, t.name
-                ),
-                sql: None,
-                cost: Some("Moving rows or attaching partitions locks the affected partitions.".into()),
-            });
-            f.verify = vec![format!("Re-scan after moving the rows out: {} should be empty or small.", t.name)];
-            Some(f)
-        })
-        .collect()
-}
-
 fn is_time_series_column(snapshot: &Snapshot, schema: &str, table: &str, col_name: &str) -> bool {
     if col_name.is_empty() || !col_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return false;
@@ -298,7 +334,71 @@ fn is_time_series_column(snapshot: &Snapshot, schema: &str, table: &str, col_nam
     )
 }
 
-fn brin_opportunities(snapshot: &Snapshot) -> Vec<Finding> {
+fn default_partitions(snapshot: &Snapshot) -> Vec<DefaultPartition<'_>> {
+    snapshot
+        .tables
+        .iter()
+        .filter_map(|t| {
+            let parent = t.partition_of.as_deref()?;
+            let is_default = t.storage.as_ref().is_some_and(|s| s.is_default_partition());
+            if !is_default {
+                return None;
+            }
+            let rows = t.rows.or_else(|| t.storage.as_ref().and_then(|s| s.planner_rows)).unwrap_or(0.0);
+            let size = table_heap_bytes(t).unwrap_or(0.0);
+            if rows < 100_000.0 && size < 100.0 * MB {
+                return None;
+            }
+            let severity = if rows >= 1_000_000.0 || size >= GB { Severity::Medium } else { Severity::Low };
+            Some(DefaultPartition { table: t, parent, rows, size, severity })
+        })
+        .collect()
+}
+
+fn default_partition_finding(d: DefaultPartition<'_>) -> Finding {
+    let DefaultPartition { table: t, parent, rows, size, severity } = d;
+    let name = t.qualified();
+    let mut f = finding(
+        "table-bloat",
+        &format!("default-partition:{name}"),
+        Category::Maintenance,
+        subject(SubjectKind::Table, &name),
+    );
+    let (count, bytes) = (format::count(rows), format::bytes(size));
+    f.title = if size > 0.0 {
+        t!("check.table_bloat.default.title_size", name = &t.name, rows = &count, size = &bytes)
+    } else {
+        t!("check.table_bloat.default.title", name = &t.name, rows = &count)
+    };
+    f.severity = severity;
+    severity_score(&mut f);
+    f.impact.label = if size > 0.0 {
+        t!("check.table_bloat.default.impact_size", size = &bytes)
+    } else {
+        t!("check.table_bloat.default.impact_rows", rows = &count)
+    };
+    f.confidence = Confidence::High;
+    f.summary = if size > 0.0 {
+        t!("check.table_bloat.default.summary_size", name = &t.name, parent = parent, rows = &count, size = &bytes)
+    } else {
+        t!("check.table_bloat.default.summary", name = &t.name, parent = parent, rows = &count)
+    };
+    if rows > 0.0 {
+        f.metrics.push(Metric::new(t!("check.table_bloat.default.metric.rows"), rows, Unit::Rows));
+    }
+    if size > 0.0 {
+        f.metrics.push(Metric::new(t!("common.metric.size"), size, Unit::Bytes));
+    }
+    f.fix = Some(Fix {
+        summary: t!("check.table_bloat.default.fix", parent = parent, name = &t.name),
+        sql: None,
+        cost: Some(t!("check.table_bloat.default.fix_cost")),
+    });
+    f.verify = vec![t!("check.table_bloat.default.verify", name = &t.name)];
+    f
+}
+
+fn brin_opportunities(snapshot: &Snapshot) -> Vec<BrinCandidate<'_>> {
     if snapshot.server.engine != Engine::Postgres {
         return Vec::new();
     }
@@ -369,66 +469,63 @@ fn brin_opportunities(snapshot: &Snapshot) -> Vec<Finding> {
             if has_brin {
                 continue;
             }
-            let mut f = finding(
-                "table-bloat",
-                &format!("brin-candidate:{table_qual}.{}", idx.name),
-                Category::Maintenance,
-                subject(SubjectKind::Index, format!("{table_qual}.{}", idx.name)),
-            );
-            f.title = format!(
-                "{} on append-only {} takes {} as a B-tree (a BRIN index would take < 1%)",
-                idx.name,
-                t.name,
-                format::bytes(idx_bytes)
-            );
-            f.severity = if idx_bytes >= GB { Severity::Medium } else { Severity::Low };
-            severity_score(&mut f);
-            f.impact.label = format!("{} B-tree on append-only time column", format::bytes(idx_bytes));
-            f.confidence = Confidence::Medium;
-            f.summary = format!(
-                "{} holds {} rows ({}) and its recorded writes are {} inserts ({} inserts vs {} updates/deletes). \
-                 {} is a {} B-tree index on `{col_name}`: because rows in an append-only table are stored on heap pages \
-                 in roughly `{col_name}` order, a Block Range Index (BRIN) on `{col_name}` stores only the minimum and \
-                 maximum timestamp per page range — taking kilobytes instead of {} while still skipping non-matching \
-                 heap blocks on time-range queries.",
-                t.name,
-                format::count(rows),
-                format::bytes(size),
-                format::percent(inserts / total_writes),
-                format::count(inserts),
-                format::count(updates + deletes),
-                idx.name,
-                format::bytes(idx_bytes),
-                format::bytes(idx_bytes),
-            );
-            f.metrics = vec![
-                Metric::new("B-tree index size", idx_bytes, Unit::Bytes),
-                Metric::new("Table rows", rows, Unit::Rows),
-                Metric::new("Inserts", inserts, Unit::Rows),
-            ];
-            let target = qualified(Engine::Postgres, &t.schema, &t.name);
-            let brin_name = quote(Engine::Postgres, &format!("ix_{}_{}_brin", t.name, col_name));
-            let quoted_col = quote(Engine::Postgres, col_name);
-            f.fix = Some(Fix {
-                summary: format!(
-                    "If `{col_name}` is queried by time ranges rather than point lookups and rows are inserted in \
-                     timestamp order, build a BRIN index concurrently and verify with `EXPLAIN` that range queries use \
-                     a Bitmap Index Scan on it before retiring `{}`.",
-                    idx.name
-                ),
-                sql: Some(format!("CREATE INDEX CONCURRENTLY {brin_name} ON {target} USING brin ({quoted_col});")),
-                cost: Some(
-                    "CONCURRENTLY scans the table without blocking reads or writes; the resulting BRIN index is tiny."
-                        .into(),
-                ),
+            out.push(BrinCandidate {
+                table: t,
+                index: idx,
+                column: col_name,
+                rows,
+                size,
+                index_bytes: idx_bytes,
+                inserts,
+                changes: updates + deletes,
+                severity: if idx_bytes >= GB { Severity::Medium } else { Severity::Low },
             });
-            f.verify = vec![format!(
-                "Re-scan after building `{}`: verify time-range queries use it before dropping `{}`.",
-                brin_name.trim_matches('"'),
-                idx.name
-            )];
-            out.push(f);
         }
     }
     out
+}
+
+fn brin_finding(b: BrinCandidate<'_>) -> Finding {
+    let BrinCandidate { table: t, index: idx, column: col_name, rows, size, index_bytes, inserts, changes, severity } =
+        b;
+    let table_qual = t.qualified();
+    let mut f = finding(
+        "table-bloat",
+        &format!("brin-candidate:{table_qual}.{}", idx.name),
+        Category::Maintenance,
+        subject(SubjectKind::Index, format!("{table_qual}.{}", idx.name)),
+    );
+    let index_size = format::bytes(index_bytes);
+    f.title = t!("check.table_bloat.brin.title", index = &idx.name, table = &t.name, size = &index_size);
+    f.severity = severity;
+    severity_score(&mut f);
+    f.impact.label = t!("check.table_bloat.brin.impact", size = &index_size);
+    f.confidence = Confidence::Medium;
+    f.summary = t!(
+        "check.table_bloat.brin.summary",
+        table = &t.name,
+        rows = format::count(rows),
+        size = format::bytes(size),
+        share = format::percent(inserts / (inserts + changes)),
+        inserts = format::count(inserts),
+        changes = format::count(changes),
+        index = &idx.name,
+        index_size = &index_size,
+        column = col_name
+    );
+    f.metrics = vec![
+        Metric::new(t!("check.table_bloat.brin.metric.index_size"), index_bytes, Unit::Bytes),
+        Metric::new(t!("check.table_bloat.brin.metric.rows"), rows, Unit::Rows),
+        Metric::new(t!("check.table_bloat.brin.metric.inserts"), inserts, Unit::Rows),
+    ];
+    let target = qualified(Engine::Postgres, &t.schema, &t.name);
+    let brin_name = quote(Engine::Postgres, &format!("ix_{}_{}_brin", t.name, col_name));
+    let quoted_col = quote(Engine::Postgres, col_name);
+    f.fix = Some(Fix {
+        summary: t!("check.table_bloat.brin.fix", column = col_name, index = &idx.name),
+        sql: Some(format!("CREATE INDEX CONCURRENTLY {brin_name} ON {target} USING brin ({quoted_col});")),
+        cost: Some(t!("check.table_bloat.brin.fix_cost")),
+    });
+    f.verify = vec![t!("check.table_bloat.brin.verify", brin = brin_name.trim_matches('"'), index = &idx.name)];
+    f
 }
