@@ -177,9 +177,8 @@ fn selecting_any_timespan_window_after_a_recent_scan_keeps_escalations_in_that_w
     let started = "2026-10-19T12:41:00Z";
 
     // Case 1: The user opened the app at 06:05 UTC (which ran a 7d scan) and then selected any timespan window
-    // (1h, 6h, 24h, 7d, 30d) at 06:06 UTC. Because SnapshotOptions::with_window_minutes clears window_minutes on whole
-    // days (24h, 7d, 30d), every window must be respected generically. The 1-minute baseline from 06:05 must not
-    // silence the 6 escalations into History for any window.
+    // (1h, 6h, 24h, 7d, 30d) at 06:06 UTC. Every window, whole days or not, must be respected generically. The
+    // 1-minute baseline from 06:05 must not silence the 6 escalations into History for any window.
     let mut scan_0605 = demo(6);
     scan_0605.id = "20261023T060500.000Z".into();
     scan_0605.taken_at = "2026-10-23T06:05:00Z".into();

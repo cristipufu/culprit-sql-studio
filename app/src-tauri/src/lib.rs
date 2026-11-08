@@ -198,44 +198,31 @@ fn for_ui(mut report: Report) -> Report {
     report
 }
 
-/// The workload window the app asked for, in minutes; a build from before minutes sent whole days.
-fn requested_window(window_minutes: Option<u32>, window_days: Option<u32>) -> Option<u32> {
-    window_minutes
-        .map(|minutes| minutes.clamp(1, culprit_core::MAX_WINDOW_MINUTES))
-        .or_else(|| window_days.map(|days| days.clamp(1, 90) * culprit_core::MINUTES_PER_DAY))
+/// The workload window the app asked for, in minutes, within what a scan reads.
+fn requested_window(window_minutes: Option<u32>) -> Option<u32> {
+    window_minutes.map(|minutes| minutes.clamp(1, culprit_core::MAX_WINDOW_MINUTES))
 }
 
 #[tauri::command]
-async fn latest_report(
-    ws: Ws<'_>,
-    name: String,
-    window_minutes: Option<u32>,
-    window_days: Option<u32>,
-) -> Result<Option<Report>> {
+async fn latest_report(ws: Ws<'_>, name: String, window_minutes: Option<u32>) -> Result<Option<Report>> {
     blocking_workspace(ws.inner().clone(), move |ws| {
-        Ok(ws.latest_report(&name, requested_window(window_minutes, window_days))?.map(for_ui))
+        Ok(ws.latest_report(&name, requested_window(window_minutes))?.map(for_ui))
     })
     .await
 }
 
 #[tauri::command]
-async fn scan(ws: Ws<'_>, name: String, window_minutes: Option<u32>, window_days: Option<u32>) -> Result<Report> {
+async fn scan(ws: Ws<'_>, name: String, window_minutes: Option<u32>) -> Result<Report> {
     let defaults = SnapshotOptions::default();
-    let window = requested_window(window_minutes, window_days).unwrap_or(defaults.window_in_minutes());
+    let window = requested_window(window_minutes).unwrap_or(defaults.window_in_minutes());
     let options = defaults.with_window_minutes(window);
     ws.scan(&name, &options).await.map(for_ui)
 }
 
 #[tauri::command]
-async fn brief(
-    ws: Ws<'_>,
-    name: String,
-    finding_id: String,
-    window_minutes: Option<u32>,
-    window_days: Option<u32>,
-) -> Result<String> {
+async fn brief(ws: Ws<'_>, name: String, finding_id: String, window_minutes: Option<u32>) -> Result<String> {
     blocking_workspace(ws.inner().clone(), move |ws| {
-        let window = requested_window(window_minutes, window_days);
+        let window = requested_window(window_minutes);
         let selected = ws.latest_report(&name, window)?;
         let report = if selected.is_none() && window.is_some() { ws.latest_report(&name, None)? } else { selected }
             .ok_or_else(|| Error::not_found(format!("No report for {name}")))?;
@@ -402,14 +389,13 @@ async fn dashboard(
     ws: Ws<'_>,
     name: String,
     window_minutes: Option<u32>,
-    window_days: Option<u32>,
     report_id: Option<String>,
 ) -> Result<culprit_core::Dashboard> {
     blocking_workspace(ws.inner().clone(), move |ws| {
         if let Some(report_id) = report_id {
             return ws.dashboard_for_report(&name, &report_id);
         }
-        let report = ws.latest_report(&name, requested_window(window_minutes, window_days))?.ok_or_else(|| {
+        let report = ws.latest_report(&name, requested_window(window_minutes))?.ok_or_else(|| {
             Error::not_found(format!("No saved report for '{name}'"))
                 .with_hint(format!("Run `culprit scan {name}` first"))
         })?;
@@ -436,14 +422,8 @@ async fn dashboard_live(
 
 /// Where the latest scan's database time went, by wait category with the queries behind each.
 #[tauri::command]
-async fn waits(
-    ws: Ws<'_>,
-    name: String,
-    window_minutes: Option<u32>,
-    window_days: Option<u32>,
-) -> Result<Option<culprit_core::WaitsReport>> {
-    blocking_workspace(ws.inner().clone(), move |ws| ws.waits(&name, requested_window(window_minutes, window_days)))
-        .await
+async fn waits(ws: Ws<'_>, name: String, window_minutes: Option<u32>) -> Result<Option<culprit_core::WaitsReport>> {
+    blocking_workspace(ws.inner().clone(), move |ws| ws.waits(&name, requested_window(window_minutes))).await
 }
 
 /// What the server waits on right now, sampled for `seconds`.

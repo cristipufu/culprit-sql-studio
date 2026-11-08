@@ -32,10 +32,7 @@ pub(crate) async fn read(
 ) -> Result<TerminationHistory> {
     let end = culprit_core::format::epoch_seconds(&probe.now)
         .ok_or_else(|| Error::invalid("YSQL returned an invalid termination observation time"))?;
-    let minutes = options
-        .window_minutes
-        .unwrap_or_else(|| options.window_days.saturating_mul(1440))
-        .clamp(1, culprit_core::MAX_WINDOW_MINUTES);
+    let minutes = options.window_in_minutes().min(culprit_core::MAX_WINDOW_MINUTES);
     let start = end - f64::from(minutes) * 60.0;
     let before = session.notices();
     // Global views cannot filter an owner id for these records. Preserve native local visibility for restricted

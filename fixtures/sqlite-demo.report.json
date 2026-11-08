@@ -756,7 +756,7 @@
         "table": "orders"
       }
     ],
-    "format": 2,
+    "format": 3,
     "histograms": null,
     "id": "20261016T210115.862Z",
     "identity": {
@@ -914,7 +914,7 @@
     "options": {
       "plans": 25,
       "top_queries": 60,
-      "window_days": 7
+      "window_minutes": 10080
     },
     "plan_cache": null,
     "pressure": null,

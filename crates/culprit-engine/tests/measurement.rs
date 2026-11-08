@@ -205,7 +205,7 @@ fn every_selected_window_retains_actual_source_coverage() {
     use culprit_core::{MeasurementContext, SnapshotOptions, WorkloadKind};
     let mut s = snapshot("db.example", "2026-10-11T00:00:00Z", 100.0, 10.0);
     for hours in [1, 6, 24, 7 * 24, 30 * 24] {
-        let options = SnapshotOptions { window_minutes: Some(hours * 60), ..Default::default() };
+        let options = SnapshotOptions { window_minutes: hours * 60, ..Default::default() };
         let identity = s.database_identity();
         let w = s.workload.as_mut().unwrap();
         w.kind = Some(WorkloadKind::QueryStore);

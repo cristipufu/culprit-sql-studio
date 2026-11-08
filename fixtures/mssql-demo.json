@@ -60,7 +60,7 @@
       "reason": null
     }
   ],
-  "format": 2,
+  "format": 3,
   "id": "20261011T121347.162Z",
   "connection": "mssql-demo",
   "environment": "local",
@@ -4024,7 +4024,7 @@
   "notes": [],
   "pressure": null,
   "options": {
-    "window_days": 7,
+    "window_minutes": 10080,
     "top_queries": 60,
     "plans": 25
   },

@@ -266,7 +266,7 @@ async fn live_cluster_skipped_node_withdraws_complete_counters_and_marks_native_
                 .iter()
                 .any(|o| o.source == sources::INDEX_USAGE.name && o.state == SourceState::Partial)
         );
-        let options = SnapshotOptions { plans: 0, window_minutes: Some(60), ..Default::default() };
+        let options = SnapshotOptions { plans: 0, window_minutes: 60, ..Default::default() };
         let activity = crate::ash::read(&monitor, &p, &options, 10_000).await?;
         eprintln!("Cluster failure activity read: {:?}", began.elapsed());
         assert!(activity.period.partial);

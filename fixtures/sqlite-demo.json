@@ -35,7 +35,7 @@
       "reason": null
     }
   ],
-  "format": 2,
+  "format": 3,
   "id": "20261016T210115.862Z",
   "connection": "sqlite-demo",
   "environment": "development",
@@ -1173,7 +1173,7 @@
   ],
   "pressure": null,
   "options": {
-    "window_days": 7,
+    "window_minutes": 10080,
     "top_queries": 60,
     "plans": 25
   },

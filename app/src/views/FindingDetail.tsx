@@ -16,7 +16,7 @@ import { ago, count, duration, findingMetric, percent, rowCount } from "../lib/f
 import { useHotkeys } from "../lib/hotkeys";
 import { aboutThePlan, doesRealWork, estRows, findingNoShareReason, findingStepShare, hottestStep, rowsOut, rowsRead, stepShare } from "../lib/plan-format";
 import { figures, honest } from "../lib/rates";
-import { setState, toast, toggleDismissed, useStore, windowMinutesOf } from "../lib/store";
+import { setState, toast, toggleDismissed, useStore } from "../lib/store";
 import { copyAndTell } from "../lib/clipboard";
 import { canOpenFixInEditor } from "../lib/editor-sql";
 import { can } from "../lib/engines";
@@ -39,7 +39,7 @@ export function FindingDetail({ report, finding }: { report: Report; finding: Fi
     await copyAndTell(finding.fix.sql, "Fix copied");
   };
   const copyBrief = async () => {
-    const brief = await (await api()).brief(report.snapshot.connection, finding.id, windowMinutesOf(report.snapshot.options));
+    const brief = await (await api()).brief(report.snapshot.connection, finding.id, report.snapshot.options?.window_minutes ?? null);
     await copyAndTell(brief, "Brief copied. Paste it into your coding agent");
   };
   const canOpenFix = canOpenFixInEditor(finding.fix?.sql, report.snapshot.server.engine);

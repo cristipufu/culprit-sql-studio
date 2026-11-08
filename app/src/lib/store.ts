@@ -58,11 +58,6 @@ export type WindowMinutes = (typeof WINDOW_OPTIONS)[number];
 const DEFAULT_WINDOW: WindowMinutes = 10080;
 const MINUTES_PER_DAY = 1440;
 
-/** A scan's window in minutes, also for scans from before windows could be hours. */
-export function windowMinutesOf(options: { window_days: number; window_minutes?: number } | null | undefined): number | null {
-  return options ? options.window_minutes ?? options.window_days * MINUTES_PER_DAY : null;
-}
-
 function windowKey(name: string): string {
   return `culprit.window.${name}`;
 }

@@ -2,15 +2,10 @@
 
 export type SnapshotOptions = { 
 /**
- * How far back to read workload history where the engine keeps it (Query Store), in whole days. A window that
- * isn't whole days sets `window_minutes` too, and this is that window rounded up.
+ * How far back to read workload history where the engine keeps it (Query Store), in minutes: `--window 6h` is
+ * 360, the default week 10080.
  */
-window_days: number, 
-/**
- * The window in minutes when it isn't a whole number of days (`--window 6h`). Absent from scans before windows
- * could be hours, which read `window_days`.
- */
-window_minutes?: number, 
+window_minutes: number, 
 /**
  * How many of the heaviest queries to keep in the snapshot.
  */

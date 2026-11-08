@@ -353,7 +353,7 @@ async fn live_terminations_preserve_visibility_period_nodes_and_omit_raw_sql() {
         assert_eq!(error.as_db_error().unwrap().code().code(), "53400");
     }
     // The collector's shared buffer refresh is asynchronous; wait for these owned records, not a fixed long delay.
-    let options = SnapshotOptions { window_minutes: Some(60), ..Default::default() };
+    let options = SnapshotOptions { window_minutes: 60, ..Default::default() };
     let mut observed = None;
     for _ in 0..50 {
         let p = crate::probe::read(&session.client).await.unwrap();
@@ -586,7 +586,7 @@ async fn live_ash_history_has_its_own_weights_period_bounds_and_role_scope() {
     // Disposable application stimulus: a long enough query to cross several native sampling ticks.
     session.client.simple_query("SELECT pg_sleep(2.2),891 AS native_ash_history_test").await.unwrap();
     let probe = crate::probe::read(&session.client).await.unwrap();
-    let options = SnapshotOptions { window_minutes: Some(60), ..Default::default() };
+    let options = SnapshotOptions { window_minutes: 60, ..Default::default() };
     let local = crate::ash::read(&session, &probe, &options, 10_000).await.unwrap();
     assert!(local.period.observations >= 2.0 && local.period.weighted_observations >= local.period.observations);
     let query = query_one(

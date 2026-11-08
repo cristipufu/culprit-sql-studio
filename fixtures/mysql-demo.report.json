@@ -1444,7 +1444,7 @@
         "table": "orders"
       }
     ],
-    "format": 2,
+    "format": 3,
     "histograms": [
       {
         "buckets": 4.0,
@@ -1855,7 +1855,7 @@
     "options": {
       "plans": 25,
       "top_queries": 60,
-      "window_days": 7
+      "window_minutes": 10080
     },
     "plan_cache": null,
     "pressure": {

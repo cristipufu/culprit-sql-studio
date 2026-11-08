@@ -2572,7 +2572,7 @@
       ]
     }
   },
-  "format": 2,
+  "format": 3,
   "id": "20261024T065249.190547Z",
   "connection": "yugabyte-demo",
   "environment": "local",
@@ -6023,7 +6023,7 @@
   ],
   "pressure": null,
   "options": {
-    "window_days": 7,
+    "window_minutes": 10080,
     "top_queries": 60,
     "plans": 25
   },

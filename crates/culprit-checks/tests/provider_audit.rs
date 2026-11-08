@@ -435,7 +435,7 @@ fn catalog_only_holds_do_not_explain_application_dead_rows() {
 #[test]
 fn new_errors_need_a_comparison_within_the_selected_window() {
     let mut s = snapshot(Engine::Postgres);
-    s.options = Some(culprit_core::SnapshotOptions { window_minutes: Some(60), ..Default::default() });
+    s.options = Some(culprit_core::SnapshotOptions { window_minutes: 60, ..Default::default() });
     s.operations.counters.push(OperationalCounter {
         kind: OperationalCounterKind::SubscriptionApplyErrors,
         subject: "feed".into(),

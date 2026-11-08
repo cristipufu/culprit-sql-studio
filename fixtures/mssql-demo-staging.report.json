@@ -1382,7 +1382,7 @@
         "table": "ticket_events"
       }
     ],
-    "format": 2,
+    "format": 3,
     "histograms": null,
     "id": "20261011T121512.204Z",
     "identity": {
@@ -1910,7 +1910,7 @@
     "options": {
       "plans": 25,
       "top_queries": 60,
-      "window_days": 7
+      "window_minutes": 10080
     },
     "plan_cache": null,
     "pressure": {
