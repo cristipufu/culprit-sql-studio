@@ -185,3 +185,8 @@ the choice and the reason are given.
 | linked server, collation, partition pruning | servidor vinculado, intercalación, eliminación de particiones | |
 | expand-and-contract | expansión y contracción | |
 | Explain again, Explain analyze again | «Vuelve a obtener el plan», «Vuelve a ejecutar EXPLAIN ANALYZE» | |
+| job, ETL job, dump | trabajo, trabajo de ETL, volcado de datos | |
+| off-peak, keyset pagination | fuera de las horas de mayor carga, paginación por clave | |
+| standby, fail over | servidor en espera, conmutar por error | |
+| cleanup holder, timed checkpoint | retenedor de limpieza, (producido) por tiempo | |
+| plan stub, lane, vCores | código auxiliar, franja, núcleos virtuales | Azure tiers (General Purpose, Hyperscale, Business Critical) stay in English |
