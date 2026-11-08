@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::model::Engine;
-use crate::{format, t};
+use crate::{format, key, t};
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Default)]
 #[ts(export)]
@@ -92,6 +92,45 @@ pub struct DeadlockFix {
     pub sql: Option<String>,
     /// A finding id that is the same fix, when the scan found it (e.g. `config:read-committed-snapshot`).
     pub finding: Option<String>,
+    /// Which advice it is, so a sentence can name it in its own words.
+    #[serde(default)]
+    pub kind: Option<DeadlockFixKind>,
+}
+
+/// The advice a [`DeadlockFix`] gives.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum DeadlockFixKind {
+    /// Cover the read's columns so it skips the key lookup.
+    SkipLookup,
+    /// Change rows through the primary key.
+    PrimaryKey,
+    /// Take the write lock when reading.
+    WriteLock,
+    /// Touch tables and rows in one order.
+    SameOrder,
+    ShortTransactions,
+    /// Change fewer rows per statement, below lock escalation.
+    FewerRows,
+    /// Fix the plan that goes parallel.
+    ParallelPlan,
+    /// Retry the victim.
+    Retry,
+    /// Turn on READ_COMMITTED_SNAPSHOT.
+    ReadCommittedSnapshot,
+}
+
+impl DeadlockFixKind {
+    /// The message key of the fix offered as another way after "Or" ("let reads stop taking shared locks"): its title
+    /// as a sentence continues with it. Only fixes with a statement to run are offered so.
+    pub fn alternative_key(self) -> Option<&'static str> {
+        match self {
+            DeadlockFixKind::ReadCommittedSnapshot => Some(key!("core.deadlock.fix.rcsi.alternative")),
+            DeadlockFixKind::WriteLock => Some(key!("core.deadlock.fix.write_lock.alternative")),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
@@ -312,6 +351,7 @@ pub fn classify(engine: Engine, deadlock: &mut Deadlock) {
                 },
                 sql: None,
                 finding: None,
+                kind: Some(DeadlockFixKind::SkipLookup),
             },
             rcsi(d),
         ],
@@ -320,6 +360,7 @@ pub fn classify(engine: Engine, deadlock: &mut Deadlock) {
             detail: t!("core.deadlock.fix.primary_key.detail"),
             sql: None,
             finding: None,
+            kind: Some(DeadlockFixKind::PrimaryKey),
         }],
         (DeadlockPattern::LockConversion, engine) => vec![DeadlockFix {
             title: t!("core.deadlock.fix.write_lock.title"),
@@ -329,6 +370,7 @@ pub fn classify(engine: Engine, deadlock: &mut Deadlock) {
                 _ => "SELECT … FROM … WHERE … FOR UPDATE;".into(),
             }),
             finding: None,
+            kind: Some(DeadlockFixKind::WriteLock),
         }],
         (DeadlockPattern::OppositeOrder | DeadlockPattern::Cycle, _) => vec![
             DeadlockFix {
@@ -336,12 +378,14 @@ pub fn classify(engine: Engine, deadlock: &mut Deadlock) {
                 detail: t!("core.deadlock.fix.same_order.detail", tables = &tables),
                 sql: None,
                 finding: None,
+                kind: Some(DeadlockFixKind::SameOrder),
             },
             DeadlockFix {
                 title: t!("core.deadlock.fix.short_transactions.title"),
                 detail: t!("core.deadlock.fix.short_transactions.detail"),
                 sql: None,
                 finding: None,
+                kind: Some(DeadlockFixKind::ShortTransactions),
             },
         ],
         (DeadlockPattern::LockEscalation, _) => vec![DeadlockFix {
@@ -349,12 +393,14 @@ pub fn classify(engine: Engine, deadlock: &mut Deadlock) {
             detail: t!("core.deadlock.fix.fewer_rows.detail"),
             sql: None,
             finding: None,
+            kind: Some(DeadlockFixKind::FewerRows),
         }],
         (DeadlockPattern::Parallelism, _) => vec![DeadlockFix {
             title: t!("core.deadlock.fix.parallel_plan.title"),
             detail: t!("core.deadlock.fix.parallel_plan.detail"),
             sql: None,
             finding: Some("config:cost-threshold-for-parallelism".into()),
+            kind: Some(DeadlockFixKind::ParallelPlan),
         }],
     };
     if pattern != DeadlockPattern::Parallelism {
@@ -365,7 +411,13 @@ pub fn classify(engine: Engine, deadlock: &mut Deadlock) {
             Engine::Postgres | Engine::Yugabyte => t!("core.deadlock.fix.retry.detail_code", code = "SQLSTATE 40P01"),
             Engine::Sqlite => t!("core.deadlock.fix.retry.detail_code", code = "SQLITE_BUSY"),
         };
-        fixes.push(DeadlockFix { title: t!("core.deadlock.fix.retry.title"), detail, sql: None, finding: None });
+        fixes.push(DeadlockFix {
+            title: t!("core.deadlock.fix.retry.title"),
+            detail,
+            sql: None,
+            finding: None,
+            kind: Some(DeadlockFixKind::Retry),
+        });
     }
 
     deadlock.pattern = pattern;
@@ -444,6 +496,7 @@ fn rcsi(d: &Deadlock) -> DeadlockFix {
             )
         }),
         finding: Some("config:read-committed-snapshot".into()),
+        kind: Some(DeadlockFixKind::ReadCommittedSnapshot),
     }
 }
 

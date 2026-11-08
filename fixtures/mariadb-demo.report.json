@@ -1200,18 +1200,21 @@
             {
               "detail": "Make every code path that changes shop.customers and shop.orders do it in one order (for example, always the parent row first, and rows sorted by key). Then the second transaction waits instead of deadlocking.",
               "finding": null,
+              "kind": "same-order",
               "sql": null,
               "title": "Touch tables and rows in the same order everywhere"
             },
             {
               "detail": "Do reads, validation and outside calls before the transaction starts; hold locks only for the writes.",
               "finding": null,
+              "kind": "short-transactions",
               "sql": null,
               "title": "Keep transactions short"
             },
             {
               "detail": "A deadlock victim can be retried safely; the application should catch error 1213 and run the transaction again.",
               "finding": null,
+              "kind": "retry",
               "sql": null,
               "title": "Retry the victim"
             }

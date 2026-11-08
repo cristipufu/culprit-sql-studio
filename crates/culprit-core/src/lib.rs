@@ -59,7 +59,8 @@ pub use connection::{
 pub use coverage::{Coverage, Source, SourceOutcome, SourceState, same_source, source_id};
 pub use dashboard::{Dashboard, DashboardLive, ItemKind, Tile, TileItem, TileKey, TileMetric, TileStatus};
 pub use deadlock::{
-    Deadlock, DeadlockFix, DeadlockPattern, DeadlockProcess, DeadlockReport, DeadlockResource, LockHolder,
+    Deadlock, DeadlockFix, DeadlockFixKind, DeadlockPattern, DeadlockProcess, DeadlockReport, DeadlockResource,
+    LockHolder,
 };
 pub use dialect::{Dialect, NewIndex, Online};
 pub use digest::{

@@ -1214,18 +1214,21 @@
             {
               "detail": "Add the columns the read needs to ix_customers_email (as INCLUDE columns) so it never touches the main index the write locks. The query's plan in Queries shows the Key Lookup and its output columns.",
               "finding": null,
+              "kind": "skip-lookup",
               "sql": null,
               "title": "Make the read skip the lookup"
             },
             {
               "detail": "With READ_COMMITTED_SNAPSHOT on, reads use row versions instead of shared locks, so a read can't be part of this cycle. It costs some tempdb space for the versions.",
               "finding": "config:read-committed-snapshot",
+              "kind": "read-committed-snapshot",
               "sql": "ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;",
               "title": "Let reads stop taking shared locks"
             },
             {
               "detail": "A deadlock victim can be retried safely; the application should catch error 1205 and run the transaction again.",
               "finding": null,
+              "kind": "retry",
               "sql": null,
               "title": "Retry the victim"
             }

@@ -265,16 +265,22 @@ fn pattern_finding(snapshot: &Snapshot, p: Pattern<'_>) -> Finding {
     if let Some(who) = latest.victim().and_then(victim_text) {
         f.metrics.push(Metric::text(t!("check.deadlocks.metric.rolled_back"), who));
     }
-    // Lead with the primary fix; when it has no SQL, offer the first alternative that does.
+    // Lead with the primary fix; when it has no SQL, offer the first alternative that does, named in its own words.
     if let Some(primary) = latest.fixes.first() {
-        let alternative = latest.fixes.iter().skip(1).find(|x| x.sql.is_some()).filter(|_| primary.sql.is_none());
+        let alternative = latest
+            .fixes
+            .iter()
+            .skip(1)
+            .filter(|x| x.sql.is_some())
+            .find_map(|x| Some((x, x.kind?.alternative_key()?)))
+            .filter(|_| primary.sql.is_none());
         f.fix = Some(match alternative {
-            Some(alt) => Fix {
+            Some((alt, named)) => Fix {
                 summary: t!(
                     "check.deadlocks.fix_or",
                     title = &primary.title,
                     detail = &primary.detail,
-                    alternative = lowercase_first(&alt.title),
+                    alternative = culprit_core::i18n::t(named, &[]),
                     alternative_detail = &alt.detail
                 ),
                 sql: alt.sql.clone(),
@@ -362,11 +368,6 @@ pub(crate) fn victim_text(victim: &culprit_core::DeadlockProcess) -> Option<Stri
     }
 }
 
-fn lowercase_first(text: &str) -> String {
-    let mut chars = text.chars();
-    chars.next().map(|c| c.to_lowercase().chain(chars).collect()).unwrap_or_default()
-}
-
 fn serde_key(pattern: DeadlockPattern) -> &'static str {
     match pattern {
         DeadlockPattern::KeyLookup => "key-lookup",
@@ -440,6 +441,25 @@ mod tests {
                 .as_deref()
                 .is_some_and(|s| s.contains("ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON"))
         );
+    }
+
+    /// The fix offered as another way is named by what it is, in the language's own words after "Or": German keeps
+    /// the capital of the noun it starts with.
+    #[test]
+    fn the_alternative_fix_is_named_in_the_languages_words() {
+        culprit_core::i18n::scope("de", || {
+            let mut snapshot: Snapshot =
+                serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
+            snapshot.deadlocks = Some(DeadlockReport {
+                deadlocks: vec![deadlock("2026-10-11T10:00:00Z")],
+                source: "system_health event files".into(),
+                since_hours: 24.0,
+                ..Default::default()
+            });
+            let found = deadlocks(&snapshot);
+            let fix = found[0].fix.as_ref().unwrap();
+            assert!(fix.summary.contains("Oder Lesevorgänge ohne gemeinsame Sperren ausführen:"), "{}", fix.summary);
+        });
     }
 
     // C1: system_health and InnoDB's report are the server's; another database's deadlocks aren't this one's.

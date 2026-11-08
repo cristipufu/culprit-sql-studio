@@ -518,6 +518,7 @@ fn read_deadlock(at: &str) -> Deadlock {
         detail: "Row versions".into(),
         sql: None,
         finding: Some("config:read-committed-snapshot".into()),
+        kind: None,
     }];
     d
 }
