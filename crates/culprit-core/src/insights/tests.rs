@@ -2270,6 +2270,585 @@ fn notes_rules_and_shared_fixes_say_the_same_english_word_for_word() {
     }
 }
 
+/// A scan of `table` reading 100K rows to keep 10, filtered by `predicate`: one an index could serve.
+fn filtered_scan(id: u32, op: &str, table: &str, predicate: &str) -> PlanNode {
+    let mut n = node(id, op, NodeKind::Scan);
+    n.object = Some(table.into());
+    n.predicate = Some(predicate.into());
+    n.rows_read = Some(100_000.0);
+    n.act_rows = Some(10.0);
+    n.act_executions = Some(1.0);
+    n.self_cost = 900.0;
+    n
+}
+
+/// Plans shaped to reach what no captured plan says: each engine's own advice, the rarer reasons and the fallbacks
+/// for a name the plan doesn't give.
+fn rarely_said() -> Vec<(&'static str, Plan)> {
+    let mut out: Vec<(&'static str, Plan)> = Vec::new();
+
+    // SQLite builds an index for itself, with no columns named, or for a join.
+    for (what, columns, statement) in [
+        ("automatic index, no columns", vec![], "SELECT * FROM orders WHERE status = 1"),
+        ("automatic index for a join", vec!["customer_id".to_string()], "SELECT * FROM customers JOIN orders ON 1"),
+    ] {
+        let mut n = node(1, "SCAN orders", NodeKind::Scan);
+        n.object = Some("orders".into());
+        n.facts_mut().automatic_index = Some(crate::PlanAutomaticIndex { table: "orders".into(), columns });
+        let mut p = plan(Engine::Sqlite, n);
+        p.statement = Some(statement.into());
+        out.push((what, p));
+    }
+
+    // A PostgreSQL subquery run per row, where neither side names a table.
+    let mut sub = node(2, "Aggregate", NodeKind::Aggregate);
+    sub.facts_mut().parent_relationship = Some(crate::PlanParentRelationship::from_source("SubPlan"));
+    sub.facts_mut().subplan_name = Some("SubPlan 1".into());
+    sub.act_executions = Some(5_000.0);
+    let mut parent = node(1, "Result", NodeKind::Other);
+    parent.predicate = Some("(total > (SubPlan 1))".into());
+    parent.act_rows = Some(5_000.0);
+    parent.children = vec![sub];
+    out.push(("correlated subquery, nothing named", plan(Engine::Postgres, parent)));
+
+    // JIT without the statement's run time.
+    let mut p = plan(Engine::Postgres, node(0, "Seq Scan", NodeKind::Scan));
+    p.facts_mut().jit_time_ms = Some(50.0);
+    out.push(("jit, no run time", p));
+
+    // Lookups into a heap, through a named index and through an unnamed one.
+    for (what, index) in [("rid lookups, named index", Some("ix_orders_status")), ("rid lookups, no index", None)] {
+        let mut seek = node(2, "Index Seek", NodeKind::Seek);
+        seek.object = Some("dbo.orders".into());
+        seek.index = index.map(str::to_string);
+        let mut lookup = node(3, "RID Lookup", NodeKind::Lookup);
+        lookup.object = Some("dbo.orders".into());
+        lookup.act_executions = Some(5_000.0);
+        lookup.act_rows = Some(5_000.0);
+        lookup.facts_mut().output_columns = Some(vec!["total".into()]);
+        let mut join = node(1, "Nested Loops", NodeKind::Join);
+        join.children = vec![seek, lookup];
+        out.push((what, plan(Engine::Mssql, join)));
+    }
+
+    // A leading wildcard on MySQL, SQLite, and on a column the filter doesn't name.
+    out.push((
+        "leading wildcard, mysql",
+        plan(Engine::Mysql, filtered_scan(1, "Table scan", "shop.users", "(`users`.`email` like '%gmail.com')")),
+    ));
+    out.push(("leading wildcard, sqlite", plan(Engine::Sqlite, filtered_scan(1, "SCAN", "users", "email LIKE '%x'"))));
+    out.push((
+        "leading wildcard, no column",
+        plan(Engine::Mssql, filtered_scan(1, "Clustered Index Scan", "dbo.users", "lower(N'X') like N'%x'")),
+    ));
+
+    // The legacy cardinality estimator, a memory limit, a large grant asked for, a slow compile without a run.
+    let mut p = plan(Engine::Mssql, node(0, "Sort", NodeKind::Sort));
+    p.facts_mut().cardinality_estimator = Some(70);
+    p.facts_mut().optimization_early_abort = Some("MemoryLimitExceeded".into());
+    p.facts_mut().memory_desired_kb = Some(2_000_000.0);
+    p.facts_mut().compile_ms = Some(800.0);
+    out.push(("legacy estimator, memory limit, desired grant, compile", p));
+
+    // A lossy bitmap that combines indexes the catalog didn't mark: maybe BRIN.
+    let mut bitmap = node(1, "Bitmap Heap Scan", NodeKind::Scan);
+    bitmap.object = Some("public.events".into());
+    bitmap.facts_mut().lossy_heap_blocks = Some(500.0);
+    bitmap.facts_mut().exact_heap_blocks = Some(100.0);
+    bitmap.act_executions = Some(1.0);
+    bitmap.children = vec![node(2, "BitmapOr", NodeKind::Other)];
+    out.push(("lossy bitmap, maybe brin", plan(Engine::Postgres, bitmap)));
+
+    // Misestimates on two columns (SQL Server) and on YugabyteDB, each feeding a join.
+    for (what, engine, table, predicate) in [
+        (
+            "misestimate, sql server columns",
+            Engine::Mssql,
+            "dbo.orders",
+            "[dbo].[orders].[status]='x' AND [dbo].[orders].[region]='eu'",
+        ),
+        ("misestimate, yugabyte", Engine::Yugabyte, "public.orders", "(status = 'x'::text)"),
+    ] {
+        let mut scan = measured(2, "Seq Scan", NodeKind::Scan, 10.0, 100_000.0, 1.0);
+        scan.object = Some(table.into());
+        scan.predicate = Some(predicate.into());
+        let mut join = measured(1, "Hash Join", NodeKind::Join, 10.0, 100_000.0, 1.0);
+        join.children = vec![scan, measured(3, "Seq Scan", NodeKind::Scan, 10.0, 10.0, 1.0)];
+        out.push((what, actual(engine, join, 900.0)));
+    }
+
+    // A nested loop rereading a table of unknown size, and one seeking an index that narrows too little.
+    for (what, op, kind, table_rows) in [
+        ("loop rereads a scan", "Seq Scan", NodeKind::Scan, None),
+        ("loop seeks too much", "Index Scan", NodeKind::Seek, Some(1_000.0)),
+    ] {
+        let mut outer = measured(2, "Seq Scan", NodeKind::Scan, 20_000.0, 20_000.0, 1.0);
+        outer.object = Some("public.a".into());
+        let mut inner = measured(3, op, kind, 500.0, 500.0, 20_000.0);
+        inner.object = Some("public.b".into());
+        inner.predicate = Some("(b.a_id = a.id)".into());
+        inner.rows_read = Some(20_000.0 * 500.0);
+        inner.table_rows = table_rows;
+        inner.self_cost = 9_000.0;
+        let mut join = measured(1, "Nested Loop", NodeKind::Join, 20_000.0, 20_000.0, 1.0);
+        join.children = vec![outer, inner];
+        out.push((what, actual(Engine::Postgres, join, 900.0)));
+    }
+
+    // A function around a filtered column, on each engine, and a cast.
+    for (what, engine, op, predicate) in [
+        ("function, yugabyte", Engine::Yugabyte, "Seq Scan", "(upper(email) = 'X'::text)"),
+        ("function, mysql", Engine::Mysql, "Table scan", "(upper(`users`.`email`) = 'X')"),
+        ("function, mariadb", Engine::Mysql, "Table scan", "(upper(`users`.`email`) = 'X')"),
+        ("function, sql server", Engine::Mssql, "Clustered Index Scan", "upper([dbo].[users].[email])=N'X'"),
+        ("function, sqlite", Engine::Sqlite, "SCAN", "upper(email)=?"),
+        ("cast, postgres", Engine::Postgres, "Seq Scan", "((total)::integer = 5)"),
+    ] {
+        let mut p = plan(engine, filtered_scan(1, op, "shop.users", predicate));
+        if what.contains("mariadb") {
+            p.facts_mut().flavor = Some("MariaDB".into());
+        }
+        out.push((what, p));
+    }
+
+    // One PostgreSQL worker doing most of the rows.
+    let mut gather = node(1, "Parallel Seq Scan", NodeKind::Scan);
+    gather.object = Some("public.events".into());
+    gather.act_rows = Some(97_000.0);
+    gather.runtime =
+        Some(crate::actual::NodeRuntime { thread_rows: vec![95_000.0, 1_000.0, 1_000.0], ..Default::default() });
+    out.push(("parallel skew, postgres", plan(Engine::Postgres, gather)));
+
+    // Every reason SQL Server gives for a serial plan, and MAXDOP from the server.
+    for reason in [
+        "EstimatedDOPIsOne",
+        "NoParallelPlansInDesktopOrExpressEdition",
+        "CouldNotGenerateValidParallelPlan",
+        "NonParallelizableIntrinsicFunction",
+        "TableVariableTransactionsDoNotSupportParallelNestedTransaction",
+        "NoParallelForMemoryOptimizedTables",
+        "UpdatingWritebackVariable",
+        "CLRUserDefinedFunctionRequiresDataAccess",
+        "SomeFutureReason",
+    ] {
+        let mut root = node(0, "Hash Match", NodeKind::Join);
+        root.self_cost = 60.0;
+        let mut p = plan(Engine::Mssql, root);
+        p.facts_mut().parallelism_blocker = Some(reason.into());
+        out.push(("serial plan", p));
+    }
+    for (what, database) in [("maxdop from the server", None), ("maxdop set elsewhere, server at 1", Some(4))] {
+        let mut root = node(0, "Hash Match", NodeKind::Join);
+        root.self_cost = 60.0;
+        let mut p = plan(Engine::Mssql, root);
+        p.facts_mut().parallelism_blocker = Some("MaxDOPSetToOne".into());
+        p.facts_mut().server_maxdop = Some(1);
+        p.facts_mut().database_maxdop = database;
+        out.push((what, p));
+    }
+
+    // Rows pulled from a linked server.
+    let mut remote = node(1, "Remote Query", NodeKind::Other);
+    remote.est_rows = 5_000.0;
+    out.push(("remote query", plan(Engine::Mssql, remote)));
+
+    // Scalar functions: measured, once per seek, and only the reason they keep the plan serial.
+    let mut compute = node(1, "Compute Scalar", NodeKind::Other);
+    compute.facts_mut().user_functions = vec!["dbo.fn_tax".into()];
+    compute.act_rows = Some(5_000.0);
+    let mut p = actual(Engine::Mssql, compute, 400.0);
+    p.facts_mut().udf_elapsed_ms = Some(120.0);
+    p.facts_mut().elapsed_ms = Some(400.0);
+    out.push(("scalar function, measured", p));
+    let mut seek = node(1, "Index Seek", NodeKind::Seek);
+    seek.facts_mut().user_functions = vec!["dbo.fn_key".into()];
+    seek.facts_mut().functions_in_seek_only = Some(true);
+    seek.act_executions = Some(20_000.0);
+    out.push(("scalar function in a seek", plan(Engine::Mssql, seek)));
+    let mut root = node(0, "Hash Match", NodeKind::Join);
+    root.self_cost = 60.0;
+    let mut p = plan(Engine::Mssql, root);
+    p.facts_mut().parallelism_blocker = Some("TSQLUserDefinedFunctionsNotParallelizable".into());
+    out.push(("scalar function, serial only", p));
+
+    // Spills whose size the plan doesn't give, and a MariaDB sort fed by an underestimate.
+    let mut exchange = node(1, "Parallelism", NodeKind::Parallelism);
+    exchange.facts_mut().exchange_spill = Some(true);
+    out.push(("exchange spill, no size", plan(Engine::Mssql, exchange)));
+    let mut sort = node(1, "Sort", NodeKind::Sort);
+    sort.warnings = vec![PlanWarning::Spill];
+    out.push(("tempdb spill, no size", plan(Engine::Mssql, sort)));
+    let mut sort = measured(1, "Sort", NodeKind::Sort, 2.0, 30_000.0, 1.0);
+    sort.warnings = vec![PlanWarning::Spill];
+    sort.facts_mut().sort_merge_passes = Some(3);
+    let mut below = measured(2, "Table scan", NodeKind::Scan, 2.0, 30_000.0, 1.0);
+    below.object = Some("shop.orders".into());
+    sort.children = vec![below];
+    out.push(("merge passes, underestimated", actual(Engine::Mysql, sort, 900.0)));
+
+    // MySQL's temporary tables: grouping without a sort, and an ORDER BY alone.
+    let mut group = node(1, "Group", NodeKind::Aggregate);
+    group.detail = Some("using temporary table".into());
+    group.est_rows = 50_000.0;
+    let mut p = plan(Engine::Mysql, group);
+    p.statement = Some("SELECT status, count(*) FROM orders GROUP BY status".into());
+    out.push(("temporary table, grouping", p));
+    let mut ordered = node(1, "Sort", NodeKind::Sort);
+    ordered.detail = Some("using temporary table; using filesort".into());
+    ordered.est_rows = 50_000.0;
+    let mut p = plan(Engine::Mysql, ordered);
+    p.statement = Some("SELECT * FROM a JOIN b ON a.id = b.a_id ORDER BY b.created_at".into());
+    out.push(("temporary table, order by", p));
+
+    // Names the plan doesn't give: an eager spool's table, a join buffer's columns, the columns without statistics.
+    let mut spool = node(1, "Index Spool", NodeKind::Spool);
+    spool.detail = Some("Eager Spool".into());
+    spool.self_cost = 50.0;
+    out.push(("eager spool, no table", plan(Engine::Mssql, spool)));
+    let mut first = node(2, "Table scan", NodeKind::Scan);
+    first.object = Some("shop.a".into());
+    first.est_rows = 10.0;
+    let mut buffered = node(3, "Table scan", NodeKind::Scan);
+    buffered.object = Some("shop.orders".into());
+    buffered.predicate = Some("(`x`.`a` = `y`.`b`)".into());
+    buffered.rows_read = Some(100_000.0);
+    buffered.facts_mut().join_buffer = Some("hash join".into());
+    let mut join = node(1, "Nested loop inner join", NodeKind::Join);
+    join.children = vec![first, buffered];
+    out.push(("join buffer, no join column", plan(Engine::Mysql, join)));
+    let mut warned = node(1, "Clustered Index Scan", NodeKind::Scan);
+    warned.object = Some("dbo.orders".into());
+    warned.warnings = vec![PlanWarning::MissingStatistics];
+    out.push(("no statistics, no columns", plan(Engine::Mssql, warned)));
+
+    // Three equality columns, any of which could lead.
+    out.push((
+        "three equality columns",
+        plan(Engine::Postgres, filtered_scan(1, "Seq Scan", "public.t", "((a = 1) AND (b = 2) AND (c = 3))")),
+    ));
+    out
+}
+
+fn rarely_said_words() -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    for (what, p) in rarely_said() {
+        let _ = writeln!(out, "== {what}");
+        for i in insights(&p) {
+            let _ = writeln!(out, "[{}] {}", i.rule, i.title);
+            let _ = writeln!(out, "  detail: {}", i.detail);
+            let _ = writeln!(out, "  fix: {}", i.fix);
+            if let Some(sql) = &i.fix_sql {
+                let _ = writeln!(out, "  sql: {}", sql.replace('\n', "\n       "));
+            }
+            let _ = writeln!(out, "  verify: {}", i.verify);
+        }
+    }
+    out
+}
+
+#[test]
+fn what_rarely_happens_says_the_same_english_word_for_word() {
+    let actual = rarely_said_words();
+    let (mut a, mut e) = (actual.lines(), RARELY_SAID.lines());
+    let mut line = 0;
+    loop {
+        line += 1;
+        match (a.next(), e.next()) {
+            (None, None) => break,
+            (got, wanted) => assert_eq!(got, wanted, "line {line} of what the insights rarely say"),
+        }
+    }
+}
+
+const RARELY_SAID: &str = r##"== automatic index, no columns
+[automatic-index] SQLite builds a temporary index on orders every time this runs
+  detail: No index on orders fits this search, so SQLite builds one for each run and throws it away.
+  fix: Create that index once, so the work happens one time instead of on every run.
+  verify: Explain again: no AUTOMATIC INDEX, and a SEARCH using the new index.
+== automatic index for a join
+[automatic-index] SQLite builds a temporary index on orders every time this runs
+  detail: No index on orders fits this join, so SQLite builds one on customer_id for each run and throws it away.
+  fix: Create that index once, so the work happens one time instead of on every run.
+  sql: CREATE INDEX IF NOT EXISTS "ix_orders_customer_id"
+           ON "orders" ("customer_id");
+       -- SQLite builds an index under the database's write lock: writers wait until it finishes.
+  verify: Explain again: no AUTOMATIC INDEX, and a SEARCH using the new index.
+== correlated subquery, nothing named
+[misestimate] Expected 1 row from Result, got 5.0K (5.0K× more)
+  detail: Nothing above it in this plan was sized from that estimate, but the same statistics decide every plan that reads this table.
+  fix: Refresh statistics on the tables below this operator.
+  verify: Run with actual rows again: the estimate is within about 10× of the actual count.
+[correlated-subquery] A subquery runs 5.0K times, once per row of the outer query
+  detail: PostgreSQL runs the subquery for every row instead of once for the whole set.
+  fix: Rewrite it as a join (or LEFT JOIN … GROUP BY for counts and sums) so it runs once; if it must stay correlated, index the columns it filters on so each run is a quick lookup.
+  verify: Explain again: the subquery appears once, joined, instead of as a per-row SubPlan / DEPENDENT SUBQUERY.
+== jit, no run time
+[jit] JIT compilation took 50 ms
+  detail: PostgreSQL compiled parts of this query to machine code because its estimated cost crossed jit_above_cost. Compiled code evaluates each row faster, so on a long run it can pay for itself; only a run without it tells.
+  fix: Compare with JIT off in your session before changing anything.
+  sql: -- In your session only, then EXPLAIN ANALYZE again and compare:
+       SET jit = off;
+  verify: Explain analyze again: no JIT section, and a shorter execution time.
+== rid lookups, named index
+[key-lookups] Looks up 5.0K rows in dbo.orders one at a time
+  detail: ix_orders_status finds the rows but doesn't hold total, so SQL Server goes back to dbo.orders for each one (RID Lookup). Together that's 67% of this plan's work.
+  fix: dbo.orders has no clustered index, so every lookup follows a row pointer. Give it a clustered index, or add total to ix_orders_status as included columns.
+  verify: Explain again: the RID Lookup is gone and ix_orders_status returns the rows by itself.
+== rid lookups, no index
+[key-lookups] Looks up 5.0K rows in dbo.orders one at a time
+  detail: Each row found by the index needs a second read from dbo.orders (RID Lookup). Together that's 67% of this plan's work.
+  fix: dbo.orders has no clustered index, so every lookup follows a row pointer. Give it a clustered index, or add total to the index as included columns.
+  verify: Explain again: the RID Lookup is gone and the seek returns the rows by itself.
+== leading wildcard, mysql
+[leading-wildcard] LIKE '%…' on email reads all of users
+  detail: A pattern that starts with a wildcard can't use an index, so Table scan checks every row's email (100K rows) to keep <1% of them.
+  fix: Use a FULLTEXT index with MATCH … AGAINST for word searches, or drop the leading % if a prefix search is enough.
+  verify: Explain again: users is read through an index (a Bitmap Index Scan on PostgreSQL).
+== leading wildcard, sqlite
+[leading-wildcard] LIKE '%…' on email reads all of users
+  detail: A pattern that starts with a wildcard can't use an index, so SCAN checks every row's email (100K rows) to keep <1% of them.
+  fix: Use an FTS5 virtual table with MATCH for word searches, or drop the leading % if a prefix search is enough.
+  verify: Explain again: users is read through an index (a Bitmap Index Scan on PostgreSQL).
+== leading wildcard, no column
+[leading-wildcard] LIKE '%…' on the column reads all of users
+  detail: A pattern that starts with a wildcard can't use an index, so Clustered Index Scan checks every row's the column (100K rows) to keep <1% of them.
+  fix: Use full-text search for word searches, or drop the leading % if a prefix search is enough. For suffix searches, store the reversed value of the column and index it.
+  verify: Explain again: users is read through an index (a Bitmap Index Scan on PostgreSQL).
+== legacy estimator, memory limit, desired grant, compile
+[memory-grant] Asks for 1.9 GB of memory per run
+  detail: Large grants are reserved for the whole run; a few of these at once make other queries queue for memory.
+  fix: Check the row estimates of the sorts and hashes; sort fewer rows or columns, or cap it with OPTION (MAX_GRANT_PERCENT = n).
+  verify: Explain again: the desired memory is lower.
+[optimizer-timeout] The optimizer ran out of memory before it finished choosing a plan
+  detail: SQL Server reports StatementOptmEarlyAbortReason = MemoryLimitExceeded: the query is complex enough that the plan in use is the best one found in the time allowed, not necessarily the best one.
+  fix: Make it simpler to optimize: split it into steps with a temporary table, remove joins the result doesn't need, or replace nested views with direct table references.
+  verify: Explain again: StatementOptmEarlyAbortReason is gone.
+[slow-compile] Compiling this plan took 800 ms
+  detail: When the plan isn't reused, every run pays this again. Many joins, many partitions or long IN lists make planning expensive.
+  fix: Make sure the plan is reused: send the query parameterized rather than with literal values, and avoid OPTION (RECOMPILE) on frequent queries.
+  verify: Explain again: compile/planning time is a small fraction of the run.
+[legacy-ce] Planned with the legacy cardinality estimator (the SQL Server 2012 model)
+  detail: The database has LEGACY_CARDINALITY_ESTIMATION on, a compatibility level below 120, or the query uses the FORCE_LEGACY_CARDINALITY_ESTIMATION hint. The newer estimator handles correlated filters and joins better.
+  fix: Test the query with the current estimator (OPTION (USE HINT('FORCE_DEFAULT_CARDINALITY_ESTIMATION'))) and, if it's faster, plan the switch for the database.
+  verify: Explain again: CardinalityEstimationModelVersion is 120 or higher.
+== lossy bitmap, maybe brin
+[lossy-bitmap] The bitmap scan on events kept 500 pages without their rows
+  detail: For 500 pages it only remembered the page, not the rows, so every row on them was re-checked. A bitmap outgrowing work_mem does that, and so does a BRIN index combined into it, which only ever gives pages: check the indexes it combines before raising work_mem.
+  fix: Raise work_mem for this workload (per role or session), or make the condition more selective.
+  sql: SET work_mem = '32MB';  -- test in your session first
+  verify: Explain analyze again: no Lossy Heap Blocks.
+== misestimate, sql server columns
+[misestimate] Expected 10 rows from orders, got 100K (10K× more)
+  detail: Everything above this operator was planned for the wrong number of rows: join types, memory grants and parallelism. The filter combines status and region; databases assume such columns are independent, which is wrong when they move together.
+  fix: Refresh the statistics on orders with a full scan, and create statistics on the filtered columns together.
+  sql: UPDATE STATISTICS [dbo].[orders] WITH FULLSCAN;
+       CREATE STATISTICS st_orders_status_region ON [dbo].[orders] ([status], [region]);
+  verify: Run with actual rows again: the estimate is within about 10× of the actual count.
+== misestimate, yugabyte
+[misestimate] Expected 10 rows from orders, got 100K (10K× more)
+  detail: Everything above this operator was planned for the wrong number of rows: join types, memory grants and parallelism.
+  fix: Refresh YSQL optimizer statistics on orders and compare a measured plan with representative values.
+  sql: ANALYZE public.orders;
+  verify: Run with actual rows again: the estimate is within about 10× of the actual count.
+== loop rereads a scan
+[misestimate] Expected 10.0M rows from b, got 500 (20K× fewer)
+  detail: Everything above this operator was planned for the wrong number of rows: join types, memory grants and parallelism.
+  fix: Analyze b.
+  sql: ANALYZE public.b;
+  verify: Run with actual rows again: the estimate is within about 10× of the actual count.
+[nested-loops] Repeats its read of b 20K times, once per row of a
+  detail: Each run reads about 500 rows of b, so the loop reads it 20K times over. 100% of this plan's work.
+  fix: Index b on the join column so each run reads only its matching rows, or filter a earlier so fewer rows reach the loop.
+  verify: Run with actual rows: a hash join, or far fewer rows read per execution of b.
+== loop seeks too much
+[misestimate] Expected 10.0M rows from b, got 500 (20K× fewer)
+  detail: Everything above this operator was planned for the wrong number of rows: join types, memory grants and parallelism.
+  fix: Analyze b.
+  sql: ANALYZE public.b;
+  verify: Run with actual rows again: the estimate is within about 10× of the actual count.
+[nested-loops] Repeats its read of b 20K times, once per row of a
+  detail: Each run reads about 500 rows of b (50% of the table), so the loop reads it 20K times over. 100% of this plan's work.
+  fix: Give b an index that leads with the join column and the columns the inner side filters on, so each run reads only its matching rows; or filter a earlier so fewer rows reach the loop.
+  verify: Run with actual rows: a hash join, or far fewer rows read per execution of b.
+== function, yugabyte
+[non-sargable] UPPER() around email keeps the database from using an index on users
+  detail: Each row's email is computed before it can be compared (`(upper(email) = 'X'::text)`), so an index on email can't narrow the search: Seq Scan reads 100K rows to keep <1%.
+  fix: Store email in the form you search for, or index the expression with explicit ordered keys, e.g. `CREATE INDEX ON users ((upper(email)) ASC)`. Review its tablet distribution and preserve collation and NULL behavior.
+  verify: Compare identical results, including NULLs and boundary values, then obtain a fresh plan for users with representative parameters. Compare rows read and execution time; an index condition on email can help, but the optimizer may correctly retain a scan.
+== function, mysql
+[non-sargable] UPPER() around email keeps the database from using an index on users
+  detail: Each row's email is computed before it can be compared (`(upper(email) = 'X')`), so an index on email can't narrow the search: Table scan reads 100K rows to keep <1%.
+  fix: Store email in the form you search for, or add a functional index, e.g. `CREATE INDEX ... ON users ((upper(email)))` (MySQL 8.0.13+).
+  verify: Compare identical results, including NULLs and boundary values, then obtain a fresh plan for users with representative parameters. Compare rows read and execution time; an index condition on email can help, but the optimizer may correctly retain a scan.
+== function, mariadb
+[non-sargable] UPPER() around email keeps the database from using an index on users
+  detail: Each row's email is computed before it can be compared (`(upper(email) = 'X')`), so an index on email can't narrow the search: Table scan reads 100K rows to keep <1%. 100% of this plan's work.
+  fix: Store email in the form you search for, or define a generated column for UPPER(email) and index that column. MariaDB uses indexed generated columns rather than MySQL's direct expression-index syntax; whether the original expression can use that index depends on the server version. Test the query against the generated column and preserve its collation and NULL behavior.
+  verify: Compare identical results, including NULLs and boundary values, then obtain a fresh plan for users with representative parameters. Compare rows read and execution time; an index condition on email can help, but the optimizer may correctly retain a scan.
+== function, sql server
+[non-sargable] UPPER() around email keeps the database from using an index on users
+  detail: Each row's email is computed before it can be compared (`upper(email) = N'X'`), so an index on email can't narrow the search: Clustered Index Scan reads 100K rows to keep <1%. 100% of this plan's work.
+  fix: Store email in the form you search for, or add a computed column with UPPER(email) and index it.
+  verify: Compare identical results, including NULLs and boundary values, then obtain a fresh plan for users with representative parameters. Compare rows read and execution time; an index condition on email can help, but the optimizer may correctly retain a scan.
+== function, sqlite
+[non-sargable] UPPER() around email keeps the database from using an index on users
+  detail: Each row's email is computed before it can be compared (`upper(email) = ?`), so an index on email can't narrow the search: SCAN reads 100K rows to keep <1%.
+  fix: Store email in the form you search for, or index the expression itself, e.g. `CREATE INDEX ... ON users (upper(email))`.
+  verify: Compare identical results, including NULLs and boundary values, then obtain a fresh plan for users with representative parameters. Compare rows read and execution time; an index condition on email can help, but the optimizer may correctly retain a scan.
+== cast, postgres
+[non-sargable] A cast on total keeps the database from using an index on users
+  detail: Each row's total is computed before it can be compared (`((total)::integer = 5)`), so an index on total can't narrow the search: Seq Scan reads 100K rows to keep <1%. 100% of this plan's work.
+  fix: Compare total with a value of its own type, so nothing has to be converted per row.
+  verify: Compare identical results, including NULLs and boundary values, then obtain a fresh plan for users with representative parameters. Compare rows read and execution time; an index condition on total can help, but the optimizer may correctly retain a scan.
+== parallel skew, postgres
+[misestimate] Expected 1 row from events, got 97K (97K× more)
+  detail: Nothing above it in this plan was sized from that estimate, but the same statistics decide every plan that reads this table.
+  fix: Analyze events.
+  sql: ANALYZE public.events;
+  verify: Run with actual rows again: the estimate is within about 10× of the actual count.
+[parallel-skew] One process of 4 handled 98% of the rows in Parallel Seq Scan
+  detail: Parallel work is only as fast as its busiest process; the others finished early and waited.
+  fix: Uneven work usually means one key value holds most of the rows (check the distribution of the join or filter column) or a parallel scan over a small range; update statistics and consider filtering that value separately.
+  verify: Run with actual rows: each process handles a similar share.
+== serial plan
+[parallelism-blocked] This plan runs on one CPU because only one CPU is available to it
+  detail: Its estimated cost is 60. SQL Server considers a parallel plan above the server's cost threshold for parallelism (5 by default, often raised to 50), which this plan passes either way; the whole run happens on a single core instead.
+  fix: Remove what prevents parallelism if the query allows it; otherwise make the single-threaded run cheaper (indexes, fewer rows).
+  verify: Explain again: no NonParallelPlanReason, and Parallelism operators appear.
+== serial plan
+[parallelism-blocked] This plan runs on one CPU because this SQL Server edition doesn't run parallel plans
+  detail: Its estimated cost is 60. SQL Server considers a parallel plan above the server's cost threshold for parallelism (5 by default, often raised to 50), which this plan passes either way; the whole run happens on a single core instead.
+  fix: Remove what prevents parallelism if the query allows it; otherwise make the single-threaded run cheaper (indexes, fewer rows).
+  verify: Explain again: no NonParallelPlanReason, and Parallelism operators appear.
+== serial plan
+[parallelism-blocked] This plan runs on one CPU because SQL Server couldn't build a valid parallel plan for it
+  detail: Its estimated cost is 60. SQL Server considers a parallel plan above the server's cost threshold for parallelism (5 by default, often raised to 50), which this plan passes either way; the whole run happens on a single core instead.
+  fix: Remove what prevents parallelism if the query allows it; otherwise make the single-threaded run cheaper (indexes, fewer rows).
+  verify: Explain again: no NonParallelPlanReason, and Parallelism operators appear.
+== serial plan
+[parallelism-blocked] This plan runs on one CPU because the query calls a built-in function that can't run in parallel
+  detail: Its estimated cost is 60. SQL Server considers a parallel plan above the server's cost threshold for parallelism (5 by default, often raised to 50), which this plan passes either way; the whole run happens on a single core instead.
+  fix: Remove what prevents parallelism if the query allows it; otherwise make the single-threaded run cheaper (indexes, fewer rows).
+  verify: Explain again: no NonParallelPlanReason, and Parallelism operators appear.
+== serial plan
+[parallelism-blocked] This plan runs on one CPU because it writes to a table variable
+  detail: Its estimated cost is 60. SQL Server considers a parallel plan above the server's cost threshold for parallelism (5 by default, often raised to 50), which this plan passes either way; the whole run happens on a single core instead.
+  fix: Remove what prevents parallelism if the query allows it; otherwise make the single-threaded run cheaper (indexes, fewer rows).
+  verify: Explain again: no NonParallelPlanReason, and Parallelism operators appear.
+== serial plan
+[parallelism-blocked] This plan runs on one CPU because it touches memory-optimized tables
+  detail: Its estimated cost is 60. SQL Server considers a parallel plan above the server's cost threshold for parallelism (5 by default, often raised to 50), which this plan passes either way; the whole run happens on a single core instead.
+  fix: Remove what prevents parallelism if the query allows it; otherwise make the single-threaded run cheaper (indexes, fewer rows).
+  verify: Explain again: no NonParallelPlanReason, and Parallelism operators appear.
+== serial plan
+[parallelism-blocked] This plan runs on one CPU because it assigns to a variable
+  detail: Its estimated cost is 60. SQL Server considers a parallel plan above the server's cost threshold for parallelism (5 by default, often raised to 50), which this plan passes either way; the whole run happens on a single core instead.
+  fix: Remove what prevents parallelism if the query allows it; otherwise make the single-threaded run cheaper (indexes, fewer rows).
+  verify: Explain again: no NonParallelPlanReason, and Parallelism operators appear.
+== serial plan
+[parallelism-blocked] This plan runs on one CPU because it calls a CLR function that reads data
+  detail: Its estimated cost is 60. SQL Server considers a parallel plan above the server's cost threshold for parallelism (5 by default, often raised to 50), which this plan passes either way; the whole run happens on a single core instead.
+  fix: Remove what prevents parallelism if the query allows it; otherwise make the single-threaded run cheaper (indexes, fewer rows).
+  verify: Explain again: no NonParallelPlanReason, and Parallelism operators appear.
+== serial plan
+[parallelism-blocked] This plan runs on one CPU: SQL Server reports SomeFutureReason
+  detail: Its estimated cost is 60. SQL Server considers a parallel plan above the server's cost threshold for parallelism (5 by default, often raised to 50), which this plan passes either way; the whole run happens on a single core instead.
+  fix: Remove what prevents parallelism if the query allows it; otherwise make the single-threaded run cheaper (indexes, fewer rows).
+  verify: Explain again: no NonParallelPlanReason, and Parallelism operators appear.
+== maxdop from the server
+[parallelism-blocked] This plan runs on one CPU because the server's max degree of parallelism is 1
+  detail: Its estimated cost is 60. SQL Server considers a parallel plan above the server's cost threshold for parallelism (5 by default, often raised to 50), which this plan passes either way; the whole run happens on a single core instead.
+  fix: Raise the server's max degree of parallelism, or set the database's MAXDOP (ALTER DATABASE SCOPED CONFIGURATION SET MAXDOP), which overrides it for this database.
+  verify: Explain again: no NonParallelPlanReason, and Parallelism operators appear.
+== maxdop set elsewhere, server at 1
+[parallelism-blocked] This plan runs on one CPU because MAXDOP is 1, though neither its statement nor the database's or server's setting says so now (a Query Store hint, a Resource Governor workload group, or a setting changed since it was compiled)
+  detail: Its estimated cost is 60. SQL Server considers a parallel plan above the server's cost threshold for parallelism (5 by default, often raised to 50), which this plan passes either way; the whole run happens on a single core instead.
+  fix: Raise the server's max degree of parallelism, or set the database's MAXDOP (ALTER DATABASE SCOPED CONFIGURATION SET MAXDOP), which overrides it for this database.
+  verify: Explain again: no NonParallelPlanReason, and Parallelism operators appear.
+== remote query
+[remote-query] Pulls 5.0K rows from a linked server
+  detail: Rows from another server travel over the network, and filters that can't be sent along are applied locally after the transfer.
+  fix: Filter on the remote side (OPENQUERY with the WHERE clause inside), or copy the data you need locally on a schedule.
+  verify: Explain again: far fewer rows come back from the Remote operator.
+== scalar function, measured
+[misestimate] Expected 1 row from Compute Scalar, got 5.0K (5.0K× more)
+  detail: Nothing above it in this plan was sized from that estimate, but the same statistics decide every plan that reads this table.
+  fix: Refresh statistics on the tables below this operator.
+  verify: Run with actual rows again: the estimate is within about 10× of the actual count.
+[scalar-udf] dbo.fn_tax runs once for every row (about 5.0K calls per run)
+  detail: A scalar function runs like a small separate query for each row. This run spent 120 ms in it, 30% of the statement's time.
+  fix: Inline it: rewrite the function as an inline table-valued function or a plain expression in the query. SQL Server 2019+ inlines scalar functions automatically unless they use things like GETDATE(), table variables or loops.
+  verify: Explain again: no UserDefinedFunction in the plan, and no NonParallelPlanReason.
+== scalar function in a seek
+[scalar-udf] dbo.fn_key runs once for every seek (about 20K calls per run)
+  detail: A scalar function runs like a small separate query for each row. Its cost doesn't show in the plan's numbers, which makes it easy to miss.
+  fix: Inline it: rewrite the function as an inline table-valued function or a plain expression in the query. SQL Server 2019+ inlines scalar functions automatically unless they use things like GETDATE(), table variables or loops.
+  verify: Explain again: no UserDefinedFunction in the plan, and no NonParallelPlanReason.
+== scalar function, serial only
+[scalar-udf] A scalar function keeps this plan on one CPU and runs once per row
+  detail: SQL Server reports TSQLUserDefinedFunctionsNotParallelizable: a T-SQL scalar function in the query can't run in parallel, and it's called for each row.
+  fix: Inline the function as an inline table-valued function or an expression; on SQL Server 2019+ remove what prevents automatic inlining (GETDATE(), table variables, loops).
+  verify: Explain again: NonParallelPlanReason is gone.
+== exchange spill, no size
+[spill] The Parallelism exchange wrote to tempdb to keep its threads from waiting on each other
+  detail: SQL Server spills an exchange's buffers to tempdb when its parallel threads would otherwise wait on each other for good, usually at an exchange that keeps rows in order (merging streams) fed unevenly. It isn't a memory grant problem.
+  fix: Remove the need for order at that exchange (an ORDER BY or merge join above it that an index or a hash join could serve), and check whether one value holds most of the rows; comparing a run with OPTION (MAXDOP 1) shows what parallelism costs here.
+  verify: Run with an actual plan: no ExchangeSpillDetails on the Parallelism operator.
+== tempdb spill, no size
+[spill] Sort ran out of memory and wrote to tempdb
+  detail: The memory granted to Sort was too small for the rows it got, so part of the work went to disk in tempdb.
+  fix: Fix the row estimate first (update statistics on the tables feeding it); an index that returns rows in the needed order removes the sort altogether. SQL Server 2019+ also grows the grant on later runs (memory grant feedback, compatibility level 150).
+  verify: Run with an actual plan: no spill warning on that operator.
+== merge passes, underestimated
+[misestimate] Expected 2 rows from orders, got 30K (15K× more)
+  detail: Everything above this operator was planned for the wrong number of rows: join types, memory grants and parallelism (here a sort or hash above it ran out of memory as a result).
+  fix: Refresh the statistics on orders.
+  sql: ANALYZE TABLE `shop`.`orders`;
+  verify: Run with actual rows again: the estimate is within about 10× of the actual count.
+[spill] The sort needed 3 merge passes through temporary files because it didn't fit in sort_buffer_size
+  detail: Each merge pass writes the sorted runs to a temporary file and reads them back. The rows feeding it were badly underestimated.
+  fix: Raise sort_buffer_size for the session that runs it rather than server-wide (it's allocated per sort), or add an index that returns rows already in order so the sort disappears.
+  sql: -- Try it in your session first:
+       SET SESSION sort_buffer_size = 8 * 1024 * 1024;
+  verify: Run ANALYZE again: r_sort_passes is 0.
+== temporary table, grouping
+[temp-table-sort] Collects 50K rows in an internal temporary table
+  detail: The rows don't arrive in the order the GROUP BY / DISTINCT needs, so MySQL builds a temporary table (on disk once it outgrows tmp_table_size) and sorts the result.
+  fix: An index whose leading columns match the GROUP BY may let MySQL group in index order and reduce grouping work. An ORDER BY that differs from the grouping, especially an aggregate such as COUNT(*) DESC, can still need a temporary table and sort. Filter rows before grouping, or keep a pre-aggregated result, to reduce that work.
+  verify: Explain again: look for grouping in index order or fewer rows entering the temporary table. A temporary table and sort for a different ORDER BY can remain; compare on-disk temporary tables on new runs to check the spill itself.
+== temporary table, order by
+[temp-table-sort] Collects 50K rows in an internal temporary table to sort them (filesort)
+  detail: The ORDER BY isn't on the table the join reads first, so MySQL collects the joined rows in a temporary table (on disk once it outgrows tmp_table_size) and sorts them.
+  fix: Order by columns of the table the join reads first, with an index that returns them in that order; or sort fewer rows with a more selective WHERE or a LIMIT.
+  verify: Explain again: no "using temporary" on the sort.
+== eager spool, no table
+[eager-spool] SQL Server builds a temporary index on the table every time this runs
+  detail: The Index Spool copies 0 rows of the table into a temporary index in tempdb on each run and drops it afterwards, because no index fits the lookup.
+  fix: It seeks on a value computed in the plan, not on a column of the table: rewrite the join or subquery above the spool to compare columns, so an index on them can replace the spool.
+  verify: Explain again: the Index Spool is gone and the lookup seeks the new index.
+== join buffer, no join column
+[join-buffer] Joins orders without an index (hash join over a full read)
+  detail: MySQL has no index to look up matching rows of orders for each row it joins, so it reads all 100K rows into a join buffer and matches them there.
+  fix: Index orders on the join column so MySQL can look rows up directly.
+  verify: Explain again: orders is read with ref or eq_ref access, without a join buffer.
+== no statistics, no columns
+[missing-statistics] The captured plan reported no usable statistics on some columns
+  detail: SQL Server reported ColumnsWithNoStatistics when this plan was compiled. This is a compilation-time warning, not a measurement of current statistics or proof of a slow plan. Query Store can retain the original plan XML after statistics change.
+  fix: Inspect the current column and index statistics and AUTO_CREATE_STATISTICS before choosing a change. An index histogram describes only its first key, so a column appearing in a seek does not prove that it has a usable histogram. Refresh or create statistics only where current evidence supports it; compare actual rows with estimates if the query is costly.
+  sql: SELECT name, is_auto_create_stats_on, is_read_only
+         FROM sys.databases
+        WHERE database_id = DB_ID();
+  verify: Capture a newly compiled plan after any justified statistics change and compare its warning and row estimates with representative runs. Reopening Query Store's original saved XML alone cannot verify that the warning is still current or has cleared.
+== three equality columns
+[scan-filter] Reads 100K rows of public.t to keep 10
+  detail: The Seq Scan reads the rows and checks `((a = 1) AND (b = 2) AND (c = 3))` on each one, so most of the reading is thrown away. 100% of this plan's work.
+  fix: An index on a, b and c lets the database go straight to the matching rows; if one already exists, the optimizer didn't use it, so refresh the table's statistics first. a, b and c can go in any order, and the SQL below takes the filter's (a first). Put another one first instead if it has more distinct values, or if another index you add on t leads with it: then that one index serves this query too.
+  sql: CREATE INDEX CONCURRENTLY ix_t_a_b_c
+           ON public.t (a, b, c);
+  verify: Explain again: t reads about as many rows as it keeps.
+"##;
+
 const SAID: &str = r##"rule deep-pagination [Mssql, Postgres, Yugabyte, Mysql]: A literal OFFSET skips many matches before returning a later page
 rule partition-filtering [Postgres]: A measured run visits many partitions and filters most rows afterwards; inspect intended pruning
 rule cross-table-or [Mssql, Postgres, Yugabyte, Mysql]: A filter across tables after a scan; evaluate a semantics-preserving rewrite before indexing
