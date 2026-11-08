@@ -1,5 +1,5 @@
 use crate::probe::{self, node_id};
-use culprit_core::{Engine, Environment, Error, ErrorCode, LiveState, LockWait, Result, Session, SessionAction};
+use culprit_core::{Engine, Environment, Error, ErrorCode, LiveState, LockWait, Result, Session, SessionAction, t};
 use culprit_postgres::wire::{Connector, INTERACTIVE, SessionLimits, query, query_one, tagged};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -24,19 +24,16 @@ pub(crate) async fn live(connector: &Connector, environment: Environment) -> Res
         AND backend_type IN ('client backend','yb-conn-mgr worker connection') AND COALESCE(application_name,'') <> 'culprit' LIMIT 1001",literal(&p.database))).await?;
     let mut notes = vec![];
     if !p.global {
-        notes.push(format!(
-            "Sessions cover connected YB-TServer {} only. Enable and authorize cluster views to observe other nodes.",
-            p.node.as_deref().unwrap_or("unknown")
-        ));
+        notes.push(match p.node.as_deref() {
+            Some(node) => t!("provider.yugabyte.sessions.node_scope", node = node),
+            None => t!("provider.yugabyte.sessions.unknown_node_scope"),
+        });
     }
     if observed.notices() != count {
-        notes.push(
-            "A YSQL node was skipped or raised a warning while reading sessions; cluster activity is incomplete."
-                .into(),
-        );
+        notes.push(t!("provider.yugabyte.sessions.node_skipped"));
     }
     if rows.len() > 1000 {
-        notes.push("Only the first 1,000 YSQL sessions are retained; activity and blocking totals are partial.".into());
+        notes.push(t!("provider.yugabyte.sessions.truncated"));
     }
     let mut sessions = Vec::new();
     let mut transactions = HashMap::new();
@@ -44,14 +41,14 @@ pub(crate) async fn live(connector: &Connector, environment: Environment) -> Res
     for row in rows.into_iter().take(1000) {
         let Some(raw) = row.text("sample") else { continue };
         let v: Value =
-            serde_json::from_str(&raw).map_err(|_| Error::invalid("YSQL returned malformed session metadata"))?;
+            serde_json::from_str(&raw).map_err(|_| Error::invalid(t!("provider.yugabyte.error.malformed_session")))?;
         let Some(pid) = v.get("pid").and_then(Value::as_i64).filter(|n| *n > 0) else {
-            notes.push("A YSQL session had no usable backend identity.".into());
+            notes.push(t!("provider.yugabyte.sessions.no_backend"));
             continue;
         };
         let node = if p.global { text(&v, "server_uuid").and_then(|s| node_id(&s)) } else { p.node.clone() };
         if node.is_none() {
-            notes.push("A YSQL session's node identity is unknown; it cannot be signaled safely.".into());
+            notes.push(t!("provider.yugabyte.sessions.unknown_node"));
         }
         let started = text(&v, "backend_start").unwrap_or_default();
         let id = format!("{}/{pid}/{started}", node.as_deref().unwrap_or("unknown"));
@@ -63,7 +60,7 @@ pub(crate) async fn live(connector: &Connector, environment: Environment) -> Res
         }
         let sql = text(&v, "query").filter(|s| s != "<insufficient privilege>");
         if sql.is_none() && text(&v, "state").as_deref().is_none_or(|s| s == "active") {
-            notes.push("Some active statements are hidden by this login's permissions.".into());
+            notes.push(t!("provider.yugabyte.sessions.hidden"));
         }
         sessions.push(Session {
             id,
@@ -93,9 +90,9 @@ pub(crate) async fn live(connector: &Connector, environment: Environment) -> Res
     // This session's metadata filter may include young waiters without changing application or cluster settings.
     // Native lock collection still has transaction/per-tablet caps; an empty result cannot establish absence.
     if observed.client.batch_execute(&tagged("SET yb_locks_min_txn_age=0")).await.is_err() {
-        notes.push("Short-lived DocDB locks may be omitted by the server's minimum transaction-age filter.".into());
+        notes.push(t!("provider.yugabyte.sessions.young_locks"));
     }
-    notes.push("DocDB lock collection follows transaction heartbeats and has transaction/per-tablet limits; missing chains do not establish that no session is blocked.".into());
+    notes.push(t!("provider.yugabyte.sessions.lock_limits"));
     let count = observed.notices();
     let locks = query(
         &observed.client,
@@ -112,7 +109,7 @@ pub(crate) async fn live(connector: &Connector, environment: Environment) -> Res
     match locks {
         Ok(rows) => {
             if rows.len() > 2000 || observed.notices() != count {
-                notes.push("DocDB lock evidence is partial.".into());
+                notes.push(t!("provider.yugabyte.sessions.locks_partial"));
             }
             for row in rows.into_iter().take(2000) {
                 let waiter = node_id(&row.string("node"))
@@ -137,9 +134,7 @@ pub(crate) async fn live(connector: &Connector, environment: Environment) -> Res
                 });
             }
         }
-        Err(_) => {
-            notes.push("DocDB lock metadata is unavailable; PostgreSQL heap lock views are not substituted.".into())
-        }
+        Err(_) => notes.push(t!("provider.yugabyte.sessions.locks_unavailable")),
     }
     notes.sort();
     notes.dedup();
@@ -156,9 +151,9 @@ pub(crate) async fn live(connector: &Connector, environment: Environment) -> Res
             Engine::Yugabyte.spec().session_actions()
         },
         session_actions_note: if environment.is_production() {
-            Some("Production connection: Culprit does not cancel or end sessions here.".into())
+            Some(t!("provider.yugabyte.sessions.actions_production"))
         } else {
-            Some("Actions require this node, the same backend start time, and a direct client backend. Pooled Connection Manager workers are not logical clients.".into())
+            Some(t!("provider.yugabyte.sessions.actions_rules"))
         },
     })
 }
@@ -181,7 +176,7 @@ pub(crate) async fn interrupt(connector: &Connector, id: &str, action: SessionAc
     if row.is_some_and(|r| r.flag("stopped")) {
         Ok(())
     } else {
-        Err(Error::new(ErrorCode::NotFound, "The YSQL session ended, belongs to another node, or is a pooled backend")
-            .with_hint("Refresh Live; session actions never signal an unverified or pooled logical client."))
+        Err(Error::new(ErrorCode::NotFound, t!("provider.yugabyte.error.session_gone"))
+            .with_hint(t!("provider.yugabyte.error.session_gone_hint")))
     }
 }

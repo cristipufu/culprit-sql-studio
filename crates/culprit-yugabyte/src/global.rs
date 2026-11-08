@@ -28,5 +28,5 @@ pub(crate) async fn nodes(session: &ObservedSession) -> Result<BTreeSet<String>>
     let rows = query(&session.client, "SELECT uuid::text AS node FROM yb_servers()").await?;
     let ids: Option<BTreeSet<_>> = rows.iter().map(|r| node_id(&r.string("node"))).collect();
     ids.filter(|ids| !ids.is_empty() && session.notices() == before)
-        .ok_or_else(|| culprit_core::Error::invalid("YSQL could not establish a complete node inventory"))
+        .ok_or_else(|| culprit_core::Error::invalid(culprit_core::t!("provider.yugabyte.error.node_inventory")))
 }

@@ -2,7 +2,7 @@ use crate::{
     probe,
     sessions::{literal, target},
 };
-use culprit_core::{Engine, QueryProgress, Result, format};
+use culprit_core::{Engine, QueryProgress, Result, format, t};
 use culprit_postgres::wire::{Connector, INTERACTIVE, ObservedSession, Row, SessionLimits, elevated_login, query_one};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,7 +40,7 @@ impl Command {
         }
     }
 
-    fn describe(self, row: &Row) -> Option<(String, &'static str)> {
+    fn describe(self, row: &Row) -> Option<(String, String)> {
         let count = |key| row.number(key).filter(|n| *n >= 0.0 && n.fract() == 0.0);
         match self {
             Self::Index => Some(index_step(
@@ -68,28 +68,24 @@ impl Command {
 }
 
 /// An index build's phase, with the table rows its backfill has processed and expects, and what those counts are.
-fn index_step(command: String, phase: String, done: Option<f64>, total: Option<f64>) -> (String, &'static str) {
+fn index_step(command: String, phase: String, done: Option<f64>, total: Option<f64>) -> (String, String) {
     let mut text = format!("{command}: {phase}");
     if phase == "backfilling" {
         if let Some(done) = done {
-            text.push_str(&format!(" · {} table rows processed", format::count(done)));
+            let processed = t!("provider.yugabyte.progress.rows_processed", n = done, count = format::count(done));
+            text.push_str(&format!(" · {processed}"));
         }
         if let Some(total) = total {
-            text.push_str(&format!(" · about {} table rows estimated", format::count(total)));
+            let estimated = t!("provider.yugabyte.progress.rows_estimated", n = total, count = format::count(total));
+            text.push_str(&format!(" · {estimated}"));
         }
     }
-    (
-        text,
-        "Index backfill counts describe table rows, including for partial indexes. The total comes from an estimate; it is not a measured completion percentage.",
-    )
+    (text, t!("provider.yugabyte.progress.index_note"))
 }
 
 /// ANALYZE's phase, and what it doesn't measure.
-fn analyze_step(phase: String) -> (String, &'static str) {
-    (
-        format!("ANALYZE: {phase}"),
-        "ANALYZE reports its current native phase. PostgreSQL heap-block counters do not measure DocDB progress.",
-    )
+fn analyze_step(phase: String) -> (String, String) {
+    (format!("ANALYZE: {phase}"), t!("provider.yugabyte.progress.analyze_note"))
 }
 
 /// A COPY in progress: the rows and bytes it reports processed, its source file's size, and what those counts are.
@@ -99,21 +95,21 @@ fn copy_step(
     rows: Option<f64>,
     bytes: Option<f64>,
     total: Option<f64>,
-) -> (String, &'static str) {
+) -> (String, String) {
     let mut text = format!("{command} {kind}: IN PROGRESS");
     if let Some(rows) = rows {
-        text.push_str(&format!(" · {} rows reported processed", format::count(rows)));
+        let processed = t!("provider.yugabyte.progress.copy_rows", n = rows, count = format::count(rows));
+        text.push_str(&format!(" · {processed}"));
     }
     if let Some(bytes) = bytes {
-        text.push_str(&format!(" · {} processed", format::bytes(bytes)));
+        let processed = t!("provider.yugabyte.progress.copy_bytes", bytes = format::bytes(bytes));
+        text.push_str(&format!(" · {processed}"));
     }
     if let Some(total) = total {
-        text.push_str(&format!(" · {} source file", format::bytes(total)));
+        let file = t!("provider.yugabyte.progress.copy_file", bytes = format::bytes(total));
+        text.push_str(&format!(" · {file}"));
     }
-    (
-        text,
-        "Native row counters follow the source's transaction mode. Batched COPY FROM can leave completed transactions persisted after a later error. A zero or missing file size is unknown; counters do not prove whole-command completion or commit.",
-    )
+    (text, t!("provider.yugabyte.progress.copy_note"))
 }
 
 pub(crate) async fn read(connector: &Connector, id: &str, with_plan: bool) -> Result<(QueryProgress, bool)> {
@@ -151,10 +147,9 @@ pub(crate) async fn read_session(
     )
     .await?;
     let mut progress = QueryProgress::idle(id, Engine::Yugabyte, p.now);
-    progress.note = Some("YSQL reports current activity and supported command phases; it does not expose completed-work percentages or live rows for every operator. Requested plans are estimates and never execute the statement.".into());
+    progress.note = Some(t!("provider.yugabyte.progress.note"));
     let Some(row) = activity else {
-        progress.note =
-            Some("The YSQL backend ended, changed identity, belongs to another node, or is hidden from this login. Refresh Live.".into());
+        progress.note = Some(t!("provider.yugabyte.progress.backend_gone"));
         return Ok((progress, false));
     };
     progress.state = row.text("state");
@@ -168,12 +163,9 @@ pub(crate) async fn read_session(
     let worker = row.text("backend_type").as_deref() == Some("yb-conn-mgr worker connection");
     let partial = session.notices() != notices;
     if worker {
-        progress.note = Some("This is a reusable Connection Manager worker, not a stable logical-client identity. Its latest observed statement can change between reads; automatic planning is withheld.".into());
+        progress.note = Some(t!("provider.yugabyte.progress.pooled_worker"));
     } else if partial || progress.state.is_none() {
-        progress.note = Some(
-            "Some activity was hidden or a node was skipped; this observation cannot establish complete progress."
-                .into(),
-        );
+        progress.note = Some(t!("provider.yugabyte.progress.partial"));
     }
     // Native YSQL progress views can also return retained COPY counters for an unrelated command. Select the view
     // with the shared SQL lexer (including comments), then require its own native command/status metadata.
@@ -213,7 +205,7 @@ pub(crate) async fn read_session(
             }
             Ok(None) if session.notices() == before => {}
             _ => {
-                progress.note = Some("Current activity was read, but the native command-progress view was unavailable or skipped a node. No completion percentage is inferred.".into());
+                progress.note = Some(t!("provider.yugabyte.progress.view_unavailable"));
             }
         }
     }
@@ -239,6 +231,7 @@ mod tests {
                 "CREATE INDEX: backfilling · 1.5K table rows processed · about 2.4M table rows estimated".to_string(),
                 "Index backfill counts describe table rows, including for partial indexes. The total comes from an \
                  estimate; it is not a measured completion percentage."
+                    .to_string()
             )
         );
         assert_eq!(
@@ -250,6 +243,7 @@ mod tests {
             (
                 "ANALYZE: acquiring sample rows".to_string(),
                 "ANALYZE reports its current native phase. PostgreSQL heap-block counters do not measure DocDB progress."
+                    .to_string()
             )
         );
         assert_eq!(
@@ -260,6 +254,7 @@ mod tests {
                 "Native row counters follow the source's transaction mode. Batched COPY FROM can leave completed \
                  transactions persisted after a later error. A zero or missing file size is unknown; counters do not \
                  prove whole-command completion or commit."
+                    .to_string()
             )
         );
         assert_eq!(copy_step("COPY FROM".into(), String::new(), None, None, None).0, "COPY FROM : IN PROGRESS");

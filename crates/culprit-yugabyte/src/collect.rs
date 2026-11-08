@@ -1,5 +1,5 @@
 use crate::{YugabyteProvider, catalog, probe, sources, workload};
-use culprit_core::{Capability, Coverage, SNAPSHOT_FORMAT, Snapshot, SnapshotOptions, StatisticsInfo};
+use culprit_core::{Capability, Coverage, SNAPSHOT_FORMAT, Snapshot, SnapshotOptions, StatisticsInfo, t};
 use culprit_postgres::wire::COLLECTOR;
 use std::time::Instant;
 
@@ -24,7 +24,7 @@ pub(crate) async fn snapshot(
     let truncated = constraints.as_ref().is_ok_and(|(_, truncated)| *truncated);
     let constraints = coverage.read_rows(&sources::CONSTRAINTS, constraints.map(|(rows, _)| rows)).unwrap_or_default();
     if truncated {
-        coverage.partial(&sources::CONSTRAINTS, "Unvalidated constraints reached the 10,000-row or 8 MiB retention budget. This is not a complete constraint inventory.");
+        coverage.partial(&sources::CONSTRAINTS, t!("provider.yugabyte.coverage.constraints_truncated"));
     }
     let workload = workload::read(&session, &probe, options.top_queries, &mut coverage).await;
     let mut snapshot = Snapshot {
@@ -85,7 +85,7 @@ pub(crate) async fn snapshot(
     if let Some(w) = &mut snapshot.workload {
         capture_plans(provider, &session, &probe, w, options.plans, &mut coverage).await;
     }
-    coverage.note("DocDB measurements","PostgreSQL heap pages, buffer ratios, vacuum/dead tuples and XID ages do not describe DocDB. These fields are unknown; YSQL statistics and native DocDB metrics retain their own units.");
+    coverage.note("DocDB measurements", t!("provider.yugabyte.coverage.docdb_measurements"));
     coverage.append_to(&mut snapshot);
     let mut identity = culprit_core::DatabaseIdentity::server(
         culprit_core::Engine::Yugabyte,
@@ -116,8 +116,7 @@ pub(crate) async fn capture_plans(
     // One budget for the phase, including ownership checks and connection setup, rather than 1,000 timeouts.
     let deadline = Instant::now() + COLLECTOR.statement_timeout;
     if timeout_at(deadline, crate::history::collect(session, probe, workload, coverage)).await.is_err() {
-        coverage
-            .partial(&sources::PLAN_HISTORY, "Native plan history reached the shared plan phase's 20-second deadline.");
+        coverage.partial(&sources::PLAN_HISTORY, t!("provider.yugabyte.coverage.plan_history_deadline"));
         return;
     }
     if requested == 0 {
@@ -131,13 +130,13 @@ pub(crate) async fn capture_plans(
     .await
     .is_err()
     {
-        coverage.partial(&sources::PLAN_HISTORY, "Retained plan capture reached the shared 20-second deadline.");
+        coverage.partial(&sources::PLAN_HISTORY, t!("provider.yugabyte.coverage.plan_capture_deadline"));
     }
     let client = &session.client;
     let elevated = match timeout_at(deadline, elevated_login(client)).await {
         Ok(Ok(value)) => Some(value),
         _ => {
-            coverage.note("YSQL plans", "Plan capture could not establish this login's planning permissions.");
+            coverage.note("YSQL plans", t!("provider.yugabyte.coverage.plan_permissions"));
             None
         }
     };
@@ -169,7 +168,7 @@ pub(crate) async fn capture_plans(
                     .map_or(0, str::len)
                     .saturating_add(plan.statement.as_deref().map_or(0, str::len));
                 if !retained.retain(bytes) {
-                    coverage.note("YSQL plans", "Captured plans reached the shared 8 MiB retention budget. Remaining statements can be planned on demand.");
+                    coverage.note("YSQL plans", t!("provider.yugabyte.coverage.plans_budget"));
                     break;
                 }
                 q.plan = Some(plan);
@@ -179,19 +178,16 @@ pub(crate) async fn capture_plans(
                 failed = true;
             }
             Err(_) => {
-                coverage.note("YSQL plans", "Plan capture reached its 20-second total budget. Captured plans are retained; remaining statements can be planned on demand.");
+                coverage.note("YSQL plans", t!("provider.yugabyte.coverage.plans_deadline"));
                 break;
             }
         }
     }
     if failed {
-        coverage.note(
-            "YSQL plans",
-            "Some recorded statements could not be safely planned with this connection's role and settings.",
-        );
+        coverage.note("YSQL plans", t!("provider.yugabyte.coverage.plans_failed"));
     }
     if foreign {
-        coverage.note("YSQL plans", "An elevated login plans only its own recorded statements; other roles' text is not planned with its privileges.");
+        coverage.note("YSQL plans", t!("provider.yugabyte.coverage.plans_foreign"));
     }
     if workload
         .queries

@@ -5,6 +5,7 @@ use crate::{
 use culprit_core::{
     CounterScope, CounterSet, Coverage, QueryStat, Spread, Workload, WorkloadKind,
     signals::{DocdbMetrics, QueryCosts},
+    t,
 };
 use culprit_postgres::wire::{ObservedSession, Row, query, query_bounded};
 use serde_json::json;
@@ -21,7 +22,7 @@ async fn epochs(session: &ObservedSession, probe: &Probe, coverage: &mut Coverag
         match found {
             Some(relation) => relation,
             None => {
-                coverage.partial(&sources::EPOCHS,"Cluster statement reset epochs were not configured. Add a trusted global pg_stat_statements_info view as an administrator to establish comparisons; Culprit never creates one during a scan.");
+                coverage.partial(&sources::EPOCHS, t!("provider.yugabyte.coverage.epochs_not_configured"));
                 return result;
             }
         }
@@ -62,7 +63,7 @@ async fn epochs(session: &ObservedSession, probe: &Probe, coverage: &mut Coverag
         }
     }
     if !result.epochs_known() {
-        coverage.partial(&sources::EPOCHS,"Not every contributing YSQL node supplied a valid reset epoch. Rates and cross-scan subtraction are unavailable for this read.");
+        coverage.partial(&sources::EPOCHS, t!("provider.yugabyte.coverage.epochs_incomplete"));
     }
     result
 }
@@ -89,7 +90,7 @@ async fn statement_rows(
         } else if columns.contains(legacy) {
             Ok(legacy.to_string())
         } else {
-            Err(culprit_core::Error::invalid("YSQL statement statistics lack execution-time columns"))
+            Err(culprit_core::Error::invalid(t!("provider.yugabyte.error.no_time_columns")))
         }
     };
     let total = time_column("total_exec_time", "total_time")?;
@@ -155,12 +156,12 @@ pub(crate) async fn read(
         coverage.recorded(
             &sources::WORKLOAD,
             culprit_core::SourceState::Unavailable,
-            Some("YSQL pg_stat_statements is not installed or visible.".into()),
+            Some(t!("provider.yugabyte.coverage.statements_unavailable")),
         );
         coverage.lacking(
             culprit_core::Capability::PgStatStatements,
-            "YSQL statement statistics are unavailable",
-            Some("Enable pg_stat_statements in this database through YugabyteDB administration.".into()),
+            t!("provider.yugabyte.capability.statements.unavailable"),
+            Some(t!("provider.yugabyte.capability.statements.enable")),
         );
         return None;
     }
@@ -177,22 +178,26 @@ pub(crate) async fn read(
     let truncated = result.as_ref().is_ok_and(|(_, truncated)| *truncated);
     let rows = coverage.read_rows(&sources::WORKLOAD, result.map(|(rows, _)| rows))?;
     if truncated {
-        coverage.partial(&sources::WORKLOAD, "Statement text and counters reached the shared 8 MiB retention budget. Only a contiguous prefix is retained; source totals still cover every statement when a retained row supplies them.");
+        coverage.partial(&sources::WORKLOAD, t!("provider.yugabyte.coverage.statements_budget"));
         if rows.is_empty() {
             coverage.lacking(
                 culprit_core::Capability::PgStatStatements,
-                "No statement row fit the retention budget; complete source totals are unknown",
+                t!("provider.yugabyte.capability.statements.no_row"),
                 None,
             );
             return None;
         }
     }
     if rows.iter().any(|row| row.text("id").is_none()) {
-        coverage.recorded(&sources::WORKLOAD, culprit_core::SourceState::Unavailable, Some("Statement visibility changed during collection; hidden identities cannot establish query counts or safely owned plans.".into()));
+        coverage.recorded(
+            &sources::WORKLOAD,
+            culprit_core::SourceState::Unavailable,
+            Some(t!("provider.yugabyte.coverage.visibility_changed")),
+        );
         coverage.lacking(
             culprit_core::Capability::PgStatStatements,
-            "Statement statistics visibility changed during collection",
-            Some("Grant pg_read_all_stats for complete database statistics, then scan again.".into()),
+            t!("provider.yugabyte.capability.statements.visibility_changed"),
+            Some(t!("provider.yugabyte.capability.statements.grant")),
         );
         return None;
     }
@@ -200,19 +205,23 @@ pub(crate) async fn read(
     let after = epochs(session, probe, coverage).await;
     if counter_set != after || partial {
         counter_set.complete = false;
-        coverage.partial(&sources::WORKLOAD,"YSQL contributors or reset epochs changed, or a node was skipped during collection. The retained totals cannot establish complete cluster history.");
+        coverage.partial(&sources::WORKLOAD, t!("provider.yugabyte.coverage.contributors_changed"));
     }
     if !probe.cluster {
-        coverage.note("YSQL scope",format!("Statement totals cover connected YB-TServer {} only. Cluster-wide statistics require configured, enabled global views and pg_read_all_stats; Culprit does not enable the preview automatically.",probe.node.as_deref().unwrap_or("unknown")));
+        let scope = match probe.node.as_deref() {
+            Some(node) => t!("provider.yugabyte.coverage.node_scope", node = node),
+            None => t!("provider.yugabyte.coverage.unknown_node_scope"),
+        };
+        coverage.note("YSQL scope", scope);
     }
     if let Some(role) = probe.statement_role {
-        coverage.note("YSQL role scope",format!("This login lacks pg_read_all_stats. Statement totals include current role {role} only; other roles' hidden identities are excluded before aggregation."));
+        coverage.note("YSQL role scope", t!("provider.yugabyte.coverage.role_scope", role = role.to_string()));
     }
     let (metrics, rpc_metrics) = metric_settings(session, probe, coverage).await;
     let mut queries = Vec::new();
     for r in &rows {
         let Some(id) = r.text("id") else {
-            coverage.partial(&sources::WORKLOAD, "Some statement identities are hidden by this login's permissions.");
+            coverage.partial(&sources::WORKLOAD, t!("provider.yugabyte.coverage.identities_hidden"));
             continue;
         };
         let (Some(calls), Some(ms)) = (r.number("calls").filter(|n| *n > 0.0), r.number("ms")) else { continue };
@@ -246,7 +255,7 @@ pub(crate) async fn read(
         match serde_json::from_value::<QueryStat>(value) {
             Ok(q) => queries.push(q),
             Err(_) => {
-                coverage.partial(&sources::WORKLOAD, "A YSQL statement row could not be normalized.");
+                coverage.partial(&sources::WORKLOAD, t!("provider.yugabyte.coverage.row_unreadable"));
             }
         }
     }
@@ -297,13 +306,19 @@ pub(crate) async fn read(
 
 async fn metric_settings(session: &ObservedSession, probe: &Probe, coverage: &mut Coverage) -> (bool, bool) {
     if !probe.cluster {
-        coverage.recorded(&sources::COSTS,
-            if probe.metrics && probe.rpc_metrics { culprit_core::SourceState::Collected } else { culprit_core::SourceState::Partial },
-            Some("Native counters are recorded only while their YSQL collection flags are enabled; disabled families remain unknown, and their totals do not reconstruct work performed before collection began.".into()));
+        coverage.recorded(
+            &sources::COSTS,
+            if probe.metrics && probe.rpc_metrics {
+                culprit_core::SourceState::Collected
+            } else {
+                culprit_core::SourceState::Partial
+            },
+            Some(t!("provider.yugabyte.coverage.native_flags")),
+        );
         return (probe.metrics, probe.rpc_metrics);
     }
     let Some(relation) = crate::global::configured(&session.client, "pg_settings").await.ok().flatten() else {
-        coverage.partial(&sources::COSTS, "Cluster native costs require an administrator-configured global pg_settings view. The connected node's flags cannot prove whether a remote zero was measured.");
+        coverage.partial(&sources::COSTS, t!("provider.yugabyte.coverage.costs_need_global_settings"));
         return (false, false);
     };
     let before = session.notices();
@@ -324,12 +339,12 @@ async fn metric_settings(session: &ObservedSession, probe: &Probe, coverage: &mu
         && session.notices() == before
         && !rows.is_empty();
     if !complete {
-        coverage.partial(&sources::COSTS, "Native metric settings were not established for every current YSQL node. Incomplete counters remain unknown.");
+        coverage.partial(&sources::COSTS, t!("provider.yugabyte.coverage.costs_settings_incomplete"));
         return (false, false);
     }
     let flags = (rows.iter().all(|r| r.flag("metrics")), rows.iter().all(|r| r.flag("rpc_metrics")));
     if !flags.0 || !flags.1 {
-        coverage.partial(&sources::COSTS, "Some nodes are not collecting native statement costs. Only metric families enabled on every contributing node are retained.");
+        coverage.partial(&sources::COSTS, t!("provider.yugabyte.coverage.costs_partial"));
     }
     flags
 }

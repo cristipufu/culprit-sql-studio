@@ -10,7 +10,8 @@ use tokio_postgres::Client;
 
 const USER_RELATIONS: &str = "n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp_%'";
 fn decode<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> Result<T> {
-    serde_json::from_value(value).map_err(|_| culprit_core::Error::invalid("YSQL returned incomplete catalog metadata"))
+    serde_json::from_value(value)
+        .map_err(|_| culprit_core::Error::invalid(culprit_core::t!("provider.yugabyte.error.incomplete_catalog")))
 }
 fn array(row: &Row, key: &str) -> Vec<String> {
     row.text(key).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()

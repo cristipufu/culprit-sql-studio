@@ -1,4 +1,4 @@
-use culprit_core::{Capability, Engine, Error, Result, ServerInfo};
+use culprit_core::{Capability, Engine, Error, Result, ServerInfo, t};
 use culprit_postgres::wire::query_one;
 use tokio_postgres::Client;
 
@@ -10,7 +10,7 @@ pub(crate) async fn require_all_stats(client: &Client) -> Result<()> {
     } else {
         Err(Error::new(
             culprit_core::ErrorCode::PermissionDenied,
-            "The monitoring privilege changed while native history was being read; collect again with the current role",
+            t!("provider.yugabyte.error.privilege_changed_history"),
         ))
     }
 }
@@ -84,14 +84,14 @@ pub(crate) async fn read(client: &Client) -> Result<Probe> {
         ),
     )
     .await?
-    .ok_or_else(|| Error::invalid("YSQL returned no server identity"))?;
+    .ok_or_else(|| Error::invalid(t!("provider.yugabyte.error.no_identity")))?;
     let version = row.string("version");
     let version = version
         .split_once("-YB-")
         .map(|(_, v)| v.split_whitespace().next().unwrap_or(v))
         .ok_or_else(|| {
-            Error::invalid("This server does not identify as YugabyteDB")
-                .with_hint("Choose PostgreSQL for a PostgreSQL server.")
+            Error::invalid(t!("provider.yugabyte.error.not_yugabyte"))
+                .with_hint(t!("provider.yugabyte.error.not_yugabyte_hint"))
         })?
         .to_string();
     let node = query_one(client, "SELECT yb_get_local_tserver_uuid()::text AS node")
@@ -106,9 +106,9 @@ pub(crate) async fn read(client: &Client) -> Result<Probe> {
         compatibility: row
             .string("compatibility")
             .parse()
-            .map_err(|_| Error::invalid("YSQL returned an invalid compatibility version"))?,
+            .map_err(|_| Error::invalid(t!("provider.yugabyte.error.invalid_compatibility")))?,
         database: row.string("database"),
-        oid: row.string("oid").parse().map_err(|_| Error::invalid("YSQL returned an invalid database oid"))?,
+        oid: row.string("oid").parse().map_err(|_| Error::invalid(t!("provider.yugabyte.error.invalid_oid")))?,
         node,
         cluster: row.flag("global_views") && row.flag("cluster_statements"),
         global: row.flag("global_views"),
@@ -119,11 +119,7 @@ pub(crate) async fn read(client: &Client) -> Result<Probe> {
         statement_role: if row.flag("all_stats") {
             None
         } else {
-            Some(
-                row.string("role_oid")
-                    .parse()
-                    .map_err(|_| Error::invalid("YSQL returned no statistics role identity"))?,
-            )
+            Some(row.string("role_oid").parse().map_err(|_| Error::invalid(t!("provider.yugabyte.error.no_role")))?)
         },
     })
 }

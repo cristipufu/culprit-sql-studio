@@ -1,5 +1,5 @@
 use crate::{global, probe};
-use culprit_core::{Engine, Result, WaitSample, WaitStat};
+use culprit_core::{Engine, Result, WaitSample, WaitStat, t};
 use culprit_postgres::wire::{Connector, INTERACTIVE, SessionLimits, query};
 use std::{collections::BTreeMap, time::Duration};
 use tokio::time::{Instant, sleep_until};
@@ -61,7 +61,7 @@ pub(crate) async fn sample(connector: &Connector, requested: u32) -> Result<Wait
                 partial = true;
                 continue;
             }
-            let event = row.text("event").unwrap_or_else(|| "Unknown native event".into());
+            let event = row.text("event").unwrap_or_else(|| t!("provider.yugabyte.wait.unknown_event"));
             let kind = category(&row.string("kind"), &event);
             if let Some(n) = row.number("n").filter(|n| *n >= 0.0) {
                 *counts.entry((kind.into(), event)).or_default() += n;
@@ -87,24 +87,25 @@ pub(crate) async fn sample(connector: &Connector, requested: u32) -> Result<Wait
         })
         .collect();
     categories.sort_by(|a, b| b.wait_ms.total_cmp(&a.wait_ms));
-    let mut notes = vec!["Session observations are weighted over the measured duration. They describe active YSQL backends, not CPU utilization or the time spent by internal DocDB tasks. Short operations can fall between samples.".into()];
+    let mut notes = vec![t!("provider.yugabyte.waits.weighted")];
     if partial {
-        notes.push("Visibility changed, permissions hid sessions, or a node was skipped. Observed categories are partial and no complete active-session count is asserted.".into());
+        notes.push(t!("provider.yugabyte.waits.partial"));
     }
     if !p.global {
-        notes.push(format!(
-            "Connected YB-TServer {} only; this is not whole-cluster activity.",
-            p.node.as_deref().unwrap_or("unknown")
-        ));
+        notes.push(match p.node.as_deref() {
+            Some(node) => t!("provider.yugabyte.waits.node_scope", node = node),
+            None => t!("provider.yugabyte.waits.unknown_node_scope"),
+        });
     }
     Ok(WaitSample {
         engine: Engine::Yugabyte,
         taken_at: p.now,
         seconds: elapsed,
-        method: format!(
-            "YSQL active sessions sampled at a one-second target cadence for {seconds} s ({})",
-            if p.global { "configured cluster views" } else { "connected node" }
-        ),
+        method: if p.global {
+            t!("provider.yugabyte.waits.method_cluster", seconds = seconds.to_string())
+        } else {
+            t!("provider.yugabyte.waits.method_node", seconds = seconds.to_string())
+        },
         total_ms: active * elapsed * 1000.0,
         categories,
         signals: vec![],

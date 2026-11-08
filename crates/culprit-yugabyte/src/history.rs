@@ -1,6 +1,6 @@
 //! QPM's independent, evictable plan cache. These are not pg_stat_statements lifetime totals or measured operators.
 use crate::{probe::Probe, sources};
-use culprit_core::{Coverage, Error, Plan, PlanHistory, PlanHistoryKind, PlanKind, PlanVariant, Result, Workload};
+use culprit_core::{Coverage, Error, Plan, PlanHistory, PlanHistoryKind, PlanKind, PlanVariant, Result, Workload, t};
 use culprit_postgres::wire::{ObservedSession, query_bounded};
 use std::collections::BTreeMap;
 
@@ -14,9 +14,9 @@ fn authorize(probe: &Probe) -> Result<()> {
     if probe.statement_role.is_some() {
         return Err(Error::new(
             culprit_core::ErrorCode::PermissionDenied,
-            "Retained YSQL plan history requires pg_read_all_stats; the native cache cannot be read safely without it",
+            t!("provider.yugabyte.error.plan_history_privilege"),
         )
-        .with_hint("An administrator can grant pg_read_all_stats to the monitoring login. Culprit skips this source without that grant."));
+        .with_hint(t!("provider.yugabyte.error.plan_history_privilege_hint")));
     }
     Ok(())
 }
@@ -38,9 +38,11 @@ pub(crate) async fn collect(
     for q in &mut workload.queries {
         q.plans.clear();
         q.plan_history = Some(PlanHistory {
-            source: source.clone(), kind: PlanHistoryKind::Cache,
-            captured_plan_id: None, captured_plan: None,
-            note: "Retained plan-cache entries have their own first/last-use dates, resets and evictions. Their calls and timings are independent of this statement's statistics window; a cache entry's first use does not prove when its plan was introduced.".into(),
+            source: source.clone(),
+            kind: PlanHistoryKind::Cache,
+            captured_plan_id: None,
+            captured_plan: None,
+            note: t!("provider.yugabyte.plan_history.note"),
         });
     }
     let ids: Vec<_> = workload.queries.iter().filter_map(|q| q.id.parse::<i64>().ok()).collect();
@@ -78,7 +80,7 @@ pub(crate) async fn collect(
     let Some(rows) = coverage.read_rows(&sources::PLAN_HISTORY, result.map(|(rows, _)| rows)) else {
         for q in &mut workload.queries {
             if let Some(history) = &mut q.plan_history {
-                history.note = "Retained plan history could not be read with this connection. See the scan's source coverage; the Plan tab can still estimate safely owned statements.".into();
+                history.note = t!("provider.yugabyte.plan_history.unreadable");
             }
         }
         return;
@@ -121,10 +123,12 @@ pub(crate) async fn collect(
         q.plans = plans.remove(&q.id).unwrap_or_default();
     }
     if partial {
-        coverage.partial(&sources::PLAN_HISTORY,"Retained plan history is partial: a contributor warned, an entry could not be decoded, or the 1,000-entry/8 MiB retention budget was reached.");
+        coverage.partial(&sources::PLAN_HISTORY, t!("provider.yugabyte.coverage.plan_history_partial"));
+        let partial = t!("provider.yugabyte.plan_history.partial");
         for q in &mut workload.queries {
             if let Some(history) = &mut q.plan_history {
-                history.note.push_str(" This read was partial; no complete plan history is established.");
+                history.note.push(' ');
+                history.note.push_str(&partial);
             }
         }
     }
@@ -172,39 +176,30 @@ pub(crate) async fn capture(
     }
     .await;
     let Ok((rows, truncated)) = result else {
-        coverage.partial(
-            &sources::PLAN_HISTORY,
-            "Native cache metadata was read, but retained plan bodies could not be fetched.",
-        );
+        coverage.partial(&sources::PLAN_HISTORY, t!("provider.yugabyte.coverage.plan_bodies_unfetched"));
         return;
     };
     if truncated {
-        coverage.partial(&sources::PLAN_HISTORY, "Retained plan bodies reached the 8 MiB capture budget.");
+        coverage.partial(&sources::PLAN_HISTORY, t!("provider.yugabyte.coverage.plan_bodies_budget"));
     }
     if rows.len() < wanted.len() {
-        coverage.partial(
-            &sources::PLAN_HISTORY,
-            "Some requested cache entries were evicted, hidden or unavailable during capture.",
-        );
+        coverage.partial(&sources::PLAN_HISTORY, t!("provider.yugabyte.coverage.plan_entries_missing"));
     }
     let mut bodies = BTreeMap::new();
     for row in rows {
         let Some(raw) = row.text("plan") else {
-            coverage.partial(&sources::PLAN_HISTORY, "A retained plan body was hidden or unavailable during capture.");
+            coverage.partial(&sources::PLAN_HISTORY, t!("provider.yugabyte.coverage.plan_body_hidden"));
             continue;
         };
         if !budget.retain(raw.len()) {
-            coverage.partial(&sources::PLAN_HISTORY, "Retained plan bodies reached the shared 8 MiB capture budget.");
+            coverage.partial(&sources::PLAN_HISTORY, t!("provider.yugabyte.coverage.plan_bodies_shared_budget"));
             break;
         }
         match decode_stored(&raw) {
             Ok(plan) => {
                 bodies.insert((row.string("query"), row.string("id")), plan);
             }
-            Err(_) => coverage.partial(
-                &sources::PLAN_HISTORY,
-                "A retained plan was truncated, hidden or not complete JSON. Its recorded counts remain available.",
-            ),
+            Err(_) => coverage.partial(&sources::PLAN_HISTORY, t!("provider.yugabyte.coverage.plan_body_truncated")),
         }
     }
     for q in workload.queries.iter_mut().take(requested) {
@@ -218,9 +213,9 @@ pub(crate) async fn capture(
 }
 
 fn decode_stored(raw: &str) -> Result<Plan> {
-    let mut plan = crate::plan::parse(raw,PlanKind::Estimated,None).map_err(|_| {
-        Error::invalid("The retained YSQL plan is truncated, hidden, or not JSON")
-            .with_hint("QPM must already retain complete JSON plans. Review yb_pg_stat_plans_plan_format; Culprit does not change it during collection.")
+    let mut plan = crate::plan::parse(raw, PlanKind::Estimated, None).map_err(|_| {
+        Error::invalid(t!("provider.yugabyte.error.retained_plan_unreadable"))
+            .with_hint(t!("provider.yugabyte.error.retained_plan_unreadable_hint"))
     })?;
     crate::plan::redacted_constants(&mut plan);
     Ok(plan)
@@ -228,8 +223,8 @@ fn decode_stored(raw: &str) -> Result<Plan> {
 
 pub(crate) async fn stored(session: &ObservedSession, probe: &Probe, query: &str, id: &str) -> Result<Option<Plan>> {
     authorize(probe)?;
-    let query = query.parse::<i64>().map_err(|_| Error::invalid("Invalid YSQL query identifier"))?;
-    let id = id.parse::<i64>().map_err(|_| Error::invalid("Invalid YSQL plan identifier"))?;
+    let query = query.parse::<i64>().map_err(|_| Error::invalid(t!("provider.yugabyte.error.query_id")))?;
+    let id = id.parse::<i64>().map_err(|_| Error::invalid(t!("provider.yugabyte.error.plan_id")))?;
     let sql = format!(
         "SELECT plan FROM {} WHERE dbid={} AND queryid={query} AND planid={id} AND {}
         ORDER BY last_used DESC LIMIT 1",
@@ -240,7 +235,7 @@ pub(crate) async fn stored(session: &ObservedSession, probe: &Probe, query: &str
     let (rows, truncated) = query_bounded(&session.client, &sql, 1).await?;
     crate::probe::require_all_stats(&session.client).await?;
     if truncated {
-        return Err(Error::invalid("The stored YSQL plan exceeds the 8 MiB retention budget"));
+        return Err(Error::invalid(t!("provider.yugabyte.error.stored_plan_too_big")));
     }
     let Some(raw) = rows.first().and_then(|r| r.text("plan")) else {
         return Ok(None);

@@ -1,6 +1,6 @@
 //! Shared host and TServer measurements. Never substitute them for database-specific pressure or RSS.
 use crate::{global, sources};
-use culprit_core::{Coverage, Error, ErrorCode, MemoryLimit, NodeResource, NodeResources, ProcessMemory, Result};
+use culprit_core::{Coverage, Error, ErrorCode, MemoryLimit, NodeResource, NodeResources, ProcessMemory, Result, t};
 use culprit_postgres::wire::{ObservedSession, query_bounded, query_one};
 use std::collections::BTreeMap;
 
@@ -11,7 +11,7 @@ pub(crate) async fn collect(session: &ObservedSession, coverage: &mut Coverage) 
     let data = coverage.read(&sources::NODE_RESOURCES, result)?;
     coverage.completed(&sources::NODE_RESOURCES, data.nodes.len());
     if data.partial {
-        coverage.partial(&sources::NODE_RESOURCES,"Shared resource observations are partial: a node failed, inventory changed, values were missing/invalid, or the 1,000-node/8 MiB budget was reached.");
+        coverage.partial(&sources::NODE_RESOURCES, t!("provider.yugabyte.coverage.resources_partial"));
     }
     Some(data)
 }
@@ -21,7 +21,7 @@ async fn clock(session: &ObservedSession) -> Result<String> {
         .await?
         .map(|r| r.string("at"))
         .filter(|s| culprit_core::format::epoch_seconds(s).is_some())
-        .ok_or_else(|| Error::invalid("YSQL returned no valid node-resource observation time"))
+        .ok_or_else(|| Error::invalid(t!("provider.yugabyte.error.invalid_resource_time")))
 }
 
 fn number(value: Option<String>, fraction: bool, partial: &mut bool) -> Option<f64> {
@@ -68,8 +68,12 @@ pub(crate) async fn read(session: &ObservedSession, maximum: usize) -> Result<No
         metrics->>'memory_total' AS total,metrics->>'memory_available' AS available,metrics->>'memory_free' AS free,
         metrics->>'tserver_root_memory_consumption' AS tracked,metrics->>'tserver_root_memory_limit' AS hard_limit,
         metrics->>'tserver_root_memory_soft_limit' AS soft_limit FROM pg_catalog.yb_servers_metrics() ORDER BY uuid LIMIT {}",maximum+1);
-    let (rows,truncated)=query_bounded(&session.client,&sql,maximum).await.map_err(|error|{
-        if error.code==ErrorCode::PermissionDenied {error.with_hint("yb_servers_metrics requires superuser or yb_db_admin. pg_read_all_stats alone does not grant access; ask an administrator to collect node resources.")}else{error}
+    let (rows, truncated) = query_bounded(&session.client, &sql, maximum).await.map_err(|error| {
+        if error.code == ErrorCode::PermissionDenied {
+            error.with_hint(t!("provider.yugabyte.error.resources_privilege_hint"))
+        } else {
+            error
+        }
     })?;
     let observed_until = clock(session).await?;
     let after = global::nodes(session).await;
@@ -109,7 +113,7 @@ pub(crate) async fn read(session: &ObservedSession, maximum: usize) -> Result<No
                 || entry.host_memory_total_bytes.is_some()
                 || tracked_bytes.is_some();
             entry.process_memory = Some(ProcessMemory {
-                name: "YB-TServer root memory tracker".into(),
+                name: t!("provider.yugabyte.resources.root_tracker"),
                 tracked_bytes,
                 hard_limit,
                 soft_limit,
@@ -137,13 +141,18 @@ pub(crate) async fn read(session: &ObservedSession, maximum: usize) -> Result<No
             None
         }
     };
-    Ok(NodeResources{
-        source:"yb_servers_metrics · shared YB-TServer nodes".into(),observed_from,observed_until,nodes_expected,partial,
-        notes:vec![
-            "Host CPU and memory are shared with other databases and processes; these measurements do not grade the selected database's pressure or identify which queries caused load.".into(),
-            "CPU fields are user/system fractions from a short native sample. Exact per-node sample timestamps and duration are not returned; the observation interval bounds this read, not a workload history.".into(),
-            "Host memory can describe the VM or host rather than a container's allocation. The TServer root tracker is neither process RSS nor total YSQL-backend memory; its own limits stay separate from host capacity.".into(),
-        ],nodes:nodes.into_values().collect(),
+    Ok(NodeResources {
+        source: t!("provider.yugabyte.resources.source"),
+        observed_from,
+        observed_until,
+        nodes_expected,
+        partial,
+        notes: vec![
+            t!("provider.yugabyte.resources.shared"),
+            t!("provider.yugabyte.resources.cpu"),
+            t!("provider.yugabyte.resources.memory"),
+        ],
+        nodes: nodes.into_values().collect(),
     })
 }
 

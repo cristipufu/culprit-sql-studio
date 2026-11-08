@@ -3,7 +3,7 @@ use crate::{
     probe::{Probe, node_id},
     sources,
 };
-use culprit_core::{Capability, Coverage, Pressure, Result, Snapshot, SourceState};
+use culprit_core::{Capability, Coverage, Pressure, Result, Snapshot, SourceState, t};
 use culprit_postgres::wire::{ObservedSession, query};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -22,7 +22,8 @@ async fn epochs(session: &ObservedSession, probe: &Probe) -> Result<Epochs> {
     rows.into_iter()
         .map(|r| {
             Ok((
-                node_id(&r.string("node")).ok_or_else(|| culprit_core::Error::invalid("Unknown YSQL node identity"))?,
+                node_id(&r.string("node"))
+                    .ok_or_else(|| culprit_core::Error::invalid(t!("provider.yugabyte.error.unknown_node")))?,
                 r.text("reset"),
             ))
         })
@@ -31,9 +32,16 @@ async fn epochs(session: &ObservedSession, probe: &Probe) -> Result<Epochs> {
 
 pub(crate) async fn read(session: &ObservedSession, probe: &Probe, snapshot: &mut Snapshot, coverage: &mut Coverage) {
     if !probe.global {
-        coverage.recorded(&sources::INDEX_USAGE, SourceState::Unavailable, Some("Node-local index counters cannot prove cluster-wide use or absence. Configured, enabled global views are required.".into()));
-        coverage.lacking(Capability::IndexUsage, "Node-local index counters cannot establish cluster-wide usage",
-            Some("Have an administrator configure and authorize YugabyteDB's global views before collecting cluster-wide index usage.".into()));
+        coverage.recorded(
+            &sources::INDEX_USAGE,
+            SourceState::Unavailable,
+            Some(t!("provider.yugabyte.coverage.index_usage_local")),
+        );
+        coverage.lacking(
+            Capability::IndexUsage,
+            t!("provider.yugabyte.capability.index_usage.local"),
+            Some(t!("provider.yugabyte.capability.index_usage.global_views")),
+        );
         return;
     }
     let notices = session.notices();
@@ -62,8 +70,8 @@ pub(crate) async fn read(session: &ObservedSession, probe: &Probe, snapshot: &mu
         })
         && session.notices() == notices;
     let Some(rows) = rows.filter(|_| complete) else {
-        coverage.partial(&sources::INDEX_USAGE, "Global index contributors or database reset epochs changed, or a node was unavailable. No complete cluster usage is inferred from this read.");
-        coverage.lacking(Capability::IndexUsage, "Complete cluster index contributors could not be established", None);
+        coverage.partial(&sources::INDEX_USAGE, t!("provider.yugabyte.coverage.index_usage_changed"));
+        coverage.lacking(Capability::IndexUsage, t!("provider.yugabyte.capability.index_usage.contributors"), None);
         return;
     };
     let epochs = before.unwrap_or_default();
@@ -95,11 +103,8 @@ pub(crate) async fn read(session: &ObservedSession, probe: &Probe, snapshot: &mu
         }
     }
     if partial {
-        coverage.partial(
-            &sources::INDEX_USAGE,
-            "Some indexes did not supply usage from every current node; those counts remain unknown.",
-        );
-        coverage.lacking(Capability::IndexUsage, "Some indexes lack counters from every current node", None);
+        coverage.partial(&sources::INDEX_USAGE, t!("provider.yugabyte.coverage.index_usage_partial"));
+        coverage.lacking(Capability::IndexUsage, t!("provider.yugabyte.capability.index_usage.partial"), None);
     } else {
         coverage.delivered(Capability::IndexUsage);
     }
@@ -112,6 +117,6 @@ pub(crate) async fn read(session: &ObservedSession, probe: &Probe, snapshot: &mu
     {
         snapshot.pressure.get_or_insert_with(Pressure::default).uptime_hours = Some(hours);
     } else {
-        coverage.note("YSQL index history", "Cluster read counts do not share a common reset epoch. Rates are unavailable; absence of reads is assessed only when every node supplies a known reset date covering at least a week.");
+        coverage.note("YSQL index history", t!("provider.yugabyte.coverage.index_usage_epochs"));
     }
 }

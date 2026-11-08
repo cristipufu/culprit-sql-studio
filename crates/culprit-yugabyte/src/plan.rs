@@ -1,4 +1,4 @@
-use culprit_core::{Engine, Error, Plan, PlanKind, PlanNode, Result, signals::DocdbMetrics};
+use culprit_core::{Engine, Error, Plan, PlanKind, PlanNode, Result, signals::DocdbMetrics, t};
 use serde_json::Value;
 
 fn number(v: &Value, key: &str) -> Option<f64> {
@@ -68,9 +68,10 @@ fn enrich(node: &mut PlanNode, v: &Value) {
 
 pub fn parse(raw: &str, kind: PlanKind, statement: Option<&str>) -> Result<Plan> {
     if raw.len() > culprit_core::limits::MAX_RESULT_BYTES {
-        return Err(Error::invalid("The native YSQL plan exceeds the 8 MiB capture budget"));
+        return Err(Error::invalid(t!("provider.yugabyte.error.plan_too_big")));
     }
-    let value: Value = serde_json::from_str(raw).map_err(|_| Error::invalid("YSQL returned malformed plan JSON"))?;
+    let value: Value =
+        serde_json::from_str(raw).map_err(|_| Error::invalid(t!("provider.yugabyte.error.malformed_plan")))?;
     let mut plan = from_value(&value, kind, statement)?;
     plan.raw = Some(raw.into());
     Ok(plan)
@@ -90,7 +91,7 @@ pub fn from_value(value: &Value, kind: PlanKind, statement: Option<&str>) -> Res
 }
 
 pub(crate) fn native(mut plan: Plan) -> Result<Plan> {
-    let raw = plan.raw.as_deref().ok_or_else(|| Error::invalid("YSQL returned no native plan text"))?;
+    let raw = plan.raw.as_deref().ok_or_else(|| Error::invalid(t!("provider.yugabyte.error.no_plan_text")))?;
     let mut native = parse(raw, plan.kind, plan.statement.as_deref())?;
     let virtual_indexes = plan.facts().virtual_indexes.clone();
     if !virtual_indexes.is_empty() {
@@ -105,10 +106,9 @@ pub(crate) fn native(mut plan: Plan) -> Result<Plan> {
 pub(crate) fn redacted_constants(plan: &mut Plan) {
     fn mark(node: &mut PlanNode) {
         if node.predicate.is_some() || node.seek_predicate.is_some() {
-            let reason =
-                "This retained YSQL plan redacts constants; the original values cannot establish filter selectivity.";
-            node.facts_mut().selectivity_guess = Some(reason.into());
-            node.props.insert(culprit_core::GUESSED_SELECTIVITY.into(), reason.into());
+            let reason = t!("provider.yugabyte.plan.redacted_constants");
+            node.facts_mut().selectivity_guess = Some(reason.clone());
+            node.props.insert(culprit_core::GUESSED_SELECTIVITY.into(), reason);
         }
         for child in &mut node.children {
             mark(child);

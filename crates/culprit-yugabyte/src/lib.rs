@@ -23,7 +23,7 @@ use async_trait::async_trait;
 use culprit_core::limits::{OBSERVE_TIMEOUT, QUERY_TIMEOUT};
 use culprit_core::{
     AuthKind, ConnectionSpec, Engine, Error, ExplainMode, LiveState, Plan, Provider, Result, ResultSet, ServerInfo,
-    Snapshot, SnapshotOptions,
+    Snapshot, SnapshotOptions, t,
 };
 use culprit_postgres::wire::{COLLECTOR, Connector, SqlExecutor};
 
@@ -44,12 +44,10 @@ pub struct YugabyteProvider {
 impl YugabyteProvider {
     pub fn new(spec: &ConnectionSpec) -> Result<Self> {
         if spec.engine.is_some_and(|e| e != Engine::Yugabyte) {
-            return Err(Error::invalid("This connection does not select YugabyteDB"));
+            return Err(Error::invalid(t!("provider.yugabyte.error.other_engine")));
         }
         if !matches!(spec.auth, AuthKind::Password | AuthKind::None) {
-            return Err(Error::invalid(
-                "Culprit supports password or trust authentication for YSQL; cloud bearer tokens are not sent to YugabyteDB",
-            ));
+            return Err(Error::invalid(t!("provider.yugabyte.error.auth")));
         }
         let mut spec = spec.clone();
         spec.port = Some(spec.port.unwrap_or(5433));
@@ -88,7 +86,7 @@ impl Provider for YugabyteProvider {
         {
             return Err(Error::new(
                 culprit_core::ErrorCode::PermissionDenied,
-                "Production measurements require a proven read-only YSQL statement",
+                t!("provider.yugabyte.error.production_analyze"),
             ));
         }
         deadline(
@@ -122,7 +120,7 @@ impl Provider for YugabyteProvider {
     async fn stored_plan(&self, query_id: &str, plan_id: &str) -> Result<Option<Plan>> {
         // Validate untrusted ids before opening a session; signed 64-bit ids are native QPM hashes.
         if query_id.parse::<i64>().is_err() || plan_id.parse::<i64>().is_err() {
-            return Err(Error::invalid("YSQL query and plan identifiers must be signed 64-bit integers"));
+            return Err(Error::invalid(t!("provider.yugabyte.error.plan_ids")));
         }
         deadline(OBSERVE_TIMEOUT, async {
             let session = self.connector.connect_observed(COLLECTOR).await?;
@@ -134,9 +132,7 @@ impl Provider for YugabyteProvider {
     async fn run(&self, sql: &str, limit: usize) -> Result<ResultSet> {
         deadline(QUERY_TIMEOUT, async {
             if !culprit_core::sql::reads_only(sql, Engine::Yugabyte) {
-                return Err(Error::invalid(
-                    "This YSQL statement is not proven read-only; choose an explicit write action to run it",
-                ));
+                return Err(Error::invalid(t!("provider.yugabyte.error.run_not_read_only")));
             }
             self.execution.run(sql, limit).await
         })
@@ -144,7 +140,7 @@ impl Provider for YugabyteProvider {
     }
     async fn preview(&self, sql: &str, limit: usize) -> Result<ResultSet> {
         if !culprit_core::sql::reads_only(sql, Engine::Yugabyte) {
-            return Err(Error::invalid("This YSQL preview is not proven read-only"));
+            return Err(Error::invalid(t!("provider.yugabyte.error.preview_not_read_only")));
         }
         deadline(OBSERVE_TIMEOUT, self.execution.preview(sql, limit)).await
     }
@@ -165,23 +161,29 @@ impl Provider for YugabyteProvider {
             let (mut progress, allowed) = progress::read(&self.connector, id, with_plan).await?;
             if allowed && progress.phase.is_none() {
                 if let Some(statement) = &progress.statement {
-                    match self.explain(statement,ExplainMode::Estimated).await {
+                    match self.explain(statement, ExplainMode::Estimated).await {
                         Ok(plan) => progress.plan = Some(plan),
-                        Err(_) => progress.note = Some(format!("{} Current activity was read, but this login could not safely plan the statement. No estimated operator progress is presented as measured work.", progress.note.as_deref().unwrap_or_default())),
+                        Err(_) => {
+                            let unplanned = t!("provider.yugabyte.progress.unplanned");
+                            progress.note =
+                                Some(format!("{} {unplanned}", progress.note.as_deref().unwrap_or_default()));
+                        }
                     }
                 }
             } else if with_plan && progress.running && progress.phase.is_none() {
-                progress.note = Some(format!("{} Current activity was read; this backend's ownership or visibility could not authorize planning its text with this login's privileges.", progress.note.as_deref().unwrap_or_default()));
+                let unauthorized = t!("provider.yugabyte.progress.not_authorized");
+                progress.note = Some(format!("{} {unauthorized}", progress.note.as_deref().unwrap_or_default()));
             }
             Ok(progress)
-        }).await
+        })
+        .await
     }
     async fn interrupt_session(&self, id: &str, action: culprit_core::SessionAction) -> Result<()> {
         deadline(OBSERVE_TIMEOUT, async {
             if self.spec.environment.is_production() {
                 return Err(Error::new(
                     culprit_core::ErrorCode::PermissionDenied,
-                    "Culprit does not cancel or end sessions on a production connection",
+                    t!("provider.yugabyte.error.production_sessions"),
                 ));
             }
             sessions::interrupt(&self.connector, id, action).await

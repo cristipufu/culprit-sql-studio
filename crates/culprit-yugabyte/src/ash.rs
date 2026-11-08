@@ -1,7 +1,7 @@
 //! Native task samples have weights, not elapsed durations. Never mix these with PGSS or exclusive wait timings.
 use crate::{global, probe::Probe, sources};
 use culprit_core::{
-    ActivityEvent, ActivityHistory, ActivityPeriod, CounterScope, Coverage, Error, Result, SnapshotOptions,
+    ActivityEvent, ActivityHistory, ActivityPeriod, CounterScope, Coverage, Error, Result, SnapshotOptions, t,
 };
 use culprit_postgres::wire::{ObservedSession, query_bounded, query_one};
 use std::collections::{BTreeMap, BTreeSet};
@@ -19,7 +19,7 @@ pub(crate) async fn collect(
     let history = coverage.read(&sources::ACTIVITY_HISTORY, result)?;
     coverage.completed(&sources::ACTIVITY_HISTORY, history.period.observations as usize);
     if history.period.partial {
-        coverage.partial(&sources::ACTIVITY_HISTORY, "Activity observations are partial: retention reached 10,000 rows/8 MiB, a contributor warned or changed, or some samples could not be decoded.");
+        coverage.partial(&sources::ACTIVITY_HISTORY, t!("provider.yugabyte.coverage.activity_partial"));
     }
     Some(history)
 }
@@ -39,7 +39,7 @@ pub(crate) async fn read(
     limit: usize,
 ) -> Result<ActivityHistory> {
     let end = culprit_core::format::epoch_seconds(&probe.now)
-        .ok_or_else(|| Error::invalid("YSQL returned an invalid ASH observation time"))?;
+        .ok_or_else(|| Error::invalid(t!("provider.yugabyte.error.invalid_ash_time")))?;
     let minutes = options.window_in_minutes().min(culprit_core::MAX_WINDOW_MINUTES);
     let start = end - f64::from(minutes) * 60.0;
     let before = session.notices();
@@ -151,20 +151,20 @@ pub(crate) async fn read(
         ),
     )
     .await?
-    .ok_or_else(|| Error::invalid("YSQL returned no ASH time bounds"))?;
+    .ok_or_else(|| Error::invalid(t!("provider.yugabyte.error.no_ash_bounds")))?;
     if probe.statement_role.is_none() && !window.flag("all_stats") {
         return Err(Error::new(
             culprit_core::ErrorCode::PermissionDenied,
-            "The monitoring privilege changed while native activity history was being read",
+            t!("provider.yugabyte.error.privilege_changed_activity"),
         ));
     }
-    let mut notes=vec![
-        "Weights describe sampled active tasks, not query elapsed time, exclusive wait time, or CPU utilization. YSQL and DocDB components can execute concurrently.".into(),
-        "The circular buffer can evict observations, short tasks can fall between samples, and sampling cadence can change. First/last samples do not prove continuous coverage of the requested period.".into(),
-        "Database-scoped activity can include administrative and monitoring work. Background records without this database's identity are excluded.".into(),
+    let mut notes = vec![
+        t!("provider.yugabyte.activity.weights"),
+        t!("provider.yugabyte.activity.buffer"),
+        t!("provider.yugabyte.activity.scope"),
     ];
     if partial {
-        notes.push("This read was partial; shares describe only the retained observations.".into());
+        notes.push(t!("provider.yugabyte.activity.partial"));
     }
     Ok(ActivityHistory {
         period: ActivityPeriod {

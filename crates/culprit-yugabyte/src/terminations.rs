@@ -1,7 +1,7 @@
 //! Unexpected backend terminations are an evictable record set, not an error rate or a complete SQL error log.
 use crate::{global, probe::Probe, sources};
 use culprit_core::{
-    CounterScope, Coverage, Error, QueryTermination, Result, SnapshotOptions, TerminationHistory, TerminationReason,
+    CounterScope, Coverage, Error, QueryTermination, Result, SnapshotOptions, TerminationHistory, TerminationReason, t,
 };
 use culprit_postgres::wire::{ObservedSession, query_bounded, query_one};
 use std::collections::BTreeSet;
@@ -19,7 +19,7 @@ pub(crate) async fn collect(
     let history = coverage.read(&sources::TERMINATIONS, result)?;
     coverage.completed(&sources::TERMINATIONS, history.events.len());
     if history.partial {
-        coverage.partial(&sources::TERMINATIONS, "Termination records reached the 1,000-row/8 MiB retention limit, a contributor warned or changed, or some records could not be decoded.");
+        coverage.partial(&sources::TERMINATIONS, t!("provider.yugabyte.coverage.terminations_partial"));
     }
     Some(history)
 }
@@ -31,7 +31,7 @@ pub(crate) async fn read(
     limit: usize,
 ) -> Result<TerminationHistory> {
     let end = culprit_core::format::epoch_seconds(&probe.now)
-        .ok_or_else(|| Error::invalid("YSQL returned an invalid termination observation time"))?;
+        .ok_or_else(|| Error::invalid(t!("provider.yugabyte.error.invalid_termination_time")))?;
     let minutes = options.window_in_minutes().min(culprit_core::MAX_WINDOW_MINUTES);
     let start = end - f64::from(minutes) * 60.0;
     let before = session.notices();
@@ -118,21 +118,21 @@ pub(crate) async fn read(
         ),
     )
     .await?
-    .ok_or_else(|| Error::invalid("YSQL returned no termination time bounds"))?;
+    .ok_or_else(|| Error::invalid(t!("provider.yugabyte.error.no_termination_bounds")))?;
     if !window.flag("allowed") {
         return Err(Error::new(
             culprit_core::ErrorCode::PermissionDenied,
-            "The monitoring privilege changed while termination history was read; collect again with the current login",
+            t!("provider.yugabyte.error.privilege_changed_terminations"),
         ));
     }
     partial |= session.notices() != before;
-    let mut notes=vec![
-        "This evictable buffer records unexpected backend terminations and temporary-file-limit failures, not all SQL errors, timeouts, cancellations or deadlocks. Empty history does not prove that no queries failed.".into(),
-        "Records have their own dates and retention, independent of statement-statistics resets. They do not establish a failure rate, failed business requests, or an ongoing incident.".into(),
-        "SIGKILL alone does not prove an out-of-memory kill; inspect the node's logs. Raw SQL and free-form termination messages were not collected.".into(),
+    let mut notes = vec![
+        t!("provider.yugabyte.terminations.scope"),
+        t!("provider.yugabyte.terminations.dates"),
+        t!("provider.yugabyte.terminations.sigkill"),
     ];
     if probe.global && !cluster {
-        notes.push("Global termination reads require effective pg_read_all_stats. This read retains connected-node records under native login visibility, without changing global-view configuration.".into());
+        notes.push(t!("provider.yugabyte.terminations.local"));
     }
     Ok(TerminationHistory {
         source: format!(
@@ -148,7 +148,7 @@ pub(crate) async fn read(
         scope: if cluster { CounterScope::Cluster } else { CounterScope::Node },
         nodes: nodes.into_iter().collect(),
         visibility: probe.statement_role.map_or_else(
-            || "Complete monitoring privilege for this database".into(),
+            || t!("provider.yugabyte.terminations.complete_visibility"),
             |id| format!("Native visibility for login role {id}; inherited privileges may expose other roles' records"),
         ),
         partial,
