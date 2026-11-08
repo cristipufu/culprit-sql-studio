@@ -47,8 +47,7 @@ pub enum ConfigCase<'s> {
     Mssql(mssql::Case<'s>),
     Postgres(postgres::Case<'s>),
     Mysql(mysql::Case<'s>),
-    /// A finding an engine's file still words as it decides it.
-    Worded(Finding),
+    Sqlite(sqlite::Case<'s>),
 }
 
 fn config_cases(snapshot: &Snapshot) -> Vec<ConfigCase<'_>> {
@@ -57,7 +56,7 @@ fn config_cases(snapshot: &Snapshot) -> Vec<ConfigCase<'_>> {
         Engine::Postgres => postgres::decide(snapshot).into_iter().map(ConfigCase::Postgres).collect(),
         Engine::Yugabyte => Vec::new(),
         Engine::Mysql => mysql::decide(snapshot).into_iter().map(ConfigCase::Mysql).collect(),
-        Engine::Sqlite => sqlite::check(snapshot).into_iter().map(ConfigCase::Worded).collect(),
+        Engine::Sqlite => sqlite::decide(snapshot).into_iter().map(ConfigCase::Sqlite).collect(),
     }
 }
 
@@ -66,7 +65,7 @@ fn config_finding(snapshot: &Snapshot, case: ConfigCase<'_>) -> Finding {
         ConfigCase::Mssql(case) => mssql::render(snapshot, case),
         ConfigCase::Postgres(case) => postgres::render(snapshot, case),
         ConfigCase::Mysql(case) => mysql::render(snapshot, case),
-        ConfigCase::Worded(f) => f,
+        ConfigCase::Sqlite(case) => sqlite::render(snapshot, case),
     }
 }
 
