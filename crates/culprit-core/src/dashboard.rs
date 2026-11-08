@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::model::{Engine, Environment};
+use crate::t;
 
 /// One database at a glance.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
@@ -217,5 +218,50 @@ impl TileItem {
             finding_id: None,
             at: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Each tile's title, word for word: it comes from locales/en.json.
+    #[test]
+    fn tiles_are_titled_in_english() {
+        let keys = [
+            TileKey::DbTime,
+            TileKey::Findings,
+            TileKey::TopQueries,
+            TileKey::Waits,
+            TileKey::Now,
+            TileKey::Health,
+            TileKey::Deadlocks,
+            TileKey::Indexes,
+            TileKey::Plans,
+            TileKey::Statistics,
+            TileKey::Storage,
+            TileKey::Connections,
+            TileKey::Replication,
+            TileKey::Failures,
+        ];
+        assert_eq!(
+            keys.map(|k| Tile::new(k, TileStatus::Good, "").title),
+            [
+                "Database time",
+                "Findings",
+                "Top queries",
+                "Where time goes",
+                "Right now",
+                "Health",
+                "Deadlocks",
+                "Indexes",
+                "Plans",
+                "Query statistics",
+                "Storage",
+                "Connections",
+                "Replication",
+                "Failing queries",
+            ]
+        );
     }
 }

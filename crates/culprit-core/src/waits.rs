@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::model::{Engine, WaitStat};
+use crate::t;
 
 /// How far back a set of numbers reaches. The UI states it next to every figure.
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
@@ -364,66 +365,43 @@ impl Pressure {
 }
 
 /// The stable key, label and plain meaning of a category, worded for this engine.
-pub fn category_info(key: &str, engine: Engine) -> (&'static str, String) {
+pub fn category_info(key: &str, engine: Engine) -> (String, String) {
     let name = engine.label();
     match key {
-        "rpc" => ("Distributed RPCs", "Waiting for remote DocDB operations or catalog requests. Native session events identify these waits; statement RPC timings can overlap and are not exclusive wait shares.".into()),
-        "storage" => ("Storage I/O", "Waiting for native storage reads or writes, including RocksDB operations. These are session observations, not PostgreSQL heap-page or buffer measurements.".into()),
+        "rpc" => (t!("core.waits.category.rpc.label"), t!("core.waits.category.rpc.meaning")),
+        "storage" => (t!("core.waits.category.storage.label"), t!("core.waits.category.storage.meaning")),
         "cpu" => (
-            "CPU",
+            t!("core.waits.category.cpu.label"),
             match engine {
                 // SQL Server folds THREADPOOL (Query Store's "Worker Thread") in here: a request that hasn't started.
-                Engine::Mssql => "Running on a processor, queued for one, or (THREADPOOL) waiting for a worker thread before the request could start at all. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row. Worker waits instead point at blocking chains or heavy parallelism holding the workers.".into(),
-                _ => "Running on a processor, or queued for one. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row.".into(),
+                Engine::Mssql => t!("core.waits.category.cpu.meaning_threadpool"),
+                _ => t!("core.waits.category.cpu.meaning"),
             },
         ),
-        "io" => (
-            "Disk reads",
-            "Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.".into(),
-        ),
-        "rows" => (
-            "Row access",
-            "Time inside InnoDB fetching and changing rows. MySQL's table I/O instrument counts rows served from memory too, so this is storage-engine work, not only disk.".into(),
-        ),
-        "lock" => (
-            "Locks",
-            "Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.".into(),
-        ),
-        "latch" => (
-            "In-memory contention",
-            "Short waits on the server's own memory structures (page latches, mutexes). Hot spots such as an ever-increasing key or busy temporary space cause most of it.".into(),
-        ),
+        "io" => (t!("core.waits.category.io.label"), t!("core.waits.category.io.meaning")),
+        "rows" => (t!("core.waits.category.rows.label"), t!("core.waits.category.rows.meaning")),
+        "lock" => (t!("core.waits.category.lock.label"), t!("core.waits.category.lock.meaning")),
+        "latch" => (t!("core.waits.category.latch.label"), t!("core.waits.category.latch.meaning")),
         "log" => (
-            "Log writes",
+            t!("core.waits.category.log.label"),
+            // What each engine's commits wait to write.
             match engine {
-                Engine::Yugabyte => "Commits waiting on DocDB replication and Raft log durability. Correlate transaction latency with the affected tablets and replicas.".into(),
-                Engine::Postgres => "Commits waiting for the write-ahead log (WAL) to reach disk. Many tiny transactions, or slow log storage.".into(),
-                Engine::Mysql => "Commits waiting for InnoDB's redo log to reach disk. Many tiny transactions, or slow log storage.".into(),
-                Engine::Mssql => "Commits waiting for the transaction log to reach disk (WRITELOG), or a tier's log-rate limit. Many tiny transactions, or slow log storage.".into(),
-                Engine::Sqlite => "Commits waiting for the journal or write-ahead log file to reach disk. Many tiny transactions, or slow storage.".into(),
+                Engine::Yugabyte => t!("core.waits.category.log.meaning.yugabyte"),
+                Engine::Postgres => t!("core.waits.category.log.meaning.postgres"),
+                Engine::Mysql => t!("core.waits.category.log.meaning.mysql"),
+                Engine::Mssql => t!("core.waits.category.log.meaning.mssql"),
+                Engine::Sqlite => t!("core.waits.category.log.meaning.sqlite"),
             },
         ),
-        "network" => (
-            "Sending results",
-            format!("{name} has results ready but the application reads them slowly. Usually large result sets, or an application that processes each row before asking for the next."),
-        ),
-        "parallelism" => (
-            "Parallel queries",
-            "Threads of a parallel query waiting for each other. Often a big scan that an index would avoid, or work split unevenly across threads.".into(),
-        ),
-        "memory" => (
-            "Memory",
-            "Waiting for memory: a grant to sort or hash before a query can start (RESOURCE_SEMAPHORE), or an allocation inside the server (CMEMTHREAD, MEMORY_ALLOCATION_EXT). Grant waits usually mean a few queries reserve far more than they use; allocation waits mean many sessions contend for one of the server's memory objects.".into(),
-        ),
-        "compilation" => (
-            "Compiling plans",
-            "Building query plans. A lot of it means the application sends one-off statements instead of parameterized ones.".into(),
-        ),
+        "network" => (t!("core.waits.category.network.label"), t!("core.waits.category.network.meaning", engine = name)),
+        "parallelism" => (t!("core.waits.category.parallelism.label"), t!("core.waits.category.parallelism.meaning")),
+        "memory" => (t!("core.waits.category.memory.label"), t!("core.waits.category.memory.meaning")),
+        "compilation" => (t!("core.waits.category.compilation.label"), t!("core.waits.category.compilation.meaning")),
         _ => (
-            "Everything else",
+            t!("core.waits.category.other.label"),
             match engine {
-                Engine::Postgres => "Statement time PostgreSQL doesn't break down: running on CPU, or waiting on locks and events it doesn't time per statement.".into(),
-                _ => format!("Everything {name} doesn't break down further."),
+                Engine::Postgres => t!("core.waits.category.other.meaning_postgres"),
+                _ => t!("core.waits.category.other.meaning", engine = name),
             },
         ),
     }
@@ -466,6 +444,98 @@ mod tests {
         assert_eq!(hit.status, SignalStatus::Good);
         let low = Signal { value: 97.0, ..hit.clone() }.graded("above 99% is healthy", 99.0, 95.0, false);
         assert_eq!(low.status, SignalStatus::Watch);
+    }
+
+    // Each category's label and meaning on every engine, word for word: they come from locales/en.json.
+    #[test]
+    fn categories_say_what_they_hold_in_english() {
+        let mut out = Vec::new();
+        for engine in Engine::ALL {
+            for key in [
+                "rpc",
+                "storage",
+                "cpu",
+                "io",
+                "rows",
+                "lock",
+                "latch",
+                "log",
+                "network",
+                "parallelism",
+                "memory",
+                "compilation",
+                "other",
+            ] {
+                let (label, meaning) = category_info(key, engine);
+                out.push(format!("{engine:?} {key}: {label} | {meaning}"));
+            }
+        }
+        let got = out.join("\n");
+        assert_eq!(got, r#"Mssql rpc: Distributed RPCs | Waiting for remote DocDB operations or catalog requests. Native session events identify these waits; statement RPC timings can overlap and are not exclusive wait shares.
+Mssql storage: Storage I/O | Waiting for native storage reads or writes, including RocksDB operations. These are session observations, not PostgreSQL heap-page or buffer measurements.
+Mssql cpu: CPU | Running on a processor, queued for one, or (THREADPOOL) waiting for a worker thread before the request could start at all. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row. Worker waits instead point at blocking chains or heavy parallelism holding the workers.
+Mssql io: Disk reads | Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.
+Mssql rows: Row access | Time inside InnoDB fetching and changing rows. MySQL's table I/O instrument counts rows served from memory too, so this is storage-engine work, not only disk.
+Mssql lock: Locks | Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.
+Mssql latch: In-memory contention | Short waits on the server's own memory structures (page latches, mutexes). Hot spots such as an ever-increasing key or busy temporary space cause most of it.
+Mssql log: Log writes | Commits waiting for the transaction log to reach disk (WRITELOG), or a tier's log-rate limit. Many tiny transactions, or slow log storage.
+Mssql network: Sending results | SQL Server has results ready but the application reads them slowly. Usually large result sets, or an application that processes each row before asking for the next.
+Mssql parallelism: Parallel queries | Threads of a parallel query waiting for each other. Often a big scan that an index would avoid, or work split unevenly across threads.
+Mssql memory: Memory | Waiting for memory: a grant to sort or hash before a query can start (RESOURCE_SEMAPHORE), or an allocation inside the server (CMEMTHREAD, MEMORY_ALLOCATION_EXT). Grant waits usually mean a few queries reserve far more than they use; allocation waits mean many sessions contend for one of the server's memory objects.
+Mssql compilation: Compiling plans | Building query plans. A lot of it means the application sends one-off statements instead of parameterized ones.
+Mssql other: Everything else | Everything SQL Server doesn't break down further.
+Postgres rpc: Distributed RPCs | Waiting for remote DocDB operations or catalog requests. Native session events identify these waits; statement RPC timings can overlap and are not exclusive wait shares.
+Postgres storage: Storage I/O | Waiting for native storage reads or writes, including RocksDB operations. These are session observations, not PostgreSQL heap-page or buffer measurements.
+Postgres cpu: CPU | Running on a processor, or queued for one. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row.
+Postgres io: Disk reads | Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.
+Postgres rows: Row access | Time inside InnoDB fetching and changing rows. MySQL's table I/O instrument counts rows served from memory too, so this is storage-engine work, not only disk.
+Postgres lock: Locks | Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.
+Postgres latch: In-memory contention | Short waits on the server's own memory structures (page latches, mutexes). Hot spots such as an ever-increasing key or busy temporary space cause most of it.
+Postgres log: Log writes | Commits waiting for the write-ahead log (WAL) to reach disk. Many tiny transactions, or slow log storage.
+Postgres network: Sending results | PostgreSQL has results ready but the application reads them slowly. Usually large result sets, or an application that processes each row before asking for the next.
+Postgres parallelism: Parallel queries | Threads of a parallel query waiting for each other. Often a big scan that an index would avoid, or work split unevenly across threads.
+Postgres memory: Memory | Waiting for memory: a grant to sort or hash before a query can start (RESOURCE_SEMAPHORE), or an allocation inside the server (CMEMTHREAD, MEMORY_ALLOCATION_EXT). Grant waits usually mean a few queries reserve far more than they use; allocation waits mean many sessions contend for one of the server's memory objects.
+Postgres compilation: Compiling plans | Building query plans. A lot of it means the application sends one-off statements instead of parameterized ones.
+Postgres other: Everything else | Statement time PostgreSQL doesn't break down: running on CPU, or waiting on locks and events it doesn't time per statement.
+Yugabyte rpc: Distributed RPCs | Waiting for remote DocDB operations or catalog requests. Native session events identify these waits; statement RPC timings can overlap and are not exclusive wait shares.
+Yugabyte storage: Storage I/O | Waiting for native storage reads or writes, including RocksDB operations. These are session observations, not PostgreSQL heap-page or buffer measurements.
+Yugabyte cpu: CPU | Running on a processor, or queued for one. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row.
+Yugabyte io: Disk reads | Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.
+Yugabyte rows: Row access | Time inside InnoDB fetching and changing rows. MySQL's table I/O instrument counts rows served from memory too, so this is storage-engine work, not only disk.
+Yugabyte lock: Locks | Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.
+Yugabyte latch: In-memory contention | Short waits on the server's own memory structures (page latches, mutexes). Hot spots such as an ever-increasing key or busy temporary space cause most of it.
+Yugabyte log: Log writes | Commits waiting on DocDB replication and Raft log durability. Correlate transaction latency with the affected tablets and replicas.
+Yugabyte network: Sending results | YugabyteDB has results ready but the application reads them slowly. Usually large result sets, or an application that processes each row before asking for the next.
+Yugabyte parallelism: Parallel queries | Threads of a parallel query waiting for each other. Often a big scan that an index would avoid, or work split unevenly across threads.
+Yugabyte memory: Memory | Waiting for memory: a grant to sort or hash before a query can start (RESOURCE_SEMAPHORE), or an allocation inside the server (CMEMTHREAD, MEMORY_ALLOCATION_EXT). Grant waits usually mean a few queries reserve far more than they use; allocation waits mean many sessions contend for one of the server's memory objects.
+Yugabyte compilation: Compiling plans | Building query plans. A lot of it means the application sends one-off statements instead of parameterized ones.
+Yugabyte other: Everything else | Everything YugabyteDB doesn't break down further.
+Mysql rpc: Distributed RPCs | Waiting for remote DocDB operations or catalog requests. Native session events identify these waits; statement RPC timings can overlap and are not exclusive wait shares.
+Mysql storage: Storage I/O | Waiting for native storage reads or writes, including RocksDB operations. These are session observations, not PostgreSQL heap-page or buffer measurements.
+Mysql cpu: CPU | Running on a processor, or queued for one. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row.
+Mysql io: Disk reads | Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.
+Mysql rows: Row access | Time inside InnoDB fetching and changing rows. MySQL's table I/O instrument counts rows served from memory too, so this is storage-engine work, not only disk.
+Mysql lock: Locks | Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.
+Mysql latch: In-memory contention | Short waits on the server's own memory structures (page latches, mutexes). Hot spots such as an ever-increasing key or busy temporary space cause most of it.
+Mysql log: Log writes | Commits waiting for InnoDB's redo log to reach disk. Many tiny transactions, or slow log storage.
+Mysql network: Sending results | MySQL has results ready but the application reads them slowly. Usually large result sets, or an application that processes each row before asking for the next.
+Mysql parallelism: Parallel queries | Threads of a parallel query waiting for each other. Often a big scan that an index would avoid, or work split unevenly across threads.
+Mysql memory: Memory | Waiting for memory: a grant to sort or hash before a query can start (RESOURCE_SEMAPHORE), or an allocation inside the server (CMEMTHREAD, MEMORY_ALLOCATION_EXT). Grant waits usually mean a few queries reserve far more than they use; allocation waits mean many sessions contend for one of the server's memory objects.
+Mysql compilation: Compiling plans | Building query plans. A lot of it means the application sends one-off statements instead of parameterized ones.
+Mysql other: Everything else | Everything MySQL doesn't break down further.
+Sqlite rpc: Distributed RPCs | Waiting for remote DocDB operations or catalog requests. Native session events identify these waits; statement RPC timings can overlap and are not exclusive wait shares.
+Sqlite storage: Storage I/O | Waiting for native storage reads or writes, including RocksDB operations. These are session observations, not PostgreSQL heap-page or buffer measurements.
+Sqlite cpu: CPU | Running on a processor, or queued for one. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row.
+Sqlite io: Disk reads | Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.
+Sqlite rows: Row access | Time inside InnoDB fetching and changing rows. MySQL's table I/O instrument counts rows served from memory too, so this is storage-engine work, not only disk.
+Sqlite lock: Locks | Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.
+Sqlite latch: In-memory contention | Short waits on the server's own memory structures (page latches, mutexes). Hot spots such as an ever-increasing key or busy temporary space cause most of it.
+Sqlite log: Log writes | Commits waiting for the journal or write-ahead log file to reach disk. Many tiny transactions, or slow storage.
+Sqlite network: Sending results | SQLite has results ready but the application reads them slowly. Usually large result sets, or an application that processes each row before asking for the next.
+Sqlite parallelism: Parallel queries | Threads of a parallel query waiting for each other. Often a big scan that an index would avoid, or work split unevenly across threads.
+Sqlite memory: Memory | Waiting for memory: a grant to sort or hash before a query can start (RESOURCE_SEMAPHORE), or an allocation inside the server (CMEMTHREAD, MEMORY_ALLOCATION_EXT). Grant waits usually mean a few queries reserve far more than they use; allocation waits mean many sessions contend for one of the server's memory objects.
+Sqlite compilation: Compiling plans | Building query plans. A lot of it means the application sends one-off statements instead of parameterized ones.
+Sqlite other: Everything else | Everything SQLite doesn't break down further."#);
     }
 
     #[test]

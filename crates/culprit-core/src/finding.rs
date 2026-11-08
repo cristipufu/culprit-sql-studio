@@ -15,12 +15,12 @@ pub enum Category {
 }
 
 impl Category {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Category::Indexes => "Indexes",
-            Category::Queries => "Queries",
-            Category::Maintenance => "Maintenance",
-            Category::Configuration => "Configuration",
+            Category::Indexes => t!("core.finding.category.indexes"),
+            Category::Queries => t!("core.finding.category.queries"),
+            Category::Maintenance => t!("core.finding.category.maintenance"),
+            Category::Configuration => t!("core.finding.category.configuration"),
         }
     }
 }
@@ -404,5 +404,29 @@ impl Report {
                     )
             })
             .then(|| t!("model.absence.combined"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // What a finding's category and actionability are called, word for word: they come from locales/en.json.
+    #[test]
+    fn categories_and_actionability_are_named_in_english() {
+        assert_eq!(
+            [Category::Indexes, Category::Queries, Category::Maintenance, Category::Configuration].map(|c| c.label()),
+            ["Indexes", "Queries", "Maintenance", "Configuration"]
+        );
+        assert_eq!(
+            [
+                Actionability::NeedsAttention,
+                Actionability::OptionalImprovement,
+                Actionability::Information,
+                Actionability::History
+            ]
+            .map(|a| a.label()),
+            ["Needs attention", "Optional improvement", "Information", "History"]
+        );
     }
 }

@@ -381,9 +381,7 @@ pub const MAX_PLAN_DEPTH: usize = 56;
 
 /// A plan nested deeper than [`MAX_PLAN_DEPTH`]: refused, so it can't make a saved scan unreadable.
 pub fn too_deep() -> crate::Error {
-    crate::Error::invalid(format!(
-        "The plan nests its steps more than {MAX_PLAN_DEPTH} deep, deeper than a saved scan can hold"
-    ))
+    crate::Error::invalid(crate::t!("core.plan.too_deep", depth = MAX_PLAN_DEPTH.to_string()))
 }
 
 impl Plan {
@@ -547,5 +545,37 @@ impl Plan {
             node.children.iter_mut().for_each(visit);
         }
         visit(&mut self.root);
+    }
+}
+
+#[cfg(test)]
+mod words {
+    use super::*;
+
+    // What each plan warning is called and why a plan is refused, word for word: they come from locales/en.json.
+    #[test]
+    fn warnings_and_refusals_read_in_english() {
+        assert_eq!(
+            [
+                PlanWarning::ImplicitConversion,
+                PlanWarning::Spill,
+                PlanWarning::NoJoinPredicate,
+                PlanWarning::MissingStatistics,
+                PlanWarning::MemoryGrant,
+                PlanWarning::Misestimate,
+                PlanWarning::ResidualPredicate,
+            ]
+            .map(|w| w.label()),
+            [
+                "Implicit conversion",
+                "Spills to disk",
+                "No join predicate",
+                "Missing statistics",
+                "Memory grant issue",
+                "Row estimate off",
+                "Filters after reading",
+            ]
+        );
+        assert_eq!(too_deep().message, "The plan nests its steps more than 56 deep, deeper than a saved scan can hold");
     }
 }
