@@ -1,5 +1,5 @@
 import { ArrowLeft, Check, Copy, SquarePen } from "lucide-react";
-import { Fragment, type ReactNode, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Drift } from "../gen/Drift";
 import type { DriftItem } from "../gen/DriftItem";
 import type { DriftKind } from "../gen/DriftKind";
@@ -8,6 +8,7 @@ import type { Report } from "../gen/Report";
 import { api, errorMessage, type ApiError } from "../lib/api";
 import { ago } from "../lib/format";
 import { t } from "../lib/i18n";
+import { tx } from "../lib/message-parts";
 import { setState, useStore } from "../lib/store";
 import { Sql } from "./Sql";
 import { serverName } from "../lib/engines";
@@ -28,10 +29,6 @@ function groups(): { kind: DriftKind; label: string }[] {
   ];
 }
 
-/** A message whose `{name}` arguments are elements: t() leaves them as `{name}`, and each is put in its place. */
-function place(message: string, elements: Record<string, ReactNode>): ReactNode[] {
-  return message.split(/\{(\w+)\}/).map((piece, i) => (i % 2 ? <Fragment key={i}>{elements[piece] ?? `{${piece}}`}</Fragment> : piece));
-}
 
 function pickKey(name: string): string {
   return `culprit.drift.${name}`;
@@ -73,7 +70,7 @@ export function DriftPanel({ report, onClose }: { report: Report; onClose: () =>
           <ArrowLeft size={13} /> {t("ui.drift_panel.back")}
         </button>
         <span className="drift-with">
-          {place(t("ui.drift_panel.compare"), { connection: <b>{active}</b> })}
+          {tx("ui.drift_panel.compare", {}, { connection: <b>{active}</b> })}
         </span>
         {others.map((c) => (
           <button type="button" key={c.name} className={`chip ${other === c.name ? "on" : ""}`} onClick={() => choose(c.name)}>
@@ -200,7 +197,7 @@ function DriftRow({ item, drift, active }: { item: DriftItem; drift: Drift; acti
           <div className="drift-sql">
             <div className="drift-sql-head">
               <span className="muted">
-                {place(t("ui.drift_panel.align_on"), { connection: <b>{item.sql_for}</b> })}
+                {tx("ui.drift_panel.align_on", {}, { connection: <b>{item.sql_for}</b> })}
               </span>
               <span className="actions">
                 <button type="button" className="btn ghost" onClick={copy}>

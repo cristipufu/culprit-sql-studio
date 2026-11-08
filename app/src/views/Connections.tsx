@@ -9,7 +9,7 @@ import { useStore } from "../lib/store";
 import { ConnectionCard } from "./connections/ConnectionCard";
 import { DiscoverPanel, ImportPanel } from "./connections/DiscoverPanel";
 import { NewConnectionForm } from "./connections/NewConnectionForm";
-import { slot, withElements } from "./message-parts";
+import { slot, withElements } from "../lib/message-parts";
 
 export function Connections() {
   const connections = useStore((s) => s.connections);

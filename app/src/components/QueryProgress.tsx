@@ -8,7 +8,7 @@ import { api, errorMessage, type ApiError } from "../lib/api";
 import { count, duration, percent, rowCount } from "../lib/format";
 import { t } from "../lib/i18n";
 import { PlanDiagram } from "./PlanDiagram";
-import { slot, withElements } from "../views/message-parts";
+import { slot, withElements } from "../lib/message-parts";
 
 const REFRESH_MS = 1000;
 

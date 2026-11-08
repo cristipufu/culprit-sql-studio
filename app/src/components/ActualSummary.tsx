@@ -1,9 +1,10 @@
 import { Clock, Cpu, Database, Gauge, HardDrive, Scale, TriangleAlert, Users } from "lucide-react";
-import { Fragment, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import type { Plan } from "../gen/Plan";
 import { actualFacts } from "../lib/actual";
 import { count, duration, percent, rowCount, when } from "../lib/format";
 import { t } from "../lib/i18n";
+import { tx } from "../lib/message-parts";
 import { estRowsForRuns } from "../lib/plan-format";
 
 function kb(value: number): string {
@@ -17,10 +18,6 @@ function where(node: { op: string; object: string | null }): string {
   return table ? t("ui.actual_summary.op_on", { op: node.op, table }) : node.op;
 }
 
-/** A message whose `{name}` arguments are elements: t() leaves them as `{name}`, and each is put in its place. */
-function place(message: string, elements: Record<string, ReactNode>): ReactNode[] {
-  return message.split(/\{(\w+)\}/).map((piece, i) => (i % 2 ? <Fragment key={i}>{elements[piece] ?? `{${piece}}`}</Fragment> : piece));
-}
 
 function Stat({ icon, value, label, title }: { icon: ReactNode; value: string; label: string; title?: string }) {
   return (
@@ -49,7 +46,7 @@ export function ActualSummary({ plan, onPick }: { plan: Plan; onPick?: (id: numb
       tone: "hot",
       icon: <Gauge size={13} />,
       text: (
-        <>{place(t("ui.actual_summary.slowest", { time: duration(f.slowest.ms), share: percent(f.slowest.share) }), { operator: <b>{where(f.slowest.node)}</b> })}</>
+        <>{tx("ui.actual_summary.slowest", { time: duration(f.slowest.ms), share: percent(f.slowest.share) }, { operator: <b>{where(f.slowest.node)}</b> })}</>
       ),
       node: f.slowest.node.id,
       title: t("ui.actual_summary.slowest_hint"),
@@ -64,7 +61,7 @@ export function ActualSummary({ plan, onPick }: { plan: Plan; onPick?: (id: numb
       tone: "warn",
       icon: <Scale size={13} />,
       text: (
-        <>{place(t("ui.actual_summary.estimate", { expected: rowCount(expected), factor: count(Math.abs(f.worstEstimate.factor)) }), { actual: <b>{count(n.act_rows ?? 0)}</b>, operator: <b>{where(n)}</b> })}</>
+        <>{tx("ui.actual_summary.estimate", { expected: rowCount(expected), factor: count(Math.abs(f.worstEstimate.factor)) }, { actual: <b>{count(n.act_rows ?? 0)}</b>, operator: <b>{where(n)}</b> })}</>
       ),
       node: f.worstEstimate.node.id,
       title: t("ui.actual_summary.estimate_hint"),
@@ -76,7 +73,7 @@ export function ActualSummary({ plan, onPick }: { plan: Plan; onPick?: (id: numb
       tone: "warn",
       icon: <Users size={13} />,
       text: (
-        <>{place(t("ui.actual_summary.skew", { threads: String(f.skew.threads), share: percent(f.skew.busiest) }), { operator: <b>{where(f.skew.node)}</b> })}</>
+        <>{tx("ui.actual_summary.skew", { threads: String(f.skew.threads), share: percent(f.skew.busiest) }, { operator: <b>{where(f.skew.node)}</b> })}</>
       ),
       node: f.skew.node.id,
       title: t("ui.actual_summary.skew_hint"),
@@ -127,7 +124,7 @@ export function ActualSummary({ plan, onPick }: { plan: Plan; onPick?: (id: numb
             <span style={{ width: `${Math.min(100, (memory.used / memory.granted) * 100)}%` }} />
           </span>
           <span>
-            {place(t("ui.actual_summary.memory_used", { granted: kb(memory.granted) }), { used: <b>{kb(memory.used)}</b> })}
+            {tx("ui.actual_summary.memory_used", { granted: kb(memory.granted) }, { used: <b>{kb(memory.used)}</b> })}
             {idle >= 0.75 && memory.granted >= 10 * 1024 && <span className="muted"> · {t("ui.actual_summary.memory_idle", { share: percent(idle) })}</span>}
           </span>
         </div>
@@ -136,7 +133,7 @@ export function ActualSummary({ plan, onPick }: { plan: Plan; onPick?: (id: numb
       {f.triggers.length > 0 && <section className="actual-triggers" aria-label={t("ui.actual_summary.triggers_label")}>
         <h4>{t("ui.actual_summary.triggers")}</h4>
         <p className="muted">{t("ui.actual_summary.triggers_note")}</p>
-        <ul>{f.triggers.map((trigger, i) => <li key={`${trigger.name}-${i}`}><span>{trigger.relation ? place(t("ui.actual_summary.trigger_on", { relation: trigger.relation }), { trigger: <b>{trigger.name}</b> }) : <b>{trigger.name}</b>}</span><span>{duration(trigger.ms)} · {trigger.calls == null ? t("ui.actual_summary.calls_unrecorded") : t("ui.actual_summary.calls", { calls: count(trigger.calls) })}</span></li>)}</ul>
+        <ul>{f.triggers.map((trigger, i) => <li key={`${trigger.name}-${i}`}><span>{trigger.relation ? tx("ui.actual_summary.trigger_on", { relation: trigger.relation }, { trigger: <b>{trigger.name}</b> }) : <b>{trigger.name}</b>}</span><span>{duration(trigger.ms)} · {trigger.calls == null ? t("ui.actual_summary.calls_unrecorded") : t("ui.actual_summary.calls", { calls: count(trigger.calls) })}</span></li>)}</ul>
       </section>}
       {!f.timed && (
         <div className="as-note">

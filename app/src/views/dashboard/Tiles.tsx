@@ -13,7 +13,7 @@ import { keys } from "../../lib/keys";
 import { querySummary } from "../../lib/query-summary";
 import { scan, setState } from "../../lib/store";
 import { openLive } from "../Live";
-import { slot, withElements } from "../message-parts";
+import { slot, withElements } from "../../lib/message-parts";
 import { rememberQueryTab } from "../Queries";
 
 /** Open a query in Queries, on one of its tabs. */

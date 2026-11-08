@@ -1,5 +1,5 @@
 import { Activity, Check, Copy, History, Play, SquarePen } from "lucide-react";
-import { Fragment, type ReactNode, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Engine } from "../gen/Engine";
 import type { Plan } from "../gen/Plan";
 import type { QueryStat } from "../gen/QueryStat";
@@ -7,6 +7,7 @@ import { api, errorMessage, type ApiError } from "../lib/api";
 import { canOpenQueryInEditor, prepareQueryForEditor } from "../lib/editor-sql";
 import { serverName } from "../lib/engines";
 import { t } from "../lib/i18n";
+import { tx } from "../lib/message-parts";
 import { currentReport, setState, useStore } from "../lib/store";
 import { PlanSurface, type PlanLook } from "./PlanSurface";
 import { copyAndTell } from "../lib/clipboard";
@@ -16,10 +17,6 @@ export type PlanSource = "plan" | "actual";
 
 const TURN_ON = "ALTER DATABASE SCOPED CONFIGURATION SET LAST_QUERY_PLAN_STATS = ON;";
 
-/** A message whose `{name}` arguments are elements: t() leaves them as `{name}`, and each is put in its place. */
-function place(message: string, elements: Record<string, ReactNode>): ReactNode[] {
-  return message.split(/\{(\w+)\}/).map((piece, i) => (i % 2 ? <Fragment key={i}>{elements[piece] ?? `{${piece}}`}</Fragment> : piece));
-}
 
 /** "Estimated" (what the optimizer planned) or "Last run" (what actually happened). */
 export function PlanSourceToggle({ value, onChange }: { value: PlanSource; onChange: (v: PlanSource) => void }) {
@@ -111,7 +108,7 @@ export function LastActualRun(props: { connection: string; engine: Engine; query
       <div className="am-title">{settingOff ? t("ui.actual_run.setting_off") : state.error.message}</div>
       <p className="am-body">
         {settingOff ? (
-          place(t("ui.actual_run.setting_explain"), { setting: <span className="mono">LAST_QUERY_PLAN_STATS</span> })
+          tx("ui.actual_run.setting_explain", {}, { setting: <span className="mono">LAST_QUERY_PLAN_STATS</span> })
         ) : engine === "mssql" ? (
           state.error.hint
         ) : (

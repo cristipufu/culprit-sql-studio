@@ -1,13 +1,10 @@
 import { TriangleAlert } from "lucide-react";
-import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ConnectionInfo } from "../gen/ConnectionInfo";
 import { t } from "../lib/i18n";
+import { tx } from "../lib/message-parts";
 import type { PendingRun } from "../lib/run-batch";
 
-/** A message whose `{name}` arguments are elements: t() leaves them as `{name}`, and each is put in its place. */
-function place(message: string, elements: Record<string, ReactNode>): ReactNode[] {
-  return message.split(/\{(\w+)\}/).map((piece, i) => (i % 2 ? <Fragment key={i}>{elements[piece] ?? `{${piece}}`}</Fragment> : piece));
-}
 
 /**
  * Asked before a statement that changes data runs on production. Cancel has focus; a statement that touches every row
@@ -40,7 +37,7 @@ export function ConfirmRun({ pending, connection, onCancel, onConfirm }: { pendi
           <div>
             <h2 id="confirm-run-title">{t("ui.confirm_run.title")}</h2>
             <div className="muted">
-              {place(check.verb ? t("ui.confirm_run.runs_on", { verb: check.verb }) : t("ui.confirm_run.statement_runs_on"), { connection: pill })}
+              {check.verb ? tx("ui.confirm_run.runs_on", { verb: check.verb }, { connection: pill }) : tx("ui.confirm_run.statement_runs_on", {}, { connection: pill })}
             </div>
           </div>
         </div>
@@ -56,7 +53,7 @@ export function ConfirmRun({ pending, connection, onCancel, onConfirm }: { pendi
         <pre className="confirm-sql">{preview}</pre>
         {risky && (
           <label className="confirm-type">
-            {place(t("ui.confirm_run.type_name"), { connection: <b>{connection.name}</b> })}
+            {tx("ui.confirm_run.type_name", {}, { connection: <b>{connection.name}</b> })}
             <input ref={input} value={typed} onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ready && onConfirm()} spellCheck={false} autoComplete="off" />
           </label>
         )}

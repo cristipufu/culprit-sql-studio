@@ -14,7 +14,7 @@ import { currentReport, setState, toast, useStore } from "../lib/store";
 import { keys } from "../lib/keys";
 import { copyAndTell } from "../lib/clipboard";
 import { dateLocale, digits } from "../lib/format";
-import { slot, withElements } from "./message-parts";
+import { slot, withElements } from "../lib/message-parts";
 
 function patternLabel(pattern: DeadlockPattern): string {
   switch (pattern) {

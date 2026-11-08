@@ -11,7 +11,7 @@ import { discoveryKey, preselectedDiscoveries, type DiscoveryPage } from "../../
 import { LatestRequest } from "../../lib/requests";
 import { loadConnections } from "../../lib/store";
 import { remember, remembered } from "../../lib/prefs";
-import { slot, withElements } from "../message-parts";
+import { slot, withElements } from "../../lib/message-parts";
 
 const TERMS_KEY: Record<CloudKind, string> = { azure: "culprit.discover.terms", aws: "culprit.discover.aws.terms" };
 const REGIONS_KEY = "culprit.discover.aws.regions";

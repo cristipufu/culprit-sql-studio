@@ -1,4 +1,4 @@
-import { Fragment, useState, type MouseEvent, type ReactNode } from "react";
+import { useState, type MouseEvent } from "react";
 import type { Engine } from "../gen/Engine";
 import type { OpenTransaction } from "../gen/OpenTransaction";
 import type { Pressure } from "../gen/Pressure";
@@ -9,16 +9,13 @@ import type { Signal } from "../gen/Signal";
 import { duration, percent, percentValue } from "../lib/format";
 import { findingStatus, worstFinding } from "../lib/health";
 import { t } from "../lib/i18n";
+import { tx } from "../lib/message-parts";
 import { SIGNAL_SCOPE, signalValue } from "../lib/waits";
 import { Replication, StorageLatency } from "./BeyondTime";
 import { OperationalHealth, hasOperationalHealth } from "./OperationalHealth";
 
 const RANK: Record<Signal["status"], number> = { bad: 0, watch: 1, good: 2, info: 3 };
 
-/** A message whose `{name}` arguments are elements: t() leaves them as `{name}`, and each is put in its place. */
-function place(message: string, elements: Record<string, ReactNode>): ReactNode[] {
-  return message.split(/\{(\w+)\}/).map((piece, i) => (i % 2 ? <Fragment key={i}>{elements[piece] ?? `{${piece}}`}</Fragment> : piece));
-}
 
 /** A signal: label, value, when it was measured, and what healthy looks like, in words. */
 export function SignalTile({ signal }: { signal: Signal }) {
@@ -49,10 +46,10 @@ function OpenTransactionCard({ txn, status }: { txn: OpenTransaction; status: Si
       <div>
         <div className="open-txn-title">
           {slot
-            ? place(t("ui.health.slot_holds", { cleanup: txn.catalog_only ? "catalog" : "all", count: Math.round(behind) }), { slot: session })
+            ? tx("ui.health.slot_holds", { cleanup: txn.catalog_only ? "catalog" : "all", count: Math.round(behind) }, { slot: session })
             : txn.holder === "prepared-transaction"
-              ? place(t("ui.health.oldest_prepared", { duration: duration(txn.seconds * 1000) }), { session })
-              : place(t("ui.health.oldest_open", { duration: duration(txn.seconds * 1000) }), { session })}
+              ? tx("ui.health.oldest_prepared", { duration: duration(txn.seconds * 1000) }, { session })
+              : tx("ui.health.oldest_open", { duration: duration(txn.seconds * 1000) }, { session })}
           {txn.state ? ` · ${txn.state}` : ""}
         </div>
         <div className="open-txn-meta">
@@ -195,7 +192,7 @@ function ResourceChart({ label, status, times, values }: { label: string; status
         </span>
         <span className="resource-sentence">
           {atLimit >= 0.01
-            ? place(t("ui.health.at_limit"), { share: <b>{percent(atLimit)}</b> })
+            ? tx("ui.health.at_limit", {}, { share: <b>{percent(atLimit)}</b> })
             : t("ui.health.recorded_peak", { peak: percentValue(peak) })}
         </span>
       </div>

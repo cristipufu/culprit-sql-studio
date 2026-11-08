@@ -15,7 +15,7 @@ import type { WaitsTab } from "./Waits";
 import type { Engine } from "../gen/Engine";
 import { can, isMariadb, serverName, waitSampling } from "../lib/engines";
 import { t } from "../lib/i18n";
-import { slot, withElements } from "../views/message-parts";
+import { slot, withElements } from "../lib/message-parts";
 
 type Loaded = { status: "loading" } | { status: "ready"; report: WaitsReport | null } | { status: "error"; error: ApiError };
 

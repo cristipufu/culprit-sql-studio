@@ -3,7 +3,7 @@ import type { Actionability } from "../gen/Actionability";
 import type { OperationalCounterKind } from "../gen/OperationalCounterKind";
 import { bytes, count, percent } from "../lib/format";
 import { t } from "../lib/i18n";
-import { slot, withElements } from "../views/message-parts";
+import { slot, withElements } from "../lib/message-parts";
 import { TerminationHistoryView } from "./TerminationHistory";
 import { NodeResourcesView } from "./NodeResources";
 

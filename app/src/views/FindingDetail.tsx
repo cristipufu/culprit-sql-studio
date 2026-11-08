@@ -21,7 +21,7 @@ import { setState, toast, toggleDismissed, useStore } from "../lib/store";
 import { copyAndTell } from "../lib/clipboard";
 import { canOpenFixInEditor } from "../lib/editor-sql";
 import { can } from "../lib/engines";
-import { slot, withElements } from "./message-parts";
+import { slot, withElements } from "../lib/message-parts";
 
 function confidenceLabel(confidence: Finding["confidence"]): string {
   switch (confidence) {

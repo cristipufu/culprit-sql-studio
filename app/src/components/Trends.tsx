@@ -4,7 +4,7 @@ import type { Timeline } from "../gen/Timeline";
 import type { Workload } from "../gen/Workload";
 import { count, duration } from "../lib/format";
 import { t } from "../lib/i18n";
-import { slot, withElements } from "../views/message-parts";
+import { slot, withElements } from "../lib/message-parts";
 import { isPartial, TimeChart, VH, VW, when, type Bucket, type ChartEvent, type Flag, type Range } from "./TimeChart";
 
 /** Colors that tell plans apart, the same in chips, flags and lanes. */

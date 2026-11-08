@@ -12,7 +12,7 @@ import { t } from "../lib/i18n";
 import { currentReport, setState, toast, useStore } from "../lib/store";
 import { remember, rememberedChoice } from "../lib/prefs";
 import { tabListKeys } from "../lib/keys";
-import { slot, withElements } from "./message-parts";
+import { slot, withElements } from "../lib/message-parts";
 
 const Deadlocks = lazy(() => import("./Deadlocks"));
 

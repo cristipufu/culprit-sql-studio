@@ -6,7 +6,7 @@ import { api, errorMessage } from "../lib/api";
 import { serverName } from "../lib/engines";
 import { loadSaved, toast, useStore } from "../lib/store";
 import { EngineBadge } from "./EngineBadge";
-import { slot, withElements } from "../views/message-parts";
+import { slot, withElements } from "../lib/message-parts";
 import { keys } from "../lib/keys";
 import { t } from "../lib/i18n";
 

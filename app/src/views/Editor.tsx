@@ -28,7 +28,7 @@ import { EmptyOutput, OutputPane } from "./editor/OutputPane";
 import { TabStrip } from "./editor/TabStrip";
 import { useTabViews } from "./editor/tab-views";
 import { Toolbar } from "./editor/Toolbar";
-import { slot, withElements } from "./message-parts";
+import { slot, withElements } from "../lib/message-parts";
 
 const RAIL_KEY = "culprit.editor.rail";
 const ROW_LIMIT = 1000;

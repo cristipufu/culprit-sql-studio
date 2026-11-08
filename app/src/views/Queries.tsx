@@ -23,7 +23,7 @@ import { setState, toast, useStore } from "../lib/store";
 import { compareSince } from "./Overview";
 import { remember, rememberedChoice } from "../lib/prefs";
 import { tabListKeys } from "../lib/keys";
-import { slot, withElements } from "./message-parts";
+import { slot, withElements } from "../lib/message-parts";
 
 const PAGE_SIZE = 100;
 type QueryEntry = { query: QueryStat; figures: Figures; search: string };

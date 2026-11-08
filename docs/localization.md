@@ -74,7 +74,9 @@ f.title = t!("check.heap_table.title.no_clustered_index", table = &t.name, rows 
   by key with `key!("common.noun.time")` and said with `support::counted`.
 - **Engine vocabulary** (MySQL's "rows examined" against "pages") comes from the engine's facts, not ad-hoc strings.
 - **No logic reads text**: decide on facts, then word them.
-- **Render text as text**: the app shows messages as text nodes, never as HTML.
+- **Render text as text**: the app shows messages as text nodes, never as HTML. A sentence with an element inside (a
+  name in bold, a command in `<code>`) is still one message: `tx("ui.drift_panel.compare", {}, { connection: <b>{name}</b> })`
+  (`app/src/lib/message-parts.tsx`) puts each element where its `{argument}` is.
 - SQL a fix gives is never translated: it is an argument.
 
 ## Checks: decide, then render
