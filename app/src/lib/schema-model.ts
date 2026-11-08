@@ -8,6 +8,7 @@ import type { TableStat } from "../gen/TableStat";
 import type { TablePreviewOptions } from "../gen/TablePreviewOptions";
 import type { ColumnSort } from "../gen/ColumnSort";
 import { sqlSyntax } from "./engines";
+import { t } from "./i18n";
 
 export const tableKey = (t: { schema: string; name: string }) => `${t.schema}.${t.name}`;
 
@@ -126,17 +127,18 @@ export function nextColumnSort(order: ColumnSort | null, column: string): Column
   return order?.column !== column ? { column, direction: "asc" } : order.direction === "asc" ? { column, direction: "desc" } : null;
 }
 
+/** A note in DDL: each of its lines a SQL comment. */
+function sqlNote(note: string): string {
+  return note.split("\n").map((line) => `-- ${line}`).join("\n");
+}
+
 /** Approximate DDL rebuilt from catalog metadata (columns, primary key, indexes, foreign keys). */
 export function ddl(engine: Engine, table: TableStat, columns: ColumnInfo[], indexes: IndexStat[], outgoing: Relation[]): string {
   const original = table.definition ? `${table.definition.trimEnd().replace(/;$/, "")};` : null;
-  if (table.kind === "hypertable" || table.kind === "timescale-unresolved") {
-    return "-- TimescaleDB manages this table's partitioning, chunks, compression and policies.\n-- The collected column/index metadata is not a complete recreation script.\n-- Export its schema with the TimescaleDB tools before recreating it.";
-  }
-  if (table.kind === "virtual") return original ?? "-- The virtual table's original definition was not collected. Read it from the database before recreating it.";
-  if (engine === "yugabyte" && !table.storage?.docdb)
-    return original ?? "-- Native DocDB sharding metadata was unavailable. Export this table's YSQL schema before recreating it.";
-  if (engine === "yugabyte" && columns.some((c) => c.generated))
-    return original ?? "-- Complete native generated/identity column definitions were not collected. Export this table's YSQL schema before recreating it.";
+  if (table.kind === "hypertable" || table.kind === "timescale-unresolved") return sqlNote(t("ui.schema_model.timescale"));
+  if (table.kind === "virtual") return original ?? sqlNote(t("ui.schema_model.virtual_missing"));
+  if (engine === "yugabyte" && !table.storage?.docdb) return original ?? sqlNote(t("ui.schema_model.docdb_missing"));
+  if (engine === "yugabyte" && columns.some((c) => c.generated)) return original ?? sqlNote(t("ui.schema_model.generated_missing"));
   const q = (n: string) => quoteIdent(engine, n);
   const name = `${q(table.schema)}.${q(table.name)}`;
   const lines = columns.map((c) => {
@@ -148,7 +150,7 @@ export function ddl(engine: Engine, table: TableStat, columns: ColumnInfo[], ind
   });
   const pk = indexes.find((i) => i.is_primary_key);
   if (pk) {
-    if (engine === "yugabyte" && !pk.docdb) return "-- Native primary-key sharding was unavailable. Export this table's YSQL schema before recreating it.";
+    if (engine === "yugabyte" && !pk.docdb) return sqlNote(t("ui.schema_model.primary_key_sharding_missing"));
     const keys = engine === "yugabyte" ? nativeKeys(pk, q) : pk.columns.map((c) => q(c.replace(/\s+(ASC|DESC)$/i, ""))).join(", ");
     lines.push(`  CONSTRAINT ${q(pk.name)} PRIMARY KEY (${keys})`);
   }
@@ -160,7 +162,7 @@ export function ddl(engine: Engine, table: TableStat, columns: ColumnInfo[], ind
   const native = engine === "yugabyte" ? table.storage?.docdb : null;
   const distribution = native ? ` WITH (colocation = ${native.colocated ? "true" : "false"})${!native.colocated && (native.hash_key_columns ?? 0) > 0 && (native.tablets ?? 0) > 1 ? ` SPLIT INTO ${native.tablets} TABLETS` : ""}` : "";
   const out = [original ?? `CREATE TABLE ${name} (\n${lines.join(",\n")}\n)${distribution};`];
-  if (native) out.unshift("-- Logical YSQL schema with captured sharding. Review tablespaces, placement, tablegroups and range split points against a native schema export.");
+  if (native) out.unshift(sqlNote(t("ui.schema_model.logical_ysql")));
   indexes
     .filter((i) => !i.is_primary_key && (engine !== "sqlite" || i.definition != null))
     .forEach((i) => {
@@ -169,7 +171,7 @@ export function ddl(engine: Engine, table: TableStat, columns: ColumnInfo[], ind
         return;
       }
       if (engine === "yugabyte") {
-        out.push(`-- The native definition of ${q(i.name)} was unavailable; export it before recreating this index.`);
+        out.push(sqlNote(t("ui.schema_model.index_definition_missing", { index: q(i.name) })));
         return;
       }
       const keys = i.columns.map((c) => {

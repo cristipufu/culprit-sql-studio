@@ -2,6 +2,7 @@
 // foreign key, where its supporting CREATE INDEX goes. Pure, so the editor only dispatches what this returns.
 import type { Finding } from "../gen/Finding";
 import { locateFindingSpan, statementEndOffset } from "./editor-sql";
+import { t } from "./i18n";
 
 /** One edit of the document: replace `from`..`to` with `insert` (an insertion when they are equal). */
 export type TextChange = { from: number; to: number; insert: string };
@@ -20,10 +21,10 @@ export function lintFix(doc: string, f: Fixable): { change: TextChange; message:
   const span = locateFindingSpan(doc, f);
   if (addsIndex(f)) {
     const at = span ? span[0] : 0;
-    return { change: { from: at, to: at, insert: `${fixSql}\n` }, message: "Added supporting CREATE INDEX" };
+    return { change: { from: at, to: at, insert: `${fixSql}\n` }, message: t("ui.lint_fixes.added_index") };
   }
   if (!span) return null;
-  return { change: { from: span[0], to: statementEndOffset(doc, span[0], span[1]), insert: fixSql }, message: "Applied safe SQL" };
+  return { change: { from: span[0], to: statementEndOffset(doc, span[0], span[1]), insert: fixSql }, message: t("ui.lint_fixes.applied") };
 }
 
 /**
