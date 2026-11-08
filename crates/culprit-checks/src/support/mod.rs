@@ -8,7 +8,7 @@ pub use predicates::*;
 
 use culprit_core::{
     Capability, Category, Confidence, Engine, Finding, Impact, QueryRef, QueryStat, Severity, Snapshot, Subject,
-    SubjectKind, format,
+    SubjectKind, format, t,
 };
 
 pub fn finding(check: &str, key: &str, category: Category, subject: Subject) -> Finding {
@@ -224,7 +224,17 @@ pub(crate) fn index_work_is_material(snapshot: &Snapshot, queries: &[&QueryStat]
 pub(crate) fn query_cost_context(snapshot: &Snapshot, queries: &[&QueryStat]) -> Option<String> {
     let w = snapshot.workload.as_ref()?;
     let impact = query_impact(snapshot, queries)?;
-    let time_noun = crate::queries::time_noun(snapshot);
+    // What the time is of: all database time, or only the runs the slow query log kept.
+    let of = if crate::queries::slow_log_only(snapshot) { "slow_log" } else { "database" };
+    let said = |time: f64, span: String| {
+        t!(
+            "support.cost.time_over",
+            time = format::duration(time),
+            of = of,
+            span = span,
+            share = format::percent(impact.share)
+        )
+    };
     if queries.iter().any(|q| w.scans_of(q).is_some()) {
         if queries.len() != 1 {
             return None;
@@ -238,24 +248,14 @@ pub(crate) fn query_cost_context(snapshot: &Snapshot, queries: &[&QueryStat]) ->
             return None;
         }
         let time: f64 = scans.iter().map(|s| s.time_ms).sum();
-        Some(format!(
-            "{} of {time_noun} over {} ({})",
-            format::duration(time),
-            first.phrase(),
-            format::percent(impact.share)
-        ))
+        Some(said(time, first.phrase()))
     } else {
         // Plan-cache shares can weight entries with different ages. Their raw totals are not an amount over one
         // common interval, so keep their existing per-entry evidence rather than manufacture a matching total.
         if w.hourly_time_ms.is_some() {
             return None;
         }
-        Some(format!(
-            "{} of {time_noun} over {} ({})",
-            format::duration(queries.iter().map(|q| q.total_time_ms).sum()),
-            w.window_phrase(),
-            format::percent(impact.share)
-        ))
+        Some(said(queries.iter().map(|q| q.total_time_ms).sum(), w.window_phrase()))
     }
 }
 
@@ -267,7 +267,7 @@ pub fn apply_query_impact(f: &mut Finding, impact: &QueryImpact) {
 }
 
 pub fn share_label(share: f64) -> String {
-    format!("{} of DB time", format::percent(share))
+    t!("support.impact.share", share = format::percent(share))
 }
 
 pub fn query_refs(queries: &[&QueryStat]) -> Vec<QueryRef> {
@@ -493,34 +493,29 @@ pub fn parse_epoch_seconds(text: &str) -> Option<f64> {
 
 pub fn since_phrase(snapshot: &Snapshot) -> String {
     if snapshot.server.engine == Engine::Yugabyte && counter_days(snapshot).is_none() {
-        return "across cluster nodes since each node's database counters were reset; no common counting period is known".into();
+        return t!("support.since.cluster_nodes");
     }
     // MariaDB's userstat counters run from when userstat was turned on (or flushed), which the server doesn't say.
     if snapshot.server.engine == Engine::Mysql
         && !snapshot.server.has(Capability::PerformanceSchema)
         && snapshot.server.has(Capability::IndexUsage)
     {
-        return "since userstat was turned on or its statistics last flushed".to_string();
+        return t!("support.since.userstat");
     }
     // Truncated with the statements (`sys.ps_truncate_all_tables`), the table and index counters' start is unknown:
     // named for what it may be, with no span.
     if counters_may_be_reset(snapshot) {
-        return "since the server started or its performance_schema counters were last reset".to_string();
+        return t!("support.since.performance_schema");
     }
-    let since = if counters_since_reset(snapshot) {
-        "since its statistics were last reset"
-    } else {
-        "since the server last restarted"
-    };
+    let since = if counters_since_reset(snapshot) { t!("support.since.reset") } else { t!("support.since.restart") };
     match counter_days(snapshot) {
-        Some(days) if days >= 2.0 => format!("in the {} days {since}", days_counted(days)),
+        Some(days) if days >= 2.0 => t!("support.since.days", days = days_counted(days), since = since),
         Some(days) if days * 24.0 < 1.0 => {
-            let minutes = (days * 24.0 * 60.0).round().max(1.0);
-            if minutes == 1.0 { format!("in the minute {since}") } else { format!("in the {minutes} minutes {since}") }
+            t!("support.since.minutes", n = (days * 24.0 * 60.0).round().max(1.0), since = since)
         }
-        Some(days) if days * 24.0 < 1.5 => format!("in the hour {since}"),
-        Some(days) => format!("in the {} hours {since}", (days * 24.0).round()),
-        None => since.to_string(),
+        // An hour and a half or more rounds to 2 hours: "in the hour" is under that.
+        Some(days) => t!("support.since.hours", n = (days * 24.0).round(), since = since),
+        None => since,
     }
 }
 
@@ -530,10 +525,18 @@ pub use culprit_core::format::days_counted;
 
 /// "once", never "1 times": a count of runs in a sentence.
 fn times(n: f64) -> String {
-    match format::count(n.round()).as_str() {
-        "1" => "once".to_string(),
-        count => format!("{count} times"),
-    }
+    let n = n.round();
+    t!("support.times", n = n, count = format::count(n))
+}
+
+/// "about 48K times a day".
+fn about_a_day(per_day: f64) -> String {
+    t!("support.runs.per_day", times = times(per_day))
+}
+
+/// "48K times in the last 6 days".
+fn times_in(runs: f64, window: String) -> String {
+    t!("support.runs.in", times = times(runs), window = window)
 }
 
 /// "about 48K times a day" over a day or more of history, otherwise the real count: extrapolating 35 minutes to a day
@@ -541,12 +544,14 @@ fn times(n: f64) -> String {
 pub fn runs_phrase(snapshot: &Snapshot, executions: f64) -> String {
     match &snapshot.workload {
         Some(w) if w.measurement_hours() >= 20.0 && w.per_day(executions) < 1.0 => {
-            format!("{} in {}", times(executions), w.window_phrase())
+            times_in(executions, w.window_phrase())
         }
-        Some(w) if w.measurement_hours() >= 20.0 => format!("about {} a day", times(w.per_day(executions))),
+        Some(w) if w.measurement_hours() >= 20.0 => about_a_day(w.per_day(executions)),
         // A window nobody can date (a log without timestamps, counters with no reset time) isn't "1 minute".
-        Some(w) if w.window_unknown() => format!("{} over {}", times(executions), w.window_phrase()),
-        Some(w) => format!("{} in {}", times(executions), culprit_core::span_words(w.measurement_hours())),
+        Some(w) if w.window_unknown() => {
+            t!("support.runs.over", times = times(executions), window = w.window_phrase())
+        }
+        Some(w) => times_in(executions, culprit_core::span_words(w.measurement_hours())),
         None => times(executions),
     }
 }
@@ -565,7 +570,7 @@ pub fn statement_runs(snapshot: &Snapshot, q: &QueryStat) -> (String, String) {
     };
     let count = match cadence {
         culprit_core::Cadence::Daily(per_day) | culprit_core::Cadence::DailyWithin { per_day, .. } => {
-            format!("about {} a day", times(per_day))
+            about_a_day(per_day)
         }
         culprit_core::Cadence::Burst { runs, .. } => times(runs),
         // The window the sentence names holds them.
@@ -585,13 +590,21 @@ pub fn runs_of(snapshot: &Snapshot, q: &QueryStat) -> String {
     // hours of Culprit's scans".
     if let Some(s) = w.scans_of(q).filter(|_| !matches!(cadence, culprit_core::Cadence::Burst { .. })) {
         let per_day = s.per_day(s.runs);
-        let runs = if per_day >= 1.0 { format!("about {} a day", times(per_day)) } else { times(s.runs) };
-        return format!("{runs} over {}", s.phrase());
+        return if per_day >= 1.0 {
+            t!("support.runs.per_day_over", times = times(per_day), span = s.phrase())
+        } else {
+            t!("support.runs.over", times = times(s.runs), window = s.phrase())
+        };
     }
     match (&cadence, cadence.when()) {
-        (culprit_core::Cadence::Burst { runs, .. }, Some(when)) => format!("{} {when}", times(*runs)),
+        (culprit_core::Cadence::Burst { runs, .. }, Some(when)) => {
+            t!("support.runs.when", times = times(*runs), when = when)
+        }
         (culprit_core::Cadence::Daily(per_day) | culprit_core::Cadence::DailyWithin { per_day, .. }, when) => {
-            format!("about {} a day{}", times(*per_day), when.map(|w| format!(" {w}")).unwrap_or_default())
+            match when {
+                Some(when) => t!("support.runs.per_day_when", times = times(*per_day), when = when),
+                None => about_a_day(*per_day),
+            }
         }
         _ => runs_phrase(snapshot, q.executions),
     }
@@ -607,7 +620,7 @@ pub fn runs_of_all(snapshot: &Snapshot, queries: &[&QueryStat]) -> String {
             if w.measurement_hours() >= culprit_core::PER_DAY_MIN_HOURS
                 && queries.iter().any(|q| w.runs_per_day_of(q).is_none()) =>
         {
-            format!("{} in {}", times(runs), w.window_phrase())
+            times_in(runs, w.window_phrase())
         }
         _ => runs_phrase(snapshot, runs),
     }
@@ -630,27 +643,53 @@ pub fn scans_sentence(snapshot: &Snapshot, q: &QueryStat, of: &str) -> Option<St
     let s = w.scans_of(q)?;
     // Runs that came in bursts within the scans are said by when they came, never a rate a day: "It ran 750 times at
     // 5.4 ms on average, on Oct 11, 15:51–15:55 UTC: 3% of all database time in 37 hours of Culprit's own scans".
+    let mean = format::duration(s.mean_ms().unwrap_or(q.mean_time_ms));
+    let (share, span, totals) = (format::percent(s.share()), s.length(), w.totals_beside(q, &s));
+    let average = |runs: f64| if runs > 1.0 { "yes" } else { "no" };
     if let Some(when) = Some(w.cadence(q)).filter(|c| c.is_burst()).and_then(|c| c.when()) {
-        return Some(format!(
-            "It ran {} at {}{}, {when}: {} {of} in {} of Culprit's own scans{}.",
-            times(q.executions),
-            format::duration(s.mean_ms().unwrap_or(q.mean_time_ms)),
-            if q.executions > 1.0 { " on average" } else { "" },
-            format::percent(s.share()),
-            s.length(),
-            w.totals_beside(q, &s).map(|t| format!(" ({t})")).unwrap_or_default()
-        ));
+        let (times, average) = (times(q.executions), average(q.executions));
+        return Some(match totals {
+            Some(totals) => t!(
+                "support.scans.burst_totals",
+                times = times,
+                mean = mean,
+                average = average,
+                when = when,
+                share = share,
+                of = of,
+                span = span,
+                totals = totals
+            ),
+            None => t!(
+                "support.scans.burst",
+                times = times,
+                mean = mean,
+                average = average,
+                when = when,
+                share = share,
+                of = of,
+                span = span
+            ),
+        });
     }
     let per_day = s.per_day(s.runs);
-    let runs = if per_day >= 1.0 { format!("about {} a day", times(per_day)) } else { times(s.runs) };
-    Some(format!(
-        "It ran {runs} at {}{} over {} of Culprit's own scans: {} {of} in them{}.",
-        format::duration(s.mean_ms().unwrap_or(q.mean_time_ms)),
-        if s.runs > 1.0 { " on average" } else { "" },
-        s.length(),
-        format::percent(s.share()),
-        w.totals_beside(q, &s).map(|t| format!(" ({t})")).unwrap_or_default()
-    ))
+    let runs = if per_day >= 1.0 { about_a_day(per_day) } else { times(s.runs) };
+    let average = average(s.runs);
+    Some(match totals {
+        Some(totals) => t!(
+            "support.scans.steady_totals",
+            runs = runs,
+            mean = mean,
+            average = average,
+            span = span,
+            share = share,
+            of = of,
+            totals = totals
+        ),
+        None => {
+            t!("support.scans.steady", runs = runs, mean = mean, average = average, span = span, share = share, of = of)
+        }
+    })
 }
 
 /// Absolute cost of the same distinct statements the top-findings share counts.
@@ -726,16 +765,20 @@ pub fn summary_window(snapshot: &Snapshot) -> Option<String> {
     }) else {
         return Some(w.window_phrase());
     };
-    let (said, covered) = (culprit_core::span_words(asked), culprit_core::span_words(w.measurement_hours()));
+    use culprit_core::SpanLength::{Days, Hours, Minutes};
+    let (said, covered) = (culprit_core::span_length(asked), culprit_core::span_length(w.measurement_hours()));
+    let words = culprit_core::span_words(asked);
     if said == covered {
-        return Some(format!("the last {said}"));
+        return Some(t!("model.window.last", span = words));
     }
-    // "7" after "6 hours"; the unit too when it differs.
-    let covered = match (said.split_once(' '), covered.split_once(' ')) {
-        (Some((_, unit)), Some((n, other))) if unit == other => n.to_string(),
-        _ => covered,
+    // "7" after "6 hours"; the unit too when it differs (in its unit, or one against several).
+    let covered = match (said, covered) {
+        (Days(a), Days(n)) | (Hours(a), Hours(n)) | (Minutes(a), Minutes(n)) if (a == 1.0) == (n == 1.0) => {
+            format::digits(format!("{n}"))
+        }
+        _ => culprit_core::span_words(w.measurement_hours()),
     };
-    Some(format!("the last {said} (Query Store keeps whole intervals, so this covers {covered})"))
+    Some(t!("support.window.query_store_intervals", span = words, covered = covered))
 }
 
 /// `value` from the workload window as a daily rate for comparing with a threshold, over at least an hour of data
@@ -817,10 +860,14 @@ pub fn setting_change(server: &culprit_core::ServerInfo, name: &str, value: &str
     // A managed service changes server settings in its own control, not with SQL (`Platform::settings_control`).
     if let Some(control) = server.platform().and_then(|p| p.settings_control()) {
         if let Some(mut database) = server.engine.spec().database_setting(server, name, value) {
-            database.how.push_str(&format!(" To change it for every database on the server, set it in {control}."));
+            database.how.push(' ');
+            database.how.push_str(&t!("support.setting.every_database", control = control));
             return database;
         }
-        return SettingChange { how: format!("Set {name} to {value} in {control}."), sql: None };
+        return SettingChange {
+            how: t!("support.setting.in_control", name = name, value = value, control = control),
+            sql: None,
+        };
     }
     server.engine.spec().change_setting(server, name, value)
 }
@@ -849,37 +896,40 @@ pub fn log_next_waits(snapshot: &Snapshot, slower_than: Option<f64>) -> LockHold
     let server = &snapshot.server;
     let on = |name: &str| snapshot.setting(name).is_some_and(|s| crate::config::is_on(&s.value));
     match server.engine {
-        Engine::Yugabyte => LockHolder { lead: "Correlate YSQL statement logs and DocDB wait-queue evidence by transaction, node and time. Configure supported logging through YugabyteDB administration.".into(), sql: None },
+        Engine::Yugabyte => LockHolder { lead: t!("support.lock_holder.yugabyte"), sql: None },
         Engine::Postgres => {
             let deadlock = match snapshot.setting("deadlock_timeout").map(|s| s.value.trim().to_string()) {
-                Some(v) if v.parse::<f64>().is_ok() => format!("{v} ms"),
+                Some(v) if v.parse::<f64>().is_ok() => t!("common.duration.ms", n = v),
                 Some(v) => v,
-                None => "1 s by default".into(),
+                None => t!("support.lock_holder.postgres.deadlock_default"),
             };
-            let threshold = slower_than.map(|ms| if ms >= 1_000.0 { format!("{}s", ms / 1_000.0) } else { format!("{ms}ms") });
+            // A value for the setting, as PostgreSQL reads it (never translated): "2.5s", "800ms".
+            let threshold =
+                slower_than.map(|ms| if ms >= 1_000.0 { format!("{}s", ms / 1_000.0) } else { format!("{ms}ms") });
             let mut changes: Vec<(&str, &str)> = Vec::new();
-            if !on("log_lock_waits") {
+            let already = on("log_lock_waits");
+            if !already {
                 changes.push(("log_lock_waits", "on"));
             }
             if let Some(t) = threshold.as_deref() {
                 changes.push(("log_min_duration_statement", t));
             }
-            let locks = format!(
-                "log_lock_waits {} each lock wait longer than deadlock_timeout ({deadlock}) with the process holding the lock",
-                if on("log_lock_waits") { "is on already, and logs" } else { "then logs" }
-            );
-            let slow = threshold
-                .as_deref()
-                .map(|t| format!(", and log_min_duration_statement each statement slower than {t} (any statement, not only this one) with its duration"))
-                .unwrap_or_default();
             if changes.is_empty() {
                 return LockHolder {
-                    lead: format!("{}: the server log has the next ones, with the process holding the lock.", capitalize_first(&locks)),
+                    lead: t!("support.lock_holder.postgres.on_already", deadlock = deadlock),
                     sql: None,
                 };
             }
+            let on = if already { "yes" } else { "no" };
+            let logs = match threshold.as_deref() {
+                Some(threshold) => {
+                    t!("support.lock_holder.postgres.logs_slow", on = on, deadlock = deadlock, threshold = threshold)
+                }
+                None => t!("support.lock_holder.postgres.logs", on = on, deadlock = deadlock),
+            };
             let change = crate::config::settings_change(server, &changes);
-            LockHolder { lead: format!("Have the next ones logged instead. {} {locks}{slow}.", change.how), sql: change.sql }
+            let lead = [t!("support.lock_holder.logged_instead"), change.how, logs].join(" ");
+            LockHolder { lead, sql: change.sql }
         }
         Engine::Mysql => {
             // A run worth logging: the bar asked for, else the second the slow-log finding suggests; never a raise.
@@ -893,41 +943,37 @@ pub fn log_next_waits(snapshot: &Snapshot, slower_than: Option<f64>) -> LockHold
             if current.is_none_or(|c| c > seconds) {
                 changes.push(("long_query_time", format!("{seconds}")));
             }
-            let bar = format!("{}", current.filter(|c| *c <= seconds).unwrap_or(seconds));
-            let mariadb = if server.is_mariadb() { format!(" {}", crate::config::MARIADB_TABLE_LOCK_TIME) } else { String::new() };
-            let keeps = |verb: &str| {
-                format!(
-                    "The slow query log {verb} each statement slower than {bar} s with its lock time and when it ran; {} keeps no record of who held the lock, so match those times with what the application ran then.{mariadb}",
-                    server.name()
-                )
+            let bar = format::digits(format!("{}", current.filter(|c| *c <= seconds).unwrap_or(seconds)));
+            let keeps = |logging: &str| {
+                let keeps =
+                    t!("support.lock_holder.mysql.keeps", logging = logging, bar = &bar, server = server.name());
+                // MariaDB writing its slow log to a table counts a statement's whole run as its lock time.
+                if server.is_mariadb() {
+                    [keeps, crate::config::MARIADB_TABLE_LOCK_TIME.into()].join(" ")
+                } else {
+                    keeps
+                }
             };
             if changes.is_empty() {
                 return LockHolder {
-                    lead: format!("Look for the next ones in the slow query log. {}", keeps("already keeps")),
+                    lead: [t!("support.lock_holder.mysql.look"), keeps("already")].join(" "),
                     sql: None,
                 };
             }
             let pairs: Vec<(&str, &str)> = changes.iter().map(|(n, v)| (*n, v.as_str())).collect();
             let change = crate::config::settings_change(server, &pairs);
             LockHolder {
-                lead: format!("Have the next ones logged instead. {} {}", change.how, keeps("then keeps")),
+                lead: [t!("support.lock_holder.logged_instead"), change.how, keeps("then")].join(" "),
                 sql: change.sql,
             }
         }
         // Query Store keeps when a query waited, interval by interval, not who held the lock. On a server whose options
         // can be set, the blocked process report names the holder.
-        Engine::Mssql if server.platform().is_some_and(|p| p.is_azure_sql_database()) => LockHolder {
-            lead: "Query Store keeps when it waited, interval by interval (sys.query_store_wait_stats), not who held the lock: match the intervals of its waits with what the application ran then.".into(),
-            sql: None,
-        },
-        Engine::Mssql => LockHolder {
-            lead: "Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them.".into(),
-            sql: None,
-        },
-        Engine::Sqlite => LockHolder {
-            lead: "SQLite keeps no record of what held the file's write lock: the application's own logs of its writes at those times say which one it was.".into(),
-            sql: None,
-        },
+        Engine::Mssql if server.platform().is_some_and(|p| p.is_azure_sql_database()) => {
+            LockHolder { lead: t!("support.lock_holder.azure_sql_database"), sql: None }
+        }
+        Engine::Mssql => LockHolder { lead: t!("support.lock_holder.mssql"), sql: None },
+        Engine::Sqlite => LockHolder { lead: t!("support.lock_holder.sqlite"), sql: None },
     }
 }
 
@@ -935,54 +981,47 @@ pub fn log_next_waits(snapshot: &Snapshot, slower_than: Option<f64>) -> LockHold
 /// while it waits, where its waits come at least once an hour (`waits`, at least; every run without it); otherwise the
 /// next ones logged ([`log_next_waits`]); and for a statement that no longer runs, nothing to catch until it comes back.
 pub fn find_lock_holder(snapshot: &Snapshot, q: &QueryStat, waits: Option<f64>) -> LockHolder {
-    let live = "Find what holds the locks while it waits (Live shows the blocking chain).";
     let rare = too_rare_to_catch(snapshot, waits.unwrap_or(q.executions));
     // What logs the next ones, by name: no settings are given for a statement that ran once or no longer runs.
-    let log = match snapshot.server.engine {
-        Engine::Postgres => "log_lock_waits",
-        Engine::Yugabyte => "YSQL statement logs and DocDB wait-queue evidence",
-        Engine::Mysql => "the slow query log, with its lock time",
+    let log = || match snapshot.server.engine {
+        Engine::Postgres => t!("support.lock_holder.log.postgres"),
+        Engine::Yugabyte => t!("support.lock_holder.log.yugabyte"),
+        Engine::Mysql => t!("support.lock_holder.log.mysql"),
         Engine::Mssql if snapshot.server.platform().is_some_and(|p| p.is_azure_sql_database()) => {
-            "Query Store's waits for each interval date them"
+            t!("support.lock_holder.log.azure_sql_database")
         }
-        Engine::Mssql => "SQL Server's blocked process report names the holder",
-        Engine::Sqlite => "the application's own log of its writes",
+        Engine::Mssql => t!("support.lock_holder.log.mssql"),
+        Engine::Sqlite => t!("support.lock_holder.log.sqlite"),
     };
     // A statement that ran once is history (`ran_once`): nothing is set up for it unless it runs again.
     if crate::ran_once(q) {
-        let window = snapshot.workload.as_ref().map(|w| w.window_phrase()).unwrap_or_else(|| "the window".into());
-        return LockHolder {
-            lead: format!(
-                "It ran once in {window}, so there is no wait to catch now; if it runs again, have its lock waits logged ({log}) to see what holds them."
-            ),
-            sql: None,
-        };
+        let window = snapshot
+            .workload
+            .as_ref()
+            .map(|w| w.window_phrase())
+            .unwrap_or_else(|| t!("support.lock_holder.the_window"));
+        return LockHolder { lead: t!("support.lock_holder.ran_once", window = window, log = log()), sql: None };
     }
     if crate::query_stopped(snapshot, q).is_some() {
         return LockHolder {
             lead: if rare {
-                format!(
-                    "It no longer runs, so there is no wait to catch now; if it comes back, have its lock waits logged ({log}): its runs are too few to catch one while it waits."
-                )
+                t!("support.lock_holder.stopped_rare", log = log())
             } else {
-                "It no longer runs, so there is no wait to catch now; if it comes back, find what holds the locks while it waits (Live shows the blocking chain).".into()
+                t!("support.lock_holder.stopped")
             },
             sql: None,
         };
     }
     if !rare {
-        return LockHolder { lead: live.into(), sql: None };
+        return LockHolder { lead: t!("support.lock_holder.live"), sql: None };
     }
     let logged = log_next_waits(snapshot, None);
     let window = snapshot.workload.as_ref().map(|w| w.window_phrase()).unwrap_or_default();
     let few = match waits {
-        Some(n) => format!(
-            "Its waits can come from as few as {} runs in {window}, too few to count on catching one while it happens.",
-            format::count(n.ceil())
-        ),
-        None => format!("It ran {}, too seldom to count on catching it while it waits.", runs_of(snapshot, q)),
+        Some(n) => t!("support.lock_holder.few_waits", count = format::count(n.ceil()), window = window),
+        None => t!("support.lock_holder.few_runs", runs = runs_of(snapshot, q)),
     };
-    LockHolder { lead: format!("{few} {}", logged.lead), sql: logged.sql }
+    LockHolder { lead: [few, logged.lead].join(" "), sql: logged.sql }
 }
 
 /// A statistic a plan was compiled with, as SQL Server's plan XML names it (its `StatisticsInfo`, kept in the plan's raw
@@ -1011,12 +1050,4 @@ pub fn plan_statistics(plan: &culprit_core::Plan) -> Vec<PlanStatistic> {
             })
         })
         .collect()
-}
-
-fn capitalize_first(s: &str) -> String {
-    let mut c = s.chars();
-    match c.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
-        None => String::new(),
-    }
 }

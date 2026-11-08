@@ -427,3 +427,390 @@ fn a_column_qualified_by_a_hyphenated_database_is_a_column() {
     // A call of values stays a value, with or without its parentheses.
     assert!(is_value("dateadd(day,@P1,'2026-01-01')") && is_value("dateadd day,@P1,'2026-01-01'"));
 }
+
+// What a statement does is a fact code can match, in any language; the words are said from it.
+#[test]
+fn a_handle_is_decided_before_it_is_worded() {
+    assert_eq!(statement_handle_of("SELECT id FROM orders WHERE id = ?"), Handle::Read(Some("orders".into())));
+    assert_eq!(statement_handle_of("SELECT count(*) FROM (SELECT 1) s"), Handle::Read(None));
+    assert_eq!(statement_handle_of("VACUUM"), Handle::Query);
+    assert_eq!(statement_handle_of("CALL shop.refresh(?)"), Handle::Call("shop.refresh".into()));
+    let mut q = sample();
+    q.text = "WITH b AS (SELECT id FROM jobs) UPDATE jobs SET a = 1 FROM b".into();
+    assert_eq!(query_handle_of(&q), Handle::UpdateInWith);
+    assert_eq!(query_handle(&q), Handle::UpdateInWith.words());
+}
+
+/// The postgres demo with 36 hours of Culprit's scans over 40 days of totals, in which its first statement ran 30
+/// times and took 9 s of the database's 30 s.
+fn over_scans() -> (Snapshot, QueryStat) {
+    let path = format!("{}/../../fixtures/postgres-demo.json", env!("CARGO_MANIFEST_DIR"));
+    let mut s: Snapshot = serde_json::from_str(&std::fs::read_to_string(path).expect("fixture")).expect("snapshot");
+    let w = s.workload.as_mut().expect("workload");
+    (w.window_start, w.window_hours) = (Some("2026-09-01T11:54:21Z".into()), 960.0);
+    w.timeline = Some(
+        serde_json::from_value(serde_json::json!({
+            "source": "scans",
+            "starts": ["2026-10-10T00:00:00Z", "2026-10-10T12:00:00Z", "2026-10-11T00:00:00Z"],
+            "end": "2026-10-11T12:00:00Z",
+            "time_ms": [10000.0, 10000.0, 10000.0],
+            "executions": [5000.0, 5000.0, 5000.0]
+        }))
+        .expect("timeline"),
+    );
+    let q = &mut w.queries[0];
+    q.trend = Some(culprit_core::QueryTrend { time_ms: vec![Some(3_000.0); 3], executions: vec![Some(10.0); 3] });
+    (q.executions, q.mean_time_ms, q.total_time_ms) = (1_000.0, 60_000.0, 60_000_000.0);
+    w.total_time_ms = 200_000_000.0;
+    let q = s.workload.as_ref().unwrap().queries[0].clone();
+    (s, q)
+}
+
+// Every phrase the shared helpers say, word for word, as English has always read it.
+#[test]
+fn support_phrases_read_as_english_writes_them() {
+    let mut said: Vec<(String, String)> = Vec::new();
+    let mut pin = |label: &str, text: String| said.push((label.to_string(), text));
+    // How often, in each window.
+    let s = crate::waits::snapshot_with(Engine::Mssql);
+    let w = s.workload.as_ref().unwrap();
+    pin("window", w.window_phrase());
+    pin("runs 1", runs_phrase(&s, 1.0));
+    pin("runs 0.4", runs_phrase(&s, 0.4));
+    pin("runs 48000", runs_phrase(&s, 48_000.0));
+    let q = &s.queries()[0];
+    pin("statement_runs", format!("{:?}", statement_runs(&s, q)));
+    pin("runs_of", runs_of(&s, q));
+    pin("runs_of_all", runs_of_all(&s, &[q, &s.queries()[1]]));
+    pin("cost", query_cost_context(&s, &[q]).unwrap_or_default());
+    pin("share", share_label(0.31));
+    let mut short = s.clone();
+    short.workload.as_mut().unwrap().window_hours = 5.0;
+    pin("runs short", runs_phrase(&short, 3.0));
+    short.workload.as_mut().unwrap().window_hours = 0.0;
+    pin("runs unknown", runs_phrase(&short, 3.0));
+    let mut burst = q.clone();
+    (burst.executions, burst.first_seen, burst.last_seen) =
+        (750.0, Some("2026-10-11T15:51:56Z".into()), Some("2026-10-11T15:55:15Z".into()));
+    pin("statement_runs burst", format!("{:?}", statement_runs(&s, &burst)));
+    pin("runs_of burst", runs_of(&s, &burst));
+    // Over Culprit's scans.
+    let (s, q) = over_scans();
+    pin("scans_sentence", scans_sentence(&s, &q, "of all database time").unwrap_or_default());
+    pin("runs_of scans", runs_of(&s, &q));
+    pin("cost scans", query_cost_context(&s, &[&q]).unwrap_or_default());
+    // Finding who holds a lock, on each engine.
+    for engine in [Engine::Mssql, Engine::Postgres, Engine::Mysql, Engine::Yugabyte] {
+        let mut s = crate::waits::snapshot_with(engine);
+        let mut q = s.queries()[0].clone();
+        q.executions = 50.0;
+        pin(&format!("{engine:?} live"), find_lock_holder(&s, &q, Some(1_000.0)).lead);
+        pin(&format!("{engine:?} rare"), find_lock_holder(&s, &q, Some(1.0)).lead);
+        pin(&format!("{engine:?} rare runs"), find_lock_holder(&s, &q, None).lead);
+        let slow = log_next_waits(&s, Some(2_500.0));
+        pin(&format!("{engine:?} slow"), format!("{} | {:?}", slow.lead, slow.sql));
+        q.executions = 1.0;
+        pin(&format!("{engine:?} once"), find_lock_holder(&s, &q, None).lead);
+        s.server.set_platform(Some(culprit_core::Platform::AmazonRds));
+        pin(&format!("{engine:?} rds"), setting_change(&s.server, "max_connections", "200").how);
+    }
+    let mut azure = crate::waits::snapshot_with(Engine::Mssql);
+    azure.server.set_platform(Some(culprit_core::Platform::AzureSqlDatabase));
+    pin("azure", log_next_waits(&azure, None).lead);
+    let mut sqlite = crate::waits::snapshot_with(Engine::Mysql);
+    sqlite.server.engine = Engine::Sqlite;
+    pin("sqlite", log_next_waits(&sqlite, None).lead);
+    let mut pg = crate::waits::snapshot_with(Engine::Postgres);
+    pg.settings.retain(|s| s.name != "deadlock_timeout");
+    pg.settings.retain(|s| s.name != "log_lock_waits");
+    let setting = |name: &str, value: &str| culprit_core::Setting {
+        name: name.into(),
+        value: value.into(),
+        default_value: None,
+        scope: "server".into(),
+    };
+    pg.settings.push(setting("log_lock_waits", "on"));
+    pin("pg on", log_next_waits(&pg, None).lead);
+    pin("pg on slow", log_next_waits(&pg, Some(800.0)).lead);
+    pg.settings.push(setting("deadlock_timeout", "500"));
+    pin("pg deadlock 500", log_next_waits(&pg, None).lead);
+    pg.settings.retain(|s| s.name != "deadlock_timeout");
+    pg.settings.push(setting("deadlock_timeout", "2s"));
+    pin("pg deadlock 2s", log_next_waits(&pg, None).lead);
+    // A day or more of window: a rate a day, and rare waits on MySQL.
+    let mut day = crate::waits::snapshot_with(Engine::Mysql);
+    day.workload.as_mut().unwrap().window_hours = 48.0;
+    pin("runs a day", runs_phrase(&day, 48_000.0));
+    pin("runs few", runs_phrase(&day, 1.0));
+    let mut q = day.queries()[0].clone();
+    q.executions = 50.0;
+    pin("mysql rare", find_lock_holder(&day, &q, Some(1.0)).lead);
+    pin("mysql rare runs", find_lock_holder(&day, &q, None).lead);
+    pin("mysql statement_runs", format!("{:?}", statement_runs(&day, &q)));
+    pin("mysql runs_of", runs_of(&day, &q));
+    let mut slow = day.clone();
+    slow.settings.retain(|s| !matches!(s.name.as_str(), "slow_query_log" | "long_query_time"));
+    slow.settings.push(setting("slow_query_log", "ON"));
+    slow.settings.push(setting("long_query_time", "0.5"));
+    pin("mysql logging", log_next_waits(&slow, Some(2_000.0)).lead);
+    // A statement that stopped: nothing to catch now.
+    let mut s = crate::waits::snapshot_with(Engine::Postgres);
+    let w = s.workload.as_mut().unwrap();
+    (w.windowed, w.window_hours, w.window_start, w.window_end) =
+        (true, 144.0, Some("2026-10-05T12:00:00Z".into()), Some("2026-10-11T12:00:00Z".into()));
+    let mut q = s.queries()[0].clone();
+    (q.executions, q.first_seen, q.last_seen) =
+        (50.0, Some("2026-10-05T12:00:00Z".into()), Some("2026-10-06T12:00:00Z".into()));
+    pin("stopped rare", find_lock_holder(&s, &q, Some(1.0)).lead);
+    pin("stopped", find_lock_holder(&s, &q, Some(10_000.0)).lead);
+    pin("stopped runs_of", runs_of(&s, &q));
+    pin("stopped statement_runs", format!("{:?}", statement_runs(&s, &q)));
+    let mut maria = crate::waits::snapshot_with(Engine::Mysql);
+    maria.server.product = "MariaDB 11.8.9".into();
+    pin("mariadb", log_next_waits(&maria, Some(500.0)).lead);
+    // Since when counters count.
+    let mut yb = crate::waits::snapshot_with(Engine::Yugabyte);
+    yb.pressure = None;
+    pin("since yugabyte", since_phrase(&yb));
+    let mut userstat = crate::waits::snapshot_with(Engine::Mysql);
+    userstat.server.capabilities.retain(|c| *c != Capability::PerformanceSchema);
+    userstat.server.capabilities.push(Capability::IndexUsage);
+    pin("since userstat", since_phrase(&userstat));
+    let mut reset = crate::waits::snapshot_with(Engine::Mysql);
+    let w = reset.workload.as_mut().unwrap();
+    w.kind = Some(culprit_core::WorkloadKind::PerformanceSchema);
+    reset.server.started_at = Some("2026-01-01T00:00:00Z".into());
+    pin("since reset", format!("{} | {}", counters_may_be_reset(&reset), since_phrase(&reset)));
+    // Statements named by what they do.
+    for text in [
+        "INSERT INTO orders (id) VALUES (1)",
+        "MERGE INTO stock USING x ON 1 = 1 WHEN MATCHED THEN DELETE",
+        "DELETE FROM jobs WHERE id = 1",
+        "VACUUM",
+        "WITH x AS (SELECT 1) UPDATE t SET a = 1 FROM x",
+    ] {
+        pin(text, statement_handle(text));
+    }
+    let mut q = sample();
+    q.object_name = Some("dbo.usp_refresh".into());
+    pin("object", query_handle(&q));
+    let mut q = sample();
+    q.text = "WITH b AS (SELECT id FROM jobs) DELETE FROM jobs USING b".into();
+    q.resolved_write_target = Some("public.jobs".into());
+    pin("resolved delete", query_handle(&q));
+    q.resolved_write_target = None;
+    q.text = "WITH b AS (SELECT id FROM jobs) UPDATE jobs SET a = 1 FROM b".into();
+    pin("with update", query_handle(&q));
+    let live = "Find what holds the locks while it waits (Live shows the blocking chain).";
+    let reported = "Have the next ones reported instead: SQL Server's blocked process report names the session holding \
+                    the lock, with its statement, for each wait longer than the server's blocked process threshold (s) \
+                    (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event \
+                    session to keep them.";
+    let rds = "Set max_connections to 200 in the instance's DB parameter group.";
+    let yugabyte = "Correlate YSQL statement logs and DocDB wait-queue evidence by transaction, node and time. Configure \
+                    supported logging through YugabyteDB administration.";
+    let expected: Vec<(&str, String)> = vec![
+        ("window", "the last 5 hours".into()),
+        ("runs 1", "once in 5 hours".into()),
+        ("runs 0.4", "0 times in 5 hours".into()),
+        ("runs 48000", "48K times in 5 hours".into()),
+        ("statement_runs", r#"("1.2K times in 5 hours", "")"#.into()),
+        ("runs_of", "1.2K times in 5 hours".into()),
+        ("runs_of_all", "1.8K times in 5 hours".into()),
+        ("cost", "22.2 s of database time over the last 5 hours (54%)".into()),
+        ("share", "31% of DB time".into()),
+        ("runs short", "3 times in 5 hours".into()),
+        ("runs unknown", "3 times over the recorded workload window".into()),
+        ("statement_runs burst", r#"("750 times in 5 hours", "")"#.into()),
+        ("runs_of burst", "750 times in 5 hours".into()),
+        (
+            "scans_sentence",
+            "It ran about 20 times a day at 300 ms on average over 36 hours of Culprit's own scans: 30% of all \
+             database time in them (1 min on average over the 40 days since statistics were reset)."
+                .into(),
+        ),
+        ("runs_of scans", "about 20 times a day over 36 hours of Culprit's scans".into()),
+        ("cost scans", "9.0 s of database time over 36 hours of Culprit's scans (30%)".into()),
+        ("Mssql live", live.into()),
+        (
+            "Mssql rare",
+            format!(
+                "Its waits can come from as few as 1 runs in the last 5 hours, too few to count on catching one while \
+                 it happens. {reported}"
+            ),
+        ),
+        ("Mssql rare runs", live.into()),
+        ("Mssql slow", format!("{reported} | None")),
+        (
+            "Mssql once",
+            "It ran once in the last 5 hours, so there is no wait to catch now; if it runs again, have its lock waits \
+             logged (SQL Server's blocked process report names the holder) to see what holds them."
+                .into(),
+        ),
+        ("Mssql rds", rds.into()),
+        ("Postgres live", live.into()),
+        (
+            "Postgres rare",
+            "Its waits can come from as few as 1 runs in the 5 hours since statistics were reset, too few to count on \
+             catching one while it happens. Have the next ones logged instead. Set log_lock_waits to on and reload \
+             the configuration (settings marked as needing a restart take effect after one). log_lock_waits then \
+             logs each lock wait longer than deadlock_timeout (1 s by default) with the process holding the lock."
+                .into(),
+        ),
+        ("Postgres rare runs", live.into()),
+        (
+            "Postgres slow",
+            "Have the next ones logged instead. Set log_lock_waits to on and log_min_duration_statement to 2.5s and \
+             reload the configuration (settings marked as needing a restart take effect after one). log_lock_waits \
+             then logs each lock wait longer than deadlock_timeout (1 s by default) with the process holding the \
+             lock, and log_min_duration_statement each statement slower than 2.5s (any statement, not only this one) \
+             with its duration. | Some(\"ALTER SYSTEM SET log_lock_waits = 'on';\\nSELECT pg_reload_conf();\\nALTER \
+             SYSTEM SET log_min_duration_statement = '2.5s';\\nSELECT pg_reload_conf();\")"
+                .into(),
+        ),
+        (
+            "Postgres once",
+            "It ran once in the 5 hours since statistics were reset, so there is no wait to catch now; if it runs \
+             again, have its lock waits logged (log_lock_waits) to see what holds them."
+                .into(),
+        ),
+        ("Postgres rds", rds.into()),
+        ("Mysql live", live.into()),
+        ("Mysql rare", live.into()),
+        ("Mysql rare runs", live.into()),
+        (
+            "Mysql slow",
+            "Have the next ones logged instead. Set slow_query_log to ON and long_query_time to 2.5; SET PERSIST \
+             keeps it across restarts. The slow query log then keeps each statement slower than 2.5 s with its lock \
+             time and when it ran; MySQL keeps no record of who held the lock, so match those times with what the \
+             application ran then. | Some(\"SET PERSIST slow_query_log = 'ON';\\nSET PERSIST long_query_time = \
+             2.5;\")"
+                .into(),
+        ),
+        (
+            "Mysql once",
+            "It ran once in the 2 minutes since statistics were reset, so there is no wait to catch now; if it runs \
+             again, have its lock waits logged (the slow query log, with its lock time) to see what holds them."
+                .into(),
+        ),
+        ("Mysql rds", rds.into()),
+        ("Yugabyte live", live.into()),
+        ("Yugabyte rare", live.into()),
+        ("Yugabyte rare runs", live.into()),
+        ("Yugabyte slow", format!("{yugabyte} | None")),
+        (
+            "Yugabyte once",
+            "It ran once in the 1 minute since statistics were reset, so there is no wait to catch now; if it runs \
+             again, have its lock waits logged (YSQL statement logs and DocDB wait-queue evidence) to see what holds \
+             them."
+                .into(),
+        ),
+        ("Yugabyte rds", rds.into()),
+        (
+            "azure",
+            "Query Store keeps when it waited, interval by interval (sys.query_store_wait_stats), not who held the \
+             lock: match the intervals of its waits with what the application ran then."
+                .into(),
+        ),
+        (
+            "sqlite",
+            "SQLite keeps no record of what held the file's write lock: the application's own logs of its writes at \
+             those times say which one it was."
+                .into(),
+        ),
+        (
+            "pg on",
+            "Log_lock_waits is on already, and logs each lock wait longer than deadlock_timeout (1 s by default) with \
+             the process holding the lock: the server log has the next ones, with the process holding the lock."
+                .into(),
+        ),
+        (
+            "pg on slow",
+            "Have the next ones logged instead. Set log_min_duration_statement to 800ms and reload the configuration \
+             (settings marked as needing a restart take effect after one). log_lock_waits is on already, and logs \
+             each lock wait longer than deadlock_timeout (1 s by default) with the process holding the lock, and \
+             log_min_duration_statement each statement slower than 800ms (any statement, not only this one) with its \
+             duration."
+                .into(),
+        ),
+        (
+            "pg deadlock 500",
+            "Log_lock_waits is on already, and logs each lock wait longer than deadlock_timeout (500 ms) with the \
+             process holding the lock: the server log has the next ones, with the process holding the lock."
+                .into(),
+        ),
+        (
+            "pg deadlock 2s",
+            "Log_lock_waits is on already, and logs each lock wait longer than deadlock_timeout (2s) with the process \
+             holding the lock: the server log has the next ones, with the process holding the lock."
+                .into(),
+        ),
+        ("runs a day", "about 24K times a day".into()),
+        ("runs few", "once in the 2 days since statistics were reset".into()),
+        (
+            "mysql rare",
+            "Its waits can come from as few as 1 runs in the 2 days since statistics were reset, too few to count on \
+             catching one while it happens. Have the next ones logged instead. Set slow_query_log to ON and \
+             long_query_time to 1; SET PERSIST keeps it across restarts. The slow query log then keeps each statement \
+             slower than 1 s with its lock time and when it ran; MySQL keeps no record of who held the lock, so match \
+             those times with what the application ran then."
+                .into(),
+        ),
+        ("mysql rare runs", live.into()),
+        ("mysql statement_runs", r#"("50 times", ", on Oct 11 at 12:07 UTC")"#.into()),
+        ("mysql runs_of", "50 times on Oct 11 at 12:07 UTC".into()),
+        (
+            "mysql logging",
+            "Look for the next ones in the slow query log. The slow query log already keeps each statement slower \
+             than 0.5 s with its lock time and when it ran; MySQL keeps no record of who held the lock, so match \
+             those times with what the application ran then."
+                .into(),
+        ),
+        (
+            "stopped rare",
+            "It no longer runs, so there is no wait to catch now; if it comes back, have its lock waits logged \
+             (log_lock_waits): its runs are too few to catch one while it waits."
+                .into(),
+        ),
+        (
+            "stopped",
+            "It no longer runs, so there is no wait to catch now; if it comes back, find what holds the locks while \
+             it waits (Live shows the blocking chain)."
+                .into(),
+        ),
+        ("stopped runs_of", "about 8 times a day".into()),
+        ("stopped statement_runs", r#"("about 8 times a day", "")"#.into()),
+        (
+            "mariadb",
+            "Have the next ones logged instead. Set slow_query_log to ON and long_query_time to 0.5 now, and in the \
+             server's option file (my.cnf) so it survives a restart. The slow query log then keeps each statement \
+             slower than 0.5 s with its lock time and when it ran; MariaDB keeps no record of who held the lock, so \
+             match those times with what the application ran then. Written to a table (TABLE in log_output), MariaDB \
+             counts the whole run of each statement it logs as that statement's lock time, so their lock time says \
+             nothing (Culprit reads it as unknown); written to a file (FILE), it is the real wait."
+                .into(),
+        ),
+        (
+            "since yugabyte",
+            "across cluster nodes since each node's database counters were reset; no common counting period is known"
+                .into(),
+        ),
+        ("since userstat", "since userstat was turned on or its statistics last flushed".into()),
+        ("since reset", "true | since the server started or its performance_schema counters were last reset".into()),
+        ("INSERT INTO orders (id) VALUES (1)", "an insert into orders".into()),
+        ("MERGE INTO stock USING x ON 1 = 1 WHEN MATCHED THEN DELETE", "a merge into stock".into()),
+        ("DELETE FROM jobs WHERE id = 1", "a delete from jobs".into()),
+        ("VACUUM", "a query".into()),
+        ("WITH x AS (SELECT 1) UPDATE t SET a = 1 FROM x", "an update of t".into()),
+        ("object", "a statement in dbo.usp_refresh".into()),
+        ("resolved delete", "a delete from jobs".into()),
+        ("with update", "an update in a WITH statement".into()),
+    ];
+    let differ: Vec<String> = said
+        .iter()
+        .zip(&expected)
+        .filter(|((label, text), (want_label, want))| label != want_label || text != want)
+        .map(|((label, text), (_, want))| format!("{label}:\n  said: {text}\n  want: {want}"))
+        .collect();
+    assert!(differ.is_empty() && said.len() == expected.len(), "{}", differ.join("\n"));
+}

@@ -1,4 +1,4 @@
-use culprit_core::{Engine, QueryStat, Snapshot};
+use culprit_core::{Engine, QueryStat, Snapshot, t};
 
 /// Queries that touch a table: by plan objects when a plan exists, otherwise by a whole-word match in the text.
 pub fn queries_touching<'a>(snapshot: &'a Snapshot, schema: &str, table: &str) -> Vec<&'a QueryStat> {
@@ -213,31 +213,82 @@ pub fn mentions_word(text: &str, word: &str) -> bool {
     false
 }
 
+/// What a statement does, as its handle names it ([`query_handle`]): decided from what the statement is, worded by
+/// [`Handle::words`]. Code that asks what a statement does matches this, never the words.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Handle {
+    /// A statement in a stored procedure or function: "a statement in dbo.usp_refresh".
+    InObject(String),
+    /// "a read from orders"; `None` for a read from something else (a subquery, VALUES): "a read".
+    Read(Option<String>),
+    Insert(String),
+    Update(String),
+    Delete(String),
+    Merge(String),
+    /// A write behind a WITH list whose table isn't resolved: "an update in a WITH statement".
+    UpdateInWith,
+    DeleteInWith,
+    /// SQL Server's UPDATE STATISTICS: "a statistics refresh on orders".
+    StatisticsRefresh(String),
+    /// A call of a routine or a function: "a call to SLEEP".
+    Call(String),
+    /// A driver's or a pool's statement, named as it is: "DISCARD ALL", "SELECT 1".
+    Session(String),
+    /// Anything else: "a query".
+    Query,
+}
+
+impl Handle {
+    /// "a read from orders", "an update of users": the handle in words, for titles and sentences.
+    pub fn words(&self) -> String {
+        match self {
+            Handle::InObject(object) => t!("support.handle.in_object", object = object),
+            Handle::Read(Some(table)) => t!("support.handle.read", table = table),
+            Handle::Read(None) => t!("support.handle.read_any"),
+            Handle::Insert(table) => t!("support.handle.insert", table = table),
+            Handle::Update(table) => t!("support.handle.update", table = table),
+            Handle::Delete(table) => t!("support.handle.delete", table = table),
+            Handle::Merge(table) => t!("support.handle.merge", table = table),
+            Handle::UpdateInWith => t!("support.handle.update_in_with"),
+            Handle::DeleteInWith => t!("support.handle.delete_in_with"),
+            Handle::StatisticsRefresh(table) => t!("support.handle.statistics_refresh", table = table),
+            Handle::Call(name) => t!("support.handle.call", name = name),
+            Handle::Session(text) => text.clone(),
+            Handle::Query => t!("support.handle.query"),
+        }
+    }
+}
+
 /// "a read from Orders", "an UPDATE of Users" — a short handle for a query in titles.
 pub fn query_handle(q: &QueryStat) -> String {
+    query_handle_of(q).words()
+}
+
+/// What [`query_handle`] names statement `q` by.
+pub fn query_handle_of(q: &QueryStat) -> Handle {
     if let Some(object) = &q.object_name {
-        return format!("a statement in {object}");
+        return Handle::InObject(object.clone());
     }
     if let Some(base) = &q.resolved_write_target {
         let verb = first_verb(main_statement(&q.text)).map(|(_, v)| v);
-        let name = base.rsplit('.').next().unwrap_or(base);
+        let name = base.rsplit('.').next().unwrap_or(base).to_string();
         if verb == Some("update") {
-            return format!("an update of {name}");
+            return Handle::Update(name);
         }
         if verb == Some("delete") {
-            return format!("a delete from {name}");
+            return Handle::Delete(name);
         }
     }
     let body = statement_body(&q.text);
     let main = main_statement(body);
     if body.get(..4).is_some_and(|s| s.eq_ignore_ascii_case("with")) && main.len() != body.len() {
         match first_verb(main).map(|(_, v)| v) {
-            Some("update") => return "an update in a WITH statement".into(),
-            Some("delete") => return "a delete in a WITH statement".into(),
+            Some("update") => return Handle::UpdateInWith,
+            Some("delete") => return Handle::DeleteInWith,
             _ => {}
         }
     }
-    statement_handle(&q.text)
+    statement_handle_of(&q.text)
 }
 
 /// The statement a `WITH` list leads to: `WITH b AS (SELECT …) DELETE FROM jobs …` is a delete, not a read. The text
@@ -321,19 +372,24 @@ pub fn main_statement(text: &str) -> &str {
 
 /// `query_handle` for bare statement text.
 pub fn statement_handle(text: &str) -> String {
+    statement_handle_of(text).words()
+}
+
+/// What [`statement_handle`] names a statement by.
+pub fn statement_handle_of(text: &str) -> Handle {
     if let Some(table) = statistics_maintenance_table(text) {
-        return format!("a statistics refresh on {table}");
+        return Handle::StatisticsRefresh(table);
     }
     let text = text.trim_start_matches(|c: char| c.is_whitespace() || c == '(');
     // A driver's or a pool's statement (BEGIN, COMMIT, DISCARD ALL, SELECT 1) is named as it is: it is short, and
     // "a query" would hide what sends it.
     if culprit_core::sql::is_session_statement(text) && text.len() <= 40 {
-        return text.trim_end_matches(';').split_whitespace().collect::<Vec<_>>().join(" ");
+        return Handle::Session(text.trim_end_matches(';').split_whitespace().collect::<Vec<_>>().join(" "));
     }
     // A write behind a WITH list is named as the write.
     let main = main_statement(text);
     if main.len() != text.len() && !main.get(..6).is_some_and(|w| w.eq_ignore_ascii_case("select")) {
-        return statement_handle(main);
+        return statement_handle_of(main);
     }
     let lower = text.to_ascii_lowercase();
     let verb = ["select", "insert", "update", "delete", "merge", "with"]
@@ -344,20 +400,20 @@ pub fn statement_handle(text: &str) -> String {
     let table = main_table(text, &lower, verb)
         .or_else(|| matches!(verb, "select" | "with").then(|| joined_table(text, &lower)).flatten());
     match (verb, table) {
-        ("select" | "with", Some(t)) => format!("a read from {t}"),
-        ("insert", Some(t)) => format!("an insert into {t}"),
-        ("update", Some(t)) => format!("an update of {t}"),
-        ("delete", Some(t)) => format!("a delete from {t}"),
-        ("merge", Some(t)) => format!("a merge into {t}"),
+        ("select" | "with", Some(t)) => Handle::Read(Some(t)),
+        ("insert", Some(t)) => Handle::Insert(t),
+        ("update", Some(t)) => Handle::Update(t),
+        ("delete", Some(t)) => Handle::Delete(t),
+        ("merge", Some(t)) => Handle::Merge(t),
         // A read from something else (a subquery, VALUES) is still a read, not a call to its first function.
-        ("select" | "with", None) if lower.contains(" from ") => "a read".to_string(),
+        ("select" | "with", None) if lower.contains(" from ") => Handle::Read(None),
         // Statements without a table still have a name people recognise: `SELECT SLEEP(?)`, `DO SLEEP(?)`, `CALL p(?)`.
-        _ => other_handle(text, &lower).unwrap_or_else(|| "a query".to_string()),
+        _ => other_handle(text, &lower).map_or(Handle::Query, Handle::Call),
     }
 }
 
-/// `CALL proc(…)`, `EXEC proc`, `DO f(…)`, `SELECT f(…)` without a table: name the routine or function. Names may be
-/// quoted the engine's way (MySQL's digest text writes ``DO `SLEEP` (?)``).
+/// `CALL proc(…)`, `EXEC proc`, `DO f(…)`, `SELECT f(…)` without a table: the routine or function it calls. Names may
+/// be quoted the engine's way (MySQL's digest text writes ``DO `SLEEP` (?)``).
 fn other_handle(text: &str, lower: &str) -> Option<String> {
     // The name at `from`, parts unquoted and joined by dots, and the text after it.
     let name_at = |from: usize| -> Option<(String, &str)> {
@@ -389,9 +445,9 @@ fn other_handle(text: &str, lower: &str) -> Option<String> {
         }
         Some((parts.join("."), rest))
     };
-    for (verb, what) in [("call ", "a call to"), ("exec ", "a call to"), ("execute ", "a call to")] {
+    for verb in ["call ", "exec ", "execute "] {
         if lower.starts_with(verb) {
-            return name_at(verb.len()).map(|(n, _)| format!("{what} {n}"));
+            return name_at(verb.len()).map(|(n, _)| n);
         }
     }
     for verb in ["do ", "select "] {
@@ -399,7 +455,7 @@ fn other_handle(text: &str, lower: &str) -> Option<String> {
             && let Some((name, after)) = name_at(verb.len())
             && after.trim_start().starts_with('(')
         {
-            return Some(format!("a call to {name}"));
+            return Some(name);
         }
     }
     None
