@@ -56,7 +56,7 @@ names (`max_connections`, `track_io_timing`, `log_lock_waits`, `busy_timeout`, P
 `system_health`), file formats and acronyms (JSON, HTML, Markdown, .sqlplan, DDL, OLTP, JIT, WAL, HOT, LSM, RPC, IAM,
 SSH, PK, FK, CPU), operator names as the engine prints them (Index Seek, Seq Scan, Key Lookup) and *pull request*,
 *Query Store*, *tempdb*, *hypertable*, *chunk*, *tablet*, *tablegroup*, *slot* (replication slot), *latch*, *trigger*,
-*vacuum*/*autovacuum*.
+*vacuum*/*autovacuum*, *backend*, *Connection Manager*, ASH, RSS, *Spool*.
 
 ## Terms
 
@@ -165,3 +165,14 @@ the choice and the reason are given.
 | insert, update, delete, merge (a write) | inserción, actualización, eliminación, MERGE | *una lectura de {table}*, *una eliminación en {table}* |
 | backfill | relleno de datos | |
 | hot pages, hot rows | páginas muy disputadas, filas muy disputadas | |
+| provider, source, capability | proveedor, origen, capacidad | a source that couldn't be read: *no se pudo leer el origen* |
+| discovery, tenant, listener | detección, inquilino, agente de escucha | |
+| port forwarding, host key, fingerprint | reenvío de puertos, clave de host, huella digital | |
+| headroom, burst balance, budget | margen, saldo de ráfaga, límite | |
+| elastic pool, filegroup, trace flag | grupo elástico, grupo de archivos, marca de seguimiento | |
+| plan (verb), planner | planificar, planificador | |
+| digest | resumen | MySQL's statement digest stays *digest* |
+| gap lock, key-range | bloqueo de hueco, intervalo de claves | |
+| session / transaction pooling | pooling de sesión / de transacción | |
+| ring buffer, memory tracker, evict | búfer circular, rastreador de memoria, expulsar | |
+| stopped running | dejó de ejecutarse | |
