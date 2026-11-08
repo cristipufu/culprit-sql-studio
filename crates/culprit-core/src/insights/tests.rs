@@ -208,10 +208,8 @@ fn lookup_advice_keeps_native_output_names_and_ignores_stale_display_columns() {
     let mut lookup = node(1, "Key Lookup", NodeKind::Lookup);
     lookup.object = Some("app.orders".into());
     lookup.est_executions = 1500.0;
-    lookup.facts = Some(crate::PlanNodeFacts {
-        output_columns: Some(vec!["odd.column".into(), "a, b".into()]),
-        ..Default::default()
-    });
+    lookup.facts =
+        crate::PlanNodeFacts { output_columns: Some(vec!["odd.column".into(), "a, b".into()]), ..Default::default() };
     lookup.props.insert("OutputList".into(), "stale_column".into());
     let advice = |n| insights(&plan(Engine::Mssql, n)).into_iter().find(|i| i.rule == "key-lookups").unwrap();
     let first = advice(lookup.clone());
@@ -230,8 +228,7 @@ fn compilation_warning_context_uses_typed_statistics_columns() {
     seek.index = Some("ix_orders_tenant".into());
     seek.seek_predicate = Some("[tenant_id] = [@tenant]".into());
     seek.warnings = vec![PlanWarning::MissingStatistics];
-    seek.facts =
-        Some(crate::PlanNodeFacts { columns_without_statistics: vec!["tenant_id".into()], ..Default::default() });
+    seek.facts = crate::PlanNodeFacts { columns_without_statistics: vec!["tenant_id".into()], ..Default::default() };
     seek.props.insert("ColumnsWithNoStatistics".into(), "stale_column".into());
     let context = stale_index_statistics(&plan(Engine::Mssql, seek.clone())).unwrap();
     assert_eq!(context.columns, vec!["tenant_id"]);
@@ -248,17 +245,17 @@ fn hashed_membership_uses_captured_conditions_without_display_properties() {
     scan.object = Some("public.orders".into());
     scan.est_rows = 500_000.0;
     scan.self_cost = 10_000.0;
-    scan.facts = Some(crate::PlanNodeFacts {
+    scan.facts = crate::PlanNodeFacts {
         conditions: vec!["(ANY (customer_id = (hashed SubPlan 1).col1))".into()],
         ..Default::default()
-    });
+    };
     let mut sub = node(2, "Seq Scan", NodeKind::Scan);
     sub.object = Some("public.customers".into());
-    sub.facts = Some(crate::PlanNodeFacts {
+    sub.facts = crate::PlanNodeFacts {
         parent_relationship: Some(crate::PlanParentRelationship::SubPlan),
         subplan_name: Some("SubPlan 1".into()),
         ..Default::default()
-    });
+    };
     scan.children = vec![sub];
     let mut p = plan(Engine::Postgres, scan);
     assert!(!rules(&p).contains(&"correlated-subquery".to_string()));
@@ -269,7 +266,7 @@ fn hashed_membership_uses_captured_conditions_without_display_properties() {
 
 fn node(id: u32, op: &str, kind: NodeKind) -> PlanNode {
     PlanNode {
-        facts: None,
+        facts: Default::default(),
         id,
         op: op.into(),
         kind,
@@ -296,7 +293,7 @@ fn node(id: u32, op: &str, kind: NodeKind) -> PlanNode {
 
 fn plan(engine: Engine, root: PlanNode) -> Plan {
     let mut p = Plan {
-        facts: None,
+        facts: Default::default(),
         view: None,
         engine,
         kind: PlanKind::Estimated,
@@ -650,7 +647,7 @@ fn a_plan_whose_ids_repeat_cannot_trap_the_walk_up_it() {
 #[test]
 fn a_mysql_scan_whose_ids_repeat_cannot_trap_the_search_for_a_join_above_it() {
     let mut scan = node(1, "Table scan", NodeKind::Scan);
-    scan.facts = Some(crate::PlanNodeFacts { possible_index_names: vec!["ix_status".into()], ..Default::default() });
+    scan.facts = crate::PlanNodeFacts { possible_index_names: vec!["ix_status".into()], ..Default::default() };
     let mut filter = node(1, "Filter", NodeKind::Other);
     filter.children = vec![scan];
     let p = plan(Engine::Mysql, filter);

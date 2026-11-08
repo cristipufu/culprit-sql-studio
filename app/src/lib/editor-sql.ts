@@ -314,7 +314,7 @@ export function prepareQueryForEditor(query: QueryStat, engine: Engine): string 
   const { parameters: leadingParams, body } = splitLeadingParameterList(query.text);
   const params = query.parameters ?? leadingParams;
   const compiled =
-    query.plan?.facts?.compiled_parameters ??
+    query.plan?.facts.compiled_parameters ??
     query.plans.find((p) => p.compiled)?.compiled ??
     query.plan?.props?.Parameters;
   const values = engine === "mssql" ? parseCompiledValues(compiled) : new Map<string, string>();

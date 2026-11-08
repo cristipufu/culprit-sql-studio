@@ -4,7 +4,7 @@ use culprit_core::{PlanKind, Properties};
 
 fn node(id: u32, op: &str, kind: NodeKind, children: Vec<PlanNode>) -> PlanNode {
     PlanNode {
-        facts: None,
+        facts: Default::default(),
         id,
         op: op.into(),
         kind,
@@ -50,7 +50,7 @@ fn apps_plan() -> Plan {
     let mut root = node(0, "Sort", NodeKind::Sort, vec![join]);
     (root.est_rows, root.self_cost, root.subtree_cost) = (11.0, 0.21, 286.19);
     Plan {
-        facts: None,
+        facts: Default::default(),
         view: None,
         engine: Engine::Postgres,
         kind: PlanKind::Generic,

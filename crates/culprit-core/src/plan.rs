@@ -89,12 +89,10 @@ pub struct PlanNode {
     // CPU, reads, per-thread rows and spills, when the plan carries runtime counters (actual plans, live progress).
     pub runtime: Option<crate::actual::NodeRuntime>,
     pub warnings: Vec<PlanWarning>,
+    // What the engine's plan displays, for reading. No calculation reads it: the facts are what the plan is read by.
     pub props: Properties,
-    // Captured and prepared calculation inputs. None: read from `props` (`PlanNodeFacts::from_properties`); Some with
-    // unknown fields never borrows a conflicting display property.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub facts: Option<crate::PlanNodeFacts>,
+    // The calculation inputs the parser recorded and preparation refined. Each one it doesn't know is unknown.
+    pub facts: crate::PlanNodeFacts,
     pub children: Vec<PlanNode>,
 }
 
@@ -139,16 +137,12 @@ pub const INDEX_KIND: &str = "Index Kind";
 pub const UDF_IN_SEEK_ONLY: &str = "UserDefinedFunctionsInSeekOnly";
 
 impl PlanNode {
-    pub fn facts(&self) -> std::borrow::Cow<'_, crate::PlanNodeFacts> {
-        self.facts
-            .as_ref()
-            .map(std::borrow::Cow::Borrowed)
-            .unwrap_or_else(|| std::borrow::Cow::Owned(crate::PlanNodeFacts::from_properties(&self.props)))
+    pub fn facts(&self) -> &crate::PlanNodeFacts {
+        &self.facts
     }
 
-    /// Materialize the facts read from `props` before a preparation step changes them, preserving the others.
     pub fn facts_mut(&mut self) -> &mut crate::PlanNodeFacts {
-        self.facts.get_or_insert_with(|| crate::PlanNodeFacts::from_properties(&self.props))
+        &mut self.facts
     }
     pub fn walk<'a>(&'a self, out: &mut Vec<&'a PlanNode>) {
         out.push(self);
@@ -363,10 +357,9 @@ pub struct Plan {
     pub root: PlanNode,
     pub warnings: Vec<PlanWarning>,
     pub index_hints: Vec<PlanIndexHint>,
+    // What the engine's plan displays, for reading; the facts are what the plan is read by.
     pub props: Properties,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub facts: Option<crate::PlanFacts>,
+    pub facts: crate::PlanFacts,
     // Immutable native text is shared across prepared, replay and collected pictures. JSON remains a string.
     pub raw: Option<std::sync::Arc<str>>,
     // Structural observations, with catalog and workload context when attached to a scan. Recomputed when a saved
@@ -404,14 +397,11 @@ impl Plan {
         deepest
     }
 
-    pub fn facts(&self) -> std::borrow::Cow<'_, crate::PlanFacts> {
-        self.facts
-            .as_ref()
-            .map(std::borrow::Cow::Borrowed)
-            .unwrap_or_else(|| std::borrow::Cow::Owned(crate::PlanFacts::from_properties(&self.props)))
+    pub fn facts(&self) -> &crate::PlanFacts {
+        &self.facts
     }
     pub fn facts_mut(&mut self) -> &mut crate::PlanFacts {
-        self.facts.get_or_insert_with(|| crate::PlanFacts::from_properties(&self.props))
+        &mut self.facts
     }
     pub fn nodes(&self) -> Vec<&PlanNode> {
         let mut out = Vec::new();

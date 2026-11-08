@@ -85,7 +85,7 @@ pub fn parse(value: &Value, json: &str, kind: PlanKind, statement: Option<&str>,
         props.insert("optimization_ms".into(), ms.to_string());
     }
     let mut plan = Plan {
-        facts: Some(culprit_core::PlanFacts {
+        facts: culprit_core::PlanFacts {
             elapsed_ms: elapsed.and_then(culprit_core::plan_facts::nonnegative),
             flavor: Some("MariaDB".into()),
             cost_basis: (!costed).then(|| {
@@ -93,7 +93,7 @@ pub fn parse(value: &Value, json: &str, kind: PlanKind, statement: Option<&str>,
                     .into()
             }),
             ..Default::default()
-        }),
+        },
         view: None,
         engine: Engine::Mysql,
         kind,

@@ -561,10 +561,11 @@ units and precision without parsing display labels. Native collection and normal
 invalid numeric evidence as unknown; a measured zero stays distinct from a missing counter. SQL Server's lightweight profiling withdraws its unrecorded timing placeholders at
 its collection boundary.
 
-A missing facts object identifies a property-only plan (an external provider's): one adapter reads its inputs from
-the engine's properties. A present object is authoritative, including unknown fields, and never inherits a
-conflicting raw property. Preparation updates typed facts and their inspection strings together, withdrawing stale
-derived annotations. Catalog enrichment requires an unambiguous table/index identity; an unqualified name shared by
+Every plan and plan step carries its facts: the engine's parser records them from the native plan, and a provider that
+plugs in either fills them in or hands its native text to the built-in parser (`culprit_engine::plans::parse_plan`).
+A fact the parser doesn't know is unknown; a display property never stands in for one, and a saved plan without facts
+is refused. Preparation updates typed facts and their inspection strings together, withdrawing stale derived
+annotations. Catalog enrichment requires an unambiguous table/index identity; an unqualified name shared by
 schemas cannot establish one. Column-type context retains schema and target type, and aliases resolve only where
 their physical table is known. Redacted exports mask SQL values in typed facts as well as in properties, while
 preserving measurements and PostgreSQL's structural SubPlan references.

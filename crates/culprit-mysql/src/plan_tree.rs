@@ -54,10 +54,10 @@ pub fn parse(tree: &str, statement: Option<&str>, schema: Option<&str>) -> Resul
         props.insert("ElapsedMs".into(), ms.to_string());
     }
     let mut plan = Plan {
-        facts: Some(culprit_core::PlanFacts {
+        facts: culprit_core::PlanFacts {
             elapsed_ms: elapsed_ms.and_then(culprit_core::plan_facts::nonnegative),
             ..Default::default()
-        }),
+        },
         view: None,
         engine: Engine::Mysql,
         kind: PlanKind::Actual,
@@ -108,7 +108,7 @@ fn build(
 
 fn blank(id: u32, op: &str, kind: NodeKind) -> PlanNode {
     PlanNode {
-        facts: Some(Default::default()),
+        facts: Default::default(),
         id,
         op: op.to_string(),
         kind,

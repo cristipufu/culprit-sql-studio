@@ -20,7 +20,7 @@ fn base() -> (Plan, QueryStat) {
     plan.warnings.clear();
     plan.props.clear();
     // A blank plan: each case states the facts a parser records, and the properties its engine displays.
-    plan.facts = Some(Default::default());
+    plan.facts = Default::default();
     plan.kind = PlanKind::Estimated;
     plan.total_cost = 0.001;
     plan.statement = Some("SELECT id FROM shop.widgets WHERE id = @id".into());
@@ -35,7 +35,7 @@ fn base() -> (Plan, QueryStat) {
     n.predicate = None;
     n.seek_predicate = None;
     n.props.clear();
-    n.facts = Some(Default::default());
+    n.facts = Default::default();
     n.warnings.clear();
     n.est_rows = 1.0;
     n.est_executions = 1.0;

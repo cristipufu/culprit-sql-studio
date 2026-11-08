@@ -653,17 +653,22 @@ mod tests {
         q.text = text.into();
         (q.executions, q.mean_time_ms, q.total_time_ms) = (runs, mean, mean * runs);
         (q.stddev_time_ms, q.max_time_ms, q.rows) = (Some(variance.sqrt()), Some(5_000.0), Some(runs * 0.25));
+        // A plan states its facts; these state nothing is known beyond the plan's shape.
+        let (plan_facts, node_facts) = (
+            serde_json::to_value(culprit_core::PlanFacts::default()).unwrap(),
+            serde_json::to_value(culprit_core::PlanNodeFacts::default()).unwrap(),
+        );
         q.plan = Some(
             serde_json::from_value(serde_json::json!({
                 "engine": "postgres", "kind": "generic", "total_cost": 0.01, "warnings": [], "index_hints": [],
-                "props": {},
+                "props": {}, "facts": plan_facts,
                 "root": {
                     "id": 0, "op": "ModifyTable", "kind": "modify", "object": "public.order_items",
                     "detail": "Insert", "est_rows": 0.0, "est_executions": 1.0, "subtree_cost": 0.01,
-                    "self_cost": 0.0, "warnings": [], "props": {"Conflict Resolution": "NOTHING"},
+                    "self_cost": 0.0, "warnings": [], "props": {"Conflict Resolution": "NOTHING"}, "facts": node_facts.clone(),
                     "children": [{
                         "id": 1, "op": "Result", "kind": "compute", "est_rows": 1.0, "est_executions": 1.0,
-                        "subtree_cost": 0.01, "self_cost": 0.01, "warnings": [], "props": {}, "children": []
+                        "subtree_cost": 0.01, "self_cost": 0.01, "warnings": [], "props": {}, "facts": node_facts, "children": []
                     }]
                 }
             }))

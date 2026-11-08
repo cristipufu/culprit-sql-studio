@@ -556,7 +556,7 @@ function rowsFor(node: PlanNode | null, plan: Plan): Record<string, string | nul
     "Actual time": node.act_time_ms != null ? duration(node.act_time_ms) : null,
     // Only where the plan can state one (none beside a step it puts no cost on, nor on a default guess): "—".
     "Share of the plan's cost": weighed ? percent(stepShare(plan, node)) : null,
-    "Subtree cost": weighed && !plan.facts?.estimated_cost_unavailable ? cost(node.subtree_cost) : null,
+    "Subtree cost": weighed && !plan.facts.estimated_cost_unavailable ? cost(node.subtree_cost) : null,
     Warnings: node.warnings.length ? node.warnings.map((w) => w.replace(/-/g, " ")).join(", ") : null,
   };
 }

@@ -126,7 +126,7 @@ export function NodeDetails({
         </ul>
       )}
 
-      <DocdbWork metrics={node.facts?.docdb} basis="loop" />
+      <DocdbWork metrics={node.facts.docdb} basis="loop" />
       <div className="nd-grid">
         {(node.seek_predicate || node.predicate) && (
           <section className="nd-card wide">
@@ -192,7 +192,7 @@ export function NodeDetails({
           <dl>
             <dt>This operator</dt>
             <dd>
-              {share != null ? percent(share) : "no share"} <span className="muted">· {plan?.facts?.estimated_cost_unavailable ? "cost unavailable" : `${cost(node.self_cost)} units`}</span>
+              {share != null ? percent(share) : "no share"} <span className="muted">· {plan?.facts.estimated_cost_unavailable ? "cost unavailable" : `${cost(node.self_cost)} units`}</span>
             </dd>
             {subtreeShare != null && (
               <>

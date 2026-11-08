@@ -65,7 +65,7 @@ export const aboutThePlan = (plan: Plan, check: string): boolean => plan.view?.f
 /** Literal counts can still be inspected in an older, unprojected plan; inferred comparisons require Rust's view. */
 export const estRows = (plan: Plan | null | undefined, node: PlanNode): number | null => {
   const view = operatorView(plan, node);
-  return view ? view.estimated_rows : node.facts?.estimated_rows_unavailable ? null : node.est_rows * Math.max(1, node.est_executions);
+  return view ? view.estimated_rows : node.facts.estimated_rows_unavailable ? null : node.est_rows * Math.max(1, node.est_executions);
 };
 export const rowsOut = (plan: Plan | null | undefined, node: PlanNode): number | null => {
   const view = operatorView(plan, node);
@@ -77,7 +77,7 @@ export const estRowsForRuns = (plan: Plan | null | undefined, node: PlanNode): n
 };
 export const operatorRuns = (plan: Plan | null | undefined, node: PlanNode): number | null => {
   const view = operatorView(plan, node);
-  return view ? view.runs : node.facts?.estimated_rows_unavailable ? node.act_executions : node.act_executions == null ? Math.max(1, node.est_executions) : null;
+  return view ? view.runs : node.facts.estimated_rows_unavailable ? node.act_executions : node.act_executions == null ? Math.max(1, node.est_executions) : null;
 };
 export const rowsRead = (plan: Plan, node: PlanNode): number | null => operatorView(plan, node)?.rows_read ?? node.rows_read;
 export const misestimate = (plan: Plan | null | undefined, node: PlanNode): number | null => operatorView(plan, node)?.misestimate ?? null;

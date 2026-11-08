@@ -8,4 +8,4 @@ import type { PlanNode } from "./PlanNode";
 import type { PlanView } from "./PlanView";
 import type { PlanWarning } from "./PlanWarning";
 
-export type Plan = { engine: Engine, kind: PlanKind, statement: string | null, total_cost: number, root: PlanNode, warnings: Array<PlanWarning>, index_hints: Array<PlanIndexHint>, props: { [key in string]: string }, facts?: PlanFacts, raw: string | null, insights?: PlanInsights, view?: PlanView, };
+export type Plan = { engine: Engine, kind: PlanKind, statement: string | null, total_cost: number, root: PlanNode, warnings: Array<PlanWarning>, index_hints: Array<PlanIndexHint>, props: { [key in string]: string }, facts: PlanFacts, raw: string | null, insights?: PlanInsights, view?: PlanView, };

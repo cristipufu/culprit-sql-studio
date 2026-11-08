@@ -184,7 +184,7 @@ fn read_statement(doc: &Document, xml: &str, query_hash: Option<&str>) -> Result
     }
 
     let mut plan = Plan {
-        facts: Some(statement_facts(statement, query_plan)),
+        facts: statement_facts(statement, query_plan),
         view: None,
         engine: Engine::Mssql,
         kind: if is_actual { PlanKind::Actual } else { PlanKind::Estimated },
@@ -414,7 +414,7 @@ fn parse_relop(relop: Node, depth: usize) -> Result<PlanNode> {
     let estimated_read = relop.attribute("EstimatedRowsRead").and_then(|v| v.parse::<f64>().ok());
 
     let mut node = PlanNode {
-        facts: Some(facts),
+        facts,
         id: relop.attribute("NodeId").and_then(|v| v.parse().ok()).unwrap_or(0),
         kind: node_kind(&op, &logical),
         detail: (!logical.is_empty() && logical != physical && logical != op).then_some(logical),

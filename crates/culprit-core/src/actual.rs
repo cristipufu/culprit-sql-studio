@@ -372,7 +372,7 @@ mod tests {
 
     fn node(id: u32, time: f64, est: f64, act: f64, cost: f64, children: Vec<PlanNode>) -> PlanNode {
         PlanNode {
-            facts: None,
+            facts: Default::default(),
             id,
             op: format!("op{id}"),
             kind: NodeKind::Other,
@@ -399,7 +399,7 @@ mod tests {
 
     fn plan(root: PlanNode) -> Plan {
         Plan {
-            facts: None,
+            facts: Default::default(),
             view: None,
             engine: Engine::Postgres,
             kind: PlanKind::Actual,

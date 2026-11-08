@@ -43,13 +43,17 @@ fn file_names_are_short_safe_and_lowercase() {
 
 #[test]
 fn native_exports_keep_the_engine_format() {
+    let (plan_facts, node_facts) = (
+        serde_json::to_value(culprit_core::PlanFacts::default()).unwrap(),
+        serde_json::to_value(culprit_core::PlanNodeFacts::default()).unwrap(),
+    );
     let mut plan: Plan = serde_json::from_value(serde_json::json!({
         "engine": "postgres", "kind": "estimated", "statement": null, "total_cost": 1.0, "warnings": [],
-        "index_hints": [], "props": {}, "raw": "[{\"Plan\": {}}]",
+        "index_hints": [], "props": {}, "facts": plan_facts, "raw": "[{\"Plan\": {}}]",
         "root": {"id": 0, "op": "Seq Scan", "kind": "scan", "detail": null, "object": "orders", "index": null,
             "seek_predicate": null, "predicate": "(status = 'open'::text)", "est_rows": 1.0, "est_executions": 1.0,
             "act_rows": null, "act_executions": null, "rows_read": null, "table_rows": null, "subtree_cost": 1.0,
-            "self_cost": 1.0, "act_time_ms": null, "warnings": [], "props": {}, "children": []}
+            "self_cost": 1.0, "act_time_ms": null, "warnings": [], "props": {}, "facts": node_facts, "children": []}
     }))
     .unwrap();
     assert_eq!(native_extension(&plan), "json");

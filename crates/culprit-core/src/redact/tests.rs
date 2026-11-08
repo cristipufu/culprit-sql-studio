@@ -424,7 +424,7 @@ fn plan_facts_and_plugin_fix_sql_share_the_same_redaction_boundary() {
     let plan = report.snapshot.workload.as_mut().unwrap().queries.iter_mut().find_map(|q| q.plan.as_mut()).unwrap();
     let value = "[plan-database-canary].[dbo].[orders].[tenant] = 'literal-value-canary'";
     plan.props.insert("PlanAffectingConvert".into(), value.into());
-    let facts = plan.root.facts.get_or_insert_default();
+    let facts = &mut plan.root.facts;
     facts.output_columns = Some(vec![value.into()]);
     facts.columns_without_statistics = vec![value.into()];
     facts.user_functions = vec!["[plan-database-canary].[dbo].[function_name]".into()];

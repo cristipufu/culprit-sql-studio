@@ -7,7 +7,7 @@ fn plan() -> Plan {
     let s: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
     let mut p = s.queries()[0].plan.as_ref().unwrap().clone();
     p.kind = crate::PlanKind::Actual;
-    p.facts = Some(PlanFacts::default());
+    p.facts = PlanFacts::default();
     p.props.clear();
     p.root = scan();
     p.root.act_rows = Some(10.0);
@@ -161,7 +161,7 @@ fn candidate_index_columns_are_qualified_and_refresh_removes_obsolete_evidence()
     let mut p = plan();
     p.engine = crate::Engine::Mysql;
     p.root.object = Some("shop.orders".into());
-    p.root.facts = Some(PlanNodeFacts { possible_index_names: vec!["same_name".into()], ..Default::default() });
+    p.root.facts = PlanNodeFacts { possible_index_names: vec!["same_name".into()], ..Default::default() };
     crate::insights::mark_possible_keys(&mut p, &[index.clone(), other.clone()]);
     assert_eq!(p.root.facts().possible_index_columns.as_ref().unwrap()[0].columns, vec!["wanted"]);
     p.root.object = Some("orders".into());
@@ -178,13 +178,13 @@ fn changed_columns_keep_schema_and_target_type_and_can_be_withdrawn() {
     let expr = |schema| format!("CONVERT_IMPLICIT(nvarchar(64),[db].[{schema}].[jobs].[name],0)=[@p1]");
     let a = expr("current");
     let b = expr("archive");
-    p.facts = Some(PlanFacts {
+    p.facts = PlanFacts {
         conversions: vec![crate::PlanConversion {
             issue: crate::PlanConversionIssue::SeekPlan,
             expression: format!("{a} AND {b}"),
         }],
         ..Default::default()
-    });
+    };
     let column = |schema: &str, ty: &str| crate::ColumnInfo {
         schema: schema.into(),
         table: "jobs".into(),
@@ -212,17 +212,17 @@ fn changed_columns_keep_schema_and_target_type_and_can_be_withdrawn() {
 fn conversion_context_resolves_native_aliases_and_refuses_aliases_shared_by_different_tables() {
     let mut p = plan();
     p.root.object = Some("current.jobs".into());
-    p.root.facts = Some(PlanNodeFacts { table_alias: Some("j".into()), ..Default::default() });
+    p.root.facts = PlanNodeFacts { table_alias: Some("j".into()), ..Default::default() };
     let aliased = "CONVERT_IMPLICIT(nvarchar(64),[j].[name],0)=[@p1]";
     let physical = "CONVERT_IMPLICIT(nvarchar(64),[db].[current].[jobs].[name] as [j].[name],0)=[@p1]";
     p.root.predicate = Some(physical.into());
-    p.facts = Some(PlanFacts {
+    p.facts = PlanFacts {
         conversions: vec![crate::PlanConversion {
             issue: crate::PlanConversionIssue::SeekPlan,
             expression: aliased.into(),
         }],
         ..Default::default()
-    });
+    };
     let column = crate::ColumnInfo {
         schema: "current".into(),
         table: "jobs".into(),
@@ -265,7 +265,7 @@ fn conversion_context_resolves_native_aliases_and_refuses_aliases_shared_by_diff
 #[test]
 fn typed_fact_redaction_masks_values_and_preserves_measurements_and_original_evidence() {
     let mut p = plan();
-    p.facts = Some(PlanFacts {
+    p.facts = PlanFacts {
         elapsed_ms: Some(0.004),
         compiled_parameters: Some("@p1 = N'PLANTED_PARAMETER'".into()),
         conversions: vec![crate::PlanConversion {
@@ -274,13 +274,13 @@ fn typed_fact_redaction_masks_values_and_preserves_measurements_and_original_evi
         }],
         generic_plan_reason: Some("Planned with `x = 123` and 'PLANTED_GENERIC'".into()),
         ..Default::default()
-    });
-    p.root.facts = Some(PlanNodeFacts {
+    };
+    p.root.facts = PlanNodeFacts {
         conditions: vec!["value = N'PLANTED_CONDITION'".into()],
         join_filter: Some("value = N'PLANTED_JOIN'".into()),
         selectivity_guess: Some("For 'PLANTED_GUESS'".into()),
         ..Default::default()
-    });
+    };
     let redacted = crate::redact::redact_plan(&p);
     assert!(!serde_json::to_string(&redacted).unwrap().contains("PLANTED_"));
     assert_eq!(redacted.facts().elapsed_ms, Some(0.004));
@@ -292,7 +292,7 @@ fn redacting_plan_expressions_preserves_subplan_references_but_masks_lookalike_v
     let mut p = plan();
     p.engine = crate::Engine::Postgres;
     p.root.predicate = Some("value = 123 AND (SubPlan 12) AND label = 'SubPlan 456'".into());
-    p.root.facts = Some(PlanNodeFacts { conditions: vec![p.root.predicate.clone().unwrap()], ..Default::default() });
+    p.root.facts = PlanNodeFacts { conditions: vec![p.root.predicate.clone().unwrap()], ..Default::default() };
     let redacted = crate::redact::redact_plan(&p);
     let predicate = redacted.root.predicate.as_ref().unwrap();
     assert!(predicate.contains("(SubPlan 12)"));
@@ -330,7 +330,7 @@ fn trigger_measurements_reject_invalid_time_and_invalid_call_counts() {
     use crate::actual::TriggerTiming;
     let mut p = plan();
     p.engine = crate::Engine::Postgres;
-    p.facts = Some(PlanFacts {
+    p.facts = PlanFacts {
         trigger_timings: vec![
             TriggerTiming { name: "audit".into(), relation: None, time_ms: 0.004, calls: Some(1.0) },
             TriggerTiming { name: "missing calls".into(), relation: None, time_ms: 0.0, calls: Some(-1.0) },
@@ -338,7 +338,7 @@ fn trigger_measurements_reject_invalid_time_and_invalid_call_counts() {
             TriggerTiming { name: "invalid time".into(), relation: None, time_ms: -1.0, calls: Some(1.0) },
         ],
         ..Default::default()
-    });
+    };
     let triggers = crate::actual::trigger_timings(&p);
     assert_eq!(triggers.len(), 3);
     assert_eq!((triggers[0].time_ms, triggers[0].calls), (0.004, Some(1.0)));
@@ -370,32 +370,15 @@ fn scan() -> PlanNode {
     n.table_rows = Some(1000.0);
     n.children.clear();
     n.props.clear();
-    n.facts = Some(PlanNodeFacts::default());
+    n.facts = PlanNodeFacts::default();
     n
-}
-
-#[test]
-fn older_plans_read_properties_but_present_facts_never_inherit_stale_display_values() {
-    let mut n = scan();
-    n.facts = None;
-    n.props.insert(MEASURED_KEPT.into(), "0.004".into());
-    assert_eq!(n.kept_share(), Some(0.004));
-    let saved = serde_json::to_value(&n).unwrap();
-    assert!(saved.get("facts").is_none());
-    let older: PlanNode = serde_json::from_value(saved).unwrap();
-    assert_eq!(older.kept_share(), Some(0.004));
-    n.facts = Some(PlanNodeFacts::default());
-    assert_eq!(n.kept_share(), Some(0.1), "the original row counts remain evidence; the stale property does not");
-    let reread: PlanNode = serde_json::from_value(serde_json::to_value(&n).unwrap()).unwrap();
-    assert!(reread.facts.is_some());
-    assert_eq!(reread.kept_share(), Some(0.1));
 }
 
 #[test]
 fn tiny_observed_selectivity_keeps_its_precision_and_a_real_zero_remains_zero() {
     let mut n = scan();
     let exact = 1.0 / 9_000_000_000.0;
-    n.facts = Some(PlanNodeFacts { measured_kept_share: Some(exact), ..Default::default() });
+    n.facts = PlanNodeFacts { measured_kept_share: Some(exact), ..Default::default() };
     n.props.insert(MEASURED_KEPT.into(), "0.000000".into());
     assert_eq!(n.kept_share(), Some(exact));
     let reread: PlanNode = serde_json::from_value(serde_json::to_value(&n).unwrap()).unwrap();
@@ -455,7 +438,7 @@ fn execution_mode_facts_control_own_time_without_reading_display_labels() {
     child.act_executions = Some(1.0);
     child.act_time_ms = Some(6.0);
     root.children = vec![child];
-    root.facts = Some(PlanNodeFacts { actual_execution_mode: Some(PlanExecutionMode::Batch), ..Default::default() });
+    root.facts = PlanNodeFacts { actual_execution_mode: Some(PlanExecutionMode::Batch), ..Default::default() };
     root.props.insert("ActualExecutionMode".into(), "Row".into());
     let s: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
     let mut p = s.queries()[0].plan.as_ref().unwrap().clone();

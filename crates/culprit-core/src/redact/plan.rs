@@ -82,8 +82,8 @@ pub fn redact_plan(plan: &Plan) -> Plan {
         if engine == Engine::Mssql { strip_database(&t) } else { t }
     }
     fn node(n: &PlanNode, engine: Engine) -> PlanNode {
-        let facts = n.facts.as_ref().map(|facts| {
-            let mut f = facts.clone();
+        let facts = {
+            let mut f = n.facts.clone();
             f.selectivity_guess = f.selectivity_guess.as_deref().map(|v| redact_prose(v, engine));
             f.partition_pruning = f.partition_pruning.as_deref().map(|v| redact_prose(v, engine));
             f.join_filter = f.join_filter.as_deref().map(|v| text(v, engine));
@@ -119,7 +119,7 @@ pub fn redact_plan(plan: &Plan) -> Plan {
                 }
             }
             f
-        });
+        };
         PlanNode {
             facts,
             detail: n.detail.as_deref().map(|d| text(d, engine)),
@@ -143,7 +143,8 @@ pub fn redact_plan(plan: &Plan) -> Plan {
         insights: None,
         ..plan.clone()
     };
-    if let Some(f) = &mut redacted.facts {
+    {
+        let f = &mut redacted.facts;
         f.flavor = f.flavor.as_deref().map(|v| redact_strings(v, plan.engine));
         f.server_version = f.server_version.as_deref().map(|v| redact_strings(v, plan.engine));
         f.memory_grant_warning = f.memory_grant_warning.as_deref().map(|v| redact_strings(v, plan.engine));

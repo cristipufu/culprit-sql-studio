@@ -453,7 +453,7 @@ pub(super) mod wording_tests {
     #[test]
     fn plan_steps_take_the_right_article() {
         let mut n = PlanNode {
-            facts: None,
+            facts: Default::default(),
             id: 1,
             op: "Index Scan".into(),
             kind: NodeKind::Scan,
@@ -477,7 +477,7 @@ pub(super) mod wording_tests {
             runtime: None,
         };
         let plan = |n: &PlanNode| Plan {
-            facts: None,
+            facts: Default::default(),
             view: None,
             engine: Engine::Postgres,
             kind: culprit_core::PlanKind::Estimated,
@@ -498,7 +498,7 @@ pub(super) mod wording_tests {
     #[test]
     fn rows_a_step_reads_are_said_as_measured_or_as_estimated() {
         let mut n = PlanNode {
-            facts: None,
+            facts: Default::default(),
             id: 1,
             op: "Index range scan".into(),
             kind: NodeKind::Seek,
@@ -522,7 +522,7 @@ pub(super) mod wording_tests {
             runtime: None,
         };
         let plan = |n: &PlanNode| Plan {
-            facts: None,
+            facts: Default::default(),
             view: None,
             engine: Engine::Mysql,
             kind: culprit_core::PlanKind::Estimated,

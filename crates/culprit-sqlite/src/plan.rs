@@ -120,7 +120,7 @@ pub fn plan_from_rows(statement: &str, rows: &[(i64, i64, String)]) -> Result<Pl
     let aliases = culprit_core::sql::table_aliases(statement, Engine::Sqlite);
     resolve_aliases(&mut root, &aliases);
     Ok(Plan {
-        facts: Some(culprit_core::PlanFacts { estimated_cost_unavailable: true, ..Default::default() }),
+        facts: culprit_core::PlanFacts { estimated_cost_unavailable: true, ..Default::default() },
         view: None,
         engine: Engine::Sqlite,
         kind: PlanKind::Estimated,
@@ -204,7 +204,7 @@ fn children(parent: i64, rows: &[(i64, i64, String)], parents: &HashMap<i64, Vec
 
 fn node(id: i64, op: &str, kind: NodeKind) -> PlanNode {
     PlanNode {
-        facts: Some(Default::default()),
+        facts: Default::default(),
         id: id.max(0) as u32,
         op: op.to_string(),
         kind,

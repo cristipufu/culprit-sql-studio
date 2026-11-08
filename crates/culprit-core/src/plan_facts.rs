@@ -1,9 +1,7 @@
-//! Captured facts used in plan calculations. A parser that sets them writes them; otherwise they are read from the
-//! engine's own plan properties (`from_properties`), which stay available for inspection.
+//! The facts plan calculations read: recorded by each engine's parser from its native plan, refined by preparation,
+//! and stored with the plan. The engine's display properties beside them are for reading only.
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-
-use crate::model::Properties;
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
@@ -315,189 +313,6 @@ pub fn count(value: f64) -> Option<u32> {
     (value.is_finite() && value >= 0.0 && value <= u32::MAX as f64 && value.fract() == 0.0).then_some(value as u32)
 }
 
-impl PlanFacts {
-    pub fn from_properties(props: &Properties) -> Self {
-        let number =
-            |key: &str| props.get(key).and_then(|value| value.trim().parse::<f64>().ok()).and_then(nonnegative);
-        let jit = props.get("JIT").and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
-        let triggers = props.get("Triggers").and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
-        Self {
-            constants_redacted: false,
-            estimated_cost_unavailable: false,
-            docdb: None,
-            query_hash: props.get("QueryHash").cloned(),
-            query_identifier: props.get("Query Identifier").cloned(),
-            last_run_at: props.get("LastRunAt").cloned(),
-            sample_limit_rows: number(crate::insights::LIMIT_ROWS),
-            virtual_indexes: props
-                .get("VirtualIndexes")
-                .map(|v| v.split(", ").filter(|s| !s.is_empty()).map(str::to_string).collect())
-                .unwrap_or_default(),
-            parallelism_blocker: props.get("NonParallelPlanReason").cloned(),
-            optimization_early_abort: props.get("StatementOptmEarlyAbortReason").cloned(),
-            server_version: props.get("server_version").cloned(),
-            flavor: props.get("flavor").cloned(),
-            cost_basis: props.get("cost_basis").cloned(),
-            generic_plan_reason: props.get("Generic Plan").cloned(),
-            statistics_maintenance: props.get("Statistics maintenance").cloned(),
-            compiled_parameters: props.get("Parameters").cloned(),
-            memory_grant_warning: props.get("MemoryGrantWarning").cloned(),
-            conversions: props
-                .get("PlanAffectingConvert")
-                .map(|v| v.lines().map(PlanConversion::from_description).collect())
-                .unwrap_or_default(),
-            changed_columns: props
-                .get("Columns changed since capture")
-                .map(|v| {
-                    v.lines()
-                        .filter_map(|line| {
-                            let (name, ty) = line.split_once(' ')?;
-                            let (table, column) = name.rsplit_once('.')?;
-                            let (schema, table) =
-                                table.rsplit_once('.').map_or((None, table), |(s, t)| (Some(s.to_string()), t));
-                            Some(PlanChangedColumn {
-                                schema,
-                                table: table.into(),
-                                column: column.into(),
-                                data_type: ty.into(),
-                            })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
-            elapsed_ms: number("ElapsedMs").or_else(|| number("Execution Time")),
-            cpu_ms: number("CpuMs"),
-            planning_ms: number("PlanningMs").or_else(|| number("Planning Time")),
-            compile_ms: number("CompileTime"),
-            compile_cpu_ms: number("CompileCPU"),
-            compile_memory_kb: number("CompileMemory"),
-            memory_desired_kb: number("MemoryDesiredKB"),
-            memory_requested_kb: number("MemoryRequestedKB"),
-            memory_granted_kb: number("MemoryGrantedKB"),
-            memory_max_used_kb: number("MemoryMaxUsedKB"),
-            memory_grant_wait_ms: number("MemoryGrantWaitMs"),
-            udf_elapsed_ms: number("UdfElapsedMs"),
-            udf_cpu_ms: number("UdfCpuMs"),
-            degree_of_parallelism: number("DegreeOfParallelism").and_then(count),
-            used_threads: number("UsedThreads").and_then(count),
-            cardinality_estimator: number("CardinalityEstimationModelVersion").and_then(count),
-            cost_threshold_for_parallelism: number(crate::insights::COST_THRESHOLD),
-            server_maxdop: number(crate::insights::SERVER_MAXDOP).and_then(count),
-            database_maxdop: number(crate::insights::DATABASE_MAXDOP).and_then(count),
-            jit_time_ms: jit
-                .and_then(|v| v.pointer("/Timing/Total").and_then(serde_json::Value::as_f64))
-                .and_then(nonnegative),
-            trigger_timings: triggers
-                .and_then(|v| v.as_array().cloned())
-                .unwrap_or_default()
-                .iter()
-                .filter_map(|v| {
-                    Some(crate::actual::TriggerTiming {
-                        name: v.get("Trigger Name").and_then(serde_json::Value::as_str).unwrap_or("Trigger").into(),
-                        relation: v.get("Relation").and_then(serde_json::Value::as_str).map(str::to_string),
-                        time_ms: v.get("Time").and_then(serde_json::Value::as_f64).and_then(nonnegative)?,
-                        calls: v.get("Calls").and_then(serde_json::Value::as_f64).and_then(whole),
-                    })
-                })
-                .collect(),
-        }
-    }
-}
-
-impl PlanNodeFacts {
-    /// The facts a node's engine properties say, for a parser (or a plugged-in provider) that supplies properties
-    /// only. A present facts object is authoritative, including its unknown fields; it never inherits stale properties.
-    pub fn from_properties(props: &Properties) -> Self {
-        let number = |key: &str| props.get(key).and_then(|value| value.trim().parse::<f64>().ok());
-        Self {
-            estimated_rows_unavailable: false,
-            docdb: None,
-            table_kind: None,
-            estimated_row_bytes: number("AvgRowSize").or_else(|| number("Plan Width")).and_then(nonnegative),
-            rows_produced_per_join: number("rows_produced_per_join").and_then(nonnegative),
-            output_columns: props.get("OutputList").map(|v| {
-                v.split(',')
-                    .map(|c| c.trim().rsplit('.').next().unwrap_or_default().trim_matches(['[', ']', '"']).to_string())
-                    .collect()
-            }),
-            storage: props.get("Storage").cloned(),
-            join_buffer: props.get("using_join_buffer").cloned(),
-            join_buffer_join_type: props.get("join_buffer_join_type").cloned(),
-            table_alias: props.get("table_name").or_else(|| props.get("Alias")).cloned(),
-            join_filter: props.get("Join Filter").cloned(),
-            subplan_name: props.get("Subplan Name").cloned(),
-            aggregate_strategy: props.get("Strategy").cloned(),
-            table_missing: props.get("Table not in the catalog").cloned(),
-            many_to_many: props.get("ManyToMany").and_then(|v| prop_bool(v)),
-            anti_join: props.get("not_exists").and_then(|v| prop_bool(v)),
-            dependent: props.get("dependent").and_then(|v| prop_bool(v)),
-            cacheable: props.get("cacheable").and_then(|v| prop_bool(v)),
-            functions_in_seek_only: props.get("UserDefinedFunctionsInSeekOnly").and_then(|v| prop_bool(v)),
-            expression_cache: props.contains_key("cache_state"),
-            conditions: ["Filter", "Join Filter", "Index Cond", "Recheck Cond", "Hash Cond", "Merge Cond"]
-                .iter()
-                .filter_map(|k| props.get(*k).cloned())
-                .collect(),
-            conversions: props
-                .get("PlanAffectingConvert")
-                .map(|v| v.lines().map(PlanConversion::from_description).collect())
-                .unwrap_or_default(),
-            user_functions: props
-                .get("UserDefinedFunctions")
-                .map(|v| v.split(", ").map(str::to_string).collect())
-                .unwrap_or_default(),
-            columns_without_statistics: props
-                .get("ColumnsWithNoStatistics")
-                .map(|v| v.split(", ").map(str::to_string).collect())
-                .unwrap_or_default(),
-            used_key_parts: props
-                .get("used_key_parts")
-                .map(|v| v.split(',').map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect())
-                .unwrap_or_default(),
-            possible_index_names: props
-                .get("possible_keys")
-                .map(|v| v.split(", ").filter(|v| !v.is_empty()).map(str::to_string).collect())
-                .unwrap_or_default(),
-            possible_index_columns: props.get("possible_keys_columns").map(|v| prop_indexes(v)),
-            table_indexes: props.get(crate::insights::TABLE_INDEXES).map(|v| prop_indexes(v)),
-            automatic_index: props.get("Automatic Index").and_then(|v| PlanAutomaticIndex::from_description(v)),
-            parallel_threads: number(crate::plan::PARALLEL_THREADS).and_then(thread_count),
-            measured_kept_share: number(crate::plan::MEASURED_KEPT).and_then(fraction),
-            estimated_filtered_percent: number("filtered").and_then(percentage),
-            selectivity_guess: props.get(crate::plan::GUESSED_SELECTIVITY).cloned(),
-            partition_pruning: props.get(crate::plan::NOT_READ_IN_FULL).cloned(),
-            partition_parent: props.get("Partition Of").cloned(),
-            index_method: props.get(crate::plan::INDEX_KIND).cloned(),
-            parent_relationship: props
-                .get("Parent Relationship")
-                .map(|value| PlanParentRelationship::from_source(value)),
-            actual_execution_mode: props.get("ActualExecutionMode").map(|value| PlanExecutionMode::from_source(value)),
-            estimated_execution_mode: props
-                .get("EstimatedExecutionMode")
-                .map(|value| PlanExecutionMode::from_source(value)),
-            disk_usage_kb: number("Disk Usage").and_then(nonnegative),
-            sort_space_kb: number("Sort Space Used").and_then(nonnegative),
-            hash_batches: number("Hash Batches").and_then(count),
-            hash_aggregate_batches: number("HashAgg Batches").and_then(count),
-            heap_fetches: number("Heap Fetches").and_then(nonnegative),
-            lossy_heap_blocks: number("Lossy Heap Blocks").and_then(nonnegative),
-            exact_heap_blocks: number("Exact Heap Blocks").and_then(nonnegative),
-            rows_removed_by_recheck: number("Rows Removed by Index Recheck").and_then(nonnegative),
-            estimated_rows_without_goal: number("EstimateRowsWithoutRowGoal").and_then(nonnegative),
-            workers_planned: number("Workers Planned").and_then(count),
-            workers_launched: number("Workers Launched").and_then(count),
-            sort_merge_passes: number("r_sort_passes").and_then(count),
-            sort_on_disk: props.get("Sort Space Type").and_then(|v| match v.as_str() {
-                "Disk" => Some(true),
-                "Memory" => Some(false),
-                _ => None,
-            }),
-            exchange_spill: props.get(crate::insights::EXCHANGE_SPILL).and_then(|v| prop_bool(v)),
-            estimated_rows_per_process: number("Plan Rows per process").and_then(nonnegative),
-        }
-    }
-}
-
 // The wire remains an optional JSON number. Serde validates imported facts while TypeScript uses that same shape.
 mod nonnegative_number {
     use super::*;
@@ -523,67 +338,25 @@ mod percentage_number {
     }
 }
 
-fn prop_bool(value: &str) -> Option<bool> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" => Some(true),
-        "0" | "false" | "no" => Some(false),
-        _ => None,
-    }
-}
-
-/// Runtime counters are authoritative. A plan without facts (an external provider's) is read from its properties.
+/// The pages a node spilled, by its runtime counters.
 pub(crate) fn spill_pages(node: &crate::PlanNode) -> Option<f64> {
-    node.runtime.as_ref().and_then(|r| r.spill_pages).and_then(nonnegative).or_else(|| {
-        node.facts
-            .is_none()
-            .then(|| node.props.get("TempdbWritesPages")?.parse::<f64>().ok().and_then(nonnegative))
-            .flatten()
-    })
+    node.runtime.as_ref().and_then(|r| r.spill_pages).and_then(nonnegative)
 }
 
-/// Number of participating workers/processes, their total rows and the busiest worker's rows. Native plans retain
-/// the actual worker vector in NodeRuntime; a plan without facts (an external provider's) is read from its
-/// properties, where SQL Server's showplan states only the maximum and count.
+/// Number of participating workers/processes, their total rows and the busiest worker's rows, from the actual worker
+/// vector in NodeRuntime.
 pub(crate) fn parallel_distribution(node: &crate::PlanNode, engine: crate::Engine) -> Option<(usize, f64, f64)> {
     if !matches!(engine, crate::Engine::Mssql | crate::Engine::Postgres) {
         return None;
     }
-    let native = node.runtime.as_ref().map(|r| r.thread_rows.as_slice()).filter(|rows| rows.len() >= 2);
-    let mut rows = if let Some(rows) = native {
-        std::borrow::Cow::Borrowed(rows)
-    } else if node.facts.is_none() && engine == crate::Engine::Postgres {
-        let value: serde_json::Value = serde_json::from_str(node.props.get("Workers")?).ok()?;
-        let rows = value
-            .as_array()?
-            .iter()
-            .filter_map(|w| {
-                let rows = w.get("Actual Rows")?.as_f64().and_then(nonnegative)?;
-                let loops = w
-                    .get("Actual Loops")
-                    .and_then(serde_json::Value::as_f64)
-                    .and_then(nonnegative)
-                    .unwrap_or(1.0)
-                    .max(1.0);
-                nonnegative(rows * loops)
-            })
-            .collect::<Vec<_>>();
-        std::borrow::Cow::Owned(rows)
-    } else if node.facts.is_none() && engine == crate::Engine::Mssql {
-        let number = |key: &str| node.props.get(key)?.parse::<f64>().ok().and_then(nonnegative);
-        let threads = number("ThreadCount").and_then(count)?;
-        let busiest = number("ThreadRowsMax")?;
-        let total = nonnegative(node.act_rows?)?;
-        return (threads >= 2 && busiest <= total).then_some((threads as usize, total, busiest));
-    } else {
-        return None;
-    };
-    if rows.is_empty() || rows.iter().any(|v| nonnegative(*v).is_none()) {
+    let mut rows = node.runtime.as_ref().map(|r| r.thread_rows.clone()).filter(|rows| rows.len() >= 2)?;
+    if rows.iter().any(|v| nonnegative(*v).is_none()) {
         return None;
     }
     if engine == crate::Engine::Postgres {
         let worker_total: f64 = rows.iter().sum();
         let leader = (node.act_rows.unwrap_or(worker_total) - worker_total).max(0.0);
-        rows.to_mut().push(leader);
+        rows.push(leader);
     }
     let total: f64 = rows.iter().sum();
     let busiest = rows.iter().copied().fold(0.0, f64::max);
@@ -645,7 +418,7 @@ pub struct PlanAutomaticIndex {
     pub columns: Vec<String>,
 }
 impl PlanAutomaticIndex {
-    /// SQLite's `table(col, col)` description, also retained by older normalized plans.
+    /// SQLite's `table(col, col)` description.
     pub fn from_description(value: &str) -> Option<Self> {
         let (table, cols) = value.split_once('(')?;
         let columns = cols
@@ -690,10 +463,6 @@ pub struct PlanConversion {
     pub expression: String,
 }
 impl PlanConversion {
-    fn from_description(value: &str) -> Self {
-        let (issue, expression) = value.split_once(": ").unwrap_or(("Convert", value));
-        Self { issue: PlanConversionIssue::from_source(issue), expression: expression.into() }
-    }
     pub fn text(&self) -> String {
         format!("{}: {}", self.issue.label(), self.expression)
     }
@@ -706,20 +475,6 @@ pub struct PlanChangedColumn {
     pub column: String,
     pub data_type: String,
 }
-fn prop_indexes(value: &str) -> Vec<PlanIndexColumns> {
-    value
-        .lines()
-        .filter_map(|line| {
-            let (name, cols) = line.split_once('=')?;
-            Some(PlanIndexColumns {
-                hash_columns: None,
-                name: name.into(),
-                columns: cols.split(',').filter(|k| !k.is_empty()).map(str::to_string).collect(),
-            })
-        })
-        .collect()
-}
-
 fn is_false(value: &bool) -> bool {
     !*value
 }

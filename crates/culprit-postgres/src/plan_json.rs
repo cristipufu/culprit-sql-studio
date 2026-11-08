@@ -61,7 +61,7 @@ pub fn from_value(value: &Value, kind: PlanKind, statement: Option<&str>) -> Res
         props.insert("PlanningMs".into(), ms.to_string());
     }
     let mut plan = Plan {
-        facts: Some(statement_facts(top)),
+        facts: statement_facts(top),
         view: None,
         engine: Engine::Postgres,
         kind,
@@ -252,7 +252,7 @@ fn node(map: &Map<String, Value>, next_id: &mut u32, parallelism: f64, divisor: 
         repeat_inner_side(&mut children, total_cost);
     }
     let result = PlanNode {
-        facts: Some(culprit_core::PlanNodeFacts {
+        facts: culprit_core::PlanNodeFacts {
             estimated_row_bytes: number(map, "Plan Width").and_then(culprit_core::plan_facts::nonnegative),
             join_filter: text(map, "Join Filter"),
             conditions: ["Filter", "Join Filter", "Index Cond", "Recheck Cond", "Hash Cond", "Merge Cond"]
@@ -285,7 +285,7 @@ fn node(map: &Map<String, Value>, next_id: &mut u32, parallelism: f64, divisor: 
                 _ => None,
             }),
             ..Default::default()
-        }),
+        },
         id,
         kind: kind_of(&op),
         detail: detail(map),

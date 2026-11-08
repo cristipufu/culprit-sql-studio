@@ -42,6 +42,6 @@ test("Plan samples: every core product, native captures, standalone loading and 
     for (const item of state.items) removePlan(item.id);
   }
   const sqlite = samples.find((sample) => sample.product === "sqlite") as PlanSample;
-  check(sqlite.plans.every((plan) => plan.facts?.estimated_cost_unavailable), "SQLite plan costs must remain unavailable");
+  check(sqlite.plans.every((plan) => plan.facts.estimated_cost_unavailable), "SQLite plan costs must remain unavailable");
   check(sqlite.plans[0].total_cost === sqlite.plans[1].total_cost && !sameSamplePlan(...sqlite.plans), "SQLite's absent costs must not collapse its comparison");
 });

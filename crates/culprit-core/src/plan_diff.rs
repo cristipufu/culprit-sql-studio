@@ -913,7 +913,7 @@ mod tests {
         children: Vec<PlanNode>,
     ) -> PlanNode {
         PlanNode {
-            facts: None,
+            facts: Default::default(),
             id: 0,
             op: op.into(),
             kind,
@@ -940,7 +940,7 @@ mod tests {
 
     fn plan(engine: Engine, root: PlanNode) -> Plan {
         let mut plan = Plan {
-            facts: None,
+            facts: Default::default(),
             view: None,
             engine,
             kind: PlanKind::Estimated,

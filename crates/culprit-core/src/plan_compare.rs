@@ -520,7 +520,7 @@ mod tests {
         children: Vec<PlanNode>,
     ) -> PlanNode {
         PlanNode {
-            facts: None,
+            facts: Default::default(),
             id: 0,
             op: op.into(),
             kind,
@@ -547,7 +547,7 @@ mod tests {
 
     fn plan(root: PlanNode, facts: crate::PlanFacts) -> Plan {
         let mut plan = Plan {
-            facts: Some(facts),
+            facts,
             view: None,
             engine: Engine::Mssql,
             kind: PlanKind::Estimated,

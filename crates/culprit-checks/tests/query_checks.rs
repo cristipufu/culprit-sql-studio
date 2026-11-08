@@ -305,15 +305,21 @@ fn many_slow_runs_are_an_unstable_query_rated_by_their_time() {
 
 /// A PostgreSQL plan of an INSERT of the values it is given: a ModifyTable over a Result, no table or index read.
 fn insert_values_plan() -> Plan {
+    let (plan_facts, node_facts) = (
+        serde_json::to_value(culprit_core::PlanFacts::default()).unwrap(),
+        serde_json::to_value(culprit_core::PlanNodeFacts::default()).unwrap(),
+    );
     serde_json::from_value(serde_json::json!({
         "engine": "postgres", "kind": "generic", "total_cost": 0.01, "warnings": [], "index_hints": [], "props": {},
+        "facts": plan_facts,
         "root": {
             "id": 0, "op": "ModifyTable", "kind": "modify", "object": "public.app_salts", "detail": "Insert",
             "est_rows": 0.0, "est_executions": 1.0, "subtree_cost": 0.01, "self_cost": 0.0,
-            "warnings": [], "props": {"Conflict Resolution": "NOTHING"},
+            "warnings": [], "props": {"Conflict Resolution": "NOTHING"}, "facts": node_facts.clone(),
             "children": [{
                 "id": 1, "op": "Result", "kind": "compute", "est_rows": 1.0, "est_executions": 1.0,
-                "subtree_cost": 0.01, "self_cost": 0.01, "warnings": [], "props": {}, "children": []
+                "subtree_cost": 0.01, "self_cost": 0.01, "warnings": [], "props": {}, "facts": node_facts,
+                "children": []
             }]
         }
     }))
@@ -514,16 +520,22 @@ fn an_unstable_insert_on_sql_server_can_wait_on_its_commit() {
     (q.executions, q.mean_time_ms, q.total_time_ms, q.stddev_time_ms, q.max_time_ms) =
         (n, mean, mean * n, Some(sd), Some(max));
     q.text = "INSERT INTO [shop].[products] ([name]) VALUES (@P1)".into();
+    let (plan_facts, node_facts) = (
+        serde_json::to_value(culprit_core::PlanFacts::default()).unwrap(),
+        serde_json::to_value(culprit_core::PlanNodeFacts::default()).unwrap(),
+    );
     q.plan = Some(
         serde_json::from_value(serde_json::json!({
             "engine": "mssql", "kind": "estimated", "total_cost": 0.01, "warnings": [], "index_hints": [], "props": {},
+            "facts": plan_facts,
             "root": {
                 "id": 0, "op": "Clustered Index Insert", "kind": "modify", "object": "[shop].[products]",
                 "est_rows": 1.0, "est_executions": 1.0, "subtree_cost": 0.01, "self_cost": 0.01,
-                "warnings": [], "props": {},
+                "warnings": [], "props": {}, "facts": node_facts.clone(),
                 "children": [{
                     "id": 1, "op": "Constant Scan", "kind": "compute", "est_rows": 1.0, "est_executions": 1.0,
-                    "subtree_cost": 0.0, "self_cost": 0.0, "warnings": [], "props": {}, "children": []
+                    "subtree_cost": 0.0, "self_cost": 0.0, "warnings": [], "props": {}, "facts": node_facts,
+                    "children": []
                 }]
             }
         }))

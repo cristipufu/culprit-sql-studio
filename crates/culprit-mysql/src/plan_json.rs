@@ -42,7 +42,7 @@ pub fn parse(json: &str, kind: PlanKind, statement: Option<&str>, schema: Option
         props.insert("message".into(), message.into());
     }
     let mut plan = Plan {
-        facts: Some(Default::default()),
+        facts: Default::default(),
         view: None,
         engine: Engine::Mysql,
         kind,
@@ -88,7 +88,7 @@ impl Context {
 
 pub(crate) fn new_node(id: &mut u32, op: &str, kind: NodeKind) -> PlanNode {
     let node = PlanNode {
-        facts: Some(Default::default()),
+        facts: Default::default(),
         id: *id,
         op: op.to_string(),
         kind,

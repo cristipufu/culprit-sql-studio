@@ -323,7 +323,7 @@ export function PlanDiagram(props: {
           <span className="tag">{kindLabel ?? (plan.kind === "actual" ? "Actual plan" : plan.kind === "generic" ? "Generic plan" : "Estimated plan")}</span>
           <span>
             {nodes.length} operator{nodes.length === 1 ? "" : "s"}
-            {estimates && ` · cost ${plan.facts?.estimated_cost_unavailable ? "unavailable" : cost(planCost)}`}
+            {estimates && ` · cost ${plan.facts.estimated_cost_unavailable ? "unavailable" : cost(planCost)}`}
           </span>
           <span className="spacer" />
           {plan.warnings.length > 0 && (
