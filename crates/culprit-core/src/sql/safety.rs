@@ -1,18 +1,17 @@
 //! Statement boundary, read-only classification, T-SQL marker injection, and session-statement detection.
 
 use crate::sql::lexer::{Token, readings};
-use crate::{Engine, Error, Result, sql::StatementCheck};
+use crate::{Engine, Error, Result, sql::StatementCheck, t};
 
 fn too_many() -> Error {
-    Error::invalid("This text holds more than one statement")
-        .with_hint("Run or explain one statement at a time: select it in the editor first.")
+    Error::invalid(t!("core.sql.several_statements")).with_hint(t!("core.sql.several_statements_hint"))
 }
 
 /// The one statement in `text`, without trailing semicolons or trailing comments. Errors when the text holds more than
 /// one statement, an executable comment, or quoting this can't follow — under every server setting that changes lexing.
 pub fn single_statement(text: &str, engine: Engine) -> Result<&str> {
     let mut cut: Option<usize> = None;
-    for (n, tokens) in readings(text, engine).map_err(Error::invalid)?.into_iter().enumerate() {
+    for (n, tokens) in readings(text, engine)?.into_iter().enumerate() {
         let first_semicolon = tokens.iter().position(|t| matches!(t, Token::Semicolon(_)));
         let end = match first_semicolon {
             Some(at) => {
@@ -30,17 +29,15 @@ pub fn single_statement(text: &str, engine: Engine) -> Result<&str> {
         cut = Some(end);
     }
     let statement = text[..cut.unwrap_or(text.len())].trim();
-    let readings = readings(statement, engine).map_err(Error::invalid)?;
+    let readings = readings(statement, engine)?;
     if statement.is_empty() || readings.iter().any(|tokens| tokens.is_empty()) {
-        return Err(Error::invalid("There is no statement to run"));
+        return Err(Error::invalid(t!("core.sql.no_statement")));
     }
     // T-SQL runs consecutive statements without a semicolon between them: `SELECT 1 COMMIT CREATE TABLE …` is three.
     if engine == Engine::Mssql
         && let Some(word) = readings.iter().find_map(|tokens| mssql_second_statement(tokens))
     {
-        return Err(too_many().with_hint(format!(
-            "SQL Server reads `{word}` here as the start of another statement. Run or explain one statement at a time."
-        )));
+        return Err(too_many().with_hint(t!("core.sql.mssql_second_statement_hint", word = word)));
     }
     Ok(statement)
 }
@@ -469,16 +466,11 @@ pub fn check(text: &str, engine: Engine) -> StatementCheck {
     let has = |w: &str| words.iter().any(|x| x == w);
     let warning = match verb.as_str() {
         _ if reads => None,
-        "UPDATE" | "DELETE" if !has("WHERE") => {
-            Some("There is no WHERE clause, so this changes every row in the table.".to_string())
-        }
-        "TRUNCATE" => Some("This removes every row in the table.".to_string()),
-        "DROP" => Some("This removes the object and everything in it.".to_string()),
-        "ALTER" => Some("This changes the structure; a large table can be locked while it runs.".to_string()),
-        "SELECT" | "WITH" | "TABLE" | "VALUES" | "SHOW" | "EXPLAIN" => Some(
-            "Culprit can't prove this only reads: it locks rows, writes into a table, or calls a function with side effects."
-                .to_string(),
-        ),
+        "UPDATE" | "DELETE" if !has("WHERE") => Some(t!("core.sql.warning.no_where")),
+        "TRUNCATE" => Some(t!("core.sql.warning.truncate")),
+        "DROP" => Some(t!("core.sql.warning.drop")),
+        "ALTER" => Some(t!("core.sql.warning.alter")),
+        "SELECT" | "WITH" | "TABLE" | "VALUES" | "SHOW" | "EXPLAIN" => Some(t!("core.sql.warning.may_write")),
         _ => None,
     };
     StatementCheck { reads_only: reads, verb, warning, problem: None }

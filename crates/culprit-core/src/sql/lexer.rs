@@ -1,7 +1,7 @@
 //! Low-level SQL lexical scanning across engine quoting and comment modes, shared by statement safety,
 //! static predicate matching, and plan predicate inspection.
 
-use crate::{Engine, SqlSyntax};
+use crate::{Engine, SqlSyntax, t};
 
 /// How backslashes behave inside quoted text. MySQL and Postgres both have a server setting that flips this
 /// (NO_BACKSLASH_ESCAPES, standard_conforming_strings).
@@ -66,36 +66,65 @@ pub(crate) enum Token<'a> {
 }
 
 /// Top-level tokens, with literals and comments skipped. Errors on text it can't lex safely.
-pub(crate) fn lex(text: &str, engine: Engine, mode: Mode) -> std::result::Result<Vec<Token<'_>>, &'static str> {
+pub(crate) fn lex(text: &str, engine: Engine, mode: Mode) -> std::result::Result<Vec<Token<'_>>, LexError> {
     let mut tokens = Vec::new();
     lex_into(text, engine, mode, &mut tokens).map(|()| tokens)
 }
 
-/// The message for a quote that never closes: the one lexing error that depends on the server's settings.
-pub(crate) const UNCLOSED_QUOTE: &str = "A quoted string or name is never closed";
+/// Why text can't be lexed with confidence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LexError {
+    /// A quoted string or name never closes: the one lexing error that depends on the server's settings.
+    UnclosedQuote,
+    /// A `/* … */` comment never closes.
+    UnclosedComment,
+    /// A Postgres `$$`-quoted string never closes.
+    UnclosedDollarQuote,
+    /// A MySQL executable comment (`/*! … */`), which the server runs.
+    ExecutableComment,
+    /// A control character or unusual whitespace outside a string, which a server may read differently.
+    UnusualWhitespace,
+}
+
+impl LexError {
+    /// What a person reads about it.
+    pub fn message(self) -> String {
+        match self {
+            LexError::UnclosedQuote => t!("core.sql.lex.unclosed_quote"),
+            LexError::UnclosedComment => t!("core.sql.lex.unclosed_comment"),
+            LexError::UnclosedDollarQuote => t!("core.sql.lex.unclosed_dollar_quote"),
+            LexError::ExecutableComment => t!("core.sql.lex.executable_comment"),
+            LexError::UnusualWhitespace => t!("core.sql.lex.unusual_whitespace"),
+        }
+    }
+}
+
+impl From<LexError> for crate::Error {
+    fn from(e: LexError) -> crate::Error {
+        crate::Error::invalid(e.message())
+    }
+}
 
 /// Every reading of `text` under the server settings that change lexing (see [`modes`]). A setting under which the
 /// text has a quote that never closes is one where the server rejects the text whole, so that reading is left out — as
 /// long as nothing before the open quote could run on its own: MySQL runs multi-statement text a statement at a time, so
 /// a `;` before it keeps the error. Every other error (comments, executable comments, invisible characters) refuses the
 /// text in any reading, and at least one reading must succeed.
-pub(crate) fn readings(text: &str, engine: Engine) -> std::result::Result<Vec<Vec<Token<'_>>>, &'static str> {
+pub(crate) fn readings(text: &str, engine: Engine) -> std::result::Result<Vec<Vec<Token<'_>>>, LexError> {
     let mut out = Vec::new();
-    let mut unclosed = None;
     for &mode in modes(engine) {
         let mut tokens = Vec::new();
         match lex_into(text, engine, mode, &mut tokens) {
             Ok(()) => out.push(tokens),
             Err(e) => {
                 let ran_before = engine == Engine::Mysql && tokens.iter().any(|t| matches!(t, Token::Semicolon(_)));
-                if e != UNCLOSED_QUOTE || ran_before {
+                if e != LexError::UnclosedQuote || ran_before {
                     return Err(e);
                 }
-                unclosed = Some(e);
             }
         }
     }
-    if out.is_empty() { Err(unclosed.unwrap_or(UNCLOSED_QUOTE)) } else { Ok(out) }
+    if out.is_empty() { Err(LexError::UnclosedQuote) } else { Ok(out) }
 }
 
 fn lex_into<'a>(
@@ -103,7 +132,7 @@ fn lex_into<'a>(
     engine: Engine,
     mode: Mode,
     tokens: &mut Vec<Token<'a>>,
-) -> std::result::Result<(), &'static str> {
+) -> std::result::Result<(), LexError> {
     let engine = engine.sql_syntax();
     let backslash = mode.backslash;
     let bytes = text.as_bytes();
@@ -129,7 +158,7 @@ fn lex_into<'a>(
                     // `/*! … */` and MariaDB's `/*M! … */` are executed by the server, so they are code, not comments.
                     let executable = bytes.get(i + 2) == Some(&b'!') || bytes.get(i + 3) == Some(&b'!');
                     if executable {
-                        return Err("Executable comments (/*! … */) aren't allowed here");
+                        return Err(LexError::ExecutableComment);
                     }
                 }
                 i = block_comment_end(bytes, i, engine != SqlSyntax::Mysql)?;
@@ -165,9 +194,7 @@ fn lex_into<'a>(
             // Characters servers may read as whitespace (or ignore) but this lexer would take for part of a word or a
             // symbol: a non-breaking space or zero-width space between `1` and `EXEC` must never hide the keyword.
             _ if c < 0x20 || c == 0x7f || (c >= 0x80 && text[i..].chars().next().is_some_and(invisible)) => {
-                return Err(
-                    "The text has a control character or unusual whitespace outside a string; retype it with plain spaces",
-                );
+                return Err(LexError::UnusualWhitespace);
             }
             _ if is_word_start(c) => {
                 let start = i;
@@ -178,9 +205,7 @@ fn lex_into<'a>(
                 // Inside a word too: `pg_stat_reset<zero-width space>()` must not read as an unknown name here while
                 // a server sees the function.
                 if word.chars().any(invisible) {
-                    return Err(
-                        "The text has a control character or unusual whitespace outside a string; retype it with plain spaces",
-                    );
+                    return Err(LexError::UnusualWhitespace);
                 }
                 // Postgres E'…' strings always treat backslashes as escapes.
                 if engine == SqlSyntax::Postgres && word.eq_ignore_ascii_case("e") && bytes.get(i) == Some(&b'\'') {
@@ -230,7 +255,7 @@ pub fn line_end(bytes: &[u8], from: usize) -> usize {
 }
 
 /// The index after a `/* … */` comment starting at `from`. Postgres and SQL Server nest these; MySQL doesn't.
-pub fn block_comment_end(bytes: &[u8], from: usize, nests: bool) -> std::result::Result<usize, &'static str> {
+pub fn block_comment_end(bytes: &[u8], from: usize, nests: bool) -> std::result::Result<usize, LexError> {
     let mut depth = 0usize;
     let mut i = from;
     while i + 1 < bytes.len() {
@@ -249,7 +274,7 @@ pub fn block_comment_end(bytes: &[u8], from: usize, nests: bool) -> std::result:
             i += 1;
         }
     }
-    Err("A /* comment */ is never closed")
+    Err(LexError::UnclosedComment)
 }
 
 /// The index after a quoted run opened at `from` with `close` (doubled `close` is an escaped one).
@@ -258,7 +283,7 @@ pub fn quoted_end(
     from: usize,
     close: u8,
     backslash_escapes: bool,
-) -> std::result::Result<usize, &'static str> {
+) -> std::result::Result<usize, LexError> {
     let mut i = from + 1;
     while i < bytes.len() {
         let c = bytes[i];
@@ -274,7 +299,7 @@ pub fn quoted_end(
             i += 1;
         }
     }
-    Err(UNCLOSED_QUOTE)
+    Err(LexError::UnclosedQuote)
 }
 
 /// Best-effort index after a quoted run opened at `from` with `close`, advancing to the end of `bytes` when unclosed.
@@ -292,13 +317,13 @@ pub fn dollar_tag(bytes: &[u8], from: usize) -> Option<&[u8]> {
     valid.then_some(&bytes[from..from + len + 2])
 }
 
-pub fn dollar_quoted_end(bytes: &[u8], from: usize, tag: &[u8]) -> std::result::Result<usize, &'static str> {
+pub fn dollar_quoted_end(bytes: &[u8], from: usize, tag: &[u8]) -> std::result::Result<usize, LexError> {
     let body = from + tag.len();
     bytes[body..]
         .windows(tag.len())
         .position(|w| w == tag)
         .map(|p| body + p + tag.len())
-        .ok_or("A $$-quoted string is never closed")
+        .ok_or(LexError::UnclosedDollarQuote)
 }
 
 /// One name part as written in a plan or filter, without its delimiters:

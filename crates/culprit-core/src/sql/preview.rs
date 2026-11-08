@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::lexer::{Token, readings};
-use crate::{Engine, Error, Result, ResultSet, SqlSyntax};
+use crate::{Engine, Error, Result, ResultSet, SqlSyntax, t};
 
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -42,9 +42,9 @@ pub struct TablePreview {
 fn predicate(text: &str, engine: Engine) -> Result<&str> {
     let text = text.trim();
     if text.len() > 16 * 1024 {
-        return Err(Error::invalid("The quick filter is too long").with_hint("Use the SQL editor for larger queries"));
+        return Err(Error::invalid(t!("core.sql.preview.filter_too_long")).with_hint(t!("core.sql.preview.use_editor")));
     }
-    for tokens in readings(text, engine).map_err(Error::invalid)? {
+    for tokens in readings(text, engine)? {
         let mut depth = 0;
         for token in tokens {
             let invalid = match token {
@@ -93,13 +93,12 @@ fn predicate(text: &str, engine: Engine) -> Result<&str> {
 }
 
 fn filter_error() -> Error {
-    Error::invalid("Enter a WHERE expression, without query clauses or statements")
-        .with_hint("For example: status = 'open' AND amount > 100. Use the column headers to sort.")
+    Error::invalid(t!("core.sql.preview.filter_invalid")).with_hint(t!("core.sql.preview.filter_example"))
 }
 
 pub fn table_preview_sql(engine: Engine, options: &TablePreviewOptions) -> Result<String> {
     if options.schema.is_empty() || options.table.is_empty() {
-        return Err(Error::invalid("Choose a schema and table to preview"));
+        return Err(Error::invalid(t!("core.sql.preview.choose_table")));
     }
     let limit = options.limit.clamp(1, crate::limits::MAX_RESULT_ROWS);
     // Always quote catalog names, including lowercase reserved words. The advice dialect may omit simple quotes.

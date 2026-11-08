@@ -20,8 +20,8 @@ pub use inspect::{
 };
 pub(crate) use lexer::{balanced_parens, split_top_level_and, strip_outer_parens};
 pub use lexer::{
-    block_comment_end, clean_identifier, dollar_quoted_end, dollar_tag, identifier_parts, line_end, quoted_end,
-    skip_quoted_bytes, unquote_identifier,
+    LexError, block_comment_end, clean_identifier, dollar_quoted_end, dollar_tag, identifier_parts, line_end,
+    quoted_end, skip_quoted_bytes, unquote_identifier,
 };
 pub use preview::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions, table_preview_sql};
 pub use safety::{
