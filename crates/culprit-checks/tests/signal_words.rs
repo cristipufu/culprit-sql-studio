@@ -1011,3 +1011,131 @@ verify: Re-scan a few days later: the HOT share counts since the last statistics
 caveat: How long these counts have run isn't known (PostgreSQL 15+ records no start until its statistics are first reset, and the counts outlive restarts): one large update or backfill long ago would keep the share low. Compare how n_tup_hot_upd grows against n_tup_upd over a few days before changing the table."#,
     );
 }
+
+// ── connection-churn ───────────────────────────────────────────────────────────────────────────────
+
+fn churn(name: &str, signals: &[(&str, f64)], settings: &[(&str, &str)]) -> Vec<Finding> {
+    use culprit_core::{Signal, SignalScope, SignalUnit};
+    let mut s = fixture(name);
+    let p = s.pressure.get_or_insert_with(Default::default);
+    p.uptime_hours = Some(72.0);
+    p.signals = signals
+        .iter()
+        .map(|(key, value)| Signal::new(key, key, *value, SignalUnit::PerSecond, SignalScope::SinceStartup))
+        .collect();
+    for (name, value) in settings {
+        set(&mut s, name, value);
+    }
+    run("connection-churn", &s)
+}
+
+#[test]
+fn connection_churn_on_postgres() {
+    let mut findings = churn("postgres-demo", &[("new-connections", 12.0), ("session-length", 0.5)], &[]);
+    findings.extend(churn("postgres-demo", &[("new-connections", 3.0)], &[]));
+    says(
+        &findings,
+        r#"id: connection-churn:server
+title: This database recorded 12 new connections a second on average
+summary: Since PostgreSQL started or its statistics were reset, 3.0 days ago the server accepted 12 new connections a second on average to this database. Each new PostgreSQL connection starts a server process and pays for TLS and authentication: milliseconds of CPU and a few MB of memory before the first query. Sessions here last 500 ms on average. If the application connects for each request, pooling can avoid that setup cost; this rate alone does not prove it does so or that connection setup is slowing requests.
+impact: 12/s new connections
+metric: New connections per second
+fix: Pool connections in the application (every mainstream driver has a pool), or put PgBouncer in front in transaction mode so thousands of clients share a few dozen server connections.
+verify: Compare new-connection counts over equal intervals before and after the change, together with request latency. Pooling should reduce connection setup for the same workload; there is no universal healthy connection rate.
+caveat: A rate since startup: one busy reconnect storm counts for the whole period.
+
+id: connection-churn:server
+title: This database recorded 3 new connections a second on average
+summary: Since PostgreSQL started or its statistics were reset, 3.0 days ago the server accepted 3 new connections a second on average to this database. Each new PostgreSQL connection starts a server process and pays for TLS and authentication: milliseconds of CPU and a few MB of memory before the first query. If the application connects for each request, pooling can avoid that setup cost; this rate alone does not prove it does so or that connection setup is slowing requests.
+impact: 3/s new connections
+metric: New connections per second
+fix: Pool connections in the application (every mainstream driver has a pool), or put PgBouncer in front in transaction mode so thousands of clients share a few dozen server connections.
+verify: Compare new-connection counts over equal intervals before and after the change, together with request latency. Pooling should reduce connection setup for the same workload; there is no universal healthy connection rate.
+caveat: A rate since startup: one busy reconnect storm counts for the whole period."#,
+    );
+}
+
+#[test]
+fn connection_churn_on_sql_server() {
+    let mut findings = churn("mssql-demo", &[("new-connections", 20.0), ("pooled-reuse", 40.0)], &[]);
+    findings.extend(churn("mssql-demo", &[("new-connections", 20.0)], &[]));
+    says(
+        &findings,
+        r#"id: connection-churn:server
+title: The whole server recorded 20 new connections a second on average
+summary: Since SQL Server started or its statistics were reset, 3.0 days ago the server accepted 20 new connections a second on average, counting every database on the instance. SQL Server recorded 40% resets compared with resets plus new logins; pools can also reuse connections without a reset, so this does not identify all pool use. If the application connects for each request, pooling can avoid that setup cost; this rate alone does not prove it does so or that connection setup is slowing requests.
+impact: 20/s new connections
+metric: New connections per second
+fix: Keep connection pooling on (it is by default in ADO.NET and Microsoft.Data.SqlClient; JDBC needs a pool such as HikariCP) and close or dispose connections promptly so they go back to the pool. Every distinct connection string gets its own pool.
+verify: Compare new-connection counts over equal intervals before and after the change, together with request latency. Pooling should reduce connection setup for the same workload; there is no universal healthy connection rate.
+caveat: SQL Server counts connections for the whole server, so other databases' applications are in this number.
+caveat: A rate since startup: one busy reconnect storm counts for the whole period.
+
+id: connection-churn:server
+title: The whole server recorded 20 new connections a second on average
+summary: Since SQL Server started or its statistics were reset, 3.0 days ago the server accepted 20 new connections a second on average, counting every database on the instance. Every login pays for TLS, authentication and session setup. If the application connects for each request, pooling can avoid that setup cost; this rate alone does not prove it does so or that connection setup is slowing requests.
+impact: 20/s new connections
+metric: New connections per second
+fix: Keep connection pooling on (it is by default in ADO.NET and Microsoft.Data.SqlClient; JDBC needs a pool such as HikariCP) and close or dispose connections promptly so they go back to the pool. Every distinct connection string gets its own pool.
+verify: Compare new-connection counts over equal intervals before and after the change, together with request latency. Pooling should reduce connection setup for the same workload; there is no universal healthy connection rate.
+caveat: SQL Server counts connections for the whole server, so other databases' applications are in this number.
+caveat: A rate since startup: one busy reconnect storm counts for the whole period."#,
+    );
+}
+
+#[test]
+fn connection_churn_on_mysql() {
+    let mut findings = churn("mysql-demo", &[("new-connections", 15.0), ("thread-cache-misses", 30.0)], &[]);
+    findings.extend(churn("mysql-demo", &[("new-connections", 15.0)], &[("thread_cache_size", "100")]));
+    says(
+        &findings,
+        r#"id: connection-churn:server
+title: The whole server recorded 15 new connections a second on average
+summary: Since MySQL started or its statistics were reset, 3.0 days ago the server accepted 15 new connections a second on average, counting every schema and application on it (failed attempts left out). 30% of them needed a new thread because the thread cache was empty. If the application connects for each request, pooling can avoid that setup cost; this rate alone does not prove it does so or that connection setup is slowing requests.
+impact: 15/s new connections
+metric: New connections per second
+fix: Pool connections in the application. Until then, a larger thread cache lets new connections reuse threads: Set thread_cache_size to 64; SET PERSIST keeps it across restarts.
+sql: SET PERSIST thread_cache_size = 64;
+verify: Compare new-connection counts over equal intervals before and after the change, together with request latency. Pooling should reduce connection setup for the same workload; there is no universal healthy connection rate.
+caveat: MySQL counts connections for the whole server, so other databases' applications are in this number.
+caveat: A rate since startup: one busy reconnect storm counts for the whole period.
+
+id: connection-churn:server
+title: The whole server recorded 15 new connections a second on average
+summary: Since MySQL started or its statistics were reset, 3.0 days ago the server accepted 15 new connections a second on average, counting every schema and application on it (failed attempts left out). Every connection pays for TLS, authentication and a thread. If the application connects for each request, pooling can avoid that setup cost; this rate alone does not prove it does so or that connection setup is slowing requests.
+impact: 15/s new connections
+metric: New connections per second
+fix: Pool connections in the application: the thread cache already keeps 100 threads, so each connection still pays for TLS and authentication.
+verify: Compare new-connection counts over equal intervals before and after the change, together with request latency. Pooling should reduce connection setup for the same workload; there is no universal healthy connection rate.
+caveat: MySQL counts connections for the whole server, so other databases' applications are in this number.
+caveat: A rate since startup: one busy reconnect storm counts for the whole period."#,
+    );
+}
+
+#[test]
+fn connection_churn_on_yugabyte_and_sqlite() {
+    let mut findings = churn("yugabyte-demo", &[("new-connections", 12.0)], &[]);
+    findings.extend(churn("sqlite-demo", &[("new-connections", 12.0)], &[]));
+    says(
+        &findings,
+        r#"id: connection-churn:server
+title: The whole server recorded 12 new connections a second on average
+summary: Since YugabyteDB started or its statistics were reset, 3.0 days ago the server accepted 12 new connections a second on average, within the measured YSQL node scope. A YSQL logical client can share a physical backend through Connection Manager; these counts alone do not identify how clients are pooled. If the application connects for each request, pooling can avoid that setup cost; this rate alone does not prove it does so or that connection setup is slowing requests.
+impact: 12/s new connections
+metric: New connections per second
+fix: Reuse connections through the application pool or YSQL Connection Manager; compare connection setup latency and client/backend counts before changing pool sizes.
+verify: Compare new-connection counts over equal intervals before and after the change, together with request latency. Pooling should reduce connection setup for the same workload; there is no universal healthy connection rate.
+caveat: YugabyteDB counts connections for the whole server, so other databases' applications are in this number.
+caveat: A rate since startup: one busy reconnect storm counts for the whole period.
+
+id: connection-churn:server
+title: The whole server recorded 12 new connections a second on average
+summary: Since SQLite started or its statistics were reset, 3.0 days ago the server accepted 12 new connections a second on average. SQLite has no connections to pool: each one opens the file. If the application connects for each request, pooling can avoid that setup cost; this rate alone does not prove it does so or that connection setup is slowing requests.
+impact: 12/s new connections
+metric: New connections per second
+fix: Keep one connection open per worker instead of opening the file for each request.
+verify: Compare new-connection counts over equal intervals before and after the change, together with request latency. Pooling should reduce connection setup for the same workload; there is no universal healthy connection rate.
+caveat: SQLite counts connections for the whole server, so other databases' applications are in this number.
+caveat: A rate since startup: one busy reconnect storm counts for the whole period."#,
+    );
+}

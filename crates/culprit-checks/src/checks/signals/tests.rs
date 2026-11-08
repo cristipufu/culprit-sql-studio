@@ -221,12 +221,12 @@ fn churn_thresholds_differ_per_engine() {
         Signal::new("new-connections", "New connections", rate, SignalUnit::PerSecond, SignalScope::SinceStartup)
     };
     let pg = with_pressure(Engine::Postgres, |p| p.signals = vec![signal(3.0)]);
-    assert_eq!(connection_churn(&pg)[0].title, "This database recorded 3 new connections a second on average");
+    assert_eq!(ConnectionChurnCheck.run(&pg)[0].title, "This database recorded 3 new connections a second on average");
     let mssql = with_pressure(Engine::Mssql, |p| p.signals = vec![signal(3.0)]);
-    assert!(connection_churn(&mssql).is_empty());
+    assert!(ConnectionChurnCheck.run(&mssql).is_empty());
     let mysql = with_pressure(Engine::Mysql, |p| p.signals = vec![signal(40.0)]);
     assert_eq!(
-        connection_churn(&mysql)[0].fix.as_ref().unwrap().sql.as_deref(),
+        ConnectionChurnCheck.run(&mysql)[0].fix.as_ref().unwrap().sql.as_deref(),
         Some("SET PERSIST thread_cache_size = 64;")
     );
 }

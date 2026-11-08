@@ -6,25 +6,47 @@ use crate::evidence::Requirement as Evidence;
 pub fn connection_churn_info() -> CheckInfo {
     CheckInfo {
         id: "connection-churn".into(),
-        title: "Applications that connect for every request".into(),
+        title: t!("check.connection_churn.info.title"),
         category: Category::Configuration,
         engines: vec![Engine::Mssql, Engine::Postgres, Engine::Mysql],
         requires: vec![],
-        description: "New connections per second since startup (SQL Server logins, PostgreSQL 14+ sessions, MySQL and MariaDB Connections), with how long sessions last and how many came from a pool where the engine says.".into(),
+        description: t!("check.connection_churn.info.description"),
     }
 }
 
 check!(
-    ConnectionChurnCheck: connection_churn_info, connection_churn,
-    &[Evidence::Pressure { signal: None, timed_files: false, complete: false }]
+    ConnectionChurnCheck: connection_churn_info,
+    decide = new_connections,
+    render = connection_churn_finding,
+    case<'s> = ConnectionChurn,
+    evidence = &[Evidence::Pressure { signal: None, timed_files: false, complete: false }],
 );
 
-pub fn connection_churn(snapshot: &Snapshot) -> Vec<Finding> {
+/// A thread cache this large is enough: the fix raises a smaller one to it, never lowers one.
+const THREAD_CACHE: f64 = 64.0;
+
+/// New connections a second since the server started, above the engine's bar, and what the engine says about them.
+pub struct ConnectionChurn {
+    rate: f64,
+    uptime_hours: f64,
+    /// PostgreSQL: how long its sessions last, in seconds.
+    session_length: Option<f64>,
+    /// SQL Server: resets against resets plus new logins, as a percentage.
+    pooled_reuse: Option<f64>,
+    /// MySQL: connections that found the thread cache empty, as a percentage.
+    thread_cache_misses: Option<f64>,
+    /// MySQL: the thread cache it keeps now, and whether the fix raises it to [`THREAD_CACHE`].
+    thread_cache: Option<f64>,
+    raise_thread_cache: bool,
+    /// A count of the whole server's connections: said, but not graded on this database.
+    shared: bool,
+    severity: Severity,
+}
+
+fn new_connections(snapshot: &Snapshot) -> Vec<ConnectionChurn> {
     let Some(p) = snapshot.pressure.as_ref() else { return Vec::new() };
     let Some(rate) = p.signal(culprit_core::signal_id::NEW_CONNECTIONS).map(|s| s.value) else { return Vec::new() };
-    if p.uptime_hours.is_none_or(|h| h < 1.0) {
-        return Vec::new();
-    }
+    let Some(uptime_hours) = p.uptime_hours.filter(|h| *h >= 1.0) else { return Vec::new() };
     let engine = snapshot.server.engine;
     // On Azure SQL Database the login counters belong to the server process behind the database, shared by its
     // elastic pool: another database's logins aren't this one's to fix.
@@ -35,14 +57,40 @@ pub fn connection_churn(snapshot: &Snapshot) -> Vec<Finding> {
     if rate < limit {
         return Vec::new();
     }
+    let session_length = p.signal(culprit_core::signal_id::SESSION_LENGTH).map(|s| s.value);
+    let pooled_reuse = p.signal(culprit_core::signal_id::POOLED_REUSE).map(|s| s.value);
     // A large pool can legitimately open many long-lived sessions. Neither a rate nor a thread-cache miss ratio
     // establishes one connection per request. Known long-lived sessions / frequent pooled resets contradict it.
-    if (engine == Engine::Postgres
-        && p.signal(culprit_core::signal_id::SESSION_LENGTH).is_some_and(|s| s.value >= 60.0))
-        || (engine == Engine::Mssql && p.signal(culprit_core::signal_id::POOLED_REUSE).is_some_and(|s| s.value >= 90.0))
+    if (engine == Engine::Postgres && session_length.is_some_and(|s| s >= 60.0))
+        || (engine == Engine::Mssql && pooled_reuse.is_some_and(|s| s >= 90.0))
     {
         return Vec::new();
     }
+    // A count of the whole server's connections is shared: said, with what it counts, but not graded on this
+    // database (CLAUDE.md: mark shared counters and don't grade them). PostgreSQL's is this database's own.
+    let shared = engine != Engine::Postgres;
+    let severity = if !shared && rate >= limit * 5.0 && session_length.is_some_and(|s| s <= 1.0) {
+        Severity::Medium
+    } else {
+        Severity::Low
+    };
+    // A larger thread cache, where the server is configured, and never smaller than it is.
+    let thread_cache = snapshot.setting("thread_cache_size").and_then(|s| s.value.trim().parse::<f64>().ok());
+    vec![ConnectionChurn {
+        rate,
+        uptime_hours,
+        session_length,
+        pooled_reuse,
+        thread_cache_misses: p.signal(culprit_core::signal_id::THREAD_CACHE_MISSES).map(|s| s.value),
+        thread_cache,
+        raise_thread_cache: engine == Engine::Mysql && thread_cache.is_none_or(|n| n < THREAD_CACHE),
+        shared,
+        severity,
+    }]
+}
+
+fn connection_churn_finding(snapshot: &Snapshot, churn: ConnectionChurn) -> Finding {
+    let engine = snapshot.server.engine;
     // Keyed on `server`, never the connection's name: finding ids travel into exports and agent briefs.
     let mut f = finding(
         "connection-churn",
@@ -50,109 +98,68 @@ pub fn connection_churn(snapshot: &Snapshot) -> Vec<Finding> {
         Category::Configuration,
         subject(SubjectKind::Database, &snapshot.server.database),
     );
+    let rate = format::count(churn.rate);
     // PostgreSQL counts sessions to this database; SQL Server's logins and MySQL's connections count the whole server,
     // every database and application on it.
     f.title = if engine == Engine::Postgres {
-        format!("This database recorded {} new connections a second on average", format::count(rate))
+        t!("check.connection_churn.title.database", rate = &rate)
     } else {
-        format!("The whole server recorded {} new connections a second on average", format::count(rate))
+        t!("check.connection_churn.title.server", rate = &rate)
     };
-    let detail = match engine {
-        Engine::Yugabyte => "A YSQL logical client can share a physical backend through Connection Manager; these counts alone do not identify how clients are pooled.".into(),
-        Engine::Sqlite => "SQLite has no connections to pool: each one opens the file.".to_string(),
+    let mut summary = vec![t!(
+        "check.connection_churn.summary.accepted",
+        engine = engine_name(snapshot),
+        ago = format::duration(churn.uptime_hours * 3_600_000.0),
+        rate = &rate,
+        scope = culprit_core::wire_name(&engine)
+    )];
+    match engine {
+        Engine::Yugabyte => summary.push(t!("check.connection_churn.detail.yugabyte")),
+        Engine::Sqlite => summary.push(t!("check.connection_churn.detail.sqlite")),
         Engine::Postgres => {
-            let length = p.signal(culprit_core::signal_id::SESSION_LENGTH).map(|s| s.value);
-            format!(
-                "Each new PostgreSQL connection starts a server process and pays for TLS and authentication: milliseconds of CPU and a few MB of memory before the first query.{}",
-                length
-                    .map(|s| format!(" Sessions here last {} on average.", format::duration(s * 1000.0)))
-                    .unwrap_or_default()
-            )
+            summary.push(t!("check.connection_churn.detail.postgres"));
+            if let Some(s) = churn.session_length {
+                summary.push(t!("check.connection_churn.detail.session_length", length = format::duration(s * 1000.0)));
+            }
         }
-        Engine::Mssql => match p.signal(culprit_core::signal_id::POOLED_REUSE).map(|s| s.value) {
-            Some(pct) => format!(
-                "SQL Server recorded {:.0}% resets compared with resets plus new logins; pools can also reuse connections without a reset, so this does not identify all pool use.",
-                pct
-            ),
-            None => "Every login pays for TLS, authentication and session setup.".into(),
-        },
-        Engine::Mysql => match p.signal(culprit_core::signal_id::THREAD_CACHE_MISSES).map(|s| s.value) {
-            Some(pct) => format!("{:.0}% of them needed a new thread because the thread cache was empty.", pct),
-            None => "Every connection pays for TLS, authentication and a thread.".into(),
-        },
-    };
-    let scope = match engine {
-        Engine::Yugabyte => ", within the measured YSQL node scope",
-        Engine::Sqlite => "",
-        Engine::Postgres => " to this database",
-        Engine::Mssql => ", counting every database on the instance",
-        Engine::Mysql => ", counting every schema and application on it (failed attempts left out)",
-    };
-    f.summary = format!(
-        "{} the server accepted {} new connections a second on average{scope}. {detail} If the application connects for each request, pooling can avoid that setup cost; this rate alone does not prove it does so or that connection setup is slowing requests.",
-        capitalize(&since_start(snapshot)),
-        format::count(rate)
-    );
-    // A count of the whole server's connections is shared: said, with what it counts, but not graded on this
-    // database (CLAUDE.md: mark shared counters and don't grade them). PostgreSQL's is this database's own.
-    let shared = engine != Engine::Postgres;
-    f.severity = if !shared
-        && rate >= limit * 5.0
-        && p.signal(culprit_core::signal_id::SESSION_LENGTH).is_some_and(|s| s.value <= 1.0)
-    {
-        Severity::Medium
-    } else {
-        Severity::Low
-    };
-    if shared {
-        f.caveats.push(format!(
-            "{} counts connections for the whole server, so other databases' applications are in this number.",
-            snapshot.server.name()
-        ));
+        Engine::Mssql => summary.push(match churn.pooled_reuse {
+            Some(pct) => t!("check.connection_churn.detail.pooled_reuse", percent = format!("{pct:.0}")),
+            None => t!("check.connection_churn.detail.mssql"),
+        }),
+        Engine::Mysql => summary.push(match churn.thread_cache_misses {
+            Some(pct) => t!("check.connection_churn.detail.thread_cache_misses", percent = format!("{pct:.0}")),
+            None => t!("check.connection_churn.detail.mysql"),
+        }),
+    }
+    summary.push(t!("check.connection_churn.summary.not_proof"));
+    f.summary = summary.join(" ");
+    f.severity = churn.severity;
+    if churn.shared {
+        f.caveats.push(t!("check.connection_churn.caveat.shared", engine = snapshot.server.name()));
     }
     severity_score(&mut f);
-    f.impact.label = format!("{}/s new connections", format::count(rate));
+    f.impact.label = t!("check.connection_churn.impact", rate = &rate);
     f.confidence = Confidence::Medium;
-    f.metrics = vec![Metric::new("New connections per second", rate, Unit::Count)];
-    // A larger thread cache, where the server is configured, and never smaller than it is.
-    const THREAD_CACHE: f64 = 64.0;
-    let thread_cache = snapshot.setting("thread_cache_size").and_then(|s| s.value.trim().parse::<f64>().ok());
-    let cache_change = (engine == Engine::Mysql && thread_cache.is_none_or(|n| n < THREAD_CACHE))
+    f.metrics = vec![Metric::new(t!("check.connection_churn.metric.rate"), churn.rate, Unit::Count)];
+    let cache_change = churn
+        .raise_thread_cache
         .then(|| setting_change(&snapshot.server, "thread_cache_size", &format!("{THREAD_CACHE:.0}")));
     f.fix = Some(match engine {
-        Engine::Yugabyte => Fix { summary: "Reuse connections through the application pool or YSQL Connection Manager; compare connection setup latency and client/backend counts before changing pool sizes.".into(), sql: None, cost: None },
-        Engine::Sqlite => Fix {
-            summary: "Keep one connection open per worker instead of opening the file for each request.".into(),
-            sql: None,
-            cost: None,
-        },
-        Engine::Postgres => Fix {
-            summary: "Pool connections in the application (every mainstream driver has a pool), or put PgBouncer in front in transaction mode so thousands of clients share a few dozen server connections.".into(),
-            sql: None,
-            cost: None,
-        },
-        Engine::Mssql => Fix {
-            summary: "Keep connection pooling on (it is by default in ADO.NET and Microsoft.Data.SqlClient; JDBC needs a pool such as HikariCP) and close or dispose connections promptly so they go back to the pool. Every distinct connection string gets its own pool.".into(),
-            sql: None,
-            cost: None,
-        },
+        Engine::Yugabyte => Fix { summary: t!("check.connection_churn.fix.yugabyte"), sql: None, cost: None },
+        Engine::Sqlite => Fix { summary: t!("check.connection_churn.fix.sqlite"), sql: None, cost: None },
+        Engine::Postgres => Fix { summary: t!("check.connection_churn.fix.postgres"), sql: None, cost: None },
+        Engine::Mssql => Fix { summary: t!("check.connection_churn.fix.mssql"), sql: None, cost: None },
         Engine::Mysql => Fix {
-            summary: match (&cache_change, thread_cache) {
-                (Some(change), _) => format!(
-                    "Pool connections in the application. Until then, a larger thread cache lets new connections reuse threads: {}",
-                    change.how
-                ),
-                (None, Some(n)) => format!(
-                    "Pool connections in the application: the thread cache already keeps {} threads, so each connection still pays for TLS and authentication.",
-                    format::count(n)
-                ),
-                (None, None) => "Pool connections in the application.".into(),
+            summary: match (&cache_change, churn.thread_cache) {
+                (Some(change), _) => t!("check.connection_churn.fix.mysql_thread_cache", how = &change.how),
+                (None, Some(n)) => t!("check.connection_churn.fix.mysql_cache_kept", threads = format::count(n)),
+                (None, None) => t!("check.connection_churn.fix.mysql"),
             },
             sql: cache_change.and_then(|c| c.sql),
             cost: None,
         },
     });
-    f.verify = vec!["Compare new-connection counts over equal intervals before and after the change, together with request latency. Pooling should reduce connection setup for the same workload; there is no universal healthy connection rate.".into()];
-    f.caveats.push("A rate since startup: one busy reconnect storm counts for the whole period.".into());
-    vec![f]
+    f.verify = vec![t!("check.connection_churn.verify")];
+    f.caveats.push(t!("check.connection_churn.caveat.since_startup"));
+    f
 }
