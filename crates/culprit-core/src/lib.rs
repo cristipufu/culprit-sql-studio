@@ -21,6 +21,8 @@ pub mod format;
 pub mod i18n;
 pub mod index_filter;
 pub mod insights;
+#[cfg(test)]
+mod label_tests;
 pub mod limits;
 pub mod measurement;
 pub mod model;

@@ -9,6 +9,8 @@ mod mysql;
 mod postgres;
 mod products;
 mod sqlite;
+#[cfg(test)]
+mod tests;
 mod timescale;
 mod yugabyte;
 
