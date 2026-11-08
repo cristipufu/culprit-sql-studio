@@ -5,6 +5,7 @@ import type { IndexStat } from "../../gen/IndexStat";
 import type { Report } from "../../gen/Report";
 import type { TableStat } from "../../gen/TableStat";
 import { bytes, count, oneLine } from "../../lib/format";
+import { t } from "../../lib/i18n";
 import { indexKey, indexUsage, plannedQueryCount } from "../../lib/index-usage";
 import { setState } from "../../lib/store";
 
@@ -32,9 +33,9 @@ export function Indexes({ report, table, indexes }: { report: Report; table: Tab
       <div className="notice">
         <div>
           {table.kind === "virtual" ? (
-            <><b>Indexes are managed by the virtual table's module.</b> Ordinary CREATE INDEX does not apply to this table.</>
+            <><b>{t("ui.indexes.virtual")}</b> {t("ui.indexes.virtual_detail")}</>
           ) : (
-            <><b>No index definitions in this scan.</b> Explain the queries that read this table to check their access paths.</>
+            <><b>{t("ui.indexes.none")}</b> {t("ui.indexes.none_detail")}</>
           )}
         </div>
       </div>
@@ -42,7 +43,7 @@ export function Indexes({ report, table, indexes }: { report: Report; table: Tab
   return (
     <>
       {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling region takes focus so the keyboard can scroll it */}
-      <div className="td-grid-wrap" role="region" aria-label="Indexes" tabIndex={0}>
+      <div className="td-grid-wrap" role="region" aria-label={t("ui.schema_table.indexes")} tabIndex={0}>
         <table className="grid td-grid ix-grid">
           <colgroup>
             <col className="index-name-col" />
@@ -53,11 +54,11 @@ export function Indexes({ report, table, indexes }: { report: Report; table: Tab
           </colgroup>
           <thead>
             <tr>
-              <th>Index</th>
-              <th>Keys</th>
-              <th>Used by</th>
-              <th title={hasUsage ? `Reads and writes ${sinceText}` : "Index usage counters are unavailable in this scan"}>Reads · writes</th>
-              <th className="r">Size</th>
+              <th>{t("ui.indexes.index")}</th>
+              <th>{t("ui.indexes.keys")}</th>
+              <th>{t("ui.indexes.used_by")}</th>
+              <th title={hasUsage ? t("ui.indexes.reads_writes_title", { since: sinceText }) : t("ui.indexes.no_counters_title")}>{t("ui.indexes.reads_writes")}</th>
+              <th className="r">{t("common.metric.size")}</th>
             </tr>
           </thead>
           <tbody>
@@ -77,14 +78,14 @@ export function Indexes({ report, table, indexes }: { report: Report; table: Tab
                         <span className="mono" title={i.name}>
                           {i.name}
                         </span>
-                        {i.is_primary_key && <span className="tag">PK</span>}
-                        {i.is_unique && !i.is_primary_key && <span className="tag">unique</span>}
-                        {i.is_clustered && !i.is_primary_key && <span className="tag">clustered</span>}
+                        {i.is_primary_key && <span className="tag">{t("ui.indexes.primary_key")}</span>}
+                        {i.is_unique && !i.is_primary_key && <span className="tag">{t("ui.indexes.unique")}</span>}
+                        {i.is_clustered && !i.is_primary_key && <span className="tag">{t("ui.indexes.clustered")}</span>}
                       </div>
                     </td>
                     <td className="ix-keys mono">
                       <span className="ix-key-list" title={i.columns.join(", ")}>{i.columns.join(", ")}</span>
-                      {i.docdb && <div className="muted">{i.docdb.hash_columns.length ? `HASH (${i.docdb.hash_columns.join(", ")})` : "range sharded"}{i.docdb.tablets != null ? ` · ${i.docdb.tablets} tablet${i.docdb.tablets === 1 ? "" : "s"}` : ""}</div>}
+                      {i.docdb && <div className="muted">{i.docdb.hash_columns.length ? `HASH (${i.docdb.hash_columns.join(", ")})` : t("ui.indexes.range_sharded")}{i.docdb.tablets != null ? ` · ${t("ui.indexes.tablets", { n: i.docdb.tablets, count: String(i.docdb.tablets) })}` : ""}</div>}
                       {i.include.length > 0 && (
                         <div className="muted" title={`INCLUDE (${i.include.join(", ")})`}>
                           + {i.include.join(", ")}
@@ -92,26 +93,26 @@ export function Indexes({ report, table, indexes }: { report: Report; table: Tab
                       )}
                       {i.filter && (
                         <div className="muted" title={i.filter}>
-                          where {i.filter}
+                          {t("ui.indexes.where", { filter: i.filter })}
                         </div>
                       )}
                     </td>
                     <td className="ix-used">
                       {uses.length > 0 ? (
-                        <button type="button" className="used-btn" onClick={() => setOpen(expanded ? null : i.name)} aria-expanded={expanded} aria-controls={expanded ? usesId : undefined} title={`${uses.length} captured ${uses.length === 1 ? "query uses" : "queries use"} ${i.name}`}>
+                        <button type="button" className="used-btn" onClick={() => setOpen(expanded ? null : i.name)} aria-expanded={expanded} aria-controls={expanded ? usesId : undefined} title={t("ui.indexes.used_by_title", { n: uses.length, count: String(uses.length), index: i.name })}>
                           <ChevronRight size={12} className={expanded ? "rot" : ""} />
-                          <b>{count(uses.length)}</b> {uses.length === 1 ? "query" : "queries"}
+                          <b>{count(uses.length)}</b> {t("ui.indexes.query_noun", { n: uses.length })}
                         </button>
                       ) : (
                         <span
                           className="muted"
                           title={
                             planned === 0
-                              ? "Culprit has no query plans for this database yet, so it can't tell which queries use each index. Its read count is on the right."
-                              : `None of the ${planned} plans Culprit captured (the heaviest queries) use it; lighter queries may still read it, as the read count shows.`
+                              ? t("ui.indexes.no_plans_title")
+                              : t("ui.indexes.unused_title", { n: planned, count: String(planned) })
                           }
                         >
-                          {planned === 0 ? "no plans yet" : (i.reads ?? 0) > 0 ? "lighter queries" : "no query"}
+                          {planned === 0 ? t("ui.indexes.no_plans") : (i.reads ?? 0) > 0 ? t("ui.indexes.lighter_queries") : t("ui.indexes.no_query")}
                         </span>
                       )}
                     </td>
@@ -119,7 +120,7 @@ export function Indexes({ report, table, indexes }: { report: Report; table: Tab
                       {i.reads == null && i.writes == null ? (
                         <span className="muted">—</span>
                       ) : (
-                        <span className="rw" title={`${i.reads == null ? "unmeasured" : count(reads)} reads · ${i.writes == null ? "unmeasured" : count(writes)} writes ${sinceText}`}>
+                        <span className="rw" title={t("ui.indexes.rw_title", { reads: i.reads == null ? t("ui.indexes.unmeasured") : count(reads), writes: i.writes == null ? t("ui.indexes.unmeasured") : count(writes), since: sinceText })}>
                           <span className="rw-bar">
                             <span className="r" style={{ width: `${(reads / rw) * 100}%` }} />
                             <span className="w" style={{ width: `${(writes / rw) * 100}%` }} />
@@ -131,7 +132,7 @@ export function Indexes({ report, table, indexes }: { report: Report; table: Tab
                       )}
                     </td>
                     <td className="r ix-size">
-                      <span className="size-cell" title={engine === "yugabyte" && i.is_primary_key ? "Primary-key storage is included in the base table; no independent index size is charged" : undefined}>
+                      <span className="size-cell" title={engine === "yugabyte" && i.is_primary_key ? t("ui.indexes.yugabyte_pk_size") : undefined}>
                         <span className="bar">
                           <span
                             style={{
@@ -150,7 +151,7 @@ export function Indexes({ report, table, indexes }: { report: Report; table: Tab
                           {notes.map((n) => (
                             <div key={n.text} className={`ix-note ${n.tone}`} title={n.text}>
                               {n.finding ? (
-                                <button type="button" onClick={() => setState({ view: "overview", finding: n.finding! })} title="Open the finding">
+                                <button type="button" onClick={() => setState({ view: "overview", finding: n.finding! })} title={t("ui.indexes.open_finding")}>
                                   {n.text} <ArrowRight size={11} />
                                 </button>
                               ) : n.text}
@@ -165,15 +166,15 @@ export function Indexes({ report, table, indexes }: { report: Report; table: Tab
                       <td colSpan={5}>
                         <div className="ix-uses-inner">
                           <div className="ix-uses-head">
-                            <span>Queries using this index</span>
-                            <span className="muted">{uses.length} captured</span>
+                            <span>{t("ui.indexes.uses_heading")}</span>
+                            <span className="muted">{t("ui.indexes.captured", { n: uses.length, count: String(uses.length) })}</span>
                           </div>
                           {uses.map((u) => (
                             <button type="button"
                               key={u.query.id}
                               className="use-row"
                               onClick={() => setState({ view: "queries", query: u.query.id })}
-                              title={`${oneLine(u.query.text)}\nOpen in Queries`}
+                              title={`${oneLine(u.query.text)}\n${t("ui.indexes.open_query")}`}
                             >
                               <span className="mono q">{oneLine(u.query.text)}</span>
                               <span className="muted ops">{u.ops.join(", ")}</span>
@@ -191,10 +192,9 @@ export function Indexes({ report, table, indexes }: { report: Report; table: Tab
         </table>
       </div>
       <p className="td-foot">
-        “Used by” comes from the plans of the {planned} heaviest queries;{" "}
         {hasUsage
-          ? `reads and writes count all activity ${sinceText}.`
-          : "Index read and write counters are unavailable in this scan."}
+          ? t("ui.indexes.foot", { n: planned, count: String(planned), since: sinceText })
+          : t("ui.indexes.foot_no_counters", { n: planned, count: String(planned) })}
       </p>
     </>
   );

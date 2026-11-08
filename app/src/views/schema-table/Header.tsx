@@ -6,6 +6,7 @@ import type { TableStat } from "../../gen/TableStat";
 import { copyAndTell } from "../../lib/clipboard";
 import { ago, bytes, count, percent } from "../../lib/format";
 import { tableSignalWarning } from "../../lib/health";
+import { t } from "../../lib/i18n";
 import { tableFindings, tableKey } from "../../lib/schema-model";
 import { setState } from "../../lib/store";
 
@@ -31,18 +32,18 @@ export function Header({ report, table, findings }: { report: Report; table: Tab
   const health: { label: string; why: string }[] = [];
   if (table.is_heap)
     health.push({
-      label: "No clustered index",
-      why: "Rows live in an unordered heap: scans read forwarded records and space isn't reclaimed well",
+      label: t("ui.table_header.no_clustered_index"),
+      why: t("ui.table_header.no_clustered_index_why"),
     });
   if (!table.has_primary_key && table.kind !== "virtual")
     health.push({
-      label: "No primary key",
-      why: "Nothing identifies a row uniquely; replication, ORMs and deduplication all suffer",
+      label: t("ui.common.no_primary_key"),
+      why: t("ui.table_header.no_primary_key_why"),
     });
   if (table.dead_rows != null && table.rows != null && table.dead_rows > Math.max(10_000, table.rows * 0.2))
     health.push({
-      label: `${count(table.dead_rows)} dead rows`,
-      why: "Deleted or updated row versions waiting for vacuum: scans still read them",
+      label: t("ui.table_header.dead_rows", { count: count(table.dead_rows) }),
+      why: t("ui.table_header.dead_rows_why"),
     });
   const rank = { high: 3, medium: 2, low: 1 } as const;
   const sorted = [...findings].sort((a, b) => rank[b.severity] - rank[a.severity]);
@@ -55,9 +56,9 @@ export function Header({ report, table, findings }: { report: Report; table: Tab
           <span className="td-schema">{table.schema}.</span>
           {table.name}
         </h2>
-        {table.kind === "virtual" && <span className="tag">Virtual table</span>}
-        {table.kind === "hypertable" && <span className="tag">Hypertable</span>}
-        <button type="button" className="btn ghost icon" title="Copy the qualified name" onClick={() => copyAndTell(tableKey(table), "Copied the table name")}>
+        {table.kind === "virtual" && <span className="tag">{t("ui.table_header.virtual")}</span>}
+        {table.kind === "hypertable" && <span className="tag">{t("ui.table_header.hypertable")}</span>}
+        <button type="button" className="btn ghost icon" title={t("ui.table_header.copy_name")} onClick={() => copyAndTell(tableKey(table), t("ui.table_header.copied_name"))}>
           <Copy size={13} />
         </button>
         {health.map((h) => (
@@ -67,20 +68,20 @@ export function Header({ report, table, findings }: { report: Report; table: Tab
         ))}
       </div>
       <div className="td-facts">
-        <Fact label="Rows" value={count(table.rows)} />
-        {table.storage?.hypertable && <Fact label="Chunks" value={count(table.storage.hypertable.chunks)} detail={table.storage.hypertable.compressed_chunks == null ? undefined : `${count(table.storage.hypertable.compressed_chunks)} in columnstore`} />}
+        <Fact label={t("common.metric.rows")} value={count(table.rows)} />
+        {table.storage?.hypertable && <Fact label={t("ui.table_header.chunks")} value={count(table.storage.hypertable.chunks)} detail={table.storage.hypertable.compressed_chunks == null ? undefined : t("ui.table_header.in_columnstore", { count: count(table.storage.hypertable.compressed_chunks) })} />}
         <Fact
-          label="Size"
+          label={t("common.metric.size")}
           value={bytes(table.total_bytes ?? (data + index || null))}
           detail={
             data + index > 0 ? (
-              <span className="td-split" title={`${bytes(data)} data · ${bytes(index)} indexes`}>
+              <span className="td-split" title={t("ui.table_header.split", { data: bytes(data), indexes: bytes(index) })}>
                 <span className="td-split-bar">
                   <span className="d" style={{ width: `${(data / total) * 100}%` }} />
                   <span className="i" style={{ width: `${(index / total) * 100}%` }} />
                 </span>
                 <span>
-                  {bytes(data)} data · {bytes(index)} indexes
+                  {t("ui.table_header.split", { data: bytes(data), indexes: bytes(index) })}
                 </span>
               </span>
             ) : null
@@ -88,31 +89,31 @@ export function Header({ report, table, findings }: { report: Report; table: Tab
         />
         {averageRow != null && own != null && large != null && (
           <Fact
-            label="Average row"
+            label={t("ui.table_header.average_row")}
             value={bytes(averageRow)}
             warn={tableSignalWarning(report, table, ["large-rows"])}
-            detail={<span title="Large values kept apart from the rows: LOB pages on SQL Server, TOAST on PostgreSQL">{percent(large / own)} in large values</span>}
+            detail={<span title={t("ui.table_header.large_values_title")}>{t("ui.table_header.large_values", { percent: percent(large / own) })}</span>}
           />
         )}
         {knowsStats && (
           <Fact
-            label="Statistics"
-            value={analyzed ? ago(analyzed) : "no update recorded"}
+            label={t("ui.table_header.statistics")}
+            value={analyzed ? ago(analyzed) : t("ui.table_header.no_update")}
             warn={tableSignalWarning(report, table, ["stale-stats"])}
             detail={
               table.modifications_since_analyze
-                ? `${count(table.modifications_since_analyze)} changes since`
+                ? t("ui.table_header.changes_since", { count: count(table.modifications_since_analyze) })
                 : stats.length > 1
-                  ? `oldest of ${stats.length}`
+                  ? t("ui.table_header.oldest_of", { count: stats.length })
                   : null
             }
           />
         )}
         {table.seq_scans != null && (
-          <Fact label="Full scans" value={count(table.seq_scans)} detail={table.index_scans != null ? `${count(table.index_scans)} index scans` : null} />
+          <Fact label={t("ui.table_header.full_scans")} value={count(table.seq_scans)} detail={table.index_scans != null ? t("ui.table_header.index_scans", { count: count(table.index_scans) }) : null} />
         )}
         {writes != null && writes > 0 && (
-          <Fact label="Writes" value={count(writes)} detail={`${count(table.inserts)} ins · ${count(table.updates)} upd · ${count(table.deletes)} del`} />
+          <Fact label={t("ui.table_header.writes")} value={count(writes)} detail={t("ui.table_header.writes_split", { inserts: count(table.inserts), updates: count(table.updates), deletes: count(table.deletes) })} />
         )}
         <TableSignalFacts report={report} table={table} />
       </div>
@@ -121,14 +122,14 @@ export function Header({ report, table, findings }: { report: Report; table: Tab
         <div className="td-findings">
           {shown.map((f, n) => (
             <div key={f.id} className="td-finding-row">
-              <button type="button" className="td-finding" onClick={() => setState({ view: "overview", finding: f.id })} title="Open in Findings">
+              <button type="button" className="td-finding" onClick={() => setState({ view: "overview", finding: f.id })} title={t("ui.table_header.open_finding")}>
                 <span className={`sev ${f.severity}`} />
                 <span className="t">{f.title}</span>
                 <ChevronRight size={13} className="muted" />
               </button>
               {n === 0 && findings.length > 1 && (
                 <button type="button" className="td-more" onClick={() => setAll((a) => !a)} aria-expanded={all}>
-                  {all ? "Fewer" : `+${findings.length - 1} more`}
+                  {all ? t("ui.table_header.fewer") : t("ui.table_header.more", { count: findings.length - 1 })}
                 </button>
               )}
             </div>
@@ -146,21 +147,21 @@ function HypertableChunks({ table }: { table: TableStat }) {
   const chunks = hypertable.chunk_details;
   return (
     <details className="td-chunks">
-      <summary>Managed chunks{hypertable.dimensions.length > 0 ? ` · ${hypertable.dimensions.join(", ")}` : ""}</summary>
-      {chunks == null ? <p className="muted">Chunk details could not be read. Hypertable totals still include its managed storage.</p> : (
+      <summary>{hypertable.dimensions.length > 0 ? t("ui.table_header.chunks_by", { dimensions: hypertable.dimensions.join(", ") }) : t("ui.table_header.managed_chunks")}</summary>
+      {chunks == null ? <p className="muted">{t("ui.table_header.chunks_unread")}</p> : (
         <>
           <div className="td-chunk-list">
             <table>
-              <thead><tr><th>Chunk</th><th>Rows</th><th>Size</th><th>Storage</th></tr></thead>
+              <thead><tr><th>{t("ui.table_header.chunk")}</th><th>{t("common.metric.rows")}</th><th>{t("common.metric.size")}</th><th>{t("ui.table_header.storage")}</th></tr></thead>
               <tbody>{chunks.slice(0, shown).map((chunk) => <tr key={`${chunk.schema}.${chunk.name}`}>
                 <td title={`${chunk.schema}.${chunk.name}`}>{chunk.name}</td>
                 <td>{count(chunk.rows)}</td><td>{bytes(chunk.total_bytes)}</td>
-                <td>{chunk.compressed ? "Columnstore" : "Rowstore"}</td>
+                <td>{chunk.compressed ? t("ui.table_header.columnstore") : t("ui.table_header.rowstore")}</td>
               </tr>)}</tbody>
             </table>
           </div>
-          {shown < chunks.length && <button type="button" className="btn small" onClick={() => setShown((n) => n + 20)}>Show 20 more ({chunks.length - shown} remaining)</button>}
-          <p className="muted">Sizes include compressed storage. Chunks are managed by TimescaleDB; index advice targets the hypertable.</p>
+          {shown < chunks.length && <button type="button" className="btn small" onClick={() => setShown((n) => n + 20)}>{t("ui.table_header.show_more", { more: 20, remaining: chunks.length - shown })}</button>}
+          <p className="muted">{t("ui.table_header.chunks_note")}</p>
         </>
       )}
     </details>

@@ -4,6 +4,7 @@ import type { Report } from "../gen/Report";
 import type { TableStat } from "../gen/TableStat";
 import { bytes, count, rowCount } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
+import { t } from "../lib/i18n";
 import { fuzzy, tableFindings, tableKey } from "../lib/schema-model";
 import { getState, setState, useStore } from "../lib/store";
 import { DriftPanel } from "../components/DriftPanel";
@@ -18,12 +19,20 @@ const CLEANUP_CHECKS = ["duplicate-index", "unused-index", "overlapping-index"];
 
 type SortKey = "size" | "rows" | "name" | "findings";
 
-const SORTS: { key: SortKey; label: string }[] = [
-  { key: "size", label: "Size" },
-  { key: "rows", label: "Rows" },
-  { key: "findings", label: "Findings" },
-  { key: "name", label: "Name" },
-];
+const SORTS: SortKey[] = ["size", "rows", "findings", "name"];
+
+function sortLabel(key: SortKey): string {
+  switch (key) {
+    case "size":
+      return t("common.metric.size");
+    case "rows":
+      return t("common.metric.rows");
+    case "findings":
+      return t("ui.schema.sort_findings");
+    case "name":
+      return t("ui.schema.sort_name");
+  }
+}
 
 const SORT_KEY = "culprit.schema.sort";
 const WIDTH_KEY = "culprit.schema.listWidth";
@@ -51,7 +60,7 @@ const SEVERITY_RANK = { high: 3, medium: 2, low: 1 } as const;
 export function Schema({ report }: { report: Report }) {
   const { snapshot } = report;
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<SortKey>(() => rememberedAs(SORT_KEY, (v) => (SORTS.some((s) => s.key === v) ? (v as SortKey) : null), "size"));
+  const [sort, setSort] = useState<SortKey>(() => rememberedAs(SORT_KEY, (v) => (SORTS.some((s) => s === v) ? (v as SortKey) : null), "size"));
   const [selected, setSelected] = useState<string | null>(null);
   const [comparing, setComparing] = useState(false);
   // The dashboard's Indexes tile opens straight on the advisor.
@@ -203,8 +212,8 @@ export function Schema({ report }: { report: Report }) {
   if (snapshot.tables.length === 0) {
     return (
       <div className="empty">
-        <h3>No tables</h3>
-        <p>This login can't see any tables in the database, or the database is empty.</p>
+        <h3>{t("ui.schema.no_tables")}</h3>
+        <p>{t("ui.schema.no_tables_detail")}</p>
       </div>
     );
   }
@@ -215,25 +224,25 @@ export function Schema({ report }: { report: Report }) {
     <div className={`schema ${collapsed ? "collapsed" : ""}`} style={{ "--list-w": `${width}px` } as React.CSSProperties}>
       {collapsed ? (
         <div className="schema-rail">
-          <button type="button" className="btn ghost icon" title="Show tables ( [ )" onClick={toggleList}>
+          <button type="button" className="btn ghost icon" title={t("ui.schema.show_tables", { key: "[" })} onClick={toggleList}>
             <PanelLeftOpen size={15} />
           </button>
         </div>
       ) : (
-        <aside className="schema-list" aria-label="Tables">
+        <aside className="schema-list" aria-label={t("ui.schema.tables")}>
           <div className="tl-tools">
             <label className="search">
               <Search size={13} />
               <input
                 ref={searchRef}
                 role="combobox"
-                aria-label="Find a table"
+                aria-label={t("ui.schema.find")}
                 aria-controls={listId}
                 aria-expanded="true"
                 aria-autocomplete="list"
                 aria-activedescendant={advising ? "tl-advisor" : current ? `tl-${current.key}` : undefined}
                 value={query}
-                placeholder="Find a table"
+                placeholder={t("ui.schema.find")}
                 spellCheck={false}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => {
@@ -252,23 +261,25 @@ export function Schema({ report }: { report: Report }) {
                 }}
               />
               {query && (
-                <button type="button" className="clear" title="Clear" onClick={() => setQuery("")}>
+                <button type="button" className="clear" title={t("ui.common.clear")} onClick={() => setQuery("")}>
                   <X size={12} />
                 </button>
               )}
               {!query && <span className="kbd">/</span>}
             </label>
-            <button type="button" className="btn ghost icon" title="Hide tables ( [ )" onClick={toggleList}>
+            <button type="button" className="btn ghost icon" title={t("ui.schema.hide_tables", { key: "[" })} onClick={toggleList}>
               <PanelLeftClose size={15} />
             </button>
           </div>
           <div className="tl-sort">
             <span className="muted">
-              {query.trim() ? `${entries.length} of ${snapshot.tables.length}` : `${snapshot.tables.length} tables`} ·{" "}
+              {query.trim()
+                ? t("ui.schema.matching", { shown: String(entries.length), total: String(snapshot.tables.length) })
+                : t("ui.schema.table_count", { n: snapshot.tables.length, count: String(snapshot.tables.length) })} ·{" "}
               {bytes(snapshot.server.database_size_bytes)}
             </span>
             <span className="spacer" />
-            <label className="mini-select" title="Sort tables">
+            <label className="mini-select" title={t("ui.schema.sort")}>
               <select
                 value={sort}
                 onChange={(e) => {
@@ -277,32 +288,32 @@ export function Schema({ report }: { report: Report }) {
                 }}
               >
                 {SORTS.map((s) => (
-                  <option key={s.key} value={s.key}>
-                    {s.label}
+                  <option key={s} value={s}>
+                    {sortLabel(s)}
                   </option>
                 ))}
               </select>
             </label>
-            <button type="button" className="icon-btn" title="Compare with another connection: indexes, columns and settings that differ" onClick={() => setComparing(true)}>
+            <button type="button" className="icon-btn" title={t("ui.schema.compare")} onClick={() => setComparing(true)}>
               <GitCompareArrows size={14} />
             </button>
           </div>
-          <div className="tl-scroll" ref={listRef} id={listId} role="listbox" aria-label="Tables">
+          <div className="tl-scroll" ref={listRef} id={listId} role="listbox" aria-label={t("ui.schema.tables")}>
             {!query.trim() && (
               <button type="button"
                 id="tl-advisor"
                 role="option"
                 aria-selected={advising}
                 className={`tl-row tl-advisor ${advising ? "on" : ""}`}
-                title="Index advisor: what to add, what to clean up ( a )"
+                title={t("ui.schema.advisor_title", { key: "a" })}
                 onClick={() => setAdvising(true)}
               >
                 <Lightbulb size={13} className="tl-advisor-icon" />
-                <span className="tl-name">Index advisor</span>
+                <span className="tl-name">{t("ui.schema.advisor")}</span>
                 <span className="tl-badges">
-                  {toAdd > 0 && <span className="tl-count medium" title={`${toAdd} to add`}>{toAdd}</span>}
+                  {toAdd > 0 && <span className="tl-count medium" title={t("ui.schema.to_add", { count: String(toAdd) })}>{toAdd}</span>}
                 </span>
-                <span className="tl-metric">{toClean > 0 ? `${toClean} to clean` : toAdd > 0 ? "" : "all good"}</span>
+                <span className="tl-metric">{toClean > 0 ? t("ui.schema.to_clean", { count: String(toClean) }) : toAdd > 0 ? "" : t("ui.schema.all_good")}</span>
               </button>
             )}
             {groups.map(([schema, list]) => (
@@ -331,8 +342,8 @@ export function Schema({ report }: { report: Report }) {
                         </span>
                       )}
                       {!e.table.has_primary_key && e.table.kind !== "virtual" && (
-                        <span className="tl-flag" title="No primary key">
-                          no pk
+                        <span className="tl-flag" title={t("ui.common.no_primary_key")}>
+                          {t("ui.schema.no_pk")}
                         </span>
                       )}
                     </span>
@@ -347,7 +358,7 @@ export function Schema({ report }: { report: Report }) {
                 ))}
               </div>
             ))}
-            {entries.length === 0 && <div className="tl-empty">No table matches “{query}”.</div>}
+            {entries.length === 0 && <div className="tl-empty">{t("ui.schema.no_match", { query })}</div>}
           </div>
         </aside>
       )}
@@ -356,7 +367,7 @@ export function Schema({ report }: { report: Report }) {
           className="schema-resizer"
           onPointerDown={startResize}
           onDoubleClick={() => (setWidth(DEFAULT_W), remember(WIDTH_KEY, String(DEFAULT_W)))}
-          title="Drag to resize"
+          title={t("ui.common.drag_to_resize")}
         />
       )}
       <section className="schema-main">
@@ -367,7 +378,7 @@ export function Schema({ report }: { report: Report }) {
         ) : current ? (
           <SchemaTable key={current.key} report={report} table={current.table} onOpenTable={(key) => (setQuery(""), setSelected(key))} />
         ) : (
-          <div className="empty">No table matches “{query}”.</div>
+          <div className="empty">{t("ui.schema.no_match", { query })}</div>
         )}
       </section>
     </div>

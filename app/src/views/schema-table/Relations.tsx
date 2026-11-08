@@ -1,16 +1,17 @@
 import { ArrowRight } from "lucide-react";
+import { t } from "../../lib/i18n";
 import type { TableRelations } from "../../lib/schema-model";
 
 /** The foreign keys from this table, with whether an index backs each, and those that point to it. */
 export function Relations({ links, onOpenTable }: { links: TableRelations; onOpenTable: (key: string) => void }) {
-  if (links.outgoing.length === 0 && links.incoming.length === 0) return <div className="notice">No foreign keys point from or to this table.</div>;
+  if (links.outgoing.length === 0 && links.incoming.length === 0) return <div className="notice">{t("ui.relations.none")}</div>;
   return (
     <div className="rel">
       <section>
         <h4>
-          References <span className="muted">{links.outgoing.length}</span>
+          {t("ui.relations.references")} <span className="muted">{links.outgoing.length}</span>
         </h4>
-        {links.outgoing.length === 0 && <p className="muted">This table doesn't reference others.</p>}
+        {links.outgoing.length === 0 && <p className="muted">{t("ui.relations.references_none")}</p>}
         {links.outgoing.map(({ fk, indexed }) => (
           <div key={fk.name} className="rel-row">
             <div className="rel-path">
@@ -26,16 +27,16 @@ export function Relations({ links, onOpenTable }: { links: TableRelations; onOpe
             <div className="rel-meta">
               <span className="muted rel-name" title={fk.name}>{fk.name}</span>
               {indexed == null ? (
-                <span className="tag" title="Native sharding metadata was unavailable; lookup support cannot be established">
-                  index support unknown
+                <span className="tag" title={t("ui.relations.support_unknown_title")}>
+                  {t("ui.relations.support_unknown")}
                 </span>
               ) : indexed ? (
-                <span className="tag good" title="An index leads with these columns, so joins and parent deletes can seek">
-                  indexed
+                <span className="tag good" title={t("ui.relations.indexed_title")}>
+                  {t("ui.relations.indexed")}
                 </span>
               ) : (
-                <span className="tag medium" title={`Deleting or updating a ${fk.ref_table} row scans this table to check ${fk.columns.join(", ")}`}>
-                  not indexed
+                <span className="tag medium" title={t("ui.relations.not_indexed_title", { table: fk.ref_table, columns: fk.columns.join(", ") })}>
+                  {t("ui.relations.not_indexed")}
                 </span>
               )}
             </div>
@@ -44,9 +45,9 @@ export function Relations({ links, onOpenTable }: { links: TableRelations; onOpe
       </section>
       <section>
         <h4>
-          Referenced by <span className="muted">{links.incoming.length}</span>
+          {t("ui.relations.referenced_by")} <span className="muted">{links.incoming.length}</span>
         </h4>
-        {links.incoming.length === 0 && <p className="muted">No other table references this one.</p>}
+        {links.incoming.length === 0 && <p className="muted">{t("ui.relations.referenced_by_none")}</p>}
         {links.incoming.map((fk) => (
           <div key={`${fk.schema}.${fk.table}.${fk.name}`} className="rel-row">
             <div className="rel-path">

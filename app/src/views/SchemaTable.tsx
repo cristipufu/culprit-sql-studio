@@ -8,6 +8,7 @@ import { useHotkeys } from "../lib/hotkeys";
 import { ddl, relations, tableFindings } from "../lib/schema-model";
 import { copyAndTell } from "../lib/clipboard";
 import { remember, rememberedChoice } from "../lib/prefs";
+import { t } from "../lib/i18n";
 import { Header } from "./schema-table/Header";
 import { Columns } from "./schema-table/Columns";
 import { Indexes } from "./schema-table/Indexes";
@@ -48,16 +49,16 @@ export function SchemaTable({ report, table, onOpenTable }: { report: Report; ta
   });
 
   const tabs: { key: Tab; label: string; n?: number; hotkey: string }[] = [
-    { key: "columns", label: "Columns", n: columns.length, hotkey: "C" },
-    { key: "indexes", label: "Indexes", n: indexes.length, hotkey: "I" },
+    { key: "columns", label: t("ui.schema_table.columns"), n: columns.length, hotkey: "C" },
+    { key: "indexes", label: t("ui.schema_table.indexes"), n: indexes.length, hotkey: "I" },
     {
       key: "relations",
-      label: "Relations",
+      label: t("ui.schema_table.relations"),
       n: links.outgoing.length + links.incoming.length,
       hotkey: "R",
     },
-    { key: "data", label: "Data", hotkey: "P" },
-    { key: "ddl", label: "DDL", hotkey: "D" },
+    { key: "data", label: t("ui.schema_table.data"), hotkey: "P" },
+    { key: "ddl", label: t("ui.schema_table.ddl"), hotkey: "D" },
   ];
 
   return (
@@ -68,23 +69,23 @@ export function SchemaTable({ report, table, onOpenTable }: { report: Report; ta
       <div
         className="td-tabs"
         role="tablist"
-        aria-label="Table details"
+        aria-label={t("ui.schema_table.details")}
         onKeyDown={tabListKeys}
       >
-        {tabs.map((t) => (
+        {tabs.map((item) => (
           <button type="button"
-            key={t.key}
-            id={`${tabId}-${t.key}`}
+            key={item.key}
+            id={`${tabId}-${item.key}`}
             role="tab"
-            aria-selected={tab === t.key}
+            aria-selected={tab === item.key}
             aria-controls={`${tabId}-panel`}
-            tabIndex={tab === t.key ? 0 : -1}
-            className={tab === t.key ? "on" : ""}
-            title={`${t.label} (${t.hotkey})`}
-            onClick={() => choose(t.key)}
+            tabIndex={tab === item.key ? 0 : -1}
+            className={tab === item.key ? "on" : ""}
+            title={`${item.label} (${item.hotkey})`}
+            onClick={() => choose(item.key)}
           >
-            {t.label}
-            {t.n != null && <span className="n">{t.n}</span>}
+            {item.label}
+            {item.n != null && <span className="n">{item.n}</span>}
           </button>
         ))}
       </div>
@@ -103,10 +104,10 @@ function Ddl({ text, original }: { text: string; original: boolean }) {
   return (
     <div className="ddl">
       <div className="data-bar">
-        <span className="muted">{original ? "Table definition captured from the database." : "Rebuilt from catalog metadata."} Check it against the database before running it anywhere.</span>
+        <span className="muted">{original ? t("ui.schema_table.ddl_captured") : t("ui.schema_table.ddl_rebuilt")}</span>
         <span className="spacer" />
-        <button type="button" className="btn" onClick={() => copyAndTell(text, "Copied the DDL")}>
-          <Copy size={12} /> Copy
+        <button type="button" className="btn" onClick={() => copyAndTell(text, t("ui.schema_table.copied_ddl"))}>
+          <Copy size={12} /> {t("ui.common.copy")}
         </button>
       </div>
       <div className="codeblock">
