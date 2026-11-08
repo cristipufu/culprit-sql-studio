@@ -1,0 +1,11 @@
+stats-reset:index usage:2026-10-11T08:00:00Z · StatsReset None · 2026-10-10T08:00:00Z
+  title: Index usage counters started over
+  detail: Without a server restart: the database was taken offline, restored or failed over. Reads counted before are gone, so its indexes aren't judged unread until they've been counted for a week.
+=== next
+stats-reset:index usage:public.customers:2026-10-11T08:00:00Z · StatsReset None · 2026-10-10T08:00:00Z
+  title: Usage counters on public.customers started over
+  detail: The table was altered, rebuilt or had its statistics reset. Reads counted before are gone, so its indexes aren't judged unread until they've been counted for a week.
+=== next
+stats-reset:pg_stat_statements:2026-10-11T07:00:00Z · StatsReset None · -
+  title: pg_stat_statements was reset
+  detail: Query statistics start again from zero; periods before and after it can't be compared through scans.

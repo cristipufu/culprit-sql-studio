@@ -1,0 +1,92 @@
+table:public.brand_new:2026-10-11T08:00:00Z · Table Some(Created) · 2026-10-10T08:00:00Z
+  title: Table public.brand_new was created
+  detail: -
+table:public.orders:2026-10-11T08:00:00Z · Table Some(Dropped) · 2026-10-10T08:00:00Z
+  title: Table public.orders was dropped
+  detail: -
+table:public.customers.columns:2026-10-11T08:00:00Z · Table Some(Changed) · 2026-10-10T08:00:00Z
+  title: Column change on public.customers: id integer NOT NULL → bigint
+  detail: id integer NOT NULL → bigint
+table:public.events.columns:2026-10-11T08:00:00Z · Table Some(Changed) · 2026-10-10T08:00:00Z
+  title: 2 column changes on public.events
+  detail: added added_col bigint NOT NULL; dropped id
+index:public.customers.customers_pkey:2026-10-11T08:00:00Z · Index Some(Created) · 2026-10-10T08:00:00Z
+  title: Index customers_pkey was created on public.customers
+  detail: CREATE UNIQUE INDEX customers_pkey ON public.customers USING btree (id)
+index:public.products.ix_gone_now:2026-10-11T08:00:00Z · Index Some(Changed) · 2026-10-10T08:00:00Z
+  title: Index products_pkey on public.products was renamed to ix_gone_now
+  detail: -
+index:public.products.products_sku_key:2026-10-11T08:00:00Z · Index Some(Changed) · 2026-10-10T08:00:00Z
+  title: Index ix_old_name on public.products was renamed to products_sku_key
+  detail: -
+index:public.customers.ix_was_never:2026-10-11T08:00:00Z · Index Some(Dropped) · 2026-10-10T08:00:00Z
+  title: Index ix_was_never was dropped from public.customers
+  detail: UNIQUE (id)
+index:public.events.events_customer_idx:2026-10-11T08:00:00Z · Index Some(Changed) · 2026-10-10T08:00:00Z
+  title: Index events_customer_idx on public.events was redefined
+  detail: (customer_id) → (customer_id, extra_col)
+index:public.events.events_pkey:2026-10-11T08:00:00Z · Index Some(Created) · 2026-10-10T08:00:00Z
+  title: Index events_pkey on public.events was enabled again
+  detail: -
+index:public.order_items.order_items_pkey:2026-10-11T08:00:00Z · Index Some(Dropped) · 2026-10-10T08:00:00Z
+  title: Index order_items_pkey on public.order_items was disabled
+  detail: -
+table:public.customers.fk_ruled:2026-10-11T08:00:00Z · Table Some(Changed) · 2026-10-10T08:00:00Z
+  title: Foreign key fk_ruled on public.customers changed ON DELETE rule
+  detail: ON DELETE NO_ACTION → ON DELETE CASCADE
+table:public.customers.fk_added:2026-10-11T08:00:00Z · Table Some(Created) · 2026-10-10T08:00:00Z
+  title: Foreign key fk_added was added on public.customers
+  detail: (b_id) REFERENCES public.events(id)
+table:public.customers.fk_dropped:2026-10-11T08:00:00Z · Table Some(Dropped) · 2026-10-10T08:00:00Z
+  title: Foreign key fk_dropped was dropped from public.customers
+  detail: (c_id) REFERENCES public.events(id) ON DELETE SET_NULL
+table:public.customers.ck_new:2026-10-11T08:00:00Z · Table Some(Changed) · 2026-10-10T08:00:00Z
+  title: Constraint ck_new on public.customers is NOT VALID / untrusted
+  detail: CHECK
+table:public.customers.fk_off:2026-10-11T08:00:00Z · Table Some(Changed) · 2026-10-10T08:00:00Z
+  title: Constraint fk_off on public.customers changed state
+  detail: NOT VALID / untrusted → disabled
+table:public.customers.ck_validated:2026-10-11T08:00:00Z · Table Some(Changed) · 2026-10-10T08:00:00Z
+  title: Constraint ck_validated on public.customers was validated or removed
+  detail: was NOT VALID / untrusted
+code:public.customers.tr_changed:2026-10-11T08:00:00Z · Code Some(Changed) · 2026-10-10T08:00:00Z
+  title: Trigger tr_changed on public.customers was redefined
+  detail: INSERT → INSERT OR UPDATE
+code:public.customers.tr_new:2026-10-11T08:00:00Z · Code Some(Created) · 2026-10-10T08:00:00Z
+  title: Trigger tr_new was created on public.customers
+  detail: DELETE
+code:public.customers.tr_odd:2026-10-11T08:00:00Z · Code Some(Created) · 2026-10-10T08:00:00Z
+  title: Trigger tr_odd was created on public.customers
+  detail: X
+code:public.customers.tr_dropped:2026-10-11T08:00:00Z · Code Some(Dropped) · 2026-10-10T08:00:00Z
+  title: Trigger tr_dropped was dropped from public.customers
+  detail: UPDATE OR DELETE
+setting:long_query_time:2026-10-11T08:00:00Z · Setting Some(Changed) · 2026-10-10T08:00:00Z
+  title: long_query_time changed from 10 to 2.5
+  detail: -
+version:19.0:2026-10-11T08:00:00Z · Version Some(Changed) · -
+  title: The server's version changed: PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2) → PostgreSQL 18.6 19.0
+  detail: -
+restart:server:2026-10-11T07:30:00Z · Restart None · -
+  title: The server restarted
+  detail: Caches start empty and every plan compiles again, so the first minutes run slower.
+=== next
+statistics:public.customers:2026-10-11T06:00:00Z · Statistics None · -
+  title: Statistics on public.customers were updated
+  detail: -
+statistics:public.order_items:2026-10-11T06:00:00Z · Statistics None · -
+  title: Statistics on public.order_items were updated
+  detail: -
+stats-reset:pg_stat_statements:2026-10-11T07:01:50Z · StatsReset None · -
+  title: pg_stat_statements was reset
+  detail: Query statistics start again from zero; periods before and after it can't be compared through scans.
+restart:server:2026-10-11T07:30:00Z · Restart None · -
+  title: The server started
+  detail: Caches start empty and every plan compiles again, so the first minutes run slower.
+statistics:archive.wide:2026-10-11T15:57:49Z · Statistics None · -
+  title: Statistics on archive.wide were updated
+  detail: -
+=== next
+setting:many:2026-10-11T08:00:00Z · Setting Some(Changed) · 2026-10-10T08:00:00Z
+  title: 14 settings changed
+  detail: setting_00: 1 → 2; setting_01: 1 → 2; setting_02: 1 → 2; setting_03: 1 → 2; setting_04: 1 → 2; setting_05: 1 → 2; setting_06: 1 → 2; setting_07: 1 → 2; …

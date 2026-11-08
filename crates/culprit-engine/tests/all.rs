@@ -9,6 +9,7 @@ mod export_words;
 mod file_pickers;
 mod fuzz;
 mod golden;
+mod history_words;
 mod insight_words;
 mod insights;
 mod invariants;

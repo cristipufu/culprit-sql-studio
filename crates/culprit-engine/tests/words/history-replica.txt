@@ -1,0 +1,4 @@
+reason: This connection reached a standby: its usage counters count only the reads run on it, not the database's whole workload, so no index is called unused from here.
+fix: Scan the primary to judge index use, and check every replica's reads before dropping an index.
+reason: This connection reached a readable secondary: its usage counters count only the reads run on it, not the database's whole workload, so no index is called unused from here.
+fix: Scan the primary to judge index use, and check every replica's reads before dropping an index.
