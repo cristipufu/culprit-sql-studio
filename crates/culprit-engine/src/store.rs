@@ -106,9 +106,11 @@ fn xdg(var: &str, unix_default: &str, fallback: fn() -> Option<PathBuf>) -> Resu
         return Ok(PathBuf::from(v));
     }
     if cfg!(windows) {
-        return fallback().ok_or_else(|| Error::internal("Cannot find the user's application data directory"));
+        return fallback().ok_or_else(|| Error::internal(culprit_core::t!("engine.store.no_data_dir")));
     }
-    dirs::home_dir().map(|h| h.join(unix_default)).ok_or_else(|| Error::internal("Cannot find the home directory"))
+    dirs::home_dir()
+        .map(|h| h.join(unix_default))
+        .ok_or_else(|| Error::internal(culprit_core::t!("engine.store.no_home_dir")))
 }
 
 pub fn safe_file_name(name: &str) -> String {
@@ -147,8 +149,8 @@ pub fn validate_name(name: &str) -> Result<()> {
     if ok {
         return Ok(());
     }
-    Err(Error::invalid(format!("'{name}' is not a valid connection name"))
-        .with_hint("Use letters, digits, '-', '_' or '.' (not first), up to 64 characters, e.g. shop-staging"))
+    Err(Error::invalid(culprit_core::t!("engine.store.bad_name", name = name))
+        .with_hint(culprit_core::t!("engine.store.bad_name_hint")))
 }
 
 pub struct Store {
@@ -165,7 +167,13 @@ impl Store {
             return Ok(ConnectionsFile::default());
         }
         let text = fs::read_to_string(&self.file).map_err(|e| io_error(&self.file, e))?;
-        toml::from_str(&text).map_err(|e| Error::invalid(format!("{} is not valid: {e}", self.file.display())))
+        toml::from_str(&text).map_err(|e| {
+            Error::invalid(culprit_core::t!(
+                "engine.store.file_invalid",
+                file = self.file.display().to_string(),
+                why = e.to_string()
+            ))
+        })
     }
 
     fn save(&self, file: &ConnectionsFile) -> Result<()> {
@@ -182,8 +190,8 @@ impl Store {
 
     pub fn get(&self, name: &str) -> Result<StoredConnection> {
         self.load()?.connections.remove(name).ok_or_else(|| {
-            Error::not_found(format!("No connection named '{name}'"))
-                .with_hint("List saved connections with `culprit conn list`, add one with `culprit conn add`")
+            Error::not_found(culprit_core::t!("engine.store.not_found", name = name))
+                .with_hint(culprit_core::t!("engine.store.not_found_hint"))
         })
     }
 
@@ -205,8 +213,10 @@ impl Store {
     pub(crate) fn try_update(&self, name: &str, edit: impl FnOnce(&mut StoredConnection) -> Result<()>) -> Result<()> {
         let _lock = private_fs::lock(&self.file).map_err(|e| io_error(&self.file, e))?;
         let mut file = self.load()?;
-        let stored =
-            file.connections.get_mut(name).ok_or_else(|| Error::not_found(format!("No connection named '{name}'")))?;
+        let stored = file
+            .connections
+            .get_mut(name)
+            .ok_or_else(|| Error::not_found(culprit_core::t!("engine.store.not_found", name = name)))?;
         edit(stored)?;
         self.save(&file)
     }
@@ -216,10 +226,12 @@ impl Store {
         validate_name(new)?;
         let mut file = self.load()?;
         if file.connections.contains_key(new) {
-            return Err(Error::invalid(format!("A connection named '{new}' already exists")));
+            return Err(Error::invalid(culprit_core::t!("engine.store.exists", name = new)));
         }
-        let connection =
-            file.connections.remove(old).ok_or_else(|| Error::not_found(format!("No connection named '{old}'")))?;
+        let connection = file
+            .connections
+            .remove(old)
+            .ok_or_else(|| Error::not_found(culprit_core::t!("engine.store.not_found", name = old)))?;
         file.connections.insert(new.to_string(), connection);
         self.save(&file)
     }
@@ -228,7 +240,7 @@ impl Store {
         let _lock = private_fs::lock(&self.file).map_err(|e| io_error(&self.file, e))?;
         let mut file = self.load()?;
         if file.connections.remove(name).is_none() {
-            return Err(Error::not_found(format!("No connection named '{name}'")));
+            return Err(Error::not_found(culprit_core::t!("engine.store.not_found", name = name)));
         }
         self.save(&file)
     }

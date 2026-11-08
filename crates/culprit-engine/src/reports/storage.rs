@@ -89,7 +89,7 @@ fn target<'a>(mut value: &'a mut Value, path: &[Step]) -> Option<&'a mut Value> 
 }
 
 fn apply(value: &mut Value, diff: Difference) -> serde_json::Result<()> {
-    let invalid = || serde_json::Error::custom("Invalid retained evidence difference");
+    let invalid = || serde_json::Error::custom(culprit_core::t!("engine.reports.bad_evidence"));
     let growth_limit = diff.changes.len();
     for change in diff.changes {
         match change {
@@ -148,9 +148,12 @@ pub(super) fn expand(value: &mut Value) -> serde_json::Result<()> {
     };
     let stored: Stored = serde_json::from_value(stored)?;
     if stored.version != 1 {
-        return Err(serde_json::Error::custom("Unsupported saved report encoding"));
+        return Err(serde_json::Error::custom(culprit_core::t!("engine.reports.bad_encoding")));
     }
-    let mut input = value.get("snapshot").cloned().ok_or_else(|| serde_json::Error::custom("No saved snapshot"))?;
+    let mut input = value
+        .get("snapshot")
+        .cloned()
+        .ok_or_else(|| serde_json::Error::custom(culprit_core::t!("engine.reports.no_snapshot")))?;
     apply(&mut input, stored.input)?;
     let collected = if let Some(diff) = stored.collected {
         let mut collected = input.clone();
@@ -179,10 +182,12 @@ pub(super) fn analysis_input(mut value: Value) -> serde_json::Result<crate::anal
     let mut input = if let Some(stored) = value.as_object_mut().and_then(|o| o.remove(KEY)) {
         let stored: Stored = serde_json::from_value(stored)?;
         if stored.version != 1 {
-            return Err(serde_json::Error::custom("Unsupported saved report encoding"));
+            return Err(serde_json::Error::custom(culprit_core::t!("engine.reports.bad_encoding")));
         }
-        let mut snapshot =
-            value.get_mut("snapshot").map(Value::take).ok_or_else(|| serde_json::Error::custom("No saved snapshot"))?;
+        let mut snapshot = value
+            .get_mut("snapshot")
+            .map(Value::take)
+            .ok_or_else(|| serde_json::Error::custom(culprit_core::t!("engine.reports.no_snapshot")))?;
         drop(value);
         apply(&mut snapshot, stored.input)?;
         let (snapshot, collected) = match stored.collected {
@@ -213,8 +218,10 @@ pub(super) fn analysis_input(mut value: Value) -> serde_json::Result<crate::anal
         drop(value);
         crate::analysis::Input::retained(serde_json::from_value(evidence)?)
     } else {
-        let snapshot =
-            value.get_mut("snapshot").map(Value::take).ok_or_else(|| serde_json::Error::custom("No saved snapshot"))?;
+        let snapshot = value
+            .get_mut("snapshot")
+            .map(Value::take)
+            .ok_or_else(|| serde_json::Error::custom(culprit_core::t!("engine.reports.no_snapshot")))?;
         drop(value);
         crate::analysis::Input::prepared(serde_json::from_value(snapshot)?)
     }

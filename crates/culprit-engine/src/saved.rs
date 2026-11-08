@@ -75,7 +75,13 @@ impl SavedQueries {
             return Ok(QueriesFile::default());
         }
         let text = fs::read_to_string(&self.file).map_err(|e| io_error(&self.file, e))?;
-        toml::from_str(&text).map_err(|e| Error::invalid(format!("{} is not valid: {e}", self.file.display())))
+        toml::from_str(&text).map_err(|e| {
+            Error::invalid(culprit_core::t!(
+                "engine.saved.file_invalid",
+                file = self.file.display().to_string(),
+                why = e.to_string()
+            ))
+        })
     }
 
     fn save(&self, file: &QueriesFile) -> Result<()> {
@@ -98,8 +104,8 @@ impl SavedQueries {
 
     pub fn get(&self, name: &str) -> Result<SavedQuery> {
         self.load()?.queries.into_iter().find(|q| same(&q.name, name)).ok_or_else(|| {
-            Error::not_found(format!("No saved query named '{name}'"))
-                .with_hint("List them with `culprit saved list`, save one with `culprit saved add`")
+            Error::not_found(culprit_core::t!("engine.saved.not_found", name = name))
+                .with_hint(culprit_core::t!("engine.saved.not_found_hint"))
         })
     }
 
@@ -108,17 +114,17 @@ impl SavedQueries {
         let _lock = private_fs::lock(&self.file).map_err(|e| io_error(&self.file, e))?;
         let name = input.name.trim().to_string();
         if name.is_empty() || name.chars().count() > MAX_NAME || name.chars().any(char::is_control) {
-            return Err(Error::invalid(format!("A saved query needs a name of 1 to {MAX_NAME} characters")));
+            return Err(Error::invalid(culprit_core::t!("engine.saved.bad_name", max = MAX_NAME.to_string())));
         }
         if input.sql.trim().is_empty() {
-            return Err(Error::invalid("There is no SQL to save"));
+            return Err(Error::invalid(culprit_core::t!("engine.saved.no_sql")));
         }
         let mut file = self.load()?;
         let target = input.previous_name.as_deref().unwrap_or(&name);
         let clash = file.queries.iter().any(|q| same(&q.name, &name) && !same(&q.name, target));
         if clash {
-            return Err(Error::new(ErrorCode::InvalidInput, format!("A saved query named '{name}' already exists"))
-                .with_hint("Pick another name, or open that query and save over it."));
+            return Err(Error::new(ErrorCode::InvalidInput, culprit_core::t!("engine.saved.exists", name = &name))
+                .with_hint(culprit_core::t!("engine.saved.exists_hint")));
         }
         let now = now();
         let stored = match file.queries.iter_mut().find(|q| same(&q.name, target)) {
@@ -154,7 +160,7 @@ impl SavedQueries {
         let before = file.queries.len();
         file.queries.retain(|q| !same(&q.name, name));
         if file.queries.len() == before {
-            return Err(Error::not_found(format!("No saved query named '{name}'")));
+            return Err(Error::not_found(culprit_core::t!("engine.saved.not_found", name = name)));
         }
         self.save(&file)
     }

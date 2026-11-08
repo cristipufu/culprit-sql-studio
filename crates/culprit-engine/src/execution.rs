@@ -3,7 +3,7 @@
 
 use crate::{ConnectionInfo, catalog, connection::Connections, deadlocks, reporting::Reports};
 use culprit_core::{
-    DeadlockReport, Engine, Error, ErrorCode, ExplainMode, LiveState, Plan, Report, Result, ResultSet, SessionAction,
+    DeadlockReport, Engine, Error, ErrorCode, ExplainMode, LiveState, Plan, Report, Result, ResultSet, SessionAction, t,
 };
 
 pub(crate) struct Execution<'a> {
@@ -19,15 +19,25 @@ impl Execution<'_> {
         options: &culprit_core::TablePreviewOptions,
     ) -> Result<culprit_core::TablePreview> {
         let _permit = self.previews.try_acquire().map_err(|_| {
-            Error::new(ErrorCode::QueryFailed, "A table preview is already running")
-                .with_hint("Wait for the current preview to finish, then retry")
+            Error::new(ErrorCode::QueryFailed, t!("engine.execution.preview_running"))
+                .with_hint(t!("engine.execution.preview_running_hint"))
         })?;
         let info = self.connections.connection(name)?;
         let sql = culprit_core::sql::table_preview_sql(info.engine, options)?;
-        let result = self.read(name, &sql, options.limit.clamp(1, culprit_core::limits::MAX_RESULT_ROWS), true).await
-            .map_err(|error| if error.code == ErrorCode::Timeout {
-                error.with_hint("Try a more selective filter or an indexed sort column. Open the query in the editor to investigate further.")
-            } else { error })?;
+        let result = self
+            .read(name, &sql, options.limit.clamp(1, culprit_core::limits::MAX_RESULT_ROWS), true)
+            .await
+            .map_err(|error| {
+            if error.code == ErrorCode::Timeout {
+                error.with_hint(format!(
+                    "{} {}",
+                    t!("engine.execution.preview_timeout"),
+                    t!("engine.execution.preview_timeout_editor")
+                ))
+            } else {
+                error
+            }
+        })?;
         Ok(culprit_core::TablePreview { sql, result })
     }
 
@@ -44,10 +54,9 @@ impl Execution<'_> {
         let dashboard = self
             .reports
             .background(move |reports| {
-                let report = reports.latest_report(&report_name, window_minutes)?.ok_or_else(|| {
-                    Error::not_found(format!("No saved report for '{report_name}'"))
-                        .with_hint(format!("Run `culprit scan {report_name}` first"))
-                })?;
+                let report = reports
+                    .latest_report(&report_name, window_minutes)?
+                    .ok_or_else(|| crate::reporting::no_saved_report(&report_name))?;
                 let mut dashboard = culprit_checks::dashboard(&report);
                 dashboard.connection = report_name;
                 Ok(dashboard)
@@ -76,7 +85,7 @@ impl Execution<'_> {
     ) -> Result<culprit_core::DashboardLive> {
         let connection = self.connections.connection(name)?;
         if dashboard.connection != name || dashboard.engine != connection.engine {
-            return Err(Error::invalid("The live refresh belongs to another connection or database engine."));
+            return Err(Error::invalid(t!("engine.execution.live_elsewhere")));
         }
         if !connection.engine.abilities().sessions {
             return Ok(culprit_core::DashboardLive { dashboard, live: None, error: None });
@@ -104,15 +113,14 @@ impl Execution<'_> {
                 if mode == ExplainMode::Analyze
                     && let Some(types) = self.connections.forget_rejected(name, provider.statement_types(sql).await)?
                 {
-                    let seen = format!("The server reads this text as: {}.", types.join(", ").to_lowercase());
+                    let seen = reads_as(&types);
                     if types.len() != 1 {
-                        return Err(Error::invalid("Explain Analyze measures one statement at a time").with_hint(seen));
+                        return Err(Error::invalid(t!("engine.execution.one_statement")).with_hint(seen));
                     }
                     if info.environment.is_production() && !is_read_type(&types[0]) {
-                        let message = format!("'{}' is a production connection; Explain Analyze would execute a statement that changes data", info.name);
-                        return Err(Error::new(ErrorCode::PermissionDenied, message).with_hint(format!(
-                            "{seen} Use the estimated plan (Explain), or measure it on a non-production copy."
-                        )));
+                        let message = t!("engine.execution.analyze_production", name = &info.name);
+                        return Err(Error::new(ErrorCode::PermissionDenied, message)
+                            .with_hint(format!("{seen} {}", t!("engine.execution.analyze_production_hint"))));
                     }
                 }
                 let mut plan = self.connections.forget_rejected(name, provider.explain(sql, mode).await)?;
@@ -131,7 +139,7 @@ impl Execution<'_> {
         for idx in indexes {
             culprit_core::sql::single_statement(idx, info.engine)?;
             if !culprit_core::sql::creates_index(idx, info.engine) {
-                return Err(Error::invalid("`--with-index` expects a `CREATE INDEX` statement"));
+                return Err(Error::invalid(t!("engine.execution.not_an_index")));
             }
         }
         let provider = self.connections.provider(name).await?;
@@ -154,9 +162,7 @@ impl Execution<'_> {
         indexes: &[String],
     ) -> Result<culprit_core::HypotheticalIndexVerification> {
         if indexes.is_empty() {
-            return Err(Error::invalid(
-                "At least one `CREATE INDEX` statement is required to verify a hypothetical index",
-            ));
+            return Err(Error::invalid(t!("engine.execution.no_index")));
         }
         let hypothetical = self.explain_hypothetical(name, sql, indexes).await?;
         let baseline = self.explain(name, sql, ExplainMode::Estimated, false).await?;
@@ -272,11 +278,16 @@ impl Execution<'_> {
             i.fix_sql = None;
         }
         let note = if plan.facts().constants_redacted {
-            "This retained plan and its cache statistics cover periods independent of the selected statement statistics. No measured operator counters or matching workload measurements are attached. Structural observations remain useful for growth planning; current urgency and an index change require workload and catalog evidence."
+            [
+                t!("engine.execution.retained.independent"),
+                t!("engine.execution.retained.unmeasured"),
+                t!("engine.execution.retained.structural"),
+            ]
+            .join(" ")
         } else {
-            "No matching measurements for this plan were identified in the selected workload. Structural observations remain useful for growth planning; current urgency and an index change require workload and catalog evidence."
+            [t!("engine.execution.retained.no_match"), t!("engine.execution.retained.structural")].join(" ")
         };
-        plan.insights = Some(culprit_core::insights::PlanInsights { items, note: Some(note.into()) });
+        plan.insights = Some(culprit_core::insights::PlanInsights { items, note: Some(note) });
         culprit_checks::present_plan(&mut plan, None);
         plan
     }
@@ -299,35 +310,35 @@ impl Execution<'_> {
         }
         let provider = self.connections.provider(name).await?;
         crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
-        if let Some(plan_id) = plan_id {
-            return provider
-                .stored_plan(query_id, plan_id)
-                .await?
-                .ok_or_else(|| Error::not_found(format!("No stored plan {plan_id} for query {query_id}")));
-        }
-        let query = report
-            .ok_or_else(|| Error::not_found(format!("No report for {name}")))?
-            .snapshot
-            .workload
-            .as_ref()
-            .and_then(|w| w.query(query_id))
-            .ok_or_else(|| Error::not_found(format!("No query {query_id} in the selected report for {name}")))?;
-        if let Some(plan_id) = query.plan_id.as_ref().or_else(|| query.plans.first().map(|p| &p.id))
-            && query.plan_history_matches_workload()
-            && let Some(plan) = provider.stored_plan(query_id, plan_id).await?
-        {
-            return Ok(plan);
-        }
-        match (provider.explain_recorded(&query.text, Some(query_id)).await, &query.plan) {
-            (Ok(plan), _) => Ok(plan),
-            // Normalized text (`WHERE id = ?`) can't be planned again; the scan planned a real sample of it.
-            (Err(e), Some(captured)) if e.code != ErrorCode::AuthFailed => Ok(captured.clone()),
-            (Err(e), _) => {
-                let hint = "The statement text may need parameter values; open it in the editor to explain it with real values";
-                Err(Error { hint: Some(e.hint.clone().unwrap_or_else(|| hint.into())), ..e })
+            if let Some(plan_id) = plan_id {
+                return provider.stored_plan(query_id, plan_id).await?.ok_or_else(|| {
+                    Error::not_found(t!("engine.execution.no_stored_plan", plan = plan_id, query = query_id))
+                });
             }
-        }
-        }).await
+            let query = report
+                .ok_or_else(|| Error::not_found(t!("engine.execution.no_report", name = name)))?
+                .snapshot
+                .workload
+                .as_ref()
+                .and_then(|w| w.query(query_id))
+                .ok_or_else(|| Error::not_found(t!("engine.execution.no_query", query = query_id, name = name)))?;
+            if let Some(plan_id) = query.plan_id.as_ref().or_else(|| query.plans.first().map(|p| &p.id))
+                && query.plan_history_matches_workload()
+                && let Some(plan) = provider.stored_plan(query_id, plan_id).await?
+            {
+                return Ok(plan);
+            }
+            match (provider.explain_recorded(&query.text, Some(query_id)).await, &query.plan) {
+                (Ok(plan), _) => Ok(plan),
+                // Normalized text (`WHERE id = ?`) can't be planned again; the scan planned a real sample of it.
+                (Err(e), Some(captured)) if e.code != ErrorCode::AuthFailed => Ok(captured.clone()),
+                (Err(e), _) => {
+                    let hint = e.hint.clone().unwrap_or_else(|| t!("engine.execution.needs_values"));
+                    Err(Error { hint: Some(hint), ..e })
+                }
+            }
+        })
+        .await
     }
 
     /// What the server waits on right now: a sample `seconds` long (capped at 60). Reads statistics views only.
@@ -351,7 +362,7 @@ impl Execution<'_> {
                 let locks = match self.connections.forget_rejected(name, provider.lock_waits().await) {
                     Ok(locks) => locks,
                     Err(error) => {
-                        live.notes.push(format!("Lock details were unavailable: {}", error.message));
+                        live.notes.push(t!("engine.execution.no_lock_details", why = &error.message));
                         Vec::new()
                     }
                 };
@@ -359,7 +370,7 @@ impl Execution<'_> {
             }
             if info.environment.is_production() {
                 live.session_actions = Vec::new();
-                live.session_actions_note = Some(PRODUCTION_SESSIONS.to_string());
+                live.session_actions_note = Some(t!("engine.execution.production_sessions"));
             } else {
                 live.session_actions = provider.session_actions();
             }
@@ -390,9 +401,9 @@ impl Execution<'_> {
         if info.environment.is_production() {
             return Err(Error::new(
                 ErrorCode::PermissionDenied,
-                format!("'{}' is a production connection; Culprit never cancels or ends sessions there", info.name),
+                t!("engine.execution.interrupt_production", name = &info.name),
             )
-            .with_hint("Use the database's own tooling, or mark the connection as non-production if it isn't one."));
+            .with_hint(t!("engine.execution.interrupt_production_hint")));
         }
         info.engine.spec().validate_session_id(session)?;
         let provider = self.connections.provider(name).await?;
@@ -401,15 +412,15 @@ impl Execution<'_> {
                 return Err(Error::new(
                     ErrorCode::Unsupported,
                     match action {
-                        SessionAction::Cancel => {
-                            format!("{} can't stop another session's statement on its own", info.engine)
+                        SessionAction::Cancel => t!("engine.execution.no_cancel", engine = info.engine.to_string()),
+                        SessionAction::Terminate => {
+                            t!("engine.execution.no_terminate", engine = info.engine.to_string())
                         }
-                        SessionAction::Terminate => format!("{} sessions can't be ended from Culprit", info.engine),
                     },
                 )
                 .with_hint(match action {
-                    SessionAction::Cancel => "End the session instead; its open transaction rolls back.",
-                    SessionAction::Terminate => "Use the database's own tooling.",
+                    SessionAction::Cancel => t!("engine.execution.no_cancel_hint"),
+                    SessionAction::Terminate => t!("engine.execution.no_terminate_hint"),
                 }));
             }
             self.connections.forget_rejected(name, provider.interrupt_session(session, action).await)
@@ -429,9 +440,9 @@ impl Execution<'_> {
         // semicolon between them, so `SELECT 1 COMMIT CREATE TABLE …` would otherwise run all three.
         if let Some(problem) = check.problem {
             let hint = if problem.contains("never closed") {
-                "Check the quotes and comments: one starts and doesn't end."
+                t!("engine.execution.unclosed_hint")
             } else {
-                "Run one statement at a time: select it in the editor first, or split the script."
+                t!("engine.execution.one_at_a_time_hint")
             };
             return Err(Error::invalid(problem).with_hint(hint));
         }
@@ -445,20 +456,17 @@ impl Execution<'_> {
             return self.connections.forget_rejected(name, crate::operation::run(provider.execute(sql, limit)).await);
         }
         if info.environment.is_production() && !confirmed {
-            let what = if check.verb.is_empty() { "statement".to_string() } else { check.verb.clone() };
             // A read-shaped statement Culprit can't prove reads (a locking read, a function call) may write; a verb
             // that writes does.
-            let reads_like = matches!(what.as_str(), "SELECT" | "WITH" | "TABLE" | "VALUES" | "SHOW" | "EXPLAIN");
-            let does = if reads_like { "may change data" } else { "changes data" };
-            return Err(Error::new(
-                ErrorCode::ConfirmationRequired,
-                format!("This {what} {does} on the production connection '{}'", info.name),
-            )
-            .with_hint(
-                check
-                    .warning
-                    .unwrap_or_else(|| "Confirm to run it (--yes-execute-on-production in the CLI).".to_string()),
-            ));
+            let verb = check.verb.as_str();
+            let reads_like = matches!(verb, "SELECT" | "WITH" | "TABLE" | "VALUES" | "SHOW" | "EXPLAIN");
+            let message = match (verb.is_empty(), reads_like) {
+                (true, _) => t!("engine.execution.confirm.statement", name = &info.name),
+                (false, true) => t!("engine.execution.confirm.may_change", verb = verb, name = &info.name),
+                (false, false) => t!("engine.execution.confirm.changes", verb = verb, name = &info.name),
+            };
+            return Err(Error::new(ErrorCode::ConfirmationRequired, message)
+                .with_hint(check.warning.unwrap_or_else(|| t!("engine.execution.confirm_hint"))));
         }
         let provider = self.connections.provider(name).await?;
         self.connections.forget_rejected(name, crate::operation::run(provider.execute(sql, limit)).await)
@@ -476,33 +484,36 @@ impl Execution<'_> {
         let info = self.connections.connection(name)?;
         let statement = culprit_core::sql::single_statement(sql, info.engine)?;
         if !culprit_core::sql::reads_only(statement, info.engine) {
-            return Err(Error::new(ErrorCode::PermissionDenied, "Only statements that read data run here")
-                .with_hint("Send a single SELECT: no writes, DDL, procedure calls or locking reads."));
+            return Err(Error::new(ErrorCode::PermissionDenied, t!("engine.execution.reads_only"))
+                .with_hint(t!("engine.execution.reads_only_hint")));
         }
         let provider = self.connections.provider(name).await?;
-        crate::operation::within(if preview { culprit_core::limits::OBSERVE_TIMEOUT } else { culprit_core::limits::QUERY_TIMEOUT }, async {
-            // The server's own parser has the last word where it can give one (SQL Server compiles the text under SHOWPLAN):
-            // exactly one statement, and a read.
-            let server_checked = match self.connections.forget_rejected(name, provider.statement_types(statement).await)? {
-                Some(types) if !(types.len() == 1 && is_read_type(&types[0])) => {
-                    return Err(Error::new(ErrorCode::PermissionDenied, "Only statements that read data run here")
-                        .with_hint(format!("The server reads this text as: {}.", types.join(", ").to_lowercase())));
+        crate::operation::within(
+            if preview { culprit_core::limits::OBSERVE_TIMEOUT } else { culprit_core::limits::QUERY_TIMEOUT },
+            async {
+                // The server's own parser has the last word where it can give one (SQL Server compiles the text under SHOWPLAN):
+                // exactly one statement, and a read.
+                let server_checked =
+                    match self.connections.forget_rejected(name, provider.statement_types(statement).await)? {
+                        Some(types) if !(types.len() == 1 && is_read_type(&types[0])) => {
+                            return Err(Error::new(ErrorCode::PermissionDenied, t!("engine.execution.reads_only"))
+                                .with_hint(reads_as(&types)));
+                        }
+                        Some(_) => true,
+                        None => false,
+                    };
+                let batch = read_only_batch(info.engine, statement);
+                let read =
+                    if preview { provider.preview(&batch, limit).await } else { provider.run(&batch, limit).await };
+                let mut result = self.connections.forget_rejected(name, read)?;
+                // Say so when the second opinion couldn't be asked for: the person (or the agent's approver) should know.
+                if !server_checked && info.engine == Engine::Mssql {
+                    result.messages.push(t!("engine.execution.no_showplan"));
                 }
-                Some(_) => true,
-                None => false,
-            };
-            let batch = read_only_batch(info.engine, statement);
-            let read = if preview { provider.preview(&batch, limit).await } else { provider.run(&batch, limit).await };
-            let mut result = self.connections.forget_rejected(name, read)?;
-            // Say so when the second opinion couldn't be asked for: the person (or the agent's approver) should know.
-            if !server_checked && info.engine == Engine::Mssql {
-                result.messages.push(
-                    "SQL Server couldn't double-check that this only reads (the login has no SHOWPLAN permission); Culprit's own check decided."
-                        .to_string(),
-                );
-            }
-            Ok(result)
-        }).await
+                Ok(result)
+            },
+        )
+        .await
     }
 
     /// Databases, tables, views and columns for editor completion, read live through the read-only run path.
@@ -542,7 +553,10 @@ pub(crate) fn read_only_batch(engine: Engine, statement: &str) -> String {
     }
 }
 
-const PRODUCTION_SESSIONS: &str = "Production connection: Culprit doesn't cancel or end sessions here.";
+/// "The server reads this text as: select, insert.": the statement types the server's own parser reported.
+fn reads_as(types: &[String]) -> String {
+    t!("engine.execution.reads_as", types = types.join(", ").to_lowercase())
+}
 
 /// Explain Analyze executes the statement. On production it only does that for a statement Culprit's classifier proves
 /// reads (SQL Server has no read-only transactions, so the classifier is the whole guard there); a write is never
@@ -551,14 +565,8 @@ fn guard_execution(info: &ConnectionInfo, sql: &str, executes: bool, _confirmed:
     if !executes || !info.environment.is_production() || culprit_core::sql::reads_only(sql, info.engine) {
         return Ok(());
     }
-    Err(Error::new(
-        ErrorCode::PermissionDenied,
-        format!(
-            "'{}' is a production connection; Explain Analyze would execute a statement that changes data",
-            info.name
-        ),
-    )
-    .with_hint("Use the estimated plan (Explain), or measure it on a non-production copy."))
+    Err(Error::new(ErrorCode::PermissionDenied, t!("engine.execution.analyze_production", name = &info.name))
+        .with_hint(t!("engine.execution.analyze_production_hint")))
 }
 
 #[cfg(test)]

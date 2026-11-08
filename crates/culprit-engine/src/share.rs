@@ -2,7 +2,7 @@
 //! reports, plans and comparisons, and check whether fixes worked.
 
 use culprit_core::{
-    CompareContext, Error, Plan, PlanDiff, Result, SnapshotOptions, Verification, compare_reports, plan_diff_in,
+    CompareContext, Error, Plan, PlanDiff, Result, SnapshotOptions, Verification, compare_reports, plan_diff_in, t,
 };
 
 use crate::Workspace;
@@ -32,13 +32,10 @@ impl Workspace {
         format: ExportFormat,
         options: &ExportOptions,
     ) -> Result<ExportFile> {
-        let report = self.latest_report(name, None)?.ok_or_else(|| {
-            Error::not_found(format!("'{name}' hasn't been scanned yet"))
-                .with_hint(format!("Run `culprit scan {name}` first"))
-        })?;
+        let report = self.latest_report(name, None)?.ok_or_else(|| not_scanned(name))?;
         let finding = report.findings.iter().find(|f| f.id == id).ok_or_else(|| {
-            Error::not_found(format!("No finding '{id}' in the latest report for {name}"))
-                .with_hint(format!("List the current ids with `culprit findings {name}`"))
+            Error::not_found(t!("engine.share.no_finding", id = id, name = name))
+                .with_hint(t!("engine.share.no_finding_hint", name = name))
         })?;
         let stem = export::file_stem(&finding.title);
         Ok(match format {
@@ -57,10 +54,7 @@ impl Workspace {
 
     /// Every finding of the latest scan.
     pub fn export_report(&self, name: &str, format: ExportFormat, options: &ExportOptions) -> Result<ExportFile> {
-        let report = self.latest_report(name, None)?.ok_or_else(|| {
-            Error::not_found(format!("'{name}' hasn't been scanned yet"))
-                .with_hint(format!("Run `culprit scan {name}` first"))
-        })?;
+        let report = self.latest_report(name, None)?.ok_or_else(|| not_scanned(name))?;
         Ok(match format {
             ExportFormat::Html => ExportFile {
                 name: "culprit-report.html".into(),
@@ -86,8 +80,8 @@ impl Workspace {
     ) -> Result<ExportFile> {
         let plan = self.query_plan(name, query_id, plan_id).await?;
         let title = match plan_id {
-            Some(id) => format!("Plan {id} of query {query_id}"),
-            None => format!("Plan of query {query_id}"),
+            Some(id) => t!("engine.share.plan_of_query_id", plan = id, query = query_id),
+            None => t!("engine.share.plan_of_query", query = query_id),
         };
         export_plan(&plan, &title, format, options)
     }
@@ -101,14 +95,19 @@ impl Workspace {
             .background(move |reports| reports.plan_report(&report_name, None))
             .await?
             .ok_or_else(|| {
-                Error::not_found(format!("'{name}' hasn't been scanned yet, so there's nothing to compare with"))
-                    .with_hint(format!("Scan before the change (`culprit scan {name}`), then verify after it ships"))
+                Error::not_found(t!("engine.share.verify_unscanned", name = name))
+                    .with_hint(t!("engine.share.verify_unscanned_hint", name = name))
             })?;
         let options = before.snapshot.options.clone().unwrap_or_else(SnapshotOptions::default);
         let after = self.scan(name, &options).await?;
         let ids = ids.to_vec();
         crate::run_blocking(move || Ok(compare_reports(&before, &after, &ids))).await
     }
+}
+
+/// `name` has no saved scan to export.
+fn not_scanned(name: &str) -> Error {
+    Error::not_found(t!("engine.share.not_scanned", name = name)).with_hint(t!("engine.scan_first", name = name))
 }
 
 /// A plan as Markdown, HTML, or its own text (.sqlplan, EXPLAIN JSON or text) when it kept it.
@@ -123,8 +122,7 @@ pub fn export_plan(plan: &Plan, title: &str, format: ExportFormat, options: &Exp
         }
         ExportFormat::Native => {
             let contents = export::plan_native(plan, options).ok_or_else(|| {
-                Error::invalid("This plan has no original text to save")
-                    .with_hint("Plans read from a scan keep only Culprit's model; open the query's plan or export HTML or Markdown")
+                Error::invalid(t!("engine.share.no_native")).with_hint(t!("engine.share.no_native_hint"))
             })?;
             ExportFile { name: format!("{stem}.{}", export::native_extension(plan)), contents, format }
         }

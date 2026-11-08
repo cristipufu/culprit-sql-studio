@@ -164,14 +164,14 @@ pub fn guess_source(path: &Path) -> Result<ImportSource> {
             return Ok(ImportSource::Dbeaver);
         }
     }
-    Err(Error::invalid(format!("Can't tell which tool wrote {}", path.display()))
-        .with_hint("Pass --from ads, vscode, dbeaver or datagrip"))
+    Err(Error::invalid(culprit_core::t!("engine.import.unknown_tool", file = path.display().to_string()))
+        .with_hint(culprit_core::t!("engine.import.unknown_tool_hint")))
 }
 
 fn read_limited(path: &Path) -> Result<String> {
     let meta = std::fs::metadata(path).map_err(|e| Error::not_found(format!("{}: {e}", path.display())))?;
     if meta.len() > MAX_FILE_BYTES {
-        return Err(Error::invalid(format!("{} is too large to be a connection list", path.display())));
+        return Err(Error::invalid(culprit_core::t!("engine.import.too_large", file = path.display().to_string())));
     }
     std::fs::read_to_string(path).map_err(|e| Error::invalid(format!("{}: {e}", path.display())))
 }
@@ -205,8 +205,7 @@ fn find_files(root: &Path, depth: usize, keep: fn(&str) -> bool) -> Vec<PathBuf>
 // ───────── Azure Data Studio and VS Code (mssql extension) ─────────
 
 fn parse_vscode_settings(source: ImportSource, text: &str, file: &str) -> Result<Vec<ImportCandidate>> {
-    let settings: Value = serde_json::from_str(&strip_jsonc(text))
-        .map_err(|e| Error::invalid(format!("{file} is not valid JSON: {e}")))?;
+    let settings: Value = serde_json::from_str(&strip_jsonc(text)).map_err(|e| invalid_json(file, &e))?;
     let mut out = Vec::new();
     // Azure Data Studio: provider + options. VS Code mssql: flat profiles.
     for entry in settings.get("datasource.connections").and_then(Value::as_array).into_iter().flatten() {
@@ -258,7 +257,7 @@ fn ads_profile(source: ImportSource, file: &str, provider: &str, o: &Value) -> O
     spec.auth = if auth_type.starts_with("azure") || auth_type.starts_with("activedirectory") {
         AuthKind::Entra
     } else if auth_type == "integrated" {
-        note = Some("Uses Windows authentication there; Culprit needs a SQL login and asks for its password.".into());
+        note = Some(culprit_core::t!("engine.import.windows_auth"));
         AuthKind::Password
     } else {
         AuthKind::Password
@@ -367,8 +366,7 @@ fn yugabyte_driver(driver: &str) -> bool {
 }
 
 fn parse_dbeaver(text: &str, file: &str) -> Result<Vec<ImportCandidate>> {
-    let doc: Value =
-        serde_json::from_str(text).map_err(|e| Error::invalid(format!("{file} is not valid JSON: {e}")))?;
+    let doc: Value = serde_json::from_str(text).map_err(|e| invalid_json(file, &e))?;
     let mut out = Vec::new();
     for c in doc.get("connections").and_then(Value::as_object).into_iter().flat_map(|m| m.values()) {
         let provider = format!("{} {}", str_at(c, "provider").unwrap_or(""), str_at(c, "driver").unwrap_or(""))
@@ -451,7 +449,9 @@ fn parse_dbeaver(text: &str, file: &str) -> Result<Vec<ImportCandidate>> {
 
 fn parse_datagrip(text: &str, file: &str, users: &BTreeMap<String, String>) -> Result<Vec<ImportCandidate>> {
     culprit_core::xml::read(text, |doc| {
-        let doc = doc.map_err(|e| Error::invalid(format!("{file} is not valid XML: {e}")))?;
+        let doc = doc.map_err(|e| {
+            Error::invalid(culprit_core::t!("engine.import.invalid_xml", file = file, why = e.to_string()))
+        })?;
         datagrip_sources(&doc, file, users)
     })
 }
@@ -576,10 +576,7 @@ fn candidate(
     let mut auth = spec.auth;
     if auth == AuthKind::Entra && !entra_host_allowed(engine, &host) {
         auth = AuthKind::Password;
-        note = Some(
-            "Signs in with Microsoft Entra ID there, but this host isn't an Azure database; Culprit uses a password."
-                .into(),
-        );
+        note = Some(culprit_core::t!("engine.import.entra_elsewhere"));
     }
     let options: BTreeMap<String, String> = spec
         .options
@@ -704,19 +701,21 @@ pub(crate) fn reconcile(list: &mut [ImportCandidate], saved: &[(String, store::S
     }
 }
 
+/// `file` doesn't read as JSON, for the reason `e` gives.
+fn invalid_json(file: &str, e: &serde_json::Error) -> Error {
+    Error::invalid(culprit_core::t!("engine.import.invalid_json", file = file, why = e.to_string()))
+}
+
 /// The stored form of a candidate. Everything comes from the caller (the UI can edit aliases), so it is validated again.
 pub(crate) fn to_stored(c: &ImportCandidate) -> Result<store::StoredConnection> {
     store::validate_name(&c.alias)?;
     let host = c.host.trim();
     if host.is_empty() || host.chars().any(|ch| ch.is_whitespace() || ch.is_control()) {
-        return Err(Error::invalid(format!("'{}' has no usable host", c.alias)));
+        return Err(Error::invalid(culprit_core::t!("engine.import.no_host", alias = &c.alias)));
     }
     let auth = match c.auth {
         AuthKind::Entra if !entra_host_allowed(c.engine, host) => {
-            return Err(Error::invalid(format!(
-                "'{}' would send a Microsoft Entra ID token to {host}, which is not an Azure database host",
-                c.alias
-            )));
+            return Err(Error::invalid(culprit_core::t!("engine.import.entra_refused", alias = &c.alias, host = host)));
         }
         AuthKind::AwsIam => AuthKind::Password,
         other => other,

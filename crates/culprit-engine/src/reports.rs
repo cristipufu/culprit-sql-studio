@@ -390,11 +390,10 @@ pub fn load(path: &Path) -> Result<Report> {
     storage::decode(&bytes).map_err(|e| {
         // `latest.json` is the one-line summary of the newest scan, not the scan itself.
         if serde_json::from_slice::<ReportSummary>(&bytes).is_ok() {
-            return Error::invalid(format!("{} is a scan summary, not a report", path.display())).with_hint(
-                "Pass the connection's name to use its latest scan, or a report file (`<snapshot id>.json`) from the same folder.",
-            );
+            return Error::invalid(culprit_core::t!("engine.reports.summary", file = path.display().to_string()))
+                .with_hint(culprit_core::t!("engine.reports.summary_hint"));
         }
-        Error::invalid(format!("{} is not a Culprit report: {e}", path.display()))
+        not_a_report(path, &e)
     })
 }
 
@@ -429,7 +428,25 @@ pub fn load_snapshot(path: &Path) -> Result<culprit_core::Snapshot> {
                 Err(e)
             }
         })
-        .map_err(|e| Error::invalid(format!("{} is not a Culprit snapshot or report: {e}", path.display())))
+        .map_err(|e| not_a_snapshot(path, &e))
+}
+
+/// `path` doesn't read as a report, for the reason `e` gives.
+fn not_a_report(path: &Path, e: &dyn std::fmt::Display) -> Error {
+    Error::invalid(culprit_core::t!(
+        "engine.reports.not_a_report",
+        file = path.display().to_string(),
+        why = e.to_string()
+    ))
+}
+
+/// `path` reads as neither a snapshot nor a report, for the reason `e` gives.
+fn not_a_snapshot(path: &Path, e: &dyn std::fmt::Display) -> Error {
+    Error::invalid(culprit_core::t!(
+        "engine.reports.not_a_snapshot",
+        file = path.display().to_string(),
+        why = e.to_string()
+    ))
 }
 
 /// Historical event backfills need only the prepared snapshot and any database-dated `recorded_changes`,
@@ -444,11 +461,11 @@ pub(crate) fn load_snapshot_and_recorded_changes(
             Ok((scan.snapshot, recorded))
         }
         Err(e) if e.to_string().starts_with("missing field `snapshot`") => {
-            let snapshot = serde_json::from_slice::<culprit_core::Snapshot>(&bytes)
-                .map_err(|e| Error::invalid(format!("{} is not a Culprit snapshot or report: {e}", path.display())))?;
+            let snapshot =
+                serde_json::from_slice::<culprit_core::Snapshot>(&bytes).map_err(|e| not_a_snapshot(path, &e))?;
             Ok((snapshot, Vec::new()))
         }
-        Err(e) => Err(Error::invalid(format!("{} is not a Culprit snapshot or report: {e}", path.display()))),
+        Err(e) => Err(not_a_snapshot(path, &e)),
     }
 }
 
@@ -459,11 +476,9 @@ pub(crate) fn load_analysis_input(path: &Path) -> Result<crate::analysis::Input>
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|e| Error::invalid(format!("{}: {e}", path.display())))?;
     if value.get("snapshot").is_some() && value.get("findings").is_some() && value.get("summary").is_some() {
-        return storage::analysis_input(value)
-            .map_err(|e| Error::invalid(format!("{} is not a Culprit report: {e}", path.display())));
+        return storage::analysis_input(value).map_err(|e| not_a_report(path, &e));
     }
-    let snapshot: culprit_core::Snapshot = serde_json::from_value(value)
-        .map_err(|e| Error::invalid(format!("{} is not a Culprit snapshot or report: {e}", path.display())))?;
+    let snapshot: culprit_core::Snapshot = serde_json::from_value(value).map_err(|e| not_a_snapshot(path, &e))?;
     Ok(crate::analysis::Input::from(snapshot))
 }
 

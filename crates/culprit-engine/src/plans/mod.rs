@@ -5,7 +5,7 @@
 
 #[cfg(any(feature = "postgres", feature = "mysql", feature = "yugabyte"))]
 use culprit_core::PlanKind;
-use culprit_core::{Error, Plan, PlanNode, Result};
+use culprit_core::{Error, Plan, PlanNode, Result, t};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use ts_rs::TS;
@@ -30,16 +30,16 @@ pub enum PlanFormat {
 }
 
 impl PlanFormat {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            PlanFormat::ShowplanXml => "SQL Server showplan XML",
-            PlanFormat::PostgresJson => "PostgreSQL EXPLAIN (FORMAT JSON)",
-            PlanFormat::YugabyteJson => "YugabyteDB EXPLAIN (DIST, FORMAT JSON)",
-            PlanFormat::PostgresText => "PostgreSQL EXPLAIN",
-            PlanFormat::MysqlJson => "MySQL EXPLAIN FORMAT=JSON",
-            PlanFormat::MysqlTree => "MySQL EXPLAIN ANALYZE / FORMAT=TREE",
-            PlanFormat::SqliteText => "SQLite EXPLAIN QUERY PLAN",
-            PlanFormat::Culprit => "Culprit plan JSON",
+            PlanFormat::ShowplanXml => t!("engine.plans.format.showplan_xml"),
+            PlanFormat::PostgresJson => t!("engine.plans.format.postgres_json"),
+            PlanFormat::YugabyteJson => t!("engine.plans.format.yugabyte_json"),
+            PlanFormat::PostgresText => t!("engine.plans.format.postgres_text"),
+            PlanFormat::MysqlJson => t!("engine.plans.format.mysql_json"),
+            PlanFormat::MysqlTree => t!("engine.plans.format.mysql_tree"),
+            PlanFormat::SqliteText => t!("engine.plans.format.sqlite_text"),
+            PlanFormat::Culprit => t!("engine.plans.format.culprit"),
         }
     }
 }
@@ -59,7 +59,7 @@ pub fn decode(bytes: &[u8]) -> Result<String> {
                     1,
                 )
             })
-            .map_err(|_| Error::invalid("The file says it is UTF-16 but isn't valid UTF-16"))
+            .map_err(|_| Error::invalid(t!("engine.plans.bad_utf16")))
     };
     match bytes {
         [0xFF, 0xFE, rest @ ..] => utf16(rest.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect()),
@@ -70,10 +70,8 @@ pub fn decode(bytes: &[u8]) -> Result<String> {
 }
 
 fn text(bytes: &[u8]) -> Result<String> {
-    String::from_utf8(bytes.to_vec()).map_err(|_| {
-        Error::invalid("This file isn't text")
-            .with_hint("Open a .sqlplan, an EXPLAIN (FORMAT JSON) file, or EXPLAIN text output.")
-    })
+    String::from_utf8(bytes.to_vec())
+        .map_err(|_| Error::invalid(t!("engine.plans.not_text")).with_hint(t!("engine.plans.not_text_hint")))
 }
 
 /// Which plan format the text is in, if Culprit reads it.
@@ -96,12 +94,10 @@ pub fn parse_plan(input: &str) -> Result<Plan> {
     };
     let text = block.trim_start();
     if text.is_empty() {
-        return Err(Error::invalid("There is no plan to read"));
+        return Err(Error::invalid(t!("engine.plans.empty")));
     }
     let format = detect_clean(text).ok_or_else(|| unrecognized(text))?;
-    let unreadable = |e: Error| {
-        Error::invalid(format!("This looks like {} but Culprit couldn't read it: {}", format.label(), e.message))
-    };
+    let unreadable = |e: Error| Error::invalid(t!("engine.plans.unreadable", format = format.label(), why = e.message));
     let mut plan = match format {
         PlanFormat::ShowplanXml => showplan(text),
         PlanFormat::PostgresJson => postgres_json(text),
@@ -126,7 +122,7 @@ pub fn parse_plan(input: &str) -> Result<Plan> {
     // file it's saved in would never read back.
     let kept = serde_json::to_value(&plan).ok().is_some_and(|saved| Plan::deserialize(&saved).is_ok());
     if !kept {
-        return Err(unreadable(Error::invalid("a number in it is too large to keep")));
+        return Err(unreadable(Error::invalid(t!("engine.plans.number_too_large"))));
     }
     Ok(plan)
 }
@@ -217,25 +213,23 @@ fn json_format(value: &Value) -> Option<PlanFormat> {
 }
 
 fn unrecognized(text: &str) -> Error {
-    let hint = "Paste or open a SQL Server plan (.sqlplan), PostgreSQL EXPLAIN output (text or FORMAT JSON), MySQL \
-                EXPLAIN FORMAT=JSON / EXPLAIN ANALYZE output, or SQLite EXPLAIN QUERY PLAN output.";
     let first = text.lines().next().unwrap_or("").trim();
     let message = if text.contains("<explain xmlns=\"http://www.postgresql.org") || first.starts_with("- Plan:") {
-        "PostgreSQL plans in XML or YAML aren't supported; use EXPLAIN (FORMAT JSON) or the default text format"
+        t!("engine.plans.unrecognized.postgres_xml_yaml")
     } else if text.starts_with('<') {
-        "This XML isn't a SQL Server execution plan"
+        t!("engine.plans.unrecognized.xml")
     } else if text.contains("|--") {
-        "This is a SQL Server text plan (SHOWPLAN_TEXT); Culprit reads the XML plan (SET SHOWPLAN_XML ON or Save Execution Plan As in SSMS)"
+        t!("engine.plans.unrecognized.showplan_text")
     } else if text.starts_with('{') || text.starts_with('[') {
-        "This JSON isn't a plan Culprit knows"
+        t!("engine.plans.unrecognized.json")
     } else {
-        "Culprit doesn't recognize this as a query plan"
+        t!("engine.plans.unrecognized.other")
     };
-    Error::invalid(message).with_hint(hint)
+    Error::invalid(message).with_hint(t!("engine.plans.unrecognized.hint"))
 }
 
 fn too_large(len: usize) -> Error {
-    Error::invalid(format!("This is {} MB, far larger than any query plan", len / (1024 * 1024)))
+    Error::invalid(t!("engine.plans.too_large", size = (len / (1024 * 1024)).to_string()))
 }
 
 /// Strip what database clients wrap around a plan: psql's `QUERY PLAN` header, dashes, `+` continuations and
@@ -311,7 +305,7 @@ fn showplan(text: &str) -> Result<Plan> {
     #[cfg(not(feature = "mssql"))]
     {
         let _ = text;
-        Err(Error::invalid("This build of Culprit has no SQL Server support"))
+        Err(Error::invalid(t!("engine.plans.no_support.mssql")))
     }
 }
 
@@ -330,7 +324,7 @@ fn postgres_value(value: &Value, statement: Option<&str>) -> Result<Plan> {
     #[cfg(not(feature = "postgres"))]
     {
         let _ = (value, statement);
-        Err(Error::invalid("This build of Culprit has no PostgreSQL support"))
+        Err(Error::invalid(t!("engine.plans.no_support.postgres")))
     }
 }
 
@@ -346,7 +340,7 @@ fn yugabyte_json(text: &str) -> Result<Plan> {
     #[cfg(not(feature = "yugabyte"))]
     {
         let _ = text;
-        Err(Error::invalid("This build of Culprit has no YugabyteDB support"))
+        Err(Error::invalid(t!("engine.plans.no_support.yugabyte")))
     }
 }
 
@@ -379,7 +373,7 @@ fn mysql_json(text: &str) -> Result<Plan> {
     #[cfg(not(feature = "mysql"))]
     {
         let _ = (value, statement);
-        Err(Error::invalid("This build of Culprit has no MySQL support"))
+        Err(Error::invalid(t!("engine.plans.no_support.mysql")))
     }
 }
 
@@ -399,7 +393,7 @@ fn sqlite_text(text: &str) -> Result<Plan> {
     #[cfg(not(feature = "sqlite"))]
     {
         let _ = text;
-        Err(Error::invalid("This build of Culprit has no SQLite support"))
+        Err(Error::invalid(t!("engine.plans.no_support.sqlite")))
     }
 }
 
@@ -415,7 +409,7 @@ fn mysql_tree(text: &str) -> Result<Plan> {
     #[cfg(not(feature = "mysql"))]
     {
         let _ = text;
-        Err(Error::invalid("This build of Culprit has no MySQL support"))
+        Err(Error::invalid(t!("engine.plans.no_support.mysql")))
     }
 }
 
@@ -425,9 +419,7 @@ fn culprit_json(text: &str) -> Result<Plan> {
         // A plan Culprit saved lacks a field this version writes (its facts, say): another version saved it, and this
         // one doesn't read what others save. The engine's own plan text always reads.
         if e.to_string().starts_with("missing field") {
-            Error::invalid(format!(
-                "it was saved by another version of Culprit ({e}); open the engine's own plan text (XML, JSON or text) instead"
-            ))
+            Error::invalid(t!("engine.plans.other_version", why = e.to_string()))
         } else {
             Error::invalid(e.to_string())
         }

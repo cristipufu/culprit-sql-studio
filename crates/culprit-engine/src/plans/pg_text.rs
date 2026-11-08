@@ -64,7 +64,7 @@ pub(super) fn to_json(text: &str) -> Result<Value> {
         }
     }
     close(&mut stack, &mut root, |_| false);
-    let plan = root.ok_or_else(|| Error::invalid("No plan nodes found"))?;
+    let plan = root.ok_or_else(|| Error::invalid(culprit_core::t!("engine.plans.no_nodes")))?;
     let mut out = Map::new();
     out.insert("Plan".into(), plan);
     out.extend(top);

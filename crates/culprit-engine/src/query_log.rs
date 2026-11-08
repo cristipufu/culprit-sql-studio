@@ -9,7 +9,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use culprit_core::{Capability, CollectorNote, Error, ErrorCode, Provider, Result, Snapshot, SnapshotOptions};
+use culprit_core::{Capability, CollectorNote, Error, ErrorCode, Provider, Result, Snapshot, SnapshotOptions, t};
 use culprit_querylog::{Aggregator, Reader};
 
 /// Shared source descriptor, independent of which database provider supplied the catalog.
@@ -45,11 +45,11 @@ pub fn recognize(path: &Path) -> Result<&'static str> {
 }
 
 fn no_statements(path: &Path) -> Error {
-    Error::invalid(format!("{} has no statements in a format Culprit reads", path.display())).with_hint(
-        "Culprit reads the logs Rails (debug level), Django (django.db.backends at DEBUG), Entity Framework Core \
-         (Database.Command at Information) and Phoenix/Ecto (debug) write, and JSON lines with sql and ms. A framework \
-         at its production log level usually leaves SQL out.",
-    )
+    Error::invalid(t!("engine.query_log.no_statements", file = path.display().to_string())).with_hint(format!(
+        "{} {}",
+        t!("engine.query_log.formats"),
+        t!("engine.query_log.production_level")
+    ))
 }
 
 /// File extensions Culprit checks when looking for an application's query log beside a SQLite database.
@@ -105,21 +105,21 @@ pub async fn attach(
     options: &SnapshotOptions,
     found: bool,
 ) -> Result<()> {
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "the log".into());
+    let name =
+        path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| t!("engine.query_log.the_log"));
     if snapshot.workload.is_some() {
         let mut coverage = culprit_core::Coverage::default();
-        coverage.not_applicable(&QUERY_LOG_SOURCE, "The database already provides statement history.");
+        coverage.not_applicable(&QUERY_LOG_SOURCE, &t!("engine.query_log.has_history"));
         coverage.append_to(snapshot);
-        snapshot
-            .notes
-            .push(note(format!("{} keeps its own statement history, so {name} wasn't read.", snapshot.server.name())));
+        let said = t!("engine.query_log.not_read", engine = snapshot.server.name(), log = &name);
+        snapshot.notes.push(note(said));
         return Ok(());
     }
     let engine = snapshot.server.engine;
     let file = path.to_path_buf();
     let read = tokio::task::spawn_blocking(move || read_file(&file, engine))
         .await
-        .map_err(|e| Error::internal(format!("Reading the query log stopped: {e}")))
+        .map_err(|e| Error::internal(t!("engine.query_log.stopped", why = e.to_string())))
         .and_then(|result| result);
     let mut coverage = culprit_core::Coverage::default();
     let Some((format, mut aggregator, limitation)) = coverage.read(&QUERY_LOG_SOURCE, read) else {
@@ -140,7 +140,14 @@ pub async fn attach(
     let read = aggregator.entries();
     snapshot.operations.log_failures = aggregator.failures();
     if !snapshot.operations.log_failures.is_empty() {
-        snapshot.notes.push(note("Recognized structured error records were retained without raw messages or values. An error without duration is absent from performance totals, not an instant execution. Counts are log records and can include retries or duplicate logging; dates describe only records that include a time zone.".into()));
+        snapshot.notes.push(note(
+            [
+                t!("engine.query_log.failures.retained"),
+                t!("engine.query_log.failures.no_duration"),
+                t!("engine.query_log.failures.counts"),
+            ]
+            .join(" "),
+        ));
     }
     let mut workload = aggregator.workload(format, options.top_queries.max(1) as usize);
     // Each shape is planned as text someone else wrote (the application did), under the engine's rules for recorded
@@ -160,23 +167,52 @@ pub async fn attach(
     if planned > 0 && !server.has(Capability::QueryPlans) {
         server.capabilities.push(Capability::QueryPlans);
     }
-    let found = if found { ", found beside the database; change or remove it on the connection" } else { "" };
-    snapshot.notes.push(note(format!(
-        "Read {} statements from {name} ({format}{found}): {} shapes, the {} heaviest kept, {planned} planned.{}",
-        culprit_core::format::count(read as f64),
-        culprit_core::format::count(workload.query_count),
-        workload.queries.len(),
-        if workload.window_unknown() {
-            " The log has no times to tell how long it covers, so shares hold and rates aren't claimed."
-        } else {
-            ""
-        }
-    )));
-    snapshot.notes.push(note("Only statements logged by the application are visible. Table names filter unrelated statements but cannot distinguish databases with the same table names; use a log for this database. Explicit request IDs support bounded request-group counts, not distributed traces or proof of an N+1 bug.".into()));
+    let statements =
+        t!("engine.query_log.statements", n = read as f64, count = culprit_core::format::count(read as f64));
+    let shapes = t!(
+        "engine.query_log.shapes",
+        n = workload.query_count,
+        count = culprit_core::format::count(workload.query_count)
+    );
+    let (kept, planned) = (workload.queries.len().to_string(), planned.to_string());
+    let mut said = if found {
+        t!(
+            "engine.query_log.read_found",
+            statements = statements,
+            log = &name,
+            format = format,
+            shapes = shapes,
+            kept = kept,
+            planned = planned
+        )
+    } else {
+        t!(
+            "engine.query_log.read",
+            statements = statements,
+            log = &name,
+            format = format,
+            shapes = shapes,
+            kept = kept,
+            planned = planned
+        )
+    };
+    if workload.window_unknown() {
+        said = format!("{said} {}", t!("engine.query_log.no_times"));
+    }
+    snapshot.notes.push(note(said));
+    snapshot.notes.push(note(
+        [
+            t!("engine.query_log.limits.visible"),
+            t!("engine.query_log.limits.tables"),
+            t!("engine.query_log.limits.requests"),
+        ]
+        .join(" "),
+    ));
     if elsewhere > 0 {
-        snapshot.notes.push(note(format!(
-            "Left out {} statements on tables this database doesn't have: the log is shared with another database.",
-            culprit_core::format::count(elsewhere as f64)
+        snapshot.notes.push(note(t!(
+            "engine.query_log.elsewhere",
+            n = elsewhere as f64,
+            count = culprit_core::format::count(elsewhere as f64)
         )));
     }
     coverage.completed(&QUERY_LOG_SOURCE, workload.queries.len() + snapshot.operations.log_failures.len());
@@ -217,11 +253,15 @@ struct LogLines {
 }
 impl LogLines {
     fn open(path: &Path, limits: LogLimits) -> Result<Self> {
-        let file = std::fs::File::open(path)
-            .map_err(|e| Error::new(ErrorCode::NotFound, format!("Can't read {}: {e}", path.display())))?;
+        let file = std::fs::File::open(path).map_err(|e| {
+            Error::new(
+                ErrorCode::NotFound,
+                t!("engine.query_log.cant_read", file = path.display().to_string(), why = e.to_string()),
+            )
+        })?;
         let metadata = file.metadata().map_err(|e| Error::invalid(e.to_string()))?;
         if !metadata.is_file() {
-            return Err(Error::invalid("A query log must be a regular file"));
+            return Err(Error::invalid(t!("engine.query_log.not_a_file")));
         }
         // Snapshot the length so a growing log cannot keep a scan alive indefinitely.
         let end = metadata.len().min(limits.bytes);
@@ -241,15 +281,14 @@ impl LogLines {
             return Ok(None);
         }
         if Instant::now() >= self.deadline {
-            self.limitation =
-                Some("Stopped at the query-log reading deadline; only complete earlier records were collected.".into());
+            self.limitation = Some(t!("engine.query_log.limitation.deadline"));
             return Ok(None);
         }
         self.buffer.clear();
         let read = Read::by_ref(&mut self.reader)
             .take(self.line_limit + 1)
             .read_until(b'\n', &mut self.buffer)
-            .map_err(|e| Error::new(ErrorCode::QueryFailed, format!("Reading the query log failed: {e}")))?;
+            .map_err(|e| Error::new(ErrorCode::QueryFailed, t!("engine.query_log.failed", why = e.to_string())))?;
         let at_end = read == 0
             || !self.buffer.ends_with(b"\n")
             || (self.reader.get_ref().limit() == 0 && self.reader.buffer().is_empty());
@@ -258,12 +297,15 @@ impl LogLines {
                 || self.reader.get_ref().get_ref().metadata().map_err(|e| Error::invalid(e.to_string()))?.len()
                     != self.initial_len);
         if at_limit && (read == 0 || !self.buffer.ends_with(b"\n")) {
-            self.limitation = Some("The log changed while reading or exceeds Culprit's reading budget; only complete earlier records were collected. Use a smaller or rotated log for recent activity.".into());
+            self.limitation = Some(format!(
+                "{} {}",
+                t!("engine.query_log.limitation.budget"),
+                t!("engine.query_log.limitation.budget_hint")
+            ));
             return Ok(None);
         }
         if read as u64 > self.line_limit {
-            self.limitation =
-                Some("Stopped before an oversized log line; only complete earlier records were collected.".into());
+            self.limitation = Some(t!("engine.query_log.limitation.oversized"));
             return Ok(None);
         }
         if read == 0 {
@@ -318,9 +360,7 @@ fn read_lines(
     let partial = lines.limitation.is_some() || reader.limited();
     let aggregator = if partial { reader.discard_pending() } else { reader.finish() };
     if aggregator.limited() && lines.limitation.is_none() {
-        lines.limitation = Some(
-            "Stopped at the query-log aggregation budget; only complete earlier statements were collected.".into(),
-        );
+        lines.limitation = Some(t!("engine.query_log.limitation.aggregation"));
     }
     Ok((format, aggregator, lines.limitation))
 }
