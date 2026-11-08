@@ -2,24 +2,66 @@
 
 use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
+use culprit_core::t;
 
 pub fn query_family_info() -> CheckInfo {
     CheckInfo {
         id: "query-family".into(),
-        title: "Statements with literals baked in".into(),
+        title: t!("check.query_family.info.title"),
         category: Category::Queries,
         engines: vec![Engine::Mssql, Engine::Postgres, Engine::Yugabyte],
         requires: vec![],
-        description:
-            "The same statement sent many times with different literal values (or value-list lengths), so the \
-            database compiles and tracks each copy separately; and plan caches filled with single-use plans."
-                .into(),
+        description: t!("check.query_family.info.description"),
     }
 }
 
-check!(QueryFamilyCheck: query_family_info, query_family, &[Evidence::Query(QueryMeasure::Work)]);
+check!(
+    QueryFamilyCheck: query_family_info,
+    decide = query_family_cases,
+    render = query_family_finding,
+    case<'s> = FamilyCase<'s>,
+    evidence = &[Evidence::Query(QueryMeasure::Work)],
+);
 
-pub fn query_family(snapshot: &Snapshot) -> Vec<Finding> {
+/// What the workload's statement families and the plan cache establish.
+pub enum FamilyCase<'s> {
+    /// One statement sent as many copies, each compiled and tracked on its own.
+    Copies(Copies<'s>),
+    /// Plans compiled for statements that ran once fill much of the plan cache (SQL Server).
+    SingleUsePlans(SingleUsePlans<'s>),
+}
+
+/// A statement family, and what its copies differ in.
+pub struct Copies<'s> {
+    family: &'s culprit_core::QueryFamily,
+    differ: Differ,
+    /// What the copies differ in is inferred from the one text Culprit has.
+    inferred: bool,
+    /// Its share of database time; `None` where the workload has no time.
+    share: Option<f64>,
+    severity: Severity,
+}
+
+/// What a family's copies differ in, which decides its fix.
+enum Differ {
+    /// Their parameters' declarations (one or two examples): the driver sizes them from each value.
+    Declarations(Vec<String>),
+    /// Literal values (SQL Server): what parameterizing fixes.
+    Literals,
+    /// The lengths of their value lists (PostgreSQL and the like).
+    ValueLists,
+}
+
+/// Single-use plans filling the plan cache, and where the setting that keeps a stub instead is.
+pub struct SingleUsePlans<'s> {
+    cache: &'s culprit_core::PlanCacheUse,
+    share: f64,
+    /// 'Optimize for ad hoc workloads' is already on.
+    ad_hoc_on: bool,
+    severity: Severity,
+}
+
+fn query_family_cases(snapshot: &Snapshot) -> Vec<FamilyCase<'_>> {
     let engine = snapshot.server.engine;
     let mut out = Vec::new();
     let threshold = if engine == Engine::Mssql { 20.0 } else { 5.0 };
@@ -28,154 +70,29 @@ pub fn query_family(snapshot: &Snapshot) -> Vec<Finding> {
         // What the copies differ in decides the fix; copies whose text is the same are split by something no
         // parameterization changes (the role that ran them, the schema a name resolved in, the module they're in).
         let Some(split) = family_split(snapshot, family) else { continue };
-        let mut f = finding(
-            "query-family",
-            &family.key.chars().take(40).collect::<String>(),
-            Category::Queries,
-            subject(SubjectKind::Query, family.key.clone()),
-        );
-        let handle = statement_handle(without_declaration(&family.sample));
-        let (title, why) = match (&split, engine) {
+        let inferred =
+            matches!(&split, FamilySplit::Unknown) || matches!(&split, FamilySplit::Declarations(e) if e.len() < 2);
+        let differ = match (split, engine) {
             (
                 FamilySplit::Declarations(examples),
                 Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite,
-            ) => (
-                format!(
-                    "The app sends {} versions of {} that differ only in how their parameters are declared",
-                    format::count(family.variants),
-                    handle
-                ),
-                format!(
-                    "because their parameters are declared differently from call to call ({}): drivers do this when a \
-                     string parameter's size comes from each value (ADO.NET's AddWithValue, for one). SQL Server \
-                     compiles and keeps a plan for each declaration",
-                    match examples.as_slice() {
-                        [one] => format!("this one declares `{one}`"),
-                        _ => examples.iter().map(|e| format!("`{e}`")).collect::<Vec<_>>().join(" and "),
-                    }
-                ),
-            ),
-            (FamilySplit::Values | FamilySplit::Unknown, Engine::Mssql) => (
-                format!(
-                    "The app sends {} versions of {} that differ only in literal values",
-                    format::count(family.variants),
-                    handle
-                ),
-                "so SQL Server compiles each one separately and keeps a plan for each".to_string(),
-            ),
+            ) => Differ::Declarations(examples),
+            (FamilySplit::Values | FamilySplit::Unknown, Engine::Mssql) => Differ::Literals,
             (
                 FamilySplit::Values | FamilySplit::Unknown,
                 Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite,
-            ) => (
-                format!("{} is tracked as {} separate statements", capitalize(&handle), format::count(family.variants)),
-                "because its value lists (IN lists, multi-row VALUES) have different lengths; each length is planned \
-                 and counted on its own"
-                    .to_string(),
-            ),
+            ) => Differ::ValueLists,
         };
-        f.title = title;
-        f.summary = format!(
-            "{} variants of the same statement ran {} times{}, {}{}. Statistics split across the copies too, so none \
-             of them looks as heavy as the statement really is.",
-            format::count(family.variants),
-            format::count(family.executions),
-            if total_ms > 0.0 {
-                format!(" for {} of database time", format::percent((family.total_time_ms / total_ms).clamp(0.0, 1.0)))
-            } else {
-                String::new()
-            },
-            why,
-            family
-                .cached_bytes
-                .filter(|b| *b >= 1024.0 * 1024.0)
-                .map(|b| format!(" ({} of plan cache)", format::bytes(b)))
-                .unwrap_or_default()
-        );
         let share = if total_ms > 0.0 { family.total_time_ms / total_ms } else { 0.0 };
         // Thousands of copies cost compiles and plan cache whatever their time; a share needs an amount behind it.
         let timed = share >= 0.1 && severity_for_time(snapshot, family.total_time_ms, share) >= Severity::Medium;
-        f.severity = if family.variants >= 1000.0 || timed { Severity::Medium } else { Severity::Low };
-        f.impact.score = base_score(f.severity) + family.variants.log10().max(0.0) * 3.0 + share * 20.0;
-        f.impact.label = format!("{} copies", format::count(family.variants));
-        f.impact.db_time_share = (share > 0.0).then_some(share);
-        f.confidence = Confidence::High;
-        f.metrics.push(Metric::new("Variants", family.variants, Unit::Count));
-        f.metrics.push(Metric::new("Executions", family.executions, Unit::Count));
-        if let Some(b) = family.cached_bytes {
-            f.metrics.push(Metric::new("Plan cache", b, Unit::Bytes));
-        }
-        f.queries = family
-            .query_ids
-            .iter()
-            .filter(|id| snapshot.workload.as_ref().is_some_and(|w| w.query(id).is_some()))
-            .map(|id| QueryRef { id: id.clone(), plan_node: None, note: None })
-            .collect();
-        // The change is in the code that sends the statement: the caveats quote one copy of it, as recorded.
-        let in_the_code = |change: &str| {
-            if family.sample.is_empty() {
-                capitalize(change)
-            } else {
-                format!("In the code that sends this statement (one copy is quoted below, as recorded), {change}")
-            }
-        };
-        f.fix = Some(match (&split, engine) {
-            (
-                FamilySplit::Declarations(_),
-                Engine::Mssql | Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite,
-            ) => Fix {
-                summary: in_the_code(
-                    "declare each string parameter with a fixed size, the column's length, instead of letting the \
-                    driver size it from the value (in ADO.NET, set SqlParameter.Size or use Add with a SqlDbType and \
-                    size rather than AddWithValue; other drivers have a similar setting). Then one plan serves every \
-                    value. Forced parameterization can't help: these statements are already parameterized.",
-                ),
-                sql: None,
-                cost: None,
-            },
-            (FamilySplit::Values | FamilySplit::Unknown, Engine::Mssql) => Fix {
-                summary: in_the_code(
-                    "send values as parameters (sp_executesql, or your driver's parameterized queries) so one plan \
-                    serves every value. If you can't change the app, forced parameterization does it for the whole \
-                    database.",
-                ),
-                sql: Some(format!(
-                    "-- Prefer fixing the app. As a database-wide fallback:\nALTER DATABASE {} SET PARAMETERIZATION FORCED;",
-                    quote(engine, &snapshot.server.database)
-                )),
-                cost: Some("Forced parameterization can make some queries pick a plan that suits one value badly (parameter sensitivity); watch the regression findings after switching.".into()),
-            },
-            (
-                FamilySplit::Values | FamilySplit::Unknown,
-                Engine::Postgres | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite,
-            ) => Fix {
-                summary: in_the_code(
-                    "pass value lists as one array parameter (`= ANY($1)` in Postgres) instead of a growing IN list, \
-                    and batch multi-row inserts with UNNEST or COPY.",
-                ),
-                sql: None,
-                cost: None,
-            },
-        });
-        if matches!(&split, FamilySplit::Unknown) || matches!(&split, FamilySplit::Declarations(e) if e.len() < 2) {
-            f.confidence = Confidence::Medium;
-            f.caveats.push(
-                "Culprit sees one of these statements' text, so what the others differ in is inferred from it.".into(),
-            );
-        }
-        // pg_stat_statements keeps an entry for each copy until it is evicted or reset: a deploy stops new ones, and
-        // the old ones stay counted.
-        f.verify = vec![if engine.sql_syntax() == culprit_core::SqlSyntax::Postgres {
-            format!(
-                "After a deploy, no new copies should appear: pg_stat_statements keeps an entry for each copy until it evicts it or its statistics are reset, so compare the family's copies in a scan taken when the change ships and one a day or more later ({} in this scan): the count should stay as it is, or fall.",
-                format::count(family.variants)
-            )
-        } else {
-            "Re-scan after a deploy: this family shrinks to one or a few statements.".into()
-        }];
-        if !family.sample.is_empty() {
-            f.caveats.push(format!("One of them, as recorded:\n{}", family.sample.trim()));
-        }
-        out.push(f);
+        out.push(FamilyCase::Copies(Copies {
+            family,
+            differ,
+            inferred,
+            share: (total_ms > 0.0).then_some(share),
+            severity: if family.variants >= 1000.0 || timed { Severity::Medium } else { Severity::Low },
+        }));
     }
 
     if let Some(cache) = &snapshot.plan_cache
@@ -183,62 +100,198 @@ pub fn query_family(snapshot: &Snapshot) -> Vec<Finding> {
     {
         let share = cache.single_use_bytes / cache.total_bytes;
         if cache.single_use_bytes >= 256.0 * 1024.0 * 1024.0 && share >= 0.25 {
-            let ad_hoc_on = snapshot.setting("optimize for ad hoc workloads").is_some_and(|s| s.value.trim() == "1");
-            let mut f = finding(
-                "query-family",
-                "plan-cache",
-                Category::Configuration,
-                subject(SubjectKind::Setting, "plan cache"),
-            );
-            f.title = format!(
-                "Plans used once fill {} of the plan cache ({})",
-                format::percent(share),
-                format::bytes(cache.single_use_bytes)
-            );
-            f.summary = format!(
-                "{} plans in the cache were compiled for a statement that ran exactly once. They take memory that could \
-                 hold data pages and reusable plans, and every one cost a compilation.{}",
-                format::count(cache.single_use_plans),
-                if ad_hoc_on {
-                    ""
-                } else {
-                    " 'Optimize for ad hoc workloads' is off, so each keeps a full plan instead of a small stub."
-                }
-            );
-            f.severity = if share >= 0.5 { Severity::Medium } else { Severity::Low };
-            f.impact.score = base_score(f.severity) + share * 10.0;
-            f.impact.label = format!("{} single-use", format::bytes(cache.single_use_bytes));
-            f.confidence = Confidence::High;
-            f.metrics.push(Metric::new("Single-use plans", cache.single_use_plans, Unit::Count));
-            f.metrics.push(Metric::new("Their memory", cache.single_use_bytes, Unit::Bytes));
-            f.metrics.push(Metric::new("Share of the cache", share, Unit::Ratio));
-            // Where the setting lives: per database on Azure SQL Database, a server option elsewhere (the DB parameter
-            // group on RDS, which refuses sp_configure).
-            let (how, sql) = if ad_hoc_on {
-                (String::new(), None)
-            } else if snapshot.server.on(culprit_core::Platform::AzureSqlDatabase) {
-                (
-                    String::new(),
-                    Some("ALTER DATABASE SCOPED CONFIGURATION SET OPTIMIZE_FOR_AD_HOC_WORKLOADS = ON;".to_string()),
-                )
-            } else {
-                let change = crate::config::server_option(&snapshot.server, "optimize for ad hoc workloads", "1");
-                (if change.sql.is_none() { format!(" {}", change.how) } else { String::new() }, change.sql)
-            };
-            f.fix = Some(Fix {
-                summary: if ad_hoc_on {
-                    "Parameterize the statements behind it (see the families above).".into()
-                } else {
-                    format!("Keep only a stub for a plan's first use, and parameterize the statements behind it.{how}")
-                },
-                sql,
-                cost: None,
-            });
-            f.verify = vec!["Re-scan after a day: single-use plans take a much smaller share of the cache.".into()];
-            out.push(f);
+            out.push(FamilyCase::SingleUsePlans(SingleUsePlans {
+                cache,
+                share,
+                ad_hoc_on: snapshot.setting("optimize for ad hoc workloads").is_some_and(|s| s.value.trim() == "1"),
+                severity: if share >= 0.5 { Severity::Medium } else { Severity::Low },
+            }));
         }
     }
     out
+}
+
+fn query_family_finding(snapshot: &Snapshot, case: FamilyCase<'_>) -> Finding {
+    match case {
+        FamilyCase::Copies(copies) => copies_finding(snapshot, copies),
+        FamilyCase::SingleUsePlans(plans) => single_use_finding(snapshot, plans),
+    }
+}
+
+fn copies_finding(snapshot: &Snapshot, copies: Copies<'_>) -> Finding {
+    let Copies { family, differ, inferred, share, severity } = copies;
+    let engine = snapshot.server.engine;
+    let mut f = finding(
+        "query-family",
+        &family.key.chars().take(40).collect::<String>(),
+        Category::Queries,
+        subject(SubjectKind::Query, family.key.clone()),
+    );
+    let handle = statement_handle(without_declaration(&family.sample));
+    let variants = format::count(family.variants);
+    f.title = match &differ {
+        Differ::Declarations(_) => {
+            t!("check.query_family.title.declarations", count = &variants, statement = &handle)
+        }
+        Differ::Literals => t!("check.query_family.title.literals", count = &variants, statement = &handle),
+        Differ::ValueLists => {
+            t!("check.query_family.title.value_lists", statement = capitalize(&handle), count = &variants)
+        }
+    };
+    let executions = format::count(family.executions);
+    let timed = if share.is_some() { "yes" } else { "no" };
+    let share_said = share.map(|s| format::percent(s.clamp(0.0, 1.0))).unwrap_or_default();
+    let cache = family.cached_bytes.filter(|b| *b >= 1024.0 * 1024.0);
+    let cached = if cache.is_some() { "yes" } else { "no" };
+    let cache = cache.map(format::bytes).unwrap_or_default();
+    let ran = match &differ {
+        Differ::Declarations(examples) => t!(
+            "check.query_family.summary.declarations",
+            variants = &variants,
+            executions = &executions,
+            timed = timed,
+            share = &share_said,
+            declarations = match examples.as_slice() {
+                [one] => t!("check.query_family.summary.one_declaration", declaration = one),
+                _ => format::list(&examples.iter().map(|e| format!("`{e}`")).collect::<Vec<_>>()),
+            },
+            cached = cached,
+            cache = &cache
+        ),
+        Differ::Literals => t!(
+            "check.query_family.summary.literals",
+            variants = &variants,
+            executions = &executions,
+            timed = timed,
+            share = &share_said,
+            cached = cached,
+            cache = &cache
+        ),
+        Differ::ValueLists => t!(
+            "check.query_family.summary.value_lists",
+            variants = &variants,
+            executions = &executions,
+            timed = timed,
+            share = &share_said,
+            cached = cached,
+            cache = &cache
+        ),
+    };
+    f.summary = [ran, t!("check.query_family.summary.statistics_split")].join(" ");
+    let share = share.unwrap_or(0.0);
+    f.severity = severity;
+    f.impact.score = base_score(f.severity) + family.variants.log10().max(0.0) * 3.0 + share * 20.0;
+    f.impact.label = t!("check.query_family.impact", count = &variants);
+    f.impact.db_time_share = (share > 0.0).then_some(share);
+    f.confidence = Confidence::High;
+    f.metrics.push(Metric::new(t!("check.query_family.metric.variants"), family.variants, Unit::Count));
+    f.metrics.push(Metric::new(t!("common.metric.executions"), family.executions, Unit::Count));
+    if let Some(b) = family.cached_bytes {
+        f.metrics.push(Metric::new(t!("check.query_family.metric.plan_cache"), b, Unit::Bytes));
+    }
+    f.queries = family
+        .query_ids
+        .iter()
+        .filter(|id| snapshot.workload.as_ref().is_some_and(|w| w.query(id).is_some()))
+        .map(|id| QueryRef { id: id.clone(), plan_node: None, note: None })
+        .collect();
+    // The change is in the code that sends the statement: the caveats quote one copy of it, as recorded.
+    let quoted = !family.sample.is_empty();
+    f.fix = Some(match differ {
+        Differ::Declarations(_) => Fix {
+            summary: if quoted {
+                t!("check.query_family.fix.declarations_quoted")
+            } else {
+                t!("check.query_family.fix.declarations")
+            },
+            sql: None,
+            cost: None,
+        },
+        Differ::Literals => Fix {
+            summary: if quoted {
+                t!("check.query_family.fix.literals_quoted")
+            } else {
+                t!("check.query_family.fix.literals")
+            },
+            sql: Some(format!(
+                "-- Prefer fixing the app. As a database-wide fallback:\nALTER DATABASE {} SET PARAMETERIZATION FORCED;",
+                quote(engine, &snapshot.server.database)
+            )),
+            cost: Some(t!("check.query_family.fix_cost.literals")),
+        },
+        Differ::ValueLists => Fix {
+            summary: if quoted {
+                t!("check.query_family.fix.value_lists_quoted")
+            } else {
+                t!("check.query_family.fix.value_lists")
+            },
+            sql: None,
+            cost: None,
+        },
+    });
+    if inferred {
+        f.confidence = Confidence::Medium;
+        f.caveats.push(t!("check.query_family.caveat.inferred"));
+    }
+    // pg_stat_statements keeps an entry for each copy until it is evicted or reset: a deploy stops new ones, and
+    // the old ones stay counted.
+    f.verify = vec![if engine.sql_syntax() == culprit_core::SqlSyntax::Postgres {
+        t!("check.query_family.verify.entries_kept", count = &variants)
+    } else {
+        t!("check.query_family.verify.shrinks")
+    }];
+    if quoted {
+        f.caveats.push(t!("check.query_family.caveat.sample", sample = family.sample.trim()));
+    }
+    f
+}
+
+fn single_use_finding(snapshot: &Snapshot, plans: SingleUsePlans<'_>) -> Finding {
+    let SingleUsePlans { cache, share, ad_hoc_on, severity } = plans;
+    let mut f =
+        finding("query-family", "plan-cache", Category::Configuration, subject(SubjectKind::Setting, "plan cache"));
+    let bytes = format::bytes(cache.single_use_bytes);
+    f.title = t!("check.query_family.plan_cache.title", share = format::percent(share), size = &bytes);
+    let mut summary = vec![t!("check.query_family.plan_cache.summary", plans = format::count(cache.single_use_plans))];
+    if !ad_hoc_on {
+        summary.push(t!("check.query_family.plan_cache.summary_ad_hoc_off"));
+    }
+    f.summary = summary.join(" ");
+    f.severity = severity;
+    f.impact.score = base_score(f.severity) + share * 10.0;
+    f.impact.label = t!("check.query_family.plan_cache.impact", size = &bytes);
+    f.confidence = Confidence::High;
+    f.metrics.push(Metric::new(
+        t!("check.query_family.plan_cache.metric.single_use_plans"),
+        cache.single_use_plans,
+        Unit::Count,
+    ));
+    f.metrics.push(Metric::new(
+        t!("check.query_family.plan_cache.metric.their_memory"),
+        cache.single_use_bytes,
+        Unit::Bytes,
+    ));
+    f.metrics.push(Metric::new(t!("check.query_family.plan_cache.metric.share"), share, Unit::Ratio));
+    // Where the setting lives: per database on Azure SQL Database, a server option elsewhere (the DB parameter
+    // group on RDS, which refuses sp_configure).
+    f.fix = Some(if ad_hoc_on {
+        Fix { summary: t!("check.query_family.plan_cache.fix.parameterize"), sql: None, cost: None }
+    } else if snapshot.server.on(culprit_core::Platform::AzureSqlDatabase) {
+        Fix {
+            summary: t!("check.query_family.plan_cache.fix.stub"),
+            sql: Some("ALTER DATABASE SCOPED CONFIGURATION SET OPTIMIZE_FOR_AD_HOC_WORKLOADS = ON;".to_string()),
+            cost: None,
+        }
+    } else {
+        let change = crate::config::server_option(&snapshot.server, "optimize for ad hoc workloads", "1");
+        let mut summary = vec![t!("check.query_family.plan_cache.fix.stub")];
+        if change.sql.is_none() {
+            summary.push(change.how);
+        }
+        Fix { summary: summary.join(" "), sql: change.sql, cost: None }
+    });
+    f.verify = vec![t!("check.query_family.plan_cache.verify")];
+    f
 }
 
 /// What the copies of a statement family differ in, as far as their texts show.

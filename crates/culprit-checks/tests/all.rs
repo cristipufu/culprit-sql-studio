@@ -31,6 +31,7 @@ mod registry;
 mod signal_false_flags;
 mod signal_words;
 mod sqlite;
+mod tuning_words;
 
 /// Record `source`'s outcome in `s`, in place of any the scan recorded for it.
 pub fn record(s: &mut culprit_core::Snapshot, source: &str, state: culprit_core::SourceState, reason: Option<&str>) {
