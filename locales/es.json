@@ -5290,7 +5290,7 @@
   "view.advisor.cleanup.prefix": "Sus claves son el principio de las de {other}, así que {other} atiende también cualquier búsqueda que atienda este.",
   "view.advisor.cleanup.prefix_caveat": "{index} es más estrecho; consérvalo si una consulta frecuente lo recorre en lugar de buscar en él.",
   "view.advisor.cleanup.unused": "Ni una lectura {since}, pero se actualiza con cada escritura en {table}.",
-  "view.advisor.cleanup.unused_maintained": "Ni una lectura {since}, mientras se mantenía {writes} veces, y se actualiza con cada escritura en {table}.",
+  "view.advisor.cleanup.unused_maintained": "Ni una lectura {since}, aunque se ha mantenido {writes} veces, y se actualiza con cada escritura en {table}.",
   "view.advisor.cleanup.unused_prefix": "Ni una lectura {since}, y sus claves son el principio de {other} (que tampoco se lee).",
   "view.advisor.cleanup.unused_same_keys": "Ni una lectura {since}, y tiene las mismas claves que {other} (que tampoco se lee).",
   "view.advisor.engine_built.reason": "{n, plural, one {{engine} crea por su cuenta un índice sobre {keys} de {table} cada vez que se ejecuta una consulta, porque ninguno sirve, y después lo elimina. Si se crea una vez, ahorra ese trabajo en cada ejecución.} other {{engine} crea por su cuenta un índice sobre {keys} de {table} cada vez que se ejecuta una de {count} consultas, porque ninguno sirve, y después lo elimina. Si se crea una vez, ahorra ese trabajo en cada ejecución.}}",
