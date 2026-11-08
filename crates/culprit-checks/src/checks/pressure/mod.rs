@@ -23,6 +23,8 @@ mod row_lock_waits;
 #[cfg(test)]
 mod tests;
 mod tier_limit;
+#[cfg(test)]
+pub(crate) mod words;
 mod worker_pressure;
 
 pub use checkpoint_pressure::*;

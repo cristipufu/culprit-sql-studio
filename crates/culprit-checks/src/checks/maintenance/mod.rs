@@ -14,6 +14,8 @@ mod dead_rows;
 mod heap_table;
 mod multixact_age;
 mod stale_stats;
+#[cfg(test)]
+mod words;
 mod xid_age;
 
 pub use dead_rows::*;
