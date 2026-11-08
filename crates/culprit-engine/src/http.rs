@@ -5,7 +5,7 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use culprit_core::{Error, ErrorCode, Result};
+use culprit_core::{Error, ErrorCode, Result, t};
 use serde_json::Value;
 
 /// One HTTPS request to a cloud's API.
@@ -34,31 +34,33 @@ pub struct Reply {
     pub json: Value,
 }
 
-fn finish(result: std::result::Result<ureq::http::Response<ureq::Body>, ureq::Error>, what: &str) -> Result<Reply> {
+/// A sign-in reply, or why the request failed.
+fn finish(result: std::result::Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Reply> {
     let mut response = result.map_err(|e| {
-        Error::new(ErrorCode::ConnectionFailed, format!("{what} failed: {e}"))
-            .with_hint("Check the network connection and any proxy, then retry")
+        Error::new(ErrorCode::ConnectionFailed, t!("engine.http.sign_in_failed", error = e.to_string()))
+            .with_hint(t!("engine.http.failed_hint"))
     })?;
     let status = response.status().as_u16();
     let text = response.body_mut().read_to_string().unwrap_or_default();
     Ok(Reply { status, json: serde_json::from_str(&text).unwrap_or(Value::Null) })
 }
 
-/// POST an `application/x-www-form-urlencoded` body.
-pub async fn post_form(url: String, fields: Vec<(&'static str, String)>, what: &'static str) -> Result<Reply> {
+/// POST an `application/x-www-form-urlencoded` body to Microsoft Entra ID's sign-in endpoints.
+pub async fn post_form(url: String, fields: Vec<(&'static str, String)>) -> Result<Reply> {
     tokio::task::spawn_blocking(move || {
         let form: Vec<(&str, &str)> = fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        finish(agent().post(&url).header("Accept", "application/json").send_form(form), what)
+        finish(agent().post(&url).header("Accept", "application/json").send_form(form))
     })
     .await
     .map_err(|e| Error::internal(e.to_string()))?
 }
 
-/// Inventory responses stay bounded even when an ARM endpoint returns an unpaged list.
-pub async fn get_bearer_limited(url: String, token: String, what: &'static str, limit: u64) -> Result<Reply> {
+/// One page of an Azure Resource Manager database listing. Responses stay bounded even when an ARM endpoint returns an
+/// unpaged list.
+pub async fn get_bearer_limited(url: String, token: String, limit: u64) -> Result<Reply> {
     let guard = culprit_core::limits::OperationGuard::new(TIMEOUT)?;
     let handle = guard.handle();
-    let permit = INVENTORY_HTTP.acquire().await.map_err(|_| Error::internal("Cloud HTTP readers are unavailable"))?;
+    let permit = INVENTORY_HTTP.acquire().await.map_err(|_| Error::internal(t!("engine.http.readers_unavailable")))?;
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
         handle.check()?;
@@ -67,15 +69,18 @@ pub async fn get_bearer_limited(url: String, token: String, what: &'static str, 
             .header("Authorization", &format!("Bearer {token}"))
             .header("Accept", "application/json")
             .call()
-            .map_err(|_| Error::new(ErrorCode::ConnectionFailed, format!("{what} failed")))?;
+            .map_err(|_| Error::new(ErrorCode::ConnectionFailed, t!("engine.http.azure_databases_failed")))?;
         let status = response.status().as_u16();
-        let text = response.body_mut().with_config().limit(limit).read_to_string().map_err(|_| {
-            Error::new(ErrorCode::QueryFailed, format!("{what} response could not be read within its size limit"))
-        })?;
+        let text = response
+            .body_mut()
+            .with_config()
+            .limit(limit)
+            .read_to_string()
+            .map_err(|_| Error::new(ErrorCode::QueryFailed, t!("engine.http.azure_databases_too_large")))?;
         let json = serde_json::from_str(&text)
-            .map_err(|_| Error::new(ErrorCode::QueryFailed, format!("{what} returned invalid JSON")))?;
+            .map_err(|_| Error::new(ErrorCode::QueryFailed, t!("engine.http.azure_databases_invalid_json")))?;
         Ok(Reply { status, json })
     })
     .await
-    .map_err(|_| Error::internal("The cloud HTTP reader stopped"))?
+    .map_err(|_| Error::internal(t!("engine.http.reader_stopped")))?
 }

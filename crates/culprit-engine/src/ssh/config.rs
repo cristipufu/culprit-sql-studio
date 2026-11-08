@@ -1,4 +1,4 @@
-use culprit_core::{Engine, Error, Result, SshConfig};
+use culprit_core::{Engine, Error, Result, SshConfig, t};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct Target {
@@ -22,9 +22,7 @@ impl Target {
     pub fn new(host: &str, port: u16) -> Result<Self> {
         let host = host_name(host.trim()).filter(|_| port != 0 && !host.chars().any(char::is_control));
         let Some(host) = host else {
-            return Err(Error::invalid(
-                "SSH forwarding needs a database hostname or IP address and a nonzero TCP port",
-            ));
+            return Err(Error::invalid(t!("engine.ssh.bad_target")));
         };
         Ok(Self { host: host.into(), port })
     }
@@ -42,7 +40,7 @@ impl Target {
 /// including through `%h` / `%r` expansion in a trusted ProxyCommand configuration.
 pub(crate) fn normalize(mut ssh: SshConfig, engine: Engine) -> Result<SshConfig> {
     if !engine.has_server() {
-        return Err(Error::invalid("SSH forwarding is available for server databases; SQLite opens a local file"));
+        return Err(Error::invalid(t!("engine.ssh.file_database")));
     }
     let input = ssh.destination.trim().strip_prefix("ssh://").unwrap_or(ssh.destination.trim());
     let (user, host) = input.rsplit_once('@').map_or((None, input), |(user, host)| (Some(user), host));
@@ -52,10 +50,10 @@ pub(crate) fn normalize(mut ssh: SshConfig, engine: Engine) -> Result<SshConfig>
             || user.starts_with('-')
             || !user.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '@' | '\\')))
     {
-        return Err(Error::invalid("The SSH user name contains unsupported characters"));
+        return Err(Error::invalid(t!("engine.ssh.bad_user")));
     }
     let (host, embedded_port) = if host.starts_with('[') {
-        let end = host.find(']').ok_or_else(|| Error::invalid("The SSH IPv6 address needs a closing bracket"))?;
+        let end = host.find(']').ok_or_else(|| Error::invalid(t!("engine.ssh.unclosed_ipv6")))?;
         let rest = &host[end + 1..];
         (&host[..=end], (!rest.is_empty()).then_some(rest))
     } else if host.matches(':').count() == 1
@@ -65,23 +63,21 @@ pub(crate) fn normalize(mut ssh: SshConfig, engine: Engine) -> Result<SshConfig>
     } else {
         (host, None)
     };
-    let host = host_name(host).ok_or_else(|| {
-        Error::invalid("Enter an SSH host alias or [user@]hostname")
-            .with_hint("Brackets require an IPv6 address. SSH options, commands and passwords do not belong here.")
-    })?;
+    let host = host_name(host)
+        .ok_or_else(|| Error::invalid(t!("engine.ssh.bad_host")).with_hint(t!("engine.ssh.bad_host_hint")))?;
     if let Some(port) = embedded_port {
         let port: u16 = port
             .strip_prefix(':')
             .and_then(|p| p.parse().ok())
             .filter(|p| *p > 0)
-            .ok_or_else(|| Error::invalid("The SSH port must be between 1 and 65535"))?;
+            .ok_or_else(|| Error::invalid(t!("engine.ssh.bad_port")))?;
         if ssh.port.is_some_and(|explicit| explicit != port) {
-            return Err(Error::invalid("The SSH host and port field specify different ports"));
+            return Err(Error::invalid(t!("engine.ssh.ports_differ")));
         }
         ssh.port = Some(port);
     }
     if ssh.port == Some(0) {
-        return Err(Error::invalid("The SSH port must be between 1 and 65535"));
+        return Err(Error::invalid(t!("engine.ssh.bad_port")));
     }
     ssh.destination = match user {
         Some(user) => format!("{user}@{host}"),
@@ -92,22 +88,20 @@ pub(crate) fn normalize(mut ssh: SshConfig, engine: Engine) -> Result<SshConfig>
         .filter(|key| !key.trim().is_empty())
         .map(|key| {
             if key.len() > 4096 || key.chars().any(char::is_control) {
-                return Err(Error::invalid("The SSH identity file path contains unsupported characters"));
+                return Err(Error::invalid(t!("engine.ssh.bad_identity_path")));
             }
             let path = match key.trim().strip_prefix("~/").or_else(|| key.trim().strip_prefix("~\\")) {
-                Some(rest) => dirs::home_dir()
-                    .ok_or_else(|| Error::not_found("Cannot find the home folder for the SSH key"))?
-                    .join(rest),
+                Some(rest) => dirs::home_dir().ok_or_else(|| Error::not_found(t!("engine.ssh.no_home")))?.join(rest),
                 None => std::path::PathBuf::from(key.trim()),
             };
             let path = std::path::absolute(path)
-                .map_err(|_| Error::invalid("Cannot resolve the SSH identity file path"))?
+                .map_err(|_| Error::invalid(t!("engine.ssh.unresolved_identity")))?
                 .to_string_lossy()
                 .into_owned();
             // Home/cwd expansion can introduce tokens even when the entered path contains none.
             if path.contains('%') {
-                return Err(Error::invalid("The SSH identity file path cannot contain '%' characters")
-                    .with_hint("Choose a file without OpenSSH expansion tokens, or configure IdentityFile in your SSH configuration"));
+                return Err(Error::invalid(t!("engine.ssh.identity_expansion"))
+                    .with_hint(t!("engine.ssh.identity_expansion_hint")));
             }
             Ok(path)
         })

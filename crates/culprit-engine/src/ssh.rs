@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use culprit_core::{
     ConnectionAttempt, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, Engine, Error, ErrorCode, Result,
-    SshConfig,
+    SshConfig, t,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -59,7 +59,7 @@ impl Drop for Attempt {
 
 pub(crate) fn validate_spec(spec: &mut ConnectionSpec) -> Result<()> {
     if let Some(ssh) = spec.ssh.take() {
-        let engine = spec.engine.ok_or_else(|| Error::invalid("Choose a database engine before configuring SSH"))?;
+        let engine = spec.engine.ok_or_else(|| Error::invalid(t!("engine.ssh.no_engine")))?;
         let ssh = normalize(ssh, engine)?;
         spec.host = Target::new(&spec.host, spec.port.unwrap_or(1))?.host;
         spec.ssh = Some(ssh);
@@ -99,13 +99,13 @@ impl Manager {
         // Fail before database credentials are requested when OpenSSH is missing. This constructs a command only.
         (self.factory)(&ssh, &target)?;
         let key = Key { engine: spec.engine, host: spec.host.clone(), port: spec.port, ssh: ssh.clone() };
-        let mut routes = self.routes.lock().map_err(|_| Error::internal("Could not open the SSH route registry"))?;
+        let mut routes = self.routes.lock().map_err(|_| Error::internal(t!("engine.ssh.registry_unavailable")))?;
         routes.retain(|_, route| route.strong_count() > 0);
         let route = if let Some(route) = routes.get(&key).and_then(Weak::upgrade) {
             route
         } else {
             if routes.len() >= MAX_ROUTES {
-                return Err(busy("Too many SSH database routes are active"));
+                return Err(busy(&t!("engine.ssh.too_many_routes")));
             }
             let route = Arc::new(Route {
                 ssh: ssh.clone(),
@@ -148,18 +148,14 @@ impl ConnectionTransport for Route {
         let mut state = self.state.lock().await;
         state.retain(|forwarder| !forwarder.task.is_finished());
         // Reserve capacity before binding or creating a waiting task. Every endpoint accepts exactly one socket.
-        let local = self
-            .local_sessions
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| busy("Too many SSH database sessions are active"))?;
+        let local =
+            self.local_sessions.clone().try_acquire_owned().map_err(|_| busy(&t!("engine.ssh.too_many_sessions")))?;
         let global =
-            self.sessions.clone().try_acquire_owned().map_err(|_| busy("Too many SSH database sessions are active"))?;
+            self.sessions.clone().try_acquire_owned().map_err(|_| busy(&t!("engine.ssh.too_many_sessions")))?;
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
             .await
-            .map_err(|_| Error::new(ErrorCode::ConnectionFailed, "Could not bind the local SSH forwarding socket"))?;
-        let address =
-            listener.local_addr().map_err(|_| Error::internal("Could not read the SSH forwarding address"))?;
+            .map_err(|_| Error::new(ErrorCode::ConnectionFailed, t!("engine.ssh.bind_failed")))?;
+        let address = listener.local_addr().map_err(|_| Error::internal(t!("engine.ssh.no_address")))?;
         let attempt = Arc::new(Attempt { error: Arc::new(OnceLock::new()), canceled: Arc::new(Notify::new()) });
         let (error, canceled) = (attempt.error.clone(), attempt.canceled.clone());
         let (ssh, factory) = (self.ssh.clone(), self.factory.clone());
@@ -180,7 +176,7 @@ impl ConnectionTransport for Route {
                     }
                     return;
                 }
-                Err(_) => Error::new(ErrorCode::ConnectionFailed, "The local SSH forwarding listener stopped"),
+                Err(_) => Error::new(ErrorCode::ConnectionFailed, t!("engine.ssh.listener_stopped")),
             };
             let _ = error.set(result);
         });
@@ -190,7 +186,7 @@ impl ConnectionTransport for Route {
 }
 
 fn busy(message: &str) -> Error {
-    Error::new(ErrorCode::ConnectionFailed, message).with_hint("Finish or cancel another SSH operation, then retry")
+    Error::new(ErrorCode::ConnectionFailed, message).with_hint(t!("engine.ssh.busy_hint"))
 }
 
 async fn accept(listener: &TcpListener) -> std::io::Result<TcpStream> {
@@ -209,8 +205,8 @@ async fn diagnostics(reader: impl AsyncRead + Unpin) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     reader.take((MAX_STDERR + 1) as u64).read_to_end(&mut bytes).await.map_err(|_| command::failure(&[]))?;
     if bytes.len() > MAX_STDERR {
-        return Err(Error::new(ErrorCode::ConnectionFailed, "SSH diagnostics exceeded the size limit")
-            .with_hint("Check the SSH configuration in a terminal, then retry"));
+        return Err(Error::new(ErrorCode::ConnectionFailed, t!("engine.ssh.diagnostics_too_large"))
+            .with_hint(t!("engine.ssh.diagnostics_too_large_hint")));
     }
     Ok(bytes)
 }
@@ -246,13 +242,13 @@ async fn forward(stream: &mut TcpStream, ssh: &SshConfig, target: &Target, facto
             } else {
                 ErrorCode::ConnectionFailed
             },
-            "Could not start OpenSSH",
+            t!("engine.ssh.start_failed"),
         )
-        .with_hint("Check that the OpenSSH client is installed and executable")
+        .with_hint(t!("engine.ssh.start_failed_hint"))
     })?;
-    let stdin = child.child.stdin().take().ok_or_else(|| Error::internal("SSH stdin is unavailable"))?;
-    let stdout = child.child.stdout().take().ok_or_else(|| Error::internal("SSH stdout is unavailable"))?;
-    let stderr = child.child.stderr().take().ok_or_else(|| Error::internal("SSH stderr is unavailable"))?;
+    let stdin = child.child.stdin().take().ok_or_else(|| Error::internal(t!("engine.ssh.stdin_unavailable")))?;
+    let stdout = child.child.stdout().take().ok_or_else(|| Error::internal(t!("engine.ssh.stdout_unavailable")))?;
+    let stderr = child.child.stderr().take().ok_or_else(|| Error::internal(t!("engine.ssh.stderr_unavailable")))?;
     let (read, write) = stream.split();
     let (mut sent, mut received) = (0, 0);
     let diagnostics = diagnostics(stderr);

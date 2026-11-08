@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use culprit_core::{Engine, Error, ErrorCode, Result, aws_iam_host_allowed};
+use culprit_core::{Engine, Error, ErrorCode, Result, aws_iam_host_allowed, t};
 
 use crate::private_fs;
 
@@ -13,15 +13,21 @@ const RDS_CA_BUNDLE: &[u8] = include_bytes!("../certs/rds-global-bundle.pem");
 /// Connection option value that stands for the bundled RDS certificate authorities.
 pub const RDS_CA: &str = "rds";
 
-pub const SIGN_IN_HINT: &str = "Sign in with `aws login` (or `aws configure sso` / `aws configure`), then search again";
+/// What to do when the AWS CLI isn't signed in.
+pub fn sign_in_hint() -> String {
+    t!("engine.aws.sign_in_hint")
+}
 
-const INSTALL_HINT: &str = if cfg!(target_os = "macos") {
-    "Install the AWS CLI (`brew install awscli`), sign in with `aws login`, then try again"
-} else if cfg!(windows) {
-    "Install the AWS CLI (`winget install Amazon.AWSCLI`), sign in with `aws login`, then try again"
-} else {
-    "Install the AWS CLI (https://aws.amazon.com/cli/), sign in with `aws login`, then try again"
-};
+/// How to install the AWS CLI on this platform.
+fn install_hint() -> String {
+    if cfg!(target_os = "macos") {
+        t!("engine.aws.install_hint.macos")
+    } else if cfg!(windows) {
+        t!("engine.aws.install_hint.windows")
+    } else {
+        t!("engine.aws.install_hint.linux")
+    }
+}
 
 /// Run the AWS CLI and return stdout, turning "not installed" and "not signed in" into actionable errors.
 pub(crate) async fn run(args: &[&str]) -> Result<Vec<u8>> {
@@ -29,7 +35,7 @@ pub(crate) async fn run(args: &[&str]) -> Result<Vec<u8>> {
     command.args(args).env("AWS_PAGER", "").env("AWS_CLI_AUTO_PROMPT", "off");
     let output = crate::cloud_process::output(command).await.map_err(|error| {
         if error.code == ErrorCode::NotFound {
-            Error::new(ErrorCode::AuthFailed, "Could not run the AWS CLI").with_hint(INSTALL_HINT)
+            Error::new(ErrorCode::AuthFailed, t!("engine.aws.cli_missing")).with_hint(install_hint())
         } else {
             error
         }
@@ -43,18 +49,17 @@ pub(crate) async fn run(args: &[&str]) -> Result<Vec<u8>> {
 fn cli_error(stderr: &str) -> Error {
     let message = stderr.trim().trim_start_matches("aws: [ERROR]:").trim().to_string();
     if is_sign_in_problem(&message) {
-        return Error::new(ErrorCode::AuthFailed, format!("The AWS CLI is not signed in: {message}"))
-            .with_hint(SIGN_IN_HINT);
+        return Error::new(ErrorCode::AuthFailed, t!("engine.aws.not_signed_in", message = message))
+            .with_hint(sign_in_hint());
     }
     if message.contains("AccessDenied")
         || message.contains("UnauthorizedOperation")
         || message.contains("not authorized")
     {
-        return Error::new(ErrorCode::PermissionDenied, format!("AWS refused the request: {message}")).with_hint(
-            "The signed-in AWS identity needs rds:Describe* (and rds-db:connect for IAM database authentication)",
-        );
+        return Error::new(ErrorCode::PermissionDenied, t!("engine.aws.refused", message = message))
+            .with_hint(t!("engine.aws.refused_hint"));
     }
-    Error::new(ErrorCode::QueryFailed, format!("AWS CLI call failed: {message}"))
+    Error::new(ErrorCode::QueryFailed, t!("engine.aws.cli_failed", message = message))
 }
 
 fn is_sign_in_problem(message: &str) -> bool {
@@ -114,21 +119,15 @@ pub fn region_short(region: &str) -> String {
 /// A 15-minute RDS IAM authentication token for `user` on `host`, refused unless `host` is an RDS endpoint.
 pub async fn iam_token(engine: Engine, host: &str, port: u16, user: &str, region: &str) -> Result<String> {
     if engine == Engine::Mssql {
-        return Err(Error::new(
-            ErrorCode::Unsupported,
-            "Amazon RDS for SQL Server does not support IAM database authentication",
-        )
-        .with_hint("Use password authentication for this connection"));
+        return Err(Error::new(ErrorCode::Unsupported, t!("engine.aws.iam_sql_server"))
+            .with_hint(t!("engine.aws.iam_sql_server_hint")));
     }
     if !aws_iam_host_allowed(host) {
-        return Err(Error::new(
-            ErrorCode::PermissionDenied,
-            format!("Refusing to send an AWS IAM token to '{host}', which is not an Amazon RDS endpoint"),
-        )
-        .with_hint("IAM database authentication only works with *.rds.amazonaws.com hosts; use password authentication for other servers"));
+        return Err(Error::new(ErrorCode::PermissionDenied, t!("engine.aws.iam_host_refused", host = host))
+            .with_hint(t!("engine.aws.iam_host_refused_hint")));
     }
     if !valid_region(region) {
-        return Err(Error::invalid(format!("'{region}' is not an AWS region")));
+        return Err(Error::invalid(t!("engine.aws.bad_region", region = region)));
     }
     let port = port.to_string();
     let stdout = run(&[
@@ -148,9 +147,7 @@ pub async fn iam_token(engine: Engine, host: &str, port: u16, user: &str, region
     .await?;
     let token = String::from_utf8_lossy(&stdout).trim().to_string();
     if token.is_empty() {
-        return Err(
-            Error::new(ErrorCode::AuthFailed, "The AWS CLI returned an empty IAM token").with_hint(SIGN_IN_HINT)
-        );
+        return Err(Error::new(ErrorCode::AuthFailed, t!("engine.aws.empty_token")).with_hint(sign_in_hint()));
     }
     Ok(token)
 }
@@ -199,7 +196,7 @@ mod tests {
             "aws: [ERROR]: An error occurred (NoCredentials): Unable to locate credentials. You can configure credentials by running \"aws login\".",
         );
         assert_eq!(e.code, ErrorCode::AuthFailed);
-        assert_eq!(e.hint.as_deref(), Some(SIGN_IN_HINT));
+        assert_eq!(e.hint, Some(sign_in_hint()));
         let e = cli_error("An error occurred (AccessDenied) when calling the DescribeDBInstances operation");
         assert_eq!(e.code, ErrorCode::PermissionDenied);
     }

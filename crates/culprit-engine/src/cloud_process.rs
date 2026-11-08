@@ -3,7 +3,7 @@ use std::process::{Output, Stdio};
 use std::time::Duration;
 
 use crate::process::OwnedChild;
-use culprit_core::{Error, ErrorCode, Result};
+use culprit_core::{Error, ErrorCode, Result, t};
 use tokio::{io::AsyncReadExt, process::Command};
 
 /// The most a cloud CLI call may print, and the largest Azure Resource Manager inventory body read over HTTP.
@@ -19,10 +19,10 @@ async fn read(reader: impl tokio::io::AsyncRead + Unpin, limit: usize) -> Result
         .take((limit + 1) as u64)
         .read_to_end(&mut bytes)
         .await
-        .map_err(|_| Error::new(ErrorCode::ConnectionFailed, "Could not read cloud CLI output"))?;
+        .map_err(|_| Error::new(ErrorCode::ConnectionFailed, t!("engine.cloud_cli.unreadable")))?;
     if bytes.len() > limit {
-        return Err(Error::new(ErrorCode::QueryFailed, "The cloud CLI response exceeded its size limit")
-            .with_hint("Narrow the search or choose specific regions"));
+        return Err(Error::new(ErrorCode::QueryFailed, t!("engine.cloud_cli.too_large"))
+            .with_hint(t!("engine.cloud_cli.too_large_hint")));
     }
     Ok(bytes)
 }
@@ -41,7 +41,7 @@ async fn within(mut command: Command, timeout: Duration) -> Result<Output> {
                 } else {
                     ErrorCode::ConnectionFailed
                 },
-                "Could not start the cloud CLI",
+                t!("engine.cloud_cli.start_failed"),
             )
         })?;
         let stdout = child.child.stdout().take().expect("piped stdout");
@@ -51,7 +51,7 @@ async fn within(mut command: Command, timeout: Duration) -> Result<Output> {
                 .child
                 .wait()
                 .await
-                .map_err(|_| Error::new(ErrorCode::ConnectionFailed, "The cloud CLI stopped unexpectedly"))
+                .map_err(|_| Error::new(ErrorCode::ConnectionFailed, t!("engine.cloud_cli.stopped")))
         });
         match result {
             Ok((stdout, stderr, status)) => {
@@ -68,8 +68,7 @@ async fn within(mut command: Command, timeout: Duration) -> Result<Output> {
     })
     .await
     .map_err(|_| {
-        Error::new(ErrorCode::Timeout, "The cloud CLI timed out")
-            .with_hint("Check the cloud CLI login and network connection, then retry")
+        Error::new(ErrorCode::Timeout, t!("engine.cloud_cli.timeout")).with_hint(t!("engine.cloud_cli.timeout_hint"))
     })?
 }
 

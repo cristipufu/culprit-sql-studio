@@ -3,7 +3,7 @@
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
-use culprit_core::{Error, Result};
+use culprit_core::{Error, Result, t};
 use tokio::process::Command;
 
 #[derive(Clone, Copy)]
@@ -155,12 +155,9 @@ fn build(cli: Cli, platform: Platform, inherited: Option<&OsStr>, extra: &[PathB
     let binary =
         paths.iter().flat_map(|dir| names.iter().map(move |name| dir.join(name))).find(|path| executable(path));
     let binary = binary.ok_or_else(|| match cli {
-        Cli::Azure => Error::not_found("The Azure CLI was not found in PATH or standard install locations")
-            .with_hint("Install the Azure CLI and run az login"),
-        Cli::Aws => Error::not_found("The AWS CLI was not found in PATH or standard install locations")
-            .with_hint("Install AWS CLI v2 and sign in with aws login or aws sso login"),
-        Cli::Ssh => Error::not_found("Could not find the OpenSSH client")
-            .with_hint("Install OpenSSH Client on Windows, or the openssh client package on Linux; macOS includes ssh"),
+        Cli::Azure => Error::not_found(t!("engine.azure_cli.missing")).with_hint(t!("engine.azure_cli.install_plain")),
+        Cli::Aws => Error::not_found(t!("engine.program.aws_missing")).with_hint(t!("engine.program.aws_install")),
+        Cli::Ssh => Error::not_found(t!("engine.program.ssh_missing")).with_hint(t!("engine.program.ssh_install")),
     })?;
     let mut command = Command::new(binary);
     if let Ok(path) = std::env::join_paths(&paths) {

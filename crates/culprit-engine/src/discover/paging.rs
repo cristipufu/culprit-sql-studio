@@ -100,13 +100,8 @@ impl Transport for Live {
     }
 
     async fn arm(&self, url: &str, token: &str) -> Result<Value> {
-        let reply = crate::http::get_bearer_limited(
-            url.into(),
-            token.into(),
-            "Listing Azure databases",
-            crate::cloud_process::MAX_OUTPUT as u64,
-        )
-        .await?;
+        let reply =
+            crate::http::get_bearer_limited(url.into(), token.into(), crate::cloud_process::MAX_OUTPUT as u64).await?;
         if reply.status != 200 {
             return Err(Error::new(ErrorCode::QueryFailed, "Azure could not list this server's databases")
                 .with_hint("Check the server state and Resource Manager permissions"));

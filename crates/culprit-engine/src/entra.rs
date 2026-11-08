@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
-use culprit_core::{ConnectionSpec, Engine, Error, ErrorCode, Result, entra_host_allowed};
+use culprit_core::{ConnectionSpec, Engine, Error, ErrorCode, Result, entra_host_allowed, t};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
@@ -74,7 +74,7 @@ struct Https;
 
 impl LoginEndpoint for Https {
     fn post_form(&self, url: String, fields: Vec<(&'static str, String)>) -> BoxFuture<'static, Result<Reply>> {
-        Box::pin(http::post_form(url, fields, "Microsoft Entra ID sign-in"))
+        Box::pin(http::post_form(url, fields))
     }
 }
 
@@ -109,11 +109,11 @@ impl Authority {
             && tenant.len() <= 64
             && tenant.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.');
         if !tenant_ok {
-            return Err(Error::invalid(format!("'{tenant}' is not a Microsoft Entra tenant"))
-                .with_hint("Use a tenant id (GUID), a domain like contoso.onmicrosoft.com, or organizations"));
+            return Err(Error::invalid(t!("engine.entra.bad_tenant", tenant = tenant))
+                .with_hint(t!("engine.entra.bad_tenant_hint")));
         }
         if !is_guid(client_id) {
-            return Err(Error::invalid(format!("'{client_id}' is not an application (client) id")));
+            return Err(Error::invalid(t!("engine.entra.bad_client_id", client_id = client_id)));
         }
         Ok(Authority { tenant: tenant.to_ascii_lowercase(), client_id: client_id.to_ascii_lowercase() })
     }
@@ -149,10 +149,8 @@ fn login_mode(spec: &ConnectionSpec) -> Result<Login> {
         None | Some("") | Some("auto") => Ok(Login::Auto),
         Some("azure-cli" | "az") => Ok(Login::AzureCli),
         Some("device-code") => Ok(Login::DeviceCode),
-        Some(other) => {
-            Err(Error::invalid(format!("Unknown entra-login `{other}`"))
-                .with_hint("Use auto, azure-cli or device-code"))
-        }
+        Some(other) => Err(Error::invalid(t!("engine.entra.unknown_login", mode = other))
+            .with_hint(t!("engine.entra.unknown_login_hint"))),
     }
 }
 
@@ -250,9 +248,9 @@ impl EntraAuth {
         if !entra_host_allowed(engine, host) {
             return Err(Error::new(
                 ErrorCode::PermissionDenied,
-                format!("Refusing to send a Microsoft Entra ID token to '{host}', which is not an Azure {engine} host"),
+                t!("engine.entra.host_refused", host = host, engine = engine.label()),
             )
-            .with_hint("Entra ID authentication only works with Azure database hosts; use password authentication for other servers"));
+            .with_hint(t!("engine.entra.host_refused_hint")));
         }
         let mode = login_mode(spec)?;
         let cli_error = if mode == Login::DeviceCode {
@@ -332,11 +330,8 @@ impl EntraAuth {
             }
         }
         if !self.has_handler() {
-            return Err(Error::new(
-                ErrorCode::Unsupported,
-                "Microsoft Entra ID sign-in needs a person at the keyboard",
-            )
-            .with_hint("Run `az login`, or run the command in a terminal to sign in with a device code"));
+            return Err(Error::new(ErrorCode::Unsupported, t!("engine.entra.needs_person"))
+                .with_hint(t!("engine.entra.needs_person_hint")));
         }
         self.sign_in(engine, authority, key, &account, secrets).await
     }
@@ -362,10 +357,10 @@ impl EntraAuth {
         loop {
             tokio::time::sleep(Duration::from_secs(interval)).await;
             if self.generation.load(Ordering::SeqCst) != generation {
-                return fail("Sign-in was cancelled".into());
+                return fail(t!("engine.entra.cancelled"));
             }
             if Instant::now() >= deadline {
-                return fail("The sign-in code expired before it was used".into());
+                return fail(t!("engine.entra.code_expired"));
             }
             let fields = vec![
                 ("client_id", authority.client_id.clone()),
@@ -430,7 +425,10 @@ fn description(json: &Value) -> String {
     let text = json.get("error_description").and_then(Value::as_str).unwrap_or("");
     let first = text.lines().next().unwrap_or("").trim();
     if first.is_empty() {
-        json.get("error").and_then(Value::as_str).unwrap_or("unknown error").to_string()
+        json.get("error")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| t!("engine.entra.unknown_error"))
     } else {
         first.to_string()
     }
@@ -450,9 +448,9 @@ fn parse_token(reply: &Reply) -> std::result::Result<Tokens, Poll> {
     match json.get("error").and_then(Value::as_str) {
         Some("authorization_pending") => Err(Poll::Pending),
         Some("slow_down") => Err(Poll::SlowDown),
-        Some("authorization_declined") => Err(Poll::Failed("Sign-in was declined".into())),
-        Some("expired_token") => Err(Poll::Failed("The sign-in code expired before it was used".into())),
-        _ => Err(Poll::Failed(format!("Microsoft Entra ID refused the sign-in: {}", description(json)))),
+        Some("authorization_declined") => Err(Poll::Failed(t!("engine.entra.declined"))),
+        Some("expired_token") => Err(Poll::Failed(t!("engine.entra.code_expired"))),
+        _ => Err(Poll::Failed(t!("engine.entra.refused", reason = description(json)))),
     }
 }
 
@@ -462,18 +460,15 @@ fn parse_device_code(reply: &Reply) -> Result<(DeviceCodePrompt, String, u64)> {
     let (Some(device_code), Some(user_code), Some(uri)) =
         (field("device_code"), field("user_code"), field("verification_uri"))
     else {
-        return Err(Error::new(
-            ErrorCode::AuthFailed,
-            format!("Microsoft Entra ID did not start a sign-in: {}", description(json)),
-        )
-        .with_hint("Check the tenant (connection option entra-tenant) and try again"));
+        return Err(Error::new(ErrorCode::AuthFailed, t!("engine.entra.not_started", reason = description(json)))
+            .with_hint(t!("engine.entra.not_started_hint")));
     };
     if !uri.starts_with("https://") {
-        return Err(Error::new(ErrorCode::AuthFailed, "Microsoft Entra ID returned an unexpected sign-in page"));
+        return Err(Error::new(ErrorCode::AuthFailed, t!("engine.entra.unexpected_page")));
     }
     let expires = json.get("expires_in").and_then(seconds).unwrap_or(900);
     let interval = json.get("interval").and_then(seconds).unwrap_or(5).min(MAX_INTERVAL_SECS);
-    let message = field("message").unwrap_or_else(|| format!("To sign in, open {uri} and enter the code {user_code}."));
+    let message = field("message").unwrap_or_else(|| t!("engine.entra.prompt", uri = &uri, code = &user_code));
     Ok((
         DeviceCodePrompt { user_code, verification_uri: uri, message, expires_in_secs: expires },
         device_code,
@@ -500,21 +495,21 @@ pub async fn azure_cli_token(engine: Engine) -> Result<String> {
         .args(["--output", "tsv"]);
     let output = crate::cloud_process::output(command).await.map_err(|error| {
         if error.code == ErrorCode::NotFound {
-            Error::new(ErrorCode::AuthFailed, "The Azure CLI was not found in PATH or standard install locations")
-                .with_hint("Install the Azure CLI and run `az login`, or use password authentication")
+            Error::new(ErrorCode::AuthFailed, t!("engine.azure_cli.missing"))
+                .with_hint(t!("engine.azure_cli.install_or_password"))
         } else {
             error
         }
     })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Error::new(ErrorCode::AuthFailed, format!("Azure CLI could not issue a token: {}", stderr.trim()))
-            .with_hint("Run `az login` (and `az account set --subscription …` if needed), then retry"));
+        return Err(Error::new(ErrorCode::AuthFailed, t!("engine.entra.cli_token_failed", error = stderr.trim()))
+            .with_hint(t!("engine.entra.cli_token_failed_hint")));
     }
     let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if token.is_empty() {
-        return Err(Error::new(ErrorCode::AuthFailed, "Azure CLI returned an empty token")
-            .with_hint("Run `az login` and retry"));
+        return Err(Error::new(ErrorCode::AuthFailed, t!("engine.entra.cli_token_empty"))
+            .with_hint(t!("engine.entra.cli_token_empty_hint")));
     }
     Ok(token)
 }
