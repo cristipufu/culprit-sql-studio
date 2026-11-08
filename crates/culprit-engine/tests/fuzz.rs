@@ -322,3 +322,28 @@ proptest! {
         prop_assert_eq!(again, fixed);
     }
 }
+
+/// Found by the fuzzer: 1e309 reads as infinity, which a saved plan writes as `null`, so the plan was read but its
+/// scan could never be read back. Such a plan is refused, in whichever format it comes.
+#[test]
+fn a_number_past_a_double_is_refused_not_saved_unreadable() {
+    let plans = [
+        "-> Table scan on t  (cost=1e309 rows=1e309)",
+        "Seq Scan on t  (cost=0.00..1e309 rows=1e309 width=4)",
+        "-> Table scan on t  (cost=0.25 rows=-1e309)",
+    ];
+    let mut refused = 0;
+    for text in plans {
+        match culprit_engine::parse_plan(text) {
+            Ok(plan) => {
+                let json = serde_json::to_string(&plan).unwrap();
+                assert!(serde_json::from_str::<culprit_core::Plan>(&json).is_ok(), "{text}");
+            }
+            Err(e) => {
+                assert!(e.message.contains("too large to keep"), "{text}: {}", e.message);
+                refused += 1;
+            }
+        }
+    }
+    assert!(refused > 0, "no format read the number as infinity, so nothing here exercises the refusal");
+}

@@ -122,6 +122,12 @@ pub fn parse_plan(input: &str) -> Result<Plan> {
     }
     culprit_core::insights::annotate(&mut plan);
     culprit_checks::present_plan(&mut plan, None);
+    // A number past what a double holds (1e309) reads as infinity, which a saved plan writes as nothing: the scan or
+    // file it's saved in would never read back.
+    let kept = serde_json::to_value(&plan).ok().is_some_and(|saved| Plan::deserialize(&saved).is_ok());
+    if !kept {
+        return Err(unreadable(Error::invalid("a number in it is too large to keep")));
+    }
     Ok(plan)
 }
 
