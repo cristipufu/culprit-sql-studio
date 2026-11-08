@@ -2,7 +2,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use culprit_core::{Error, Result};
+use culprit_core::{Error, Result, format, t};
 
 /// The largest file an export writes to Downloads.
 pub const MAX_EXPORT_BYTES: usize = 64 * 1024 * 1024;
@@ -13,14 +13,16 @@ pub fn save_to_downloads(name: &str, contents: &str) -> Result<PathBuf> {
     let dir = dirs::download_dir()
         .or_else(|| dirs::home_dir().map(|home| home.join("Downloads")))
         .filter(|dir| dir.is_dir())
-        .ok_or_else(|| Error::not_found("There is no Downloads folder to save into"))?;
+        .ok_or_else(|| Error::not_found(t!("engine.files.no_downloads")))?;
     save_in(&dir, name, contents)
 }
 
 fn check_size(bytes: usize) -> Result<()> {
     if bytes > MAX_EXPORT_BYTES {
-        return Err(Error::invalid(format!("Exports are limited to {} MiB", MAX_EXPORT_BYTES / (1024 * 1024)))
-            .with_hint("Export fewer rows or columns, then try again"));
+        let size = format::digits((MAX_EXPORT_BYTES / (1024 * 1024)).to_string());
+        return Err(
+            Error::invalid(t!("engine.files.too_large", size = size)).with_hint(t!("engine.files.too_large_hint"))
+        );
     }
     Ok(())
 }
@@ -43,15 +45,15 @@ fn save_in(dir: &Path, name: &str, contents: &str) -> Result<PathBuf> {
                 if let Err(error) = file.write_all(contents.as_bytes()) {
                     drop(file);
                     let _ = std::fs::remove_file(&path);
-                    return Err(Error::internal(format!("Could not save the file: {error}")));
+                    return Err(Error::internal(t!("engine.files.save_failed", error = error.to_string())));
                 }
                 return Ok(path);
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(Error::internal(format!("Could not save the file: {error}"))),
+            Err(error) => return Err(Error::internal(t!("engine.files.save_failed", error = error.to_string()))),
         }
     }
-    Err(Error::internal("Too many exported files with this name"))
+    Err(Error::internal(t!("engine.files.too_many")))
 }
 
 fn file_name(name: &str) -> (String, &'static str) {

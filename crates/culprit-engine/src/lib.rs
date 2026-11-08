@@ -591,8 +591,8 @@ impl Workspace {
     ) -> Result<ResultSet> {
         let query = self.saved.get(name)?;
         let target = connection.map(str::to_string).or(query.connection.clone()).ok_or_else(|| {
-            Error::invalid(format!("'{}' isn't tied to a connection", query.name))
-                .with_hint("Pass the connection to run it on.")
+            Error::invalid(culprit_core::t!("engine.workspace.query_without_connection", name = &query.name))
+                .with_hint(culprit_core::t!("engine.workspace.query_without_connection_hint"))
         })?;
         let result = self.run(&target, &query.sql, limit, confirmed).await?;
         self.saved.touch(&query.name)?;

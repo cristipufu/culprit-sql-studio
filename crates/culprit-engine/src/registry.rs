@@ -1,6 +1,6 @@
 //! Maps an engine to its provider. New engines plug in here behind a cargo feature.
 
-use culprit_core::{ConnectionSpec, Engine, Error, ErrorCode, Provider, Result, Source};
+use culprit_core::{ConnectionSpec, Engine, Error, ErrorCode, Provider, Result, Source, t};
 
 /// Every source a scan reads on `engine`, as its provider declares them (`<provider>/src/sources.rs`); empty for an
 /// engine this build has no provider for.
@@ -23,8 +23,7 @@ pub fn sources(engine: Engine) -> &'static [Source] {
 
 pub fn provider(spec: &ConnectionSpec) -> Result<Box<dyn Provider>> {
     let engine = spec.engine.ok_or_else(|| {
-        Error::invalid("Can't tell which database engine this is")
-            .with_hint("Use a postgres://, mssql://, mysql:// or sqlite:// URL, or pass --engine")
+        Error::invalid(t!("engine.connection.unknown_engine")).with_hint(t!("engine.registry.unknown_engine_hint"))
     })?;
     match engine {
         #[cfg(feature = "mssql")]
@@ -38,7 +37,7 @@ pub fn provider(spec: &ConnectionSpec) -> Result<Box<dyn Provider>> {
         #[cfg(feature = "sqlite")]
         Engine::Sqlite => Ok(Box::new(culprit_sqlite::SqliteProvider::new(spec)?)),
         #[allow(unreachable_patterns)]
-        other => Err(Error::new(ErrorCode::Unsupported, format!("This build of Culprit has no {other} support"))),
+        other => Err(Error::new(ErrorCode::Unsupported, t!("engine.registry.unsupported", engine = other.label()))),
     }
 }
 

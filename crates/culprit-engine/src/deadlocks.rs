@@ -1,7 +1,7 @@
 //! Deadlocks pasted or dropped in (SQL Server .xdl XML, InnoDB status, Postgres log lines), and links from deadlock
 //! fixes to the findings that are the same fix.
 
-use culprit_core::{Deadlock, DeadlockReport, Error, Report, Result};
+use culprit_core::{Deadlock, DeadlockReport, Error, Report, Result, t};
 
 /// Largest pasted text Culprit reads.
 const MAX_TEXT: usize = 8 * 1024 * 1024;
@@ -9,7 +9,7 @@ const MAX_TEXT: usize = 8 * 1024 * 1024;
 /// Every deadlock in `text`, whatever engine wrote it.
 pub fn parse_deadlock(text: &str) -> Result<Vec<Deadlock>> {
     if text.len() > MAX_TEXT {
-        return Err(Error::invalid("That text is larger than 8 MB; paste one deadlock at a time"));
+        return Err(Error::invalid(t!("engine.deadlocks.too_large")));
     }
     let trimmed = text.trim_start_matches('\u{feff}').trim();
     let found = if trimmed.starts_with('<') || trimmed.contains("<deadlock") {
@@ -22,10 +22,7 @@ pub fn parse_deadlock(text: &str) -> Result<Vec<Deadlock>> {
         Vec::new()
     };
     if found.is_empty() {
-        return Err(Error::invalid("No deadlock found in that text").with_hint(
-            "Paste a SQL Server deadlock graph (.xdl XML), the LATEST DETECTED DEADLOCK section of SHOW ENGINE INNODB STATUS, \
-             or the PostgreSQL log lines from \"deadlock detected\" to STATEMENT.",
-        ));
+        return Err(Error::invalid(t!("engine.deadlocks.none_found")).with_hint(t!("engine.deadlocks.none_found_hint")));
     }
     Ok(found
         .into_iter()

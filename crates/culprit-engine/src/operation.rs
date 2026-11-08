@@ -16,19 +16,16 @@ pub async fn run_blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T> + 
     let permit = tokio::time::timeout(handle.remaining(), BLOCKING_TASKS.acquire())
         .await
         .map_err(|_| {
-            culprit_core::Error::new(
-                culprit_core::ErrorCode::Timeout,
-                "Background workers are busy; try again after the current work finishes",
-            )
+            culprit_core::Error::new(culprit_core::ErrorCode::Timeout, culprit_core::t!("engine.operation.busy"))
         })?
-        .map_err(|_| culprit_core::Error::internal("Background workers are unavailable"))?;
+        .map_err(|_| culprit_core::Error::internal(culprit_core::t!("engine.operation.unavailable")))?;
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
         handle.check()?;
         work()
     })
     .await
-    .map_err(|_| culprit_core::Error::internal("The background task stopped before completing"))?
+    .map_err(|_| culprit_core::Error::internal(culprit_core::t!("engine.operation.stopped")))?
 }
 
 pub(crate) async fn run<T>(future: impl Future<Output = Result<T>>) -> Result<T> {

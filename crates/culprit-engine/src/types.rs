@@ -1,7 +1,7 @@
 //! The plain data the workspace takes and returns: connections as the app lists them, a new connection, a pasted
 //! connection string read back, and the request and answer for a period's events.
 
-use culprit_core::{AuthKind, Engine, Environment, Error, Result, SshConfig};
+use culprit_core::{AuthKind, Engine, Environment, Error, Result, SshConfig, t};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -58,8 +58,8 @@ impl EventsRequest {
                 .as_deref()
                 .map(|v| {
                     culprit_core::changes::epoch(v).ok_or_else(|| {
-                        Error::invalid(format!("`{field}` isn't a timestamp: {v}"))
-                            .with_hint("Use ISO 8601 with a time zone, e.g. 2026-10-11T14:05:00Z")
+                        Error::invalid(t!("engine.types.bad_timestamp", field = field, value = v))
+                            .with_hint(t!("engine.types.timestamp_hint"))
                     })
                 })
                 .transpose()
@@ -72,7 +72,7 @@ impl EventsRequest {
             (None, None) => end - 7.0 * 86_400.0,
         };
         if start >= end {
-            return Err(Error::invalid("The period is empty: its start must come before its end"));
+            return Err(Error::invalid(t!("engine.types.empty_period")));
         }
         Ok((start, end))
     }

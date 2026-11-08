@@ -1,6 +1,6 @@
 //! Turns whatever a person pastes (URL, ADO, JDBC, libpq key/value, bare host) into a `ConnectionSpec`.
 
-use culprit_core::{AuthKind, ConnectionSpec, Engine, Error, Result};
+use culprit_core::{AuthKind, ConnectionSpec, Engine, Error, Result, t};
 
 pub fn parse(input: &str) -> Result<ConnectionSpec> {
     read(input).map(|(spec, _)| spec)
@@ -26,7 +26,7 @@ pub fn parse_as(input: &str, picked: Option<Engine>) -> Result<ConnectionSpec> {
 fn read(input: &str) -> Result<(ConnectionSpec, bool)> {
     let input = input.trim();
     if input.is_empty() {
-        return Err(Error::invalid("Paste a connection string or a host name"));
+        return Err(Error::invalid(t!("engine.connstr.empty")));
     }
     let lower = input.to_ascii_lowercase();
     let named = |spec: Result<ConnectionSpec>| spec.map(|s| (s, true));
@@ -76,7 +76,7 @@ pub fn parse_sqlite(input: &str) -> Result<ConnectionSpec> {
 fn sqlite(path: &str) -> Result<ConnectionSpec> {
     let path = path.split('?').next().unwrap_or(path).trim();
     if path.is_empty() {
-        return Err(Error::invalid("A SQLite connection needs the database file's path"));
+        return Err(Error::invalid(t!("engine.connstr.sqlite_path")));
     }
     Ok(ConnectionSpec {
         engine: Some(Engine::Sqlite),
@@ -250,13 +250,15 @@ fn guess_engine(host: &str, port: Option<u16>) -> Option<Engine> {
 fn split_host_port(raw: &str, separator: char) -> Result<(String, Option<u16>)> {
     let raw = raw.trim();
     if let Some(stripped) = raw.strip_prefix('[') {
-        let (host, rest) = stripped.split_once(']').ok_or_else(|| Error::invalid("Unclosed IPv6 address"))?;
+        let (host, rest) =
+            stripped.split_once(']').ok_or_else(|| Error::invalid(t!("engine.connstr.unclosed_ipv6")))?;
         let port = rest.trim_start_matches(separator).parse().ok();
         return Ok((host.to_string(), port));
     }
     match raw.rsplit_once(separator) {
         Some((host, port)) => {
-            let port: u16 = port.trim().parse().map_err(|_| Error::invalid(format!("'{port}' is not a valid port")))?;
+            let port: u16 =
+                port.trim().parse().map_err(|_| Error::invalid(t!("engine.connstr.bad_port", port = port)))?;
             Ok((host.trim().to_string(), Some(port)))
         }
         None => Ok((raw.to_string(), None)),
@@ -296,7 +298,7 @@ fn absorb_option(spec: &mut ConnectionSpec, key: &str, value: &str) {
 
 fn finish(mut spec: ConnectionSpec) -> Result<ConnectionSpec> {
     if spec.host.is_empty() {
-        return Err(Error::invalid("The connection string has no host"));
+        return Err(Error::invalid(t!("engine.connstr.no_host")));
     }
     if spec.engine.is_none() {
         spec.engine = guess_engine(&spec.host, spec.port);

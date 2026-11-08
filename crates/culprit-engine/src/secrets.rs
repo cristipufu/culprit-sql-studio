@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use culprit_core::{Error, ErrorCode, Result};
+use culprit_core::{Error, ErrorCode, Result, t};
 
 const KEYCHAIN_SERVICE: &str = "culprit";
 
@@ -33,21 +33,23 @@ impl Keychain {
 }
 
 /// What to do when there is no keychain to talk to (a headless server, a container, CI) or it refused access.
-const UNAVAILABLE_HINT: &str = if cfg!(target_os = "macos") {
-    "Unlock the login keychain, or pass the password with --password-env NAME (and set CULPRIT_KEYCHAIN=off to skip the keychain)"
-} else if cfg!(windows) {
-    "Culprit keeps passwords in Windows Credential Manager; pass the password with --password-env NAME instead (and set CULPRIT_KEYCHAIN=off to skip it)"
-} else {
-    "Culprit keeps passwords in the Secret Service (GNOME Keyring, KWallet). Without one, as on servers, containers and CI, pass the password with --password-env NAME and set CULPRIT_KEYCHAIN=off"
-};
+fn unavailable_hint() -> String {
+    if cfg!(target_os = "macos") {
+        t!("engine.secrets.unavailable_hint.macos")
+    } else if cfg!(windows) {
+        t!("engine.secrets.unavailable_hint.windows")
+    } else {
+        t!("engine.secrets.unavailable_hint.linux")
+    }
+}
 
 fn keychain_error(error: keyring::Error) -> Error {
     let unavailable = matches!(
         error,
         keyring::Error::NoDefaultStore | keyring::Error::NoStorageAccess(_) | keyring::Error::PlatformFailure(_)
     );
-    let e = Error::new(ErrorCode::Internal, format!("OS keychain: {error}"));
-    if unavailable { e.with_hint(UNAVAILABLE_HINT) } else { e }
+    let e = Error::new(ErrorCode::Internal, t!("engine.secrets.keychain_error", error = error.to_string()));
+    if unavailable { e.with_hint(unavailable_hint()) } else { e }
 }
 
 impl SecretStore for Keychain {

@@ -10,7 +10,7 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
-use culprit_core::{Environment, Error, ErrorCode, Result};
+use culprit_core::{Environment, Error, ErrorCode, Result, t};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -88,7 +88,7 @@ pub enum ApprovalOutcome {
 }
 
 impl ApprovalOutcome {
-    /// Why a statement didn't run, with what to do about it.
+    /// Why a statement didn't run, with what to do about it. Said to the coding agent (`culprit mcp`), so in English.
     pub fn error(self, connection: &str) -> Error {
         let (message, hint) = match self {
             ApprovalOutcome::Approved => return Error::internal("approved"),
@@ -154,7 +154,7 @@ fn hex(bytes: &[u8]) -> String {
 fn new_id() -> Result<String> {
     use ring::rand::SecureRandom;
     let mut bytes = [0u8; 16];
-    ring::rand::SystemRandom::new().fill(&mut bytes).map_err(|_| Error::internal("No system randomness"))?;
+    ring::rand::SystemRandom::new().fill(&mut bytes).map_err(|_| Error::internal(t!("engine.agent.no_randomness")))?;
     Ok(hex(&bytes))
 }
 
@@ -335,23 +335,20 @@ impl Workspace {
     /// Answer a pending request. `hash` is the one shown with the request; approving text that changed since is refused.
     pub fn decide_approval(&self, id: &str, hash: &str, approved: bool) -> Result<()> {
         if !valid_id(id) {
-            return Err(Error::invalid("Not an approval request id"));
+            return Err(Error::invalid(t!("engine.agent.not_a_request")));
         }
         let queue = self.queue();
         let request: ApprovalRequest = queue
             .read(&queue.request(id))
             .filter(|r: &ApprovalRequest| !expired(&r.expires_at))
-            .ok_or_else(|| Error::not_found("This request is no longer waiting; the agent stopped waiting for it"))?;
+            .ok_or_else(|| Error::not_found(t!("engine.agent.no_longer_waiting")))?;
         let current = approval_hash(&request.connection, &request.sql);
         let approved_text = approved && current == hash;
         let decision =
             Decision { id: id.to_string(), hash: current, approved: approved_text, decided_at: rfc3339(now()) };
         queue.write(&queue.decision(id), &decision)?;
         if approved && !approved_text {
-            return Err(Error::new(
-                ErrorCode::PermissionDenied,
-                "The statement changed after it was shown, so it was denied",
-            ));
+            return Err(Error::new(ErrorCode::PermissionDenied, t!("engine.agent.changed")));
         }
         Ok(())
     }

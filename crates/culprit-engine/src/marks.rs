@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use culprit_core::changes::epoch;
-use culprit_core::{ChangeEvent, Error, EventKind, EventSource, Result};
+use culprit_core::{ChangeEvent, Error, EventKind, EventSource, Result, format, t};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -56,20 +56,19 @@ fn save(dir: &Path, marks: &[Mark]) -> Result<()> {
 pub fn add(dir: &Path, text: &str, at: Option<&str>, by: &str) -> Result<Mark> {
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if text.is_empty() {
-        return Err(Error::invalid("A mark needs a few words, e.g. \"deploy v1.4.2\""));
+        return Err(Error::invalid(t!("engine.marks.empty")));
     }
     if text.chars().count() > MAX_TEXT {
-        return Err(Error::invalid(format!("A mark is at most {MAX_TEXT} characters")));
+        return Err(Error::invalid(t!("engine.marks.too_long", max = format::digits(MAX_TEXT.to_string()))));
     }
     let now = chrono::Utc::now();
     let at = match at {
         Some(at) => {
             let t = epoch(at).ok_or_else(|| {
-                Error::invalid(format!("`{at}` isn't a timestamp"))
-                    .with_hint("Use ISO 8601 with a time zone, e.g. 2026-10-11T14:05:00Z")
+                Error::invalid(t!("engine.marks.bad_timestamp", at = at)).with_hint(t!("engine.types.timestamp_hint"))
             })?;
             if t > now.timestamp() as f64 + 60.0 {
-                return Err(Error::invalid("A mark can't be in the future"));
+                return Err(Error::invalid(t!("engine.marks.future")));
             }
             chrono::DateTime::from_timestamp(t as i64, 0).unwrap_or(now)
         }
@@ -101,8 +100,7 @@ pub fn remove(dir: &Path, id: &str) -> Result<Mark> {
     let _lock = private_fs::lock(&path(dir)).map_err(|e| Error::internal(e.to_string()))?;
     let mut marks = list(dir);
     let index = marks.iter().position(|m| m.id == id).ok_or_else(|| {
-        Error::not_found(format!("No mark '{id}' on this connection"))
-            .with_hint("`culprit events <connection>` lists them")
+        Error::not_found(t!("engine.marks.not_found", id = id)).with_hint(t!("engine.marks.not_found_hint"))
     })?;
     let removed = marks.remove(index);
     save(dir, &marks)?;

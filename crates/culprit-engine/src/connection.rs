@@ -3,6 +3,7 @@
 
 use culprit_core::{
     AuthKind, ConnectionSpec, Engine, Environment, Error, ErrorCode, Provider, Result, ServerInfo, entra_host_allowed,
+    t,
 };
 
 use crate::{
@@ -84,11 +85,21 @@ impl Connections<'_> {
             None => None,
             Some(path) => {
                 let absolute = std::fs::canonicalize(path).map_err(|e| {
-                    Error::new(ErrorCode::NotFound, format!("Can't read {}: {e}", path.display()))
-                        .with_hint("Give the path of the log file the application writes, e.g. log/production.log.")
+                    Error::new(
+                        ErrorCode::NotFound,
+                        t!(
+                            "engine.connection.unreadable_log",
+                            path = path.display().to_string(),
+                            error = e.to_string()
+                        ),
+                    )
+                    .with_hint(t!("engine.connection.unreadable_log_hint"))
                 })?;
                 if !absolute.is_file() {
-                    return Err(Error::invalid(format!("{} isn't a file", absolute.display())));
+                    return Err(Error::invalid(t!(
+                        "engine.connection.not_a_file",
+                        path = absolute.display().to_string()
+                    )));
                 }
                 query_log::recognize(&absolute)?;
                 Some(absolute.to_string_lossy().into_owned())
@@ -135,9 +146,7 @@ impl Connections<'_> {
         store::validate_name(&new.name)?;
         let spec = merge(&new)?;
         let engine = spec.engine.ok_or_else(|| {
-            Error::invalid("Can't tell which database engine this is").with_hint(
-                "Choose the engine explicitly: PostgreSQL, SQL Server, MySQL or SQLite (--engine in the CLI)",
-            )
+            Error::invalid(t!("engine.connection.unknown_engine")).with_hint(t!("engine.connection.choose_engine_hint"))
         })?;
         let password_env = new.password_env.clone().filter(|v| !v.is_empty());
         let password = spec.password.as_deref().filter(|p| !p.is_empty() && password_env.is_none());
@@ -171,10 +180,10 @@ impl Connections<'_> {
     pub(crate) fn set_password(&self, name: &str, password: &str) -> Result<ConnectionInfo> {
         let stored = self.store.get(name)?;
         if stored.auth != AuthKind::Password {
-            return Err(Error::invalid(format!("'{name}' does not use password authentication")));
+            return Err(Error::invalid(t!("engine.connection.not_password_auth", name = name)));
         }
         if password.is_empty() {
-            return Err(Error::invalid("The password is empty"));
+            return Err(Error::invalid(t!("engine.connection.empty_password")));
         }
         self.secrets.set(name, password)?;
         self.store.update(name, |stored| {
@@ -224,9 +233,7 @@ impl Connections<'_> {
             to = removed.join(format!("{folder}-{stamp}-{n}"));
         }
         std::fs::rename(&dir, &to).map_err(|e| {
-            Error::internal(format!("{}: {e}", dir.display())).with_hint(
-                "A removed connection left reports under this name; move or delete that folder, then try again",
-            )
+            Error::internal(format!("{}: {e}", dir.display())).with_hint(t!("engine.connection.removed_reports_hint"))
         })
     }
 
@@ -326,7 +333,7 @@ impl Connections<'_> {
         };
         let mut options = std::collections::BTreeMap::new();
         match d.engine {
-            Engine::Yugabyte => return Err(Error::invalid("YugabyteDB is not an Azure flexible-server engine")),
+            Engine::Yugabyte => return Err(Error::invalid(t!("engine.connection.yugabyte_not_azure"))),
             Engine::Mysql => options.insert("ssl-mode".into(), "VERIFY_IDENTITY".into()),
             _ => options.insert("sslmode".into(), "verify-full".into()),
         };
@@ -353,7 +360,7 @@ impl Connections<'_> {
 
     fn add_rds(&self, d: &DiscoveredDatabase) -> Result<ConnectionInfo> {
         if d.engine == Engine::Yugabyte {
-            return Err(Error::invalid("YugabyteDB is not an Amazon RDS engine"));
+            return Err(Error::invalid(t!("engine.connection.yugabyte_not_rds")));
         }
         store::validate_name(&d.alias)?;
         let auth =
@@ -376,7 +383,7 @@ impl Connections<'_> {
                 options.insert("trustServerCertificateCA".into(), aws::RDS_CA.into());
             }
             Engine::Sqlite => {}
-            Engine::Yugabyte => return Err(Error::invalid("YugabyteDB is not an Amazon RDS engine")),
+            Engine::Yugabyte => return Err(Error::invalid(t!("engine.connection.yugabyte_not_rds"))),
         }
         let stored = StoredConnection {
             engine: d.engine,
@@ -429,8 +436,8 @@ impl Connections<'_> {
         let mut stored = Vec::with_capacity(items.len());
         for c in items {
             if existing.contains(&c.alias) || !seen.insert(c.alias.clone()) {
-                return Err(Error::invalid(format!("A connection named '{}' already exists", c.alias))
-                    .with_hint("Pick another alias for it"));
+                return Err(Error::invalid(t!("engine.connection.name_taken", name = &c.alias))
+                    .with_hint(t!("engine.connection.name_taken_hint")));
             }
             stored.push((c.alias.clone(), import::to_stored(c)?));
         }
@@ -525,7 +532,7 @@ impl Connections<'_> {
 
     /// Fetch a fresh token for token-based auth (Entra ID, AWS IAM); a no-op for other kinds.
     async fn resolve_token(&self, spec: &mut ConnectionSpec) -> Result<()> {
-        let engine = || spec.engine.ok_or_else(|| Error::invalid("Can't tell which database engine this is"));
+        let engine = || spec.engine.ok_or_else(|| Error::invalid(t!("engine.connection.unknown_engine")));
         match spec.auth {
             AuthKind::Entra => {
                 let engine = engine()?;
@@ -542,11 +549,11 @@ impl Connections<'_> {
                     .user
                     .clone()
                     .filter(|u| !u.is_empty())
-                    .ok_or_else(|| Error::invalid("AWS IAM authentication needs a database user name"))?;
+                    .ok_or_else(|| Error::invalid(t!("engine.connection.iam_needs_user")))?;
                 let port = spec.port.unwrap_or(match engine {
                     Engine::Postgres => 5432,
                     Engine::Yugabyte => {
-                        return Err(Error::invalid("AWS RDS IAM authentication does not apply to YugabyteDB"));
+                        return Err(Error::invalid(t!("engine.connection.iam_not_yugabyte")));
                     }
                     Engine::Mysql => 3306,
                     Engine::Mssql => 1433,
@@ -557,8 +564,8 @@ impl Connections<'_> {
                     .map(str::to_string)
                     .or_else(|| aws::region_from_host(&spec.host))
                     .ok_or_else(|| {
-                        Error::invalid("Can't tell which AWS region this RDS endpoint is in")
-                            .with_hint("Add ?region=… to the connection")
+                        Error::invalid(t!("engine.connection.unknown_region"))
+                            .with_hint(t!("engine.connection.unknown_region_hint"))
                     })?;
                 spec.token = Some(aws::iam_token(engine, &spec.host, port, &user, &region).await?);
             }
@@ -572,8 +579,8 @@ impl Connections<'_> {
             (AuthKind::Entra | AuthKind::AwsIam, _) => self.resolve_token(spec).await?,
             (AuthKind::Password, Some(var)) => {
                 let value = std::env::var(var).map_err(|_| {
-                    Error::new(ErrorCode::AuthFailed, format!("Environment variable {var} is not set"))
-                        .with_hint(format!("Connection '{name}' reads its password from {var}"))
+                    Error::new(ErrorCode::AuthFailed, t!("engine.connection.password_env_unset", variable = var))
+                        .with_hint(t!("engine.connection.password_env_hint", name = name, variable = var))
                 })?;
                 spec.password = Some(value);
             }

@@ -60,7 +60,10 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
     for _ in 0..128 {
-        let mut name = path.file_name().ok_or_else(|| io::Error::other("No file name"))?.to_os_string();
+        let mut name = path
+            .file_name()
+            .ok_or_else(|| io::Error::other(culprit_core::t!("engine.private_fs.no_file_name")))?
+            .to_os_string();
         name.push(format!(".{}.{}.tmp", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
         let tmp = path.with_file_name(name);
         let mut options = private_options();
@@ -79,7 +82,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
         }
         return result;
     }
-    Err(io::Error::new(io::ErrorKind::AlreadyExists, "Cannot create a unique temporary file"))
+    Err(io::Error::new(io::ErrorKind::AlreadyExists, culprit_core::t!("engine.private_fs.no_unique_temp")))
 }
 
 fn private_options() -> fs::OpenOptions {
@@ -102,7 +105,10 @@ pub fn lock(path: &Path) -> io::Result<fs::File> {
     if let Some(parent) = path.parent() {
         create_dir(parent)?;
     }
-    let mut name = path.file_name().ok_or_else(|| io::Error::other("No file name"))?.to_os_string();
+    let mut name = path
+        .file_name()
+        .ok_or_else(|| io::Error::other(culprit_core::t!("engine.private_fs.no_file_name")))?
+        .to_os_string();
     name.push(".lock");
     let file = private_options().read(true).write(true).create(true).truncate(false).open(path.with_file_name(name))?;
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -113,10 +119,7 @@ pub fn lock(path: &Path) -> io::Result<fs::File> {
                 std::thread::sleep(Duration::from_millis(5));
             }
             Err(fs::TryLockError::WouldBlock) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "Another Culprit process is still saving this file",
-                ));
+                return Err(io::Error::new(io::ErrorKind::TimedOut, culprit_core::t!("engine.private_fs.locked")));
             }
             Err(fs::TryLockError::Error(e)) => return Err(e),
         }
