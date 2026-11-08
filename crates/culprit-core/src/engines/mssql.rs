@@ -8,36 +8,32 @@ pub(super) struct Mssql;
 
 impl EngineSpec for Mssql {
     fn products(&self) -> &'static [ProductSpec] {
-        const PRODUCTS: &[ProductSpec] = &[ProductSpec::primary(
-            DatabaseProduct::Mssql,
-            "SQL Server",
-            ".sqlplan or showplan XML (SSMS, Query Store)",
-        )];
+        const PRODUCTS: &[ProductSpec] =
+            &[ProductSpec::primary(DatabaseProduct::Mssql, "SQL Server", key!("core.engines.mssql.plan_format"))];
         PRODUCTS
     }
     fn hide_index(&self, _server: &ServerInfo, schema: &str, table: &str, index: &str) -> Option<String> {
         Some(format!("ALTER INDEX {} ON {} DISABLE;", self.quote(index), self.qualified(&[schema, table])))
     }
-    fn unused_index_advice(&self, _server: &ServerInfo, _table_kind: Option<&str>) -> &'static str {
-        "Disable first: the definition stays, nothing reads it, and `ALTER INDEX … REBUILD` brings it back. Drop it after a full business cycle without complaints."
+    fn unused_index_advice(&self, _server: &ServerInfo, _table_kind: Option<&str>) -> String {
+        t!("core.engines.mssql.unused_index")
     }
-    fn session_advice(&self, _command: &str) -> Option<&'static str> {
-        Some(
-            "The driver or the connection pool sends this around the application's statements, not the application's own code: a pooled connection returns to the login's defaults each time it is reused (sp_reset_connection), so options set per session are sent again on every checkout. Set them once instead: as the database's or the login's defaults, or in the connection string where the driver allows.",
-        )
+    fn session_advice(&self, _command: &str) -> Option<String> {
+        Some(t!("core.engines.mssql.session_advice"))
     }
     fn statement_metrics(&self) -> StatementMetrics {
         StatementMetrics {
-            planning_label: "Compiling".into(),
             compilation_history: true,
             lock_time: true,
-            write_rows_label: Some("Rows per run".into()),
-            runtime_note: "Query Store keeps the fastest and slowest run and the spread of every plan, and each plan's compiled parameter values.".into(),
-            runtime_cache_note: Some("The plan cache keeps the fastest and slowest run of each cached plan since it was cached, not their spread: Query Store would add it.".into()),
-            errors_note: Some(
-                "Query Store counts errors but doesn't keep them; the finding shows how to capture them.".into(),
-            ),
-            ..StatementMetrics::BASIC
+            runtime_note: key!("core.engines.mssql.runtime_note").into(),
+            runtime_cache_note: Some(key!("core.engines.mssql.runtime_cache_note").into()),
+            errors_note: Some(key!("core.engines.mssql.errors_note").into()),
+            ..StatementMetrics::new(
+                PlanningStep::Compiling,
+                ReadUnit::Pages,
+                Some(WriteRows::Rows),
+                WriteLog::TransactionLog,
+            )
         }
     }
     fn wait_sampling(&self) -> Option<WaitSampling> {
@@ -49,19 +45,19 @@ impl EngineSpec for Mssql {
     fn inactive_index_state(&self, _server: &ServerInfo) -> crate::IndexState {
         crate::IndexState::Disabled
     }
-    fn limitations(&self) -> Vec<String> {
-        vec![
-        "Query Store records aggregate executions and plan history, not an application's request trace or every parameter value. Caller identity and transaction boundaries need application telemetry.".into(),
-        "An estimated or stored compilation plan does not measure the rows, timing or waits of the run you are investigating. Runtime-only problems require recorded runtime evidence or an explicitly measured run.".into(),
-        "Host CPU and filesystem capacity need their own measurements, such as connected cloud telemetry. Backup recoverability and database corruption are not checked by the statistics scan; they need backup/recovery validation and an appropriate integrity investigation.".into(),
-    ]
+    fn limitation_keys(&self) -> &'static [&'static str] {
+        &[
+            key!("core.engines.mssql.limitation.query_store"),
+            key!("core.engines.mssql.limitation.estimated_plan"),
+            key!("core.engines.mssql.limitation.host"),
+        ]
     }
 
     fn connect(&self) -> Connect {
         Connect::server(
             "SQL Server",
             "Server=tcp:shop.database.windows.net;Database=shop;User ID=app",
-            "An ADO.NET connection string, an mssql:// or JDBC URL, or host,port/database. Azure SQL without a user name signs in with your az login (Entra ID).",
+            key!("core.engines.mssql.accepts"),
         )
     }
 
@@ -83,30 +79,25 @@ impl EngineSpec for Mssql {
 
     fn change_setting(&self, _server: &ServerInfo, name: &str, value: &str) -> SettingChange {
         SettingChange {
-            how: format!("Set {name} to {value}."),
+            how: t!("core.engines.mssql.change_setting", name = name, value = value),
             sql: Some(format!("EXEC sp_configure '{name}', {};\nRECONFIGURE;", literal(value))),
         }
     }
 
     fn refresh_statistics(&self, target: &str) -> Fix {
         Fix {
-            summary: "Update the statistics now; if this table changes fast, schedule the update in a maintenance job."
-                .into(),
+            summary: t!("core.engines.mssql.refresh_statistics.summary"),
             sql: Some(self.dialect().refresh_statistics(target)),
-            cost: Some("Reads a sample of the table; run it outside peak hours on very large tables.".into()),
+            cost: Some(t!("core.engines.mssql.refresh_statistics.cost")),
         }
     }
 
     fn wait_not_per_statement(&self, _server: &ServerInfo, _category: &str) -> String {
-        "Query Store didn't record this wait for individual queries in the window.".into()
+        t!("core.engines.mssql.wait_not_per_statement")
     }
 
     fn index_advice_sources(&self, server: &ServerInfo, _has_workload: bool) -> Option<String> {
-        (!server.has(Capability::MissingIndexes)).then(|| {
-            "This login can't read SQL Server's missing-index requests (VIEW DATABASE STATE), so candidates come from \
-             captured plans and foreign keys only."
-                .to_string()
-        })
+        (!server.has(Capability::MissingIndexes)).then(|| t!("core.engines.mssql.index_advice_sources"))
     }
 }
 

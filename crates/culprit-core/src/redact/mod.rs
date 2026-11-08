@@ -307,8 +307,7 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
                 engine
                     .spec()
                     .deadlock_limitation()
-                    .unwrap_or("Deadlock collection was limited; details omitted from shared data.")
-                    .into(),
+                    .unwrap_or_else(|| "Deadlock collection was limited; details omitted from shared data.".into()),
             );
         }
     }

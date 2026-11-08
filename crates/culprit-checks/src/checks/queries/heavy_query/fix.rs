@@ -788,10 +788,7 @@ pub(super) fn session_fix(engine: Engine, text: &str) -> String {
             t!("check.heavy_query.fix.session.transaction")
         }
         "select" => t!("check.heavy_query.fix.session.ping"),
-        _ => engine
-            .spec()
-            .session_advice(&command)
-            .map_or_else(|| t!("check.heavy_query.fix.session.settings"), str::to_string),
+        _ => engine.spec().session_advice(&command).unwrap_or_else(|| t!("check.heavy_query.fix.session.settings")),
     }
 }
 

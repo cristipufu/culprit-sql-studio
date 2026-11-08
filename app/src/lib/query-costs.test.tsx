@@ -6,6 +6,7 @@ import type { Report } from "../gen/Report";
 import { QueryCostsPanel } from "../components/BeyondTime";
 import { RuntimeSpread } from "../components/RuntimeSpread";
 import { ENGINES, engineLabel, statementMetrics } from "./engines";
+import { t } from "./i18n";
 import { fromRust } from "../test/fixtures";
 
 function check(ok: boolean, message: string) {
@@ -27,7 +28,7 @@ test(`Query cost rendering follows shared statement metrics for all ${profiles.l
       log_full_pages: null, row_bytes: null, compile_history: null,
     };
     const measured = renderToStaticMarkup(createElement(QueryCostsPanel, { report, query }));
-    check(measured.includes(`>${metrics.planning_label}</span>`), `${engine}: wrong planning terminology`);
+    check(measured.includes(`>${t(metrics.planning_label)}</span>`), `${engine}: wrong planning terminology`);
     check(measured.includes("Query Store counts errors") === !!metrics.errors_note, `${engine}: another source's error note leaked`);
     if (engine === "yugabyte") {
       check(measured.includes(">Planning</span>") && !measured.includes("Compiling"), "YSQL plans are not SQL Server compilations");
@@ -46,7 +47,7 @@ test(`Query cost rendering follows shared statement metrics for all ${profiles.l
     query.costs.log_bytes = 102400;
     query.waits = [{ category: "Lock", wait_type: null, wait_ms: 1000, tasks: null }];
     const io = renderToStaticMarkup(createElement(QueryCostsPanel, { report, query }));
-    check(io.includes(`>${metrics.log_label}</span>`), `${product}: wrong log terminology`);
+    check(io.includes(`>${t(metrics.log_label)}</span>`), `${product}: wrong log terminology`);
     check(io.includes(">Lock waits</span>") === metrics.lock_time, `${product}: another source's lock timing leaked`);
     if (product.startsWith("MariaDB")) {
       check(io.includes("MariaDB keeps no planning time or redo bytes"), "MariaDB was described as MySQL");

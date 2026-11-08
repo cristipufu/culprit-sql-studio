@@ -4,4 +4,8 @@ import type { DatabaseProduct } from "./DatabaseProduct";
 /**
  * The same product identities and recognition rules consumed by the UI.
  */
-export type ProductFacts = { id: DatabaseProduct, label: string, plan_format: string, prefix: string | null, };
+export type ProductFacts = { id: DatabaseProduct, label: string, 
+/**
+ * Message key: the native plan formats a person can open without a connection.
+ */
+plan_format: string, prefix: string | null, };

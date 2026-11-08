@@ -5,6 +5,7 @@ import { PlanCatalog } from "../components/PlanCatalog";
 import type { Plan } from "../gen/Plan";
 import type { PlanSample } from "../gen/PlanSample";
 import { PRODUCTS } from "./engines";
+import { t } from "./i18n";
 import { planSamples, sameSamplePlan } from "./plan-samples";
 import { getPlans, removePlan, SAMPLES, trySample } from "./plans";
 import { fromRust } from "../test/fixtures";
@@ -19,12 +20,12 @@ test("Plan samples: every core product, native captures, standalone loading and 
   const rendered = renderToStaticMarkup(createElement(PlanCatalog, { onSample: () => {} }));
   for (const product of PRODUCTS) {
     check(rendered.split(`data-product="${product.id}"`).length === 3, `${product.label}: the Plans view needs a format row and sample action`);
-    check(rendered.includes(product.plan_format), `${product.label}: the view must use the core format description`);
+    check(rendered.includes(t(product.plan_format)), `${product.label}: the view must use the core format description`);
   }
   const expected = PRODUCTS.map((product) => product.id).sort();
   check(JSON.stringify(samples.map((sample) => sample.product).sort()) === JSON.stringify(expected), "Every core product needs exactly one bundled sample");
   check(JSON.stringify(SAMPLES.map((sample) => sample.id).sort()) === JSON.stringify(expected), "Plans sample controls must follow the core catalog");
-  for (const product of PRODUCTS) check(!!product.plan_format.trim(), `${product.label} needs a format description`);
+  for (const product of PRODUCTS) check(t(product.plan_format).trim() !== "" && t(product.plan_format) !== product.plan_format, `${product.label} needs a format description`);
   for (const sample of samples) {
     const sidecar = shared.compares.find((entry) => entry.product === sample.product)!;
     check(!!sidecar, `${sample.product}: missing browser comparison`);

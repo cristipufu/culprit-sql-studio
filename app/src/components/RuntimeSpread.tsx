@@ -105,7 +105,7 @@ function coverage(engine: Engine, hasHistogram: boolean, product?: string, kind?
   const note = (kind === "plan-cache" ? metrics.runtime_cache_note : null)
     ?? (hasHistogram ? metrics.runtime_histogram_note : null)
     ?? metrics.runtime_note;
-  return note.replaceAll("{engine}", serverName(engine, product));
+  return t(note, { engine: serverName(engine, product) });
 }
 
 function sentence(q: QueryStat, ls: Lane[]): string | null {

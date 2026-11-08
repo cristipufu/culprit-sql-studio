@@ -77,7 +77,10 @@ fn words(engine: Engine) -> Vec<String> {
         line(&format!("metrics.runtime_cache_note.{name}"), format!("{:?}", note(&m.runtime_cache_note)));
     }
     for command in ["discard", "reset", "set"] {
-        line(&format!("session_advice.{command}"), format!("{:?}", spec.session_advice(command).map(|s| s.to_string())));
+        line(
+            &format!("session_advice.{command}"),
+            format!("{:?}", spec.session_advice(command).map(|s| s.to_string())),
+        );
     }
     line("deadlock_limitation", format!("{:?}", spec.deadlock_limitation().map(|s| s.to_string())));
     let servers: Vec<ServerInfo> = match engine {
@@ -108,7 +111,10 @@ fn words(engine: Engine) -> Vec<String> {
             line(&format!("wait_not_per_statement.{i}.{category}"), spec.wait_not_per_statement(s, category));
         }
         for workload in [true, false] {
-            line(&format!("index_advice_sources.{i}.{workload}"), format!("{:?}", spec.index_advice_sources(s, workload)));
+            line(
+                &format!("index_advice_sources.{i}.{workload}"),
+                format!("{:?}", spec.index_advice_sources(s, workload)),
+            );
         }
     }
     let fix = spec.refresh_statistics("public.orders");
@@ -122,6 +128,67 @@ fn every_engine_says_its_facts_and_advice_in_english() {
     all.push(format!("Yugabyte.session_target: {}", crate::engines::ysql_session_target("42").unwrap_err().message));
     let actual = all.join("\n");
     assert_eq!(actual, EXPECTED);
+}
+
+// The words checks and the app choose by engine are its facts: every engine declares its planning step, its log, what
+// its reads count and what a write's rows mean, each said by a message English has, with the id messages select on.
+#[test]
+fn every_engine_declares_its_vocabulary_as_messages_and_ids() {
+    use PlanningStep::{Compiling, Planning};
+    use ReadUnit::{Pages, RowsExamined};
+    use WriteLog::{TransactionLog, Wal};
+    use WriteRows::{Changed, Returned, Rows};
+    let cases = [
+        (Engine::Mssql, Compiling, TransactionLog, Pages, Some(Rows)),
+        (Engine::Postgres, Planning, Wal, Pages, Some(Changed)),
+        (Engine::Yugabyte, Planning, TransactionLog, Pages, Some(Changed)),
+        (Engine::Mysql, Planning, TransactionLog, RowsExamined, None),
+        (Engine::Sqlite, Planning, TransactionLog, Pages, Some(Returned)),
+    ];
+    assert_eq!(cases.map(|c| c.0), Engine::ALL, "Declare the vocabulary of each new engine explicitly");
+    let english = crate::i18n::english();
+    for (engine, planning, log, reads, rows) in cases {
+        let m = engine.spec().statement_metrics();
+        assert_eq!((m.planning, m.log, m.reads, m.write_rows), (planning, log, reads, rows), "{engine:?}");
+        assert_eq!(m.write_rows_label.as_deref(), rows.map(|r| t(r.per_run_key(), &[])).as_deref());
+        // Every word the app reads from its facts is a message English has.
+        let facts = engine.facts();
+        let notes = [&m.missing_costs_note, &m.errors_note, &m.runtime_histogram_note, &m.runtime_cache_note];
+        let keys = [&m.planning_label, &m.reads_label, &m.log_name, &m.log_label, &m.runtime_note]
+            .into_iter()
+            .map(|k| k.to_string())
+            .chain(notes.into_iter().flatten().map(|k| k.to_string()))
+            .chain(facts.products.iter().map(|p| p.plan_format.clone()))
+            .chain([facts.connect.accepts.clone()])
+            .chain(facts.limitations.iter().cloned())
+            .chain(facts.refusals.values().flat_map(|r| [Some(r.message.clone()), r.hint.clone()]).flatten());
+        for key in keys {
+            assert!(english.message(&key).is_some(), "{engine:?}: {key} is not in locales/en.json");
+        }
+        // The app's messages select on the ids, and say what the engine's own words say.
+        let share = || ("share", Arg::from("40%"));
+        assert_eq!(
+            t("ui.beyond_time.of_all_log", &[share(), ("log", Arg::from(wire_name(&log)))]),
+            format!("40% of all {}", t(&m.log_name, &[]))
+        );
+        assert_eq!(
+            t("ui.beyond_time.takeaway.planning", &[share(), ("planning", Arg::from(wire_name(&planning)))]),
+            format!("{} takes 40% of its time.", t(&m.planning_label, &[]))
+        );
+    }
+    let words = |key: &str| t(key, &[]);
+    assert_eq!(
+        [Rows, Changed, Returned].map(|r| (words(r.per_run_key()), words(r.total_key()))),
+        [
+            ("Rows per run".into(), "Rows".into()),
+            ("Rows changed per run".into(), "Rows changed".into()),
+            ("Rows returned per run".into(), "Rows returned".into()),
+        ]
+    );
+    assert_eq!([Pages, RowsExamined].map(|r| words(r.per_run_key())), ["Pages read per run", "Rows examined per run"]);
+    assert_eq!([Wal, TransactionLog].map(|l| words(l.name_key())), ["WAL", "log"]);
+    assert_eq!([Wal, TransactionLog].map(|l| words(l.written_key())), ["WAL written", "Log written"]);
+    assert_eq!([Planning, Compiling].map(|p| words(p.label_key())), ["Planning", "Compiling"]);
 }
 
 const EXPECTED: &str = r#"Mssql.plan_format.Mssql: .sqlplan or showplan XML (SSMS, Query Store)

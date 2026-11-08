@@ -38,12 +38,13 @@ export function engineLabel(engine: Engine): string {
 }
 
 /** How a person connects to the engine: its name where they pick it, whether it's a file they choose, and what they
- *  paste otherwise. */
+ *  paste otherwise (`accepts` is a message key). */
 export function connectFacts(engine: Engine): EngineFacts["connect"] {
   return FACTS[engine].connect;
 }
 
-export function engineLimitations(engine: Engine): string[] { return FACTS[engine].limitations; }
+/** What a scan of the engine can't establish, in the app's language. */
+export function engineLimitations(engine: Engine): string[] { return FACTS[engine].limitations.map((key) => t(key)); }
 
 /** MariaDB is served by the MySQL engine; the server's product string (or a plan's flavor) tells them apart. */
 export function isMariadb(engine: Engine, product?: string | null): boolean {
@@ -59,7 +60,13 @@ export function can(engine: Engine, ability: Ability): boolean {
 /** The error the engine gives for something it can't do, as the desktop returns it. */
 export function refusal(engine: Engine, ability: Ability): { code: "unsupported"; message: string; hint: string | null } {
   const r = FACTS[engine].refusals[ability];
-  return { code: "unsupported", message: r?.message ?? t("ui.engines.refused", { engine: LABEL[engine] }), hint: r?.hint ?? null };
+  // The engine's messages say its label and the ability's id where they need them, as the desktop says them.
+  const args = { engine: LABEL[engine], ability };
+  return {
+    code: "unsupported",
+    message: r ? t(r.message, args) : t("ui.engines.refused", { engine: LABEL[engine] }),
+    hint: r?.hint ? t(r.hint, args) : null,
+  };
 }
 
 /** What Live may do to another session on this engine, outside production. */

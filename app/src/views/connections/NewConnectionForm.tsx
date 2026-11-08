@@ -231,7 +231,7 @@ export function NewConnectionForm({ onDone, canCancel }: { onDone: () => void; c
         ) : (
           <>
             {switched && <b>{t("ui.new_connection_form.switched", { engine: facts?.choice ?? "" })} </b>}
-            {facts?.accepts ?? t("ui.new_connection_form.accepts")}
+            {facts ? t(facts.accepts) : t("ui.new_connection_form.accepts")}
           </>
         )}
       </p>

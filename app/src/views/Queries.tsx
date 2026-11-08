@@ -2,7 +2,7 @@ import { ChevronLeft, ChevronRight, GitCompareArrows, Search, SquareArrowOutUpRi
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { LookToggle, PlanSurface, rememberLook, rememberedLook, type PlanLook } from "../components/PlanSurface";
 import { LastActualRun, PlanSourceToggle, type PlanSource } from "../components/ActualRun";
-import { measuresRuns } from "../lib/engines";
+import { measuresRuns, statementMetrics } from "../lib/engines";
 import { QueryTrend, Sparkline } from "../components/Trends";
 import { RuntimeSpread } from "../components/RuntimeSpread";
 import { QueryCostsPanel } from "../components/BeyondTime";
@@ -332,7 +332,7 @@ function QueryDetail({ report, query }: { report: Report; query: QueryStat }) {
                 <Metric value={duration(stated.mean)} label={t("ui.queries.metric.average")} />
                 <Metric value={duration(query.max_time_ms)} label={t("ui.queries.metric.slowest")} />
                 {query.rows != null && <Metric value={count(query.rows / Math.max(1, query.executions))} label={t("ui.queries.metric.rows")} />}
-                {query.logical_reads != null && <Metric value={count(query.logical_reads / Math.max(1, query.executions))} label={report.snapshot.server.engine === "mysql" ? t("ui.queries.metric.rows_examined") : t("ui.queries.metric.pages_read")} />}
+                {query.logical_reads != null && <Metric value={count(query.logical_reads / Math.max(1, query.executions))} label={statementMetrics(report.snapshot.server.engine).reads === "rows_examined" ? t("ui.queries.metric.rows_examined") : t("ui.queries.metric.pages_read")} />}
               </div>
               {stated.over && (
                 <p className="muted">

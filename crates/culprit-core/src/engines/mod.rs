@@ -3,6 +3,10 @@
 //! refreshing statistics, what its statement statistics don't record). Checks ask the engine's [`EngineSpec`] instead of
 //! matching the engine. A new engine is one more file here and one arm in [`Engine::spec`]; advice a single check gives
 //! for one engine (how to fix a spill on PostgreSQL) stays with that check.
+//!
+//! Its words are messages in the language catalogs (`core.engines.*`): what Rust asks for is said in the current
+//! language, and what the app reads (`app/src/gen/engines.json`, [`EngineFacts`]) are message keys, with ids its messages
+//! `select` on where another language's words agree with the engine's (its log, its planning step).
 
 mod mssql;
 mod mysql;
@@ -26,7 +30,9 @@ use ts_rs::TS;
 use crate::dialect::Dialect;
 use crate::error::{Error, ErrorCode};
 use crate::finding::Fix;
+use crate::i18n::{self, Arg};
 use crate::model::{Ability, Engine, EngineAbilities, ServerInfo, SessionAction, wire_name};
+use crate::{key, t};
 
 /// How to apply a server setting: the SQL that does it (`sp_configure`, `ALTER SYSTEM` and a reload, `SET PERSIST`,
 /// `PRAGMA`) and a sentence on where and how. A managed service changes settings in its own control instead; the checks'
@@ -57,7 +63,7 @@ pub trait EngineSpec: Send + Sync {
     /// How a live wait sample is collected. Required so a new engine cannot inherit another engine's description.
     fn wait_sampling(&self) -> Option<WaitSampling>;
     /// Advice for the driver's session settings or reset command, after generic transactions and pings are handled.
-    fn session_advice(&self, _command: &str) -> Option<&'static str> {
+    fn session_advice(&self, _command: &str) -> Option<String> {
         None
     }
     fn mutating_function(&self, _name: &str) -> bool {
@@ -68,10 +74,15 @@ pub trait EngineSpec: Send + Sync {
     fn hide_index(&self, _server: &ServerInfo, _schema: &str, _table: &str, _index: &str) -> Option<String> {
         None
     }
-    fn unused_index_advice(&self, server: &ServerInfo, table_kind: Option<&str>) -> &'static str;
-    fn limitations(&self) -> Vec<String>;
+    fn unused_index_advice(&self, server: &ServerInfo, table_kind: Option<&str>) -> String;
+    /// What a scan of it can't establish, as message keys: the app says them from its facts.
+    fn limitation_keys(&self) -> &'static [&'static str];
+    /// What a scan of it can't establish, in the current language.
+    fn limitations(&self) -> Vec<String> {
+        self.limitation_keys().iter().map(|key| i18n::t(key, &[])).collect()
+    }
     /// Public collection limits, safe to show after private collector details have been removed for sharing.
-    fn deadlock_limitation(&self) -> Option<&'static str> {
+    fn deadlock_limitation(&self) -> Option<String> {
         None
     }
     /// "SQL Server": the engine's name in sentences (a server's product can say more: MariaDB).
@@ -132,11 +143,8 @@ pub trait EngineSpec: Send + Sync {
 
     /// Why it can't do `ability`, said the same by the desktop, the CLI, the MCP server and the browser demo. An engine
     /// overrides the ones it can say better than this.
-    fn refusal(&self, ability: Ability) -> Refusal {
-        Refusal {
-            message: format!("{} can't do this ({})", self.label(), wire_name(&ability).replace('_', " ")),
-            hint: None,
-        }
+    fn refusal(&self, _ability: Ability) -> Refusal {
+        Refusal::cant()
     }
 }
 
@@ -159,18 +167,132 @@ pub enum WaitSampling {
     Counters,
 }
 
-/// Counter semantics shared with the app. Optional facts describe support; a particular scan may still lack data.
+/// What the engine calls finding a statement's plan before running it: SQL Server compiles, the others plan. Messages
+/// `select` on it (`{planning, select, compiling {..} other {..}}`), so another language's words can agree with it.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum PlanningStep {
+    Planning,
+    Compiling,
+}
+
+impl PlanningStep {
+    /// The message key of its label: "Planning", "Compiling".
+    pub fn label_key(self) -> &'static str {
+        match self {
+            PlanningStep::Planning => key!("core.engines.planning.planning"),
+            PlanningStep::Compiling => key!("core.engines.planning.compiling"),
+        }
+    }
+}
+
+/// The log a statement's changes are written to before they reach the data files: PostgreSQL's WAL, the others'
+/// transaction log. Messages `select` on it (`{log, select, wal {..} other {..}}`).
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum WriteLog {
+    Wal,
+    TransactionLog,
+}
+
+impl WriteLog {
+    /// The message key of its name in a sentence: "WAL", "log".
+    pub fn name_key(self) -> &'static str {
+        match self {
+            WriteLog::Wal => key!("core.engines.log.wal"),
+            WriteLog::TransactionLog => key!("core.engines.log.transaction_log"),
+        }
+    }
+
+    /// The message key of the label of what a statement wrote to it: "WAL written", "Log written".
+    pub fn written_key(self) -> &'static str {
+        match self {
+            WriteLog::Wal => key!("core.engines.log_written.wal"),
+            WriteLog::TransactionLog => key!("core.engines.log_written.transaction_log"),
+        }
+    }
+}
+
+/// What a statement's reads are counted in: pages on most engines, rows examined on MySQL and MariaDB (the rows the
+/// storage engine handed to the server). Messages `select` on it.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ReadUnit {
+    Pages,
+    RowsExamined,
+}
+
+impl ReadUnit {
+    /// The message key of a run's reads as a metric's label: "Pages read per run", "Rows examined per run".
+    pub fn per_run_key(self) -> &'static str {
+        match self {
+            ReadUnit::Pages => key!("common.metric.pages_read_per_run"),
+            ReadUnit::RowsExamined => key!("common.metric.rows_examined_per_run"),
+        }
+    }
+}
+
+/// What the row count of a statement that writes means: the rows it touched, the rows it changed, or (where the engine
+/// counts nothing else) the rows it returned.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum WriteRows {
+    Rows,
+    Changed,
+    Returned,
+}
+
+impl WriteRows {
+    /// The message key of a run's rows as a metric's label: "Rows changed per run".
+    pub fn per_run_key(self) -> &'static str {
+        match self {
+            WriteRows::Rows => key!("core.engines.write_rows.rows"),
+            WriteRows::Changed => key!("core.engines.write_rows.changed"),
+            WriteRows::Returned => key!("common.metric.rows_returned_per_run"),
+        }
+    }
+
+    /// The message key of the rows of all its runs as a metric's label: "Rows changed".
+    pub fn total_key(self) -> &'static str {
+        match self {
+            WriteRows::Rows => key!("common.metric.rows"),
+            WriteRows::Changed => key!("core.engines.write_rows.changed_total"),
+            WriteRows::Returned => key!("common.metric.rows_returned"),
+        }
+    }
+}
+
+/// Counter semantics shared with the app. Optional facts describe support; a particular scan may still lack data. Its
+/// words are message keys, said with [`i18n::t`]; a note's `{engine}` is the server's display name, including product
+/// variants such as MariaDB.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct StatementMetrics {
+    pub planning: PlanningStep,
+    /// Message key: what [`StatementMetrics::planning`] is called ("Compiling").
     pub planning_label: Cow<'static, str>,
     pub planning_setting: Option<Cow<'static, str>>,
     pub compilation_history: bool,
+    pub reads: ReadUnit,
+    /// Message key: a run's reads ("Pages read per run").
+    pub reads_label: Cow<'static, str>,
+    /// What a write's row count means; `None` where the engine counts no rows for a write (MySQL).
+    pub write_rows: Option<WriteRows>,
+    /// A run's rows of a write, said in the current language when the facts were asked for ("Rows changed per run"),
+    /// for the checks that put it on a metric. The app has no use for it.
+    #[serde(skip)]
+    #[ts(skip)]
     pub write_rows_label: Option<Cow<'static, str>>,
     pub lock_time: bool,
+    pub log: WriteLog,
+    /// Message key: [`StatementMetrics::log`] in a sentence ("WAL").
     pub log_name: Cow<'static, str>,
+    /// Message key: the label of what a statement wrote to it ("WAL written").
     pub log_label: Cow<'static, str>,
-    /// `{engine}` is replaced by the server's display name, including product variants such as MariaDB.
     pub missing_costs_note: Option<Cow<'static, str>>,
     pub errors_note: Option<Cow<'static, str>>,
     pub runtime_note: Cow<'static, str>,
@@ -179,38 +301,43 @@ pub struct StatementMetrics {
 }
 
 impl StatementMetrics {
-    const BASIC: Self = Self {
-        planning_label: Cow::Borrowed("Planning"),
-        planning_setting: None,
-        compilation_history: false,
-        write_rows_label: Some(Cow::Borrowed("Rows returned per run")),
-        lock_time: false,
-        log_name: Cow::Borrowed("log"),
-        log_label: Cow::Borrowed("Log written"),
-        missing_costs_note: None,
-        errors_note: None,
-        runtime_note: Cow::Borrowed(
-            "The scan includes aggregate run-time statistics rather than individual execution traces.",
-        ),
-        runtime_histogram_note: None,
-        runtime_cache_note: None,
-    };
+    /// The words for an engine's planning step, reads, write rows and log, with the run-time note of an engine whose
+    /// statistics are aggregates; its file says what else it keeps.
+    fn new(planning: PlanningStep, reads: ReadUnit, write_rows: Option<WriteRows>, log: WriteLog) -> Self {
+        Self {
+            planning,
+            planning_label: planning.label_key().into(),
+            planning_setting: None,
+            compilation_history: false,
+            reads,
+            reads_label: reads.per_run_key().into(),
+            write_rows,
+            write_rows_label: write_rows.map(|rows| i18n::t(rows.per_run_key(), &[]).into()),
+            lock_time: false,
+            log,
+            log_name: log.name_key().into(),
+            log_label: log.written_key().into(),
+            missing_costs_note: None,
+            errors_note: None,
+            runtime_note: key!("core.engines.runtime_note").into(),
+            runtime_histogram_note: None,
+            runtime_cache_note: None,
+        }
+    }
 
     /// YSQL and PostgreSQL share these statement statistics, without sharing heap or WAL measurements.
-    const PG_STAT_STATEMENTS: Self = Self {
-        planning_setting: Some(Cow::Borrowed("pg_stat_statements.track_planning")),
-        write_rows_label: Some(Cow::Borrowed("Rows changed per run")),
-        missing_costs_note: Some(Cow::Borrowed(
-            "{engine} keeps no error count or lock time per statement; Live shows blocking as it happens.",
-        )),
-        runtime_note: Cow::Borrowed(
-            "{engine} keeps one fastest, average, slowest and spread per statement: enough to see a long tail, not which values caused it.",
-        ),
-        ..Self::BASIC
-    };
+    fn pg_stat_statements(log: WriteLog) -> Self {
+        Self {
+            planning_setting: Some("pg_stat_statements.track_planning".into()),
+            missing_costs_note: Some(key!("core.engines.pg_stat_statements.missing_costs_note").into()),
+            runtime_note: key!("core.engines.pg_stat_statements.runtime_note").into(),
+            ..Self::new(PlanningStep::Planning, ReadUnit::Pages, Some(WriteRows::Changed), log)
+        }
+    }
 }
 
-/// Why an engine can't do something: the message and, when there's one, what to do instead.
+/// Why an engine can't do something: the message and, when there's one, what to do instead, as message keys. Each is
+/// said with the engine's label as `{engine}` and the ability's id as `{ability}` ([`Engine::refused`]).
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct Refusal {
@@ -219,8 +346,13 @@ pub struct Refusal {
 }
 
 impl Refusal {
-    fn new(message: &str, hint: Option<&str>) -> Refusal {
+    fn new(message: &'static str, hint: Option<&'static str>) -> Refusal {
         Refusal { message: message.into(), hint: hint.map(str::to_string) }
+    }
+
+    /// "PostgreSQL can't do this (last actual plan)": for an ability an engine has nothing better to say about.
+    fn cant() -> Refusal {
+        Refusal::new(key!("core.engines.refusal.cant"), None)
     }
 }
 
@@ -234,12 +366,12 @@ pub struct Connect {
     pub file: bool,
     /// What to paste, or the path to type, as an example.
     pub example: String,
-    /// What Culprit reads, in a sentence.
+    /// Message key: what Culprit reads, in a sentence.
     pub accepts: String,
 }
 
 impl Connect {
-    fn server(choice: &str, example: &str, accepts: &str) -> Connect {
+    fn server(choice: &str, example: &str, accepts: &'static str) -> Connect {
         Connect { choice: choice.into(), file: false, example: example.into(), accepts: accepts.into() }
     }
 }
@@ -254,6 +386,7 @@ pub struct EngineFacts {
     pub session_actions: Vec<SessionAction>,
     pub waiting_state: String,
     pub connect: Connect,
+    /// Message keys: what a scan of it can't establish.
     pub limitations: Vec<String>,
     /// The reason for every ability it lacks, by ability.
     pub refusals: BTreeMap<String, Refusal>,
@@ -293,12 +426,14 @@ impl Engine {
         self.spec().dialect()
     }
 
-    /// The error a surface returns when asked for something the engine can't do.
+    /// The error a surface returns when asked for something the engine can't do, in the current language.
     pub fn refused(self, ability: Ability) -> Error {
         let r = self.spec().refusal(ability);
-        let error = Error::new(ErrorCode::Unsupported, r.message);
+        let id = wire_name(&ability);
+        let args = [("engine", Arg::from(self.label())), ("ability", Arg::from(id.as_str()))];
+        let error = Error::new(ErrorCode::Unsupported, i18n::t(&r.message, &args));
         match r.hint {
-            Some(hint) => error.with_hint(hint),
+            Some(hint) => error.with_hint(i18n::t(&hint, &args)),
             None => error,
         }
     }
@@ -317,7 +452,7 @@ impl Engine {
             session_actions: spec.session_actions(),
             waiting_state: spec.waiting_state().into(),
             connect: spec.connect(),
-            limitations: spec.limitations(),
+            limitations: spec.limitation_keys().iter().map(|key| key.to_string()).collect(),
             refusals: Ability::ALL
                 .into_iter()
                 .filter(|a| !abilities.has(*a))

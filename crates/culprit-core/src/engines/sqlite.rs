@@ -8,22 +8,22 @@ pub(super) struct Sqlite;
 
 impl EngineSpec for Sqlite {
     fn products(&self) -> &'static [ProductSpec] {
-        const PRODUCTS: &[ProductSpec] = &[ProductSpec::primary(
-            DatabaseProduct::Sqlite,
-            "SQLite",
-            "EXPLAIN QUERY PLAN, as the sqlite3 shell prints it",
-        )];
+        const PRODUCTS: &[ProductSpec] =
+            &[ProductSpec::primary(DatabaseProduct::Sqlite, "SQLite", key!("core.engines.sqlite.plan_format"))];
         PRODUCTS
     }
-    fn unused_index_advice(&self, _server: &ServerInfo, _table_kind: Option<&str>) -> &'static str {
-        "Drop it: SQLite can't hide an index first, so keep its CREATE INDEX statement to put it back if a query slows down."
+    fn unused_index_advice(&self, _server: &ServerInfo, _table_kind: Option<&str>) -> String {
+        t!("core.engines.sqlite.unused_index")
     }
     fn statement_metrics(&self) -> StatementMetrics {
         StatementMetrics {
-            runtime_note:
-                "SQLite keeps no run times; these come from the query log Culprit read, one entry per logged run."
-                    .into(),
-            ..StatementMetrics::BASIC
+            runtime_note: key!("core.engines.sqlite.runtime_note").into(),
+            ..StatementMetrics::new(
+                PlanningStep::Planning,
+                ReadUnit::Pages,
+                Some(WriteRows::Returned),
+                WriteLog::TransactionLog,
+            )
         }
     }
     fn wait_sampling(&self) -> Option<WaitSampling> {
@@ -35,13 +35,13 @@ impl EngineSpec for Sqlite {
     fn inactive_index_state(&self, _server: &ServerInfo) -> crate::IndexState {
         crate::IndexState::Active
     }
-    fn limitations(&self) -> Vec<String> {
-        vec![
-        "SQLite file inspection cannot see the application's connections, transaction owners, foreign_keys, busy_timeout or synchronous settings. Configure and inspect those on the application's own connections.".into(),
-        "Plans are obtained with Culprit's SQLite library, which may differ from the application's version, modules or build options. Logged placeholders are planned with NULL values, so value-dependent access paths may differ.".into(),
-        "EXPLAIN QUERY PLAN records access paths, not estimated or measured rows, costs or timing. Query durations and errors require a supported application log; request traces need request identifiers in that telemetry.".into(),
-        "A WAL file can retain allocated space after checkpointing. Its size or growth alone does not establish checkpoint starvation or identify a reader holding a snapshot.".into(),
-    ]
+    fn limitation_keys(&self) -> &'static [&'static str] {
+        &[
+            key!("core.engines.sqlite.limitation.connections"),
+            key!("core.engines.sqlite.limitation.library"),
+            key!("core.engines.sqlite.limitation.access_paths"),
+            key!("core.engines.sqlite.limitation.wal"),
+        ]
     }
 
     fn connect(&self) -> Connect {
@@ -49,7 +49,7 @@ impl EngineSpec for Sqlite {
             choice: "SQLite".into(),
             file: true,
             example: "~/code/shop/db/production.sqlite3".into(),
-            accepts: "The database file. Culprit opens it read-only and needs nothing from your app.".into(),
+            accepts: key!("core.engines.sqlite.accepts").into(),
         }
     }
 
@@ -69,40 +69,32 @@ impl EngineSpec for Sqlite {
     }
 
     fn refusal(&self, ability: Ability) -> Refusal {
-        let busy = "A writer that has to wait gets SQLITE_BUSY in the application: its logs say when.";
         match ability {
-            Ability::Sessions | Ability::OperatorProgress => {
-                Refusal::new("SQLite has no server, so no sessions to show", Some(busy))
-            }
+            Ability::Sessions | Ability::OperatorProgress => Refusal::new(
+                key!("core.engines.sqlite.refusal.sessions"),
+                Some(key!("core.engines.sqlite.refusal.sessions_hint")),
+            ),
             Ability::Deadlocks => Refusal::new(
-                "SQLite records no deadlocks: one writer at a time holds the file",
-                Some(
-                    "A transaction that can't get the write lock waits busy_timeout, then gets SQLITE_BUSY in the application: its logs say when.",
-                ),
+                key!("core.engines.sqlite.refusal.deadlocks"),
+                Some(key!("core.engines.sqlite.refusal.deadlocks_hint")),
             ),
             Ability::WaitSample => Refusal::new(
-                "SQLite has no server, so nothing records what it waits on",
-                Some(
-                    "Time spent waiting for the write lock shows up in the application as SQLITE_BUSY or slow commits.",
-                ),
+                key!("core.engines.sqlite.refusal.wait_sample"),
+                Some(key!("core.engines.sqlite.refusal.wait_sample_hint")),
             ),
             Ability::MeasuresRuns | Ability::LastActualPlan | Ability::PlanEstimates => Refusal::new(
-                "SQLite's plans have no actual rows or timings: EXPLAIN QUERY PLAN shows the access path only",
-                Some("Use the estimated plan; time the statement in the application to see how long it takes."),
+                key!("core.engines.sqlite.refusal.plans"),
+                Some(key!("core.engines.sqlite.refusal.plans_hint")),
             ),
             Ability::Writes => Refusal::new(
-                "Culprit opens SQLite files read-only, so it never changes one",
-                Some("Run it with the sqlite3 shell or from the application, then scan again to see the effect."),
+                key!("core.engines.sqlite.refusal.writes"),
+                Some(key!("core.engines.sqlite.refusal.writes_hint")),
             ),
             Ability::Periods => Refusal::new(
-                "SQLite keeps no statement history to compare two periods of",
-                Some(
-                    "Add the log your framework writes to the connection, scan before and after the change, and compare the two reports' queries.",
-                ),
+                key!("core.engines.sqlite.refusal.periods"),
+                Some(key!("core.engines.sqlite.refusal.periods_hint")),
             ),
-            Ability::SignIn => {
-                Refusal::new("A SQLite file takes no sign-in: Culprit opens it read-only from disk", None)
-            }
+            Ability::SignIn => Refusal::new(key!("core.engines.sqlite.refusal.sign_in"), None),
         }
     }
 
@@ -114,34 +106,28 @@ impl EngineSpec for Sqlite {
     // cache_size) has to be set by the application each time it opens the file.
     fn change_setting(&self, _server: &ServerInfo, name: &str, value: &str) -> SettingChange {
         SettingChange {
-            how: format!(
-                "Set {name} to {value} with PRAGMA. If it is a per-connection pragma, the application has to set it each time it opens the file."
-            ),
+            how: t!("core.engines.sqlite.change_setting", name = name, value = value),
             sql: Some(format!("PRAGMA {name} = {value};")),
         }
     }
 
     fn refresh_statistics(&self, target: &str) -> Fix {
         Fix {
-            summary: "Run ANALYZE, so the planner knows each table's size and how selective each index is.".into(),
+            summary: t!("core.engines.sqlite.refresh_statistics.summary"),
             sql: Some(self.dialect().refresh_statistics(target)),
-            cost: Some("ANALYZE reads the indexes and briefly takes the write lock to store what it found.".into()),
+            cost: Some(t!("core.engines.sqlite.refresh_statistics.cost")),
         }
     }
 
     fn wait_not_per_statement(&self, _server: &ServerInfo, _category: &str) -> String {
-        "SQLite keeps no waits.".into()
+        t!("core.engines.sqlite.wait_not_per_statement")
     }
 
     fn index_advice_sources(&self, _server: &ServerInfo, has_workload: bool) -> Option<String> {
         Some(if has_workload {
-            "SQLite doesn't record missing-index requests. Candidates come from the indexes it builds for itself on \
-             every run of the logged statements, and foreign keys."
-                .into()
+            t!("core.engines.sqlite.index_advice_sources.logged")
         } else {
-            "SQLite keeps no history of the statements it ran, so candidates come from foreign keys only. With the \
-             application's query log on the connection, the indexes SQLite builds for itself on every run join them."
-                .into()
+            t!("core.engines.sqlite.index_advice_sources.no_history")
         })
     }
 }

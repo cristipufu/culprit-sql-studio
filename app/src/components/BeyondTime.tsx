@@ -79,16 +79,16 @@ function costRows(report: Report, q: QueryStat): Row[] {
     const plans = Math.max(1, c.plans ?? 1);
     rows.push({
       key: "planning",
-      label: metrics.planning_label,
+      label: t(metrics.planning_label),
       value: t("ui.beyond_time.of_its_time", { share: percent(share) }),
       note: plans >= runs * 0.9 ? t("ui.beyond_time.plan_every_run", { duration: duration(c.plan_ms / plans) }) : t("ui.beyond_time.plan_reused", { duration: duration(c.plan_ms / plans), times: count(runs / plans) }),
       status: "info",
-      takeaway: t("ui.beyond_time.takeaway.planning", { label: metrics.planning_label, share: percent(share) }),
+      takeaway: t("ui.beyond_time.takeaway.planning", { planning: metrics.planning, share: percent(share) }),
     });
   } else if (metrics.planning_setting) {
     const tracking = report.snapshot.settings.find((s) => s.name === metrics.planning_setting);
     if (tracking && tracking.value !== "on")
-      rows.push({ key: "planning", label: metrics.planning_label, value: t("ui.beyond_time.not_measured"), note: t("ui.beyond_time.setting_off", { setting: metrics.planning_setting }), status: "info" });
+      rows.push({ key: "planning", label: t(metrics.planning_label), value: t("ui.beyond_time.not_measured"), note: t("ui.beyond_time.setting_off", { setting: metrics.planning_setting }), status: "info" });
   }
 
   if (metrics.compilation_history && c?.plan_ms == null) {
@@ -128,11 +128,12 @@ function costRows(report: Report, q: QueryStat): Row[] {
 
   const writes = ["insert", "update", "delete", "merge", "copy", "replace"].includes(verb(q.text));
   if (c?.log_bytes != null && (writes || c.log_bytes / runs >= 65_536)) {
-    const log = metrics.log_name;
+    // Which log the engine writes, for its messages to say it in the reader's words (`{log, select, wal {..} other {..}}`).
+    const log = metrics.log;
     const perRow = q.rows != null && q.rows >= 1 ? c.log_bytes / q.rows : null;
     rows.push({
       key: "log",
-      label: metrics.log_label,
+      label: t(metrics.log_label),
       value: t("ui.beyond_time.per_run", { amount: bytes(c.log_bytes / runs) }),
       note: [c.log_share != null ? t("ui.beyond_time.of_all_log", { share: percent(c.log_share), log }) : null, perRow != null ? t("ui.beyond_time.per_row", { size: bytes(perRow) }) : null].filter(Boolean).join(" · ") || "",
       status: "info",
@@ -163,7 +164,7 @@ function costRows(report: Report, q: QueryStat): Row[] {
 function notKept(report: Report, q: QueryStat): string | null {
   const metrics = statementMetrics(report.snapshot.server.engine);
   const note = metrics.missing_costs_note ?? ((q.costs?.failed ?? 0) > 0 ? metrics.errors_note : null);
-  return note?.replaceAll("{engine}", engineName(report)) ?? null;
+  return note ? t(note, { engine: engineName(report) }) : null;
 }
 
 /** The query detail's "beyond run time" block: one sentence, then one row per signal the engine keeps. */

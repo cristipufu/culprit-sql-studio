@@ -20,7 +20,7 @@ pub enum DatabaseProduct {
 pub struct ProductSpec {
     pub id: DatabaseProduct,
     pub label: &'static str,
-    /// The native plan formats a person can open without a connection.
+    /// Message key: the native plan formats a person can open without a connection.
     pub plan_format: &'static str,
     /// `None` identifies the provider's default product; named variants match their recorded product prefix.
     pub prefix: Option<&'static str>,
@@ -56,6 +56,7 @@ impl ProductSpec {
 pub struct ProductFacts {
     pub id: DatabaseProduct,
     pub label: String,
+    /// Message key: the native plan formats a person can open without a connection.
     pub plan_format: String,
     pub prefix: Option<String>,
 }

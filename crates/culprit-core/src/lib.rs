@@ -68,7 +68,8 @@ pub use digest::{
 };
 pub use drift::{Drift, DriftItem, DriftKind, DriftPresence, DriftSide, server_label};
 pub use engines::{
-    DatabaseProduct, EngineSpec, ProductFacts, ProductSpec, SettingChange, SqlSyntax, ysql_session_target,
+    DatabaseProduct, EngineSpec, PlanningStep, ProductFacts, ProductSpec, ReadUnit, SettingChange, SqlSyntax, WriteLog,
+    WriteRows, ysql_session_target,
 };
 pub use error::{Error, ErrorCode, Result};
 pub use events::{ChangeEvent, EventAction, EventKind, EventLink, EventSource};

@@ -17,6 +17,6 @@ file: boolean,
  */
 example: string, 
 /**
- * What Culprit reads, in a sentence.
+ * Message key: what Culprit reads, in a sentence.
  */
 accepts: string, };

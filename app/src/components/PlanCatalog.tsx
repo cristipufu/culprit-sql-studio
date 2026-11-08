@@ -11,7 +11,7 @@ export function PlanCatalog({ onSample }: { onSample: (product: DatabaseProduct)
         {PRODUCTS.map((product) => (
           <div className="format-row" key={product.id} data-product={product.id}>
             <b><EngineBadge engine={product.engine} product={product.prefix} />{product.label}</b>
-            <span className="muted">{product.plan_format}</span>
+            <span className="muted">{t(product.plan_format)}</span>
           </div>
         ))}
       </div>

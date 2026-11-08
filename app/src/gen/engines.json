@@ -5,7 +5,7 @@
       {
         "id": "mssql",
         "label": "SQL Server",
-        "plan_format": ".sqlplan or showplan XML (SSMS, Query Store)",
+        "plan_format": "core.engines.mssql.plan_format",
         "prefix": null
       }
     ],
@@ -29,28 +29,32 @@
       "choice": "SQL Server",
       "file": false,
       "example": "Server=tcp:shop.database.windows.net;Database=shop;User ID=app",
-      "accepts": "An ADO.NET connection string, an mssql:// or JDBC URL, or host,port/database. Azure SQL without a user name signs in with your az login (Entra ID)."
+      "accepts": "core.engines.mssql.accepts"
     },
     "limitations": [
-      "Query Store records aggregate executions and plan history, not an application's request trace or every parameter value. Caller identity and transaction boundaries need application telemetry.",
-      "An estimated or stored compilation plan does not measure the rows, timing or waits of the run you are investigating. Runtime-only problems require recorded runtime evidence or an explicitly measured run.",
-      "Host CPU and filesystem capacity need their own measurements, such as connected cloud telemetry. Backup recoverability and database corruption are not checked by the statistics scan; they need backup/recovery validation and an appropriate integrity investigation."
+      "core.engines.mssql.limitation.query_store",
+      "core.engines.mssql.limitation.estimated_plan",
+      "core.engines.mssql.limitation.host"
     ],
     "refusals": {},
     "sql_syntax": "mssql",
     "statement_metrics": {
-      "planning_label": "Compiling",
+      "planning": "compiling",
+      "planning_label": "core.engines.planning.compiling",
       "planning_setting": null,
       "compilation_history": true,
-      "write_rows_label": "Rows per run",
+      "reads": "pages",
+      "reads_label": "common.metric.pages_read_per_run",
+      "write_rows": "rows",
       "lock_time": true,
-      "log_name": "log",
-      "log_label": "Log written",
+      "log": "transaction_log",
+      "log_name": "core.engines.log.transaction_log",
+      "log_label": "core.engines.log_written.transaction_log",
       "missing_costs_note": null,
-      "errors_note": "Query Store counts errors but doesn't keep them; the finding shows how to capture them.",
-      "runtime_note": "Query Store keeps the fastest and slowest run and the spread of every plan, and each plan's compiled parameter values.",
+      "errors_note": "core.engines.mssql.errors_note",
+      "runtime_note": "core.engines.mssql.runtime_note",
       "runtime_histogram_note": null,
-      "runtime_cache_note": "The plan cache keeps the fastest and slowest run of each cached plan since it was cached, not their spread: Query Store would add it."
+      "runtime_cache_note": "core.engines.mssql.runtime_cache_note"
     },
     "wait_sampling": "counters"
   },
@@ -60,13 +64,13 @@
       {
         "id": "postgres",
         "label": "PostgreSQL",
-        "plan_format": "EXPLAIN or EXPLAIN ANALYZE, as text or FORMAT JSON",
+        "plan_format": "core.engines.postgres.plan_format",
         "prefix": null
       },
       {
         "id": "timescale",
         "label": "TimescaleDB",
-        "plan_format": "PostgreSQL EXPLAIN, including hypertable and chunk operators",
+        "plan_format": "core.engines.postgres.timescale_plan_format",
         "prefix": "TimescaleDB"
       }
     ],
@@ -91,35 +95,39 @@
       "choice": "PostgreSQL",
       "file": false,
       "example": "postgres://app@db.example.com:5432/shop",
-      "accepts": "A postgres:// or JDBC URL, libpq's key=value pairs, an Npgsql connection string, or host:port/database."
+      "accepts": "core.engines.postgres.accepts"
     },
     "limitations": [
-      "pg_stat_statements keeps aggregate totals, not per-request traces, historical parameter values or the plan used by each execution. Culprit's scans provide comparisons only over their recorded intervals.",
-      "A newly obtained generic plan uses this connection's role, settings and search path; it may differ from the application's custom plan. Actual rows, spills and timing require a measured plan.",
-      "Deadlock graphs, statement errors and auto_explain output live in server logs. SQL counters alone cannot reconstruct them; import the relevant logs or correlate application telemetry."
+      "core.engines.postgres.limitation.pg_stat_statements",
+      "core.engines.postgres.limitation.generic_plan",
+      "core.engines.postgres.limitation.logs"
     ],
     "refusals": {
       "last_actual_plan": {
-        "message": "PostgreSQL doesn't keep the actual plan of past runs",
-        "hint": "auto_explain can write them to the server log, which Culprit can't read over SQL. Open the query in the editor with real values and use Analyze: it runs inside a transaction that is rolled back."
+        "message": "core.engines.postgres.refusal.last_actual_plan",
+        "hint": "core.engines.postgres.refusal.last_actual_plan_hint"
       },
       "operator_progress": {
-        "message": "PostgreSQL reports a running statement's progress, not each step's",
-        "hint": "Its plan doesn't change while it runs: ask for the plan once."
+        "message": "core.engines.postgres.refusal.operator_progress",
+        "hint": "core.engines.refusal.operator_progress_hint"
       }
     },
     "sql_syntax": "postgres",
     "statement_metrics": {
-      "planning_label": "Planning",
+      "planning": "planning",
+      "planning_label": "core.engines.planning.planning",
       "planning_setting": "pg_stat_statements.track_planning",
       "compilation_history": false,
-      "write_rows_label": "Rows changed per run",
+      "reads": "pages",
+      "reads_label": "common.metric.pages_read_per_run",
+      "write_rows": "changed",
       "lock_time": false,
-      "log_name": "WAL",
-      "log_label": "WAL written",
-      "missing_costs_note": "{engine} keeps no error count or lock time per statement; Live shows blocking as it happens.",
+      "log": "wal",
+      "log_name": "core.engines.log.wal",
+      "log_label": "core.engines.log_written.wal",
+      "missing_costs_note": "core.engines.pg_stat_statements.missing_costs_note",
       "errors_note": null,
-      "runtime_note": "{engine} keeps one fastest, average, slowest and spread per statement: enough to see a long tail, not which values caused it.",
+      "runtime_note": "core.engines.pg_stat_statements.runtime_note",
       "runtime_histogram_note": null,
       "runtime_cache_note": null
     },
@@ -131,7 +139,7 @@
       {
         "id": "yugabyte",
         "label": "YugabyteDB",
-        "plan_format": "EXPLAIN (ANALYZE, DIST, FORMAT JSON), including DocDB storage metrics",
+        "plan_format": "core.engines.yugabyte.plan_format",
         "prefix": null
       }
     ],
@@ -156,40 +164,44 @@
       "choice": "YugabyteDB",
       "file": false,
       "example": "yugabyte://yugabyte@db.example.com:5433/yugabyte",
-      "accepts": "A YSQL postgres:// or yugabyte:// URL, libpq parameters, or host:port/database."
+      "accepts": "core.engines.yugabyte.accepts"
     },
     "limitations": [
-      "YSQL uses DocDB/RocksDB over Raft. PostgreSQL heap pages, buffer-cache ratios, dead tuples, vacuum and XID ages are not storage measurements here.",
-      "Local statistics cover the connected YB-TServer. Configured cluster views add other nodes; skipped nodes and independent counter resets prevent complete comparisons.",
-      "Captured generic plans use this login's current role and settings. Actual DocDB RPCs and rows scanned require EXPLAIN ANALYZE with DIST.",
-      "An index's sharding keys affect distributed reads and write hotspots. Suggested ordered keys use explicit ASC/DESC; review partitioning before deployment."
+      "core.engines.yugabyte.limitation.storage",
+      "core.engines.yugabyte.limitation.nodes",
+      "core.engines.yugabyte.limitation.generic_plans",
+      "core.engines.yugabyte.limitation.sharding"
     ],
     "refusals": {
       "deadlocks": {
-        "message": "DocDB's distributed deadlock detection is not PostgreSQL's heap lock accounting. A PostgreSQL deadlock counter does not establish this database's distributed deadlocks.",
-        "hint": "Correlate YSQL errors and the YB-TServer logs for the affected transaction."
+        "message": "core.engines.yugabyte.deadlocks",
+        "hint": "core.engines.yugabyte.refusal.deadlocks_hint"
       },
       "last_actual_plan": {
-        "message": "YSQL statement totals do not retain the measured plan of every past execution",
-        "hint": "Analyze a representative statement to capture its actual DocDB work."
+        "message": "core.engines.yugabyte.refusal.last_actual_plan",
+        "hint": "core.engines.yugabyte.refusal.last_actual_plan_hint"
       },
       "operator_progress": {
-        "message": "YSQL does not expose live row counters for every plan operator",
-        "hint": "Use a measured plan and native statement/operation progress."
+        "message": "core.engines.yugabyte.refusal.operator_progress",
+        "hint": "core.engines.yugabyte.refusal.operator_progress_hint"
       }
     },
     "sql_syntax": "postgres",
     "statement_metrics": {
-      "planning_label": "Planning",
+      "planning": "planning",
+      "planning_label": "core.engines.planning.planning",
       "planning_setting": "pg_stat_statements.track_planning",
       "compilation_history": false,
-      "write_rows_label": "Rows changed per run",
+      "reads": "pages",
+      "reads_label": "common.metric.pages_read_per_run",
+      "write_rows": "changed",
       "lock_time": false,
-      "log_name": "log",
-      "log_label": "Log written",
-      "missing_costs_note": "{engine} keeps no error count or lock time per statement; Live shows blocking as it happens.",
+      "log": "transaction_log",
+      "log_name": "core.engines.log.transaction_log",
+      "log_label": "core.engines.log_written.transaction_log",
+      "missing_costs_note": "core.engines.pg_stat_statements.missing_costs_note",
       "errors_note": null,
-      "runtime_note": "YSQL keeps aggregate run-time statistics in the recorded node or cluster scope. Their spread does not identify which parameter values, tablets, RPCs or retries caused slow runs.",
+      "runtime_note": "core.engines.yugabyte.runtime_note",
       "runtime_histogram_note": null,
       "runtime_cache_note": null
     },
@@ -201,13 +213,13 @@
       {
         "id": "mysql",
         "label": "MySQL",
-        "plan_format": "EXPLAIN FORMAT=JSON, EXPLAIN ANALYZE or FORMAT=TREE",
+        "plan_format": "core.engines.mysql.plan_format",
         "prefix": null
       },
       {
         "id": "mariadb",
         "label": "MariaDB",
-        "plan_format": "EXPLAIN FORMAT=JSON or ANALYZE FORMAT=JSON",
+        "plan_format": "core.engines.mysql.mariadb_plan_format",
         "prefix": "MariaDB"
       }
     ],
@@ -232,36 +244,40 @@
       "choice": "MySQL / MariaDB",
       "file": false,
       "example": "mysql://app@db.example.com:3306/shop",
-      "accepts": "A mysql://, mariadb:// or JDBC URL, a .NET connection string (Server=…;Uid=…), or host:port/database."
+      "accepts": "core.engines.mysql.accepts"
     },
     "limitations": [
-      "Statement digests keep aggregate totals, not an application's request trace, transaction boundaries or the plan of every historical execution. Culprit compares only intervals its scans or the slow log record.",
-      "InnoDB status keeps only the latest deadlock. A complete incident history requires the error log; an empty or old latest report does not prove that no other deadlocks happened.",
-      "MySQL and MariaDB differ in plan details, instrumentation and syntax. Runtime measurements, metadata-lock visibility and replication diagnostics depend on the product, version and permissions."
+      "core.engines.mysql.limitation.digests",
+      "core.engines.mysql.limitation.innodb_status",
+      "core.engines.mysql.limitation.products"
     ],
     "refusals": {
       "last_actual_plan": {
-        "message": "MySQL and MariaDB don't keep the actual plan of past runs",
-        "hint": "Measure it instead: Analyze runs the statement's recorded text once inside a read-only transaction."
+        "message": "core.engines.mysql.refusal.last_actual_plan",
+        "hint": "core.engines.mysql.refusal.last_actual_plan_hint"
       },
       "operator_progress": {
-        "message": "MySQL reports a running statement's progress, not each step's",
-        "hint": "Its plan doesn't change while it runs: ask for the plan once."
+        "message": "core.engines.mysql.refusal.operator_progress",
+        "hint": "core.engines.refusal.operator_progress_hint"
       }
     },
     "sql_syntax": "mysql",
     "statement_metrics": {
-      "planning_label": "Planning",
+      "planning": "planning",
+      "planning_label": "core.engines.planning.planning",
       "planning_setting": null,
       "compilation_history": false,
-      "write_rows_label": null,
+      "reads": "rows_examined",
+      "reads_label": "common.metric.rows_examined_per_run",
+      "write_rows": null,
       "lock_time": true,
-      "log_name": "log",
-      "log_label": "Log written",
-      "missing_costs_note": "{engine} keeps no planning time or redo bytes per statement.",
+      "log": "transaction_log",
+      "log_name": "core.engines.log.transaction_log",
+      "log_label": "core.engines.log_written.transaction_log",
+      "missing_costs_note": "core.engines.mysql.missing_costs_note",
       "errors_note": null,
-      "runtime_note": "This {engine} scan includes no run-time histogram; the lane shows fastest, average and slowest. Histogram availability depends on the product, server version and collection permissions; the slow query log can add individual logged runs.",
-      "runtime_histogram_note": "{engine} keeps a run-time histogram per statement, so the bars show how many runs took how long.",
+      "runtime_note": "core.engines.mysql.runtime_note",
+      "runtime_histogram_note": "core.engines.mysql.runtime_histogram_note",
       "runtime_cache_note": null
     },
     "wait_sampling": "counters"
@@ -272,7 +288,7 @@
       {
         "id": "sqlite",
         "label": "SQLite",
-        "plan_format": "EXPLAIN QUERY PLAN, as the sqlite3 shell prints it",
+        "plan_format": "core.engines.sqlite.plan_format",
         "prefix": null
       }
     ],
@@ -294,68 +310,72 @@
       "choice": "SQLite",
       "file": true,
       "example": "~/code/shop/db/production.sqlite3",
-      "accepts": "The database file. Culprit opens it read-only and needs nothing from your app."
+      "accepts": "core.engines.sqlite.accepts"
     },
     "limitations": [
-      "SQLite file inspection cannot see the application's connections, transaction owners, foreign_keys, busy_timeout or synchronous settings. Configure and inspect those on the application's own connections.",
-      "Plans are obtained with Culprit's SQLite library, which may differ from the application's version, modules or build options. Logged placeholders are planned with NULL values, so value-dependent access paths may differ.",
-      "EXPLAIN QUERY PLAN records access paths, not estimated or measured rows, costs or timing. Query durations and errors require a supported application log; request traces need request identifiers in that telemetry.",
-      "A WAL file can retain allocated space after checkpointing. Its size or growth alone does not establish checkpoint starvation or identify a reader holding a snapshot."
+      "core.engines.sqlite.limitation.connections",
+      "core.engines.sqlite.limitation.library",
+      "core.engines.sqlite.limitation.access_paths",
+      "core.engines.sqlite.limitation.wal"
     ],
     "refusals": {
       "deadlocks": {
-        "message": "SQLite records no deadlocks: one writer at a time holds the file",
-        "hint": "A transaction that can't get the write lock waits busy_timeout, then gets SQLITE_BUSY in the application: its logs say when."
+        "message": "core.engines.sqlite.refusal.deadlocks",
+        "hint": "core.engines.sqlite.refusal.deadlocks_hint"
       },
       "last_actual_plan": {
-        "message": "SQLite's plans have no actual rows or timings: EXPLAIN QUERY PLAN shows the access path only",
-        "hint": "Use the estimated plan; time the statement in the application to see how long it takes."
+        "message": "core.engines.sqlite.refusal.plans",
+        "hint": "core.engines.sqlite.refusal.plans_hint"
       },
       "measures_runs": {
-        "message": "SQLite's plans have no actual rows or timings: EXPLAIN QUERY PLAN shows the access path only",
-        "hint": "Use the estimated plan; time the statement in the application to see how long it takes."
+        "message": "core.engines.sqlite.refusal.plans",
+        "hint": "core.engines.sqlite.refusal.plans_hint"
       },
       "operator_progress": {
-        "message": "SQLite has no server, so no sessions to show",
-        "hint": "A writer that has to wait gets SQLITE_BUSY in the application: its logs say when."
+        "message": "core.engines.sqlite.refusal.sessions",
+        "hint": "core.engines.sqlite.refusal.sessions_hint"
       },
       "periods": {
-        "message": "SQLite keeps no statement history to compare two periods of",
-        "hint": "Add the log your framework writes to the connection, scan before and after the change, and compare the two reports' queries."
+        "message": "core.engines.sqlite.refusal.periods",
+        "hint": "core.engines.sqlite.refusal.periods_hint"
       },
       "plan_estimates": {
-        "message": "SQLite's plans have no actual rows or timings: EXPLAIN QUERY PLAN shows the access path only",
-        "hint": "Use the estimated plan; time the statement in the application to see how long it takes."
+        "message": "core.engines.sqlite.refusal.plans",
+        "hint": "core.engines.sqlite.refusal.plans_hint"
       },
       "sessions": {
-        "message": "SQLite has no server, so no sessions to show",
-        "hint": "A writer that has to wait gets SQLITE_BUSY in the application: its logs say when."
+        "message": "core.engines.sqlite.refusal.sessions",
+        "hint": "core.engines.sqlite.refusal.sessions_hint"
       },
       "sign_in": {
-        "message": "A SQLite file takes no sign-in: Culprit opens it read-only from disk",
+        "message": "core.engines.sqlite.refusal.sign_in",
         "hint": null
       },
       "wait_sample": {
-        "message": "SQLite has no server, so nothing records what it waits on",
-        "hint": "Time spent waiting for the write lock shows up in the application as SQLITE_BUSY or slow commits."
+        "message": "core.engines.sqlite.refusal.wait_sample",
+        "hint": "core.engines.sqlite.refusal.wait_sample_hint"
       },
       "writes": {
-        "message": "Culprit opens SQLite files read-only, so it never changes one",
-        "hint": "Run it with the sqlite3 shell or from the application, then scan again to see the effect."
+        "message": "core.engines.sqlite.refusal.writes",
+        "hint": "core.engines.sqlite.refusal.writes_hint"
       }
     },
     "sql_syntax": "sqlite",
     "statement_metrics": {
-      "planning_label": "Planning",
+      "planning": "planning",
+      "planning_label": "core.engines.planning.planning",
       "planning_setting": null,
       "compilation_history": false,
-      "write_rows_label": "Rows returned per run",
+      "reads": "pages",
+      "reads_label": "common.metric.pages_read_per_run",
+      "write_rows": "returned",
       "lock_time": false,
-      "log_name": "log",
-      "log_label": "Log written",
+      "log": "transaction_log",
+      "log_name": "core.engines.log.transaction_log",
+      "log_label": "core.engines.log_written.transaction_log",
       "missing_costs_note": null,
       "errors_note": null,
-      "runtime_note": "SQLite keeps no run times; these come from the query log Culprit read, one entry per logged run.",
+      "runtime_note": "core.engines.sqlite.runtime_note",
       "runtime_histogram_note": null,
       "runtime_cache_note": null
     },

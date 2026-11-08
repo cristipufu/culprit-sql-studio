@@ -11,7 +11,11 @@ import type { WaitSampling } from "./WaitSampling";
 /**
  * Everything the app needs to know about an engine without a connection: written to `app/src/gen/engines.json`.
  */
-export type EngineFacts = { label: string, products: Array<ProductFacts>, abilities: EngineAbilities, session_actions: Array<SessionAction>, waiting_state: string, connect: Connect, limitations: Array<string>, 
+export type EngineFacts = { label: string, products: Array<ProductFacts>, abilities: EngineAbilities, session_actions: Array<SessionAction>, waiting_state: string, connect: Connect, 
+/**
+ * Message keys: what a scan of it can't establish.
+ */
+limitations: Array<string>, 
 /**
  * The reason for every ability it lacks, by ability.
  */

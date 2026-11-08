@@ -23,31 +23,27 @@ fn index_hiding(server: &ServerInfo) -> Option<&'static str> {
 impl EngineSpec for Mysql {
     fn products(&self) -> &'static [ProductSpec] {
         const PRODUCTS: &[ProductSpec] = &[
-            ProductSpec::primary(
-                DatabaseProduct::Mysql,
-                "MySQL",
-                "EXPLAIN FORMAT=JSON, EXPLAIN ANALYZE or FORMAT=TREE",
-            ),
+            ProductSpec::primary(DatabaseProduct::Mysql, "MySQL", key!("core.engines.mysql.plan_format")),
             ProductSpec::variant(
                 DatabaseProduct::Mariadb,
                 "MariaDB",
                 "MariaDB",
-                "EXPLAIN FORMAT=JSON or ANALYZE FORMAT=JSON",
+                key!("core.engines.mysql.mariadb_plan_format"),
             ),
         ];
         PRODUCTS
     }
-    fn unused_index_advice(&self, server: &ServerInfo, _table_kind: Option<&str>) -> &'static str {
+    fn unused_index_advice(&self, server: &ServerInfo, _table_kind: Option<&str>) -> String {
         if version_pair(server).is_none() {
-            "Save its definition before dropping it. Index-hiding support is not established for this server version."
+            t!("core.engines.mysql.unused_index.unknown_version")
         } else if index_hiding(server) == Some("IGNORED") {
-            "Have the optimizer ignore it first: it stays maintained, and `ALTER INDEX … NOT IGNORED` brings it back instantly. Drop it after a full business cycle without complaints."
+            t!("core.engines.mysql.unused_index.ignored")
         } else if server.is_mariadb() {
-            "Save its definition, then drop it: this MariaDB version can't hide an index (ignored indexes arrived in 10.6)."
+            t!("core.engines.mysql.unused_index.mariadb_cant_hide")
         } else if index_hiding(server).is_none() {
-            "Save its definition, then drop it: MySQL 5.7 can't hide an index (invisible indexes arrived in 8.0)."
+            t!("core.engines.mysql.unused_index.mysql_cant_hide")
         } else {
-            "Make it invisible first: the optimizer stops using it but it stays maintained, and `ALTER INDEX … VISIBLE` brings it back instantly. Drop it after a full business cycle without complaints."
+            t!("core.engines.mysql.unused_index.invisible")
         }
     }
     fn hide_index(&self, server: &ServerInfo, schema: &str, table: &str, index: &str) -> Option<String> {
@@ -56,12 +52,11 @@ impl EngineSpec for Mysql {
     }
     fn statement_metrics(&self) -> StatementMetrics {
         StatementMetrics {
-            write_rows_label: None,
             lock_time: true,
-            runtime_note: "This {engine} scan includes no run-time histogram; the lane shows fastest, average and slowest. Histogram availability depends on the product, server version and collection permissions; the slow query log can add individual logged runs.".into(),
-            runtime_histogram_note: Some("{engine} keeps a run-time histogram per statement, so the bars show how many runs took how long.".into()),
-            missing_costs_note: Some("{engine} keeps no planning time or redo bytes per statement.".into()),
-            ..StatementMetrics::BASIC
+            runtime_note: key!("core.engines.mysql.runtime_note").into(),
+            runtime_histogram_note: Some(key!("core.engines.mysql.runtime_histogram_note").into()),
+            missing_costs_note: Some(key!("core.engines.mysql.missing_costs_note").into()),
+            ..StatementMetrics::new(PlanningStep::Planning, ReadUnit::RowsExamined, None, WriteLog::TransactionLog)
         }
     }
     fn wait_sampling(&self) -> Option<WaitSampling> {
@@ -70,28 +65,22 @@ impl EngineSpec for Mysql {
     fn sql_syntax(&self) -> SqlSyntax {
         SqlSyntax::Mysql
     }
-    fn deadlock_limitation(&self) -> Option<&'static str> {
-        Some(
-            "InnoDB keeps only its most recent deadlock. Turn on innodb_print_all_deadlocks to write every one to the error log.",
-        )
+    fn deadlock_limitation(&self) -> Option<String> {
+        Some(t!("core.engines.mysql.deadlocks"))
     }
     fn inactive_index_state(&self, server: &ServerInfo) -> crate::IndexState {
         if server.is_mariadb() { crate::IndexState::Ignored } else { crate::IndexState::Invisible }
     }
-    fn limitations(&self) -> Vec<String> {
-        vec![
-        "Statement digests keep aggregate totals, not an application's request trace, transaction boundaries or the plan of every historical execution. Culprit compares only intervals its scans or the slow log record.".into(),
-        "InnoDB status keeps only the latest deadlock. A complete incident history requires the error log; an empty or old latest report does not prove that no other deadlocks happened.".into(),
-        "MySQL and MariaDB differ in plan details, instrumentation and syntax. Runtime measurements, metadata-lock visibility and replication diagnostics depend on the product, version and permissions.".into(),
-    ]
+    fn limitation_keys(&self) -> &'static [&'static str] {
+        &[
+            key!("core.engines.mysql.limitation.digests"),
+            key!("core.engines.mysql.limitation.innodb_status"),
+            key!("core.engines.mysql.limitation.products"),
+        ]
     }
 
     fn connect(&self) -> Connect {
-        Connect::server(
-            "MySQL / MariaDB",
-            "mysql://app@db.example.com:3306/shop",
-            "A mysql://, mariadb:// or JDBC URL, a .NET connection string (Server=…;Uid=…), or host:port/database.",
-        )
+        Connect::server("MySQL / MariaDB", "mysql://app@db.example.com:3306/shop", key!("core.engines.mysql.accepts"))
     }
 
     fn abilities(&self) -> EngineAbilities {
@@ -105,16 +94,14 @@ impl EngineSpec for Mysql {
     fn refusal(&self, ability: Ability) -> Refusal {
         match ability {
             Ability::LastActualPlan => Refusal::new(
-                "MySQL and MariaDB don't keep the actual plan of past runs",
-                Some(
-                    "Measure it instead: Analyze runs the statement's recorded text once inside a read-only transaction.",
-                ),
+                key!("core.engines.mysql.refusal.last_actual_plan"),
+                Some(key!("core.engines.mysql.refusal.last_actual_plan_hint")),
             ),
             Ability::OperatorProgress => Refusal::new(
-                "MySQL reports a running statement's progress, not each step's",
-                Some("Its plan doesn't change while it runs: ask for the plan once."),
+                key!("core.engines.mysql.refusal.operator_progress"),
+                Some(key!("core.engines.refusal.operator_progress_hint")),
             ),
-            _ => Refusal::new(&format!("MySQL can't do this ({})", wire_name(&ability).replace('_', " ")), None),
+            _ => Refusal::cant(),
         }
     }
 
@@ -123,23 +110,21 @@ impl EngineSpec for Mysql {
     }
 
     fn change_setting(&self, server: &ServerInfo, name: &str, value: &str) -> SettingChange {
-        if server.name() == "MySQL" && crate::version_at_least(&server.version, [8, 0, 0]) {
+        if !server.is_mariadb() && crate::version_at_least(&server.version, [8, 0, 0]) {
             return SettingChange {
-                how: format!("Set {name} to {value}; SET PERSIST keeps it across restarts."),
+                how: t!("core.engines.mysql.change_setting.persist", name = name, value = value),
                 sql: Some(format!("SET PERSIST {name} = {};", literal(value))),
             };
         }
         SettingChange {
-            how: format!(
-                "Set {name} to {value} now, and in the server's option file (my.cnf) so it survives a restart."
-            ),
+            how: t!("core.engines.mysql.change_setting.global", name = name, value = value),
             sql: Some(format!("SET GLOBAL {name} = {};", literal(value))),
         }
     }
 
     fn refresh_statistics(&self, target: &str) -> Fix {
         Fix {
-            summary: "Recompute the table's statistics.".into(),
+            summary: t!("core.engines.mysql.refresh_statistics"),
             sql: Some(self.dialect().refresh_statistics(target)),
             cost: None,
         }
@@ -147,24 +132,16 @@ impl EngineSpec for Mysql {
 
     fn wait_not_per_statement(&self, server: &ServerInfo, category: &str) -> String {
         match category {
-            "lock" | "cpu" => "No statement recorded this in performance_schema.".into(),
-            _ => format!("{} doesn't attribute this wait to statements; it is a server-wide total.", server.name()),
+            "lock" | "cpu" => t!("core.engines.mysql.wait_not_per_statement.unrecorded"),
+            _ => t!("core.engines.mysql.wait_not_per_statement.server_wide", server = server.name()),
         }
     }
 
     fn index_advice_sources(&self, server: &ServerInfo, _has_workload: bool) -> Option<String> {
         Some(if server.has(Capability::PerformanceSchema) {
-            format!(
-                "{} doesn't record missing-index requests. Candidates come from captured plans, foreign keys, and rows \
-                 read without an index (performance_schema).",
-                server.name()
-            )
+            t!("core.engines.mysql.index_advice_sources.performance_schema", server = server.name())
         } else {
-            format!(
-                "{} doesn't record missing-index requests. Candidates come from the plans of logged statements and \
-                 foreign keys; performance_schema would add rows read without an index.",
-                server.name()
-            )
+            t!("core.engines.mysql.index_advice_sources.logged", server = server.name())
         })
     }
 }
