@@ -187,3 +187,11 @@ say in English (Query Store, autovacuum, tempdb, buffer pool, DocDB, tablet, tab
 | full-page image, wraparound, freeze, backfill | image de page complète, bouclage, geler, remplissage rétroactif | |
 | an application request, a SQL Server request | requête HTTP, demande | |
 | (service) tier, row versioning | niveau de service, versionnage des lignes | |
+| insight (a plan insight) | diagnostic (m.) | « Diagnostics du plan »; not *observation*, which is a sampled activity |
+| slow query log, blocked process report, lock holder | journal des requêtes lentes, rapport de processus bloqués, détenteur | |
+| linked server, join buffer, visibility map, index-only scan | serveur lié, tampon de jointure, carte de visibilité, parcours d’index seul | |
+| running totals | totaux cumulés | |
+| DB parameter group, database flags | groupe de paramètres de base de données, indicateurs de base de données | |
+| Explain again | « Expliquez à nouveau » (« Relancez EXPLAIN ANALYZE » for PostgreSQL) | |
+| tile (dashboard) | vignette (f.) | |
+| a handle (`support.handle.*`) | starts with « une »/« un »: never put `{handle}` after « de » or « que » | no elision, unknown gender |

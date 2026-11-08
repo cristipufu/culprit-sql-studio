@@ -1218,7 +1218,7 @@
   "check.parameter_sensitive.verify.rescan": "Relancez une analyse après la modification : Requêtes → Dispersion des durées devrait montrer que la voie lente a disparu ou s’est rapprochée de la voie rapide.",
   "check.plan_insights.caveat.estimated": "D’après le plan estimé ; le nombre de lignes réel peut raconter une autre histoire.",
   "check.plan_insights.info.description": "Recherches de clé, fonctions sur des colonnes filtrées, caractères génériques en tête, NOT IN, fonctions scalaires, spools Eager, estimations erronées et boucles répétées dans les plans des requêtes qui comptent.",
-  "check.plan_insights.info.title": "Observations sur les plans",
+  "check.plan_insights.info.title": "Diagnostics des plans",
   "check.plan_insights.metric.plan_share": "Part du travail du plan",
   "check.plan_insights.summary.seen_in": "Observé dans {query}.",
   "check.plan_insights.summary.shared": "Le même problème apparaît dans {count} requêtes qui prennent ensemble {share} du temps de base de données.",
