@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import type { CloudSeries } from "../gen/CloudSeries";
 import type { CloudSignals } from "../gen/CloudSignals";
 import type { ThrottleEpisode } from "../gen/ThrottleEpisode";
-import { bytes, count, duration, percentValue } from "../lib/format";
+import { bytes, count, dateFormat, duration, percentValue } from "../lib/format";
 import { stamp, useCloud } from "../lib/events";
 import { t } from "../lib/i18n";
 import { TimeChart, VH, type Bucket, type ChartEvent } from "./TimeChart";
@@ -24,13 +24,13 @@ export function cloudValue(series: Pick<CloudSeries, "unit">, v: number): string
   }
 }
 
-const clock = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+const clock = () => dateFormat({ hour: "numeric", minute: "2-digit" });
 
 function episodeWhen(e: ThrottleEpisode): string {
   const a = Date.parse(e.start);
   const b = Date.parse(e.end);
   const lasted = duration(b - a);
-  return e.ongoing ? t("ui.cloud_limits.episode_ongoing", { from: stamp(a), lasted }) : t("ui.cloud_limits.episode", { from: stamp(a), to: clock.format(b), lasted });
+  return e.ongoing ? t("ui.cloud_limits.episode_ongoing", { from: stamp(a), lasted }) : t("ui.cloud_limits.episode", { from: stamp(a), to: clock().format(b), lasted });
 }
 
 /**
@@ -106,7 +106,7 @@ function Signals({ signals, onCompare }: { signals: CloudSignals; onCompare?: (f
         ))}
       </div>
       <div className="cloud-foot">
-        {signals.notes.join(" ")} {Number.isFinite(fetched) && t("ui.cloud_limits.read_at", { time: clock.format(fetched) })}
+        {signals.notes.join(" ")} {Number.isFinite(fetched) && t("ui.cloud_limits.read_at", { time: clock().format(fetched) })}
       </div>
     </>
   );

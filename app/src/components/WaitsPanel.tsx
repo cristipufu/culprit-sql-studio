@@ -5,7 +5,7 @@ import type { WaitCategory } from "../gen/WaitCategory";
 import type { WaitSample } from "../gen/WaitSample";
 import type { WaitsReport } from "../gen/WaitsReport";
 import { api, errorMessage, type ApiError } from "../lib/api";
-import { count, duration, percent } from "../lib/format";
+import { count, dateFormat, duration, percent } from "../lib/format";
 import { changeRequest, setState, useStore } from "../lib/store";
 import { WAIT_LABEL, foldWaits, startSample, useSample, waitColor } from "../lib/waits";
 import { CloudLimits } from "./CloudLimits";
@@ -14,7 +14,7 @@ import { HealthTab, SignalTile } from "./Health";
 import type { WaitsTab } from "./Waits";
 import type { Engine } from "../gen/Engine";
 import { can, isMariadb, serverName, waitSampling } from "../lib/engines";
-import { t } from "../lib/i18n";
+import { t, useLanguage } from "../lib/i18n";
 import { slot, withElements } from "../lib/message-parts";
 
 type Loaded = { status: "loading" } | { status: "ready"; report: WaitsReport | null } | { status: "error"; error: ApiError };
@@ -413,13 +413,18 @@ function Usual({ history }: { history: WaitsReport }) {
 }
 
 function SampleView({ sample, history }: { sample: WaitSample; history: WaitsReport | null }) {
-  const folded = useMemo(() => foldWaits(sample.categories), [sample]);
+  // Folding labels the waits in the app's language, so a new language folds them again.
+  const language = useLanguage();
+  const folded = useMemo(() => {
+    void language;
+    return foldWaits(sample.categories);
+  }, [sample, language]);
   const past = new Map((history?.categories ?? []).map((c) => [c.key, c.share]));
   const taken = new Date(sample.taken_at);
   return (
     <div className="sample-view">
       <div className="sample-meta">
-        {t("ui.waits_panel.sample_meta", { seconds: String(Math.round(sample.seconds)), time: Number.isNaN(taken.getTime()) ? "" : taken.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" }) })}
+        {t("ui.waits_panel.sample_meta", { seconds: String(Math.round(sample.seconds)), time: Number.isNaN(taken.getTime()) ? "" : dateFormat({ hour: "numeric", minute: "2-digit", second: "2-digit" }).format(taken) })}
         {sample.active_sessions != null ? ` · ${t("ui.waits_panel.busy_sessions", { sessions: count(sample.active_sessions) })}` : ""}
       </div>
       {history && history.categories.length > 0 && folded.length > 0 && (

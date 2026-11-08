@@ -89,7 +89,8 @@ const DECADES = [0.001, 0.01, 0.1, 1, 10, 100, 1_000, 10_000, 100_000];
 
 /** An axis label: round steps read "1 s" and "10 s", not "1.0 s". */
 function tick(ms: number): string {
-  return duration(ms).replace(/\.0 (s)$/, " $1");
+  const seconds = ms / 1000;
+  return Number.isInteger(seconds) && seconds >= 1 && seconds < 60 ? t("ui.format.duration.s", { value: String(seconds) }) : duration(ms);
 }
 
 function logTicks(lo: number, hi: number): number[] {

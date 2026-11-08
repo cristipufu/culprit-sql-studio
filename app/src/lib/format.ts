@@ -39,6 +39,20 @@ export function dateLocale(): string {
   return system.find((tag) => tag && (tag === code || tag.split("-")[0] === base)) ?? code;
 }
 
+const dateFormats = new Map<string, Intl.DateTimeFormat>();
+
+/** A date and time formatter in the app's language ({@link dateLocale}), made once per language and options. */
+export function dateFormat(options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const locale = dateLocale();
+  const key = `${locale} ${JSON.stringify(options)}`;
+  let format = dateFormats.get(key);
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale, options);
+    dateFormats.set(key, format);
+  }
+  return format;
+}
+
 export function duration(ms: number | null | undefined): string {
   if (ms == null) return "—";
   const v = Math.max(0, ms);

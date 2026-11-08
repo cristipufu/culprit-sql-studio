@@ -1,3 +1,4 @@
+import { dateFormat } from "../lib/format";
 import { Clock, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ChangeEvent } from "../gen/ChangeEvent";
@@ -116,7 +117,7 @@ export function AroundThen({ changes, onFocusQuery }: { changes: Changes; onFocu
   );
 }
 
-const day = new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
+const day = () => dateFormat({ weekday: "short", hour: "numeric", minute: "2-digit" });
 
 /** The two periods on one line, with a marker wherever something changed. */
 export function PeriodStrip({ changes, onFocusEvent }: { changes: Changes; onFocusEvent?: (id: string) => void }) {
@@ -151,9 +152,9 @@ export function PeriodStrip({ changes, onFocusEvent }: { changes: Changes; onFoc
         );
       })}
       <div className="pstrip-labels">
-        <span style={{ left: 0 }}>{day.format(from)}</span>
-        <span style={{ left: pct(r0), transform: "translateX(-50%)" }}>{day.format(r0)}</span>
-        <span style={{ right: 0 }}>{day.format(to)}</span>
+        <span style={{ left: 0 }}>{day().format(from)}</span>
+        <span style={{ left: pct(r0), transform: "translateX(-50%)" }}>{day().format(r0)}</span>
+        <span style={{ right: 0 }}>{day().format(to)}</span>
       </div>
     </div>
   );

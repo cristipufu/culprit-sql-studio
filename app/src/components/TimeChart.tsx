@@ -1,3 +1,4 @@
+import { dateFormat } from "../lib/format";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import type { EventKind } from "../gen/EventKind";
 import { t } from "../lib/i18n";
@@ -70,23 +71,23 @@ export function timeTicks(from: number, to: number): number[] {
   return out;
 }
 
-const clock = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
-const dayClock = new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
-const day = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+const clock = () => dateFormat({ hour: "numeric", minute: "2-digit" });
+const dayClock = () => dateFormat({ weekday: "short", hour: "numeric", minute: "2-digit" });
+const day = () => dateFormat({ month: "short", day: "numeric" });
 
 export function tickLabel(t: number, spanMs: number): string {
-  if (spanMs <= 36 * HOUR) return clock.format(t);
-  return day.format(t);
+  if (spanMs <= 36 * HOUR) return clock().format(t);
+  return day().format(t);
 }
 
 /** "Tue 14:05" in local time. */
 export function when(t: number): string {
-  return dayClock.format(t);
+  return dayClock().format(t);
 }
 
 export function rangeLabel(from: number, to: number): string {
   const sameDay = new Date(from).toDateString() === new Date(to).toDateString();
-  return sameDay ? `${dayClock.format(from)}–${clock.format(to)}` : `${dayClock.format(from)} – ${dayClock.format(to)}`;
+  return sameDay ? `${dayClock().format(from)}–${clock().format(to)}` : `${dayClock().format(from)} – ${dayClock().format(to)}`;
 }
 
 type Props = {

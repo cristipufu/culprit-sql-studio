@@ -19,7 +19,7 @@ import { allLintFixes, lintFix } from "../lib/lint-fixes";
 import { type Acted, EditorExecution, type Output } from "../lib/editor-execution";
 import type { PendingRun } from "../lib/run-batch";
 import { remember, rememberedChoice } from "../lib/prefs";
-import { t } from "../lib/i18n";
+import { t, useLanguage } from "../lib/i18n";
 import { currentReport, getState, loadSaved, setState, toast, useStore } from "../lib/store";
 import { sqlLanguage } from "./editor/codemirror";
 import { placeholder, useLiveLint, useSplit } from "./editor/hooks";
@@ -81,9 +81,14 @@ export default function Editor({ connection }: { connection: ConnectionInfo }) {
   const fallbackCatalog = useMemo(() => (report?.snapshot.connection === connection.name ? catalogFromReport(report) : null), [report, connection.name]);
   const effectiveCatalog = catalog ?? fallbackCatalog;
 
+  // Completion details are worded in the app's language: a new language rebuilds the SQL language with them.
+  const appLanguage = useLanguage();
   const languageExtension = useCallback(
-    (): Extension => sqlLanguage(connection.engine, connection.last_report?.product, effectiveCatalog, report?.snapshot.connection === connection.name ? report : null),
-    [connection.engine, connection.last_report?.product, effectiveCatalog, report, connection.name],
+    (): Extension => {
+      void appLanguage;
+      return sqlLanguage(connection.engine, connection.last_report?.product, effectiveCatalog, report?.snapshot.connection === connection.name ? report : null);
+    },
+    [connection.engine, connection.last_report?.product, effectiveCatalog, report, connection.name, appLanguage],
   );
 
   // ── tab bookkeeping ────────────────────────────────────────────────────────────────────────────

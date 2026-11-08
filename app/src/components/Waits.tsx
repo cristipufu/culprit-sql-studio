@@ -5,7 +5,7 @@ import type { Signal } from "../gen/Signal";
 import { percent } from "../lib/format";
 import { foldActivity, foldWaits, signalValue, waitColor } from "../lib/waits";
 import { can, serverName } from "../lib/engines";
-import { t } from "../lib/i18n";
+import { t, useLanguage } from "../lib/i18n";
 
 /** Which part of the waits panel to open. */
 export type WaitsTab = "waits" | "now" | "health";
@@ -43,7 +43,12 @@ function activate(e: KeyboardEvent, run: () => void) {
  */
 export function WaitsVital({ report, onOpen }: { report: Report; onOpen: OpenWaits }) {
   const activity = report.snapshot.operations.activity_history;
-  const sampled = useMemo(() => activity ? foldActivity(activity) : [], [activity]);
+  // Folding labels the activity in the app's language, so a new language folds it again.
+  const language = useLanguage();
+  const sampled = useMemo(() => {
+    void language;
+    return activity ? foldActivity(activity) : [];
+  }, [activity, language]);
   if (activity) {
     const categories = sampled;
     const top = categories[0];

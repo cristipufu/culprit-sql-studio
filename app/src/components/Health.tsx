@@ -6,7 +6,7 @@ import type { Report } from "../gen/Report";
 import type { SignalStatus } from "../gen/SignalStatus";
 import type { ResourceSample } from "../gen/ResourceSample";
 import type { Signal } from "../gen/Signal";
-import { duration, percent, percentValue } from "../lib/format";
+import { dateFormat, duration, percent, percentValue } from "../lib/format";
 import { findingStatus, worstFinding } from "../lib/health";
 import { t } from "../lib/i18n";
 import { tx } from "../lib/message-parts";
@@ -138,7 +138,7 @@ function dimensions(): { key: string; label: string; pick: Pick }[] {
   ];
 }
 
-const timeFmt = new Intl.DateTimeFormat(undefined, { timeZone: "UTC", hour: "2-digit", minute: "2-digit", hour12: false });
+const timeFmt = () => dateFormat({ timeZone: "UTC", hour: "2-digit", minute: "2-digit", hour12: false });
 
 function ResourceCharts({ samples, signals }: { samples: ResourceSample[]; signals: Signal[] }) {
   const times = samples.map((s) => Date.parse(s.at));
@@ -147,7 +147,7 @@ function ResourceCharts({ samples, signals }: { samples: ResourceSample[]; signa
       <div className="resource-head">
         <h4>{t("ui.health.limits")}</h4>
         <span className="muted">
-          {t("ui.health.limits_about", { from: timeFmt.format(times[0]!), to: timeFmt.format(times[times.length - 1]!) })}
+          {t("ui.health.limits_about", { from: timeFmt().format(times[0]!), to: timeFmt().format(times[times.length - 1]!) })}
         </span>
       </div>
       <div className="resource-grid">
@@ -211,11 +211,11 @@ function ResourceChart({ label, status, times, values }: { label: string; status
             <path className="line" d={line} vectorEffect="non-scaling-stroke" />
             {hover != null && <line className="cursor" x1={x(times[hover]!)} x2={x(times[hover]!)} y1="0" y2={VH} vectorEffect="non-scaling-stroke" />}
           </svg>
-          <span className="peak" style={{ left: `${(x(times[peakIndex]!) / VW) * 100}%`, top: `${(y(peak) / VH) * 100}%` }} title={t("ui.health.peak", { peak: percentValue(peak), time: timeFmt.format(times[peakIndex]!) })} />
+          <span className="peak" style={{ left: `${(x(times[peakIndex]!) / VW) * 100}%`, top: `${(y(peak) / VH) * 100}%` }} title={t("ui.health.peak", { peak: percentValue(peak), time: timeFmt().format(times[peakIndex]!) })} />
           <span className="limit-label">95%</span>
           {hover != null && hv != null && (
             <span className="readout" style={{ left: `${(x(times[hover]!) / VW) * 100}%` }}>
-              <b>{percentValue(hv)}</b> {timeFmt.format(times[hover]!)}
+              <b>{percentValue(hv)}</b> {timeFmt().format(times[hover]!)}
             </span>
           )}
         </div>
@@ -223,7 +223,7 @@ function ResourceChart({ label, status, times, values }: { label: string; status
       <div className="resource-xaxis" aria-hidden>
         {ticks.map((tick, i) => (
           <span key={i} style={{ left: `${i * 25}%` }}>
-            {timeFmt.format(tick)}
+            {timeFmt().format(tick)}
           </span>
         ))}
       </div>
