@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-use culprit_core::{NodeKind, Plan, PlanNode, format};
+use culprit_core::{NodeKind, Plan, PlanNode, format, t};
 
 use super::{rows_out, share, table};
 
@@ -58,7 +58,7 @@ fn fit(text: &str, width: f64, glyph: f64) -> String {
 
 /// "1 row", "1.2K rows".
 fn rows_word(n: f64) -> String {
-    format!("{} row{}", format::count(n), if n.round() == 1.0 { "" } else { "s" })
+    t!("engine.export.diagram.rows", n = n.round(), count = format::count(n))
 }
 
 pub fn heat_class(share: f64) -> &'static str {
@@ -75,19 +75,20 @@ pub fn heat_class(share: f64) -> &'static str {
     }
 }
 
-pub fn kind_class(kind: NodeKind) -> (&'static str, &'static str) {
+/// An operator's class on the card, and the word for its kind (none for an operator of no kind Culprit names).
+pub fn kind_class(kind: NodeKind) -> (&'static str, Option<String>) {
     match kind {
-        NodeKind::Scan => ("k-scan", "Scan"),
-        NodeKind::Seek => ("k-seek", "Seek"),
-        NodeKind::Lookup => ("k-lookup", "Lookup"),
-        NodeKind::Join => ("k-join", "Join"),
-        NodeKind::Sort => ("k-sort", "Sort"),
-        NodeKind::Aggregate => ("k-agg", "Aggregate"),
-        NodeKind::Spool => ("k-dim", "Spool"),
-        NodeKind::Parallelism => ("k-dim", "Parallel"),
-        NodeKind::Modify => ("k-write", "Write"),
-        NodeKind::Compute => ("k-dim", "Compute"),
-        NodeKind::Other => ("k-dim", ""),
+        NodeKind::Scan => ("k-scan", Some(t!("engine.export.diagram.kind.scan"))),
+        NodeKind::Seek => ("k-seek", Some(t!("engine.export.diagram.kind.seek"))),
+        NodeKind::Lookup => ("k-lookup", Some(t!("engine.export.diagram.kind.lookup"))),
+        NodeKind::Join => ("k-join", Some(t!("engine.export.diagram.kind.join"))),
+        NodeKind::Sort => ("k-sort", Some(t!("engine.export.diagram.kind.sort"))),
+        NodeKind::Aggregate => ("k-agg", Some(t!("engine.export.diagram.kind.aggregate"))),
+        NodeKind::Spool => ("k-dim", Some(t!("engine.export.diagram.kind.spool"))),
+        NodeKind::Parallelism => ("k-dim", Some(t!("engine.export.diagram.kind.parallel"))),
+        NodeKind::Modify => ("k-write", Some(t!("engine.export.diagram.kind.write"))),
+        NodeKind::Compute => ("k-dim", Some(t!("engine.export.diagram.kind.compute"))),
+        NodeKind::Other => ("k-dim", None),
     }
 }
 
@@ -156,7 +157,13 @@ pub fn diagram(plan: &Plan, marks: &HashMap<u32, Mark>, focus: Option<u32>, labe
         r#"<defs><marker id="arrow-{id}" viewBox="0 0 10 10" refX="8" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M 0 1 L 9 5 L 0 9 z" class="arrowhead"/></marker></defs>"#
     );
     let root = by_id[&plan.root.id];
-    let _ = write!(svg, r#"<text class="result" x="{:.1}" y="{:.1}">RESULT</text>"#, px(root.x) + W / 2.0, PAD + 6.0);
+    let _ = write!(
+        svg,
+        r#"<text class="result" x="{:.1}" y="{:.1}">{}</text>"#,
+        px(root.x) + W / 2.0,
+        PAD + 6.0,
+        escape(&t!("engine.export.diagram.result"))
+    );
     // Edges first, under the cards.
     for p in &placed {
         for c in &p.node.children {
@@ -179,7 +186,7 @@ pub fn diagram(plan: &Plan, marks: &HashMap<u32, Mark>, focus: Option<u32>, labe
                 r#"<text class="edge-label" x="{:.1}" y="{:.1}">{}</text>"#,
                 x1 + stroke(rows) / 2.0 + 7.0,
                 y1 - 9.0,
-                escape(&known_rows.map_or_else(|| "rows unavailable".into(), rows_word))
+                escape(&known_rows.map_or_else(|| t!("engine.export.diagram.rows_unavailable"), rows_word))
             );
         }
     }
@@ -208,8 +215,8 @@ pub fn diagram(plan: &Plan, marks: &HashMap<u32, Mark>, focus: Option<u32>, labe
         let tip = n
             .predicate
             .as_deref()
-            .map(|p| format!("filter {p}"))
-            .or_else(|| n.seek_predicate.as_deref().map(|p| format!("seek {p}")))
+            .map(|p| t!("engine.export.diagram.filter", predicate = p))
+            .or_else(|| n.seek_predicate.as_deref().map(|p| t!("engine.export.diagram.seek", predicate = p)))
             .unwrap_or_else(|| n.op.clone());
         let _ = write!(svg, r#"<g class="{}"><title>{}</title>"#, classes.join(" "), escape(&tip));
         let _ = write!(svg, r#"<rect class="box" x="{x:.1}" y="{y:.1}" width="{W}" height="{H}" rx="9"/>"#);
@@ -225,7 +232,7 @@ pub fn diagram(plan: &Plan, marks: &HashMap<u32, Mark>, focus: Option<u32>, labe
             y + H - 8.0,
             ((W - 24.0) * s.clamp(0.0, 1.0)).max(if s > 0.0 { 2.0 } else { 0.0 })
         );
-        let kind = if kind_label.is_empty() { n.op.to_uppercase() } else { kind_label.to_uppercase() };
+        let kind = kind_label.unwrap_or_else(|| n.op.clone()).to_uppercase();
         let _ = write!(
             svg,
             r#"<text class="kind {kind_class}" x="{:.1}" y="{:.1}">{}</text>"#,
@@ -234,9 +241,9 @@ pub fn diagram(plan: &Plan, marks: &HashMap<u32, Mark>, focus: Option<u32>, labe
             escape(&fit(&kind, W * 0.5, 6.4))
         );
         let badge = match mark {
-            Some(Mark::Changed) => "changed · ",
-            Some(Mark::Only) => "only here · ",
-            _ => "",
+            Some(Mark::Changed) => format!("{} · ", t!("engine.export.diagram.changed")),
+            Some(Mark::Only) => format!("{} · ", t!("engine.export.diagram.only")),
+            _ => String::new(),
         };
         let flame = if Some(n.id) == hottest && s >= 0.05 { "▲ " } else { "" };
         let _ = write!(
@@ -272,19 +279,20 @@ pub fn diagram(plan: &Plan, marks: &HashMap<u32, Mark>, focus: Option<u32>, labe
         );
         let est = n.est_rows_total();
         let rows = if n.facts().estimated_rows_unavailable {
-            n.act_rows.map_or_else(|| "Row estimate unavailable".into(), rows_word)
+            n.act_rows.map_or_else(|| t!("engine.export.diagram.no_row_estimate"), rows_word)
         } else {
             match n.act_rows {
                 Some(act) => {
                     let off = act.max(1.0) / est.max(1.0);
                     let warn = if !(0.1..10.0).contains(&off) {
-                        format!("  ×{} off", format::count(if off >= 1.0 { off } else { 1.0 / off }))
+                        let factor = format::count(if off >= 1.0 { off } else { 1.0 / off });
+                        format!("  {}", t!("engine.export.diagram.off", factor = factor))
                     } else {
                         String::new()
                     };
                     format!("{} → {}{warn}", format::count(est), rows_word(act))
                 }
-                None => format!("{} est.", rows_word(est)),
+                None => t!("engine.export.diagram.estimated", rows = rows_word(est)),
             }
         };
         let time = n.act_time_ms.map(|t| format!(" · {}", format::duration(t))).unwrap_or_default();

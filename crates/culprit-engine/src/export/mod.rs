@@ -10,7 +10,7 @@ mod svg;
 use std::borrow::Cow;
 
 use culprit_core::redact::{redact_native, redact_plan, redact_sql};
-use culprit_core::{Engine, Environment, Finding, Plan, PlanKind, PlanNode, Report};
+use culprit_core::{Confidence, Engine, Environment, Finding, Plan, PlanKind, PlanNode, Report, Severity, t};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -158,16 +158,58 @@ pub(crate) fn report_engine_label(report: &Report) -> &'static str {
     report.snapshot.server.name()
 }
 
-pub(crate) fn environment_label(environment: Environment) -> String {
+/// The environment's id, for a message's `select`: "production", "staging", "development", "local".
+fn environment_id(environment: Environment) -> String {
     format!("{environment:?}").to_lowercase()
 }
 
-pub(crate) fn kind_label(kind: PlanKind) -> &'static str {
+/// "Estimated plan": the plan's kind as a label of its own.
+pub(crate) fn kind_label(kind: PlanKind) -> String {
     match kind {
-        PlanKind::Estimated => "Estimated plan",
-        PlanKind::Generic => "Generic plan",
-        PlanKind::Actual => "Actual plan",
+        PlanKind::Estimated => t!("engine.export.plan_kind.estimated"),
+        PlanKind::Generic => t!("engine.export.plan_kind.generic"),
+        PlanKind::Actual => t!("engine.export.plan_kind.actual"),
     }
+}
+
+/// "estimated plan": the plan's kind inside a line.
+pub(crate) fn kind_inline(kind: PlanKind) -> String {
+    match kind {
+        PlanKind::Estimated => t!("engine.export.plan_kind_inline.estimated"),
+        PlanKind::Generic => t!("engine.export.plan_kind_inline.generic"),
+        PlanKind::Actual => t!("engine.export.plan_kind_inline.actual"),
+    }
+}
+
+/// A severity's id, for a message's `select`.
+fn severity_id(severity: Severity) -> &'static str {
+    match severity {
+        Severity::High => "high",
+        Severity::Medium => "medium",
+        Severity::Low => "low",
+    }
+}
+
+/// A confidence's id, for a message's `select`.
+fn confidence_id(confidence: Confidence) -> &'static str {
+    match confidence {
+        Confidence::High => "high",
+        Confidence::Medium => "medium",
+        Confidence::Low => "low",
+    }
+}
+
+/// "28% of runs fail · Needs attention · high impact, high confidence · MySQL 8.4.11, local environment": what a
+/// finding is, under its title. `impact` is its impact as the format shows it.
+pub(crate) fn finding_line(report: &Report, finding: &Finding, impact: String) -> String {
+    t!(
+        "engine.export.finding_line",
+        impact = impact,
+        actionability = finding.actionability.label(),
+        severity = severity_id(finding.severity),
+        confidence = confidence_id(finding.confidence),
+        server = server_line(report)
+    )
 }
 
 /// A step's share of the plan's cost where the plan can state one (`Plan::step_share`): none on a plan without costs, a
@@ -190,7 +232,7 @@ pub(crate) fn rows_out(node: &PlanNode) -> Option<f64> {
 
 pub(crate) fn estimated_cost(plan: &Plan) -> String {
     if plan.facts().estimated_cost_unavailable {
-        "unavailable".into()
+        t!("engine.export.unavailable")
     } else if plan.total_cost < 10.0 {
         format!("{:.3}", plan.total_cost)
     } else {
@@ -214,9 +256,10 @@ pub(crate) fn where_(node: &PlanNode) -> String {
 
 pub(crate) fn rows_text(node: &PlanNode) -> String {
     if node.facts().estimated_rows_unavailable {
-        return node
-            .act_rows
-            .map_or_else(|| "unavailable".into(), |act| format!("unavailable → {}", culprit_core::format::count(act)));
+        return node.act_rows.map_or_else(
+            || t!("engine.export.unavailable"),
+            |act| format!("{} → {}", t!("engine.export.unavailable"), culprit_core::format::count(act)),
+        );
     }
     let est = node.est_rows_total();
     match node.act_rows {
@@ -227,8 +270,8 @@ pub(crate) fn rows_text(node: &PlanNode) -> String {
 
 /// `rows_text` with its noun: "1 row", "12 rows", "12 → 1 row" (the noun follows the last number).
 pub(crate) fn rows_phrase(node: &PlanNode) -> String {
-    let Some(last) = rows_out(node) else { return "row count unavailable".into() };
-    format!("{} {}", rows_text(node), if last.round() == 1.0 { "row" } else { "rows" })
+    let Some(last) = rows_out(node) else { return t!("engine.export.row_count_unavailable") };
+    t!("engine.export.rows_phrase", n = last.round(), rows = rows_text(node))
 }
 
 /// The plan's statement and the highest-cost operators, for the one-line "where the cost goes" summary.
@@ -240,7 +283,7 @@ pub(crate) fn top_costs(plan: &Plan, limit: usize) -> Vec<(&'_ PlanNode, f64)> {
 
 pub(crate) fn node_label(node: &PlanNode) -> String {
     match table(node) {
-        Some(t) => format!("{} on {t}", node.op),
+        Some(table) => t!("engine.export.step_on", op = &node.op, table = table),
         None => node.op.clone(),
     }
 }
@@ -251,16 +294,26 @@ pub(crate) fn node_label(node: &PlanNode) -> String {
 pub(crate) fn stats_line(workload: &culprit_core::Workload, q: &culprit_core::QueryStat) -> String {
     let cost = workload.cost_of(q);
     // One run or two far apart: what they took, never an average that hides it (`QueryStat::few_runs`).
-    let took = q.few_runs_took().map_or_else(
-        || format!("{} on average", culprit_core::format::duration(cost.mean_ms)),
-        |t| format!("took {t}"),
-    );
-    format!(
-        "{} of database time · {} · {took}{}",
-        culprit_core::format::percent(cost.share),
-        cost.runs,
-        cost.totals.map(|t| format!(" ({t})")).unwrap_or_default()
-    )
+    let share = culprit_core::format::percent(cost.share);
+    match (q.few_runs_took(), cost.totals) {
+        (None, None) => t!(
+            "engine.export.stats.average",
+            share = share,
+            runs = cost.runs,
+            mean = culprit_core::format::duration(cost.mean_ms)
+        ),
+        (None, Some(totals)) => t!(
+            "engine.export.stats.average_totals",
+            share = share,
+            runs = cost.runs,
+            mean = culprit_core::format::duration(cost.mean_ms),
+            totals = totals
+        ),
+        (Some(took), None) => t!("engine.export.stats.took", share = share, runs = cost.runs, took = took),
+        (Some(took), Some(totals)) => {
+            t!("engine.export.stats.took_totals", share = share, runs = cost.runs, took = took, totals = totals)
+        }
+    }
 }
 
 /// When the export was made, for the footer.
@@ -271,7 +324,7 @@ pub(crate) fn exported_at() -> String {
 /// The report's server, without names that identify the deployment: "SQL Server 2022, production".
 pub(crate) fn server_line(report: &Report) -> String {
     let s = &report.snapshot;
-    format!("{}, {} environment", s.server.product, environment_label(s.environment))
+    t!("engine.export.server_line", product = &s.server.product, environment = environment_id(s.environment))
 }
 
 #[cfg(test)]

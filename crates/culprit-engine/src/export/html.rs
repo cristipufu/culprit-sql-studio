@@ -4,16 +4,14 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use culprit_core::{
-    ChangeKind, Finding, Plan, PlanDiff, PlanKind, PlanNode, Report, ScenarioKind, Severity, Unit, format,
-};
+use culprit_core::{ChangeKind, Finding, Plan, PlanDiff, PlanNode, Report, ScenarioKind, Severity, Unit, format, t};
 
-use super::markdown::metric_text;
+use super::markdown::{change_word, metric_text, rows_column};
 use super::svg::{Mark, diagram, escape, heat_class};
 use super::{
-    ExportNote, ExportOptions, environment_label, estimated_cost, exported_at, kind_label, node_label,
-    plan_engine_label, prepared, report_engine_label, rows_phrase, rows_text, share, shares_note, sql_text, stats_line,
-    top_costs, where_,
+    ExportNote, ExportOptions, estimated_cost, exported_at, finding_line, kind_inline, kind_label, node_label,
+    plan_engine_label, prepared, report_engine_label, rows_phrase, rows_text, server_line, share, shares_note,
+    sql_text, stats_line, top_costs, where_,
 };
 
 const STYLE: &str = r#"
@@ -134,18 +132,28 @@ fn page(title: &str, chips: &[String], body: &str, options: &ExportOptions) -> S
         let _ = write!(chips_html, r#"<span class="chip">{}</span>"#, escape(c));
     }
     if options.redact {
-        chips_html.push_str(r#"<span class="chip redacted" title="Strings and numbers in SQL text, predicates and parameter values are replaced with ? — names are kept">Values redacted</span>"#);
+        let _ = write!(
+            chips_html,
+            r#"<span class="chip redacted" title="{}">{}</span>"#,
+            escape(&t!("engine.export.page.redacted_title")),
+            escape(&t!("engine.export.page.redacted_chip"))
+        );
     }
     format!(
         r#"<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="generator" content="Culprit"><title>{}</title><style>{STYLE}</style></head>
+<html lang="{}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="generator" content="Culprit"><title>{}</title><style>{STYLE}</style></head>
 <body><main><div class="top"><span class="mark">C</span><span class="brand">Culprit</span><span class="spacer"></span>{chips_html}</div>
 {body}
-<footer><span>Exported from Culprit on {}</span>{}</footer></main></body></html>
+<footer><span>{}</span>{}</footer></main></body></html>
 "#,
+        escape(&culprit_core::i18n::current().code),
         escape(title),
-        escape(&exported_at()),
-        if options.redact { "<span>· literal values redacted</span>" } else { "" }
+        escape(&t!("engine.export.page.footer", when = exported_at())),
+        if options.redact {
+            format!("<span>{}</span>", escape(&t!("engine.export.page.footer_redacted")))
+        } else {
+            String::new()
+        }
     )
 }
 
@@ -153,15 +161,14 @@ fn strip(plan: &Plan) -> String {
     let costs = top_costs(plan, 6);
     // A plan that states no share for any step (no costs, or a step it doesn't cost) has no strip, only why.
     let note = shares_note(plan, None)
-        .or_else(|| {
-            (!plan.weighed()).then(|| "The plan has the access path only: no costs to weigh its steps by.".into())
-        })
+        .or_else(|| (!plan.weighed()).then(|| t!("engine.export.page.no_costs")))
         .map(|n| format!(r#"<p class="note">{}</p>"#, escape(&n.replace('`', ""))))
         .unwrap_or_default();
     if costs.is_empty() {
         return note;
     }
-    let mut bar = String::from(r#"<div class="strip" role="img" aria-label="Share of the plan's cost per operator">"#);
+    let mut bar =
+        format!(r#"<div class="strip" role="img" aria-label="{}">"#, attribute(&t!("engine.export.page.strip_label")));
     let mut legend = String::from(r#"<ul class="legend">"#);
     for (n, s) in &costs {
         let _ = write!(
@@ -196,10 +203,13 @@ fn steps(plan: &Plan) -> String {
     }
     walk(&plan.root, 0, &mut rows);
     let hot = plan.hottest().map(|n| n.id);
-    let actual = plan.kind == PlanKind::Actual;
     let mut out = format!(
-        r#"<table class="steps"><thead><tr><th>Step</th><th>Table · index</th><th class="r">Cost</th><th class="r">{}</th><th>Notes</th></tr></thead><tbody>"#,
-        if actual { "Rows (est. → actual)" } else { "Rows (est.)" }
+        r#"<table class="steps"><thead><tr><th>{}</th><th>{}</th><th class="r">{}</th><th class="r">{}</th><th>{}</th></tr></thead><tbody>"#,
+        escape(&t!("engine.export.column.step")),
+        escape(&t!("engine.export.column.table_index")),
+        escape(&t!("engine.export.column.cost")),
+        escape(&rows_column(plan)),
+        escape(&t!("engine.export.column.notes"))
     );
     for (n, depth) in rows {
         // No share where the plan can't state one (no costs, a step it doesn't cost, a default guess).
@@ -226,7 +236,7 @@ fn steps(plan: &Plan) -> String {
 
 fn statement(plan: &Plan) -> String {
     match &plan.statement {
-        Some(s) => format!("<h2>Statement</h2><pre>{}</pre>", escape(s.trim())),
+        Some(s) => format!("<h2>{}</h2><pre>{}</pre>", escape(&t!("engine.export.statement")), escape(s.trim())),
         None => String::new(),
     }
 }
@@ -235,16 +245,23 @@ fn notes_html(notes: &[ExportNote], plan: &Plan) -> String {
     if notes.is_empty() {
         return String::new();
     }
-    let mut out = String::from(r#"<h2>Insights</h2><ul class="scen">"#);
+    let mut out = format!(r#"<h2>{}</h2><ul class="scen">"#, escape(&t!("engine.export.insights")));
     for n in notes {
         let on = n.node.and_then(|id| plan.nodes().into_iter().find(|x| x.id == id)).map(node_label);
         let _ = write!(
             out,
             r#"<li><span class="tag">{}</span><div><div class="t">{}</div>{}{}</div></li>"#,
-            escape(on.as_deref().unwrap_or("Plan")),
+            escape(&on.unwrap_or_else(|| t!("engine.export.plan"))),
             escape(&n.title),
             n.detail.as_deref().map(|d| format!(r#"<div class="d">{}</div>"#, escape(d))).unwrap_or_default(),
-            n.fix.as_deref().map(|f| format!(r#"<div class="d"><b>Fix:</b> {}</div>"#, escape(f))).unwrap_or_default()
+            n.fix
+                .as_deref()
+                .map(|f| format!(
+                    r#"<div class="d"><b>{}</b> {}</div>"#,
+                    escape(&t!("engine.export.fix_label")),
+                    escape(f)
+                ))
+                .unwrap_or_default()
         );
     }
     out.push_str("</ul>");
@@ -254,34 +271,28 @@ fn notes_html(notes: &[ExportNote], plan: &Plan) -> String {
 fn plan_figures(plan: &Plan) -> String {
     let mut out = String::from(r#"<div class="figures">"#);
     if plan.weighed() || plan.facts().estimated_cost_unavailable {
-        let _ = write!(
-            out,
-            r#"<div class="fig"><div class="v">{}</div><div class="l">estimated cost</div></div>"#,
-            estimated_cost(plan)
-        );
+        out.push_str(&figure(&estimated_cost(plan), &t!("engine.export.page.figure.estimated_cost")));
     }
-    let _ = write!(
-        out,
-        r#"<div class="fig"><div class="v">{}</div><div class="l">operators</div></div>"#,
-        plan.nodes().len()
-    );
-    if let Some(t) = plan.root.act_time_ms {
-        let _ = write!(
-            out,
-            r#"<div class="fig"><div class="v">{}</div><div class="l">actual time</div></div>"#,
-            format::duration(t)
-        );
+    out.push_str(&figure(&plan.nodes().len().to_string(), &t!("engine.export.page.figure.operators")));
+    if let Some(time) = plan.root.act_time_ms {
+        out.push_str(&figure(&format::duration(time), &t!("engine.export.page.figure.actual_time")));
     }
     if let Some((hot, s)) = plan.hottest().and_then(|hot| Some((hot, share(plan, hot)?))) {
-        let _ = write!(
-            out,
-            r#"<div class="fig"><div class="v">{}</div><div class="l">{}</div></div>"#,
-            format::percent(s),
-            escape(&format!("in {}", node_label(hot)))
-        );
+        let label = t!("engine.export.page.figure.in_step", step = node_label(hot));
+        out.push_str(&figure(&format::percent(s), &escape(&label)));
     }
     out.push_str("</div>");
     out
+}
+
+/// Catalog text inside a double-quoted attribute: only a double quote needs escaping there.
+fn attribute(text: &str) -> String {
+    text.replace('"', "&quot;")
+}
+
+/// One of a page's figures: a value with its label under it (both already HTML).
+fn figure(value: &str, label: &str) -> String {
+    format!(r#"<div class="fig"><div class="v">{value}</div><div class="l">{label}</div></div>"#)
 }
 
 /// One plan: its numbers, where the cost goes, the diagram, every step, notes and the statement.
@@ -289,40 +300,46 @@ pub fn plan_html(plan: &Plan, title: &str, options: &ExportOptions) -> String {
     let plan = prepared(plan, options);
     let mut body = String::new();
     let _ = write!(body, "<h1>{}</h1>", escape(title));
-    let _ = write!(body, r#"<p class="sub">{} · {}</p>"#, escape(plan_engine_label(&plan)), kind_label(plan.kind));
-    body.push_str(&plan_figures(&plan));
-    let _ = write!(body, "<h2>Where the cost goes</h2>{}", strip(&plan));
     let _ =
-        write!(body, r#"<h2>Plan</h2><div class="wrap">{}</div>"#, diagram(&plan, &HashMap::new(), None, title, "p"));
-    let _ = write!(body, "<h2>Steps</h2>{}", steps(&plan));
+        write!(body, r#"<p class="sub">{} · {}</p>"#, escape(plan_engine_label(&plan)), escape(&kind_label(plan.kind)));
+    body.push_str(&plan_figures(&plan));
+    let _ = write!(body, "<h2>{}</h2>{}", escape(&t!("engine.export.where_cost_goes")), strip(&plan));
+    let _ = write!(
+        body,
+        r#"<h2>{}</h2><div class="wrap">{}</div>"#,
+        escape(&t!("engine.export.plan")),
+        diagram(&plan, &HashMap::new(), None, title, "p")
+    );
+    let _ = write!(body, "<h2>{}</h2>{}", escape(&t!("engine.export.steps")), steps(&plan));
     body.push_str(&notes_html(&options.notes, &plan));
     body.push_str(&statement(&plan));
-    page(title, &[plan_engine_label(&plan).to_string(), kind_label(plan.kind).to_string()], &body, options)
+    page(title, &[plan_engine_label(&plan).to_string(), kind_label(plan.kind)], &body, options)
 }
 
-fn change_tag(kind: ChangeKind) -> (&'static str, &'static str) {
+/// A change's class on the page.
+fn change_class(kind: ChangeKind) -> &'static str {
     match kind {
-        ChangeKind::Access => ("access", "Access"),
-        ChangeKind::Operator => ("operator", "Operator"),
-        ChangeKind::Added => ("added", "Added"),
-        ChangeKind::Removed => ("removed", "Removed"),
-        ChangeKind::Cost => ("cost", "Cost"),
-        ChangeKind::Rows => ("rows", "Rows"),
-        ChangeKind::Warning => ("warning", "Warning"),
+        ChangeKind::Access => "access",
+        ChangeKind::Operator => "operator",
+        ChangeKind::Added => "added",
+        ChangeKind::Removed => "removed",
+        ChangeKind::Cost => "cost",
+        ChangeKind::Rows => "rows",
+        ChangeKind::Warning => "warning",
     }
 }
 
-fn scenario_tag(kind: ScenarioKind) -> &'static str {
+fn scenario_tag(kind: ScenarioKind) -> String {
     match kind {
-        ScenarioKind::Statement => "Statement",
-        ScenarioKind::PlanKind => "Plan kind",
-        ScenarioKind::Estimator => "Estimator",
-        ScenarioKind::Parameters => "Parameters",
-        ScenarioKind::Estimates => "Estimates",
-        ScenarioKind::Index => "Index",
-        ScenarioKind::Conversion => "Types",
-        ScenarioKind::Parallelism => "Parallelism",
-        ScenarioKind::Memory => "Memory",
+        ScenarioKind::Statement => t!("engine.export.scenario.statement"),
+        ScenarioKind::PlanKind => t!("engine.export.scenario.plan_kind"),
+        ScenarioKind::Estimator => t!("engine.export.scenario.estimator"),
+        ScenarioKind::Parameters => t!("engine.export.scenario.parameters"),
+        ScenarioKind::Estimates => t!("engine.export.scenario.estimates"),
+        ScenarioKind::Index => t!("engine.export.scenario.index"),
+        ScenarioKind::Conversion => t!("engine.export.scenario.types"),
+        ScenarioKind::Parallelism => t!("engine.export.scenario.parallelism"),
+        ScenarioKind::Memory => t!("engine.export.scenario.memory"),
     }
 }
 
@@ -332,16 +349,34 @@ fn verdict(diff: &PlanDiff) -> (&'static str, String) {
         (Some(a), Some(b)) if a > 0.0 && b > 0.0 => (b / a, true),
         _ => match diff.cost_ratio {
             Some(r) => (r, false),
-            None => return ("same", "not comparable".into()),
+            None => return ("same", t!("engine.export.verdict.not_comparable")),
         },
     };
-    let x = |v: f64| if v >= 10.0 { format!("{}×", format::count(v.round())) } else { format!("{v:.1}×") };
+    let x = |v: f64| {
+        if v >= 10.0 {
+            t!("common.factor", n = format::count(v.round()))
+        } else {
+            t!("common.factor", n = format::digits(format!("{v:.1}")))
+        }
+    };
     if r >= 1.25 {
-        ("worse", format!("{} {}", x(r), if time { "slower" } else { "costlier" }))
+        let factor = x(r);
+        let word = if time {
+            t!("engine.export.verdict.slower", factor = factor)
+        } else {
+            t!("engine.export.verdict.costlier", factor = factor)
+        };
+        ("worse", word)
     } else if r <= 0.8 {
-        ("better", format!("{} {}", x(1.0 / r), if time { "faster" } else { "cheaper" }))
+        let factor = x(1.0 / r);
+        let word = if time {
+            t!("engine.export.verdict.faster", factor = factor)
+        } else {
+            t!("engine.export.verdict.cheaper", factor = factor)
+        };
+        ("better", word)
     } else {
-        ("same", "about the same".into())
+        ("same", t!("engine.export.verdict.same"))
     }
 }
 
@@ -378,9 +413,9 @@ pub fn diff_html(a: &Plan, b: &Plan, diff: &PlanDiff, name_a: &str, name_b: &str
     let (a, b) = (prepared(a, options), prepared(b, options));
     let redacted_diff = options.redact.then(|| culprit_core::plan_diff_named(&a, name_a, &b, name_b));
     let diff = redacted_diff.as_ref().unwrap_or(diff);
-    let title = format!("{name_a} → {name_b}");
+    let title = t!("engine.export.plan_comparison", a = name_a, b = name_b);
     let mut body = String::new();
-    let _ = write!(body, "<h1>Plan comparison: {}</h1>", escape(&title));
+    let _ = write!(body, "<h1>{}</h1>", escape(&title));
     let (class, word) = verdict(diff);
     if let Some((lead, rest)) = diff.headlines.split_first() {
         let _ = write!(
@@ -398,43 +433,25 @@ pub fn diff_html(a: &Plan, b: &Plan, diff: &PlanDiff, name_a: &str, name_b: &str
         }
     }
     body.push_str(r#"<div class="figures">"#);
-    let _ = write!(
-        body,
-        r#"<div class="fig"><div class="v">{}</div><div class="l">cost · {}</div></div>"#,
-        estimated_cost(&a),
-        escape(name_a)
-    );
-    let _ = write!(
-        body,
-        r#"<div class="fig"><div class="v">{}</div><div class="l">cost · {}</div></div>"#,
-        estimated_cost(&b),
-        escape(name_b)
-    );
-    if let (Some(ta), Some(tb)) = (diff.time_a_ms, diff.time_b_ms) {
-        let _ = write!(
-            body,
-            r#"<div class="fig"><div class="v">{}</div><div class="l">actual time · {}</div></div>"#,
-            format::duration(ta),
-            escape(name_a)
-        );
-        let _ = write!(
-            body,
-            r#"<div class="fig"><div class="v">{}</div><div class="l">actual time · {}</div></div>"#,
-            format::duration(tb),
-            escape(name_b)
-        );
+    for (plan, name) in [(&a, name_a), (&b, name_b)] {
+        let label = t!("engine.export.page.figure.cost_of", name = name);
+        body.push_str(&figure(&estimated_cost(plan), &escape(&label)));
     }
-    let _ = write!(
-        body,
-        r#"<div class="fig"><div class="v">{} → {}</div><div class="l">operators</div></div>"#,
-        a.nodes().len(),
-        b.nodes().len()
-    );
+    if let (Some(ta), Some(tb)) = (diff.time_a_ms, diff.time_b_ms) {
+        for (time, name) in [(ta, name_a), (tb, name_b)] {
+            let label = t!("engine.export.page.figure.actual_time_of", name = name);
+            body.push_str(&figure(&format::duration(time), &escape(&label)));
+        }
+    }
+    body.push_str(&figure(
+        &format!("{} → {}", a.nodes().len(), b.nodes().len()),
+        &escape(&t!("engine.export.page.figure.operators")),
+    ));
     body.push_str("</div>");
     if !diff.changes.is_empty() {
-        body.push_str(r#"<h2>What changed</h2><ul class="changes">"#);
+        let _ = write!(body, r#"<h2>{}</h2><ul class="changes">"#, escape(&t!("engine.export.what_changed")));
         for c in diff.changes.iter().take(24) {
-            let (cls, label) = change_tag(c.kind);
+            let (cls, label) = (change_class(c.kind), escape(&change_word(c.kind)));
             let _ = write!(
                 body,
                 r#"<li><span class="tag {cls}">{label}</span><div><div class="t">{}</div>{}</div></li>"#,
@@ -445,12 +462,12 @@ pub fn diff_html(a: &Plan, b: &Plan, diff: &PlanDiff, name_a: &str, name_b: &str
         body.push_str("</ul>");
     }
     if !diff.scenarios.is_empty() {
-        body.push_str(r#"<h2>Why the optimizer may have chosen differently</h2><ul class="scen">"#);
+        let _ = write!(body, r#"<h2>{}</h2><ul class="scen">"#, escape(&t!("engine.export.why_differently")));
         for s in &diff.scenarios {
             let _ = write!(
                 body,
                 r#"<li><span class="tag">{}</span><div><div class="t">{}</div>{}</div></li>"#,
-                scenario_tag(s.kind),
+                escape(&scenario_tag(s.kind)),
                 escape(&s.title),
                 s.detail.as_deref().map(|d| format!(r#"<div class="d">{}</div>"#, escape(d))).unwrap_or_default()
             );
@@ -458,23 +475,33 @@ pub fn diff_html(a: &Plan, b: &Plan, diff: &PlanDiff, name_a: &str, name_b: &str
         body.push_str("</ul>");
     }
     let (marks_a, marks_b) = diff_marks(diff);
-    body.push_str(r#"<h2>Plans</h2><div class="keys"><span class="key"><i class="tint"></i>Same color: the same steps in both plans</span><span class="key"><i class="changed"></i>Changed operator or index</span><span class="key"><i class="only"></i>Only in this plan</span></div>"#);
+    let _ = write!(
+        body,
+        r#"<h2>{}</h2><div class="keys"><span class="key"><i class="tint"></i>{}</span><span class="key"><i class="changed"></i>{}</span><span class="key"><i class="only"></i>{}</span></div>"#,
+        escape(&t!("engine.export.plans")),
+        escape(&t!("engine.export.page.key.same")),
+        escape(&t!("engine.export.page.key.changed")),
+        escape(&t!("engine.export.page.key.only"))
+    );
     for (badge, name, plan, marks, id) in [("A", name_a, &a, &marks_a, "a"), ("B", name_b, &b, &marks_b, "b")] {
+        let line = t!(
+            "engine.export.page.side_line",
+            engine = escape(plan_engine_label(plan)),
+            kind = kind_inline(plan.kind),
+            cost = estimated_cost(plan)
+        );
         let _ = write!(
             body,
-            r#"<div class="side"><div class="side-head"><span class="badge">{badge}</span><b>{}</b><span>{} · {} · cost {}</span></div><div class="wrap">{}</div></div>"#,
+            r#"<div class="side"><div class="side-head"><span class="badge">{badge}</span><b>{}</b><span>{line}</span></div><div class="wrap">{}</div></div>"#,
             escape(name),
-            escape(plan_engine_label(plan)),
-            kind_label(plan.kind).to_lowercase(),
-            estimated_cost(plan),
             diagram(plan, marks, None, name, id)
         );
     }
     body.push_str(&notes_html(&options.notes, &b));
     if let Some(s) = b.statement.as_deref().or(a.statement.as_deref()) {
-        let _ = write!(body, "<h2>Statement</h2><pre>{}</pre>", escape(s.trim()));
+        let _ = write!(body, "<h2>{}</h2><pre>{}</pre>", escape(&t!("engine.export.statement")), escape(s.trim()));
     }
-    page(&format!("Plan comparison: {title}"), &[plan_engine_label(&b).to_string()], &body, options)
+    page(&title, &[plan_engine_label(&b).to_string()], &body, options)
 }
 
 fn severity(f: &Finding) -> &'static str {
@@ -510,13 +537,9 @@ fn finding_body(
     let _ = write!(out, r#"<section class="finding"><{level}>{}</{level}>"#, escape(&finding.title));
     let _ = write!(
         out,
-        r#"<p class="sub"><span class="sev {}"></span>{} · {} · {} impact, {} confidence · {}</p>"#,
+        r#"<p class="sub"><span class="sev {}"></span>{}</p>"#,
         severity(finding),
-        escape(&finding.impact.label),
-        finding.actionability.label(),
-        format!("{:?}", finding.severity).to_lowercase(),
-        format!("{:?}", finding.confidence).to_lowercase(),
-        escape(&format!("{}, {} environment", s.server.product, environment_label(s.environment)))
+        escape(&finding_line(report, finding, finding.impact.label.clone()))
     );
     let _ = write!(out, "<p>{}</p>", escape(&finding.summary));
     if !finding.metrics.is_empty() {
@@ -547,8 +570,8 @@ fn finding_body(
         let w = s.workload.as_ref().expect("filtered on workload");
         let _ = write!(
             out,
-            r#"<h2>Query {}</h2><p class="qmeta">{}</p><pre>{}</pre>"#,
-            escape(&q.id),
+            r#"<h2>{}</h2><p class="qmeta">{}</p><pre>{}</pre>"#,
+            escape(&t!("engine.export.query", id = &q.id)),
             escape(&stats_line(w, q)),
             escape(&sql_text(&q.text, engine, options))
         );
@@ -556,63 +579,80 @@ fn finding_body(
             let plan = prepared(plan, options);
             // The step the finding names, else its plan's working step where the finding is about one.
             let focus = culprit_checks::finding_step(finding, r, &plan).map(|n| n.id);
+            let label = t!("engine.export.page.plan_of_query", id = &q.id);
             let _ = write!(
                 out,
                 r#"<div class="wrap" style="margin-top:12px">{}</div>"#,
-                diagram(&plan, &HashMap::new(), focus, &format!("Plan of query {}", q.id), &format!("f{index}q{qi}"))
+                diagram(&plan, &HashMap::new(), focus, &label, &format!("f{index}q{qi}"))
             );
             if let Some(node) = focus.and_then(|id| plan.nodes().into_iter().find(|n| n.id == id)) {
-                let pred = node.predicate.as_deref().or(node.seek_predicate.as_deref());
+                let step = format!("<b>{}</b>", escape(&node_label(node)));
+                let predicate = node
+                    .predicate
+                    .as_deref()
+                    .or(node.seek_predicate.as_deref())
+                    .map(|p| format!("<code>{}</code>", escape(&format::predicate(p))));
                 // A share only where the plan can state one, and rows only where it estimates them.
-                let mut details = Vec::new();
-                if plan.weighed() {
-                    if let Some(s) = culprit_checks::finding_step_share(&plan, node) {
-                        details.push(format!("{} of the plan's cost", format::percent(s)));
+                let share = plan.weighed().then(|| culprit_checks::finding_step_share(&plan, node));
+                let rows = || escape(&rows_phrase(node));
+                let said = match (share, predicate) {
+                    (None, None) => t!("engine.export.page.step.plain", step = step),
+                    (None, Some(predicate)) => t!("engine.export.page.step.on", step = step, predicate = predicate),
+                    (Some(None), None) => t!("engine.export.page.step.rows", step = step, rows = rows()),
+                    (Some(None), Some(predicate)) => {
+                        t!("engine.export.page.step.rows_on", step = step, rows = rows(), predicate = predicate)
                     }
-                    details.push(escape(&rows_phrase(node)));
-                }
-                if let Some(p) = pred {
-                    details.push(format!("on <code>{}</code>", escape(&format::predicate(p))));
-                }
+                    (Some(Some(s)), None) => {
+                        t!("engine.export.page.step.share_rows", step = step, share = format::percent(s), rows = rows())
+                    }
+                    (Some(Some(s)), Some(predicate)) => t!(
+                        "engine.export.page.step.share_rows_on",
+                        step = step,
+                        share = format::percent(s),
+                        rows = rows(),
+                        predicate = predicate
+                    ),
+                };
                 let why = culprit_checks::finding_no_share_reason(&plan, node, Some(q))
                     .map(|w| format!(" {}", escape(&w.replace('`', ""))))
                     .unwrap_or_default();
-                let _ = write!(
-                    out,
-                    r#"<p class="note" style="margin-top:8px">The outlined step: <b>{}</b>{}.{why}</p>"#,
-                    escape(&node_label(node)),
-                    details.iter().map(|d| format!(", {d}")).collect::<String>()
-                );
+                let _ = write!(out, r#"<p class="note" style="margin-top:8px">{said}{why}</p>"#);
             }
         }
     }
     if let Some(fix) = &finding.fix {
-        let _ = write!(out, r#"<h2>Fix</h2><div class="callout"><p>{}</p>"#, escape(&fix.summary));
+        let _ = write!(
+            out,
+            r#"<h2>{}</h2><div class="callout"><p>{}</p>"#,
+            escape(&t!("engine.export.fix")),
+            escape(&fix.summary)
+        );
         if let Some(sql) = &fix.sql {
             let _ = write!(out, "<pre>{}</pre>", escape(sql.trim()));
         }
         if let Some(c) = &fix.cost {
-            let _ = write!(out, r#"<p class="note" style="margin:10px 0 0">Cost: {}</p>"#, escape(c));
+            let _ = write!(
+                out,
+                r#"<p class="note" style="margin:10px 0 0">{}</p>"#,
+                escape(&t!("engine.export.cost", cost = c))
+            );
         }
         out.push_str("</div>");
     }
     if !finding.verify.is_empty() {
-        out.push_str(r#"<h2>How to verify</h2><ol class="verify">"#);
+        let _ = write!(out, r#"<h2>{}</h2><ol class="verify">"#, escape(&t!("engine.export.how_to_verify")));
         for step in &finding.verify {
             let _ = write!(out, "<li>{}</li>", escape(step));
         }
         // Only where a re-scan can show it gone: not for statements that stopped, nor on running totals.
         if culprit_checks::gone_after_rescan(shared.unwrap_or(report), finding) {
-            let _ = write!(
-                out,
-                "<li>After it ships, <code>culprit verify &lt;connection&gt; {}</code> re-scans and reports whether it's gone.</li>",
-                escape(&finding.id)
-            );
+            let command = format!("<code>culprit verify &lt;connection&gt; {}</code>", escape(&finding.id));
+            let _ = write!(out, "<li>{}</li>", t!("engine.export.page.verify_after", command = command));
         }
         out.push_str("</ol>");
     }
     if !finding.caveats.is_empty() {
-        out.push_str(r#"<h2>Before you act</h2><ul class="more">"#);
+        let _ = write!(out, r#"<h2>{}</h2><ul class="more">"#, escape(&t!("engine.export.before_you_act")));
         for c in &finding.caveats {
             let _ = write!(out, "<li>{}</li>", escape(c));
         }
@@ -634,21 +674,20 @@ pub fn finding_html(report: &Report, finding: &Finding, options: &ExportOptions)
         None => finding.title.clone(),
     };
     finding_body(&mut body, report, shared.as_ref(), finding, options, "h1", 0);
-    page(&title, &[report_engine_label(report).to_string(), format!("finding {}", finding.id)], &body, options)
+    let chip = t!("engine.export.page.finding_chip", id = &finding.id);
+    page(&title, &[report_engine_label(report).to_string(), chip], &body, options)
 }
 
 /// Every finding of a scan on one page, highest impact first.
 pub fn report_html(report: &Report, options: &ExportOptions) -> String {
     let n = report.findings.len();
     let mut body = format!(
-        r#"<h1>{n} opportunit{}</h1><p class="sub">{}, {} environment · scanned {}</p>"#,
-        if n == 1 { "y" } else { "ies" },
-        escape(&report.snapshot.server.product),
-        environment_label(report.snapshot.environment),
-        escape(&report.snapshot.taken_at)
+        r#"<h1>{}</h1><p class="sub">{}</p>"#,
+        escape(&t!("engine.export.page.opportunities", n = n, count = n.to_string())),
+        escape(&t!("engine.export.page.report_sub", server = server_line(report), when = &report.snapshot.taken_at))
     );
     if n == 0 {
-        body.push_str("<p>Nothing stands out.</p>");
+        let _ = write!(body, "<p>{}</p>", escape(&t!("engine.export.nothing_stands_out")));
     } else {
         let shared = options.redact.then(|| super::shared_report(report));
         body.push_str(r#"<ul class="scen" style="margin-top:18px">"#);
@@ -670,5 +709,5 @@ pub fn report_html(report: &Report, options: &ExportOptions) -> String {
             finding_body(&mut body, report, shared.as_ref(), f, options, "h1", i + 1);
         }
     }
-    page("Culprit report", &[report_engine_label(report).to_string()], &body, options)
+    page(&t!("engine.export.page.report_title"), &[report_engine_label(report).to_string()], &body, options)
 }
