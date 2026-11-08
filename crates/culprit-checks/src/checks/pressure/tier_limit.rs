@@ -104,7 +104,7 @@ fn tier_limit_finding(snapshot: &Snapshot, l: TierLimit) -> Finding {
         Category::Configuration,
         subject(SubjectKind::Database, snapshot.server.database.clone()),
     );
-    let span = t!("check.tier_limit.span", span = culprit_core::span_words(l.hours));
+    let span = culprit_core::last_span(l.hours);
     let share = format::percent(l.at_limit);
     let (name, caps, effect, fix, verify) = match l.resource {
         Resource::LogWrite => (

@@ -127,17 +127,27 @@ fn is_mariadb(snapshot: &Snapshot) -> bool {
 }
 
 /// "in the last 7 days" for windowed sources, "since its statistics began 1277 days ago" otherwise: spans in the words
-/// every window is said in ([`culprit_core::span_words`]), never "1277.0 days".
+/// every window is said in ([`culprit_core::last_span`]), never "1277.0 days".
 fn window_phrase(snapshot: &Snapshot) -> String {
     match snapshot.workload.as_ref() {
         Some(w) if w.log.is_some() => t!("common.signals.window.over", window = w.window_phrase()),
         Some(w) if w.is_windowed() => {
-            t!("common.signals.window.last", span = culprit_core::span_words(w.measurement_hours()))
+            t!("common.signals.window.in", window = culprit_core::last_span(w.measurement_hours()))
         }
-        Some(w) if w.measurement_hours() > 0.0 => {
-            t!("common.signals.window.began_ago", span = culprit_core::span_words(w.measurement_hours()))
-        }
+        Some(w) if w.measurement_hours() > 0.0 => began_ago(w.measurement_hours()),
         _ => t!("common.signals.window.began"),
+    }
+}
+
+/// "since its statistics began 1277 days ago", worded whole per unit as [`culprit_core::last_span`] is.
+fn began_ago(hours: f64) -> String {
+    let count = |n: f64| format::digits(format!("{n}"));
+    match culprit_core::span_length(hours) {
+        culprit_core::SpanLength::Days(n) => t!("common.signals.window.began_days_ago", n = n, count = count(n)),
+        culprit_core::SpanLength::Hours(n) => t!("common.signals.window.began_hours_ago", n = n, count = count(n)),
+        culprit_core::SpanLength::Minutes(n) => {
+            t!("common.signals.window.began_minutes_ago", n = n, count = count(n))
+        }
     }
 }
 

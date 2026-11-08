@@ -211,7 +211,7 @@ fn pattern_finding(snapshot: &Snapshot, p: Pattern<'_>) -> Finding {
         let window = if (p.since_hours - 24.0).abs() < 0.01 {
             t!("check.deadlocks.window.last_day")
         } else {
-            t!("check.deadlocks.window.last", span = culprit_core::span_words(p.since_hours))
+            culprit_core::last_span(p.since_hours)
         };
         if undated > 0 {
             t!(

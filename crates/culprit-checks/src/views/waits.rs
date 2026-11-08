@@ -4,9 +4,10 @@
 use std::collections::BTreeMap;
 
 use culprit_core::waits::{category_info, category_key};
+use culprit_core::i18n::Arg;
 use culprit_core::{
-    ActivityCategory, ActivityQuery, ActivityReport, Capability, Engine, QueryStat, Snapshot, WaitCategory, WaitQuery,
-    WaitScope, WaitsReport, format, span_words, t,
+    ActivityCategory, ActivityQuery, ActivityReport, Capability, Engine, QueryStat, Snapshot, SpanLength, WaitCategory,
+    WaitQuery, WaitScope, WaitsReport, format, key, last_span, since_reset_span, span_length, t,
 };
 
 use crate::support::{app_queries, setting_change};
@@ -224,44 +225,78 @@ fn waits_capture_note(snapshot: &Snapshot) -> String {
 
 fn scope_and_source(snapshot: &Snapshot) -> (WaitScope, String) {
     let engine = snapshot.server.engine;
-    // The workload's period in words; none without a workload.
-    let window = snapshot.workload.as_ref().map(|w| span_words(w.measurement_hours()));
-    let uptime = snapshot.pressure.as_ref().and_then(|p| p.uptime_hours).map(span_words);
+    // The workload's period, in hours; none without a workload (waits a statement carries come with one).
+    let hours = snapshot.workload.as_ref().map(|w| w.measurement_hours());
+    let uptime = snapshot.pressure.as_ref().and_then(|p| p.uptime_hours);
     let attributed = app_queries(snapshot).any(|q| q.waits.iter().any(|w| w.wait_ms > 0.0));
     match engine {
         Engine::Yugabyte => (WaitScope::Statements, t!("view.waits.source.yugabyte")),
         Engine::Sqlite => (WaitScope::SinceStartup, t!("view.waits.source.sqlite")),
         Engine::Mssql if attributed => {
-            (WaitScope::Window, t!("view.waits.source.query_store", window = window.unwrap_or_default()))
+            let keys = [
+                key!("view.waits.source.query_store_days"),
+                key!("view.waits.source.query_store_hours"),
+                key!("view.waits.source.query_store_minutes"),
+            ];
+            (WaitScope::Window, per_unit(hours.unwrap_or_default(), keys, &[]))
         }
         Engine::Mssql => (
             WaitScope::SinceStartup,
             match uptime {
-                Some(uptime) => t!("view.waits.source.server_totals_uptime", uptime = uptime),
+                Some(uptime) => {
+                    let keys = [
+                        key!("view.waits.source.server_totals_days_ago"),
+                        key!("view.waits.source.server_totals_hours_ago"),
+                        key!("view.waits.source.server_totals_minutes_ago"),
+                    ];
+                    per_unit(uptime, keys, &[])
+                }
                 None => t!("view.waits.source.server_totals"),
             },
         ),
         Engine::Postgres => (
             WaitScope::Statements,
-            match window {
-                Some(window) => t!("view.waits.source.pg_stat_statements_window", window = window),
+            match hours {
+                Some(hours) => t!("view.waits.source.pg_stat_statements_window", window = since_reset_span(hours)),
                 None => t!("view.waits.source.pg_stat_statements"),
             },
         ),
-        Engine::Mysql if !snapshot.server.has(Capability::PerformanceSchema) => {
-            (WaitScope::Statements, t!("view.waits.source.slow_log", window = window.unwrap_or_default()))
-        }
+        Engine::Mysql if !snapshot.server.has(Capability::PerformanceSchema) => (
+            WaitScope::Statements,
+            t!("view.waits.source.slow_log", window = last_span(hours.unwrap_or_default())),
+        ),
         Engine::Mysql => {
             let name = snapshot.server.name();
             (
                 WaitScope::SinceStartup,
                 match uptime {
-                    Some(uptime) => t!("view.waits.source.performance_schema_uptime", server = name, uptime = uptime),
+                    Some(uptime) => {
+                        let keys = [
+                            key!("view.waits.source.performance_schema_days_ago"),
+                            key!("view.waits.source.performance_schema_hours_ago"),
+                            key!("view.waits.source.performance_schema_minutes_ago"),
+                        ];
+                        per_unit(uptime, keys, &[("server", Arg::from(name))])
+                    }
                     None => t!("view.waits.source.performance_schema", server = name),
                 },
             )
         }
     }
+}
+
+/// A sentence about a period of `hours`, worded whole per unit as [`culprit_core::span_words`] rounds it: `keys` are
+/// its messages for days, hours and minutes, each given the number as `n` (for its plural) and `count` (as written),
+/// beside `args`.
+fn per_unit(hours: f64, keys: [&str; 3], args: &[(&str, Arg)]) -> String {
+    let (key, n) = match span_length(hours) {
+        SpanLength::Days(n) => (keys[0], n),
+        SpanLength::Hours(n) => (keys[1], n),
+        SpanLength::Minutes(n) => (keys[2], n),
+    };
+    let mut all = vec![("n", Arg::Number(n)), ("count", Arg::Text(format::digits(format!("{n}"))))];
+    all.extend(args.iter().cloned());
+    culprit_core::i18n::t(key, &all)
 }
 
 /// Each query's wait time per shared category key.
