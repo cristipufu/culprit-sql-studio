@@ -160,7 +160,7 @@ pub(super) fn create_index_advice<'s>(
             let instead = heavy.as_ref().and_then(|h| {
                 let used = indexes_read_through(h.query, &ix.schema, &ix.table);
                 (!used.is_empty() && !used.iter().any(|u| u.eq_ignore_ascii_case(&index.name)))
-                    .then(|| (h.query.id.as_str(), used))
+                    .then_some((h.query.id.as_str(), used))
             });
             Leading { index, keys, instead }
         })),
