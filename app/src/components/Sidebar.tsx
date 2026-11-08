@@ -121,7 +121,7 @@ export function Sidebar() {
         <ChevronsUpDown size={14} className="chev" />
       </button>
       <button type="button" className="side-search" onClick={() => setState({ palette: true })} aria-label={keys(t("ui.sidebar.search_label"))}>
-        <Search size={13} /> {t("ui.sidebar.search")} <span className="kbd">{keys("⌘K")}</span>
+        <Search size={13} /> <span className="side-search-text">{t("ui.sidebar.search")}</span> <span className="kbd">{keys("⌘K")}</span>
       </button>
       {(
         <nav className="nav">

@@ -12284,6 +12284,15 @@ button.as-callout:hover {
 
 .side-search .kbd {
   margin-left: auto;
+  flex: none;
+}
+
+/* One line in every language: a longer label ends in an ellipsis instead of wrapping the box. */
+.side-search-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .theme-seg {
