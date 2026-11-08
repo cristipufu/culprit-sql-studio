@@ -562,6 +562,89 @@ mod tests {
         assert!(!why.contains("heaviest"), "{why}");
     }
 
+    // What the periods and their notes say, word for word, as they said it before their words moved into the catalog.
+    #[test]
+    fn periods_and_their_notes_say_what_they_said() {
+        let now = epoch("2026-10-11T12:00:00Z").unwrap();
+        let error = |request: ChangeRequest| {
+            let e = resolve(&request, (now - 86_400.0, now)).unwrap_err();
+            format!("{} | {}", e.message, e.hint.unwrap_or_default())
+        };
+        assert_eq!(
+            error(ChangeRequest { since: Some("yesterday".into()), ..Default::default() }),
+            "`since` isn't a timestamp: yesterday | Use ISO 8601 with a time zone, e.g. 2026-10-11T14:05:00Z"
+        );
+        assert_eq!(
+            error(ChangeRequest { since: Some("2026-10-11T13:00:00Z".into()), ..Default::default() }),
+            "The recent period is empty: its start must come before its end | "
+        );
+        assert_eq!(
+            error(ChangeRequest {
+                baseline_start: Some("2026-10-11T02:00:00Z".into()),
+                baseline_end: Some("2026-10-11T01:00:00Z".into()),
+                ..Default::default()
+            }),
+            "The baseline period is empty: its start must come before its end | "
+        );
+        let p = Period { start: "2026-10-11T00:00:00Z".into(), end: "2026-10-11T06:00:00Z".into() };
+        let few = from_scans(&[counters("2026-10-11T00:00:00Z", [1.0, 1.0], &[])], &p, &p);
+        assert_eq!(
+            few.notes,
+            ["Comparing two periods needs at least three scans of this database; Culprit has 1. Scan again later (each \
+              scan marks a point in time)."]
+        );
+        assert_eq!(few.unavailable.as_deref(), Some(few.notes[0].as_str()));
+        let history = vec![
+            counters("2026-10-11T00:00:00Z", [900_000.0, 50_000.0], &[("a", 100.0, 10.0, None), ("b", 5.0, 5.0, None)]),
+            counters("2026-10-11T06:00:00Z", [900_300.0, 50_030.0], &[("a", 400.0, 40.0, None), ("b", 9.0, 9.0, None)]),
+            counters("2026-10-11T12:00:00Z", [5_000.0, 500.0], &[("a", 700.0, 70.0, None), ("c", 40.0, 20.0, None)]),
+        ];
+        let before = Period { start: "2026-10-10T18:00:00Z".into(), end: "2026-10-11T00:00:00Z".into() };
+        let outside = from_scans(&history, &before, &before);
+        assert_eq!(outside.notes, ["The scans Culprit has don't fall inside both periods; pick a longer range."]);
+        let (baseline, recent) = default_scan_periods(&history).unwrap();
+        let data = from_scans(&history, &baseline, &recent);
+        assert_eq!(
+            data.notes,
+            [
+                "Periods follow Culprit's scans: 3 scans between Sun 00:00 UTC and Sun 12:00 UTC.",
+                "Between some of these scans the source's totals shrank without a reset (entries evicted or plans \
+                 dropped), so those stretches count only what the statements still tracked grew by: totals there are a \
+                 lower bound."
+            ]
+        );
+        let untracked = |data: &PeriodData, id: &str| {
+            data.queries.iter().find(|q| q.query_id == id).and_then(|q| q.untracked.clone()).unwrap_or_default()
+        };
+        assert_eq!(
+            untracked(&data, "b"),
+            "it's no longer among the heaviest queries Culprit tracks, and the source doesn't say when it last ran"
+        );
+        let late = vec![
+            counters("2026-10-11T00:00:00Z", [100.0, 100.0], &[("a", 100.0, 100.0, None)]),
+            counters("2026-10-11T06:00:00Z", [200.0, 200.0], &[("a", 150.0, 150.0, None), ("c", 10.0, 5.0, None)]),
+            counters("2026-10-11T12:00:00Z", [300.0, 300.0], &[("a", 200.0, 200.0, None), ("c", 50.0, 25.0, None)]),
+        ];
+        let (baseline, recent) = default_scan_periods(&late).unwrap();
+        assert_eq!(
+            untracked(&from_scans(&late, &baseline, &recent), "c"),
+            "Culprit's earlier scans didn't track it (it wasn't among the heaviest queries then)"
+        );
+        let mut reset = counters("2026-10-11T12:00:00Z", [500.0, 50.0], &[("a", 500.0, 50.0, None)]);
+        reset.measurement.as_mut().unwrap().reset = culprit_core::ResetMarker::At("2026-10-11T07:00:00Z".into());
+        let empty = vec![
+            counters("2026-10-11T00:00:00Z", [0.0, 0.0], &[]),
+            counters("2026-10-11T06:00:00Z", [0.0, 0.0], &[]),
+            reset,
+        ];
+        let (baseline, recent) = default_scan_periods(&empty).unwrap();
+        assert_eq!(
+            untracked(&from_scans(&empty, &baseline, &recent), "a"),
+            "Culprit's scans before then recorded no queries at all (the statistics were empty, for example just \
+             reset), so there is nothing to compare it with"
+        );
+    }
+
     #[test]
     fn too_few_scans_say_so() {
         let history = vec![counters("2026-10-11T00:00:00Z", [1.0, 1.0], &[])];
