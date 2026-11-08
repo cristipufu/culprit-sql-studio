@@ -189,3 +189,47 @@ fn virtual_table_sizes_do_not_turn_a_small_files_statistics_into_a_warning() {
     s.tables.push(virtual_table);
     assert!(!analyze(s).findings.iter().any(|f| f.id == "config:sqlite-statistics"));
 }
+
+// What repeated-request says, word for word, of a statement repeated within logged requests, with the sample whole and
+// cut at its limit: its messages come from locales/en.json.
+#[test]
+fn repeated_requests_say_what_the_log_shows_in_english() {
+    assert_eq!(
+        crate::info("repeated-request"),
+        "Repeated statements within logged requests\n\
+        Repeated SQL shapes correlated by explicit request_id in structured logs. Repetition identifies a caller to inspect; it does not prove an N+1 bug or removable work."
+    );
+    let said = |sample_truncated: bool| {
+        let mut s = demo();
+        let q = &mut s.workload.as_mut().expect("the log's statements").queries[0];
+        q.requests = Some(culprit_core::operations::RequestEvidence {
+            requests: 1_500,
+            repeated_requests: 1_200,
+            most_calls: 42,
+            sample_truncated,
+        });
+        let id = format!("repeated-request:{}", q.id);
+        crate::words(analyze(s).findings.iter().find(|f| f.id == id).expect("a repeated statement"))
+    };
+    assert_eq!(
+        [said(false), said(true)],
+        [
+            "The same statement repeats at least 10 times in 1200 logged requests · Low · Medium\n\
+            Explicit request_id values correlate this statement with 1500 recorded requests; one contains 42 timed SQL records. Repeated per-object loads, intentional batches or retries can explain this. The log does not prove an N+1 bug, network round trips or redundant work. Request identifiers are hashed during reading and are not stored in the report.\n\
+            impact: 1200 repeated request groups\n\
+            metric: Logged request groups\n\
+            metric: Groups with at least 10 calls\n\
+            metric: Most calls in one group\n\
+            fix: Inspect the caller for the correlated request groups. If it loads one object at a time unnecessarily, test a set-based query or appropriate eager loading while preserving ordering, permissions, limits and result semantics. Keep required batches and retries; SQLite's embedded calls have no server network round trip.\n\
+            verify: Compare equivalent request groups before and after: unnecessary SQL records and total time should fall while results, permission boundaries and retry correctness remain the same.",
+            "The same statement repeats at least 10 times in 1200 logged requests · Low · Medium\n\
+            Explicit request_id values correlate this statement with 1500 recorded requests; one contains 42 timed SQL records. Repeated per-object loads, intentional batches or retries can explain this. The log does not prove an N+1 bug, network round trips or redundant work. Request counting reached its bounded sample limit; these counts are a lower bound. Request identifiers are hashed during reading and are not stored in the report.\n\
+            impact: 1200 repeated request groups\n\
+            metric: Logged request groups\n\
+            metric: Groups with at least 10 calls\n\
+            metric: Most calls in one group\n\
+            fix: Inspect the caller for the correlated request groups. If it loads one object at a time unnecessarily, test a set-based query or appropriate eager loading while preserving ordering, permissions, limits and result semantics. Keep required batches and retries; SQLite's embedded calls have no server network round trip.\n\
+            verify: Compare equivalent request groups before and after: unnecessary SQL records and total time should fall while results, permission boundaries and retry correctness remain the same.",
+        ]
+    );
+}
