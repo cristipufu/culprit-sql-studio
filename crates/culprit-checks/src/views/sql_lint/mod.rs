@@ -14,7 +14,7 @@ mod lex;
 #[cfg(test)]
 mod tests;
 
-use culprit_core::{Engine, Finding, Metric, Snapshot, TableStat, Unit, format};
+use culprit_core::{Engine, Finding, Metric, Snapshot, TableStat, Unit, format, t};
 
 use alter_table::{check_alter_table, collect_validated_constraint_tables};
 use index_ddl::{
@@ -216,19 +216,19 @@ pub(super) fn table_bytes(t: &TableStat) -> f64 {
 
 pub(super) fn table_size_label(rows: f64, bytes: f64) -> String {
     match (rows > 0.0, bytes > 0.0) {
-        (true, true) => format!("{} rows, {}", format::count(rows), format::bytes(bytes)),
-        (true, false) => format!("{} rows", format::count(rows)),
+        (true, true) => t!("view.sql_lint.size.rows_bytes", rows = format::count(rows), size = format::bytes(bytes)),
+        (true, false) => t!("view.sql_lint.size.rows", rows = format::count(rows)),
         (false, true) => format::bytes(bytes),
-        (false, false) => "large table".into(),
+        (false, false) => t!("view.sql_lint.size.unknown"),
     }
 }
 
 pub(super) fn push_table_metrics(f: &mut Finding, rows: f64, bytes: f64) {
     if rows > 0.0 {
-        f.metrics.push(Metric::new("Rows in snapshot", rows, Unit::Rows));
+        f.metrics.push(Metric::new(t!("view.sql_lint.metric.rows"), rows, Unit::Rows));
     }
     if bytes > 0.0 {
-        f.metrics.push(Metric::new("Table size in snapshot", bytes, Unit::Bytes));
+        f.metrics.push(Metric::new(t!("view.sql_lint.metric.size"), bytes, Unit::Bytes));
     }
 }
 

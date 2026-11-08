@@ -1,7 +1,7 @@
 //! `ALTER TABLE` rewrites, foreign-key additions, constraint validation, and type-change checks.
 
 use culprit_core::{
-    Actionability, Category, Confidence, Engine, Finding, Fix, Severity, Snapshot, SubjectKind, TableStat,
+    Actionability, Category, Confidence, Engine, Finding, Fix, Severity, Snapshot, SubjectKind, TableStat, t,
 };
 
 use crate::support::{base_score, finding, subject};
@@ -114,30 +114,18 @@ pub(super) fn check_alter_table(
         f.confidence = Confidence::High;
         f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
         f.impact.score = base_score(f.severity);
-        f.impact.label = table_size_label(rows, bytes);
-        f.title = format!(
-            "ALTER TABLE on {} ({}) without LOCK=NONE or ALGORITHM=INSTANT can lock the table",
-            table.name,
-            table_size_label(rows, bytes)
-        );
-        f.summary = format!(
-            "The statement `{}` alters {} ({}) without specifying `ALGORITHM=INSTANT` or `ALGORITHM=INPLACE, \
-             LOCK=NONE`. Without an explicit online DDL clause, MySQL/MariaDB can fall back to `ALGORITHM=COPY` or \
-             `LOCK=SHARED`, blocking concurrent writes while rebuilding the table.",
-            compact_sql(stmt),
-            qual,
-            table_size_label(rows, bytes)
-        );
+        let size = table_size_label(rows, bytes);
+        f.impact.label = size.clone();
+        f.title = t!("view.sql_lint.mysql_online_ddl.title", table = &table.name, size = &size);
+        f.summary = t!("view.sql_lint.mysql_online_ddl.summary", sql = compact_sql(stmt), table = &qual, size = size);
         let can_append = !upper.iter().any(|t| matches!(t.as_str(), "ALGORITHM" | "LOCK"));
         f.fix = Some(Fix {
-            summary: "Append `ALGORITHM=INPLACE, LOCK=NONE` (or `ALGORITHM=INSTANT` for compatible column additions on MySQL 8.0+) so the database rejects any blocking table copy immediately.".into(),
+            summary: t!("view.sql_lint.mysql_online_ddl.fix"),
             sql: can_append.then(|| append_sql_clause(stmt, ", ALGORITHM=INPLACE, LOCK=NONE;")),
             cost: None,
         });
         push_table_metrics(&mut f, rows, bytes);
-        f.verify = vec![
-            "Re-run `culprit lint-sql` after adding `ALGORITHM=INPLACE, LOCK=NONE` or `ALGORITHM=INSTANT`.".into(),
-        ];
+        f.verify = vec![t!("view.sql_lint.mysql_online_ddl.verify")];
         findings.push(f);
     }
 }
@@ -331,31 +319,27 @@ fn check_add_not_null_without_default(
         f.confidence = Confidence::High;
         f.severity = Severity::High;
         f.impact.score = base_score(f.severity);
-        f.impact.label = "fails on existing rows".into();
-        f.title = format!(
-            "ADD COLUMN {}.{} NOT NULL without DEFAULT fails on non-empty table ({})",
-            table.name,
-            col_name,
-            table_size_label(rows, bytes)
+        let size = table_size_label(rows, bytes);
+        f.impact.label = t!("view.sql_lint.not_null_without_default.impact");
+        f.title = t!(
+            "view.sql_lint.not_null_without_default.title",
+            column = format!("{}.{col_name}", table.name),
+            size = &size
         );
-        f.summary = format!(
-            "The statement `{}` adds `{col_name}` as `NOT NULL` without a `DEFAULT` clause to {} ({}). \
-             Because existing rows would receive `NULL` for `{col_name}`, the database rejects the \
-             statement immediately at runtime.",
-            compact_sql(scope.stmt),
-            qual,
-            table_size_label(rows, bytes)
+        f.summary = t!(
+            "view.sql_lint.not_null_without_default.summary",
+            sql = compact_sql(scope.stmt),
+            column = &col_name,
+            table = &qual,
+            size = size
         );
         f.fix = Some(Fix {
-            summary: format!(
-                "Either supply a non-volatile `DEFAULT` value, or add `{col_name}` as nullable first, backfill existing rows, and then enforce `NOT NULL`."
-            ),
+            summary: t!("view.sql_lint.not_null_without_default.fix", column = &col_name),
             sql: None,
             cost: None,
         });
         push_table_metrics(&mut f, rows, bytes);
-        f.verify =
-            vec!["Re-run `culprit lint-sql` after adding a `DEFAULT` or making the initial column nullable.".into()];
+        f.verify = vec![t!("view.sql_lint.not_null_without_default.verify")];
         findings.push(f);
     }
 }
@@ -396,30 +380,28 @@ fn check_postgres_constraint_additions(
         f.confidence = Confidence::High;
         f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
         f.impact.score = base_score(f.severity);
-        f.impact.label = table_size_label(rows, bytes);
-        f.title = format!(
-            "ADD {kind} constraint on {} ({}) without NOT VALID scans the table under a lock",
-            table.name,
-            table_size_label(rows, bytes)
-        );
-        f.summary = format!(
-            "The statement `{}` adds a {kind} constraint on {} ({}) without `NOT VALID`. PostgreSQL validates \
-             every existing row immediately while holding a `SHARE ROW EXCLUSIVE` / `ACCESS EXCLUSIVE` lock that \
-             blocks writes on {}.",
-            compact_sql(scope.stmt),
-            qual,
-            table_size_label(rows, bytes),
-            table.name
+        let size = table_size_label(rows, bytes);
+        f.impact.label = size.clone();
+        f.title = t!("view.sql_lint.unvalidated_constraint.title", kind = kind, table = &table.name, size = &size);
+        f.summary = t!(
+            "view.sql_lint.unvalidated_constraint.summary",
+            sql = compact_sql(scope.stmt),
+            kind = kind,
+            table = &qual,
+            size = size,
+            name = &table.name
         );
         f.fix = Some(Fix {
-            summary: format!(
-                "Add the {kind} constraint with `NOT VALID` first, then run `ALTER TABLE {qual} VALIDATE CONSTRAINT {cname};` in a separate step (which only holds `SHARE UPDATE EXCLUSIVE` and allows concurrent reads and writes)."
+            summary: t!(
+                "view.sql_lint.unvalidated_constraint.fix",
+                kind = kind,
+                validate = format!("ALTER TABLE {qual} VALIDATE CONSTRAINT {cname};")
             ),
             sql: None,
             cost: None,
         });
         push_table_metrics(&mut f, rows, bytes);
-        f.verify = vec!["Re-run `culprit lint-sql` after adding `NOT VALID` to the constraint definition.".into()];
+        f.verify = vec![t!("view.sql_lint.unvalidated_constraint.verify")];
         findings.push(f);
     } else if (is_unique || is_pk) && !has_using_index {
         let kind = if is_pk { "PRIMARY KEY" } else { "UNIQUE" };
@@ -438,32 +420,27 @@ fn check_postgres_constraint_additions(
         f.confidence = Confidence::High;
         f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
         f.impact.score = base_score(f.severity);
-        f.impact.label = table_size_label(rows, bytes);
-        f.title = format!(
-            "ADD {kind} constraint on {} ({}) without USING INDEX builds the index under an ACCESS EXCLUSIVE lock",
-            table.name,
-            table_size_label(rows, bytes)
-        );
-        f.summary = format!(
-            "The statement `{}` adds a {kind} constraint on {} ({}) directly. PostgreSQL builds the backing unique \
-             index while holding an `ACCESS EXCLUSIVE` lock on {}, blocking all reads and writes until the index \
-             build finishes.",
-            compact_sql(scope.stmt),
-            qual,
-            table_size_label(rows, bytes),
-            table.name
+        let size = table_size_label(rows, bytes);
+        f.impact.label = size.clone();
+        f.title = t!("view.sql_lint.blocking_unique.title", kind = kind, table = &table.name, size = &size);
+        f.summary = t!(
+            "view.sql_lint.blocking_unique.summary",
+            sql = compact_sql(scope.stmt),
+            kind = kind,
+            table = &qual,
+            size = size,
+            name = &table.name
         );
         f.fix = Some(Fix {
-            summary: format!(
-                "Build the unique index first with `CREATE UNIQUE INDEX CONCURRENTLY`, then attach it with `ALTER TABLE {qual} ADD CONSTRAINT {cname} {kind} USING INDEX <index_name>;`."
+            summary: t!(
+                "view.sql_lint.blocking_unique.fix",
+                attach = format!("ALTER TABLE {qual} ADD CONSTRAINT {cname} {kind} USING INDEX <index_name>;")
             ),
             sql: None,
             cost: None,
         });
         push_table_metrics(&mut f, rows, bytes);
-        f.verify = vec![
-            "Re-run `culprit lint-sql` after switching to `CREATE UNIQUE INDEX CONCURRENTLY` + `ADD CONSTRAINT ... USING INDEX`.".into(),
-        ];
+        f.verify = vec![t!("view.sql_lint.blocking_unique.verify")];
         findings.push(f);
     }
 }
@@ -514,31 +491,33 @@ fn check_add_volatile_default(
         f.confidence = Confidence::High;
         f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
         f.impact.score = base_score(f.severity);
-        f.impact.label = table_size_label(rows, bytes);
-        f.title = format!(
-            "ADD COLUMN {}.{} with volatile DEFAULT {}() rewrites the table ({})",
-            table.name,
-            col_name,
-            fn_display,
-            table_size_label(rows, bytes)
+        let size = table_size_label(rows, bytes);
+        f.impact.label = size.clone();
+        f.title = t!(
+            "view.sql_lint.volatile_default.title",
+            column = format!("{}.{col_name}", table.name),
+            function = &fn_display,
+            size = &size
         );
-        f.summary = format!(
-            "The statement `{}` adds `{col_name}` to {} ({}) with volatile `DEFAULT {fn_display}()`, which \
-             cannot use metadata-only fast defaults because every existing row requires a newly evaluated \
-             value. The engine rewrites every row and index while holding an exclusive table lock.",
-            compact_sql(scope.stmt),
-            qual,
-            table_size_label(rows, bytes)
+        f.summary = t!(
+            "view.sql_lint.volatile_default.summary",
+            sql = compact_sql(scope.stmt),
+            column = &col_name,
+            table = &qual,
+            size = size,
+            function = &fn_display
         );
         f.fix = Some(Fix {
-            summary: format!(
-                "Add `{col_name}` without a default, backfill existing rows in batches, and then set `ALTER TABLE {qual} ALTER COLUMN {col_name} SET DEFAULT {fn_display}();`."
+            summary: t!(
+                "view.sql_lint.volatile_default.fix",
+                column = &col_name,
+                set_default = format!("ALTER TABLE {qual} ALTER COLUMN {col_name} SET DEFAULT {fn_display}();")
             ),
             sql: None,
             cost: None,
         });
         push_table_metrics(&mut f, rows, bytes);
-        f.verify = vec!["Verify in staging with `SET lock_timeout = '2s'` before running on production.".into()];
+        f.verify = vec![t!("view.sql_lint.verify.lock_timeout")];
         findings.push(f);
     }
 }
@@ -604,28 +583,19 @@ fn check_column_type_or_set_not_null(
         f.confidence = Confidence::High;
         f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
         f.impact.score = base_score(f.severity);
-        f.impact.label = table_size_label(rows, bytes);
-        f.title = format!(
-            "Column type change on {} ({}) can rewrite the table under an exclusive lock",
-            table.name,
-            table_size_label(rows, bytes)
+        let size = table_size_label(rows, bytes);
+        f.impact.label = size.clone();
+        f.title = t!("view.sql_lint.table_rewrite.title", table = &table.name, size = &size);
+        f.summary = t!(
+            "view.sql_lint.table_rewrite.summary",
+            sql = compact_sql(scope.stmt),
+            table = &qual,
+            size = size,
+            name = &table.name
         );
-        f.summary = format!(
-            "The statement `{}` alters a column type on {} ({}). Changing a column's representation rewrites \
-             every row and index while holding an `ACCESS EXCLUSIVE` / schema-modification lock, blocking all \
-             reads and writes on {}.",
-            compact_sql(scope.stmt),
-            qual,
-            table_size_label(rows, bytes),
-            table.name
-        );
-        f.fix = Some(Fix {
-            summary: "Prefer an expand-and-contract migration (add a new column, backfill in small batches, swap reads/writes) unless the engine guarantees a metadata-only cast.".into(),
-            sql: None,
-            cost: None,
-        });
+        f.fix = Some(Fix { summary: t!("view.sql_lint.table_rewrite.fix"), sql: None, cost: None });
         push_table_metrics(&mut f, rows, bytes);
-        f.verify = vec!["Verify in staging with `SET lock_timeout = '2s'` before running on production.".into()];
+        f.verify = vec![t!("view.sql_lint.verify.lock_timeout")];
         findings.push(f);
     } else if has_set_not_null
         && scope.snapshot.server.engine == Engine::Postgres
@@ -642,26 +612,13 @@ fn check_column_type_or_set_not_null(
         f.confidence = Confidence::High;
         f.severity = Severity::Medium;
         f.impact.score = base_score(f.severity);
-        f.impact.label = table_size_label(rows, bytes);
-        f.title = format!(
-            "SET NOT NULL on {} ({}) scans the table under an ACCESS EXCLUSIVE lock unless backed by a valid constraint",
-            table.name,
-            table_size_label(rows, bytes)
-        );
-        f.summary = format!(
-            "The statement `{}` runs `SET NOT NULL` on {} ({}). Without an existing validated `CHECK (col IS NOT \
-             NULL)` constraint, PostgreSQL scans the entire table while holding an `ACCESS EXCLUSIVE` lock.",
-            compact_sql(scope.stmt),
-            qual,
-            table_size_label(rows, bytes)
-        );
-        f.fix = Some(Fix {
-            summary: "Add `CHECK (col IS NOT NULL) NOT VALID`, run `ALTER TABLE ... VALIDATE CONSTRAINT ...` (which only takes `SHARE UPDATE EXCLUSIVE`), and then run `SET NOT NULL`.".into(),
-            sql: None,
-            cost: None,
-        });
+        let size = table_size_label(rows, bytes);
+        f.impact.label = size.clone();
+        f.title = t!("view.sql_lint.set_not_null.title", table = &table.name, size = &size);
+        f.summary = t!("view.sql_lint.set_not_null.summary", sql = compact_sql(scope.stmt), table = &qual, size = size);
+        f.fix = Some(Fix { summary: t!("view.sql_lint.set_not_null.fix"), sql: None, cost: None });
         push_table_metrics(&mut f, rows, bytes);
-        f.verify = vec!["Re-run `culprit lint-sql` after splitting the constraint validation step.".into()];
+        f.verify = vec![t!("view.sql_lint.set_not_null.verify")];
         findings.push(f);
     }
 }
@@ -721,28 +678,25 @@ fn check_foreign_key_addition(
         f.confidence = Confidence::High;
         f.severity = if is_large_table(child_table) { Severity::High } else { Severity::Medium };
         f.impact.score = base_score(f.severity);
-        f.impact.label = "unindexed FK".into();
-        f.title = format!("New foreign key on {}.({}) has no supporting index", child_table.name, cols_label);
-        f.summary = format!(
-            "The statement `{}` adds a foreign key on {}.({}) referencing {}, but neither the snapshot nor the migration \
-             defines an index with ({}) as its leading key. Deletes or key updates on the referenced parent table \
-             will scan {} on every check.",
-            compact_sql(stmt),
-            child_qual,
-            cols_label,
-            raw_parent,
-            cols_label,
-            child_table.name
+        f.impact.label = t!("view.sql_lint.unindexed_fk.impact");
+        f.title = t!("view.sql_lint.unindexed_fk.title", table = &child_table.name, columns = &cols_label);
+        f.summary = t!(
+            "view.sql_lint.unindexed_fk.summary",
+            sql = compact_sql(stmt),
+            table = &child_qual,
+            columns = &cols_label,
+            parent = raw_parent,
+            name = &child_table.name
         );
         let pg_in_tx = ctx.in_transaction && snapshot.server.engine == Engine::Postgres;
         f.fix = Some(Fix {
-            summary: format!("Create an index on {child_qual} ({cols_label}) before or alongside the foreign key."),
+            summary: t!("view.sql_lint.unindexed_fk.fix", table = &child_qual, columns = &cols_label),
             sql: (!pg_in_tx).then(|| {
                 crate::support::create_index_sql(snapshot, &child_table.schema, &child_table.name, child_cols, &[])
             }),
             cost: None,
         });
-        f.verify = vec!["Add the supporting `CREATE INDEX` to the migration and re-run `culprit lint-sql`.".into()];
+        f.verify = vec![t!("view.sql_lint.unindexed_fk.verify")];
         findings.push(f);
     }
 
@@ -771,35 +725,36 @@ fn check_foreign_key_addition(
                 f.confidence = Confidence::High;
                 f.severity = Severity::Medium;
                 f.impact.score = base_score(f.severity);
-                f.impact.label = format!("{} vs {}", c.data_type, p.data_type);
-                f.title = format!(
-                    "Foreign key {}.{} ({}) does not match {}.{} ({})",
-                    child_table.name, c.name, c.data_type, parent_table.name, p.name, p.data_type
+                let (child, parent) =
+                    (format!("{child_qual}.{}", c.name), format!("{}.{}", parent_table.qualified(), p.name));
+                f.impact.label =
+                    t!("view.sql_lint.fk_type_mismatch.impact", child_type = &c.data_type, parent_type = &p.data_type);
+                f.title = t!(
+                    "view.sql_lint.fk_type_mismatch.title",
+                    child = format!("{}.{}", child_table.name, c.name),
+                    child_type = &c.data_type,
+                    parent = format!("{}.{}", parent_table.name, p.name),
+                    parent_type = &p.data_type
                 );
-                f.summary = format!(
-                    "The statement `{}` references {}.{} (`{}`) from {}.{} (`{}`). Mismatched foreign key types either \
-                     fail DDL validation or force implicit conversions during joins and referential integrity checks.",
-                    compact_sql(stmt),
-                    parent_table.qualified(),
-                    p.name,
-                    p.data_type,
-                    child_qual,
-                    c.name,
-                    c.data_type
+                f.summary = t!(
+                    "view.sql_lint.fk_type_mismatch.summary",
+                    sql = compact_sql(stmt),
+                    parent = &parent,
+                    parent_type = &p.data_type,
+                    child = &child,
+                    child_type = &c.data_type
                 );
                 f.fix = Some(Fix {
-                    summary: format!(
-                        "Align {}.{}'s type with {}.{} (`{}`).",
-                        child_qual,
-                        c.name,
-                        parent_table.qualified(),
-                        p.name,
-                        p.data_type
+                    summary: t!(
+                        "view.sql_lint.fk_type_mismatch.fix",
+                        child = &child,
+                        parent = &parent,
+                        parent_type = &p.data_type
                     ),
                     sql: None,
                     cost: None,
                 });
-                f.verify = vec!["Confirm both columns share the same data type before adding the constraint.".into()];
+                f.verify = vec![t!("view.sql_lint.fk_type_mismatch.verify")];
                 findings.push(f);
             }
         }

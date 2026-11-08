@@ -1,7 +1,7 @@
 //! Index DDL, maintenance, `DROP`/`TRUNCATE`, and active workload reference checks.
 
 use culprit_core::{
-    Actionability, Category, Confidence, Engine, Finding, Fix, Severity, Snapshot, SubjectKind, TableStat,
+    Actionability, Category, Confidence, Engine, Finding, Fix, Severity, Snapshot, SubjectKind, TableStat, t,
 };
 
 use crate::support::{base_score, finding, subject, supports_online_index};
@@ -49,11 +49,10 @@ pub(super) fn check_concurrent_in_tx(
             target_pos += 1;
         }
     }
-    let target = tokens
-        .get(target_pos)
-        .filter(|t| !matches!(t.as_str(), "(" | ")" | ";" | ","))
-        .map(|s| unquote_ident(s))
-        .unwrap_or_else(|| "index".into());
+    let named =
+        tokens.get(target_pos).filter(|t| !matches!(t.as_str(), "(" | ")" | ";" | ",")).map(|s| unquote_ident(s));
+    // The finding's id and subject name the statement's target; one without a name is "index" there.
+    let target = named.clone().unwrap_or_else(|| "index".into());
     let kind_word = if head == "REINDEX" && upper[..conc_pos].iter().any(|t| t == "TABLE") { "TABLE" } else { "INDEX" };
     let mut f = finding(
         "sql-lint",
@@ -65,20 +64,15 @@ pub(super) fn check_concurrent_in_tx(
     f.confidence = Confidence::High;
     f.severity = Severity::High;
     f.impact.score = base_score(f.severity);
-    f.impact.label = "aborts in transaction".into();
-    f.title = format!("{head} {kind_word} CONCURRENTLY ({target}) cannot run inside a transaction block");
-    f.summary = format!(
-        "The statement `{}` uses `CONCURRENTLY` inside an explicit `BEGIN ... COMMIT` transaction block. PostgreSQL \
-         immediately aborts `CREATE INDEX CONCURRENTLY`, `DROP INDEX CONCURRENTLY` and `REINDEX CONCURRENTLY` when \
-         executed inside a transaction block.",
-        compact_sql(stmt)
+    f.impact.label = t!("view.sql_lint.concurrent_in_tx.impact");
+    f.title = t!(
+        "view.sql_lint.concurrent_in_tx.title",
+        statement = format!("{head} {kind_word} CONCURRENTLY"),
+        target = named.unwrap_or_else(|| t!("view.sql_lint.concurrent_in_tx.unnamed"))
     );
-    f.fix = Some(Fix {
-        summary: "Run the `CONCURRENTLY` statement outside `BEGIN ... COMMIT` (for example `disable_ddl_transaction!` in Rails, `atomic = False` in Django, or `-- migrate:no-transaction`).".into(),
-        sql: None,
-        cost: None,
-    });
-    f.verify = vec!["Remove the surrounding `BEGIN`/`COMMIT` and re-run `culprit lint-sql`.".into()];
+    f.summary = t!("view.sql_lint.concurrent_in_tx.summary", sql = compact_sql(stmt));
+    f.fix = Some(Fix { summary: t!("view.sql_lint.concurrent_in_tx.fix"), sql: None, cost: None });
+    f.verify = vec![t!("view.sql_lint.concurrent_in_tx.verify")];
     findings.push(f);
 }
 
@@ -141,54 +135,44 @@ pub(super) fn check_drop_or_truncate(
             f.confidence = Confidence::High;
             f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
             f.impact.score = base_score(f.severity);
-            f.impact.label = table_size_label(rows, bytes);
+            let size = table_size_label(rows, bytes);
+            f.impact.label = size.clone();
+            let sql = compact_sql(stmt);
             if engine == Engine::Mysql {
-                f.title = format!(
-                    "DROP INDEX {} on {} ({}) without LOCK=NONE can block concurrent writes",
-                    ix.name,
-                    table.name,
-                    table_size_label(rows, bytes)
-                );
-                f.summary = format!(
-                    "The statement `{}` drops `{}` on {} ({}) without `ALGORITHM=INPLACE LOCK=NONE`. Specifying \
-                     `ALGORITHM=INPLACE, LOCK=NONE` guarantees an online drop that never falls back to a blocking \
-                     table lock.",
-                    compact_sql(stmt),
-                    ix.name,
-                    qual,
-                    table_size_label(rows, bytes)
+                f.title =
+                    t!("view.sql_lint.drop_index.mysql.title", index = &ix.name, table = &table.name, size = &size);
+                f.summary = t!(
+                    "view.sql_lint.drop_index.mysql.summary",
+                    sql = sql,
+                    index = &ix.name,
+                    table = &qual,
+                    size = size
                 );
                 f.fix = Some(Fix {
-                    summary: "Drop the index with `ALGORITHM=INPLACE, LOCK=NONE` so concurrent reads and writes are not blocked.".into(),
+                    summary: t!("view.sql_lint.drop_index.mysql.fix"),
                     sql: Some(Engine::Mysql.dialect().drop_index(&ix.schema, &ix.table, &ix.name)),
                     cost: None,
                 });
-                f.verify = vec!["Re-run `culprit lint-sql` after adding `ALGORITHM=INPLACE, LOCK=NONE`.".into()];
+                f.verify = vec![t!("view.sql_lint.drop_index.mysql.verify")];
             } else {
-                f.title = format!(
-                    "DROP INDEX {} on {} ({}) without CONCURRENTLY acquires an ACCESS EXCLUSIVE lock",
-                    ix.name,
-                    table.name,
-                    table_size_label(rows, bytes)
-                );
-                f.summary = format!(
-                    "The statement `{}` drops `{}` on {} ({}) without `CONCURRENTLY`. Standard `DROP INDEX` in PostgreSQL \
-                     acquires an `ACCESS EXCLUSIVE` lock on the table, blocking all concurrent reads and writes until \
-                     in-flight queries finish.",
-                    compact_sql(stmt),
-                    ix.name,
-                    qual,
-                    table_size_label(rows, bytes)
+                f.title =
+                    t!("view.sql_lint.drop_index.postgres.title", index = &ix.name, table = &table.name, size = &size);
+                f.summary = t!(
+                    "view.sql_lint.drop_index.postgres.summary",
+                    sql = sql,
+                    index = &ix.name,
+                    table = &qual,
+                    size = size
                 );
                 let multi_drop = upper.iter().any(|t| t == ",");
                 let q_idx = postgres_qualified_index(&ix.schema, &ix.name);
                 f.fix = Some(Fix {
-                    summary: "Use `DROP INDEX CONCURRENTLY` (outside a transaction block) so concurrent reads and writes are not blocked.".into(),
+                    summary: t!("view.sql_lint.drop_index.postgres.fix"),
                     sql: (!in_transaction && !multi_drop)
                         .then(|| format!("DROP INDEX CONCURRENTLY IF EXISTS {q_idx};")),
-                    cost: Some("DROP INDEX CONCURRENTLY waits for active transactions using the index and cannot run inside a transaction block.".into()),
+                    cost: Some(t!("view.sql_lint.drop_index.postgres.cost")),
                 });
-                f.verify = vec!["Re-run `culprit lint-sql` after switching to `DROP INDEX CONCURRENTLY`.".into()];
+                f.verify = vec![t!("view.sql_lint.drop_index.postgres.verify")];
             }
             push_table_metrics(&mut f, rows, bytes);
             findings.push(f);
@@ -231,21 +215,12 @@ pub(super) fn check_drop_or_truncate(
             f.confidence = Confidence::High;
             f.severity = Severity::High;
             f.impact.score = base_score(f.severity);
-            f.impact.label = table_size_label(rows, bytes);
-            f.title = format!(
-                "TRUNCATE on {} ({}) acquires an exclusive table lock and deletes all rows",
-                table.name,
-                table_size_label(rows, bytes)
-            );
-            f.summary = format!(
-                "The statement `{}` truncates {} ({}). `TRUNCATE` acquires an `ACCESS EXCLUSIVE` / schema-modification \
-                 lock on the table, blocking all concurrent queries while deallocating its storage.",
-                compact_sql(stmt),
-                qual,
-                table_size_label(rows, bytes)
-            );
+            let size = table_size_label(rows, bytes);
+            f.impact.label = size.clone();
+            f.title = t!("view.sql_lint.truncate.title", table = &table.name, size = &size);
+            f.summary = t!("view.sql_lint.truncate.summary", sql = compact_sql(stmt), table = &qual, size = size);
             push_table_metrics(&mut f, rows, bytes);
-            f.verify = vec!["Confirm `TRUNCATE` is intended for this environment before running.".into()];
+            f.verify = vec![t!("view.sql_lint.truncate.verify")];
             findings.push(f);
         }
         _ => {}
@@ -286,31 +261,25 @@ pub(super) fn check_workload_references(
     f.confidence = Confidence::High;
     f.severity = Severity::High;
     f.impact.score = base_score(f.severity);
-    f.impact.label = format!("{} active {}", active.len(), if active.len() == 1 { "query" } else { "queries" });
+    // A count of statements, written as it is ("1234", not "1.2K").
+    let (n, count) = (active.len(), active.len().to_string());
+    f.impact.label = t!("view.sql_lint.workload_break.impact", n = n, count = &count);
     f.queries = crate::support::query_refs(&active);
-    f.title = format!(
-        "{action} on {target_short} breaks {} active workload {}",
-        active.len(),
-        if active.len() == 1 { "query" } else { "queries" }
-    );
-    f.summary = format!(
-        "The migration statement `{}` runs `{action}` on `{target_short}`, which is referenced by {} active \
-         {} in the captured workload. Deploying this DDL while the current application code is running will cause \
-         immediate query errors.",
-        compact_sql(stmt),
-        active.len(),
-        if active.len() == 1 { "statement" } else { "statements" }
+    f.title = t!("view.sql_lint.workload_break.title", action = action, target = &target_short, n = n, count = &count);
+    f.summary = t!(
+        "view.sql_lint.workload_break.summary",
+        sql = compact_sql(stmt),
+        action = action,
+        target = &target_short,
+        n = n,
+        count = count
     );
     f.fix = Some(Fix {
-        summary: format!(
-            "Stop reading/writing `{target_short}` in application code and deploy that change before running `{action}` in a later migration."
-        ),
+        summary: t!("view.sql_lint.workload_break.fix", target = &target_short, action = action),
         sql: None,
         cost: None,
     });
-    f.verify = vec![format!(
-        "Verify no active queries in `culprit top` reference `{target_short}` before applying `{action}`."
-    )];
+    f.verify = vec![t!("view.sql_lint.workload_break.verify", target = &target_short, action = action)];
     findings.push(f);
 }
 
@@ -379,27 +348,17 @@ pub(super) fn check_maintenance(
             f.confidence = Confidence::High;
             f.severity = Severity::High;
             f.impact.score = base_score(f.severity);
-            f.impact.label = table_size_label(rows, bytes);
-            f.title = format!(
-                "VACUUM FULL on {} ({}) rewrites the entire table under an ACCESS EXCLUSIVE lock",
-                table.name,
-                table_size_label(rows, bytes)
-            );
-            f.summary = format!(
-                "The statement `{}` runs `VACUUM FULL` on {} ({}). Unlike standard `VACUUM`, `VACUUM FULL` rewrites \
-                 every row and index into new disk files while holding an `ACCESS EXCLUSIVE` lock, blocking all \
-                 concurrent reads and writes.",
-                compact_sql(stmt),
-                qual,
-                table_size_label(rows, bytes)
-            );
+            let size = table_size_label(rows, bytes);
+            f.impact.label = size.clone();
+            f.title = t!("view.sql_lint.vacuum_full.title", table = &table.name, size = &size);
+            f.summary = t!("view.sql_lint.vacuum_full.summary", sql = compact_sql(stmt), table = &qual, size = size);
             f.fix = Some(Fix {
-                summary: "Run standard `VACUUM (ANALYZE)` (which reclaims dead tuples online without blocking reads or writes), or use `pg_repack` if physical table compaction is required.".into(),
+                summary: t!("view.sql_lint.vacuum_full.fix"),
                 sql: Some(format!("VACUUM (ANALYZE) {qual};")),
                 cost: None,
             });
             push_table_metrics(&mut f, rows, bytes);
-            f.verify = vec!["Replace `VACUUM FULL` with `VACUUM (ANALYZE)` or `pg_repack`.".into()];
+            f.verify = vec![t!("view.sql_lint.vacuum_full.verify")];
             findings.push(f);
         }
         Some("CLUSTER") => {
@@ -424,26 +383,13 @@ pub(super) fn check_maintenance(
             f.confidence = Confidence::High;
             f.severity = Severity::High;
             f.impact.score = base_score(f.severity);
-            f.impact.label = table_size_label(rows, bytes);
-            f.title = format!(
-                "CLUSTER on {} ({}) rewrites the table under an ACCESS EXCLUSIVE lock",
-                table.name,
-                table_size_label(rows, bytes)
-            );
-            f.summary = format!(
-                "The statement `{}` runs `CLUSTER` on {} ({}). `CLUSTER` physically reorders and rewrites the table \
-                 while holding an `ACCESS EXCLUSIVE` lock, blocking all concurrent reads and writes.",
-                compact_sql(stmt),
-                qual,
-                table_size_label(rows, bytes)
-            );
-            f.fix = Some(Fix {
-                summary: "Use `pg_repack` to reorder a large production table online without holding an `ACCESS EXCLUSIVE` lock.".into(),
-                sql: None,
-                cost: None,
-            });
+            let size = table_size_label(rows, bytes);
+            f.impact.label = size.clone();
+            f.title = t!("view.sql_lint.cluster.title", table = &table.name, size = &size);
+            f.summary = t!("view.sql_lint.cluster.summary", sql = compact_sql(stmt), table = &qual, size = size);
+            f.fix = Some(Fix { summary: t!("view.sql_lint.cluster.fix"), sql: None, cost: None });
             push_table_metrics(&mut f, rows, bytes);
-            f.verify = vec!["Avoid running `CLUSTER` directly on large production tables during traffic.".into()];
+            f.verify = vec![t!("view.sql_lint.cluster.verify")];
             findings.push(f);
         }
         Some("REINDEX") => {
@@ -490,27 +436,18 @@ pub(super) fn check_maintenance(
                     f.confidence = Confidence::High;
                     f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
                     f.impact.score = base_score(f.severity);
-                    f.impact.label = table_size_label(rows, bytes);
-                    f.title = format!(
-                        "REINDEX TABLE {} ({}) without CONCURRENTLY blocks reads and writes",
-                        table.name,
-                        table_size_label(rows, bytes)
-                    );
-                    f.summary = format!(
-                        "The statement `{}` rebuilds all indexes on {} ({}) without `CONCURRENTLY`. Standard `REINDEX \
-                         TABLE` holds `SHARE` and `ACCESS EXCLUSIVE` locks that block concurrent writes and reads.",
-                        compact_sql(stmt),
-                        qual,
-                        table_size_label(rows, bytes)
-                    );
+                    let size = table_size_label(rows, bytes);
+                    f.impact.label = size.clone();
+                    f.title = t!("view.sql_lint.reindex_table.title", table = &table.name, size = &size);
+                    f.summary =
+                        t!("view.sql_lint.reindex_table.summary", sql = compact_sql(stmt), table = &qual, size = size);
                     f.fix = Some(Fix {
-                        summary: "Use `REINDEX TABLE CONCURRENTLY` (outside a transaction block) so concurrent reads and writes can continue.".into(),
+                        summary: t!("view.sql_lint.reindex_table.fix"),
                         sql: (!in_transaction).then(|| format!("REINDEX TABLE CONCURRENTLY {qual};")),
-                        cost: Some("REINDEX CONCURRENTLY cannot run inside a transaction block.".into()),
+                        cost: Some(t!("view.sql_lint.reindex.cost")),
                     });
                     push_table_metrics(&mut f, rows, bytes);
-                    f.verify =
-                        vec!["Re-run `culprit lint-sql` after switching to `REINDEX TABLE CONCURRENTLY`.".into()];
+                    f.verify = vec![t!("view.sql_lint.reindex_table.verify")];
                     findings.push(f);
                 }
                 "INDEX" => {
@@ -538,30 +475,25 @@ pub(super) fn check_maintenance(
                     f.confidence = Confidence::High;
                     f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
                     f.impact.score = base_score(f.severity);
-                    f.impact.label = table_size_label(rows, bytes);
-                    f.title = format!(
-                        "REINDEX INDEX {} on {} ({}) without CONCURRENTLY blocks writes",
-                        ix.name,
-                        table.name,
-                        table_size_label(rows, bytes)
-                    );
-                    f.summary = format!(
-                        "The statement `{}` rebuilds `{}` on {} ({}) without `CONCURRENTLY`. Standard `REINDEX INDEX` \
-                         blocks writes on the parent table and reads of the index until the rebuild finishes.",
-                        compact_sql(stmt),
-                        ix.name,
-                        qual,
-                        table_size_label(rows, bytes)
+                    let size = table_size_label(rows, bytes);
+                    f.impact.label = size.clone();
+                    f.title =
+                        t!("view.sql_lint.reindex_index.title", index = &ix.name, table = &table.name, size = &size);
+                    f.summary = t!(
+                        "view.sql_lint.reindex_index.summary",
+                        sql = compact_sql(stmt),
+                        index = &ix.name,
+                        table = &qual,
+                        size = size
                     );
                     let q_idx = postgres_qualified_index(&ix.schema, &ix.name);
                     f.fix = Some(Fix {
-                        summary: "Use `REINDEX INDEX CONCURRENTLY` (outside a transaction block) so concurrent reads and writes can continue.".into(),
+                        summary: t!("view.sql_lint.reindex_index.fix"),
                         sql: (!in_transaction).then(|| format!("REINDEX INDEX CONCURRENTLY {q_idx};")),
-                        cost: Some("REINDEX CONCURRENTLY cannot run inside a transaction block.".into()),
+                        cost: Some(t!("view.sql_lint.reindex.cost")),
                     });
                     push_table_metrics(&mut f, rows, bytes);
-                    f.verify =
-                        vec!["Re-run `culprit lint-sql` after switching to `REINDEX INDEX CONCURRENTLY`.".into()];
+                    f.verify = vec![t!("view.sql_lint.reindex_index.verify")];
                     findings.push(f);
                 }
                 _ => {}
@@ -621,74 +553,41 @@ pub(super) fn check_create_index(
     f.confidence = Confidence::High;
     f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
     f.impact.score = base_score(f.severity);
-    f.impact.label = table_size_label(rows, bytes);
+    let size = table_size_label(rows, bytes);
+    f.impact.label = size.clone();
+    let sql = compact_sql(stmt);
     match engine {
         Engine::Postgres => {
-            f.title = format!(
-                "CREATE INDEX on {} ({}) without CONCURRENTLY blocks writes until the build finishes",
-                table.name,
-                table_size_label(rows, bytes)
-            );
-            f.summary = format!(
-                "The statement `{}` builds an index on {} ({}) without `CONCURRENTLY`. Standard `CREATE INDEX` in \
-                 PostgreSQL acquires a `SHARE` lock on the table for the entire index build, blocking all `INSERT`, \
-                 `UPDATE` and `DELETE` statements.",
-                compact_sql(stmt),
-                qual,
-                table_size_label(rows, bytes)
-            );
+            f.title = t!("view.sql_lint.create_index.postgres.title", table = &table.name, size = &size);
+            f.summary = t!("view.sql_lint.create_index.postgres.summary", sql = sql, table = &qual, size = size);
             f.fix = Some(Fix {
-                summary: "Use `CREATE INDEX CONCURRENTLY` (outside a transaction block) so writes continue while the index builds.".into(),
+                summary: t!("view.sql_lint.create_index.postgres.fix"),
                 sql: (!in_transaction).then(|| suggest_concurrent_index(stmt)).flatten(),
-                cost: Some("CONCURRENTLY performs two table scans and cannot run inside a transaction block.".into()),
+                cost: Some(t!("view.sql_lint.create_index.postgres.cost")),
             });
         }
         Engine::Mssql => {
-            f.title = format!(
-                "CREATE INDEX on {} ({}) without ONLINE = ON blocks writes during the build",
-                table.name,
-                table_size_label(rows, bytes)
-            );
-            f.summary = format!(
-                "The statement `{}` builds an index on {} ({}) without `WITH (ONLINE = ON)`, which this SQL Server \
-                 edition supports. Offline index builds hold shared or schema-modification locks that block writers.",
-                compact_sql(stmt),
-                qual,
-                table_size_label(rows, bytes)
-            );
+            f.title = t!("view.sql_lint.create_index.mssql.title", table = &table.name, size = &size);
+            f.summary = t!("view.sql_lint.create_index.mssql.summary", sql = sql, table = &qual, size = size);
             f.fix = Some(Fix {
-                summary:
-                    "Add `WITH (ONLINE = ON)` to the `CREATE INDEX` statement so concurrent reads and writes continue."
-                        .into(),
+                summary: t!("view.sql_lint.create_index.mssql.fix"),
                 sql: suggest_mssql_online_index(stmt, &upper),
-                cost: Some("Online index builds use additional tempdb version store space while running.".into()),
+                cost: Some(t!("view.sql_lint.create_index.mssql.cost")),
             });
         }
         Engine::Mysql => {
-            f.title = format!(
-                "CREATE INDEX on {} ({}) without LOCK=NONE can fall back to a table lock",
-                table.name,
-                table_size_label(rows, bytes)
-            );
-            f.summary = format!(
-                "The statement `{}` builds an index on {} ({}) without `ALGORITHM=INPLACE LOCK=NONE`. Without \
-                 explicit `LOCK=NONE`, MySQL/MariaDB can fall back to `LOCK=SHARED` or `ALGORITHM=COPY` if an online \
-                 build is not supported, blocking concurrent writes until the build finishes.",
-                compact_sql(stmt),
-                qual,
-                table_size_label(rows, bytes)
-            );
+            f.title = t!("view.sql_lint.create_index.mysql.title", table = &table.name, size = &size);
+            f.summary = t!("view.sql_lint.create_index.mysql.summary", sql = sql, table = &qual, size = size);
             f.fix = Some(Fix {
-                summary: "Add `ALGORITHM=INPLACE LOCK=NONE` so the server guarantees an online build and fails immediately instead of locking the table.".into(),
+                summary: t!("view.sql_lint.create_index.mysql.fix"),
                 sql: suggest_mysql_online_index(stmt, &upper),
-                cost: Some("Online InnoDB index builds buffer concurrent DML in innodb_online_alter_log_max_size while running.".into()),
+                cost: Some(t!("view.sql_lint.create_index.mysql.cost")),
             });
         }
         Engine::Yugabyte | Engine::Sqlite => {}
     }
     push_table_metrics(&mut f, rows, bytes);
-    f.verify =
-        vec!["Re-run `culprit lint-sql` on the updated migration to confirm no blocking index builds remain.".into()];
+    f.verify = vec![t!("view.sql_lint.create_index.verify")];
     findings.push(f);
 }
 
