@@ -166,12 +166,15 @@ pub(super) fn render(snapshot: &Snapshot, case: Case<'_>) -> Finding {
                 (Severity::High, t!("check.config.performance_schema.summary", server = name))
             };
             let restart = restart_change(snapshot, &[("performance_schema", "ON")]);
-            // In the server's configuration file (the change with SQL, [`restart_change`]) the sentence is one message;
-            // a managed service's own sentence about its control still follows the colon lowercased.
-            let at_next_restart = if restart.sql.is_some() {
-                t!("check.config.performance_schema.fix.at_next_restart_my_cnf")
-            } else {
-                t!("check.config.performance_schema.fix.at_next_restart", how = lowercase_first(&restart.how))
+            // Where it is set ([`restart_change`]): the server configuration file, or a managed service's own control,
+            // which needs a reboot.
+            let at_next_restart = match snapshot.server.platform().and_then(|p| p.settings_control()) {
+                Some(control) => [
+                    t!("check.config.performance_schema.fix.at_next_restart_in_control", control = control),
+                    t!("check.config.reboot_needed"),
+                ]
+                .join(" "),
+                None => t!("check.config.performance_schema.fix.at_next_restart_my_cnf"),
             };
             let (fix_summary, sql) = match slow_log_change(snapshot).filter(|_| !logged) {
                 Some(now) => (
@@ -333,11 +336,6 @@ fn buffer_pool_finding(snapshot: &Snapshot, pool: f64, data: f64, hit: f64, read
     }
     f.confidence = Confidence::Medium;
     f
-}
-
-fn lowercase_first(text: &str) -> String {
-    let mut chars = text.chars();
-    chars.next().map(|c| c.to_lowercase().chain(chars).collect()).unwrap_or_default()
 }
 
 /// The settings that have the server log slow statements to the table Culprit reads (and, on MariaDB, count index

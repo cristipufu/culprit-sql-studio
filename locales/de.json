@@ -182,7 +182,7 @@
   "check.config.maxdop.summary": "Ohne Grenze für die Parallelität kann eine einzige große Abfrage alle {count} Scheduler belegen, und alles andere muss dahinter warten. Microsoft empfiehlt höchstens 8 und nicht mehr als die Prozessoren eines NUMA-Knotens{nodes, select, many { (hier {per_node})} other {}}.",
   "check.config.maxdop.title": "Eine Abfrage darf alle {count} Prozessoren nutzen (MAXDOP 0)",
   "check.config.my_cnf_and_restart": "Setzen Sie den Wert in der Serverkonfiguration (my.cnf) und starten Sie den Server neu.",
-  "check.config.performance_schema.fix.at_next_restart": "Schalten Sie performance_schema beim nächsten Neustart ein, um Statistiken zu jeder Anweisung zu erhalten: {how}",
+  "check.config.performance_schema.fix.at_next_restart_in_control": "Schalten Sie performance_schema beim nächsten Neustart ein, um Statistiken zu jeder Anweisung zu erhalten: Setzen Sie performance_schema in {control} auf ON.",
   "check.config.performance_schema.fix.slow_log_first": "Beginnen Sie mit dem Slow Query Log, das keinen Neustart braucht: Culprit liest es aus der Tabelle mysql.slow_log.",
   "check.config.performance_schema.fix.turn_on": "Schalten Sie performance_schema ein (im laufenden Betrieb lässt es sich nicht ändern).",
   "check.config.performance_schema.fix_cost": "Einige hundert MB Arbeitsspeicher und etwas CPU-Overhead.",

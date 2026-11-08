@@ -295,6 +295,11 @@ fn mysql_restart_settings_on_a_managed_server() {
     assert!(fix.sql.is_none(), "{:?}", fix.sql);
     assert!(fix.summary.contains("in the instance's DB parameter group"), "{}", fix.summary);
     assert!(fix.summary.contains("after a reboot"));
+    // Where the setting is set is a sentence of its own in each language: German's keeps its capitals.
+    culprit_core::i18n::scope("de", || {
+        let fix = found(&mysql::check(&s), "config:performance_schema").unwrap().fix.clone().unwrap();
+        assert!(fix.summary.contains("zu erhalten: Setzen Sie performance_schema in "), "{}", fix.summary);
+    });
 }
 
 #[test]

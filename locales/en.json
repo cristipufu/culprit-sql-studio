@@ -183,7 +183,7 @@
   "check.config.maxdop.summary": "With no limit on parallelism, a single large query can occupy all {count} schedulers and make everything else queue behind it. Microsoft's guidance is at most 8, and no more than the processors in one NUMA node{nodes, select, many { ({per_node} here)} other {}}.",
   "check.config.maxdop.title": "One query may use all {count} processors (MAXDOP 0)",
   "check.config.my_cnf_and_restart": "Set it in the server configuration (my.cnf) and restart.",
-  "check.config.performance_schema.fix.at_next_restart": "Turn performance_schema on at the next restart for statistics on every statement: {how}",
+  "check.config.performance_schema.fix.at_next_restart_in_control": "Turn performance_schema on at the next restart for statistics on every statement: set performance_schema to ON in {control}.",
   "check.config.performance_schema.fix.at_next_restart_my_cnf": "Turn performance_schema on at the next restart for statistics on every statement: set it in the server configuration (my.cnf) and restart.",
   "check.config.performance_schema.fix.slow_log_first": "Start with the slow query log, which needs no restart: Culprit reads it from the mysql.slow_log table.",
   "check.config.performance_schema.fix.turn_on": "Turn it on (it can't be changed at runtime).",

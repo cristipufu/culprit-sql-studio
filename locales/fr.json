@@ -182,7 +182,7 @@
   "check.config.maxdop.summary": "Sans limite de parallélisme, une seule grosse requête peut occuper les {count} planificateurs et mettre tout le reste en file d’attente derrière elle. Microsoft recommande au plus 8, et pas plus que le nombre de processeurs d’un nœud NUMA{nodes, select, many { ({per_node} ici)} other {}}.",
   "check.config.maxdop.title": "Une seule requête peut utiliser les {count} processeurs (MAXDOP 0)",
   "check.config.my_cnf_and_restart": "Définissez-le dans la configuration du serveur (my.cnf) et redémarrez.",
-  "check.config.performance_schema.fix.at_next_restart": "Activez performance_schema au prochain redémarrage pour obtenir des statistiques sur chaque instruction : {how}",
+  "check.config.performance_schema.fix.at_next_restart_in_control": "Activez performance_schema au prochain redémarrage pour obtenir des statistiques sur chaque instruction : réglez performance_schema sur ON dans {control}.",
   "check.config.performance_schema.fix.slow_log_first": "Commencez par le journal des requêtes lentes, qui ne nécessite pas de redémarrage : Culprit le lit dans la table mysql.slow_log.",
   "check.config.performance_schema.fix.turn_on": "Activez-le (il ne peut pas être modifié à chaud).",
   "check.config.performance_schema.fix_cost": "Quelques centaines de Mo de mémoire et un léger surcoût CPU.",
