@@ -6,8 +6,8 @@
 
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
 use culprit_core::{
-    Category, CheckInfo, Confidence, Engine, Finding, Fix, Metric, PlanVariant, QueryStat, Snapshot, SubjectKind, Unit,
-    format,
+    Category, CheckInfo, Confidence, Engine, Finding, Fix, Metric, PlanVariant, QueryStat, Severity, Snapshot,
+    SubjectKind, Unit, format, t,
 };
 
 use crate::queries::{apply_impact, slow_log_only};
@@ -27,17 +27,20 @@ const MIN_TAIL_MS: f64 = 200.0;
 pub fn parameter_sensitive_info() -> CheckInfo {
     CheckInfo {
         id: "parameter-sensitive".into(),
-        title: "Queries that are fast for most calls and slow for some".into(),
+        title: t!("check.parameter_sensitive.info.title"),
         category: Category::Queries,
         engines: vec![Engine::Mssql, Engine::Mysql],
         requires: vec![],
-        description: "Statements whose run time depends heavily on the values they run with: two plans used side by side, one fast and one slow (SQL Server Query Store), or a long tail in the run-time histogram (MySQL). Single-plan variance on any engine is `unstable-query`.".into(),
+        description: t!("check.parameter_sensitive.info.description"),
     }
 }
 
 check!(
-    ParameterSensitiveCheck: parameter_sensitive_info, parameter_sensitive,
-    &[Evidence::Query(QueryMeasure::ParameterSpread)]
+    ParameterSensitiveCheck: parameter_sensitive_info,
+    decide = parameter_sensitive_cases,
+    render = parameter_sensitive_finding,
+    case<'s> = ParameterSensitive<'s>,
+    evidence = &[Evidence::Query(QueryMeasure::ParameterSpread)],
 );
 
 /// How the slow calls show up in the data.
@@ -159,9 +162,46 @@ fn tail_shape<'a>(snapshot: &Snapshot, q: &'a QueryStat) -> Option<Shape<'a>> {
     Some(Shape::Tail { typical_ms: typical, p99_ms: p99, slow_share })
 }
 
-pub fn parameter_sensitive(snapshot: &Snapshot) -> Vec<Finding> {
+/// A statement whose run time depends on its values, and what its data establishes.
+pub struct ParameterSensitive<'s> {
+    query: &'s QueryStat,
+    shape: Shape<'s>,
+    impact: Option<QueryImpact>,
+    severity: Severity,
+    score: f64,
+    /// It stopped running: told in the past.
+    stopped: bool,
+    /// The plan most calls run fast with on its own, the one forcing is offered for.
+    most_calls: Option<&'s PlanVariant>,
+    /// What a long tail's source keeps of the runs.
+    tail: Option<TailSource>,
+    fix: Ladder,
+}
+
+/// What a run-time tail is read from.
+struct TailSource {
+    /// The slow query log keeps only runs over long_query_time: its "typical" run is a typical slow one.
+    logged: bool,
+    /// The workload is the slow query log's.
+    from_log: bool,
+    /// long_query_time, where the scan read it (ms).
+    threshold_ms: Option<f64>,
+    /// 99 in 100 is said only of a hundred runs or more.
+    percentile_99: bool,
+    /// The share of its time spent waiting for locks.
+    lock_share: f64,
+}
+
+/// The fix ladder that applies.
+enum Ladder {
+    Mssql(MssqlLadder),
+    Mysql { lock_share: f64, slow_runs: Option<f64> },
+}
+
+/// The six statements whose values cost the most.
+fn parameter_sensitive_cases(snapshot: &Snapshot) -> Vec<ParameterSensitive<'_>> {
     let Some(workload) = snapshot.workload.as_ref() else { return Vec::new() };
-    let mut findings: Vec<Finding> = app_queries(snapshot)
+    let mut cases: Vec<ParameterSensitive> = app_queries(snapshot)
         .filter(|q| q.executions >= MIN_RUNS)
         .filter_map(|q| {
             let shape = plans_shape(snapshot, q).or_else(|| tail_shape(snapshot, q))?;
@@ -171,12 +211,67 @@ pub fn parameter_sensitive(snapshot: &Snapshot) -> Vec<Finding> {
                 Shape::Plans { slow, .. } => workload.share_of(slow.total_time_ms, q),
                 _ => share,
             };
-            (share >= 0.01 || slow_time_share >= 0.01).then(|| finding_for(snapshot, q, &shape, share))
+            (share >= 0.01 || slow_time_share >= 0.01).then(|| parameter_sensitive_case(snapshot, q, shape, share))
         })
         .collect();
-    findings.sort_by(|a, b| b.impact.score.total_cmp(&a.impact.score));
-    findings.truncate(6);
-    findings
+    cases.sort_by(|a, b| b.score.total_cmp(&a.score));
+    cases.truncate(6);
+    cases
+}
+
+fn parameter_sensitive_case<'s>(
+    snapshot: &'s Snapshot,
+    q: &'s QueryStat,
+    shape: Shape<'s>,
+    share: f64,
+) -> ParameterSensitive<'s> {
+    // Graded on what the slow calls cost beyond running at the fast speed, not on the whole statement's time: the
+    // fast calls are fine as they are.
+    let extra = match &shape {
+        Shape::Plans { slow, fast_ms, .. } => (slow.mean_time_ms - fast_ms).max(0.0) * slow.executions,
+        // Each run in the tail is at least MIN_TAIL_FACTOR times the typical one.
+        Shape::Tail { typical_ms, slow_share, .. } => {
+            slow_share.unwrap_or(0.01) * q.executions * typical_ms * (MIN_TAIL_FACTOR - 1.0)
+        }
+    };
+    let extra_share = snapshot.workload.as_ref().map_or(0.0, |w| w.share_of(extra, q));
+    let (most_calls, tail, fix) = match &shape {
+        Shape::Plans { fast, .. } => {
+            // Forcing is offered only for a plan that serves most calls on its own.
+            let most_calls = (fast.executions >= q.executions * MOST_CALLS).then_some(*fast);
+            (most_calls, None, Ladder::Mssql(MssqlLadder::of(snapshot, q, most_calls, extra)))
+        }
+        Shape::Tail { slow_share, .. } => {
+            let locks = q.spread.as_ref().and_then(|s| s.lock_ms).filter(|l| *l > 0.0);
+            let lock_share = locks.map(|l| (l / q.total_time_ms.max(0.001)).clamp(0.0, 1.0)).unwrap_or(0.0);
+            let tail = TailSource {
+                logged: slow_log_only(snapshot),
+                from_log: snapshot
+                    .workload
+                    .as_ref()
+                    .is_some_and(|w| w.kind() == Some(culprit_core::WorkloadKind::SlowLog)),
+                threshold_ms: snapshot
+                    .setting("long_query_time")
+                    .and_then(|s| s.value.trim().parse::<f64>().ok())
+                    .map(|s| s * 1000.0),
+                percentile_99: q.executions >= 100.0,
+                lock_share,
+            };
+            let slow_runs = slow_share.map(|s| s * q.executions);
+            (None, Some(tail), Ladder::Mysql { lock_share, slow_runs })
+        }
+    };
+    ParameterSensitive {
+        query: q,
+        impact: query_impact(snapshot, &[q]),
+        severity: severity_for_time_of(snapshot, &[q], extra, extra_share),
+        score: score_for_share(extra_share.max(share * 0.1)),
+        stopped: crate::all_stopped(snapshot, &[q]),
+        shape,
+        most_calls,
+        tail,
+        fix,
+    }
 }
 
 fn compiled(plan: &PlanVariant, q: &QueryStat) -> Option<String> {
@@ -206,168 +301,186 @@ pub(crate) fn tidy_parameters(raw: &str) -> String {
         .join(", ")
 }
 
-fn finding_for(snapshot: &Snapshot, q: &QueryStat, shape: &Shape, share: f64) -> Finding {
+fn parameter_sensitive_finding(snapshot: &Snapshot, case: ParameterSensitive<'_>) -> Finding {
+    let q = case.query;
     let handle = capitalize(&query_handle(q));
     let mut f = finding("parameter-sensitive", &q.id, Category::Queries, subject(SubjectKind::Query, &q.id));
-    if let Some(impact) = query_impact(snapshot, &[q]) {
-        apply_impact(snapshot, &mut f, &impact);
+    if let Some(impact) = &case.impact {
+        apply_impact(snapshot, &mut f, impact);
     }
-    // Graded on what the slow calls cost beyond running at the fast speed, not on the whole statement's time: the
-    // fast calls are fine as they are.
-    let extra = match shape {
-        Shape::Plans { slow, fast_ms, .. } => (slow.mean_time_ms - fast_ms).max(0.0) * slow.executions,
-        // Each run in the tail is at least MIN_TAIL_FACTOR times the typical one.
-        Shape::Tail { typical_ms, slow_share, .. } => {
-            slow_share.unwrap_or(0.01) * q.executions * typical_ms * (MIN_TAIL_FACTOR - 1.0)
-        }
-    };
-    let extra_share = snapshot.workload.as_ref().map_or(0.0, |w| w.share_of(extra, q));
-    f.severity = severity_for_time_of(snapshot, &[q], extra, extra_share);
-    f.impact.score = score_for_share(extra_share.max(share * 0.1));
+    f.severity = case.severity;
+    f.impact.score = case.score;
+    // A statement that stopped running is told in the past.
+    let tense = if case.stopped { "past" } else { "present" };
     let run = culprit_core::changes::run_time;
-    match shape {
+    match &case.shape {
         Shape::Plans { fast, slow, fast_ms, fast_calls, fast_plans } => {
             let slow_share = slow.executions / q.executions.max(1.0);
             let calls = |n: f64| format::percent(n / q.executions.max(1.0));
             // One plan for most calls, or several, each well ahead of the slow one: then the slowest of them is the bound.
-            let fast_time =
-                if *fast_plans == 1 { run(fast.mean_time_ms) } else { format!("{} or less", run(*fast_ms)) };
-            // A statement that stopped running is told in the past.
-            let runs = if crate::all_stopped(snapshot, &[q]) { "ran" } else { "runs" };
-            f.title = format!(
-                "{handle} {runs} in {fast_time} for most calls but {} for {} of them",
-                run(slow.mean_time_ms),
-                format::percent(slow_share)
-            );
-            f.impact.label = format!("{} slower for some calls", times(slow.mean_time_ms / fast_ms.max(0.001)));
-            let compiled_for =
-                |p: &PlanVariant| compiled(p, q).map(|c| format!(", compiled for `{c}`")).unwrap_or_default();
-            let fast_side = if *fast_plans == 1 {
-                format!(
-                    "Plan {} handles {} of the calls and averages {}{}",
-                    fast.id,
-                    calls(*fast_calls),
-                    run(fast.mean_time_ms),
-                    compiled_for(fast)
+            f.title = if *fast_plans == 1 {
+                t!(
+                    "check.parameter_sensitive.title.plans",
+                    query = &handle,
+                    tense = tense,
+                    fast = run(fast.mean_time_ms),
+                    slow = run(slow.mean_time_ms),
+                    share = format::percent(slow_share)
                 )
             } else {
-                format!(
-                    "{fast_plans} plans that average {} or less handle {} of the calls (plan {} the most, {} of them at {}{})",
-                    run(*fast_ms),
-                    calls(*fast_calls),
-                    fast.id,
-                    calls(fast.executions),
-                    run(fast.mean_time_ms),
-                    compiled_for(fast)
+                t!(
+                    "check.parameter_sensitive.title.plans_or_less",
+                    query = &handle,
+                    tense = tense,
+                    fast = run(*fast_ms),
+                    slow = run(slow.mean_time_ms),
+                    share = format::percent(slow_share)
                 )
             };
-            f.summary = format!(
-                "SQL Server runs this statement with {} plans side by side. {fast_side}; plan {} averages {}{} and handled {} calls. A plan is compiled for the parameter values of the call that happened to compile it, then reused for every other value, so values that need a different strategy get the wrong one.",
-                if q.workload_plans().len() == 2 {
-                    "two".to_string()
-                } else {
-                    format::count(q.workload_plans().len() as f64)
-                },
-                slow.id,
-                run(slow.mean_time_ms),
-                compiled_for(slow),
-                format::count(slow.executions),
-            );
-            f.metrics.push(Metric::new("Fast plan", fast.mean_time_ms, Unit::Ms));
-            f.metrics.push(Metric::new("Slow plan", slow.mean_time_ms, Unit::Ms));
-            f.metrics.push(Metric::new("Calls on the slow plan", slow_share, Unit::Ratio));
+            f.impact.label =
+                t!("check.parameter_sensitive.impact.calls", factor = times(slow.mean_time_ms / fast_ms.max(0.001)));
+            let compiled_for = |p: &PlanVariant| {
+                compiled(p, q).map(|c| t!("check.parameter_sensitive.compiled_for", values = c)).unwrap_or_default()
+            };
+            let plans = if q.workload_plans().len() == 2 {
+                t!("check.parameter_sensitive.two")
+            } else {
+                format::count(q.workload_plans().len() as f64)
+            };
+            let first = if *fast_plans == 1 {
+                t!(
+                    "check.parameter_sensitive.summary.plans",
+                    plans = plans,
+                    fast = &fast.id,
+                    fast_calls = calls(*fast_calls),
+                    fast_ms = run(fast.mean_time_ms),
+                    fast_compiled = compiled_for(fast),
+                    slow = &slow.id,
+                    slow_ms = run(slow.mean_time_ms),
+                    slow_compiled = compiled_for(slow),
+                    slow_calls = format::count(slow.executions)
+                )
+            } else {
+                t!(
+                    "check.parameter_sensitive.summary.plans_several",
+                    plans = plans,
+                    fast_plans = fast_plans.to_string(),
+                    fast_ms = run(*fast_ms),
+                    fast_calls = calls(*fast_calls),
+                    busiest = &fast.id,
+                    busiest_calls = calls(fast.executions),
+                    busiest_ms = run(fast.mean_time_ms),
+                    busiest_compiled = compiled_for(fast),
+                    slow = &slow.id,
+                    slow_ms = run(slow.mean_time_ms),
+                    slow_compiled = compiled_for(slow),
+                    slow_calls = format::count(slow.executions)
+                )
+            };
+            f.summary = [first, t!("check.parameter_sensitive.summary.plans_why")].join(" ");
+            f.metrics.push(Metric::new(t!("common.metric.fast_plan"), fast.mean_time_ms, Unit::Ms));
+            f.metrics.push(Metric::new(t!("check.parameter_sensitive.metric.slow_plan"), slow.mean_time_ms, Unit::Ms));
+            f.metrics.push(Metric::new(t!("check.parameter_sensitive.metric.slow_calls"), slow_share, Unit::Ratio));
             // Forcing is offered only for a plan that serves most calls on its own.
-            let most_calls = (fast.executions >= q.executions * MOST_CALLS).then_some(*fast);
-            if let Some(p) = most_calls {
-                f.metrics.push(Metric::text(PLAN_MOST_CALLS_USE, p.id.clone()));
+            if let Some(p) = case.most_calls {
+                f.metrics.push(Metric::text(t!("check.parameter_sensitive.metric.most_calls_plan"), p.id.clone()));
                 f.facts.usual_fast_plan = Some(p.id.clone());
             }
             f.confidence = Confidence::High;
-            f.fix = Some(mssql_fix(snapshot, q, most_calls, extra));
         }
         Shape::Tail { typical_ms, p99_ms, slow_share } => {
             // The slow query log keeps only runs over long_query_time: its "typical" run is a typical slow one.
-            let logged = slow_log_only(snapshot);
-            let percentile_99 = q.executions >= 100.0;
-            let subject = if logged { format!("Logged runs of {}", query_handle(q)) } else { handle.clone() };
-            // A statement that stopped running is told in the past.
-            let stopped = crate::all_stopped(snapshot, &[q]);
-            let usual = match (stopped, logged) {
-                (true, _) => "usually took",
-                (false, true) => "usually take",
-                (false, false) => "usually takes",
-            };
-            let (take, takes) = if stopped { ("took", "took") } else { ("take", "takes") };
-            f.title = match slow_share {
-                Some(s) if *s >= 0.001 => format!(
-                    "{subject} {usual} {} but {} of {} {take} over {}",
-                    run(*typical_ms),
-                    format::percent(*s),
-                    if logged { "them" } else { "its runs" },
-                    run(typical_ms * MIN_TAIL_FACTOR)
+            let tail = case.tail.as_ref().expect("a tail's facts");
+            let (typical, query) = (run(*typical_ms), query_handle(q));
+            f.title = match (slow_share, tail.logged) {
+                (Some(s), false) if *s >= 0.001 => t!(
+                    "check.parameter_sensitive.title.tail",
+                    query = &handle,
+                    tense = tense,
+                    typical = typical.clone(),
+                    share = format::percent(*s),
+                    slow = run(typical_ms * MIN_TAIL_FACTOR)
                 ),
-                _ => format!("{subject} {usual} {} but 1 in 100 {takes} over {}", run(*typical_ms), run(*p99_ms)),
+                (Some(s), true) if *s >= 0.001 => t!(
+                    "check.parameter_sensitive.title.tail_logged",
+                    query = &query,
+                    tense = tense,
+                    typical = typical.clone(),
+                    share = format::percent(*s),
+                    slow = run(typical_ms * MIN_TAIL_FACTOR)
+                ),
+                (_, false) => t!(
+                    "check.parameter_sensitive.title.tail_p99",
+                    query = &handle,
+                    tense = tense,
+                    typical = typical.clone(),
+                    p99 = run(*p99_ms)
+                ),
+                (_, true) => t!(
+                    "check.parameter_sensitive.title.tail_p99_logged",
+                    query = &query,
+                    tense = tense,
+                    typical = typical.clone(),
+                    p99 = run(*p99_ms)
+                ),
             };
-            f.impact.label = format!("{} slower for some runs", times(p99_ms / typical_ms.max(0.001)));
-            let locks = q.spread.as_ref().and_then(|s| s.lock_ms).filter(|l| *l > 0.0);
-            let lock_share = locks.map(|l| (l / q.total_time_ms.max(0.001)).clamp(0.0, 1.0)).unwrap_or(0.0);
+            f.impact.label =
+                t!("check.parameter_sensitive.impact.runs", factor = times(p99_ms / typical_ms.max(0.001)));
             let name = snapshot.server.name();
-            let from_log =
-                snapshot.workload.as_ref().is_some_and(|w| w.kind() == Some(culprit_core::WorkloadKind::SlowLog));
-            let source = if from_log && !logged {
-                "The slow query log's runs of this statement (it keeps every run)".to_string()
-            } else if logged {
-                let threshold = snapshot
-                    .setting("long_query_time")
-                    .and_then(|s| s.value.trim().parse::<f64>().ok())
-                    .map(|s| format!(", {}", format::duration(s * 1000.0)))
-                    .unwrap_or_default();
-                format!(
-                    "Of the runs of this statement the slow query log kept (only those over long_query_time{threshold}, so faster runs aren't counted)"
-                )
-            } else {
-                format!("{name}'s run-time histogram for this statement")
+            let source = match (tail.from_log && !tail.logged, tail.logged, tail.threshold_ms) {
+                (true, _, _) => t!("check.parameter_sensitive.source.log_every_run"),
+                (false, true, Some(ms)) => {
+                    t!("check.parameter_sensitive.source.log_kept_over", threshold = format::duration(ms))
+                }
+                (false, true, None) => t!("check.parameter_sensitive.source.log_kept"),
+                (false, false, _) => t!("check.parameter_sensitive.source.histogram", server = name),
             };
-            f.summary = format!(
-                "{source}: half finished within {}{}, the slowest took {}. {name} plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.{}",
-                run(*typical_ms),
-                if percentile_99 { format!(", 99 in 100 within {}", run(*p99_ms)) } else { String::new() },
-                q.max_time_ms.map(run).unwrap_or_else(|| "longer".into()),
-                if lock_share >= 0.2 {
-                    format!(
-                        " {} of its time is spent waiting for locks, so start with what holds them (the fix says how to find it).",
-                        format::percent(lock_share)
+            let slowest = q.max_time_ms.map(run).unwrap_or_else(|| t!("check.parameter_sensitive.slowest_longer"));
+            let mut summary = vec![
+                if tail.percentile_99 {
+                    t!(
+                        "check.parameter_sensitive.summary.tail_p99",
+                        source = source,
+                        typical = typical,
+                        p99 = run(*p99_ms),
+                        slowest = slowest
                     )
                 } else {
-                    String::new()
-                }
-            );
+                    t!("check.parameter_sensitive.summary.tail", source = source, typical = typical, slowest = slowest)
+                },
+                t!("check.parameter_sensitive.summary.tail_why", server = name),
+            ];
+            if tail.lock_share >= 0.2 {
+                summary
+                    .push(t!("check.parameter_sensitive.summary.tail_locks", share = format::percent(tail.lock_share)));
+            }
+            f.summary = summary.join(" ");
             f.metrics.push(Metric::new(
-                if logged { "Typical logged run" } else { "Typical run" },
+                if tail.logged {
+                    t!("check.parameter_sensitive.metric.typical_logged_run")
+                } else {
+                    t!("check.parameter_sensitive.metric.typical_run")
+                },
                 *typical_ms,
                 Unit::Ms,
             ));
-            if percentile_99 {
-                f.metrics.push(Metric::new("1 in 100 runs", *p99_ms, Unit::Ms));
+            if tail.percentile_99 {
+                f.metrics.push(Metric::new(t!("check.parameter_sensitive.metric.p99"), *p99_ms, Unit::Ms));
             }
             if let Some(s) = slow_share {
-                f.metrics.push(Metric::new("Slow runs", *s, Unit::Ratio));
+                f.metrics.push(Metric::new(t!("check.parameter_sensitive.metric.slow_runs"), *s, Unit::Ratio));
             }
-            f.confidence = if logged { Confidence::Medium } else { Confidence::High };
-            let slow_runs = slow_share.map(|s| s * q.executions);
-            f.fix = Some(mysql_fix(snapshot, q, lock_share, slow_runs));
+            f.confidence = if tail.logged { Confidence::Medium } else { Confidence::High };
         }
     }
+    f.fix = Some(match &case.fix {
+        Ladder::Mssql(ladder) => ladder.fix(snapshot, q),
+        Ladder::Mysql { lock_share, slow_runs } => mysql_fix(snapshot, q, *lock_share, *slow_runs),
+    });
     f.queries = query_refs(&[q]);
-    f.verify = vec![
-        "Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).".into(),
-        "Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.".into(),
-    ];
+    f.verify = vec![t!("check.parameter_sensitive.verify.compare"), t!("check.parameter_sensitive.verify.rescan")];
     f
 }
-
-/// The metric naming the plan most calls run with (refine reads it to compare with SQL Server's own recommendation).
-pub(crate) const PLAN_MOST_CALLS_USE: &str = "Plan most calls use";
 
 /// The fix ladder for SQL Server, lightest first, with only the steps this server has: Query Store hints and
 /// parameter-sensitive plan optimization came with SQL Server 2022 (Azure SQL has both), and the optimization needs
@@ -375,100 +488,157 @@ pub(crate) const PLAN_MOST_CALLS_USE: &str = "Plan most calls use";
 /// it costs: a compile on every call (Query Store's average compile, else the plan's own CompileTime) against the
 /// `slow_extra_ms` the slow calls cost beyond the fast ones; where compiling every run of the window costs more, it comes
 /// last and says so.
-pub(crate) fn mssql_fix(snapshot: &Snapshot, q: &QueryStat, fast: Option<&PlanVariant>, slow_extra_ms: f64) -> Fix {
-    let numeric = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
-    let server = &snapshot.server;
-    let azure = server.platform().is_some_and(|p| p.is_azure_sql());
-    let sql2022 = azure || culprit_core::version_at_least(&server.version, [16, 0, 0]);
-    let compat = snapshot.setting("compatibility_level").and_then(|s| s.value.trim().parse::<u32>().ok());
-    let psp_on = snapshot
-        .setting("PARAMETER_SENSITIVE_PLAN_OPTIMIZATION")
-        .is_some_and(|s| matches!(s.value.trim().to_ascii_uppercase().as_str(), "1" | "ON"));
-    // (what it does, the SQL or the change to make, the option in a sentence)
-    let mut steps: Vec<(String, String, &str)> = Vec::new();
-    let force = fast.filter(|p| numeric(&q.id) && numeric(&p.id) && p.executions >= q.executions * MOST_CALLS);
-    if let Some(fast) = force {
-        steps.push((
-            "Keep the plan most calls run fast with, for every call (no code change; undo with sp_query_store_unforce_plan)".into(),
-            format!("EXEC sp_query_store_force_plan @query_id = {}, @plan_id = {};", q.id, fast.id),
-            "force the plan most calls run fast with",
-        ));
+pub(crate) struct MssqlLadder {
+    /// The rungs this server has, lightest first.
+    steps: Vec<Step>,
+    /// The plan to force, where one serves most calls on its own.
+    force: Option<String>,
+    /// A compile, and one on every run of the window, where known.
+    compile_ms: Option<f64>,
+    recompile_ms: Option<f64>,
+    /// Compiling every run costs more than the slow calls do: RECOMPILE comes last.
+    costly: bool,
+    slow_extra_ms: f64,
+}
+
+/// One rung of SQL Server's ladder.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Step {
+    /// Force the plan most calls run fast with.
+    Force,
+    /// Plan each call for its own values: a Query Store hint, or the application's OPTION (RECOMPILE).
+    Recompile { hint: bool },
+    /// Let SQL Server keep a plan per range of values.
+    Psp,
+    /// Plan for the typical value, in the application.
+    Typical,
+}
+
+impl MssqlLadder {
+    pub(crate) fn of(snapshot: &Snapshot, q: &QueryStat, fast: Option<&PlanVariant>, slow_extra_ms: f64) -> Self {
+        let numeric = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
+        let server = &snapshot.server;
+        let azure = server.platform().is_some_and(|p| p.is_azure_sql());
+        let sql2022 = azure || culprit_core::version_at_least(&server.version, [16, 0, 0]);
+        let compat = snapshot.setting("compatibility_level").and_then(|s| s.value.trim().parse::<u32>().ok());
+        let psp_on = snapshot
+            .setting("PARAMETER_SENSITIVE_PLAN_OPTIMIZATION")
+            .is_some_and(|s| matches!(s.value.trim().to_ascii_uppercase().as_str(), "1" | "ON"));
+        let mut steps = Vec::new();
+        let force = fast.filter(|p| numeric(&q.id) && numeric(&p.id) && p.executions >= q.executions * MOST_CALLS);
+        if force.is_some() {
+            steps.push(Step::Force);
+        }
+        // A compile, by Query Store's average over its compiles, else the one the plan records.
+        let compile_ms = q
+            .costs
+            .as_ref()
+            .and_then(|c| Some(c.plan_ms? / c.plans.filter(|n| *n > 0.0)?))
+            .or_else(|| q.plan.as_ref()?.facts().compile_ms)
+            .filter(|ms| *ms > 0.0);
+        let recompile_ms = compile_ms.map(|ms| ms * q.executions);
+        let costly = recompile_ms.is_some_and(|total| slow_extra_ms > 0.0 && total >= slow_extra_ms);
+        let recompile = Step::Recompile { hint: numeric(&q.id) && sql2022 };
+        if !costly {
+            steps.push(recompile);
+        }
+        if sql2022 && !psp_on && compat.is_none_or(|c| c >= 160) {
+            steps.push(Step::Psp);
+        }
+        steps.push(Step::Typical);
+        if costly {
+            steps.push(recompile);
+        }
+        MssqlLadder { steps, force: force.map(|p| p.id.clone()), compile_ms, recompile_ms, costly, slow_extra_ms }
     }
-    // A compile, by Query Store's average over its compiles, else the one the plan records.
-    let compile_ms = q
-        .costs
-        .as_ref()
-        .and_then(|c| Some(c.plan_ms? / c.plans.filter(|n| *n > 0.0)?))
-        .or_else(|| q.plan.as_ref()?.facts().compile_ms)
-        .filter(|ms| *ms > 0.0);
-    let recompile_ms = compile_ms.map(|ms| ms * q.executions);
-    let costly = recompile_ms.is_some_and(|total| slow_extra_ms > 0.0 && total >= slow_extra_ms);
-    let recompile = if numeric(&q.id) && sql2022 {
-        (
-            "Plan each call for its own values (costs compile CPU per call)".to_string(),
-            format!("EXEC sys.sp_query_store_set_hints @query_id = {}, @query_hints = N'OPTION (RECOMPILE)';", q.id),
-            "plan per call for this statement only",
-        )
-    } else {
-        (
-            "Plan each call for its own values (costs compile CPU per call), in the application".to_string(),
-            "--    append OPTION (RECOMPILE) to the statement".to_string(),
-            "plan per call for this statement only",
-        )
-    };
-    let mut last = None;
-    if costly {
-        last = Some(recompile);
-    } else {
-        steps.push(recompile);
-    }
-    if sql2022 && !psp_on && compat.is_none_or(|c| c >= 160) {
-        steps.push((
-            "Let SQL Server keep a plan per range of values".into(),
-            "ALTER DATABASE SCOPED CONFIGURATION SET PARAMETER_SENSITIVE_PLAN_OPTIMIZATION = ON;".into(),
-            "let SQL Server keep several plans",
-        ));
-    }
-    steps.push((
-        "In the application, plan for the typical value instead of the first one seen".into(),
-        "--    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement".into(),
-        "plan for the typical value",
-    ));
-    steps.extend(last);
-    let sql: Vec<String> = steps
-        .iter()
-        .enumerate()
-        .map(|(i, (what, sql, _))| {
-            let what = if i == 0 { what.clone() } else { format!("Or {}{}", what[..1].to_lowercase(), &what[1..]) };
-            format!("-- {}. {what}:\n{sql}", i + 1)
-        })
-        .collect();
-    let options: Vec<String> = steps.iter().map(|(_, _, option)| option.to_string()).collect();
-    // What a compile on every call costs, against what the slow calls cost, where both are known.
-    let recompile_cost = match (compile_ms, recompile_ms) {
-        (Some(each), Some(total)) if costly => format!(
-            "RECOMPILE spends a compile on every call: about {} each, {} over its {} runs in {}, more than the {} its slow calls cost, so it comes last.",
-            format::duration(each),
-            format::duration(total),
-            format::count(q.executions),
-            snapshot.workload.as_ref().map(|w| w.window_phrase()).unwrap_or_else(|| "the window".into()),
-            format::duration(slow_extra_ms)
-        ),
-        (Some(each), _) => format!("RECOMPILE spends a compile on every call (about {} each).", format::duration(each)),
-        _ => "RECOMPILE spends a compile on every call.".to_string(),
-    };
-    Fix {
-        summary: format!("Pick the lightest option that works: {}. Each is reversible.", or_list(&options)),
-        sql: Some(sql.join("\n\n")),
-        cost: Some(if force.is_some() {
-            format!(
-                "Forcing a plan pins it for every value until you unforce it: try a value from a slow call under it first.{} {recompile_cost}",
-                crate::tuning::hand_forcing_note(snapshot).map(|n| format!(" {n}")).unwrap_or_default()
-            )
+
+    /// The ladder in words, its SQL each rung's.
+    pub(crate) fn fix(&self, snapshot: &Snapshot, q: &QueryStat) -> Fix {
+        let sql: Vec<String> = self
+            .steps
+            .iter()
+            .enumerate()
+            .map(|(i, step)| {
+                // (what it does, the SQL or the change to make): comments of the fix's SQL.
+                let (what, sql) = match step {
+                    Step::Force => (
+                        "Keep the plan most calls run fast with, for every call (no code change; undo with sp_query_store_unforce_plan)".to_string(),
+                        format!(
+                            "EXEC sp_query_store_force_plan @query_id = {}, @plan_id = {};",
+                            q.id,
+                            self.force.as_deref().unwrap_or_default()
+                        ),
+                    ),
+                    Step::Recompile { hint: true } => (
+                        "Plan each call for its own values (costs compile CPU per call)".to_string(),
+                        format!(
+                            "EXEC sys.sp_query_store_set_hints @query_id = {}, @query_hints = N'OPTION (RECOMPILE)';",
+                            q.id
+                        ),
+                    ),
+                    Step::Recompile { hint: false } => (
+                        "Plan each call for its own values (costs compile CPU per call), in the application".to_string(),
+                        "--    append OPTION (RECOMPILE) to the statement".to_string(),
+                    ),
+                    Step::Psp => (
+                        "Let SQL Server keep a plan per range of values".into(),
+                        "ALTER DATABASE SCOPED CONFIGURATION SET PARAMETER_SENSITIVE_PLAN_OPTIMIZATION = ON;".into(),
+                    ),
+                    Step::Typical => (
+                        "In the application, plan for the typical value instead of the first one seen".into(),
+                        "--    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement".into(),
+                    ),
+                };
+                let what = if i == 0 { what } else { format!("Or {}{}", what[..1].to_lowercase(), &what[1..]) };
+                format!("-- {}. {what}:\n{sql}", i + 1)
+            })
+            .collect();
+        let options: Vec<String> = self
+            .steps
+            .iter()
+            .map(|step| match step {
+                Step::Force => t!("check.parameter_sensitive.option.force"),
+                Step::Recompile { .. } => t!("check.parameter_sensitive.option.recompile"),
+                Step::Psp => t!("check.parameter_sensitive.option.psp"),
+                Step::Typical => t!("check.parameter_sensitive.option.typical"),
+            })
+            .collect();
+        // What a compile on every call costs, against what the slow calls cost, where both are known.
+        let recompile_cost = match (self.compile_ms, self.recompile_ms) {
+            (Some(each), Some(total)) if self.costly => t!(
+                "check.parameter_sensitive.cost.recompile_last",
+                each = format::duration(each),
+                total = format::duration(total),
+                runs = format::count(q.executions),
+                window = snapshot
+                    .workload
+                    .as_ref()
+                    .map(|w| w.window_phrase())
+                    .unwrap_or_else(|| t!("check.parameter_sensitive.cost.the_window")),
+                slow = format::duration(self.slow_extra_ms)
+            ),
+            (Some(each), _) => t!("check.parameter_sensitive.cost.recompile_each", each = format::duration(each)),
+            _ => t!("check.parameter_sensitive.cost.recompile"),
+        };
+        let cost = if self.force.is_some() {
+            let mut cost = vec![t!("check.parameter_sensitive.cost.force")];
+            cost.extend(crate::tuning::hand_forcing_note(snapshot));
+            cost.push(recompile_cost);
+            cost.join(" ")
         } else {
             recompile_cost
-        }),
+        };
+        Fix {
+            summary: t!("check.parameter_sensitive.fix.ladder", options = or_list(&options)),
+            sql: Some(sql.join("\n\n")),
+            cost: Some(cost),
+        }
     }
+}
+
+/// [`MssqlLadder`] decided and worded at once, for a check that words a fix where it decides it.
+pub(crate) fn mssql_fix(snapshot: &Snapshot, q: &QueryStat, fast: Option<&PlanVariant>, slow_extra_ms: f64) -> Fix {
+    MssqlLadder::of(snapshot, q, fast, slow_extra_ms).fix(snapshot, q)
 }
 
 /// "a, b or c".
@@ -476,13 +646,13 @@ fn or_list(items: &[String]) -> String {
     match items {
         [] => String::new(),
         [one] => one.clone(),
-        [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
+        [rest @ .., last] => t!("check.parameter_sensitive.or_list", items = rest.join(", "), last = last),
     }
 }
 
 pub(crate) fn postgres_fix() -> Fix {
     Fix {
-        summary: "First see what differs: plan the statement with a value from a slow call and one from a fast call. If a generic plan is reused for very different values, plan per call for the application's role; if one column's values are very uneven, give the planner finer statistics for it.".into(),
+        summary: t!("check.parameter_sensitive.fix.postgres"),
         sql: Some(
             "-- Compare a slow and a fast value (outside production, ANALYZE runs the statement):\nEXPLAIN (ANALYZE, BUFFERS) <the statement with a slow value>;\n\n-- Plan every call for its own values (for the role the application connects as):\nALTER ROLE <app_role> SET plan_cache_mode = force_custom_plan;\n\n-- Finer statistics for an uneven column, then refresh them:\nALTER TABLE <table> ALTER COLUMN <column> SET STATISTICS 1000;\nANALYZE <table>;".into(),
         ),
@@ -498,22 +668,21 @@ pub(crate) fn mysql_fix(snapshot: &Snapshot, q: &QueryStat, lock_share: f64, slo
     if lock_share >= 0.2 {
         let LockHolder { lead, sql } = find_lock_holder(snapshot, q, slow_runs);
         return Fix {
-            summary: format!(
-                "The slow runs mostly wait for row locks. {lead} Keep the transactions that touch these rows short."
-            ),
+            summary: [t!("check.parameter_sensitive.fix.locks"), lead, t!("check.parameter_sensitive.fix.locks_short")]
+                .join(" "),
             sql,
             cost: None,
         };
     }
     if mariadb {
         return Fix {
-            summary: "Compare a slow and a fast value with ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MariaDB choose a better plan for each.".into(),
+            summary: t!("check.parameter_sensitive.fix.mariadb"),
             sql: Some("-- Collect a histogram for an uneven column (used with the default use_stat_tables):\nANALYZE TABLE <table> PERSISTENT FOR COLUMNS (<column>) INDEXES ();".into()),
             cost: None,
         };
     }
     Fix {
-        summary: "Compare a slow and a fast value with EXPLAIN ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MySQL choose a better plan for each.".into(),
+        summary: t!("check.parameter_sensitive.fix.mysql"),
         sql: Some("-- Give the optimizer the distribution of an uneven column:\nANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;".into()),
         cost: None,
     }
@@ -594,10 +763,12 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        let f = finding_for(&s, &q, &plans_shape(&s, &q).unwrap(), 0.04);
-        assert!(f.title.contains("1.2 ms or less for most calls"), "{}", f.title);
+        let case = parameter_sensitive_case(&s, &q, plans_shape(&s, &q).unwrap(), 0.04);
         // No plan serves most calls on its own: forcing one isn't offered.
-        assert!(!f.metrics.iter().any(|m| m.label == PLAN_MOST_CALLS_USE), "{:?}", f.metrics);
+        assert!(case.most_calls.is_none());
+        let f = parameter_sensitive_finding(&s, case);
+        assert!(f.title.contains("1.2 ms or less for most calls"), "{}", f.title);
+        assert!(f.facts.usual_fast_plan.is_none(), "{:?}", f.metrics);
     }
 
     #[test]
