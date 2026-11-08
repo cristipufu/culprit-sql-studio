@@ -58,7 +58,7 @@ fn planning_share_needs_reuse_and_volume() {
     q.total_time_ms = 20_000.0;
     q.mean_time_ms = 2.0;
     q.costs = Some(QueryCosts { plan_ms: Some(30_000.0), plans: Some(10_000.0), ..Default::default() });
-    let f = planning_time(&s);
+    let f = PlanningTimeCheck.run(&s);
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].title, "Planning takes 60% of the time of a read from orders");
     assert!(f[0].summary.contains("a new plan for every run"));

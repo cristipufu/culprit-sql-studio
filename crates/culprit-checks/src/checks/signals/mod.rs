@@ -283,7 +283,7 @@ fn with_query(snapshot: &Snapshot, f: &mut Finding, q: &QueryStat) {
 
 /// "40%", or "almost all" when rounding would claim 100%.
 fn share_words(share: f64) -> String {
-    if share >= 0.97 { "almost all".into() } else { format::percent(share) }
+    if share >= 0.97 { t!("common.signals.almost_all") } else { format::percent(share) }
 }
 
 fn per_run(total: f64, runs: f64) -> f64 {
