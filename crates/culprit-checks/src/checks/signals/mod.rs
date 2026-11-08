@@ -12,7 +12,7 @@ use culprit_core::{
     format, signals::plan_row_bytes,
 };
 
-use culprit_core::Check;
+use culprit_core::{Check, t};
 
 use crate::support::*;
 
@@ -130,12 +130,14 @@ fn is_mariadb(snapshot: &Snapshot) -> bool {
 /// every window is said in ([`culprit_core::span_words`]), never "1277.0 days".
 fn window_phrase(snapshot: &Snapshot) -> String {
     match snapshot.workload.as_ref() {
-        Some(w) if w.log.is_some() => format!("over {}", w.window_phrase()),
-        Some(w) if w.is_windowed() => format!("in the last {}", culprit_core::span_words(w.measurement_hours())),
-        Some(w) if w.measurement_hours() > 0.0 => {
-            format!("since its statistics began {} ago", culprit_core::span_words(w.measurement_hours()))
+        Some(w) if w.log.is_some() => t!("common.signals.window.over", window = w.window_phrase()),
+        Some(w) if w.is_windowed() => {
+            t!("common.signals.window.last", span = culprit_core::span_words(w.measurement_hours()))
         }
-        _ => "since its statistics began".into(),
+        Some(w) if w.measurement_hours() > 0.0 => {
+            t!("common.signals.window.began_ago", span = culprit_core::span_words(w.measurement_hours()))
+        }
+        _ => t!("common.signals.window.began"),
     }
 }
 
@@ -256,6 +258,18 @@ pub(crate) fn total_wait(ms: f64) -> String {
 
 fn severity_score(f: &mut Finding) {
     f.impact.score = f.impact.score.max(base_score(f.severity));
+}
+
+/// Where a finding on statement `q` with `severity` ranks among its check's: the score [`with_query`] and
+/// [`severity_score`] give it, so a check can order and keep its cases before wording them.
+fn query_score(snapshot: &Snapshot, q: &QueryStat, severity: Severity) -> f64 {
+    query_impact(snapshot, &[q]).map_or(0.0, |impact| score_for_share(impact.share)).max(base_score(severity))
+}
+
+/// The tense a finding on statements tells them in, as its messages' `select` reads it: the past once every one of
+/// them stopped running ([`crate::all_stopped`]).
+fn tense(snapshot: &Snapshot, queries: &[&QueryStat]) -> &'static str {
+    if crate::all_stopped(snapshot, queries) { "past" } else { "present" }
 }
 
 /// Attach the query's share of database time, keep a score at least as high as the severity's.

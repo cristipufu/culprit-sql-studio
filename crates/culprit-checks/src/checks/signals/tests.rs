@@ -73,7 +73,7 @@ fn jit_longer_than_the_query() {
     q.total_time_ms = 4_000.0;
     q.mean_time_ms = 40.0;
     q.costs = Some(QueryCosts { jit_ms: Some(2_500.0), jit_functions: Some(800.0), ..Default::default() });
-    let f = jit_overhead(&s);
+    let f = JitOverheadCheck.run(&s);
     assert_eq!(f[0].title, "JIT compilation takes longer than running a read from orders");
     assert!(s.setting("jit_above_cost").is_none());
     assert!(f[0].summary.contains("Culprit did not read jit_above_cost."));

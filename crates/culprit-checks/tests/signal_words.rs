@@ -427,3 +427,155 @@ fix: Inspect cluster membership, node logs and state transfer with the cluster o
 verify: Verify the intended node rejoins the primary component, reports ready and connected, and serves application operations. Compare flow control over a fresh known interval before diagnosing sustained pressure."#,
     );
 }
+
+// ── jit-overhead ───────────────────────────────────────────────────────────────────────────────────
+
+/// `s` with one application statement left, the heaviest, made `text` with no costs: the one the query checks are
+/// planted on.
+fn only<'s>(s: &'s mut Snapshot, text: &str) -> &'s mut culprit_core::QueryStat {
+    let w = s.workload.as_mut().expect("workload");
+    w.queries.sort_by(|a, b| b.total_time_ms.total_cmp(&a.total_time_ms));
+    let keep = w.queries.iter().position(|q| !q.text.to_ascii_lowercase().contains("pg_catalog")).expect("a query");
+    let q = w.queries.swap_remove(keep);
+    w.queries = vec![q];
+    let q = &mut w.queries[0];
+    q.text = text.into();
+    q.costs = Some(Default::default());
+    q
+}
+
+/// Make `s` a window of three days in which its statement last ran 30 hours before the end: it stopped running.
+fn stopped(s: &mut Snapshot) {
+    use culprit_core::format::{epoch_seconds, iso_from_epoch};
+    let w = s.workload.as_mut().expect("workload");
+    let end = w.window_end.clone().unwrap_or_else(|| s.taken_at.clone());
+    w.window_end = Some(end.clone());
+    crate::last_hours(w, 72.0);
+    let end = epoch_seconds(&end).expect("a window end");
+    for q in &mut w.queries {
+        q.first_seen = Some(iso_from_epoch(end - 72.0 * 3600.0));
+        q.last_seen = Some(iso_from_epoch(end - 30.0 * 3600.0));
+    }
+}
+
+fn set(s: &mut Snapshot, name: &str, value: &str) {
+    s.settings.retain(|x| x.name != name);
+    s.settings.push(culprit_core::Setting {
+        name: name.into(),
+        value: value.into(),
+        default_value: None,
+        scope: "server".into(),
+    });
+}
+
+fn jit(jit_ms: f64) -> Snapshot {
+    let mut s = fixture("postgres-demo");
+    let q = only(&mut s, "SELECT count(*) FROM orders WHERE status = $1");
+    (q.executions, q.total_time_ms, q.mean_time_ms) = (100.0, 4_000.0, 40.0);
+    q.costs.as_mut().unwrap().jit_ms = Some(jit_ms);
+    s
+}
+
+#[test]
+fn jit_longer_than_the_run_with_no_threshold_read() {
+    says(
+        &run("jit-overhead", &jit(2_500.0)),
+        r#"id: jit-overhead:9065391607317686058
+title: JIT compilation takes longer than running a read from orders
+summary: PostgreSQL spent 25 ms of its 40 ms per run compiling parts of this statement to machine code (2.5 s in all since its statistics began 5 hours ago). JIT is chosen at plan time when the estimated cost exceeds the effective jit_above_cost. Culprit did not read jit_above_cost. The application's role, database or session can use another setting, and a cached plan can keep a decision made before this scan. JIT pays off for long analytical queries; on short runs its compilation can cost more than it saves. These totals alone do not show that the planner overestimated the rows.
+impact: 62% JIT
+metric: JIT share
+metric: JIT per run
+metric: Run time
+fix: Turn JIT off for the application's role, or raise jit_above_cost in the scope that enables it. This scan does not establish that threshold for the application, so it cannot choose a higher value safely. Check the role, database and session settings before changing it; a role's new connections use the SQL below unless the application overrides it.
+cost: This affects every statement that role runs, including analytical queries that may benefit from JIT.
+sql: -- For the role the application connects as (takes effect on its next connections):
+ALTER ROLE <app_role> SET jit = off;
+verify: Once the application's connections use the change, its JIT time per run should drop to zero or near it between two scans: pg_stat_statements keeps running totals, so compare its JIT time and runs in a scan taken once the change is live and one a day or more later (2.5 s over 100 runs in this scan)."#,
+    );
+}
+
+#[test]
+fn jit_a_share_of_the_run_with_the_threshold_read() {
+    let mut s = jit(1_200.0);
+    set(&mut s, "jit_above_cost", "100000");
+    says(
+        &run("jit-overhead", &s),
+        r#"id: jit-overhead:9065391607317686058
+title: JIT compilation takes 30% of the time of a read from orders
+summary: PostgreSQL spent 12 ms of its 40 ms per run compiling parts of this statement to machine code (1.2 s in all since its statistics began 5 hours ago). JIT is chosen at plan time when the estimated cost exceeds the effective jit_above_cost. jit_above_cost is 100000 in Culprit's session. The application's role, database or session can use another setting, and a cached plan can keep a decision made before this scan. JIT pays off for long analytical queries; on short runs its compilation can cost more than it saves. These totals alone do not show that the planner overestimated the rows.
+impact: 30% JIT
+metric: JIT share
+metric: JIT per run
+metric: Run time
+fix: jit_above_cost is 100K in Culprit's session; first check the application's effective threshold. If it uses this value, raise it so JIT starts only for more expensive plans: Set jit_above_cost to 1000000 and reload the configuration (settings marked as needing a restart take effect after one). Apply the change in the role, database or session instead if that is where the application's threshold is set. Or turn JIT off for the application's role (the alternative SQL), whose new connections use it unless the application overrides it.
+sql: -- Only if the application uses the threshold Culprit read, with no role, database or session override:
+ALTER SYSTEM SET jit_above_cost = 1000000;
+SELECT pg_reload_conf();
+-- Alternative, for the application's role only:
+-- ALTER ROLE <app_role> SET jit = off;
+verify: Once the application's connections use the change, its JIT time per run should drop to zero or near it between two scans: pg_stat_statements keeps running totals, so compare its JIT time and runs in a scan taken once the change is live and one a day or more later (1.2 s over 100 runs in this scan)."#,
+    );
+}
+
+#[test]
+fn jit_that_stopped_on_a_managed_server() {
+    let mut s = jit(1_200.0);
+    set(&mut s, "jit_above_cost", "500000");
+    s.server.set_platform(Some(culprit_core::Platform::AmazonRds));
+    stopped(&mut s);
+    says(
+        &run("jit-overhead", &s),
+        r#"id: jit-overhead:9065391607317686058
+title: JIT compilation took 30% of the time of a read from orders
+summary: PostgreSQL spent 12 ms of its 40 ms per run compiling parts of this statement to machine code (1.2 s in all in the last 3 days). JIT is chosen at plan time when the estimated cost exceeds the effective jit_above_cost. jit_above_cost is 500000 in Culprit's session. The application's role, database or session can use another setting, and a cached plan can keep a decision made before this scan. JIT pays off for long analytical queries; on short runs its compilation can cost more than it saves. These totals alone do not show that the planner overestimated the rows.
+impact: 30% JIT
+metric: JIT share
+metric: JIT per run
+metric: Run time
+fix: jit_above_cost is 500K in Culprit's session; first check the application's effective threshold. If it uses this value, raise it so JIT starts only for more expensive plans: Set jit_above_cost to 5000000 for this database only, as its owner: sessions that connect after the change use it, and other databases on the server keep theirs. To change it for every database on the server, set it in the instance's DB parameter group. Apply the change in the role, database or session instead if that is where the application's threshold is set. Or turn JIT off for the application's role (the alternative SQL), whose new connections use it unless the application overrides it.
+sql: -- Only if the application uses the threshold Culprit read, with no role, database or session override:
+ALTER DATABASE demo SET jit_above_cost = 5000000;
+-- Alternative, for the application's role only:
+-- ALTER ROLE <app_role> SET jit = off;
+verify: Re-scan: JIT time per run should drop to zero or near it, and the average run time with it."#,
+    );
+}
+
+#[test]
+fn jit_over_a_log_and_over_a_window_of_unknown_length() {
+    let mut s = jit(2_500.0);
+    s.workload.as_mut().unwrap().log = Some("slow query".into());
+    let mut findings = run("jit-overhead", &s);
+    let mut s = jit(2_500.0);
+    s.workload.as_mut().unwrap().window_hours = 0.0;
+    findings.extend(run("jit-overhead", &s));
+    says(
+        &findings,
+        r#"id: jit-overhead:9065391607317686058
+title: JIT compilation takes longer than running a read from orders
+summary: PostgreSQL spent 25 ms of its 40 ms per run compiling parts of this statement to machine code (2.5 s in all over the 5 hours the slow query log covers). JIT is chosen at plan time when the estimated cost exceeds the effective jit_above_cost. Culprit did not read jit_above_cost. The application's role, database or session can use another setting, and a cached plan can keep a decision made before this scan. JIT pays off for long analytical queries; on short runs its compilation can cost more than it saves. These totals alone do not show that the planner overestimated the rows.
+impact: 62% JIT
+metric: JIT share
+metric: JIT per run
+metric: Run time
+fix: Turn JIT off for the application's role, or raise jit_above_cost in the scope that enables it. This scan does not establish that threshold for the application, so it cannot choose a higher value safely. Check the role, database and session settings before changing it; a role's new connections use the SQL below unless the application overrides it.
+cost: This affects every statement that role runs, including analytical queries that may benefit from JIT.
+sql: -- For the role the application connects as (takes effect on its next connections):
+ALTER ROLE <app_role> SET jit = off;
+verify: Once the application's connections use the change, its JIT time per run should drop to zero or near it between two scans: pg_stat_statements keeps running totals, so compare its JIT time and runs in a scan taken once the change is live and one a day or more later (2.5 s over 100 runs in this scan).
+
+id: jit-overhead:9065391607317686058
+title: JIT compilation takes longer than running a read from orders
+summary: PostgreSQL spent 25 ms of its 40 ms per run compiling parts of this statement to machine code (2.5 s in all since its statistics began). JIT is chosen at plan time when the estimated cost exceeds the effective jit_above_cost. Culprit did not read jit_above_cost. The application's role, database or session can use another setting, and a cached plan can keep a decision made before this scan. JIT pays off for long analytical queries; on short runs its compilation can cost more than it saves. These totals alone do not show that the planner overestimated the rows.
+impact: 62% JIT
+metric: JIT share
+metric: JIT per run
+metric: Run time
+fix: Turn JIT off for the application's role, or raise jit_above_cost in the scope that enables it. This scan does not establish that threshold for the application, so it cannot choose a higher value safely. Check the role, database and session settings before changing it; a role's new connections use the SQL below unless the application overrides it.
+cost: This affects every statement that role runs, including analytical queries that may benefit from JIT.
+sql: -- For the role the application connects as (takes effect on its next connections):
+ALTER ROLE <app_role> SET jit = off;
+verify: Once the application's connections use the change, its JIT time per run should drop to zero or near it between two scans: pg_stat_statements keeps running totals, so compare its JIT time and runs in a scan taken once the change is live and one a day or more later (2.5 s over 100 runs in this scan)."#,
+    );
+}
