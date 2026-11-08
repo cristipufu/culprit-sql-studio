@@ -152,13 +152,8 @@ pub fn set_aside_replica_usage(snapshot: &mut Snapshot) {
     snapshot.server.missing.retain(|m| m.capability != Capability::IndexUsage);
     snapshot.server.missing.push(MissingCapability {
         capability: Capability::IndexUsage,
-        reason: format!(
-            "This connection reached a {role}: its usage counters count only the reads run on it, not the database's \
-             whole workload, so no index is called unused from here."
-        ),
-        fix: Some(
-            "Scan the primary to judge index use, and check every replica's reads before dropping an index.".into(),
-        ),
+        reason: culprit_core::t!("engine.history.replica.reason", role = role),
+        fix: Some(culprit_core::t!("engine.history.replica.fix")),
     });
     for i in &mut snapshot.indexes {
         (i.reads, i.writes, i.seeks, i.scans, i.lookups, i.last_read) = (None, None, None, None, None, None);
