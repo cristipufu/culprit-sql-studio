@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::format;
 use crate::model::{Engine, Session};
+use crate::{format, t};
 
 /// The lock a waiting session asked for and didn't get.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Default)]
@@ -212,66 +212,57 @@ fn head_kind(session: Option<&Session>) -> HeadKind {
 /// What kind of lock, in words a non-DBA reads: `LCK_M_U` → "an update lock", `X,REC_NOT_GAP` → "an exclusive row lock",
 /// a Postgres `ShareLock` on a transaction id → "a row lock".
 pub fn lock_kind(wait_type: Option<&str>, lock: Option<&LockWait>) -> Option<String> {
+    // A lock of `strength` over `scope` (`none` when the mode says no more): "an exclusive row lock".
+    let mode_lock = |strength: &str, scope: &str| match strength {
+        "X" => Some(t!("core.blocking.lock.exclusive", scope = scope)),
+        "S" => Some(t!("core.blocking.lock.shared", scope = scope)),
+        "IX" => Some(t!("core.blocking.lock.intent_exclusive", scope = scope)),
+        "IS" => Some(t!("core.blocking.lock.intent_shared", scope = scope)),
+        "U" => Some(t!("core.blocking.lock.update", scope = scope)),
+        _ => None,
+    };
     if let Some(w) = wait_type.filter(|w| w.starts_with("LCK_M_")) {
         let mode = &w["LCK_M_".len()..];
-        return Some(
-            match mode {
-                "S" => "a shared lock",
-                "U" => "an update lock",
-                "X" => "an exclusive lock",
-                "IS" => "an intent-shared lock",
-                "IU" => "an intent-update lock",
-                "IX" => "an intent-exclusive lock",
-                "SIX" | "SIU" | "UIX" => "a shared-and-intent lock",
-                "SCH_S" => "a schema-stability lock",
-                "SCH_M" => "a schema-change lock",
-                "BU" => "a bulk-load lock",
-                m if m.starts_with("R") => "a key-range lock",
-                _ => "a lock",
-            }
-            .to_string(),
-        );
+        return Some(match mode {
+            "S" | "U" | "X" | "IS" | "IX" => mode_lock(mode, "none").unwrap_or_default(),
+            "IU" => t!("core.blocking.lock.intent_update"),
+            "SIX" | "SIU" | "UIX" => t!("core.blocking.lock.shared_and_intent"),
+            "SCH_S" => t!("core.blocking.lock.schema_stability"),
+            "SCH_M" => t!("core.blocking.lock.schema_change"),
+            "BU" => t!("core.blocking.lock.bulk_load"),
+            m if m.starts_with("R") => t!("core.blocking.lock.key_range"),
+            _ => t!("core.blocking.lock.any"),
+        });
     }
     let lock = lock?;
     if matches!(lock.resource.as_deref(), Some("transactionid") | Some("tuple")) {
-        return Some("a row lock".into());
+        return Some(t!("core.blocking.lock.row"));
     }
     let mode = lock.mode.as_deref()?;
     // MySQL performance_schema modes: X, S, IX, IS, plus REC_NOT_GAP / GAP / INSERT_INTENTION.
     let parts: Vec<&str> = mode.split(',').map(str::trim).collect();
     let base = parts.first().copied().unwrap_or("");
     let has = |p: &str| parts.iter().any(|x| x.eq_ignore_ascii_case(p));
-    let strength = match base {
-        "X" => "an exclusive",
-        "S" => "a shared",
-        "IX" => "an intent-exclusive",
-        "IS" => "an intent-shared",
-        "U" => "an update",
-        _ => "",
+    let scope = if has("INSERT_INTENTION") {
+        "insert_intention"
+    } else if has("GAP") {
+        "gap"
+    } else if has("REC_NOT_GAP") {
+        "row"
+    } else if lock.resource.as_deref().is_some_and(|r| r.eq_ignore_ascii_case("TABLE") || r.eq_ignore_ascii_case("OBJECT"))
+    {
+        "table"
+    } else {
+        "none"
     };
-    if !strength.is_empty() {
-        let scope = if has("INSERT_INTENTION") {
-            " insert-intention"
-        } else if has("GAP") {
-            " gap"
-        } else if has("REC_NOT_GAP") {
-            " row"
-        } else if lock
-            .resource
-            .as_deref()
-            .is_some_and(|r| r.eq_ignore_ascii_case("TABLE") || r.eq_ignore_ascii_case("OBJECT"))
-        {
-            " table"
-        } else {
-            ""
-        };
-        return Some(format!("{strength}{scope} lock"));
+    if let Some(words) = mode_lock(base, scope) {
+        return Some(words);
     }
     // Postgres table locks: AccessExclusiveLock, ShareRowExclusiveLock, …
     Some(match mode {
-        "AccessExclusiveLock" => "a table-wide exclusive lock".to_string(),
-        m if m.ends_with("Lock") => format!("a {m}"),
-        m => format!("a {m} lock"),
+        "AccessExclusiveLock" => t!("core.blocking.lock.table_wide_exclusive"),
+        m if m.ends_with("Lock") => t!("core.blocking.lock.named", mode = m),
+        m => t!("core.blocking.lock.named_mode", mode = m),
     })
 }
 
@@ -279,15 +270,11 @@ pub fn lock_kind(wait_type: Option<&str>, lock: Option<&LockWait>) -> Option<Str
 pub fn lock_phrase(wait_type: Option<&str>, lock: Option<&LockWait>) -> Option<String> {
     let object = lock.and_then(|l| l.object.as_deref());
     match (lock_kind(wait_type, lock), object) {
-        (Some(kind), Some(object)) => Some(format!("{kind} on {object}")),
+        (Some(kind), Some(object)) => Some(t!("core.blocking.lock.on", lock = kind, object = object)),
         (Some(kind), None) => Some(kind),
-        (None, Some(object)) => Some(format!("a lock on {object}")),
+        (None, Some(object)) => Some(t!("core.blocking.lock.any_on", object = object)),
         (None, None) => wait_type.map(str::to_string),
     }
-}
-
-fn plural(n: u32, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 fn chain(
@@ -324,32 +311,40 @@ fn chain(
     });
     let head_ms = session.and_then(|s| s.elapsed_ms);
     let transaction_ms = session.and_then(|s| s.transaction_ms);
-    let on = lock_phrase(wait_type.as_deref(), lock.as_ref()).map(|p| format!(" ({p})")).unwrap_or_default();
+    let behind = match lock_phrase(wait_type.as_deref(), lock.as_ref()) {
+        Some(lock) => t!("core.blocking.behind_on", n = waiters, count = waiters.to_string(), lock = lock),
+        None => t!("core.blocking.behind", n = waiters, count = waiters.to_string()),
+    };
     let wait_type = wait_type.filter(|w| w.starts_with("LCK_M_") || w.starts_with("Lock"));
-    let behind = format!("{} behind it{on}", plural(waiters, "session waits", "sessions wait"));
     let headline = match kind {
         HeadKind::IdleInTransaction => match head_ms {
-            Some(ms) => {
-                format!("Session {head} has been idle in an open transaction for {}; {behind}.", format::duration(ms))
-            }
-            None => format!("Session {head} is idle in an open transaction; {behind}."),
+            Some(ms) => t!(
+                "core.blocking.headline.idle_in_transaction_for",
+                head = head,
+                duration = format::duration(ms),
+                behind = behind
+            ),
+            None => t!("core.blocking.headline.idle_in_transaction", head = head, behind = behind),
         },
         HeadKind::Running => {
-            let what = match session.and_then(statement_verb) {
-                Some(v) if v.starts_with(['A', 'E', 'I', 'O', 'U']) => format!("an {v} statement"),
-                Some(v) => format!("a {v} statement"),
-                None => "a statement".to_string(),
+            // The verb is an SQL keyword (`SELECT`, `INSERT`), said as it is.
+            let statement = match session.and_then(statement_verb) {
+                Some(verb) => t!("core.blocking.statement_verb", verb = verb),
+                None => t!("core.blocking.statement"),
             };
             match head_ms {
-                Some(ms) => format!(
-                    "Session {head} has been running {what} for {} while holding locks; {behind}.",
-                    format::duration(ms)
+                Some(ms) => t!(
+                    "core.blocking.headline.running_for",
+                    head = head,
+                    statement = statement,
+                    duration = format::duration(ms),
+                    behind = behind
                 ),
-                None => format!("Session {head} is running {what} while holding locks; {behind}."),
+                None => t!("core.blocking.headline.running", head = head, statement = statement, behind = behind),
             }
         }
-        HeadKind::Idle => format!("Session {head} holds locks without running anything; {behind}."),
-        HeadKind::Unknown => format!("Session {head}, which this login can't see, holds the locks; {behind}."),
+        HeadKind::Idle => t!("core.blocking.headline.idle", head = head, behind = behind),
+        HeadKind::Unknown => t!("core.blocking.headline.unknown", head = head, behind = behind),
     };
     let advice = advice(engine, kind, head, wait_type.as_deref());
     BlockingChain {
@@ -371,37 +366,24 @@ fn advice(engine: Engine, kind: HeadKind, head: &str, wait_type: Option<&str>) -
     let readers = wait_type.is_some_and(|w| w == "LCK_M_S" || w == "LCK_M_IS");
     match kind {
         HeadKind::IdleInTransaction => {
+            // How each engine keeps an idle transaction from holding its locks.
             let prevent = match engine {
-                Engine::Mssql => "SET XACT_ABORT ON in the application makes an error roll the transaction back instead of leaving it open.",
-                Engine::Postgres | Engine::Yugabyte => "Set idle_in_transaction_session_timeout so the server ends sessions that sit in a transaction.",
-                Engine::Mysql => "Keep transactions short; waiters give up after innodb_lock_wait_timeout (50 s by default).",
-                Engine::Sqlite => "Keep write transactions short: SQLite allows one writer at a time, and the others wait busy_timeout, then fail with SQLITE_BUSY.",
+                Engine::Mssql => t!("core.blocking.advice.prevent.mssql"),
+                Engine::Postgres | Engine::Yugabyte => t!("core.blocking.advice.prevent.postgres"),
+                Engine::Mysql => t!("core.blocking.advice.prevent.mysql"),
+                Engine::Sqlite => t!("core.blocking.advice.prevent.sqlite"),
             };
-            format!(
-                "The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path \
-                 that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. \
-                 Ending session {head} rolls its transaction back and frees everyone behind it. {prevent}"
-            )
+            [t!("core.blocking.advice.idle_in_transaction", head = head), prevent].join(" ")
         }
         HeadKind::Running => {
-            let readers_note = match (engine, readers) {
-                (Engine::Mssql, true) => " The waiters only want to read: with READ_COMMITTED_SNAPSHOT on, readers use row versions and stop waiting on writers.",
-                _ => "",
-            };
-            format!(
-                "A long statement is holding locks the others need. Look at its plan in Queries, and keep the transaction \
-                 around it short: do reads and outside calls before it starts.{readers_note}"
-            )
+            let mut sentences = vec![t!("core.blocking.advice.running")];
+            if engine == Engine::Mssql && readers {
+                sentences.push(t!("core.blocking.advice.readers_rcsi"));
+            }
+            sentences.join(" ")
         }
-        HeadKind::Idle => format!(
-            "Session {head} isn't running anything but still holds locks, typically from a transaction the client never \
-             finished. Ending it releases them."
-        ),
-        HeadKind::Unknown => {
-            "The blocker belongs to another database or a login Culprit can't see; ask someone with VIEW SERVER STATE (or \
-             pg_read_all_stats / PROCESS) to look."
-                .to_string()
-        }
+        HeadKind::Idle => t!("core.blocking.advice.idle", head = head),
+        HeadKind::Unknown => t!("core.blocking.advice.unknown"),
     }
 }
 
@@ -523,6 +505,425 @@ mod tests {
         };
         assert_eq!(lock_phrase(None, Some(&ddl)).unwrap(), "a table-wide exclusive lock on public.orders");
         assert_eq!(lock_phrase(Some("PAGEIOLATCH_SH"), None).unwrap(), "PAGEIOLATCH_SH");
+    }
+
+    // Every lock and every kind of head, word for word, on every engine: the messages come from locales/en.json.
+    #[test]
+    fn chains_say_who_blocks_in_english() {
+        let mut out = Vec::new();
+        for mode in ["S", "U", "X", "IS", "IU", "IX", "SIX", "SCH_S", "SCH_M", "BU", "RangeS_S", "Z"] {
+            let wait = format!("LCK_M_{mode}");
+            out.push(format!("{wait}: {}", lock_kind(Some(&wait), None).unwrap()));
+        }
+        for mode in ["X", "S", "IX", "IS", "U", "AccessExclusiveLock", "RowExclusiveLock", "SIREAD"] {
+            for scope in ["", ",INSERT_INTENTION", ",GAP", ",REC_NOT_GAP"] {
+                for resource in ["RECORD", "TABLE", "transactionid"] {
+                    let l = LockWait {
+                        session: "1".into(),
+                        mode: Some(format!("{mode}{scope}")),
+                        resource: Some(resource.into()),
+                        object: None,
+                        index: None,
+                    };
+                    out.push(format!("{mode}{scope} {resource}: {}", lock_kind(None, Some(&l)).unwrap()));
+                }
+            }
+        }
+        let on = LockWait { object: Some("shop.orders".into()), mode: None, resource: None, ..lock("1") };
+        out.push(format!("object only: {}", lock_phrase(None, Some(&on)).unwrap()));
+        for engine in Engine::ALL {
+            for state in ["sleeping", "idle in transaction", "running", "dormant"] {
+                for (elapsed, waiters, wait) in [(Some(48_000.0), 1, "LCK_M_S"), (None, 2, "LCK_M_X"), (None, 1, "PAGELATCH")] {
+                    let mut head = session("57", state, None);
+                    head.elapsed_ms = elapsed;
+                    if state == "dormant" {
+                        head.transaction_ms = None;
+                    }
+                    head.command = (state == "running" && waiters == 2).then(|| "INSERT".into());
+                    let mut sessions = vec![head];
+                    for w in 0..waiters {
+                        let mut s = session(&format!("6{w}"), "suspended", Some("57"));
+                        s.wait = Some(wait.into());
+                        sessions.push(s);
+                    }
+                    let locks = if wait == "PAGELATCH" { vec![] } else { vec![lock("60")] };
+                    let c = &analyze(engine, &sessions, &locks).unwrap().chains[0];
+                    out.push(format!("\n{engine:?} {state} {elapsed:?} {waiters} {wait}\n{}\n{}", c.headline, c.advice));
+                }
+            }
+            let c = &analyze(engine, &[session("61", "active", Some("99"))], &[]).unwrap().chains[0];
+            out.push(format!("\n{engine:?} unseen\n{}\n{}", c.headline, c.advice));
+        }
+        let got = out.join("\n");
+        assert_eq!(got, r#"LCK_M_S: a shared lock
+LCK_M_U: an update lock
+LCK_M_X: an exclusive lock
+LCK_M_IS: an intent-shared lock
+LCK_M_IU: an intent-update lock
+LCK_M_IX: an intent-exclusive lock
+LCK_M_SIX: a shared-and-intent lock
+LCK_M_SCH_S: a schema-stability lock
+LCK_M_SCH_M: a schema-change lock
+LCK_M_BU: a bulk-load lock
+LCK_M_RangeS_S: a key-range lock
+LCK_M_Z: a lock
+X RECORD: an exclusive lock
+X TABLE: an exclusive table lock
+X transactionid: a row lock
+X,INSERT_INTENTION RECORD: an exclusive insert-intention lock
+X,INSERT_INTENTION TABLE: an exclusive insert-intention lock
+X,INSERT_INTENTION transactionid: a row lock
+X,GAP RECORD: an exclusive gap lock
+X,GAP TABLE: an exclusive gap lock
+X,GAP transactionid: a row lock
+X,REC_NOT_GAP RECORD: an exclusive row lock
+X,REC_NOT_GAP TABLE: an exclusive row lock
+X,REC_NOT_GAP transactionid: a row lock
+S RECORD: a shared lock
+S TABLE: a shared table lock
+S transactionid: a row lock
+S,INSERT_INTENTION RECORD: a shared insert-intention lock
+S,INSERT_INTENTION TABLE: a shared insert-intention lock
+S,INSERT_INTENTION transactionid: a row lock
+S,GAP RECORD: a shared gap lock
+S,GAP TABLE: a shared gap lock
+S,GAP transactionid: a row lock
+S,REC_NOT_GAP RECORD: a shared row lock
+S,REC_NOT_GAP TABLE: a shared row lock
+S,REC_NOT_GAP transactionid: a row lock
+IX RECORD: an intent-exclusive lock
+IX TABLE: an intent-exclusive table lock
+IX transactionid: a row lock
+IX,INSERT_INTENTION RECORD: an intent-exclusive insert-intention lock
+IX,INSERT_INTENTION TABLE: an intent-exclusive insert-intention lock
+IX,INSERT_INTENTION transactionid: a row lock
+IX,GAP RECORD: an intent-exclusive gap lock
+IX,GAP TABLE: an intent-exclusive gap lock
+IX,GAP transactionid: a row lock
+IX,REC_NOT_GAP RECORD: an intent-exclusive row lock
+IX,REC_NOT_GAP TABLE: an intent-exclusive row lock
+IX,REC_NOT_GAP transactionid: a row lock
+IS RECORD: an intent-shared lock
+IS TABLE: an intent-shared table lock
+IS transactionid: a row lock
+IS,INSERT_INTENTION RECORD: an intent-shared insert-intention lock
+IS,INSERT_INTENTION TABLE: an intent-shared insert-intention lock
+IS,INSERT_INTENTION transactionid: a row lock
+IS,GAP RECORD: an intent-shared gap lock
+IS,GAP TABLE: an intent-shared gap lock
+IS,GAP transactionid: a row lock
+IS,REC_NOT_GAP RECORD: an intent-shared row lock
+IS,REC_NOT_GAP TABLE: an intent-shared row lock
+IS,REC_NOT_GAP transactionid: a row lock
+U RECORD: an update lock
+U TABLE: an update table lock
+U transactionid: a row lock
+U,INSERT_INTENTION RECORD: an update insert-intention lock
+U,INSERT_INTENTION TABLE: an update insert-intention lock
+U,INSERT_INTENTION transactionid: a row lock
+U,GAP RECORD: an update gap lock
+U,GAP TABLE: an update gap lock
+U,GAP transactionid: a row lock
+U,REC_NOT_GAP RECORD: an update row lock
+U,REC_NOT_GAP TABLE: an update row lock
+U,REC_NOT_GAP transactionid: a row lock
+AccessExclusiveLock RECORD: a table-wide exclusive lock
+AccessExclusiveLock TABLE: a table-wide exclusive lock
+AccessExclusiveLock transactionid: a row lock
+AccessExclusiveLock,INSERT_INTENTION RECORD: a AccessExclusiveLock,INSERT_INTENTION lock
+AccessExclusiveLock,INSERT_INTENTION TABLE: a AccessExclusiveLock,INSERT_INTENTION lock
+AccessExclusiveLock,INSERT_INTENTION transactionid: a row lock
+AccessExclusiveLock,GAP RECORD: a AccessExclusiveLock,GAP lock
+AccessExclusiveLock,GAP TABLE: a AccessExclusiveLock,GAP lock
+AccessExclusiveLock,GAP transactionid: a row lock
+AccessExclusiveLock,REC_NOT_GAP RECORD: a AccessExclusiveLock,REC_NOT_GAP lock
+AccessExclusiveLock,REC_NOT_GAP TABLE: a AccessExclusiveLock,REC_NOT_GAP lock
+AccessExclusiveLock,REC_NOT_GAP transactionid: a row lock
+RowExclusiveLock RECORD: a RowExclusiveLock
+RowExclusiveLock TABLE: a RowExclusiveLock
+RowExclusiveLock transactionid: a row lock
+RowExclusiveLock,INSERT_INTENTION RECORD: a RowExclusiveLock,INSERT_INTENTION lock
+RowExclusiveLock,INSERT_INTENTION TABLE: a RowExclusiveLock,INSERT_INTENTION lock
+RowExclusiveLock,INSERT_INTENTION transactionid: a row lock
+RowExclusiveLock,GAP RECORD: a RowExclusiveLock,GAP lock
+RowExclusiveLock,GAP TABLE: a RowExclusiveLock,GAP lock
+RowExclusiveLock,GAP transactionid: a row lock
+RowExclusiveLock,REC_NOT_GAP RECORD: a RowExclusiveLock,REC_NOT_GAP lock
+RowExclusiveLock,REC_NOT_GAP TABLE: a RowExclusiveLock,REC_NOT_GAP lock
+RowExclusiveLock,REC_NOT_GAP transactionid: a row lock
+SIREAD RECORD: a SIREAD lock
+SIREAD TABLE: a SIREAD lock
+SIREAD transactionid: a row lock
+SIREAD,INSERT_INTENTION RECORD: a SIREAD,INSERT_INTENTION lock
+SIREAD,INSERT_INTENTION TABLE: a SIREAD,INSERT_INTENTION lock
+SIREAD,INSERT_INTENTION transactionid: a row lock
+SIREAD,GAP RECORD: a SIREAD,GAP lock
+SIREAD,GAP TABLE: a SIREAD,GAP lock
+SIREAD,GAP transactionid: a row lock
+SIREAD,REC_NOT_GAP RECORD: a SIREAD,REC_NOT_GAP lock
+SIREAD,REC_NOT_GAP TABLE: a SIREAD,REC_NOT_GAP lock
+SIREAD,REC_NOT_GAP transactionid: a row lock
+object only: a lock on shop.orders
+
+Mssql sleeping Some(48000.0) 1 LCK_M_S
+Session 57 has been idle in an open transaction for 48.0 s; 1 session waits behind it (a shared lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. SET XACT_ABORT ON in the application makes an error roll the transaction back instead of leaving it open.
+
+Mssql sleeping None 2 LCK_M_X
+Session 57 is idle in an open transaction; 2 sessions wait behind it (an exclusive lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. SET XACT_ABORT ON in the application makes an error roll the transaction back instead of leaving it open.
+
+Mssql sleeping None 1 PAGELATCH
+Session 57 is idle in an open transaction; 1 session waits behind it (PAGELATCH).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. SET XACT_ABORT ON in the application makes an error roll the transaction back instead of leaving it open.
+
+Mssql idle in transaction Some(48000.0) 1 LCK_M_S
+Session 57 has been idle in an open transaction for 48.0 s; 1 session waits behind it (a shared lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. SET XACT_ABORT ON in the application makes an error roll the transaction back instead of leaving it open.
+
+Mssql idle in transaction None 2 LCK_M_X
+Session 57 is idle in an open transaction; 2 sessions wait behind it (an exclusive lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. SET XACT_ABORT ON in the application makes an error roll the transaction back instead of leaving it open.
+
+Mssql idle in transaction None 1 PAGELATCH
+Session 57 is idle in an open transaction; 1 session waits behind it (PAGELATCH).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. SET XACT_ABORT ON in the application makes an error roll the transaction back instead of leaving it open.
+
+Mssql running Some(48000.0) 1 LCK_M_S
+Session 57 has been running a statement for 48.0 s while holding locks; 1 session waits behind it (a shared lock on shop.orders).
+A long statement is holding locks the others need. Look at its plan in Queries, and keep the transaction around it short: do reads and outside calls before it starts. The waiters only want to read: with READ_COMMITTED_SNAPSHOT on, readers use row versions and stop waiting on writers.
+
+Mssql running None 2 LCK_M_X
+Session 57 is running an INSERT statement while holding locks; 2 sessions wait behind it (an exclusive lock on shop.orders).
+A long statement is holding locks the others need. Look at its plan in Queries, and keep the transaction around it short: do reads and outside calls before it starts.
+
+Mssql running None 1 PAGELATCH
+Session 57 is running a statement while holding locks; 1 session waits behind it (PAGELATCH).
+A long statement is holding locks the others need. Look at its plan in Queries, and keep the transaction around it short: do reads and outside calls before it starts.
+
+Mssql dormant Some(48000.0) 1 LCK_M_S
+Session 57 holds locks without running anything; 1 session waits behind it (a shared lock on shop.orders).
+Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
+
+Mssql dormant None 2 LCK_M_X
+Session 57 holds locks without running anything; 2 sessions wait behind it (an exclusive lock on shop.orders).
+Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
+
+Mssql dormant None 1 PAGELATCH
+Session 57 holds locks without running anything; 1 session waits behind it (PAGELATCH).
+Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
+
+Mssql unseen
+Session 99, which this login can't see, holds the locks; 1 session waits behind it (an update lock).
+The blocker belongs to another database or a login Culprit can't see; ask someone with VIEW SERVER STATE (or pg_read_all_stats / PROCESS) to look.
+
+Postgres sleeping Some(48000.0) 1 LCK_M_S
+Session 57 has been idle in an open transaction for 48.0 s; 1 session waits behind it (a shared lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Set idle_in_transaction_session_timeout so the server ends sessions that sit in a transaction.
+
+Postgres sleeping None 2 LCK_M_X
+Session 57 is idle in an open transaction; 2 sessions wait behind it (an exclusive lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Set idle_in_transaction_session_timeout so the server ends sessions that sit in a transaction.
+
+Postgres sleeping None 1 PAGELATCH
+Session 57 is idle in an open transaction; 1 session waits behind it (PAGELATCH).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Set idle_in_transaction_session_timeout so the server ends sessions that sit in a transaction.
+
+Postgres idle in transaction Some(48000.0) 1 LCK_M_S
+Session 57 has been idle in an open transaction for 48.0 s; 1 session waits behind it (a shared lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Set idle_in_transaction_session_timeout so the server ends sessions that sit in a transaction.
+
+Postgres idle in transaction None 2 LCK_M_X
+Session 57 is idle in an open transaction; 2 sessions wait behind it (an exclusive lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Set idle_in_transaction_session_timeout so the server ends sessions that sit in a transaction.
+
+Postgres idle in transaction None 1 PAGELATCH
+Session 57 is idle in an open transaction; 1 session waits behind it (PAGELATCH).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Set idle_in_transaction_session_timeout so the server ends sessions that sit in a transaction.
+
+Postgres running Some(48000.0) 1 LCK_M_S
+Session 57 has been running a statement for 48.0 s while holding locks; 1 session waits behind it (a shared lock on shop.orders).
+A long statement is holding locks the others need. Look at its plan in Queries, and keep the transaction around it short: do reads and outside calls before it starts.
+
+Postgres running None 2 LCK_M_X
+Session 57 is running an INSERT statement while holding locks; 2 sessions wait behind it (an exclusive lock on shop.orders).
+A long statement is holding locks the others need. Look at its plan in Queries, and keep the transaction around it short: do reads and outside calls before it starts.
+
+Postgres running None 1 PAGELATCH
+Session 57 is running a statement while holding locks; 1 session waits behind it (PAGELATCH).
+A long statement is holding locks the others need. Look at its plan in Queries, and keep the transaction around it short: do reads and outside calls before it starts.
+
+Postgres dormant Some(48000.0) 1 LCK_M_S
+Session 57 holds locks without running anything; 1 session waits behind it (a shared lock on shop.orders).
+Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
+
+Postgres dormant None 2 LCK_M_X
+Session 57 holds locks without running anything; 2 sessions wait behind it (an exclusive lock on shop.orders).
+Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
+
+Postgres dormant None 1 PAGELATCH
+Session 57 holds locks without running anything; 1 session waits behind it (PAGELATCH).
+Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
+
+Postgres unseen
+Session 99, which this login can't see, holds the locks; 1 session waits behind it (an update lock).
+The blocker belongs to another database or a login Culprit can't see; ask someone with VIEW SERVER STATE (or pg_read_all_stats / PROCESS) to look.
+
+Yugabyte sleeping Some(48000.0) 1 LCK_M_S
+Session 57 has been idle in an open transaction for 48.0 s; 1 session waits behind it (a shared lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Set idle_in_transaction_session_timeout so the server ends sessions that sit in a transaction.
+
+Yugabyte sleeping None 2 LCK_M_X
+Session 57 is idle in an open transaction; 2 sessions wait behind it (an exclusive lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Set idle_in_transaction_session_timeout so the server ends sessions that sit in a transaction.
+
+Yugabyte sleeping None 1 PAGELATCH
+Session 57 is idle in an open transaction; 1 session waits behind it (PAGELATCH).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Set idle_in_transaction_session_timeout so the server ends sessions that sit in a transaction.
+
+Yugabyte idle in transaction Some(48000.0) 1 LCK_M_S
+Session 57 has been idle in an open transaction for 48.0 s; 1 session waits behind it (a shared lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Set idle_in_transaction_session_timeout so the server ends sessions that sit in a transaction.
+
+Yugabyte idle in transaction None 2 LCK_M_X
+Session 57 is idle in an open transaction; 2 sessions wait behind it (an exclusive lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Set idle_in_transaction_session_timeout so the server ends sessions that sit in a transaction.
+
+Yugabyte idle in transaction None 1 PAGELATCH
+Session 57 is idle in an open transaction; 1 session waits behind it (PAGELATCH).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Set idle_in_transaction_session_timeout so the server ends sessions that sit in a transaction.
+
+Yugabyte running Some(48000.0) 1 LCK_M_S
+Session 57 has been running a statement for 48.0 s while holding locks; 1 session waits behind it (a shared lock on shop.orders).
+A long statement is holding locks the others need. Look at its plan in Queries, and keep the transaction around it short: do reads and outside calls before it starts.
+
+Yugabyte running None 2 LCK_M_X
+Session 57 is running an INSERT statement while holding locks; 2 sessions wait behind it (an exclusive lock on shop.orders).
+A long statement is holding locks the others need. Look at its plan in Queries, and keep the transaction around it short: do reads and outside calls before it starts.
+
+Yugabyte running None 1 PAGELATCH
+Session 57 is running a statement while holding locks; 1 session waits behind it (PAGELATCH).
+A long statement is holding locks the others need. Look at its plan in Queries, and keep the transaction around it short: do reads and outside calls before it starts.
+
+Yugabyte dormant Some(48000.0) 1 LCK_M_S
+Session 57 holds locks without running anything; 1 session waits behind it (a shared lock on shop.orders).
+Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
+
+Yugabyte dormant None 2 LCK_M_X
+Session 57 holds locks without running anything; 2 sessions wait behind it (an exclusive lock on shop.orders).
+Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
+
+Yugabyte dormant None 1 PAGELATCH
+Session 57 holds locks without running anything; 1 session waits behind it (PAGELATCH).
+Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
+
+Yugabyte unseen
+Session 99, which this login can't see, holds the locks; 1 session waits behind it (an update lock).
+The blocker belongs to another database or a login Culprit can't see; ask someone with VIEW SERVER STATE (or pg_read_all_stats / PROCESS) to look.
+
+Mysql sleeping Some(48000.0) 1 LCK_M_S
+Session 57 has been idle in an open transaction for 48.0 s; 1 session waits behind it (an update lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Keep transactions short; waiters give up after innodb_lock_wait_timeout (50 s by default).
+
+Mysql sleeping None 2 LCK_M_X
+Session 57 is idle in an open transaction; 2 sessions wait behind it (an update lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Keep transactions short; waiters give up after innodb_lock_wait_timeout (50 s by default).
+
+Mysql sleeping None 1 PAGELATCH
+Session 57 is idle in an open transaction; 1 session waits behind it.
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Keep transactions short; waiters give up after innodb_lock_wait_timeout (50 s by default).
+
+Mysql idle in transaction Some(48000.0) 1 LCK_M_S
+Session 57 has been idle in an open transaction for 48.0 s; 1 session waits behind it (an update lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Keep transactions short; waiters give up after innodb_lock_wait_timeout (50 s by default).
+
+Mysql idle in transaction None 2 LCK_M_X
+Session 57 is idle in an open transaction; 2 sessions wait behind it (an update lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Keep transactions short; waiters give up after innodb_lock_wait_timeout (50 s by default).
+
+Mysql idle in transaction None 1 PAGELATCH
+Session 57 is idle in an open transaction; 1 session waits behind it.
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Keep transactions short; waiters give up after innodb_lock_wait_timeout (50 s by default).
+
+Mysql running Some(48000.0) 1 LCK_M_S
+Session 57 has been running a statement for 48.0 s while holding locks; 1 session waits behind it (an update lock on shop.orders).
+A long statement is holding locks the others need. Look at its plan in Queries, and keep the transaction around it short: do reads and outside calls before it starts.
+
+Mysql running None 2 LCK_M_X
+Session 57 is running an INSERT statement while holding locks; 2 sessions wait behind it (an update lock on shop.orders).
+A long statement is holding locks the others need. Look at its plan in Queries, and keep the transaction around it short: do reads and outside calls before it starts.
+
+Mysql running None 1 PAGELATCH
+Session 57 is running a statement while holding locks; 1 session waits behind it.
+A long statement is holding locks the others need. Look at its plan in Queries, and keep the transaction around it short: do reads and outside calls before it starts.
+
+Mysql dormant Some(48000.0) 1 LCK_M_S
+Session 57 holds locks without running anything; 1 session waits behind it (an update lock on shop.orders).
+Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
+
+Mysql dormant None 2 LCK_M_X
+Session 57 holds locks without running anything; 2 sessions wait behind it (an update lock on shop.orders).
+Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
+
+Mysql dormant None 1 PAGELATCH
+Session 57 holds locks without running anything; 1 session waits behind it.
+Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
+
+Mysql unseen
+Session 99, which this login can't see, holds the locks; 1 session waits behind it.
+The blocker belongs to another database or a login Culprit can't see; ask someone with VIEW SERVER STATE (or pg_read_all_stats / PROCESS) to look.
+
+Sqlite sleeping Some(48000.0) 1 LCK_M_S
+Session 57 has been idle in an open transaction for 48.0 s; 1 session waits behind it (a shared lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Keep write transactions short: SQLite allows one writer at a time, and the others wait busy_timeout, then fail with SQLITE_BUSY.
+
+Sqlite sleeping None 2 LCK_M_X
+Session 57 is idle in an open transaction; 2 sessions wait behind it (an exclusive lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Keep write transactions short: SQLite allows one writer at a time, and the others wait busy_timeout, then fail with SQLITE_BUSY.
+
+Sqlite sleeping None 1 PAGELATCH
+Session 57 is idle in an open transaction; 1 session waits behind it (PAGELATCH).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Keep write transactions short: SQLite allows one writer at a time, and the others wait busy_timeout, then fail with SQLITE_BUSY.
+
+Sqlite idle in transaction Some(48000.0) 1 LCK_M_S
+Session 57 has been idle in an open transaction for 48.0 s; 1 session waits behind it (a shared lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Keep write transactions short: SQLite allows one writer at a time, and the others wait busy_timeout, then fail with SQLITE_BUSY.
+
+Sqlite idle in transaction None 2 LCK_M_X
+Session 57 is idle in an open transaction; 2 sessions wait behind it (an exclusive lock on shop.orders).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Keep write transactions short: SQLite allows one writer at a time, and the others wait busy_timeout, then fail with SQLITE_BUSY.
+
+Sqlite idle in transaction None 1 PAGELATCH
+Session 57 is idle in an open transaction; 1 session waits behind it (PAGELATCH).
+The application opened a transaction and stopped sending statements: usually a missing COMMIT, an error path that skips the ROLLBACK, or slow work (an HTTP call, a user prompt) done while the transaction is open. Ending session 57 rolls its transaction back and frees everyone behind it. Keep write transactions short: SQLite allows one writer at a time, and the others wait busy_timeout, then fail with SQLITE_BUSY.
+
+Sqlite running Some(48000.0) 1 LCK_M_S
+Session 57 has been running a statement for 48.0 s while holding locks; 1 session waits behind it (a shared lock on shop.orders).
+A long statement is holding locks the others need. Look at its plan in Queries, and keep the transaction around it short: do reads and outside calls before it starts.
+
+Sqlite running None 2 LCK_M_X
+Session 57 is running an INSERT statement while holding locks; 2 sessions wait behind it (an exclusive lock on shop.orders).
+A long statement is holding locks the others need. Look at its plan in Queries, and keep the transaction around it short: do reads and outside calls before it starts.
+
+Sqlite running None 1 PAGELATCH
+Session 57 is running a statement while holding locks; 1 session waits behind it (PAGELATCH).
+A long statement is holding locks the others need. Look at its plan in Queries, and keep the transaction around it short: do reads and outside calls before it starts.
+
+Sqlite dormant Some(48000.0) 1 LCK_M_S
+Session 57 holds locks without running anything; 1 session waits behind it (a shared lock on shop.orders).
+Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
+
+Sqlite dormant None 2 LCK_M_X
+Session 57 holds locks without running anything; 2 sessions wait behind it (an exclusive lock on shop.orders).
+Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
+
+Sqlite dormant None 1 PAGELATCH
+Session 57 holds locks without running anything; 1 session waits behind it (PAGELATCH).
+Session 57 isn't running anything but still holds locks, typically from a transaction the client never finished. Ending it releases them.
+
+Sqlite unseen
+Session 99, which this login can't see, holds the locks; 1 session waits behind it (an update lock).
+The blocker belongs to another database or a login Culprit can't see; ask someone with VIEW SERVER STATE (or pg_read_all_stats / PROCESS) to look."#);
     }
 
     #[test]
