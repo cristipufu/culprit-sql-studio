@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use culprit_core::{
     AdviceQuery, CandidateSource, Capability, CleanupKind, Engine, IndexAdvice, IndexCandidate, IndexCleanup,
-    MergedRequest, QueryStat, Report, Snapshot, TableAdvice, TableAdviceKind, format,
+    MergedRequest, QueryStat, Report, Snapshot, TableAdvice, TableAdviceKind, format, t,
 };
 
 use crate::index_health::{hide_index_sql, overlapping_pairs};
@@ -106,9 +106,7 @@ pub fn index_advice(report: &Report) -> IndexAdvice {
             candidates: vec![],
             cleanups: vec![],
             tables: vec![],
-            notes: vec![format!(
-                "Current index and schema definitions were incomplete: {reason}. No index changes can be chosen safely from this scan."
-            )],
+            notes: vec![t!("view.advisor.note.catalog_incomplete", reason = reason)],
         };
     }
     let scope = AdvisorScope::new(report);
@@ -151,77 +149,67 @@ fn collect_optimizer_candidates(scope: &AdvisorScope<'_>, candidates: &mut Vec<I
         }
         let share = query_impact(s, &asking).map(|i| i.share);
         let lookups = c.seeks + c.scans;
-        let mut reason = format!(
-            "SQL Server's optimizer asked for it {} times {} and estimates those lookups would be about {:.0}% cheaper.",
-            format::count(lookups),
-            since_phrase(s),
-            c.impact_pct
-        );
+        let mut reason = vec![t!(
+            "view.advisor.optimizer.asked",
+            lookups = format::count(lookups),
+            since = since_phrase(s),
+            improvement = t!("common.percent", n = format!("{:.0}", c.impact_pct))
+        )];
         if let Some(share) = share {
-            reason.push_str(&format!(
-                " The {} behind it {} for {} of database time.",
-                if asking.len() == 1 { "query".to_string() } else { format!("{} queries", asking.len()) },
-                if asking.len() == 1 { "accounts" } else { "account" },
-                format::percent(share)
+            reason.push(t!(
+                "view.advisor.optimizer.share",
+                n = asking.len(),
+                count = asking.len().to_string(),
+                share = format::percent(share)
             ));
         }
-        let mut verify = vec![
-            "Obtain a newly compiled plan after representative runs; an old stored request need not disappear."
-                .to_string(),
-            "Compare reads and time per run under equivalent parameters and load, including storage and write cost."
-                .to_string(),
-        ];
+        // What else a person should know about its columns, after the steps that verify it.
+        let mut notes = Vec::new();
         if let Some(note) = crate::indexes::drop_large_includes(s, &c.schema, &c.table, &mut c.include) {
-            verify.push(note);
+            notes.push(note);
         }
         if c.include.len() > MAX_INCLUDE {
-            verify.push(format!(
-                "SQL Server also wanted {} more columns included; the statement keeps the keys only, so add INCLUDE \
-                 columns just for what the hot queries select.",
-                c.include.len()
-            ));
+            notes.push(t!("view.advisor.optimizer.too_many_includes", count = c.include.len().to_string()));
             c.include.clear();
         }
-        let (index_keys, include, sql, widens) = match &parameterized {
+        let (index_keys, include, sql, widens, mut verify) = match &parameterized {
             Some(p) => {
                 let remainder = p.remainder(&c.include);
                 let Some((sql, widens)) = p.remainder_sql(s, &remainder) else { continue };
                 let columns = format::list(&p.columns());
-                reason.push_str(&format!(
-                    " {} {columns} as a parameter, which keeps SQL Server off {}, filtered to {}; written as a literal, ",
-                    if asking.len() == 1 { "The query passes" } else { "The queries pass" },
-                    p.index.name,
-                    p.literals()
-                ));
-                verify.splice(
-                    0..2,
-                    [
-                        format!(
-                            "Write {} as a literal in the queries first, then re-scan: the request either disappears or asks for this.",
-                            p.literals()
-                        ),
-                        format!(
-                            "The queries listed seek on {} and read far fewer pages per run.",
-                            widens.as_deref().unwrap_or("the new index")
-                        ),
-                    ],
-                );
+                let verify = vec![
+                    t!("view.advisor.optimizer.verify_literal", literals = p.literals()),
+                    match widens.as_deref() {
+                        Some(index) => t!("view.advisor.optimizer.verify_seek", index = index),
+                        None => t!("view.advisor.optimizer.verify_seek_new"),
+                    },
+                ];
                 match remainder {
                     crate::indexes::Remainder::Index { keys, include } => {
-                        reason.push_str(&format!(
-                            "it finds the rows by {}, not by {}. This index is the rest of the request, filtered the same way.",
-                            format::list(&keys[..keys.len() - p.missing_range.len()]),
-                            format::list(&p.missing_range)
+                        reason.push(t!(
+                            "view.advisor.optimizer.parameter_finds",
+                            n = asking.len(),
+                            columns = &columns,
+                            index = &p.index.name,
+                            literals = p.literals(),
+                            keys = format::list(&keys[..keys.len() - p.missing_range.len()]),
+                            range = format::list(&p.missing_range)
                         ));
-                        (keys, include, Some(sql), widens)
+                        reason.push(t!("view.advisor.optimizer.rest_filtered"));
+                        (keys, include, Some(sql), widens, verify)
                     }
                     crate::indexes::Remainder::Include(missing) => {
-                        reason.push_str(&format!(
-                            "it serves them, reading {} from the table for each row. Including {} is the rest of the request.",
-                            format::list(&missing),
-                            if missing.len() == 1 { "it" } else { "them" }
+                        reason.push(t!(
+                            "view.advisor.optimizer.parameter_serves",
+                            n = asking.len(),
+                            columns = &columns,
+                            index = &p.index.name,
+                            literals = p.literals(),
+                            missing = format::list(&missing)
                         ));
-                        (p.index.key_names().iter().map(|k| k.to_string()).collect(), missing, Some(sql), widens)
+                        reason.push(t!("view.advisor.optimizer.rest_included", n = missing.len()));
+                        let keys = p.index.key_names().iter().map(|k| k.to_string()).collect();
+                        (keys, missing, Some(sql), widens, verify)
                     }
                     crate::indexes::Remainder::Nothing => continue,
                 }
@@ -249,23 +237,28 @@ fn collect_optimizer_candidates(scope: &AdvisorScope<'_>, candidates: &mut Vec<I
                                 include.push(col.clone());
                             }
                         }
-                        (i.key_names().iter().map(|k| k.to_string()).collect(), include, fix.fix.sql, fix.widens)
+                        let keys = i.key_names().iter().map(|k| k.to_string()).collect();
+                        (keys, include, fix.fix.sql, fix.widens, Vec::new())
                     }
-                    None => (keys.clone(), c.include.clone(), fix.fix.sql, fix.widens),
+                    None => (keys.clone(), c.include.clone(), fix.fix.sql, fix.widens, Vec::new()),
                 }
             }
         };
         // A widen rebuilds an existing index under its own name: the queries seek that one. With no query behind the
         // request, there is no list to look at.
         if parameterized.is_none() {
-            verify[1] = format!(
-                "Check whether the queries listed use {} and compare reads and time per run under equivalent parameters and load.",
-                widens.as_deref().unwrap_or("the new index")
-            );
+            verify = vec![
+                t!("view.advisor.optimizer.verify_plan"),
+                match widens.as_deref() {
+                    Some(index) => t!("view.advisor.optimizer.verify_uses", index = index),
+                    None => t!("view.advisor.optimizer.verify_uses_new"),
+                },
+            ];
         }
         if asking.is_empty() {
             verify.remove(1);
         }
+        verify.extend(notes);
         // What "this index" costs the table's writes, said only beside the SQL that creates it.
         let cost = sql.as_ref().and_then(|_| write_cost(s, &c.schema, &c.table));
         let requests = c
@@ -285,7 +278,7 @@ fn collect_optimizer_candidates(scope: &AdvisorScope<'_>, candidates: &mut Vec<I
             keys: index_keys,
             include,
             source: CandidateSource::Optimizer,
-            reason,
+            reason: reason.join(" "),
             sql,
             widens,
             queries: asking.iter().map(|q| advice_query(s, q)).collect(),
@@ -339,18 +332,14 @@ fn collect_plan_scan_candidates(scope: &AdvisorScope<'_>, candidates: &mut Vec<I
             keys: g.keys.clone(),
             include: Vec::new(),
             source: CandidateSource::PlanScan,
-            reason: format!(
-                "{} {} and keep{} only those matching {}; no enabled index starts with {}. {}",
-                if group_queries.len() == 1 {
-                    "One captured query plan scans".to_string()
-                } else {
-                    format!("{} captured query plans scan", group_queries.len())
-                },
-                table_name,
-                if group_queries.len() == 1 { "s" } else { "" },
-                g.predicate.trim(),
-                format::list(&g.keys),
-                g.row_basis(s)
+            reason: t!(
+                "view.advisor.plan_scan.reason",
+                n = group_queries.len(),
+                count = group_queries.len().to_string(),
+                table = &table_name,
+                predicate = g.predicate.trim(),
+                keys = format::list(&g.keys),
+                rows = g.row_basis(s)
             )
             .replace("  ", " "),
             sql: match disabled {
@@ -367,8 +356,8 @@ fn collect_plan_scan_candidates(scope: &AdvisorScope<'_>, candidates: &mut Vec<I
             writes_per_day: writes_per_day(s, &g.schema, &g.table),
             write_cost: write_cost(s, &g.schema, &g.table),
             verify: vec![
-                format!("Obtain a newly compiled plan and check whether {} uses the candidate index to read fewer rows; a scan can still be appropriate for some parameters.", g.table),
-                "Compare reads and time per run after equivalent workload, including storage and write cost. Old saved plans and a changing share of database time alone do not verify improvement.".into(),
+                t!("view.advisor.plan_scan.verify_plan", table = &g.table),
+                t!("view.advisor.plan_scan.verify_compare"),
             ],
             finding_id: scope.link(finding_id),
         });
@@ -399,20 +388,16 @@ fn collect_engine_built_candidates(scope: &AdvisorScope<'_>, candidates: &mut Ve
             continue;
         }
         let share = query_impact(s, &g.queries).map(|i| i.share);
-        let mut reason = format!(
-            "{} builds an index on {} of {} for itself every time {} runs, because none fits, and drops it after. \
-             Created once, it saves that work on every run.",
-            engine.label(),
-            format::list(&g.keys),
-            table_name,
-            if g.queries.len() == 1 { "one query".to_string() } else { format!("one of {} queries", g.queries.len()) }
-        );
+        let mut reason = vec![t!(
+            "view.advisor.engine_built.reason",
+            n = g.queries.len(),
+            count = g.queries.len().to_string(),
+            engine = engine.label(),
+            keys = format::list(&g.keys),
+            table = &table_name
+        )];
         if let Some(share) = share {
-            reason.push_str(&format!(
-                " {} {} of database time.",
-                if g.queries.len() == 1 { "It takes" } else { "They take" },
-                format::percent(share)
-            ));
+            reason.push(t!("view.advisor.engine_built.share", n = g.queries.len(), share = format::percent(share)));
         }
         candidates.push(IndexCandidate {
             schema: g.schema.clone(),
@@ -420,7 +405,7 @@ fn collect_engine_built_candidates(scope: &AdvisorScope<'_>, candidates: &mut Ve
             keys: g.keys.clone(),
             include: Vec::new(),
             source: CandidateSource::EngineBuilt,
-            reason,
+            reason: reason.join(" "),
             sql: Some(create_index_sql(s, &g.schema, &g.table, &g.keys, &[])),
             widens: None,
             queries: g.queries.iter().map(|q| advice_query(s, q)).collect(),
@@ -432,11 +417,8 @@ fn collect_engine_built_candidates(scope: &AdvisorScope<'_>, candidates: &mut Ve
             writes_per_day: writes_per_day(s, &g.schema, &g.table),
             write_cost: write_cost(s, &g.schema, &g.table),
             verify: vec![
-                format!(
-                    "Explain one of the queries again: no automatic index on {}, and a search using the new one.",
-                    g.table
-                ),
-                "Re-scan after the workload has run: the queries' share of database time drops.".into(),
+                t!("view.advisor.engine_built.verify_explain", table = &g.table),
+                t!("view.advisor.engine_built.verify_rescan"),
             ],
             finding_id: scope.link(format!("plan-insights:automatic-index:{}", g.plan_table.to_ascii_lowercase())),
         });
@@ -488,16 +470,23 @@ fn collect_foreign_key_candidates(scope: &AdvisorScope<'_>, candidates: &mut Vec
                 let all: Vec<&QueryStat> =
                     planned.queries.iter().filter_map(|a| s.workload.as_ref()?.query(&a.id)).collect();
                 planned.db_time_share = query_impact(s, &all).map(|i| i.share).or(planned.db_time_share);
-                planned.reason.push_str(&format!(
-                    " It is also the foreign key to {}, which {} more {} filter or join on{}.",
-                    fk.ref_table,
-                    added,
-                    if added == 1 { "query" } else { "queries" },
-                    planned
-                        .db_time_share
-                        .map(|s| format!(": together they take {} of database time", format::percent(s)))
-                        .unwrap_or_default()
-                ));
+                let also = match planned.db_time_share {
+                    Some(share) => t!(
+                        "view.advisor.foreign_key.also_share",
+                        n = added,
+                        count = added.to_string(),
+                        parent = &fk.ref_table,
+                        share = format::percent(share)
+                    ),
+                    None => t!(
+                        "view.advisor.foreign_key.also",
+                        n = added,
+                        count = added.to_string(),
+                        parent = &fk.ref_table
+                    ),
+                };
+                planned.reason.push(' ');
+                planned.reason.push_str(&also);
             }
             // The refine stage folds an engine-built index's finding into the key's: link to the one that's left.
             if planned.finding_id.is_none() {
@@ -513,17 +502,16 @@ fn collect_foreign_key_candidates(scope: &AdvisorScope<'_>, candidates: &mut Vec
             keys: fk.columns.clone(),
             include: Vec::new(),
             source: CandidateSource::ForeignKey,
-            reason: format!(
-                "{} is the foreign key to {}. Without an index, deleting or re-keying a row in {} reads all {} rows of \
-                 {} looking for matches, and joins from {} can't seek.{}",
-                format::list(&fk.columns),
-                fk.ref_table,
-                fk.ref_table,
-                format::count(rows),
-                child,
-                fk.ref_table,
-                crate::indexes::parent_never_deletes(s, fk).map(|n| format!(" {n}")).unwrap_or_default()
-            ),
+            reason: std::iter::once(t!(
+                "view.advisor.foreign_key.reason",
+                columns = format::list(&fk.columns),
+                parent = &fk.ref_table,
+                rows = format::count(rows),
+                child = &child
+            ))
+            .chain(crate::indexes::parent_never_deletes(s, fk))
+            .collect::<Vec<_>>()
+            .join(" "),
             sql: Some(create_index_sql(s, &fk.schema, &fk.table, &fk.columns, &[])),
             widens: None,
             queries: through_key.iter().take(5).map(|q| advice_query(s, q)).collect(),
@@ -534,7 +522,7 @@ fn collect_foreign_key_candidates(scope: &AdvisorScope<'_>, candidates: &mut Vec
             table_rows: Some(rows),
             writes_per_day: writes_per_day(s, &fk.schema, &fk.table),
             write_cost: write_cost(s, &fk.schema, &fk.table),
-            verify: vec![format!("Deletes from {} no longer scan {}.", fk.ref_table, fk.table)],
+            verify: vec![t!("view.advisor.foreign_key.verify", parent = &fk.ref_table, table = &fk.table)],
             finding_id: scope.link(format!("unindexed-fk:{child}({})", fk.columns.join(","))),
         });
     }
@@ -619,12 +607,11 @@ fn collect_cleanups(scope: &AdvisorScope<'_>, candidates: &[IndexCandidate]) -> 
                 size_bytes: a.size_bytes,
                 reads: a.reads,
                 writes: a.writes,
-                reason: format!(
-                    "Not read once {}, and {} {} (which isn't read either).",
-                    since_phrase(s),
-                    if exact { "it has the same keys as" } else { "its keys are the start of" },
-                    b.name
-                ),
+                reason: if exact {
+                    t!("view.advisor.cleanup.unused_same_keys", since = since_phrase(s), other = &b.name)
+                } else {
+                    t!("view.advisor.cleanup.unused_prefix", since = since_phrase(s), other = &b.name)
+                },
                 sql: Some(hide_index_sql(s, a)),
                 caveats: Vec::new(),
                 finding_id: scope.link(format!("duplicate-index:{table_name}.{}", a.name)),
@@ -643,16 +630,12 @@ fn collect_cleanups(scope: &AdvisorScope<'_>, candidates: &[IndexCandidate]) -> 
             reads: a.reads,
             writes: a.writes,
             reason: if exact {
-                format!("Same keys as {}: the same index twice, both maintained on every write.", b.name)
+                t!("view.advisor.cleanup.duplicate", other = &b.name)
             } else {
-                format!("Its keys are the start of {}'s, so any seek it serves {} serves too.", b.name, b.name)
+                t!("view.advisor.cleanup.prefix", other = &b.name)
             },
             sql: Some(drop_index_for_snapshot(s, &a.schema, &a.table, &a.name)),
-            caveats: if exact {
-                Vec::new()
-            } else {
-                vec![format!("{} is narrower; keep it if a hot query scans it rather than seeking.", a.name)]
-            },
+            caveats: if exact { Vec::new() } else { vec![t!("view.advisor.cleanup.prefix_caveat", index = &a.name)] },
             finding_id: scope.link(format!("duplicate-index:{table_name}.{}", a.name)),
         });
     }
@@ -669,16 +652,15 @@ fn collect_cleanups(scope: &AdvisorScope<'_>, candidates: &[IndexCandidate]) -> 
             size_bytes: a.size_bytes,
             reads: a.reads,
             writes: a.writes,
-            reason: format!(
-                "Read {} times next to {}'s {}; both start with {}, so its queries can almost always seek on {} instead.",
-                format::count(a.reads.unwrap_or(0.0)),
-                b.name,
-                format::count(b.reads.unwrap_or(0.0)),
-                a.key_names().first().copied().unwrap_or(""),
-                b.name
+            reason: t!(
+                "view.advisor.cleanup.overlap",
+                reads = format::count(a.reads.unwrap_or(0.0)),
+                other = &b.name,
+                other_reads = format::count(b.reads.unwrap_or(0.0)),
+                key = a.key_names().first().copied().unwrap_or("")
             ),
             sql: Some(hide_index_sql(s, a)),
-            caveats: vec![format!("Check the plans of the queries that read {} before hiding it.", a.name)],
+            caveats: vec![t!("view.advisor.cleanup.overlap_caveat", index = &a.name)],
             finding_id: scope.link(format!("overlapping-index:{table_name}.{}", a.name)),
         });
     }
@@ -705,20 +687,18 @@ fn collect_cleanups(scope: &AdvisorScope<'_>, candidates: &[IndexCandidate]) -> 
             size_bytes: i.size_bytes,
             reads: i.reads,
             writes: i.writes,
-            reason: format!(
-                "Not read once {}{}, yet updated with every write to {}.",
-                since_phrase(s),
-                i.writes
-                    .filter(|w| *w > 0.0)
-                    .map(|w| format!(" while maintained {} times", format::count(w)))
-                    .unwrap_or_default(),
-                table_name
-            ),
+            reason: match i.writes.filter(|w| *w > 0.0) {
+                Some(writes) => t!(
+                    "view.advisor.cleanup.unused_maintained",
+                    since = since_phrase(s),
+                    writes = format::count(writes),
+                    table = &table_name
+                ),
+                None => t!("view.advisor.cleanup.unused", since = since_phrase(s), table = &table_name),
+            },
             sql: Some(hide_index_sql(s, i)),
             caveats: fk
-                .map(|fk| {
-                    vec![format!("It supports the foreign key {}; deletes on the parent scan without it.", fk.name)]
-                })
+                .map(|fk| vec![t!("view.advisor.cleanup.foreign_key_caveat", key = &fk.name)])
                 .unwrap_or_default(),
             finding_id: scope.link(format!("unused-index:{table_name}")),
         });
@@ -746,14 +726,11 @@ fn collect_cleanups(scope: &AdvisorScope<'_>, candidates: &[IndexCandidate]) -> 
                 size_bytes: i.size_bytes,
                 reads: i.reads,
                 writes: i.writes,
-                reason: format!(
-                    "Marked invalid after an unfinished concurrent build; the planner never reads it{}.",
-                    if i.maintained != Some(false) {
-                        format!(", yet every write to {table_name} still updates it")
-                    } else {
-                        String::new()
-                    }
-                ),
+                reason: if i.maintained != Some(false) {
+                    t!("view.advisor.cleanup.invalid_maintained", table = &table_name)
+                } else {
+                    t!("view.advisor.cleanup.invalid")
+                },
                 sql: Some(drop_index_for_snapshot(s, &i.schema, &i.table, &i.name)),
                 caveats: Vec::new(),
                 finding_id: scope.link(format!("unused-index:invalid:{table_name}.{}", i.name)),
@@ -783,18 +760,19 @@ fn collect_table_advice(scope: &AdvisorScope<'_>) -> Vec<TableAdvice> {
                 kind: TableAdviceKind::ScanHeavy,
                 schema: t.schema.clone(),
                 table: t.name.clone(),
-                reason: format!(
-                    "Read in full {} ({} rows without an index). {}",
-                    how_many(s, scans_total, days, culprit_core::key!("common.noun.time")),
-                    format::count(read_total),
+                reason: [
+                    t!(
+                        "view.advisor.table.scan_heavy",
+                        how_many = how_many(s, scans_total, days, culprit_core::key!("common.noun.time")),
+                        rows = format::count(read_total)
+                    ),
                     match listed.len() {
-                        0 => "None of the captured statements explains these full reads: they come \
-                              from statements outside the top of the workload."
-                            .to_string(),
-                        1 => "Explain the statement listed with it to check its access path, then measure rows kept in representative runs.".to_string(),
-                        _ => "Explain the statements listed with it to check their access paths, then measure rows kept in representative runs.".to_string(),
-                    }
-                ),
+                        0 => t!("view.advisor.table.scan_heavy_unexplained"),
+                        1 => t!("view.advisor.table.scan_heavy_explain_one"),
+                        _ => t!("view.advisor.table.scan_heavy_explain_many"),
+                    },
+                ]
+                .join(" "),
                 rows: t.rows,
                 indexes: Some(s.indexes_on(&t.schema, &t.name).count() as f64),
                 writes_per_day: writes_per_day(s, &t.schema, &t.name),
@@ -817,11 +795,7 @@ fn collect_table_advice(scope: &AdvisorScope<'_>) -> Vec<TableAdvice> {
                 kind: TableAdviceKind::ForwardedFetches,
                 schema: t.schema.clone(),
                 table: t.name.clone(),
-                reason: format!(
-                    "A heap: reads followed a forwarding pointer to another page {} times {}. A clustered index ends that.",
-                    format::count(forwarded),
-                    since_phrase(s)
-                ),
+                reason: t!("view.advisor.table.forwarded", count = format::count(forwarded), since = since_phrase(s)),
                 rows: t.rows,
                 indexes: Some(s.indexes_on(&t.schema, &t.name).count() as f64),
                 writes_per_day: writes_per_day(s, &t.schema, &t.name),
@@ -848,9 +822,10 @@ fn collect_table_advice(scope: &AdvisorScope<'_>) -> Vec<TableAdvice> {
                 kind: TableAdviceKind::OverIndexed,
                 schema: t.schema.clone(),
                 table: t.name.clone(),
-                reason: format!(
-                    "{secondary} secondary indexes and {}: every insert updates all of them.",
-                    how_many(s, w.total, w.days, w.unit())
+                reason: t!(
+                    "view.advisor.table.over_indexed",
+                    count = secondary.to_string(),
+                    how_many = how_many(s, w.total, w.days, w.unit())
                 ),
                 rows: t.rows,
                 indexes: Some(secondary as f64),
@@ -881,43 +856,30 @@ fn collect_advisor_notes(scope: &AdvisorScope<'_>, skipped: usize) -> Vec<String
         .map(|q| q.id.as_str())
         .collect();
     if !rewrites.is_empty() {
-        notes.push(format!("Query rewrites to evaluate before adding indexes: {}. Their plans filter an OR across tables after a scan. Compare equivalent UNION or EXISTS forms and representative branch plans first; these are structural observations, not indexes to create.", rewrites.join(", ")));
+        notes.push(t!("view.advisor.note.rewrites", queries = rewrites.join(", ")));
     }
 
     if !s.server.has(Capability::IndexUsage) {
-        notes.push(
-            "Index usage counters aren't readable: unused indexes and the runtime impact of overlaps are unknown. \
-             Duplicate and prefix coverage checks use the recorded definitions."
-                .into(),
-        );
+        notes.push(t!("view.advisor.note.no_index_usage"));
     } else if !crate::indexes::watched_long_enough(s) {
-        let counted = crate::support::watched_days(s).map_or_else(
-            || "for an unknown time".to_string(),
-            |d| format!("for {}", format::duration(d * 86_400_000.0)),
-        );
-        notes.push(if crate::support::counters_may_be_reset(s) {
-            // Reset with the statements, the counters are as old as the statement digests, whatever the uptime.
-            format!(
-                "Index usage counters may have started over with performance_schema's statements, which have counted \
-                 {counted}; an index has to go unread for a week of them before it's listed to clean up."
-            )
-        } else {
-            format!(
-                "Index usage counters have counted {counted}; an index has to go unread for a week before it's listed \
-                 to clean up."
-            )
+        let counted = crate::support::watched_days(s).map(|d| format::duration(d * 86_400_000.0));
+        // Reset with the statements, the counters are as old as the statement digests, whatever the uptime.
+        notes.push(match (crate::support::counters_may_be_reset(s), counted) {
+            (true, Some(span)) => t!("view.advisor.note.counted_maybe_reset", span = span),
+            (true, None) => t!("view.advisor.note.counted_maybe_reset_unknown"),
+            (false, Some(span)) => t!("view.advisor.note.counted", span = span),
+            (false, None) => t!("view.advisor.note.counted_unknown"),
         });
     }
     if !s.server.has(Capability::QueryPlans) {
-        notes.push("No plans were captured, so plan-based candidates are missing.".into());
+        notes.push(t!("view.advisor.note.no_plans"));
     }
     let partition_copies = s.indexes.iter().filter(|i| crate::indexes::is_partition_copy(i)).count();
     if partition_copies > 0 {
-        notes.push(format!(
-            "{} {} on partitions {} left out of the clean-ups: each is a partition's copy of its partitioned table's index, a cold partition reads as unused because queries skip it, and a copy can't be dropped on its own.",
-            partition_copies,
-            if partition_copies == 1 { "index" } else { "indexes" },
-            if partition_copies == 1 { "is" } else { "are" }
+        notes.push(t!(
+            "view.advisor.note.partition_copies",
+            n = partition_copies,
+            count = partition_copies.to_string()
         ));
     }
     if let Some(f) = report.findings.iter().find(|f| f.id == "unindexed-fk:schema") {
@@ -926,21 +888,15 @@ fn collect_advisor_notes(scope: &AdvisorScope<'_>, skipped: usize) -> Vec<String
             .iter()
             .filter(|(_, rows)| rows.is_some_and(|r| r < threshold))
             .count();
-        notes.push(format!(
-            "{} more foreign keys on tables under {} rows have no usable index; the finding \u{201c}{}\u{201d} lists them with the SQL.",
-            small,
-            format::count(threshold),
-            f.title
+        notes.push(t!(
+            "view.advisor.note.small_foreign_keys",
+            count = small.to_string(),
+            rows = format::count(threshold),
+            finding = &f.title
         ));
     }
     if skipped > 0 {
-        notes.push(if skipped == 1 {
-            "Left out 1 candidate without sufficient current measured workload, or for a table that is gone or queries that are history.".to_string()
-        } else {
-            format!(
-                "Left out {skipped} candidates without sufficient current measured workload, or for tables that are gone or queries that are history."
-            )
-        });
+        notes.push(t!("view.advisor.note.skipped", n = skipped, count = skipped.to_string()));
     }
     notes
 }

@@ -35,6 +35,7 @@ mod signal_words;
 mod sql_lint_words;
 mod sqlite;
 mod tuning_words;
+mod view_words;
 mod waits_words;
 
 /// Record `source`'s outcome in `s`, in place of any the scan recorded for it.
