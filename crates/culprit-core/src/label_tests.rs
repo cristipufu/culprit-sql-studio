@@ -29,9 +29,12 @@ fn capabilities_are_said_in_each_engines_words() {
     for (capability, label) in all {
         assert_eq!(capability.label(), label);
         for engine in [Engine::Mssql, Engine::Yugabyte] {
-            assert_eq!(capability.label_for(engine), label, "{engine:?}");
+            if (capability, engine) != (Capability::Showplan, Engine::Yugabyte) {
+                assert_eq!(capability.label_for(engine), label, "{engine:?}");
+            }
         }
     }
+    assert_eq!(Capability::Showplan.label_for(Engine::Yugabyte), "Estimated plans (EXPLAIN)");
     assert_eq!(Capability::Showplan.label_for(Engine::Postgres), "Estimated plans (EXPLAIN)");
     assert_eq!(Capability::Showplan.label_for(Engine::Mysql), "Estimated plans (EXPLAIN)");
     assert_eq!(Capability::Showplan.label_for(Engine::Sqlite), "Estimated plans (EXPLAIN QUERY PLAN)");
