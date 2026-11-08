@@ -2,6 +2,7 @@ import { KeyRound } from "lucide-react";
 import { useState } from "react";
 import type { ConnectionInfo } from "../gen/ConnectionInfo";
 import { api, errorMessage } from "../lib/api";
+import { t } from "../lib/i18n";
 import { loadConnections, scan } from "../lib/store";
 
 /** The password inside a pasted connection URL (postgres://user:secret@host/db), or the text itself. */
@@ -25,7 +26,6 @@ export function PasswordNeeded({ connection, message }: { connection: Connection
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const who = `${connection.user ?? "the saved user"} on ${connection.host}`;
 
   const save = async () => {
     const password = passwordFrom(value);
@@ -48,10 +48,11 @@ export function PasswordNeeded({ connection, message }: { connection: Connection
     <div className="empty">
       <div className="password-needed">
         <KeyRound size={18} />
-        <h3>{connection.name} needs its password</h3>
+        <h3>{t("ui.password_needed.title", { connection: connection.name })}</h3>
         <p className="muted">
-          Culprit signs in as {who}. The password goes to your OS keychain, never to a file. Paste the password, or a whole connection
-          string and Culprit takes just the password from it.
+          {connection.user != null
+            ? t("ui.password_needed.explain", { user: connection.user, host: connection.host })
+            : t("ui.password_needed.explain_saved_user", { host: connection.host })}
         </p>
         <form
           onSubmit={(e) => {
@@ -59,9 +60,9 @@ export function PasswordNeeded({ connection, message }: { connection: Connection
             void save();
           }}
         >
-          <input type="password" autoFocus value={value} placeholder="Password or connection string" onChange={(e) => setValue(e.target.value)} autoComplete="off" spellCheck={false} />
+          <input type="password" autoFocus value={value} placeholder={t("ui.password_needed.placeholder")} onChange={(e) => setValue(e.target.value)} autoComplete="off" spellCheck={false} />
           <button className="btn primary" type="submit" disabled={!value.trim() || busy}>
-            {busy ? "Signing in…" : "Save and scan"}
+            {busy ? t("ui.password_needed.signing_in") : t("ui.password_needed.save_and_scan")}
           </button>
         </form>
         {(error ?? message) && <p className="muted small">{error ?? message}</p>}

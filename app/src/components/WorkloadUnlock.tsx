@@ -5,16 +5,17 @@ import type { Report } from "../gen/Report";
 
 import { scan, setState } from "../lib/store";
 import { keys } from "../lib/keys";
+import { t } from "../lib/i18n";
 import { copyAndTell } from "../lib/clipboard";
 import { canOpenFixInEditor } from "../lib/editor-sql";
 
-/** What each source of query statistics is called, for "Culprit reads … only". */
-const SOURCE: Partial<Record<Capability, string>> = {
-  "pg-stat-statements": "pg_stat_statements",
-  "query-store": "Query Store",
-  "plan-cache": "the plan cache",
-  "performance-schema": "performance_schema statement digests or the slow query log table",
-  "slow-log": "the slow query log table",
+/** "Culprit reads … only", for each source of query statistics. */
+const READS_ONLY: Partial<Record<Capability, () => string>> = {
+  "pg-stat-statements": () => t("ui.workload_unlock.reads_only.pg_stat_statements"),
+  "query-store": () => t("ui.workload_unlock.reads_only.query_store"),
+  "plan-cache": () => t("ui.workload_unlock.reads_only.plan_cache"),
+  "performance-schema": () => t("ui.workload_unlock.reads_only.performance_schema"),
+  "slow-log": () => t("ui.workload_unlock.reads_only.slow_log"),
 };
 
 /** The first SQL statement in a fix sentence ("Run CREATE EXTENSION pg_stat_statements; in this database…"). */
@@ -47,15 +48,15 @@ export function WorkloadUnlock({ report }: { report: Report }) {
       <div className="unlock">
         <div className="unlock-head">
           <KeyRound size={15} />
-          <b>Read the statements from your framework's log</b>
+          <b>{t("ui.workload_unlock.query_log_title")}</b>
         </div>
         <p>
-          {missing.reason} Until then Culprit can only check tables, indexes and settings: no query list, no plans of what runs.
+          {missing.reason} {t("ui.workload_unlock.query_log_until")}
         </p>
         <div className="unlock-foot">
-          <span className="muted">Culprit reads the file only; nothing changes in the application.</span>
+          <span className="muted">{t("ui.workload_unlock.query_log_reads_only")}</span>
           <button type="button" className="btn small" onClick={() => setState({ view: "connections" })}>
-            <FileText size={12} /> Add query log
+            <FileText size={12} /> {t("ui.workload_unlock.add_query_log")}
           </button>
         </div>
       </div>
@@ -67,21 +68,21 @@ export function WorkloadUnlock({ report }: { report: Report }) {
     <div className="unlock">
       <div className="unlock-head">
         <KeyRound size={15} />
-        <b>Turn on query history</b>
+        <b>{t("ui.workload_unlock.title")}</b>
       </div>
       <p>
-        {missing.reason} Until then Culprit can only check tables, indexes and settings: no query list, no plans, no trends.
+        {missing.reason} {t("ui.workload_unlock.until")}
       </p>
       {sql && (
         <div className="unlock-sql">
           <code>{sql}</code>
           <span className="spacer" />
-          <button type="button" className="btn small" onClick={() => copyAndTell(sql, "Copied")} aria-label="Copy the statement">
-            <Copy size={12} /> Copy
+          <button type="button" className="btn small" onClick={() => copyAndTell(sql, t("ui.common.copied"))} aria-label={t("ui.workload_unlock.copy_statement")}>
+            <Copy size={12} /> {t("ui.common.copy")}
           </button>
           {canOpenFixInEditor(sql, report.snapshot.server.engine) && (
-            <button type="button" className="btn small" onClick={() => setState({ view: "editor", editorSql: sql })} aria-label="Open the statement in the editor">
-              <SquarePen size={12} /> Open in editor
+            <button type="button" className="btn small" onClick={() => setState({ view: "editor", editorSql: sql })} aria-label={t("ui.workload_unlock.open_statement")}>
+              <SquarePen size={12} /> {t("ui.common.open_in_editor")}
             </button>
           )}
         </div>
@@ -89,10 +90,10 @@ export function WorkloadUnlock({ report }: { report: Report }) {
       {rest && <p className="muted">{rest}</p>}
       <div className="unlock-foot">
         <span className="muted">
-          {SOURCE[missing.capability] ? `Culprit reads ${SOURCE[missing.capability]} only; it never changes the database for you.` : ""}
+          {READS_ONLY[missing.capability]?.() ?? ""}
         </span>
-        <button type="button" className="btn small" onClick={() => scan(report.snapshot.connection)} title={keys("Scan again once it's on (⌘R)")}>
-          <RefreshCw size={12} /> Done, re-scan
+        <button type="button" className="btn small" onClick={() => scan(report.snapshot.connection)} title={keys(t("ui.workload_unlock.rescan_title"))}>
+          <RefreshCw size={12} /> {t("ui.workload_unlock.rescan")}
         </button>
       </div>
     </div>

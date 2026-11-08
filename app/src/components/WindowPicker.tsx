@@ -2,16 +2,23 @@ import { CalendarClock, Check, ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { windowLabel } from "../lib/format";
 import { useHotkeys } from "../lib/hotkeys";
+import { t } from "../lib/i18n";
 import { setWindow, useStore, WINDOW_OPTIONS, type WindowMinutes } from "../lib/store";
 
-const LABEL: Record<WindowMinutes, string> = {
-  60: "Last hour",
-  360: "Last 6 hours",
-  1440: "Last 24 hours",
-  10080: "Last 7 days",
-  43200: "Last 30 days",
+const LABEL: Record<WindowMinutes, () => string> = {
+  60: () => t("ui.window_picker.last_hour"),
+  360: () => t("ui.window_picker.last_6_hours"),
+  1440: () => t("ui.window_picker.last_24_hours"),
+  10080: () => t("ui.window_picker.last_7_days"),
+  43200: () => t("ui.window_picker.last_30_days"),
 };
-const SHORT: Record<WindowMinutes, string> = { 60: "1h", 360: "6h", 1440: "24h", 10080: "7d", 43200: "30d" };
+const SHORT: Record<WindowMinutes, () => string> = {
+  60: () => t("ui.window_picker.short_1h"),
+  360: () => t("ui.window_picker.short_6h"),
+  1440: () => t("ui.window_picker.short_24h"),
+  10080: () => t("ui.window_picker.short_7d"),
+  43200: () => t("ui.window_picker.short_30d"),
+};
 
 /** Workload window for history-keeping sources (Query Store, the slow query log). `coveredHours` is what the source
  *  actually had; `source` names it. */
@@ -47,28 +54,28 @@ export function WindowPicker({ coveredHours, source }: { coveredHours: number | 
 
   return (
     <div className="menu-anchor" ref={anchor}>
-      <button type="button" className="picker" aria-haspopup="listbox" aria-expanded={open} title="Workload window (W)" onClick={() => setOpen((o) => !o)}>
+      <button type="button" className="picker" aria-haspopup="listbox" aria-expanded={open} title={t("ui.window_picker.title")} onClick={() => setOpen((o) => !o)}>
         <CalendarClock size={13} />
-        {LABEL[minutes]}
+        {LABEL[minutes]()}
         <ChevronDown size={13} className="muted" />
       </button>
       {short && (
-        <span className="picker-note" title={`${from} has kept history for ${held}; a longer window shows the same data until it has more.`}>
-          {from} keeps {held}
+        <span className="picker-note" title={t("ui.window_picker.short_history_title", { source: from, held })}>
+          {t("ui.window_picker.short_history", { source: from, held })}
         </span>
       )}
       {open && (
-        <div className="menu" role="listbox" aria-label="Workload window">
+        <div className="menu" role="listbox" aria-label={t("ui.window_picker.label")}>
           {WINDOW_OPTIONS.map((d) => (
             <button type="button" key={d} role="option" aria-selected={d === minutes} className={`menu-item ${d === minutes ? "on" : ""} ${same(d) ? "same" : ""}`} onClick={() => choose(d)}>
               <span>
-                {LABEL[d]}
-                {same(d) && <span className="menu-sub">same data: {held} kept</span>}
+                {LABEL[d]()}
+                {same(d) && <span className="menu-sub">{t("ui.window_picker.same_data", { held })}</span>}
               </span>
-              <span className="menu-key">{d === minutes ? <Check size={13} /> : SHORT[d]}</span>
+              <span className="menu-key">{d === minutes ? <Check size={13} /> : SHORT[d]()}</span>
             </button>
           ))}
-          <div className="menu-hint">From {from} history. Short windows show what is slow now; long ones catch weekly and monthly jobs. Press W to cycle.</div>
+          <div className="menu-hint">{t("ui.window_picker.hint", { source: from })}</div>
         </div>
       )}
     </div>
