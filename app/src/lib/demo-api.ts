@@ -29,6 +29,7 @@ import { previewSql } from "./schema-model";
 import { can, connectFacts, refusal, sessionActions, waitingState } from "./engines";
 import { sameSamplePlan } from "./plan-samples";
 import { discoveryPage } from "./discovery-results";
+import { t } from "./i18n";
 import { fromRust } from "./rust-json";
 
 /** The fixture reports, served as saved. The staging connection's resource samples are synthetic, to show the tier-limit chart. */
@@ -87,7 +88,7 @@ export const shareSample: () => Promise<ShareSample | null> = import.meta.env.DE
 
 /** Demo limitations are information, not errors: the UI shows them calmly. */
 function desktopOnly(message: string): Promise<never> {
-  return Promise.reject({ code: "unsupported", message, hint: "Open the desktop app or use the CLI for your own plans and scans." });
+  return Promise.reject({ code: "unsupported", message, hint: t("ui.demo_api.desktop_only_hint") });
 }
 
 const driftSample: () => Promise<Drift | null> = import.meta.env.DEV
@@ -163,8 +164,8 @@ const demoSaved = (() => {
       const list = load();
       const name = q.name.trim();
       const target = q.previous_name ?? name;
-      if (!name || !q.sql.trim()) throw { code: "invalid_input", message: "A saved query needs a name and SQL", hint: null };
-      if (list.some((x) => same(x.name, name) && !same(x.name, target))) throw { code: "invalid_input", message: `A saved query named '${name}' already exists`, hint: null };
+      if (!name || !q.sql.trim()) throw { code: "invalid_input", message: t("ui.demo_api.saved_query_incomplete"), hint: null };
+      if (list.some((x) => same(x.name, name) && !same(x.name, target))) throw { code: "invalid_input", message: t("ui.demo_api.saved_query_exists", { name }), hint: null };
       const now = new Date().toISOString().slice(0, 19) + "Z";
       const existing = list.find((x) => same(x.name, target));
       const saved: SavedQuery = existing
@@ -179,7 +180,17 @@ const demoSaved = (() => {
 })();
 
 function unsupported(): Promise<never> {
-  return Promise.reject({ code: "unsupported", message: "This is the browser demo; open the desktop app to connect to a database.", hint: null });
+  return Promise.reject({ code: "unsupported", message: t("ui.demo_api.unsupported"), hint: null });
+}
+
+/** The error the desktop app gives for a connection name it doesn't have. */
+function noConnection(name: string) {
+  return { code: "not_found", message: t("ui.demo_api.no_connection", { name }), hint: null };
+}
+
+/** The error the desktop app gives for a connection never scanned. */
+function noReport(name: string): Promise<never> {
+  return Promise.reject({ code: "not_found", message: t("ui.demo_api.no_report", { name }), hint: t("ui.demo_api.no_report_hint") });
 }
 
 /** Demo backed by fixtures, for UI work and screenshots outside Tauri. Connection edits live in memory only. */
@@ -211,7 +222,7 @@ export async function demoApi(): Promise<Api> {
         headline: r.summary.headline,
         window_minutes: r.snapshot.options?.window_minutes ?? null,
         product: r.snapshot.server.product,
-        no_workload: r.snapshot.workload ? null : (r.summary.no_workload ?? "This scan has no query history."),
+        no_workload: r.snapshot.workload ? null : (r.summary.no_workload ?? t("ui.demo_api.no_query_history")),
       },
     }));
   const demoUpdate = import.meta.env.DEV && typeof location !== "undefined" && location.search.includes("demo-update");
@@ -251,7 +262,7 @@ export async function demoApi(): Promise<Api> {
         ...view.live,
         taken_at: new Date().toISOString(),
         session_actions: production || !connection ? [] : sessionActions(connection.engine),
-        session_actions_note: production ? "Production connection: Culprit doesn't cancel or end sessions here." : null,
+        session_actions_note: production ? t("ui.demo_api.production_sessions") : null,
       },
     };
   };
@@ -270,14 +281,14 @@ export async function demoApi(): Promise<Api> {
     testConnection: unsupported,
     addConnection: unsupported,
     removeConnection: async (name) => {
-      if (!connections.some((c) => c.name === name)) return Promise.reject({ code: "not_found", message: `No connection named '${name}'`, hint: null });
+      if (!connections.some((c) => c.name === name)) return Promise.reject(noConnection(name));
       connections = connections.filter((c) => c.name !== name);
     },
     renameConnection: async (old, next) => {
-      if (!/^[A-Za-z0-9._-]{1,64}$/.test(next)) return Promise.reject({ code: "invalid_input", message: `'${next}' is not a valid connection name`, hint: null });
-      if (connections.some((c) => c.name === next)) return Promise.reject({ code: "invalid_input", message: `A connection named '${next}' already exists`, hint: null });
+      if (!/^[A-Za-z0-9._-]{1,64}$/.test(next)) return Promise.reject({ code: "invalid_input", message: t("ui.demo_api.invalid_name", { name: next }), hint: null });
+      if (connections.some((c) => c.name === next)) return Promise.reject({ code: "invalid_input", message: t("ui.demo_api.connection_exists", { name: next }), hint: null });
       const current = connections.find((c) => c.name === old);
-      if (!current) return Promise.reject({ code: "not_found", message: `No connection named '${old}'`, hint: null });
+      if (!current) return Promise.reject(noConnection(old));
       aliases.set(next, reportName(old));
       const renamed = { ...current, name: next };
       connections = connections.map((c) => (c.name === old ? renamed : c));
@@ -290,21 +301,21 @@ export async function demoApi(): Promise<Api> {
     setLanguage: async () => {},
     setPassword: async (name, password) => {
       const current = connections.find((c) => c.name === name);
-      if (!current) return Promise.reject({ code: "not_found", message: `No connection named '${name}'`, hint: null });
-      if (!password) return Promise.reject({ code: "invalid_input", message: "The password is empty", hint: null });
+      if (!current) return Promise.reject(noConnection(name));
+      if (!password) return Promise.reject({ code: "invalid_input", message: t("ui.demo_api.password_empty"), hint: null });
       const updated = { ...current, has_secret: true };
       connections = connections.map((c) => (c.name === name ? updated : c));
       return updated;
     },
     setSsh: async (name, ssh) => {
       const current = connections.find((c) => c.name === name);
-      if (!current) throw { code: "not_found", message: `No connection named '${name}'`, hint: null };
-      if (ssh && connectFacts(current.engine).file) throw { code: "invalid_input", message: "SQLite opens a local file and cannot use SSH forwarding", hint: null };
+      if (!current) throw noConnection(name);
+      if (ssh && connectFacts(current.engine).file) throw { code: "invalid_input", message: t("ui.demo_api.file_without_ssh"), hint: null };
       const updated = { ...current, ssh: ssh ?? undefined };
       connections = connections.map((c) => c.name === name ? updated : c);
       return updated;
     },
-    testSsh: () => desktopOnly("Testing an SSH tunnel uses OpenSSH in the desktop app or CLI."),
+    testSsh: () => desktopOnly(t("ui.demo_api.test_ssh")),
     importCandidates: async (source) => {
       await new Promise((r) => setTimeout(r, 250));
       const sample = await importSample();
@@ -400,7 +411,7 @@ export async function demoApi(): Promise<Api> {
       const plan = (await actualSample())?.last_actual[reportName(name)]?.[queryId];
       return (
         plan ??
-        Promise.reject({ code: "not_found", message: "This query's plan isn't in the plan cache right now", hint: "SQL Server keeps the last actual plan only while the plan is cached. It comes back the next time the query runs." })
+        Promise.reject({ code: "not_found", message: t("ui.demo_api.plan_not_cached"), hint: t("ui.demo_api.plan_not_cached_hint") })
       );
     },
     queryProgress: async (name, session, withPlan) => {
@@ -422,7 +433,7 @@ export async function demoApi(): Promise<Api> {
         hot_node: null, phase: null, phase_percent: null, note: null,
       };
       if (live?.state === "active") {
-        return { ...idle, running: true, state: waitingState(engine), wait: live.wait, wait_ms: live.wait_ms, elapsed_ms: live.elapsed_ms, note: live.blocked_by ? `It is waiting for session ${live.blocked_by} to release a lock, so no step has started yet.` : null };
+        return { ...idle, running: true, state: waitingState(engine), wait: live.wait, wait_ms: live.wait_ms, elapsed_ms: live.elapsed_ms, note: live.blocked_by ? t("ui.demo_api.waiting_for_lock", { session: live.blocked_by }) : null };
       }
       return idle;
     },
@@ -436,7 +447,7 @@ export async function demoApi(): Promise<Api> {
     dashboard: async (name) => {
       const sample = (await dashboardSample())[reportName(name)];
       if (sample) return { ...sample, connection: name };
-      return Promise.reject({ code: "not_found", message: `No saved report for '${name}'`, hint: "Scan it first." });
+      return noReport(name);
     },
     dashboardLive: async (name, dashboard) => {
       const view = await liveView(name);
@@ -449,7 +460,7 @@ export async function demoApi(): Promise<Api> {
     indexAdvice: async (name) => {
       const sample = (await adviceSample())[reportName(name)];
       if (sample) return { ...sample, connection: name };
-      return Promise.reject({ code: "not_found", message: `No saved report for '${name}'`, hint: "Scan it first." });
+      return noReport(name);
     },
     drift: async (a, b) => {
       const sample = await driftSample();
@@ -464,8 +475,8 @@ export async function demoApi(): Promise<Api> {
       } catch {}
       return Promise.reject({
         code: "unsupported",
-        message: "The browser demo only reads plans Culprit saved as JSON.",
-        hint: "Open the desktop app to read .sqlplan files and EXPLAIN output.",
+        message: t("ui.demo_api.json_plans_only"),
+        hint: t("ui.demo_api.json_plans_only_hint"),
       });
     },
     diffPlans: async (a, b) => {
@@ -474,7 +485,7 @@ export async function demoApi(): Promise<Api> {
         if (sameSamplePlan(c.a, a) && sameSamplePlan(c.b, b)) return c.diff;
         if (sameSamplePlan(c.a, b) && sameSamplePlan(c.b, a)) return c.reverse;
       }
-      return desktopOnly("The demo compares its sample plans; comparing other plans runs in the desktop app.");
+      return desktopOnly(t("ui.demo_api.compare_samples_only"));
     },
     exportPlan: async (plan, title, format) => {
       const sample = await shareSample();
@@ -482,25 +493,25 @@ export async function demoApi(): Promise<Api> {
         const contents = sameSamplePlan(c.a, plan) ? c.plan_markdown[0] : sameSamplePlan(c.b, plan) ? c.plan_markdown[1] : null;
         if (contents && format === "markdown") return { name: `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.md`, contents, format };
       }
-      return desktopOnly("The demo exports its sample plans as Markdown; HTML pages and .sqlplan files come from the desktop app.");
+      return desktopOnly(t("ui.demo_api.export_samples_only"));
     },
     exportDiff: async (a, b, nameA, nameB, format) => {
       const sample = await shareSample();
       const c = sample?.compares.find((x) => sameSamplePlan(x.a, a) && sameSamplePlan(x.b, b));
-      if (!c) return desktopOnly("The demo exports its sample comparisons; others come from the desktop app.");
+      if (!c) return desktopOnly(t("ui.demo_api.export_comparisons_only"));
       const stem = `compare-${nameA}-${nameB}`.toLowerCase().replace(/[^a-z0-9]+/g, "-");
       return format === "html" ? { name: `${stem}.html`, contents: c.html, format } : { name: `${stem}.md`, contents: c.markdown, format: "markdown" };
     },
-    exportQueryPlan: () => desktopOnly("Exporting a query's stored plan reads it from the database."),
+    exportQueryPlan: () => desktopOnly(t("ui.demo_api.export_query_plan")),
     exportFinding: async (name, findingId, format) => {
       const sample = await shareSample();
       const entry = sample?.findings[`${reportName(name)}|${findingId}`];
       const stem = findingId.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60);
       if (entry && format === "html" && entry.html) return { name: `${stem}.html`, contents: entry.html, format };
       if (entry && format !== "html") return { name: `${stem}.md`, contents: entry.markdown, format: "markdown" };
-      return desktopOnly("The demo has HTML pages for the top findings only.");
+      return desktopOnly(t("ui.demo_api.finding_pages"));
     },
-    verifyFindings: () => desktopOnly("Verifying re-scans the database to see whether the finding is gone."),
+    verifyFindings: () => desktopOnly(t("ui.demo_api.verify")),
     saveFile: async (name, contents) => {
       const url = URL.createObjectURL(new Blob([contents], { type: name.endsWith(".csv") ? "text/csv;charset=utf-8" : name.endsWith(".json") ? "application/json" : "text/plain" }));
       const link = Object.assign(document.createElement("a"), { href: url, download: name });
@@ -510,7 +521,7 @@ export async function demoApi(): Promise<Api> {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       return name;
     },
-    screenshot: () => desktopOnly("Screenshots of the window are taken by the desktop app."),
+    screenshot: () => desktopOnly(t("ui.demo_api.screenshot")),
     live: async (name) => (await liveView(name)).live!,
     interruptSession: async (name, session) => {
       await new Promise((r) => setTimeout(r, 300));
@@ -566,7 +577,7 @@ export async function demoApi(): Promise<Api> {
       await new Promise((r) => setTimeout(r, 500));
       const end = request.end ? Date.parse(request.end) : Date.now();
       const start = request.start ? Date.parse(request.start) : end - (request.hours ?? 24) * 3_600_000;
-      return demoCloud(reportName(name), start, end) ?? Promise.reject({ code: "unsupported", message: "Not a cloud database", hint: null });
+      return demoCloud(reportName(name), start, end) ?? Promise.reject({ code: "unsupported", message: t("ui.demo_api.not_cloud"), hint: null });
     },
     mark: async (name, text, at) => {
       const mark: Mark = { id: `m${Date.now()}`, at: at ?? new Date().toISOString().replace(/\.\d+Z$/, "Z"), text: text.trim(), by: "app", created_at: new Date().toISOString() };
@@ -576,7 +587,7 @@ export async function demoApi(): Promise<Api> {
     unmark: async (name, id) => {
       const list = demoMarks.get(name) ?? [];
       const mark = list.find((m) => m.id === id);
-      if (!mark) return Promise.reject({ code: "not_found", message: `No mark '${id}'`, hint: null });
+      if (!mark) return Promise.reject({ code: "not_found", message: t("ui.demo_api.no_mark", { id }), hint: null });
       demoMarks.set(name, list.filter((m) => m.id !== id));
       return mark;
     },
@@ -590,11 +601,11 @@ export async function demoApi(): Promise<Api> {
     parseDeadlock: () =>
       Promise.reject({
         code: "unsupported",
-        message: "Explaining a pasted deadlock runs in the desktop app and the CLI (`culprit deadlocks --file`).",
+        message: t("ui.demo_api.pasted_deadlock"),
         hint: null,
       }),
     previewTable: async (name, options) => {
-      if (options.filter?.trim()) return desktopOnly("Quick filters run against a connected database in the desktop app.");
+      if (options.filter?.trim()) return desktopOnly(t("ui.demo_api.quick_filters"));
       const report = byConnection(name);
       if (!report) return unsupported();
       const sql = previewSql(report.snapshot.server.engine, { schema: options.schema, name: options.table }, options.limit, options);
@@ -616,7 +627,7 @@ export async function demoApi(): Promise<Api> {
       const verb = (sql.trim().match(/^[(\s]*([A-Za-z]+)/)?.[1] ?? "").toUpperCase();
       const reads_only = ["SELECT", "WITH", "SHOW", "VALUES", "TABLE"].includes(verb) && !/\b(insert|update|delete|merge|into)\b/i.test(sql);
       const every = (verb === "UPDATE" || verb === "DELETE") && !/\bwhere\b/i.test(sql);
-      return { reads_only, verb, warning: every ? "There is no WHERE clause, so this changes every row in the table." : null, problem: null };
+      return { reads_only, verb, warning: every ? t("ui.demo_api.no_where") : null, problem: null };
     },
     lintSql: async () => [],
     catalog: async (name) => {
@@ -637,21 +648,21 @@ export async function demoApi(): Promise<Api> {
     savedQueryRan: async (name) => demoSaved.touch(name),
     setAgentAccess: async (name, access) => {
       const current = connections.find((c) => c.name === name);
-      if (!current) return Promise.reject({ code: "not_found", message: `No connection named '${name}'`, hint: null });
+      if (!current) return Promise.reject(noConnection(name));
       const updated = { ...current, agent_access: access };
       connections = connections.map((c) => (c.name === name ? updated : c));
       return updated;
     },
     setQueryLog: async (name, path) => {
       const current = connections.find((c) => c.name === name);
-      if (!current) return Promise.reject({ code: "not_found", message: `No connection named '${name}'`, hint: null });
+      if (!current) return Promise.reject(noConnection(name));
       const updated = { ...current, query_log: path };
       connections = connections.map((c) => (c.name === name ? updated : c));
       return updated;
     },
     chooseQueryLog: () => unsupported(),
     chooseDatabaseFile: () => unsupported(),
-    chooseSshIdentity: () => desktopOnly("Choose an SSH identity file in the desktop app."),
+    chooseSshIdentity: () => desktopOnly(t("ui.demo_api.ssh_identity")),
     // `?demo-approval` shows a sample request so the approval dialog can be designed without an agent.
     pendingApprovals: async () => (demoApproval ? [demoApproval] : []),
     decideApproval: async () => {
