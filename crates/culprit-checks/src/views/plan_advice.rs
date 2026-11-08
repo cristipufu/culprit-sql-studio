@@ -2,7 +2,7 @@
 //! visible when cheap or historical; urgency and executable changes require current supporting evidence.
 
 use culprit_core::insights::{PlanInsight, PlanInsights};
-use culprit_core::{Plan, QueryStat, Severity, Snapshot};
+use culprit_core::{Plan, QueryStat, Severity, Snapshot, t};
 
 use crate::{indexes::*, support::*};
 
@@ -57,9 +57,9 @@ pub fn query_plan_insights(snapshot: &Snapshot, query: &QueryStat, plan: &Plan) 
     let history = crate::query_is_history(snapshot, query);
     let material = index_work_is_material(snapshot, &[query]);
     let context = if history {
-        Some("This statement ran once or stopped running in the selected workload. These are observations about its captured plan, not a current incident. Recheck if the workload returns.".to_string())
+        Some(t!("view.plan_advice.context.history"))
     } else if !material && !items.is_empty() {
-        Some("The selected workload does not establish material execution cost. Structural concerns remain relevant as table size or call volume grows; compare reads and time under representative load before changing an index.".to_string())
+        Some(t!("view.plan_advice.context.not_material"))
     } else {
         None
     };
@@ -74,11 +74,16 @@ pub fn query_plan_insights(snapshot: &Snapshot, query: &QueryStat, plan: &Plan) 
             i.fix_sql = None;
         }
     }
-    let growth = plan.nodes().into_iter().any(|n| {
-        n.kind == culprit_core::NodeKind::Scan && n.predicate.is_some()
-            && n.table_rows.is_some_and(|rows| rows > 0.0 && rows < culprit_core::plan::SCAN_ROWS)
-            && !n.facts().partition_pruning.is_some()
-    }).then(|| "A filtered scan of a small table can be appropriate today. Track rows read and execution time as the table grows; low current cost does not establish that the access path will scale.".to_string());
+    let growth = plan
+        .nodes()
+        .into_iter()
+        .any(|n| {
+            n.kind == culprit_core::NodeKind::Scan
+                && n.predicate.is_some()
+                && n.table_rows.is_some_and(|rows| rows > 0.0 && rows < culprit_core::plan::SCAN_ROWS)
+                && !n.facts().partition_pruning.is_some()
+        })
+        .then(|| t!("view.plan_advice.growth"));
     let notes: Vec<_> = [culprit_core::insights::coverage_note(plan), context, growth].into_iter().flatten().collect();
     let note = (!notes.is_empty()).then(|| notes.join(" "));
     PlanInsights { items, note }
@@ -94,7 +99,7 @@ pub(crate) fn catalog_insights(snapshot: &Snapshot, query: &QueryStat, plan: &Pl
         if i.area == culprit_core::insights::InsightArea::Index && crate::evidence::index_catalog(snapshot).is_some() {
             i.severity = Severity::Low;
             i.fix_sql = None;
-            i.fix = "Current index definitions were unavailable in this scan. Inspect the current keys, filters and included columns before choosing an index change; the captured structure can still pose a scaling risk.".into();
+            i.fix = t!("view.plan_advice.index.definitions_unavailable");
             continue;
         }
         if i.rule == "key-lookups" {
@@ -127,7 +132,7 @@ pub(crate) fn catalog_insights(snapshot: &Snapshot, query: &QueryStat, plan: &Pl
         };
         let Some((schema, table, equality, inequality, mut include)) = request else {
             i.fix_sql = None;
-            i.fix = "Check the complete predicate and current index definitions before choosing index keys.".into();
+            i.fix = t!("view.plan_advice.index.predicate_unknown");
             continue;
         };
         let note = drop_large_includes(snapshot, &schema, &table, &mut include);
@@ -151,32 +156,34 @@ pub(crate) fn catalog_insights(snapshot: &Snapshot, query: &QueryStat, plan: &Pl
         };
         if candidate.keys().is_empty() {
             i.fix_sql = None;
-            i.fix = "Inspect the complete predicate and current index definitions; these conditions do not establish a safe choice of index keys.".into();
+            i.fix = t!("view.plan_advice.index.no_keys");
             continue;
         }
         if table_gone(snapshot, &table, &[query]) {
             i.severity = Severity::Low;
             i.fix_sql = None;
-            i.fix = "The captured table is absent from this scan's catalog. Confirm the current schema before acting on this historical plan.".into();
+            i.fix = t!("view.plan_advice.index.table_gone");
             continue;
         }
         let fixed = candidate_fix(snapshot, &candidate, &[query]);
         if fixed.fix.sql.is_none() && fixed.widens.is_some() {
             i.severity = Severity::Low;
-            i.title = format!(
-                "The captured {} on {schema}.{table} has matching index keys now",
-                if i.rule == "scan-filter" { "scan" } else { "request" }
-            );
+            let object = format!("{schema}.{table}");
+            i.title = if i.rule == "scan-filter" {
+                t!("view.plan_advice.index.matched_scan", table = object)
+            } else {
+                t!("view.plan_advice.index.matched_request", table = object)
+            };
         }
-        i.fix = fixed.fix.summary;
+        // The fix's sentences, then what this scan adds to them.
+        let mut fix = vec![fixed.fix.summary];
         i.fix_sql = fixed.fix.sql;
-        if let Some(note) = note {
-            i.fix.push_str(&format!(" {note}"));
-        }
+        fix.extend(note);
         if wide {
-            i.fix.push_str(" The wide INCLUDE list is omitted. Select fewer columns and test a narrow index before copying the payload into an index.");
+            fix.push(t!("view.plan_advice.index.wide_include"));
         }
-        i.verify = "Obtain a newly compiled plan and compare reads and execution time with equivalent parameters and load. Check index usage and write cost; a retained scan or old stored suggestion alone does not establish success or failure.".into();
+        i.fix = fix.join(" ");
+        i.verify = t!("view.plan_advice.index.verify");
     }
     found
 }
@@ -215,16 +222,14 @@ fn lookup_advice(snapshot: &Snapshot, query: &QueryStat, plan: &Plan, i: &mut Pl
     });
     let wide = include.len() > MAX_INCLUDE;
     // A lookup can be appropriate for large payloads; never recommend copying the entire row blindly.
-    i.fix = "Select fewer columns where possible. Test adding only the narrow columns needed by frequent reads as included columns, balancing saved lookups against index size and write cost.".into();
+    let mut fix = vec![t!("view.plan_advice.lookup.fix")];
     i.fix_sql = None;
-    if let Some(note) = note {
-        i.fix.push_str(&format!(" {note}"));
-    }
+    fix.extend(note);
     if wide {
-        i.fix.push_str(" The remaining projection is also wide; a covering index is not automatically worthwhile.");
+        fix.push(t!("view.plan_advice.lookup.wide"));
     }
     if unknown {
-        i.fix.push_str(" Confirm the projection against current column definitions before choosing INCLUDE columns.");
+        fix.push(t!("view.plan_advice.lookup.unknown_columns"));
     }
     if !unknown && !wide && !include.is_empty() && index_work_is_material(snapshot, &[query]) {
         let index = i
@@ -242,13 +247,14 @@ fn lookup_advice(snapshot: &Snapshot, query: &QueryStat, plan: &Plan, i: &mut Pl
                 })
             });
         if let Some(index) = index
-            && let Widening::Sql(fix) = widen_index(snapshot, index, &include)
+            && let Widening::Sql(widened) = widen_index(snapshot, index, &include)
         {
-            i.fix.push_str(&format!(" {}", fix.summary));
-            i.fix_sql = fix.sql;
+            fix.push(widened.summary);
+            i.fix_sql = widened.sql;
         }
     }
-    i.verify = "Compare a newly compiled plan, lookup counts, reads and time under equivalent parameters and load. Retain a covering index only if its read benefit justifies its storage and write cost.".into();
+    i.fix = fix.join(" ");
+    i.verify = t!("view.plan_advice.lookup.verify");
 }
 
 #[cfg(test)]

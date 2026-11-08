@@ -101,7 +101,7 @@ pub(super) fn with_insights(
         timed_total_ms,
         cost_note: crate::plan_shares_note(plan, query),
         time_note: (times.is_some() && nodes.iter().any(|n| n.act_time_ms.is_none()))
-            .then(|| "Only recorded operator times contribute; untimed steps have no measured share.".into()),
+            .then(|| culprit_core::t!("view.plan_view.time_note")),
         actual,
         nodes: operators,
         insights: insights
