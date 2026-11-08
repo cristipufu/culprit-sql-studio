@@ -176,3 +176,12 @@ the choice and the reason are given.
 | session / transaction pooling | pooling de sesión / de transacción | |
 | ring buffer, memory tracker, evict | búfer circular, rastreador de memoria, expulsar | |
 | stopped running | dejó de ejecutarse | |
+| rebuild (an index), tile | reconstruir / reconstrucción, mosaico | |
+| antijoin, merge join, hash join | antisemicombinación, combinación de mezcla, combinación hash | |
+| memory grant feedback | comentarios de concesión de memoria | |
+| inline (a UDF), inline TVF | insertar en la consulta, función insertada con valores de tabla | |
+| online / offline index build | en línea / sin conexión | |
+| lossy (bitmap), worktable | con pérdida, tabla de trabajo | |
+| linked server, collation, partition pruning | servidor vinculado, intercalación, eliminación de particiones | |
+| expand-and-contract | expansión y contracción | |
+| Explain again, Explain analyze again | «Vuelve a obtener el plan», «Vuelve a ejecutar EXPLAIN ANALYZE» | |
