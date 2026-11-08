@@ -5,6 +5,7 @@ import type { Catalog } from "../gen/Catalog";
 import type { Engine } from "../gen/Engine";
 import type { Report } from "../gen/Report";
 import { rowCount } from "./format";
+import { t } from "./i18n";
 
 /** What the latest report knows about a table: row count, keys, foreign keys, the columns indexes lead with. */
 function tableFacts(report: Report | null) {
@@ -44,14 +45,19 @@ export function completionConfig(engine: Engine, catalog: Catalog | null, report
     const indexed = facts.indexed.get(k);
     const columns: Completion[] = table.columns.map((c, i) => {
       const name = c.name.toLowerCase();
-      const tags = [pk?.has(name) ? "PK" : null, fk?.has(name) ? `FK → ${fk.get(name)}` : null, !pk?.has(name) && indexed?.has(name) ? "indexed" : null].filter(Boolean);
+      const tags = [
+        pk?.has(name) ? t("ui.completion.primary_key") : null,
+        fk?.has(name) ? t("ui.completion.foreign_key", { table: fk.get(name) ?? "" }) : null,
+        !pk?.has(name) && indexed?.has(name) ? t("ui.completion.indexed") : null,
+      ].filter(Boolean);
       return { label: c.name, type: "property", detail: [c.data_type, ...tags].join(" · "), boost: (pk?.has(name) ? 0.2 : 0) - i / 1000 };
     });
     const rows = facts.rows.get(k);
+    const columnCount = table.columns.length;
     const self: Completion = {
       label: table.name,
       type: table.view ? "interface" : "class",
-      detail: table.view ? "view" : rows != null ? rowCount(rows) : `${table.columns.length} columns`,
+      detail: table.view ? t("ui.completion.view") : rows != null ? rowCount(rows) : t("ui.completion.columns", { n: columnCount, count: String(columnCount) }),
       // Among equal matches the shorter name first: "ord" offers orders before order_items.
       boost: -Math.min(table.name.length, 90) / 100,
     };
@@ -61,10 +67,10 @@ export function completionConfig(engine: Engine, catalog: Catalog | null, report
   }
   const schema: Record<string, SQLNamespace> = {};
   for (const [name, tables] of Object.entries(schemas)) {
-    schema[name] = { self: { label: name, type: "namespace", detail: "schema" }, children: tables };
+    schema[name] = { self: { label: name, type: "namespace", detail: t("ui.completion.schema") }, children: tables };
   }
   for (const database of catalog.databases) {
-    if (!(database in schema)) schema[database] = { self: { label: database, type: "namespace", detail: "database" }, children: {} };
+    if (!(database in schema)) schema[database] = { self: { label: database, type: "namespace", detail: t("ui.completion.database") }, children: {} };
   }
   return { schema, defaultSchema: defaultSchema(engine, Object.keys(schemas)) };
 }

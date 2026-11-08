@@ -3,7 +3,8 @@ import type { StatementActivity } from "../gen/StatementActivity";
 import type { Report } from "../gen/Report";
 import type { Workload } from "../gen/Workload";
 import type { WorkloadKind } from "../gen/WorkloadKind";
-import { windowLabel } from "./format";
+import { windowSpan } from "./format";
+import { t } from "./i18n";
 
 /** What a workload was read from, as its provider said. */
 export function workloadKind(w: Workload): WorkloadKind | null {
@@ -31,10 +32,11 @@ export function windowUnknown(w: Workload): boolean {
 
 /** "the last 7 days", "the 35 minutes since statistics were reset", "the 50 minutes the Rails log covers": the core's phrase. */
 export function windowPhrase(w: Workload): string {
-  const span = windowLabel(w.window_hours).replace(/^last /, "");
-  if (w.log != null) return windowUnknown(w) ? `the period the ${w.log} log covers` : `the ${span} the ${w.log} log covers`;
-  if (w.windowed) return windowUnknown(w) ? "the recorded workload window" : `the last ${span}`;
-  return windowUnknown(w) ? "the time since statistics were last reset" : `the ${span} since statistics were reset`;
+  const unknown = windowUnknown(w);
+  const span = unknown ? "" : windowSpan(w.window_hours);
+  if (w.log != null) return unknown ? t("ui.rates.window.log_period", { log: w.log }) : t("ui.rates.window.log_span", { span, log: w.log });
+  if (w.windowed) return unknown ? t("ui.rates.window.recorded") : t("ui.rates.window.last", { span });
+  return unknown ? t("ui.rates.window.since_last_reset") : t("ui.rates.window.since_reset", { span });
 }
 
 /** How the runs of statements a rate a day would misstate are said, by query id: those that came in bursts ("750 runs
@@ -46,15 +48,15 @@ export function runsSaid(summary: { runs_said: { query: string; runs: string }[]
 
 /** Per-day rates for windows long enough to mean something, measured totals otherwise. */
 export function honest(w: Workload): Honest {
-  if (w.window_hours >= PER_DAY_MIN_HOURS) {
-    return { perDay: true, suffix: "per day", runsHeader: "Runs/day", value: (v) => (v * 24) / w.window_hours };
-  }
-  return {
-    perDay: false,
-    suffix: `over ${windowPhrase(w)}`,
-    runsHeader: "Runs",
-    value: (v) => v,
-  };
+  const { perDay, value } = rate(w);
+  return perDay
+    ? { perDay, suffix: t("ui.rates.per_day"), runsHeader: t("ui.rates.runs_per_day"), value }
+    : { perDay, suffix: t("ui.rates.over", { window: windowPhrase(w) }), runsHeader: t("ui.rates.runs"), value };
+}
+
+/** `honest` without its words, for figures worked out per statement. */
+function rate(w: Workload): Pick<Honest, "perDay" | "value"> {
+  return w.window_hours >= PER_DAY_MIN_HOURS ? { perDay: true, value: (v) => (v * 24) / w.window_hours } : { perDay: false, value: (v) => v };
 }
 
 /** A statement's share of database time, runs and average run as every surface states them. */
@@ -103,7 +105,7 @@ function figureIndex(summary: Summary): FigureIndex {
  * (`summary.runs_said`). Both worked out by the core, never again here. */
 export function figures(report: Report, q: QueryStat): Figures {
   const w = report.snapshot.workload!;
-  const rates = honest(w);
+  const rates = rate(w);
   const index = figureIndex(report.summary);
   const scans = index.scans.get(q.id);
   const said = index.said.get(q.id) ?? null;

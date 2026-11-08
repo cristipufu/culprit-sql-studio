@@ -7,7 +7,8 @@ import type { QueryStat } from "../gen/QueryStat";
 import type { Severity } from "../gen/Severity";
 import type { Guess } from "../gen/Guess";
 export type { Guess } from "../gen/Guess";
-import { count } from "./format";
+import { count, digits } from "./format";
+import { t } from "./i18n";
 
 /** Tree walking and presentation only: analysis decisions arrive in Rust's PlanView. */
 export function allNodes(n: PlanNode, out: PlanNode[] = []): PlanNode[] {
@@ -40,23 +41,23 @@ export function statedInsightShare(plan: Plan, insight: PlanInsight): number | n
   return plan.view?.insights.find((i) => i.rule === insight.rule && i.nodes.length === insight.nodes.length && i.nodes.every((id, at) => id === insight.nodes[at]))?.share ?? null;
 }
 
-const MISSING_VIEW = "Reopen this plan to compute its measurements and explanations with the current analyzer.";
-const OTHER_MEASUREMENTS = "This plan view was prepared for different statement or plan measurements. Reopen the selected plan to refresh its explanation.";
+const missingView = () => t("ui.plan_format.missing_view");
+const otherMeasurements = () => t("ui.plan_format.other_measurements");
 const matchesQuery = (plan: Plan, query?: QueryStat | null): boolean =>
   !query || !plan.view?.query || (plan.view.query.query_id === query.id && (plan.view.query.plan_id == null || query.plan_id == null || plan.view.query.plan_id === query.plan_id));
 
 export function noShareReason(plan: Plan, node: PlanNode, query?: QueryStat | null): string | null {
-  if (!plan.view) return MISSING_VIEW;
-  return matchesQuery(plan, query) ? operatorView(plan, node)?.no_share_reason ?? null : OTHER_MEASUREMENTS;
+  if (!plan.view) return missingView();
+  return matchesQuery(plan, query) ? operatorView(plan, node)?.no_share_reason ?? null : otherMeasurements();
 }
 export const findingStepShare = stepShare;
 export function findingNoShareReason(plan: Plan, node: PlanNode, query?: QueryStat | null): string | null {
-  if (!plan.view) return MISSING_VIEW;
-  return matchesQuery(plan, query) ? operatorView(plan, node)?.finding_no_share_reason ?? null : OTHER_MEASUREMENTS;
+  if (!plan.view) return missingView();
+  return matchesQuery(plan, query) ? operatorView(plan, node)?.finding_no_share_reason ?? null : otherMeasurements();
 }
 export function sharesNote(plan: Plan, query?: QueryStat | null): string | null {
-  if (!plan.view) return MISSING_VIEW;
-  return matchesQuery(plan, query) ? plan.view.cost_note : OTHER_MEASUREMENTS;
+  if (!plan.view) return missingView();
+  return matchesQuery(plan, query) ? plan.view.cost_note : otherMeasurements();
 }
 export const hottestStep = (plan: Plan): PlanNode | null => allNodes(plan.root).find((n) => n.id === plan.view?.hottest_cost) ?? null;
 export const doesRealWork = (plan: Plan): boolean => plan.view?.real_work ?? false;
@@ -82,19 +83,20 @@ export const operatorRuns = (plan: Plan | null | undefined, node: PlanNode): num
 export const rowsRead = (plan: Plan, node: PlanNode): number | null => operatorView(plan, node)?.rows_read ?? node.rows_read;
 export const misestimate = (plan: Plan | null | undefined, node: PlanNode): number | null => operatorView(plan, node)?.misestimate ?? null;
 
-/** Grouped integers ("1,000,000"); small fractions keep one decimal. Never exponent notation. */
+/** Grouped integers ("1,000,000"); small fractions keep one decimal. Never exponent notation. In the app's language's
+ * separators. */
 export function exact(value: number | null): string {
   if (value == null) return "—";
   if (!Number.isFinite(value)) return "—";
-  if (Math.abs(value) >= 100 || Number.isInteger(value)) return Math.round(value).toLocaleString("en-US");
-  return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  if (Math.abs(value) >= 100 || Number.isInteger(value)) return digits(Math.round(value).toLocaleString("en-US"));
+  return digits(value.toLocaleString("en-US", { maximumFractionDigits: 2 }));
 }
 
 /** Optimizer cost to three significant figures; it's a unit-less estimate, not time. */
 export function cost(value: number): string {
   if (value === 0) return "0";
   if (Math.abs(value) >= 1000) return count(value);
-  return Number(value.toPrecision(3)).toLocaleString("en-US");
+  return digits(Number(value.toPrecision(3)).toLocaleString("en-US"));
 }
 
 /** Rows as people say them: 20K, 1.2M, 14, 4.7. */
@@ -108,10 +110,10 @@ export function propValue(value: string): string {
   const trimmed = value.trim();
   if (/^-?\d+(\.\d+)?(e[+-]?\d+)?$/i.test(trimmed)) {
     const n = Number(trimmed);
-    if (Number.isFinite(n)) return Math.abs(n) >= 1e4 || Number.isInteger(n) ? exact(n) : Number(n.toPrecision(4)).toLocaleString("en-US");
+    if (Number.isFinite(n)) return Math.abs(n) >= 1e4 || Number.isInteger(n) ? exact(n) : digits(Number(n.toPrecision(4)).toLocaleString("en-US"));
   }
-  if (trimmed === "1" || trimmed.toLowerCase() === "true") return "yes";
-  if (trimmed.toLowerCase() === "false") return "no";
+  if (trimmed === "1" || trimmed.toLowerCase() === "true") return t("ui.plan_format.true");
+  if (trimmed.toLowerCase() === "false") return t("ui.plan_format.false");
   return value;
 }
 
