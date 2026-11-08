@@ -2,27 +2,54 @@
 
 use super::*;
 use crate::evidence::Requirement as Evidence;
+use culprit_core::{QueryStat, t};
 
 pub fn stale_stats_info() -> CheckInfo {
     CheckInfo {
         id: "stale-stats".into(),
-        title: "Stale statistics".into(),
+        title: t!("check.stale_stats.info.title"),
         category: Category::Maintenance,
         engines: vec![Engine::Mssql, Engine::Postgres],
         requires: vec![Capability::Statistics],
-        description:
-            "Tables whose optimizer statistics are far behind their data, which leads to bad row estimates and plans."
-                .into(),
+        description: t!("check.stale_stats.info.description"),
     }
 }
 
-check!(StaleStatsCheck: stale_stats_info, stale_stats, &[Evidence::Statistics]);
+check!(
+    StaleStatsCheck: stale_stats_info,
+    decide = stale_tables,
+    render = stale_stats_finding,
+    case<'s> = StaleTable<'s>,
+    evidence = &[Evidence::Statistics],
+);
 
-/// The metric counting the changes since the statistics were updated: SQL Server's modification counter and
-/// PostgreSQL's n_mod_since_analyze count changes (a row updated twice is two), not rows.
-pub(crate) const CHANGES_SINCE_UPDATE: &str = "Changes since update";
+/// The stale-stats findings of `snapshot`: its cases, each worded.
+#[cfg(test)]
+pub(crate) fn stale_stats(snapshot: &Snapshot) -> Vec<Finding> {
+    culprit_core::Check::run(&StaleStatsCheck, snapshot)
+}
 
-pub(super) struct Stale {
+/// The label of the metric counting the changes since the statistics were updated (SQL Server's modification counter
+/// and PostgreSQL's n_mod_since_analyze count changes: a row updated twice is two), as refine finds it: a metric's
+/// label equals it when it is that label in the current language.
+pub(crate) const CHANGES_SINCE_UPDATE: ChangesSinceUpdate = ChangesSinceUpdate;
+
+/// See [`CHANGES_SINCE_UPDATE`].
+pub(crate) struct ChangesSinceUpdate;
+
+impl ChangesSinceUpdate {
+    fn label() -> String {
+        t!("check.stale_stats.metric.changes")
+    }
+}
+
+impl PartialEq<ChangesSinceUpdate> for String {
+    fn eq(&self, _: &ChangesSinceUpdate) -> bool {
+        *self == ChangesSinceUpdate::label()
+    }
+}
+
+pub struct Stale {
     schema: String,
     table: String,
     rows: f64,
@@ -35,6 +62,21 @@ pub(super) struct Stale {
     each: Vec<(String, f64, Option<String>)>,
 }
 
+/// A table whose statistics are far behind its data, and what the scan establishes about it.
+pub struct StaleTable<'s> {
+    stale: Stale,
+    /// Changes for each of its rows.
+    ratio: f64,
+    /// SQL Server updates the statistics itself (AUTO_UPDATE_STATISTICS on, or not reported off): the counts are
+    /// information, not a request to refresh them.
+    auto_update: bool,
+    /// Saved plans that name one of its statistics (where SQL Server updates them itself).
+    in_use: Vec<&'s QueryStat>,
+    /// Heavy reads of the table are in this workload (where nothing updates the statistics by itself).
+    hot: bool,
+    severity: Severity,
+}
+
 /// Saved plans that name a statistic. Their XML describes the captured compilation, which may predate both the
 /// current catalog statistics and later compilations of the same query. It does not prove current use or harm.
 fn saved_plans_referencing<'a>(
@@ -42,25 +84,22 @@ fn saved_plans_referencing<'a>(
     schema: &str,
     table: &str,
     names: &[String],
-) -> Vec<(&'a culprit_core::QueryStat, String)> {
+) -> Vec<&'a QueryStat> {
     app_queries(snapshot)
         .filter(|q| crate::query_stopped(snapshot, q).is_none())
-        .filter_map(|q| {
-            let plan = q.plan.as_ref()?;
-            if only_unique_lookups(snapshot, plan, schema, table) {
-                return None;
-            }
-            let used = plan_statistics(plan).into_iter().find(|s| {
-                s.schema.eq_ignore_ascii_case(schema)
-                    && s.table.eq_ignore_ascii_case(table)
-                    && names.iter().any(|n| n.eq_ignore_ascii_case(&s.name))
-            })?;
-            Some((q, used.name))
+        .filter(|q| {
+            let Some(plan) = q.plan.as_ref() else { return false };
+            !only_unique_lookups(snapshot, plan, schema, table)
+                && plan_statistics(plan).into_iter().any(|s| {
+                    s.schema.eq_ignore_ascii_case(schema)
+                        && s.table.eq_ignore_ascii_case(table)
+                        && names.iter().any(|n| n.eq_ignore_ascii_case(&s.name))
+                })
         })
         .collect()
 }
 
-pub fn stale_stats(snapshot: &Snapshot) -> Vec<Finding> {
+fn stale_tables(snapshot: &Snapshot) -> Vec<StaleTable<'_>> {
     let mut stale = match snapshot.server.engine {
         Engine::Mssql => mssql_stale(snapshot),
         Engine::Postgres => pg_stale(snapshot),
@@ -73,85 +112,121 @@ pub fn stale_stats(snapshot: &Snapshot) -> Vec<Finding> {
         .into_iter()
         .take(8)
         .map(|s| {
-            let table_name = format!("{}.{}", s.schema, s.table);
             let ratio = s.modifications / s.rows.max(1.0);
             let auto_update = snapshot.server.engine == Engine::Mssql && !mssql_auto_update_off(snapshot);
-            let in_use = if auto_update { saved_plans_referencing(snapshot, &s.schema, &s.table, &s.names) } else { Vec::new() };
+            let in_use = if auto_update {
+                saved_plans_referencing(snapshot, &s.schema, &s.table, &s.names)
+            } else {
+                Vec::new()
+            };
             let hot = !auto_update && heavy_reads(snapshot, &s.schema, &s.table);
-            let mut f = finding("stale-stats", &table_name, Category::Maintenance, subject(SubjectKind::Table, &table_name));
-            // The modification counter counts changes (a row updated twice is two), not rows.
-            f.title = format!(
-                "Statistics on {} are stale: {} changes since they were updated ({} of the table's rows)",
-                s.table,
-                format::count(s.modifications),
-                format::percent(ratio.min(9.99))
-            );
-            let effect = if auto_update {
-                "Automatic statistics updates are enabled or were not reported disabled. A saved plan's statistics list describes its captured compilation; it does not establish which version later compilations or current executions use. Catalog modification counts alone do not demonstrate a slow plan or justify an immediate refresh.".to_string()
-            } else {
-                "The optimizer uses these statistics for row estimates. Check current estimates against actual rows before choosing maintenance; modification counts alone do not measure query harm.".to_string()
-            };
-            // The count and the date said together are one statistic's: the most changed one, with the others' beside.
-            let since = match s.each.as_slice() {
-                [] | [_] => format!(
-                    "since its statistics were last updated{}",
-                    s.last_updated.as_deref().map(|d| format!(" ({})", short_date(d))).unwrap_or_default()
-                ),
-                [(name, _, at), rest @ ..] => {
-                    let when = |at: &Option<String>| at.as_deref().map(|d| format!(" ({})", short_date(d))).unwrap_or_default();
-                    let rest = match rest {
-                        [(other, n, other_at)] => {
-                            format!(", and {} since {other} was{}", format::count(*n), when(other_at))
-                        }
-                        _ => format!(
-                            "; the {} other statistics listed below are past SQL Server's own threshold too",
-                            rest.len()
-                        ),
-                    };
-                    format!("since {name} was last updated{}{rest}", when(at))
-                }
-            };
-            f.summary = format!(
-                "{} changes to {} ({} rows) {since}. {effect}{}",
-                format::count(s.modifications),
-                table_name,
-                format::count(s.rows),
-                if hot { " Heavy queries in this workload read this table." } else { "" }
-            );
-            f.severity = if hot && ratio >= 0.5 { Severity::Medium } else { Severity::Low };
-            if auto_update {
-                f.actionability = culprit_core::Actionability::Information;
-                f.title = format!("Statistics on {} have {} recorded changes", s.table, format::count(s.modifications));
-                f.caveats.push("Automatic updates depend on the engine's thresholds and settings, including asynchronous updates and per-statistic NORECOMPUTE; this scan does not establish when every statistic will refresh.".into());
-            }
-            f.impact.score = base_score(f.severity) + ratio.min(2.0) * 3.0;
-            f.impact.label = format!("{} changes", format::count(s.modifications));
-            f.confidence = Confidence::Medium;
-            f.queries = query_refs(&in_use.iter().map(|(q, _)| *q).collect::<Vec<_>>());
-            f.metrics.push(Metric::new(CHANGES_SINCE_UPDATE, s.modifications, Unit::Count));
-            f.metrics.push(Metric::new("Rows in table", s.rows, Unit::Rows));
-            if !s.names.is_empty() {
-                f.metrics.push(Metric::text("Statistics", format::list(&s.names)));
-            }
-            let engine = snapshot.server.engine;
-            let target = qualified(engine, &s.schema, &s.table);
-            let mut fix = engine.spec().refresh_statistics(&target);
-            if auto_update {
-                fix = Fix {
-                    summary: "Inspect current statistics metadata and a newly compiled plan under representative load if this query is slow. Refresh only when that evidence supports it; the historical plan reference is not a request to update statistics now.".into(),
-                    sql: None,
-                    cost: None,
-                };
-            }
-            f.fix = Some(fix);
-            f.verify = vec![if auto_update {
-                "Compare the current catalog update time and modification counter with a newly compiled plan's estimates and measured rows. An older saved XML reference may remain after maintenance, and does not prove that the change failed.".into()
-            } else {
-                format!("After maintenance and representative workload, compare the changes-since-update counter on {} and fresh plan estimates with actual rows; check measured query time as well.", s.table)
-            }];
-            f
+            let severity = if hot && ratio >= 0.5 { Severity::Medium } else { Severity::Low };
+            StaleTable { stale: s, ratio, auto_update, in_use, hot, severity }
         })
         .collect()
+}
+
+fn stale_stats_finding(snapshot: &Snapshot, case: StaleTable<'_>) -> Finding {
+    let s = &case.stale;
+    let table_name = format!("{}.{}", s.schema, s.table);
+    let mut f = finding("stale-stats", &table_name, Category::Maintenance, subject(SubjectKind::Table, &table_name));
+    // The modification counter counts changes (a row updated twice is two), not rows.
+    let changes = format::count(s.modifications);
+    f.title = if case.auto_update {
+        t!("check.stale_stats.title.recorded", table = &s.table, changes = &changes)
+    } else {
+        t!(
+            "check.stale_stats.title.stale",
+            table = &s.table,
+            changes = &changes,
+            share = format::percent(case.ratio.min(9.99))
+        )
+    };
+    let mut summary = vec![t!(
+        "check.stale_stats.summary.changes",
+        changes = &changes,
+        table = &table_name,
+        rows = format::count(s.rows),
+        since = since_updated(s)
+    )];
+    summary.push(if case.auto_update {
+        t!("check.stale_stats.summary.auto_update")
+    } else {
+        t!("check.stale_stats.summary.estimates")
+    });
+    if case.hot {
+        summary.push(t!("check.stale_stats.summary.heavy_reads"));
+    }
+    f.summary = summary.join(" ");
+    f.severity = case.severity;
+    if case.auto_update {
+        f.actionability = culprit_core::Actionability::Information;
+        f.caveats.push(t!("check.stale_stats.caveat.auto_update"));
+    }
+    f.impact.score = base_score(f.severity) + case.ratio.min(2.0) * 3.0;
+    f.impact.label = t!("check.stale_stats.impact", changes = &changes);
+    f.confidence = Confidence::Medium;
+    f.queries = query_refs(&case.in_use);
+    f.metrics.push(Metric::new(ChangesSinceUpdate::label(), s.modifications, Unit::Count));
+    f.metrics.push(Metric::new(t!("check.stale_stats.metric.rows"), s.rows, Unit::Rows));
+    if !s.names.is_empty() {
+        f.metrics.push(Metric::text(t!("check.stale_stats.metric.statistics"), format::list(&s.names)));
+    }
+    let engine = snapshot.server.engine;
+    let target = qualified(engine, &s.schema, &s.table);
+    f.fix = Some(if case.auto_update {
+        Fix { summary: t!("check.stale_stats.fix.auto_update"), sql: None, cost: None }
+    } else {
+        engine.spec().refresh_statistics(&target)
+    });
+    f.verify = vec![if case.auto_update {
+        t!("check.stale_stats.verify.auto_update")
+    } else {
+        t!("check.stale_stats.verify.estimates", table = &s.table)
+    }];
+    f
+}
+
+/// Since when the changes were counted: the count and the date said together are one statistic's, the most changed
+/// one, with the others' beside it.
+fn since_updated(s: &Stale) -> String {
+    let date = |at: &Option<String>| at.as_deref().map(short_date);
+    match s.each.as_slice() {
+        [] | [_] => match date(&s.last_updated) {
+            Some(date) => t!("check.stale_stats.since.table_on", date = date),
+            None => t!("check.stale_stats.since.table"),
+        },
+        [(name, _, at), (other, n, other_at)] => {
+            let count = format::count(*n);
+            match (date(at), date(other_at)) {
+                (Some(date), Some(other_date)) => t!(
+                    "check.stale_stats.since.two_both_on",
+                    name = name,
+                    date = date,
+                    count = count,
+                    other = other,
+                    other_date = other_date
+                ),
+                (Some(date), None) => {
+                    t!("check.stale_stats.since.two_first_on", name = name, date = date, count = count, other = other)
+                }
+                (None, Some(other_date)) => t!(
+                    "check.stale_stats.since.two_other_on",
+                    name = name,
+                    count = count,
+                    other = other,
+                    other_date = other_date
+                ),
+                (None, None) => t!("check.stale_stats.since.two", name = name, count = count, other = other),
+            }
+        }
+        [(name, _, at), rest @ ..] => match date(at) {
+            Some(date) => {
+                t!("check.stale_stats.since.many_on", name = name, date = date, others = rest.len().to_string())
+            }
+            None => t!("check.stale_stats.since.many", name = name, others = rest.len().to_string()),
+        },
+    }
 }
 
 /// A full equality on a unique key finds at most one row independently of its statistics. The stored plan's list of
