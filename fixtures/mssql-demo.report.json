@@ -320,25 +320,25 @@
     },
     {
       "check": "hot-rows",
-      "reason": "This scan did not record the required source's collection outcome.",
+      "reason": null,
       "status": "findings",
       "title": "Rows that many sessions fight over"
     },
     {
       "check": "lock-escalations",
-      "reason": "This scan did not record the required source's collection outcome.",
+      "reason": null,
       "status": "findings",
       "title": "Statements that lock a whole table"
     },
     {
       "check": "last-page-insert",
-      "reason": "This scan did not record the required source's collection outcome.",
+      "reason": null,
       "status": "findings",
       "title": "Inserts that queue for the last page"
     },
     {
       "check": "untrusted-constraint",
-      "reason": "This scan did not record the required source's collection outcome.",
+      "reason": null,
       "status": "findings",
       "title": "Unvalidated or disabled constraints"
     },
@@ -4527,6 +4527,26 @@
       {
         "reason": null,
         "source": "settings",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "index contention",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "constraints",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "query costs",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "file latency",
         "state": "collected"
       }
     ],

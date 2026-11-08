@@ -269,7 +269,7 @@
     },
     {
       "check": "untrusted-constraint",
-      "reason": "This scan did not record the required source's collection outcome.",
+      "reason": null,
       "status": "findings",
       "title": "Unvalidated or disabled constraints"
     },
@@ -2828,6 +2828,31 @@
       {
         "reason": null,
         "source": "settings",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "constraints",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "query costs",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "file latency",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "table storage",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "replication",
         "state": "collected"
       }
     ],

@@ -2429,6 +2429,21 @@
         "reason": null,
         "source": "settings",
         "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "query costs",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "file latency",
+        "state": "collected"
+      },
+      {
+        "reason": null,
+        "source": "histograms",
+        "state": "collected"
       }
     ],
     "statistics": [],
