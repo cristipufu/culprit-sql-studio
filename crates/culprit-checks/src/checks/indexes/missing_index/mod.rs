@@ -11,16 +11,16 @@ mod candidates;
 mod parameterized;
 
 pub(crate) use candidates::{
-    Candidate, SCAN_ROWS, asking_queries, candidate_fix, drop_large_includes, fits_index_filter, merge_candidates,
-    readable_filter, too_small_to_index, writes_per_day,
+    Candidate, LargeIncludes, SCAN_ROWS, asking_queries, candidate_fix, drop_large_includes, fits_index_filter,
+    large_includes, merge_candidates, readable_filter, too_small_to_index, writes_per_day,
 };
 #[cfg(test)]
 pub(super) use parameterized::compares_to_parameter;
 pub(crate) use parameterized::{Remainder, parameterized_filter};
 
 use candidates::{
-    CandidateFix, LargeIncludes, LastAsked, MEASURED_READS, Remedy, TooSmall, candidate_remedy, candidate_remedy_fix,
-    large_includes, reads_per_run, request_severity, too_small, too_small_finding, wanted_before_window,
+    CandidateFix, LastAsked, MEASURED_READS, Remedy, TooSmall, candidate_remedy, candidate_remedy_fix, reads_per_run,
+    request_severity, too_small, too_small_finding, wanted_before_window,
 };
 use parameterized::{LiteralFilter, literal_filter, literal_filter_finding};
 

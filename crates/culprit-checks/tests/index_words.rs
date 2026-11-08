@@ -2773,3 +2773,81 @@ verify: A later scan must show a new request inside its workload window and enou
 caveat: None of the recorded workload window's statements asked for it: SQL Server's optimizer last did on Oct 11 at 06:00 UTC, 6 h 14 min before this scan's data ends, too short a time to say the statements that wanted it stopped."#,
     );
 }
+
+// An index on the key the workload shows created, at a time it didn't record; on a table still there, and gone.
+#[test]
+fn a_scan_past_a_dropped_index_of_unknown_date() {
+    let plant = |gone: bool| {
+        let mut s = snapshot("postgres-demo.json");
+        let id = "-3722457391793582113";
+        let mut create = s.queries().iter().find(|q| q.id == id).cloned().expect("a scan of order_items");
+        (create.id, create.plan, create.executions, create.first_seen) = ("create".into(), None, 1.0, None);
+        create.text = "CREATE INDEX ix_items_product ON public.order_items (product_id)".into();
+        add(&mut s, create);
+        if gone {
+            let q = query(&mut s, id);
+            q.executions = 1.0;
+            scan_node(q).unwrap().table_rows = Some(1_000_000.0);
+            s.tables.retain(|t| t.name != "order_items");
+            s.indexes.retain(|i| i.table != "order_items");
+        }
+        s
+    };
+    pin(
+        "filtered-scan",
+        &plant(false),
+        "filtered-scan:public.order_items(product_id)",
+        r#"filtered-scan:public.order_items(product_id) · Low · High · OptionalImprovement
+title: order_items is read in full to find rows by product_id
+summary: One query plans to read public.order_items and keep only those matching `(order_items.product_id = $1)`. The captured scan uses 1.0M rows as its size basis; this scan's catalog reports 1.0M rows in the table. Captured estimates can predate the current table size. No index starts with product_id, so the database has no faster way in. It accounts for 4% of database time. product_id is also the foreign key to products, so deletes there scan this table too. An index on product_id did exist: pg_stat_statements recorded `CREATE INDEX ix_items_product ON public.order_items (product_id)`, and the catalog doesn't list ix_items_product now, so it was dropped or renamed since.
+impact: 4% of DB time
+metric: Share of DB time: 0.04140462131320083
+metric: Captured scan size basis: 1000000
+metric: Queries: 1
+fix: Test an index on product_id as a way for the query to find matching rows without a full scan.
+verify: Obtain a newly compiled plan for the query and check whether order_items uses the new index to read fewer rows. A scan can remain appropriate for some parameter values.
+verify: pg_stat_statements keeps running totals, so a later scan's runs, share and averages for the query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there compare its time per run under equivalent load. Use the scans' read-counter changes to compare reads per new run, accounting for resets; include index storage and write cost."#,
+    );
+    pin(
+        "filtered-scan",
+        &plant(true),
+        "filtered-scan:public.order_items(product_id)",
+        r#"filtered-scan:public.order_items(product_id) · Low · High · History
+title: order_items was read in full to find rows by product_id
+summary: One query read public.order_items and kept only those matching `(order_items.product_id = $1)`. The captured scan uses 1.0M rows as its size basis; the current table row count is unavailable. This is not a measured count of rows read on every execution. The plan it last ran with had no index starting with product_id to seek. It accounted for 4% of database time. product_id is also the foreign key to products, so deletes there scan this table too. public.order_items isn't in the database's catalog any more. An index on product_id did exist: pg_stat_statements recorded `CREATE INDEX ix_items_product ON public.order_items (product_id)`.
+impact: 4% of DB time
+metric: Share of DB time: 0.04140462131320083
+metric: Captured scan size basis: 1000000
+metric: Queries: 1
+fix: Nothing to create: public.order_items isn't in the database's catalog any more, so it was dropped or renamed since these statements ran. If they now read a table under another name, a scan of it says whether that one needs an index.
+verify: Nothing to check: public.order_items is gone, and this finding goes once no captured statement reads it."#,
+    );
+}
+
+// Two statements read past an invalid index that leads with the key.
+#[test]
+fn two_scans_past_an_invalid_index() {
+    let mut s = ten_days(snapshot("postgres-demo.json"));
+    let mut invalid = index_like(&s, "orders_status_idx", "orders_customer_idx", &["customer_id"]);
+    invalid.is_disabled = true;
+    s.indexes.push(invalid);
+    let mut q = s.queries().iter().find(|q| q.id == "5308963031944094559").unwrap().clone();
+    q.id = "second-read".into();
+    q.text = "SELECT id FROM orders WHERE customer_id = $1".into();
+    add(&mut s, q);
+    pin(
+        "filtered-scan",
+        &s,
+        "filtered-scan:public.orders(customer_id)",
+        r#"filtered-scan:public.orders(customer_id) · Medium · High · OptionalImprovement
+title: orders is read in full to find rows by customer_id
+summary: 2 queries plan to read public.orders and keep only those matching `(orders.customer_id = $1)`. The captured scan uses 2.0M rows as its size basis; this scan's catalog reports 2.0M rows in the table. Captured estimates can predate the current table size. Only orders_customer_idx, which is disabled, starts with customer_id, so the database has no faster way in. Together they account for 39% of database time. customer_id is also the foreign key to customers, so deletes there scan this table too.
+impact: 39% of DB time
+metric: Share of DB time: 0.38678343852074343
+metric: Captured scan size basis: 1999995
+metric: Queries: 2
+fix: orders_customer_idx has these keys, but it is invalid (a build that didn't finish), so PostgreSQL never reads it. Rebuilding it makes it usable; if it was set aside because nothing read it, the queries below now would.
+verify: Obtain a newly compiled plan for one of the queries and check whether orders uses orders_customer_idx to read fewer rows. A scan can remain appropriate for some parameter values.
+verify: pg_stat_statements keeps running totals, so a later scan's runs, share and averages for the queries still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there compare their time per run under equivalent load. Use the scans' read-counter changes to compare reads per new run, accounting for resets; include index storage and write cost."#,
+    );
+}
