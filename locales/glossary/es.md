@@ -33,8 +33,11 @@ sentence: «Abrir en Planes».
 - Quotes: **« »** (comillas latinas), everywhere a message quotes a name or a phrase: «{name}».
 - No space before **: ; ! ?** (Spanish never puts one). A space after.
 - **…** where English has it, as the single character.
-- Percent: `{value} %` with a no-break space before %, as the Spanish norm and CLDR write it. Units keep their symbol:
-  *B, KB, MB, GB, TB, ms, s, min, h, µs*.
+- Percent: `{value} %` with a no-break space (U+00A0) before %, as the Spanish norm and CLDR write it. In prose a
+  percentage takes its article (*ocupa el {share} del tiempo de base de datos*, *al {share}*); labels, chips and table
+  cells don't (*{share} del tiempo de BD*). Units keep their symbol: *B, KB, MB, GB, TB, ms, s, min, h, µs*.
+- A count passed as plain text, with no plural argument, can't make a noun agree: put the noun first (*alto: {count}*,
+  *más lentas: {count}*) or use a phrase that doesn't inflect (*{still} sin corregir*).
 - Compact counts: *mil* (thousand), *M* (million), *mil M* (thousand million: Spanish *billón* is 10¹², never use it).
 - Dates read *hoy, 14:30* / *ayer, 9:02*: a comma, never *a las* (it would be *a la 1:05*). UTC times from the core are
   always two-digit (*13:58*), so they may take *a las*: *el 11 oct a las 13:58 UTC*.
