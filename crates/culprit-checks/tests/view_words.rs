@@ -3,7 +3,7 @@
 //! English to what the views said when they wrote it in code.
 
 use culprit_checks::{analyze, index_advice};
-use culprit_core::{IndexAdvice, IndexStat, MissingIndex, PlanNode, Snapshot};
+use culprit_core::{Drift, IndexAdvice, IndexStat, MissingIndex, PlanNode, Report, Snapshot};
 
 fn snapshot(name: &str) -> Snapshot {
     let text =
@@ -441,3 +441,185 @@ cleanup products_sku_idx Duplicate: Same keys as products_sku_key: the same inde
 note: PostgreSQL doesn't record missing-index requests. Candidates come from captured plans that read whole tables, foreign keys, and the table scan counters.
 note: 1 index on partitions is left out of the clean-ups: each is a partition's copy of its partitioned table's index, a cold partition reads as unused because queries skip it, and a copy can't be dropped on its own.
 note: 3 more foreign keys on tables under 10K rows have no usable index; the finding “None of the 6 foreign keys has an index that can serve it” lists them with the SQL."#;
+
+fn report(name: &str) -> Report {
+    let text =
+        std::fs::read_to_string(format!("{}/../../fixtures/{name}", env!("CARGO_MANIFEST_DIR"))).expect("fixture");
+    serde_json::from_str(&text).expect("report")
+}
+
+#[test]
+fn drift_says_what_it_said() {
+    let mut out = Vec::new();
+    let (prod, staging) = (report("mssql-demo.report.json"), report("mssql-demo-staging.report.json"));
+    out.push(drift_words(&culprit_checks::drift(&prod, &staging)));
+    out.push(drift_words(&culprit_checks::drift(&staging, &prod)));
+    // Every kind of difference, each way round.
+    let a = report("pg-demo.report.json");
+    let mut b = a.clone();
+    b.snapshot.connection = "staging".into();
+    let s = &mut b.snapshot;
+    let gone = s.tables.pop().unwrap();
+    s.tables[0].rows = None;
+    let mut extra = s.tables[0].clone();
+    (extra.name, extra.rows) = ("audit_trail".into(), Some(1234.0));
+    s.tables.push(extra.clone());
+    (extra.name, extra.rows) = ("audit_unknown".into(), None);
+    s.tables.push(extra);
+    let kept = |schema: &str, table: &str| !(schema == gone.schema && table == gone.name);
+    let columns: Vec<usize> =
+        (0..s.columns.len()).filter(|&k| kept(&s.columns[k].schema, &s.columns[k].table)).collect();
+    s.columns[columns[0]].data_type = "bigint".into();
+    s.columns[columns[1]].nullable = !s.columns[columns[1]].nullable;
+    let mut added = s.columns[columns[2]].clone();
+    added.name = "note".into();
+    s.columns.push(added);
+    s.columns.remove(columns[3]);
+    let indexes: Vec<usize> =
+        (0..s.indexes.len()).filter(|&k| kept(&s.indexes[k].schema, &s.indexes[k].table)).collect();
+    s.indexes[indexes[0]].name = format!("{}_v2", s.indexes[indexes[0]].name);
+    s.indexes[indexes[1]].include.push("note".into());
+    let mut unique = s.indexes[indexes[2]].clone();
+    (unique.name, unique.is_unique, unique.is_primary_key, unique.is_clustered) =
+        ("ux_extra".into(), true, false, false);
+    s.indexes.push(unique.clone());
+    (unique.name, unique.is_primary_key, unique.columns) = ("pk_extra".into(), true, vec!["id".into(), "sku".into()]);
+    s.indexes.push(unique);
+    s.indexes[indexes[3]].name = format!("{}_v2", s.indexes[indexes[3]].name);
+    s.foreign_keys[0].delete_rule = Some("CASCADE".into());
+    s.foreign_keys[1].columns.push("note".into());
+    let table = s.tables[0].clone();
+    for (name, disabled) in [("ck_amount", true), ("ck_status", false)] {
+        s.constraints.push(culprit_core::ConstraintIssue {
+            schema: table.schema.clone(),
+            table: table.name.clone(),
+            name: name.into(),
+            kind: culprit_core::ConstraintKind::Check,
+            disabled,
+            inheritance_child: false,
+        });
+    }
+    s.tables[0].storage.get_or_insert_with(Default::default).options.push("trigger=trg_audit:IU".into());
+    s.tables[1].storage.get_or_insert_with(Default::default).options.push("trigger=trg_touch:U".into());
+    s.settings[0].value = format!("{}-changed", s.settings[0].value);
+    s.server.version = "17.1".into();
+    let mut c = a.clone();
+    c.snapshot.tables[1].storage.get_or_insert_with(Default::default).options.push("trigger=trg_touch:D".into());
+    out.push(drift_words(&culprit_checks::drift(&c, &b)));
+    out.push(drift_words(&culprit_checks::drift(&b, &c)));
+    // One index apart; a side without column or index data; engines that differ.
+    let mut one = a.clone();
+    one.snapshot.connection = "one".into();
+    let at = one.snapshot.indexes.iter().position(|i| !i.is_primary_key && !i.is_unique).unwrap();
+    one.snapshot.indexes.remove(at);
+    out.push(drift_words(&culprit_checks::drift(&a, &one)));
+    let mut bare = a.clone();
+    bare.snapshot.connection = "bare".into();
+    bare.snapshot.columns.clear();
+    out.push(drift_words(&culprit_checks::drift(&a, &bare)));
+    bare.snapshot.indexes.clear();
+    out.push(drift_words(&culprit_checks::drift(&a, &bare)));
+    let mut no_indexes = a.clone();
+    no_indexes.snapshot.connection = "no-indexes".into();
+    no_indexes.snapshot.indexes.clear();
+    out.push(drift_words(&culprit_checks::drift(&no_indexes, &bare)));
+    out.push(drift_words(&culprit_checks::drift(&a, &prod)));
+    same(&out.join("\n---\n"), DRIFT);
+}
+
+const DRIFT: &str = r#"summary: 8 differences: 2 indexes, 2 tables, 1 column, 2 settings and 1 version. One index only differs by name.
+Index OnlyB shop.order_items.ix_order_items_order_id: shop.order_items has an index on (order_id) in mssql-demo-staging that mssql-demo lacks. | a: - | b: ix_order_items_order_id (order_id)
+Index OnlyA shop.support_tickets.ix_support_tickets_priority: shop.support_tickets has an index on (priority) in mssql-demo that mssql-demo-staging lacks. | a: ix_support_tickets_priority (priority) | b: -
+Index Renamed shop.orders.ix_orders_channel: shop.orders has the same index under different names: ix_orders_channel in mssql-demo, ix_orders_by_channel in mssql-demo-staging. | a: ix_orders_channel (channel) | b: ix_orders_by_channel (channel)
+Table OnlyA archive.child: archive.child exists in mssql-demo but not in mssql-demo-staging. | a: 0 rows, 1 index | b: -
+Table OnlyA archive.hot: archive.hot exists in mssql-demo but not in mssql-demo-staging. | a: 128K rows, 1 index | b: -
+Column Different shop.customers.email: shop.customers.email is varchar(200) in mssql-demo and nvarchar(200) in mssql-demo-staging. | a: varchar(200) NOT NULL | b: nvarchar(200) NOT NULL
+Setting Different compatibility_level: compatibility_level is 160 in mssql-demo and 150 in mssql-demo-staging. | a: 160 | b: 150
+Setting Different is_read_committed_snapshot_on: is_read_committed_snapshot_on is 0 in mssql-demo and 1 in mssql-demo-staging. | a: 0 | b: 1
+Version Different version: mssql-demo runs SQL Server 2022 16.0.4295.3 and mssql-demo-staging runs SQL Server 2022 16.0.4175.1. | a: SQL Server 2022 16.0.4295.3 | b: SQL Server 2022 16.0.4175.1
+---
+summary: 8 differences: 2 indexes, 2 tables, 1 column, 2 settings and 1 version. One index only differs by name.
+Index OnlyA shop.order_items.ix_order_items_order_id: shop.order_items has an index on (order_id) in mssql-demo-staging that mssql-demo lacks. | a: ix_order_items_order_id (order_id) | b: -
+Index OnlyB shop.support_tickets.ix_support_tickets_priority: shop.support_tickets has an index on (priority) in mssql-demo that mssql-demo-staging lacks. | a: - | b: ix_support_tickets_priority (priority)
+Index Renamed shop.orders.ix_orders_by_channel: shop.orders has the same index under different names: ix_orders_by_channel in mssql-demo-staging, ix_orders_channel in mssql-demo. | a: ix_orders_by_channel (channel) | b: ix_orders_channel (channel)
+Table OnlyB archive.child: archive.child exists in mssql-demo but not in mssql-demo-staging. | a: - | b: 0 rows, 1 index
+Table OnlyB archive.hot: archive.hot exists in mssql-demo but not in mssql-demo-staging. | a: - | b: 128K rows, 1 index
+Column Different shop.customers.email: shop.customers.email is nvarchar(200) in mssql-demo-staging and varchar(200) in mssql-demo. | a: nvarchar(200) NOT NULL | b: varchar(200) NOT NULL
+Setting Different compatibility_level: compatibility_level is 150 in mssql-demo-staging and 160 in mssql-demo. | a: 150 | b: 160
+Setting Different is_read_committed_snapshot_on: is_read_committed_snapshot_on is 1 in mssql-demo-staging and 0 in mssql-demo. | a: 1 | b: 0
+Version Different version: mssql-demo-staging runs SQL Server 2022 16.0.4175.1 and mssql-demo runs SQL Server 2022 16.0.4295.3. | a: SQL Server 2022 16.0.4175.1 | b: SQL Server 2022 16.0.4295.3
+---
+summary: 19 differences: 3 indexes, 10 tables, 4 columns, 1 setting and 1 version. 2 indexes only differ by name.
+Index OnlyB public.products.pk_extra: public.products has a primary key on (id, sku) in staging that pg-demo lacks. | a: - | b: pk_extra (id, sku) PRIMARY KEY
+Index Different public.products.products_pkey: products_pkey on public.products is defined differently: (id) PRIMARY KEY in pg-demo, (id) INCLUDE (note) PRIMARY KEY in staging. | a: (id) PRIMARY KEY | b: (id) INCLUDE (note) PRIMARY KEY
+Index OnlyB public.products.ux_extra: public.products has a unique index on (sku) in staging that pg-demo lacks. | a: - | b: ux_extra (sku) UNIQUE
+Index Renamed public.customers.customers_pkey: public.customers has the same index under different names: customers_pkey in pg-demo, customers_pkey_v2 in staging. | a: customers_pkey (id) PRIMARY KEY | b: customers_pkey_v2 (id) PRIMARY KEY
+Index Renamed public.orders.orders_pkey: public.orders has the same index under different names: orders_pkey in pg-demo, orders_pkey_v2 in staging. | a: orders_pkey (id) PRIMARY KEY | b: orders_pkey_v2 (id) PRIMARY KEY
+Table OnlyA archive.wide: archive.wide exists in pg-demo but not in staging. | a: 45K rows, 2 indexes | b: -
+Table OnlyB public.audit_trail: public.audit_trail exists in staging but not in pg-demo. | a: - | b: 1.2K rows, 0 indexes
+Table OnlyB public.audit_unknown: public.audit_unknown exists in staging but not in pg-demo. | a: - | b: ? rows, 0 indexes
+Table Different public.customers.trg_touch: Trigger public.customers.trg_touch fires on D in pg-demo and U in staging. | a: trigger (D) | b: trigger (U)
+Table OnlyA public.order_items.order_items_product_id_fkey: public.order_items has foreign key order_items_product_id_fkey (product_id) -> public.products(id) in pg-demo that staging lacks. | a: (product_id) -> public.products(id) | b: -
+Table OnlyB public.order_items.order_items_product_id_fkey: public.order_items has foreign key order_items_product_id_fkey (product_id, note) -> public.products(id) in staging that pg-demo lacks. | a: - | b: (product_id, note) -> public.products(id)
+Table Different public.orders.ck_amount: Constraint ck_amount on public.orders is validated in pg-demo and disabled in staging. | a: validated | b: disabled
+Table Different public.orders.ck_status: Constraint ck_status on public.orders is validated in pg-demo and untrusted / NOT VALID in staging. | a: validated | b: untrusted / NOT VALID
+Table Different public.orders.orders_customer_id_fkey: Foreign key orders_customer_id_fkey on public.orders uses ON DELETE NO ACTION in pg-demo and ON DELETE CASCADE in staging. | a: (customer_id) -> public.customers(id) | b: (customer_id) -> public.customers(id) ON DELETE CASCADE
+Table OnlyB public.orders.trg_audit: Trigger public.orders.trg_audit (IU) exists in staging but not in pg-demo. | a: - | b: trigger (IU)
+Column Different public.customers.email: public.customers.email allows NULL in staging but not in pg-demo. | a: text NOT NULL | b: text NULL
+Column Different public.customers.id: public.customers.id is integer in pg-demo and bigint in staging. | a: integer NOT NULL | b: bigint NOT NULL
+Column OnlyB public.customers.note: public.customers.note exists in staging but not in pg-demo. | a: - | b: text NOT NULL
+Column OnlyA public.customers.region: public.customers.region exists in pg-demo but not in staging. | a: text NOT NULL | b: -
+Setting Different autovacuum: autovacuum is on in pg-demo and on-changed in staging. | a: on | b: on-changed
+Version Different version: pg-demo runs PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2) and staging runs PostgreSQL 18.6 17.1. | a: PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2) | b: PostgreSQL 18.6 17.1
+---
+summary: 19 differences: 3 indexes, 10 tables, 4 columns, 1 setting and 1 version. 2 indexes only differ by name.
+Index OnlyA public.products.pk_extra: public.products has a primary key on (id, sku) in staging that pg-demo lacks. | a: pk_extra (id, sku) PRIMARY KEY | b: -
+Index Different public.products.products_pkey: products_pkey on public.products is defined differently: (id) INCLUDE (note) PRIMARY KEY in staging, (id) PRIMARY KEY in pg-demo. | a: (id) INCLUDE (note) PRIMARY KEY | b: (id) PRIMARY KEY
+Index OnlyA public.products.ux_extra: public.products has a unique index on (sku) in staging that pg-demo lacks. | a: ux_extra (sku) UNIQUE | b: -
+Index Renamed public.customers.customers_pkey_v2: public.customers has the same index under different names: customers_pkey_v2 in staging, customers_pkey in pg-demo. | a: customers_pkey_v2 (id) PRIMARY KEY | b: customers_pkey (id) PRIMARY KEY
+Index Renamed public.orders.orders_pkey_v2: public.orders has the same index under different names: orders_pkey_v2 in staging, orders_pkey in pg-demo. | a: orders_pkey_v2 (id) PRIMARY KEY | b: orders_pkey (id) PRIMARY KEY
+Table OnlyB archive.wide: archive.wide exists in pg-demo but not in staging. | a: - | b: 45K rows, 2 indexes
+Table OnlyA public.audit_trail: public.audit_trail exists in staging but not in pg-demo. | a: 1.2K rows, 0 indexes | b: -
+Table OnlyA public.audit_unknown: public.audit_unknown exists in staging but not in pg-demo. | a: ? rows, 0 indexes | b: -
+Table Different public.customers.trg_touch: Trigger public.customers.trg_touch fires on U in staging and D in pg-demo. | a: trigger (U) | b: trigger (D)
+Table OnlyA public.order_items.order_items_product_id_fkey: public.order_items has foreign key order_items_product_id_fkey (product_id, note) -> public.products(id) in staging that pg-demo lacks. | a: (product_id, note) -> public.products(id) | b: -
+Table OnlyB public.order_items.order_items_product_id_fkey: public.order_items has foreign key order_items_product_id_fkey (product_id) -> public.products(id) in pg-demo that staging lacks. | a: - | b: (product_id) -> public.products(id)
+Table Different public.orders.ck_amount: Constraint ck_amount on public.orders is disabled in staging and validated in pg-demo. | a: disabled | b: validated
+Table Different public.orders.ck_status: Constraint ck_status on public.orders is untrusted / NOT VALID in staging and validated in pg-demo. | a: untrusted / NOT VALID | b: validated
+Table Different public.orders.orders_customer_id_fkey: Foreign key orders_customer_id_fkey on public.orders uses ON DELETE CASCADE in staging and ON DELETE NO ACTION in pg-demo. | a: (customer_id) -> public.customers(id) ON DELETE CASCADE | b: (customer_id) -> public.customers(id)
+Table OnlyA public.orders.trg_audit: Trigger public.orders.trg_audit (IU) exists in staging but not in pg-demo. | a: trigger (IU) | b: -
+Column Different public.customers.email: public.customers.email allows NULL in staging but not in pg-demo. | a: text NULL | b: text NOT NULL
+Column Different public.customers.id: public.customers.id is bigint in staging and integer in pg-demo. | a: bigint NOT NULL | b: integer NOT NULL
+Column OnlyA public.customers.note: public.customers.note exists in staging but not in pg-demo. | a: text NOT NULL | b: -
+Column OnlyB public.customers.region: public.customers.region exists in pg-demo but not in staging. | a: - | b: text NOT NULL
+Setting Different autovacuum: autovacuum is on-changed in staging and on in pg-demo. | a: on-changed | b: on
+Version Different version: staging runs PostgreSQL 18.6 17.1 and pg-demo runs PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2). | a: PostgreSQL 18.6 17.1 | b: PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2)
+---
+summary: 1 difference: 1 index.
+Index OnlyA public.events.events_customer_idx: public.events has an index on (customer_id) in pg-demo that one lacks. | a: events_customer_idx (customer_id) | b: -
+---
+summary: No differences in tables, columns, indexes or settings. Not compared: bare has no column data (check that login's permissions).
+---
+summary: No differences in tables, columns, indexes or settings. Not compared: bare has no column data, bare has no index data (check that login's permissions).
+---
+summary: No differences in tables, columns, indexes or settings. Not compared: bare has no column data (check that login's permissions).
+---
+summary: pg-demo is PostgreSQL and mssql-demo is SQL Server; Culprit compares databases of the same engine.
+Version Different engine: pg-demo is PostgreSQL and mssql-demo is SQL Server; Culprit compares databases of the same engine. | a: PostgreSQL | b: SQL Server"#;
+
+/// Everything drift says: its summary, then each difference with what each side has.
+fn drift_words(d: &Drift) -> String {
+    let mut out = vec![format!("summary: {}", d.summary)];
+    for i in &d.items {
+        out.push(format!(
+            "{:?} {:?} {}: {} | a: {} | b: {}",
+            i.kind,
+            i.presence,
+            i.subject,
+            i.title,
+            i.a.as_deref().unwrap_or("-"),
+            i.b.as_deref().unwrap_or("-")
+        ));
+    }
+    out.join("\n")
+}

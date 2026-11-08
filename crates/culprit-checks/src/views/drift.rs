@@ -2,9 +2,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use culprit_core::i18n::Arg;
 use culprit_core::{
     ColumnInfo, Drift, DriftItem, DriftKind, DriftPresence, DriftSide, Engine, IndexStat, Report, Snapshot, format,
-    server_label,
+    server_label, t,
 };
 
 use crate::support::supports_online_index;
@@ -30,9 +31,12 @@ pub fn drift(a: &Report, b: &Report) -> Drift {
     };
     let names = Names { a: &sa.connection, b: &sb.connection };
     if sa.server.engine != sb.server.engine {
-        let title = format!(
-            "{} is {} and {} is {}; Culprit compares databases of the same engine.",
-            names.a, sa.server.engine, names.b, sb.server.engine
+        let title = t!(
+            "view.drift.engines_differ",
+            a = names.a,
+            engine_a = sa.server.engine.to_string(),
+            b = names.b,
+            engine_b = sb.server.engine.to_string()
         );
         return Drift {
             a: side(sa),
@@ -52,18 +56,18 @@ pub fn drift(a: &Report, b: &Report) -> Drift {
     }
 
     let mut items = Vec::new();
-    let mut notes = Vec::new();
     let tables_a = table_set(sa);
     let tables_b = table_set(sb);
     tables(&names, sa, sb, &tables_a, &tables_b, &mut items);
-    if sa.columns.is_empty() != sb.columns.is_empty() {
-        notes.push(format!("{} has no column data", if sa.columns.is_empty() { names.a } else { names.b }));
-    } else {
+    // The side that read no columns, or no indexes, where the other did: not compared.
+    let without =
+        |a_empty: bool, b_empty: bool| (a_empty != b_empty).then_some(if a_empty { names.a } else { names.b });
+    let no_columns = without(sa.columns.is_empty(), sb.columns.is_empty());
+    let no_indexes = without(sa.indexes.is_empty(), sb.indexes.is_empty());
+    if no_columns.is_none() {
         columns(&names, sa, sb, &tables_a, &tables_b, &mut items);
     }
-    if sa.indexes.is_empty() != sb.indexes.is_empty() {
-        notes.push(format!("{} has no index data", if sa.indexes.is_empty() { names.a } else { names.b }));
-    } else {
+    if no_indexes.is_none() {
         indexes(&names, sa, sb, &tables_a, &tables_b, &mut items);
     }
     foreign_keys(&names, sa, sb, &tables_a, &tables_b, &mut items);
@@ -79,7 +83,7 @@ pub fn drift(a: &Report, b: &Report) -> Drift {
             kind: DriftKind::Version,
             presence: DriftPresence::Different,
             subject: "version".into(),
-            title: format!("{} runs {va} and {} runs {vb}.", names.a, names.b),
+            title: t!("view.drift.version", a = names.a, version_a = &va, b = names.b, version_b = &vb),
             a: Some(va),
             b: Some(vb),
             sql: None,
@@ -92,11 +96,16 @@ pub fn drift(a: &Report, b: &Report) -> Drift {
             .then((x.presence == DriftPresence::Renamed).cmp(&(y.presence == DriftPresence::Renamed)))
             .then(x.subject.to_ascii_lowercase().cmp(&y.subject.to_ascii_lowercase()))
     });
-    let mut summary = summarize(&items);
-    if !notes.is_empty() {
-        summary.push_str(&format!(" Not compared: {} (check that login's permissions).", notes.join(", ")));
-    }
-    Drift { a: side(sa), b: side(sb), summary, items }
+    let mut summary = vec![summarize(&items)];
+    summary.extend(match (no_columns, no_indexes) {
+        (Some(columns), Some(indexes)) => {
+            Some(t!("view.drift.not_compared_both", columns = columns, indexes = indexes))
+        }
+        (Some(connection), None) => Some(t!("view.drift.not_compared_columns", connection = connection)),
+        (None, Some(connection)) => Some(t!("view.drift.not_compared_indexes", connection = connection)),
+        (None, None) => None,
+    });
+    Drift { a: side(sa), b: side(sb), summary: summary.join(" "), items }
 }
 
 struct Names<'a> {
@@ -123,18 +132,19 @@ fn tables(
     let describe = |s: &Snapshot, k: &str| {
         let t = s.tables.iter().find(|t| key(&t.schema, &t.name) == k)?;
         let indexes = s.indexes.iter().filter(|i| key(&i.schema, &i.table) == k).count();
-        Some(format!(
-            "{} rows, {indexes} index{}",
-            t.rows.map(format::count).unwrap_or_else(|| "?".into()),
-            if indexes == 1 { "" } else { "es" }
-        ))
+        Some(match t.rows {
+            Some(rows) => {
+                t!("view.drift.table_shape", n = indexes, count = indexes.to_string(), rows = format::count(rows))
+            }
+            None => t!("view.drift.table_shape_unknown_rows", n = indexes, count = indexes.to_string()),
+        })
     };
     for (k, name) in ta.iter().filter(|(k, _)| !tb.contains_key(*k)) {
         items.push(DriftItem {
             kind: DriftKind::Table,
             presence: DriftPresence::OnlyA,
             subject: name.clone(),
-            title: format!("{name} exists in {} but not in {}.", n.a, n.b),
+            title: t!("view.drift.only_in", subject = name, has = n.a, lacks = n.b),
             a: describe(sa, k),
             b: None,
             sql: None,
@@ -146,7 +156,7 @@ fn tables(
             kind: DriftKind::Table,
             presence: DriftPresence::OnlyB,
             subject: name.clone(),
-            title: format!("{name} exists in {} but not in {}.", n.b, n.a),
+            title: t!("view.drift.only_in", subject = name, has = n.b, lacks = n.a),
             a: None,
             b: describe(sb, k),
             sql: None,
@@ -173,7 +183,7 @@ fn columns(
                 None => items.push(DriftItem {
                     kind: DriftKind::Column,
                     presence: DriftPresence::OnlyA,
-                    title: format!("{subject} exists in {} but not in {}.", n.a, n.b),
+                    title: t!("view.drift.only_in", subject = &subject, has = n.a, lacks = n.b),
                     subject,
                     a: Some(shape(col)),
                     b: None,
@@ -183,7 +193,14 @@ fn columns(
                 Some(other) if !same_type(&col.data_type, &other.data_type) => items.push(DriftItem {
                     kind: DriftKind::Column,
                     presence: DriftPresence::Different,
-                    title: format!("{subject} is {} in {} and {} in {}.", col.data_type, n.a, other.data_type, n.b),
+                    title: t!(
+                        "view.drift.column_type",
+                        column = &subject,
+                        type_a = &col.data_type,
+                        a = n.a,
+                        type_b = &other.data_type,
+                        b = n.b
+                    ),
                     subject,
                     a: Some(shape(col)),
                     b: Some(shape(other)),
@@ -193,10 +210,11 @@ fn columns(
                 Some(other) if col.nullable != other.nullable => items.push(DriftItem {
                     kind: DriftKind::Column,
                     presence: DriftPresence::Different,
-                    title: format!(
-                        "{subject} allows NULL in {} but not in {}.",
-                        if col.nullable { n.a } else { n.b },
-                        if col.nullable { n.b } else { n.a }
+                    title: t!(
+                        "view.drift.column_nullable",
+                        column = &subject,
+                        has = if col.nullable { n.a } else { n.b },
+                        lacks = if col.nullable { n.b } else { n.a }
                     ),
                     subject,
                     a: Some(shape(col)),
@@ -212,7 +230,7 @@ fn columns(
             items.push(DriftItem {
                 kind: DriftKind::Column,
                 presence: DriftPresence::OnlyB,
-                title: format!("{subject} exists in {} but not in {}.", n.b, n.a),
+                title: t!("view.drift.only_in", subject = &subject, has = n.b, lacks = n.a),
                 subject,
                 a: None,
                 b: Some(shape(col)),
@@ -330,13 +348,13 @@ fn indexes(
                     kind: DriftKind::Index,
                     presence: DriftPresence::Renamed,
                     subject: format!("{}.{}", i.qualified_table(), i.name),
-                    title: format!(
-                        "{} has the same index under different names: {} in {}, {} in {}.",
-                        i.qualified_table(),
-                        i.name,
-                        n.a,
-                        j.name,
-                        n.b
+                    title: t!(
+                        "view.drift.index_renamed",
+                        table = i.qualified_table(),
+                        index_a = &i.name,
+                        a = n.a,
+                        index_b = &j.name,
+                        b = n.b
                     ),
                     a: Some(format!("{} {}", i.name, definition(i))),
                     b: Some(format!("{} {}", j.name, definition(j))),
@@ -363,14 +381,14 @@ fn indexes(
                 kind: DriftKind::Index,
                 presence: DriftPresence::Different,
                 subject: format!("{}.{}", i.qualified_table(), i.name),
-                title: format!(
-                    "{} on {} is defined differently: {} in {}, {} in {}.",
-                    i.name,
-                    i.qualified_table(),
-                    definition(i),
-                    n.a,
-                    definition(j),
-                    n.b
+                title: t!(
+                    "view.drift.index_different",
+                    index = &i.name,
+                    table = i.qualified_table(),
+                    definition_a = definition(i),
+                    a = n.a,
+                    definition_b = definition(j),
+                    b = n.b
                 ),
                 a: Some(definition(i)),
                 b: Some(definition(j)),
@@ -389,13 +407,13 @@ fn indexes(
 
 /// `index` exists in `has` and not in `lacks`, whose snapshot is `target`.
 fn missing_index(index: &IndexStat, has: &str, lacks: &str, target: &Snapshot, presence: DriftPresence) -> DriftItem {
-    let keys: Vec<&str> = index.key_names();
-    let kind = if index.is_primary_key {
-        "a primary key"
+    let (table, keys) = (index.qualified_table(), index.key_names().join(", "));
+    let title = if index.is_primary_key {
+        t!("view.drift.missing_primary_key", table = table, keys = keys, has = has, lacks = lacks)
     } else if index.is_unique {
-        "a unique index"
+        t!("view.drift.missing_unique_index", table = table, keys = keys, has = has, lacks = lacks)
     } else {
-        "an index"
+        t!("view.drift.missing_index", table = table, keys = keys, has = has, lacks = lacks)
     };
     let definition = format!("{} {}", index.name, definition(index));
     let (a, b) = if presence == DriftPresence::OnlyA { (Some(definition), None) } else { (None, Some(definition)) };
@@ -404,7 +422,7 @@ fn missing_index(index: &IndexStat, has: &str, lacks: &str, target: &Snapshot, p
         kind: DriftKind::Index,
         presence,
         subject: format!("{}.{}", index.qualified_table(), index.name),
-        title: format!("{} has {kind} on ({}) in {has} that {lacks} lacks.", index.qualified_table(), keys.join(", ")),
+        title,
         a,
         b,
         sql_for: sql.as_ref().map(|_| lacks.to_string()),
@@ -478,7 +496,14 @@ fn settings(n: &Names, sa: &Snapshot, sb: &Snapshot, items: &mut Vec<DriftItem>)
             kind: DriftKind::Setting,
             presence: DriftPresence::Different,
             subject: s.name.clone(),
-            title: format!("{} is {} in {} and {} in {}.", s.name, s.value, n.a, other.value, n.b),
+            title: t!(
+                "view.drift.setting",
+                setting = &s.name,
+                value_a = &s.value,
+                a = n.a,
+                value_b = &other.value,
+                b = n.b
+            ),
             a: Some(s.value.clone()),
             b: Some(other.value.clone()),
             sql: None,
@@ -536,9 +561,14 @@ fn foreign_keys(
                         kind: DriftKind::Table,
                         presence: DriftPresence::Different,
                         subject: format!("{table_display}.{}", fk_a.name),
-                        title: format!(
-                            "Foreign key {} on {table_display} uses ON DELETE {ra} in {} and ON DELETE {rb} in {}.",
-                            fk_a.name, n.a, n.b
+                        title: t!(
+                            "view.drift.foreign_key_delete_rule",
+                            key = &fk_a.name,
+                            table = &table_display,
+                            rule_a = ra,
+                            a = n.a,
+                            rule_b = rb,
+                            b = n.b
                         ),
                         a: Some(fk_desc(fk_a)),
                         b: Some(fk_desc(fk_b)),
@@ -552,12 +582,13 @@ fn foreign_keys(
                 kind: DriftKind::Table,
                 presence: DriftPresence::OnlyA,
                 subject: format!("{table_display}.{}", fk_a.name),
-                title: format!(
-                    "{table_display} has foreign key {} {} in {} that {} lacks.",
-                    fk_a.name,
-                    fk_desc(fk_a),
-                    n.a,
-                    n.b
+                title: t!(
+                    "view.drift.foreign_key_only_in",
+                    table = &table_display,
+                    key = &fk_a.name,
+                    definition = fk_desc(fk_a),
+                    has = n.a,
+                    lacks = n.b
                 ),
                 a: Some(fk_desc(fk_a)),
                 b: None,
@@ -575,12 +606,13 @@ fn foreign_keys(
             kind: DriftKind::Table,
             presence: DriftPresence::OnlyB,
             subject: format!("{table_display}.{}", fk_b.name),
-            title: format!(
-                "{table_display} has foreign key {} {} in {} that {} lacks.",
-                fk_b.name,
-                fk_desc(fk_b),
-                n.b,
-                n.a
+            title: t!(
+                "view.drift.foreign_key_only_in",
+                table = &table_display,
+                key = &fk_b.name,
+                definition = fk_desc(fk_b),
+                has = n.b,
+                lacks = n.a
             ),
             a: None,
             b: Some(fk_desc(fk_b)),
@@ -603,7 +635,11 @@ fn constraints(
         ta.contains_key(&k) && tb.contains_key(&k)
     };
     let state_label = |c: &culprit_core::ConstraintIssue| {
-        if c.disabled { "disabled" } else { "untrusted / NOT VALID" }
+        if c.disabled {
+            t!("view.drift.constraint_state.disabled")
+        } else {
+            t!("view.drift.constraint_state.untrusted")
+        }
     };
     let ca: BTreeMap<String, &culprit_core::ConstraintIssue> = sa
         .constraints
@@ -620,21 +656,18 @@ fn constraints(
     for (k, c) in &ca {
         if !cb.contains_key(k) {
             let subject = format!("{}.{}.{}", c.schema, c.table, c.name);
+            let table = format!("{}.{}", c.schema, c.table);
             items.push(DriftItem {
                 kind: DriftKind::Table,
                 presence: DriftPresence::Different,
-                title: format!(
-                    "Constraint {} on {}.{} is {} in {} and validated in {}.",
-                    c.name,
-                    c.schema,
-                    c.table,
-                    state_label(c),
-                    n.a,
-                    n.b
-                ),
+                title: if c.disabled {
+                    t!("view.drift.constraint_disabled_in_a", constraint = &c.name, table = table, a = n.a, b = n.b)
+                } else {
+                    t!("view.drift.constraint_untrusted_in_a", constraint = &c.name, table = table, a = n.a, b = n.b)
+                },
                 subject,
-                a: Some(state_label(c).into()),
-                b: Some("validated".into()),
+                a: Some(state_label(c)),
+                b: Some(t!("view.drift.constraint_state.validated")),
                 sql: None,
                 sql_for: None,
             });
@@ -643,21 +676,18 @@ fn constraints(
     for (k, c) in &cb {
         if !ca.contains_key(k) {
             let subject = format!("{}.{}.{}", c.schema, c.table, c.name);
+            let table = format!("{}.{}", c.schema, c.table);
             items.push(DriftItem {
                 kind: DriftKind::Table,
                 presence: DriftPresence::Different,
-                title: format!(
-                    "Constraint {} on {}.{} is validated in {} and {} in {}.",
-                    c.name,
-                    c.schema,
-                    c.table,
-                    n.a,
-                    state_label(c),
-                    n.b
-                ),
+                title: if c.disabled {
+                    t!("view.drift.constraint_disabled_in_b", constraint = &c.name, table = table, a = n.a, b = n.b)
+                } else {
+                    t!("view.drift.constraint_untrusted_in_b", constraint = &c.name, table = table, a = n.a, b = n.b)
+                },
                 subject,
-                a: Some("validated".into()),
-                b: Some(state_label(c).into()),
+                a: Some(t!("view.drift.constraint_state.validated")),
+                b: Some(state_label(c)),
                 sql: None,
                 sql_for: None,
             });
@@ -699,8 +729,8 @@ fn triggers(
                 kind: DriftKind::Table,
                 presence: DriftPresence::OnlyA,
                 subject: subject.clone(),
-                title: format!("Trigger {subject} ({ev_a}) exists in {} but not in {}.", n.a, n.b),
-                a: Some(format!("trigger ({ev_a})")),
+                title: t!("view.drift.trigger_only_in", trigger = subject, events = ev_a, has = n.a, lacks = n.b),
+                a: Some(t!("view.drift.trigger_value", events = ev_a)),
                 b: None,
                 sql: None,
                 sql_for: None,
@@ -709,9 +739,16 @@ fn triggers(
                 kind: DriftKind::Table,
                 presence: DriftPresence::Different,
                 subject: subject.clone(),
-                title: format!("Trigger {subject} fires on {ev_a} in {} and {ev_b} in {}.", n.a, n.b),
-                a: Some(format!("trigger ({ev_a})")),
-                b: Some(format!("trigger ({ev_b})")),
+                title: t!(
+                    "view.drift.trigger_events",
+                    trigger = subject,
+                    events_a = ev_a,
+                    a = n.a,
+                    events_b = ev_b,
+                    b = n.b
+                ),
+                a: Some(t!("view.drift.trigger_value", events = ev_a)),
+                b: Some(t!("view.drift.trigger_value", events = ev_b)),
                 sql: None,
                 sql_for: None,
             }),
@@ -724,9 +761,9 @@ fn triggers(
                 kind: DriftKind::Table,
                 presence: DriftPresence::OnlyB,
                 subject: subject.clone(),
-                title: format!("Trigger {subject} ({ev_b}) exists in {} but not in {}.", n.b, n.a),
+                title: t!("view.drift.trigger_only_in", trigger = subject, events = ev_b, has = n.b, lacks = n.a),
                 a: None,
-                b: Some(format!("trigger ({ev_b})")),
+                b: Some(t!("view.drift.trigger_value", events = ev_b)),
                 sql: None,
                 sql_for: None,
             });
@@ -737,33 +774,32 @@ fn triggers(
 fn summarize(items: &[DriftItem]) -> String {
     let real: Vec<&DriftItem> = items.iter().filter(|i| i.presence != DriftPresence::Renamed).collect();
     let renamed = items.len() - real.len();
+    // Each kind's count, as a counted noun (`{n, plural, one {{count} index} other {{count} indexes}}`).
+    let counted = |noun: &str, n: usize| {
+        culprit_core::i18n::t(noun, &[("n", Arg::Number(n as f64)), ("count", Arg::Text(n.to_string()))])
+    };
     let mut parts = Vec::new();
-    for (kind, one, many) in [
-        (DriftKind::Index, "index", "indexes"),
-        (DriftKind::Table, "table", "tables"),
-        (DriftKind::Column, "column", "columns"),
-        (DriftKind::Setting, "setting", "settings"),
-        (DriftKind::Version, "version", "versions"),
+    for (kind, noun) in [
+        (DriftKind::Index, culprit_core::key!("view.drift.count.index")),
+        (DriftKind::Table, culprit_core::key!("view.drift.count.table")),
+        (DriftKind::Column, culprit_core::key!("view.drift.count.column")),
+        (DriftKind::Setting, culprit_core::key!("view.drift.count.setting")),
+        (DriftKind::Version, culprit_core::key!("view.drift.count.version")),
     ] {
         let count = real.iter().filter(|i| i.kind == kind).count();
         if count > 0 {
-            parts.push(format!("{count} {}", if count == 1 { one } else { many }));
+            parts.push(counted(noun, count));
         }
     }
-    let renamed_note = match renamed {
-        0 => String::new(),
-        1 => " One index only differs by name.".into(),
-        n => format!(" {n} indexes only differ by name."),
-    };
-    if real.is_empty() {
-        return format!("No differences in tables, columns, indexes or settings.{renamed_note}");
+    let mut summary = vec![if real.is_empty() {
+        t!("view.drift.none")
+    } else {
+        t!("view.drift.differences", n = real.len(), count = real.len().to_string(), parts = format::list(&parts))
+    }];
+    if renamed > 0 {
+        summary.push(t!("view.drift.renamed", n = renamed, count = renamed.to_string()));
     }
-    format!(
-        "{} difference{}: {}.{renamed_note}",
-        real.len(),
-        if real.len() == 1 { "" } else { "s" },
-        format::list(&parts)
-    )
+    summary.join(" ")
 }
 
 #[cfg(test)]
