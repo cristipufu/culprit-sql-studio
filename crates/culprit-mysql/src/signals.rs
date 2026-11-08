@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use culprit_core::{
     ColumnHistogram, Coverage, FileIo, FileKind, Pressure, QueryStat, Replica, ReplicaRole, Setting, Signal,
-    SignalScope, SignalUnit, Snapshot,
+    SignalScope, SignalUnit, Snapshot, i18n, key, t,
 };
 use mysql_async::{Conn, Value};
 
@@ -85,44 +85,43 @@ fn needs_replica_privilege(message: &str, mariadb: bool, version: &str) -> Strin
     } else {
         "REPLICATION CLIENT"
     };
-    format!(
-        "{message} Reading replica status needs the {permission} privilege; it only matters if this server is a replica."
-    )
+    [message.to_string(), t!("provider.mysql.replica.needs_privilege", privilege = permission)].join(" ")
 }
 
 // ── per statement ──────────────────────────────────────────────────────────────────────────────────
 
 /// A fixed name for error codes a statement commonly fails with. The server's message can carry row values, so it is
 /// never kept.
-pub fn error_name(code: u32) -> Option<&'static str> {
+pub fn error_name(code: u32) -> Option<String> {
     Some(match code {
-        1205 => "lock wait timeout",
-        1213 => "deadlock",
-        3024 => "statement timeout (max_execution_time)",
-        1969 => "statement timeout (max_statement_time)",
-        1317 => "query interrupted",
-        3572 => "lock not available (NOWAIT)",
-        1062 => "duplicate key",
-        1451 => "row is referenced by a foreign key",
-        1452 => "foreign key has no parent row",
-        1048 => "column cannot be null",
-        1406 => "data too long",
-        1264 | 1690 => "value out of range",
-        1292 | 1366 => "incorrect value",
-        1064 => "syntax error",
-        1054 => "unknown column",
-        1146 => "table doesn't exist",
-        1114 => "table is full",
-        1206 => "lock table full",
+        1205 => t!("provider.mysql.error_name.lock_wait_timeout"),
+        1213 => t!("provider.mysql.error_name.deadlock"),
+        3024 => t!("provider.mysql.error_name.max_execution_time"),
+        1969 => t!("provider.mysql.error_name.max_statement_time"),
+        1317 => t!("provider.mysql.error_name.query_interrupted"),
+        3572 => t!("provider.mysql.error_name.nowait"),
+        1062 => t!("provider.mysql.error_name.duplicate_key"),
+        1451 => t!("provider.mysql.error_name.row_referenced"),
+        1452 => t!("provider.mysql.error_name.no_parent_row"),
+        1048 => t!("provider.mysql.error_name.column_not_null"),
+        1406 => t!("provider.mysql.error_name.data_too_long"),
+        1264 | 1690 => t!("provider.mysql.error_name.out_of_range"),
+        1292 | 1366 => t!("provider.mysql.error_name.incorrect_value"),
+        1064 => t!("provider.mysql.error_name.syntax_error"),
+        1054 => t!("provider.mysql.error_name.unknown_column"),
+        1146 => t!("provider.mysql.error_name.no_such_table"),
+        1114 => t!("provider.mysql.error_name.table_full"),
+        1206 => t!("provider.mysql.error_name.lock_table_full"),
         _ => return None,
     })
 }
 
-/// An error as a statement's costs and a replica name it: its code first (checks read it), then its name.
+/// An error as a statement's costs and a replica name it: its code first, then its name. Checks read the code at the
+/// start, so it stays first in every language.
 fn error_label(code: u32) -> String {
     match error_name(code) {
         Some(name) => format!("{code} {name}"),
-        None => format!("error {code}"),
+        None => t!("provider.mysql.error_name.unnamed", code = code.to_string()),
     }
 }
 
@@ -275,12 +274,12 @@ fn connection_signals(status: &HashMap<String, f64>) -> Vec<Signal> {
         out.push(
             Signal::new(
                 culprit_core::signal_id::NEW_CONNECTIONS,
-                "New connections",
+                &t!("provider.mysql.signal.new_connections"),
                 rate,
                 SignalUnit::PerSecond,
                 SignalScope::SinceStartup,
             )
-            .graded("under 5 a second: pooled connections are opened once", 5.0, 25.0, true),
+            .graded(&t!("provider.mysql.signal.new_connections.healthy"), 5.0, 25.0, true),
         );
         if let Some(created) = get("Threads_created")
             && connections >= 1_000.0
@@ -288,26 +287,36 @@ fn connection_signals(status: &HashMap<String, f64>) -> Vec<Signal> {
             out.push(
                 Signal::new(
                     culprit_core::signal_id::THREAD_CACHE_MISSES,
-                    "Connections that needed a new thread",
+                    &t!("provider.mysql.signal.thread_cache_misses"),
                     created / connections * 100.0,
                     SignalUnit::Percent,
                     SignalScope::SinceStartup,
                 )
-                .graded("under 10%: thread_cache_size covers new connections", 10.0, 50.0, true),
+                .graded(&t!("provider.mysql.signal.thread_cache_misses.healthy"), 10.0, 50.0, true),
             );
         }
     }
     let hours = uptime / 3600.0;
-    for (key, name, label) in [
-        ("aborted-connects", "Aborted_connects", "Failed connection attempts"),
-        ("aborted-clients", "Aborted_clients", "Connections dropped without closing"),
+    for (key, name, per_hour, since_start) in [
+        (
+            "aborted-connects",
+            "Aborted_connects",
+            key!("provider.mysql.signal.aborted_connects"),
+            key!("provider.mysql.signal.aborted_connects_since_start"),
+        ),
+        (
+            "aborted-clients",
+            "Aborted_clients",
+            key!("provider.mysql.signal.aborted_clients"),
+            key!("provider.mysql.signal.aborted_clients_since_start"),
+        ),
     ] {
         if let Some(n) = get(name) {
             // Under an hour of uptime, a rate per hour would be an extrapolation: report the count.
             let signal = if hours >= 1.0 {
-                Signal::new(key, label, n / hours, SignalUnit::PerHour, SignalScope::SinceStartup)
+                Signal::new(key, &i18n::t(per_hour, &[]), n / hours, SignalUnit::PerHour, SignalScope::SinceStartup)
             } else {
-                Signal::new(key, &format!("{label} since start"), n, SignalUnit::Count, SignalScope::SinceStartup)
+                Signal::new(key, &i18n::t(since_start, &[]), n, SignalUnit::Count, SignalScope::SinceStartup)
             };
             out.push(signal);
         }
@@ -376,6 +385,8 @@ fn replica(r: ChannelRow, writable: Option<bool>) -> Option<Replica> {
         return None;
     }
     let error = r.sql_errno.or(r.io_errno);
+    // The state and the name stay one string in every language: replica-lag decides on the state's words, and the
+    // name is its finding's id.
     let state = match (r.io.eq_ignore_ascii_case("yes"), r.sql.eq_ignore_ascii_case("yes")) {
         (true, true) => "replicating".to_string(),
         (false, true) => format!("receiving stopped (I/O thread: {})", r.io),

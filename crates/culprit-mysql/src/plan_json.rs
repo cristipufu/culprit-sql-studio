@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use culprit_core::{Engine, Error, NodeKind, Plan, PlanKind, PlanNode, PlanWarning, Properties, Result};
+use culprit_core::{Engine, Error, NodeKind, Plan, PlanKind, PlanNode, PlanWarning, Properties, Result, t};
 use serde_json::{Map, Value};
 
 /// Operations that wrap other operations, in the order MySQL nests them.
@@ -22,14 +22,13 @@ const OPERATIONS: [&str; 7] = [
 pub fn parse(json: &str, kind: PlanKind, statement: Option<&str>, schema: Option<&str>) -> Result<Plan> {
     // MariaDB before 11 repeats `table` members for a join; read them all (MySQL's JSON is unaffected).
     let value: Value = crate::json_members::parse(json)
-        .map_err(|e| Error::internal(format!("The server returned a plan Culprit cannot read: {e}")))?;
+        .map_err(|e| Error::internal(t!("provider.mysql.plan.unreadable", error = e.to_string())))?;
     if crate::plan_maria::is_mariadb(&value) {
         return crate::plan_maria::parse(&value, json, kind, statement, schema);
     }
-    let block = value
-        .get("query_block")
-        .and_then(Value::as_object)
-        .ok_or_else(|| Error::internal("MySQL plan has no query_block"))?;
+    let block = value.get("query_block").and_then(Value::as_object).ok_or_else(|| {
+        Error::internal(t!("provider.mysql.plan.no_query_block", server = crate::connect::Flavor::Mysql.name()))
+    })?;
     let context = Context::new(statement, schema);
     let mut next_id = 0;
     let root = query_block(block, &context, &mut next_id);

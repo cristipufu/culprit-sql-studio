@@ -3,7 +3,7 @@
 //! statement's plan and never runs anything). MariaDB: the process list (time, rows examined, its own progress report)
 //! and SHOW ANALYZE, which reads the running statement's plan with every operator's counters so far.
 
-use culprit_core::{Engine, PlanKind, QueryProgress, Result, session_number};
+use culprit_core::{Engine, PlanKind, QueryProgress, Result, format, session_number, t};
 use mysql_async::Conn;
 
 use crate::connect::{Connector, Flavor, Scope};
@@ -12,32 +12,30 @@ use crate::{plan_json, plan_maria};
 
 /// What MySQL can say about a running statement, where it says no more.
 fn no_operator_progress() -> String {
-    "MySQL doesn't report how far a running query has got, operator by \
-operator. Culprit shows the plan MySQL is executing, how long it has run and, for plans MySQL counts as it goes, how \
-many rows it has examined so far. \
-ALTER TABLE and other long statements report stage progress when performance_schema stage events are on."
-        .into()
+    t!("provider.mysql.progress.no_operator_progress")
 }
 
 /// [`no_operator_progress`], when the plan it is executing couldn't be read either (the server's `error`).
 fn plan_unavailable(error: &str) -> String {
-    format!("{} Its plan couldn't be shown: {error}", no_operator_progress())
+    [no_operator_progress(), t!("provider.mysql.progress.plan_unavailable", error = error)].join(" ")
 }
 
 fn stage_progress_basis() -> String {
-    "MySQL's own stage progress (WORK_COMPLETED of WORK_ESTIMATED)".into()
+    t!("provider.mysql.progress.basis.stages")
 }
 
 fn mariadb_progress_basis() -> String {
-    "MariaDB's own progress report for this statement".into()
+    t!("provider.mysql.progress.basis.mariadb")
 }
 
 /// The phase a MariaDB statement that reports its progress is in: its `state` and its stage of `stages`.
 fn mariadb_phase(state: Option<&str>, stage: f64, stages: f64) -> String {
-    match (state, stages > 1.0) {
-        (Some(state), true) => format!("{state} (stage {stage:.0} of {stages:.0})"),
+    let staged = stages > 1.0;
+    let (stage, stages) = (format::digits(format!("{stage:.0}")), format::digits(format!("{stages:.0}")));
+    match (state, staged) {
+        (Some(state), true) => t!("provider.mysql.progress.state_stage", state = state, stage = stage, stages = stages),
         (Some(state), false) => state.to_string(),
-        (None, _) => format!("stage {stage:.0} of {stages:.0}"),
+        (None, _) => t!("provider.mysql.progress.stage", stage = stage, stages = stages),
     }
 }
 
@@ -64,10 +62,7 @@ const MARIADB_SQL: &str =
 
 /// What a MariaDB before 10.9 can say about a running statement.
 fn mariadb_no_analyze() -> String {
-    "MariaDB reports a running statement's operators through SHOW ANALYZE, which needs \
-MariaDB 10.9 or newer. Culprit shows how long it has run and, for plans MariaDB counts as it goes, how many rows it \
-has examined so far."
-        .into()
+    t!("provider.mysql.progress.no_show_analyze")
 }
 
 pub(crate) async fn query_progress(connector: &Connector, session: &str, with_plan: bool) -> Result<QueryProgress> {

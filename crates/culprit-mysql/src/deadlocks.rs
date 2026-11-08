@@ -4,7 +4,9 @@
 use std::collections::{HashMap, HashSet};
 
 use culprit_core::deadlock::classify;
-use culprit_core::{Deadlock, DeadlockProcess, DeadlockReport, DeadlockResource, Engine, LockHolder, LockWait, Result};
+use culprit_core::{
+    Deadlock, DeadlockProcess, DeadlockReport, DeadlockResource, Engine, LockHolder, LockWait, Result, t,
+};
 use mysql_async::{Conn, Value};
 
 use crate::connect::Flavor;
@@ -178,26 +180,20 @@ pub(crate) async fn recent(conn: &mut Conn, since_hours: f64) -> Result<Deadlock
 }
 
 fn metadata_instrument_off() -> String {
-    "Metadata-lock instrumentation is disabled; absence of a chain does not establish absence of metadata blocking."
-        .into()
+    t!("provider.mysql.locks.metadata_instrument_off")
 }
 
 fn needs_process_privilege() -> String {
-    "Reading InnoDB's deadlock report needs the PROCESS privilege. Paste the LATEST DETECTED DEADLOCK section \
-     of SHOW ENGINE INNODB STATUS to have it explained."
-        .into()
+    t!("provider.mysql.deadlocks.needs_process")
 }
 
 /// InnoDB keeps one deadlock; `undated`: its time couldn't be converted from the server's time zone.
 fn only_the_latest(undated: bool) -> String {
-    format!(
-        "InnoDB keeps only its most recent deadlock{}. Turn on innodb_print_all_deadlocks to write every one to the error log.",
-        if undated {
-            ", and Culprit couldn't convert its time from the server's time zone, so when it happened is unknown (it may be from long ago)"
-        } else {
-            ""
-        }
-    )
+    if undated {
+        t!("provider.mysql.deadlocks.only_the_latest_undated")
+    } else {
+        t!("provider.mysql.deadlocks.only_the_latest")
+    }
 }
 
 /// The time on the LATEST DETECTED DEADLOCK section, as InnoDB printed it (`2026-10-11 13:48:08`, the server's local
@@ -420,20 +416,20 @@ struct Pending {
 /// `X locks rec but not gap` → `X (row)`; `X` → `X (row and gap)`; `IX` stays.
 fn mode_label(raw: &str) -> String {
     let mut parts = raw.splitn(2, ' ');
-    let mode = parts.next().unwrap_or("").to_string();
+    let mode = parts.next().unwrap_or("");
     let rest = parts.next().unwrap_or("");
-    let kind = if rest.contains("rec but not gap") {
-        " (row)"
+    // An intention lock (IX, IS) stays bare: the deadlock's classification reads it.
+    if rest.contains("rec but not gap") {
+        t!("provider.mysql.lock_mode.row", mode = mode)
     } else if rest.contains("gap before rec") {
-        " (gap)"
+        t!("provider.mysql.lock_mode.gap", mode = mode)
     } else if rest.contains("insert intention") {
-        " (insert intention)"
+        t!("provider.mysql.lock_mode.insert_intention", mode = mode)
     } else if rest.is_empty() && !mode.starts_with('I') {
-        " (row and gap)"
+        t!("provider.mysql.lock_mode.row_and_gap", mode = mode)
     } else {
-        ""
-    };
-    format!("{mode}{kind}")
+        mode.to_string()
+    }
 }
 
 #[cfg(test)]

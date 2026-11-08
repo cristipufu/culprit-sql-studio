@@ -7,9 +7,10 @@
 //! adds measured `r_*` members to every operation: loops, rows per loop, the share kept by the condition, time and
 //! pages. A running statement's `SHOW ANALYZE` has the same members, counted so far.
 
-use culprit_core::{Engine, NodeKind, NodeRuntime, Plan, PlanKind, PlanNode, PlanWarning, Properties, Result};
+use culprit_core::{Engine, NodeKind, NodeRuntime, Plan, PlanKind, PlanNode, PlanWarning, Properties, Result, t};
 use serde_json::{Map, Value};
 
+use crate::connect::Flavor;
 use crate::plan_json::{Context, access_op, flag, new_node, number_field, scalar_text, strings, text, unquote};
 
 /// Members only MariaDB writes; MySQL's version 1 JSON always has `cost_info` instead.
@@ -51,10 +52,9 @@ pub fn is_mariadb(value: &Value) -> bool {
 }
 
 pub fn parse(value: &Value, json: &str, kind: PlanKind, statement: Option<&str>, schema: Option<&str>) -> Result<Plan> {
-    let block = value
-        .get("query_block")
-        .and_then(Value::as_object)
-        .ok_or_else(|| culprit_core::Error::internal("MariaDB plan has no query_block"))?;
+    let block = value.get("query_block").and_then(Value::as_object).ok_or_else(|| {
+        culprit_core::Error::internal(t!("provider.mysql.plan.no_query_block", server = Flavor::Mariadb.name()))
+    })?;
     let measured = has_key(value, "r_rows") || has_key(value, "r_total_time_ms");
     // EXPLAIN never measures; a plan with measurements is an actual one whatever the caller expected.
     let kind = if measured && kind == PlanKind::Estimated { PlanKind::Actual } else { kind };
@@ -69,11 +69,10 @@ pub fn parse(value: &Value, json: &str, kind: PlanKind, statement: Option<&str>,
 
     let mut props = Properties::new();
     props.insert("flavor".into(), "MariaDB".into());
-    if !costed {
-        props.insert(
-            "cost_basis".into(),
-            "Rows examined: this MariaDB version reports no optimizer costs, so the costs shown are row counts".into(),
-        );
+    // Before MariaDB 11.0 a plan has no optimizer costs; rows examined stand in for them.
+    let cost_basis = (!costed).then(|| t!("provider.mysql.plan.rows_as_costs"));
+    if let Some(basis) = &cost_basis {
+        props.insert("cost_basis".into(), basis.clone());
     }
     let optimization = value.get("query_optimization").and_then(|o| number_field(o.as_object()?, "r_total_time_ms"));
     let in_progress = value.as_object().and_then(|m| number_field(m, "r_query_time_in_progress_ms"));
@@ -88,10 +87,7 @@ pub fn parse(value: &Value, json: &str, kind: PlanKind, statement: Option<&str>,
         facts: culprit_core::PlanFacts {
             elapsed_ms: elapsed.and_then(culprit_core::plan_facts::nonnegative),
             flavor: Some("MariaDB".into()),
-            cost_basis: (!costed).then(|| {
-                "Rows examined: this MariaDB version reports no optimizer costs, so the costs shown are row counts"
-                    .into()
-            }),
+            cost_basis,
             ..Default::default()
         },
         view: None,

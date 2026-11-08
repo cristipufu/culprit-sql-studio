@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use culprit_core::{
     CleanupHolder, Coverage, Engine, OpenTransaction, Pressure, Result, Signal, SignalScope, SignalUnit, WaitSample,
-    WaitStat,
+    WaitStat, format, t,
 };
 use mysql_async::{Conn, Value};
 
@@ -254,18 +254,18 @@ fn pressure_from(r: Readings) -> Pressure {
             p.signals.push(
                 Signal::new(
                     culprit_core::signal_id::BUFFER_POOL_HIT,
-                    "Reads served from memory",
+                    &t!("provider.mysql.signal.buffer_pool_hit"),
                     (1.0 - reads / requests) * 100.0,
                     SignalUnit::Percent,
                     SignalScope::SinceStartup,
                 )
-                .graded("above 99% is healthy for most workloads", 99.0, 95.0, false),
+                .graded(&t!("provider.mysql.signal.buffer_pool_hit.healthy"), 99.0, 95.0, false),
             );
             // How much reading from disk that miss rate is: a 98% hit rate can be 1 read a second or 10,000.
             if let Some(u) = uptime_s {
                 p.signals.push(Signal::new(
                     culprit_core::signal_id::BUFFER_POOL_READS,
-                    "Pages read from disk",
+                    &t!("provider.mysql.signal.buffer_pool_reads"),
                     reads / u,
                     SignalUnit::PerSecond,
                     SignalScope::SinceStartup,
@@ -275,7 +275,7 @@ fn pressure_from(r: Readings) -> Pressure {
         if let Some(waits) = get("Innodb_buffer_pool_wait_free").filter(|w| *w > 0.0) {
             p.signals.push(Signal::new(
                 "buffer-pool-wait-free",
-                "Buffer pool free-page waits",
+                &t!("provider.mysql.signal.buffer_pool_wait_free"),
                 waits,
                 SignalUnit::Count,
                 SignalScope::SinceStartup,
@@ -287,18 +287,18 @@ fn pressure_from(r: Readings) -> Pressure {
             p.signals.push(
                 Signal::new(
                     culprit_core::signal_id::TMP_DISK_TABLES,
-                    "Temporary tables on disk",
+                    &t!("provider.mysql.signal.tmp_disk_tables"),
                     disk / all * 100.0,
                     SignalUnit::Percent,
                     SignalScope::SinceStartup,
                 )
-                .graded("under 10% of temporary tables is healthy", 10.0, 25.0, true),
+                .graded(&t!("provider.mysql.signal.tmp_disk_tables.healthy"), 10.0, 25.0, true),
             );
         }
         if let (Some(q), Some(u)) = (get("Questions"), uptime_s) {
             p.signals.push(Signal::new(
                 "questions",
-                "Statements",
+                &t!("provider.mysql.signal.statements"),
                 q / u,
                 SignalUnit::PerSecond,
                 SignalScope::SinceStartup,
@@ -308,7 +308,7 @@ fn pressure_from(r: Readings) -> Pressure {
         if let Some(running) = r.running.or_else(|| get("Threads_running").map(|r| (r - 1.0).max(0.0))) {
             p.signals.push(Signal::new(
                 "threads-running",
-                "Statements running now",
+                &t!("provider.mysql.signal.statements_running"),
                 running,
                 SignalUnit::Count,
                 SignalScope::Now,
@@ -318,13 +318,13 @@ fn pressure_from(r: Readings) -> Pressure {
             // Under an hour of uptime, a rate per hour would be an extrapolation: report the plain count.
             let hours = u / 3600.0;
             let (label, value, unit) = if hours >= 1.0 {
-                ("Row-lock waits", waits / hours, SignalUnit::PerHour)
+                (t!("provider.mysql.signal.row_lock_waits"), waits / hours, SignalUnit::PerHour)
             } else {
-                ("Row-lock waits since start", waits, SignalUnit::Count)
+                (t!("provider.mysql.signal.row_lock_waits_since_start"), waits, SignalUnit::Count)
             };
             p.signals.push(Signal::new(
                 culprit_core::signal_id::ROW_LOCK_WAITS,
-                label,
+                &label,
                 value,
                 unit,
                 SignalScope::SinceStartup,
@@ -334,7 +334,7 @@ fn pressure_from(r: Readings) -> Pressure {
         if let Some(total) = get("Innodb_row_lock_time") {
             p.signals.push(Signal::new(
                 culprit_core::signal_id::ROW_LOCK_TIME,
-                "Time waiting for row locks since start (whole server)",
+                &t!("provider.mysql.signal.row_lock_time"),
                 total,
                 SignalUnit::Milliseconds,
                 SignalScope::SinceStartup,
@@ -344,12 +344,12 @@ fn pressure_from(r: Readings) -> Pressure {
             p.signals.push(
                 Signal::new(
                     culprit_core::signal_id::ROW_LOCK_AVG,
-                    "Average row-lock wait",
+                    &t!("provider.mysql.signal.row_lock_avg"),
                     avg,
                     SignalUnit::Milliseconds,
                     SignalScope::SinceStartup,
                 )
-                .graded("under 50 ms is healthy", 50.0, 500.0, true),
+                .graded(&t!("provider.mysql.signal.row_lock_avg.healthy"), 50.0, 500.0, true),
             );
         }
         if let Some(ConnectionLimit { max, own, peak_ago }) = r.connections {
@@ -358,29 +358,34 @@ fn pressure_from(r: Readings) -> Pressure {
                 p.signals.push(
                     Signal::new(
                         culprit_core::signal_id::CONNECTIONS,
-                        "Connections in use",
+                        &t!("provider.mysql.signal.connections"),
                         used / max * 100.0,
                         SignalUnit::Percent,
                         SignalScope::Now,
                     )
-                    .graded("under 80% of max_connections is healthy", 80.0, 90.0, true),
+                    .graded(&t!("provider.mysql.signal.connections.healthy"), 80.0, 90.0, true),
                 );
             }
             if let Some(peak) = get("Max_used_connections") {
                 p.signals.push(
                     Signal::new(
                         culprit_core::signal_id::MAX_USED_CONNECTIONS,
-                        "Busiest moment",
+                        &t!("provider.mysql.signal.max_used_connections"),
                         peak / max * 100.0,
                         SignalUnit::Percent,
                         SignalScope::SinceStartup,
                     )
-                    .graded("under 90% of max_connections is healthy", 90.0, 100.0, true),
+                    .graded(
+                        &t!("provider.mysql.signal.max_used_connections.healthy"),
+                        90.0,
+                        100.0,
+                        true,
+                    ),
                 );
                 if let Some(ago) = peak_ago {
                     p.signals.push(Signal::new(
                         culprit_core::signal_id::MAX_USED_CONNECTIONS_AGO,
-                        "Since the busiest moment",
+                        &t!("provider.mysql.signal.max_used_connections_ago"),
                         ago,
                         SignalUnit::Seconds,
                         SignalScope::Now,
@@ -395,29 +400,24 @@ fn pressure_from(r: Readings) -> Pressure {
         p.signals.push(
             Signal::new(
                 culprit_core::signal_id::HISTORY_LENGTH,
-                "Undo logs not yet purged (whole server)",
+                &t!("provider.mysql.signal.history_length"),
                 h,
                 SignalUnit::Count,
                 SignalScope::Now,
             )
-            .graded(
-                "under 100K is healthy; a long history means purge is behind or a long transaction holds it",
-                100_000.0,
-                1_000_000.0,
-                true,
-            ),
+            .graded(&t!("provider.mysql.signal.history_length.healthy"), 100_000.0, 1_000_000.0, true),
         );
     }
     if let Some(oldest) = r.oldest {
         p.signals.push(
             Signal::new(
                 culprit_core::signal_id::OLDEST_TRANSACTION,
-                "Oldest transaction to inspect for locks or a retained read view",
+                &t!("provider.mysql.signal.oldest_transaction"),
                 oldest.seconds,
                 SignalUnit::Seconds,
                 SignalScope::Now,
             )
-            .graded("seconds or minutes, not hours", 600.0, 1800.0, true),
+            .graded(&t!("provider.mysql.signal.oldest_transaction.healthy"), 600.0, 1800.0, true),
         );
         p.oldest_transaction = Some(oldest);
     }
@@ -491,14 +491,14 @@ pub async fn sample(conn: &mut Conn, seconds: u32) -> Result<WaitSample> {
 /// One busy session's sample: its category and what it was doing, from its process-list state and whether InnoDB has
 /// it waiting for a row lock.
 fn observation(state: Option<String>, trx_state: Option<String>) -> (&'static str, String) {
-    let state = state.filter(|s| !s.is_empty()).unwrap_or_else(|| "executing".into());
+    // Decided on the server's own words; a session without a state is executing.
+    let state = state.filter(|s| !s.is_empty());
     let lock_wait = trx_state.is_some_and(|t| t.eq_ignore_ascii_case("LOCK WAIT"));
-    let label = if lock_wait && !state.to_ascii_lowercase().contains("lock") {
-        format!("row lock wait ({state})")
-    } else {
-        state.clone()
-    };
-    (state_category(&state, lock_wait), label)
+    let category = state_category(state.as_deref().unwrap_or_default(), lock_wait);
+    let names_a_lock = state.as_deref().is_some_and(|s| s.to_ascii_lowercase().contains("lock"));
+    let doing = state.unwrap_or_else(|| t!("provider.mysql.wait.executing"));
+    let label = if lock_wait && !names_a_lock { t!("provider.mysql.wait.row_lock_wait", state = doing) } else { doing };
+    (category, label)
 }
 
 /// What [`sample`] read: two readings of the wait totals and of global status, and the busy sessions it saw between.
@@ -530,14 +530,10 @@ impl Sampled {
         };
         let samples = f64::from(ticks);
         let busy: f64 = observed.values().sum();
-        let mut notes = vec!["These wait and connection counters cover the whole server, including other databases. They do not establish pressure in the selected database.".into()];
+        let mut notes = vec![t!("provider.mysql.wait_sample.whole_server")];
+        let span = t!("common.duration.s", n = format::digits(seconds.to_string()));
         let (categories, method) = if instrumented.iter().map(|c| c.wait_ms).sum::<f64>() > 0.0 {
-            (
-                instrumented,
-                format!(
-                    "Whole-server difference of two readings of performance_schema.events_waits_summary_global_by_event_name {seconds} s apart"
-                ),
-            )
+            (instrumented, t!("provider.mysql.wait_sample.method.instruments", span = &span))
         } else {
             // Each observation stands for one second of one session's time.
             let mut by_category: BTreeMap<&'static str, (f64, String, f64)> = BTreeMap::new();
@@ -560,15 +556,10 @@ impl Sampled {
                 .collect();
             sampled.sort_by(|a, b| b.wait_ms.total_cmp(&a.wait_ms));
             notes.push(match first {
-                Some(_) => "No enabled performance_schema wait instrument recorded anything, so these come from sampling what each busy session was doing once a second.".to_string(),
-                None => "performance_schema is off, so the server times no waits; these come from sampling what each busy session was doing once a second.".to_string(),
+                Some(_) => t!("provider.mysql.wait_sample.no_instrument_recorded"),
+                None => t!("provider.mysql.wait_sample.performance_schema_off"),
             });
-            (
-                sampled,
-                format!(
-                    "The whole server's process list sampled once a second for {seconds} s; observations are weighted over the measured sample duration"
-                ),
-            )
+            (sampled, t!("provider.mysql.wait_sample.method.process_list", span = &span))
         };
         let total_ms: f64 = categories.iter().map(|c| c.wait_ms).sum();
         let delta = |k: &str| {
@@ -578,19 +569,25 @@ impl Sampled {
         let rate = |k: &str| delta(k).map(|d| d / elapsed);
         let mut signals = Vec::new();
         if let Some(q) = rate("Questions") {
-            signals.push(Signal::new("questions", "Statements", q, SignalUnit::PerSecond, SignalScope::Sampled));
+            signals.push(Signal::new(
+                "questions",
+                &t!("provider.mysql.signal.statements"),
+                q,
+                SignalUnit::PerSecond,
+                SignalScope::Sampled,
+            ));
         }
         if let Some(w) = delta("Innodb_row_lock_waits") {
             signals.push(Signal::new(
                 "row-lock-waits",
-                "Row-lock waits during sample (whole server)",
+                &t!("provider.mysql.signal.row_lock_waits_sampled"),
                 w,
                 SignalUnit::Count,
                 SignalScope::Sampled,
             ));
         }
         if total_ms == 0.0 {
-            notes.push("No enabled wait instrument recorded anything and no session was busy. Many instruments are off by default; enable them in performance_schema.setup_instruments to see more.".into());
+            notes.push(t!("provider.mysql.wait_sample.nothing_seen"));
         }
         WaitSample {
             engine: Engine::Mysql,

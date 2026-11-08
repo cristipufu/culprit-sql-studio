@@ -3,7 +3,7 @@
 //! records when each global setting was last SET. Catalog and performance_schema only.
 
 use culprit_core::changes::epoch;
-use culprit_core::{ChangeEvent, EventAction, EventKind, EventSource, Result};
+use culprit_core::{ChangeEvent, EventAction, EventKind, EventSource, Result, t};
 use mysql_async::{Conn, Value};
 
 use crate::rows::{query, query_with};
@@ -122,26 +122,25 @@ pub async fn changes(conn: &mut Conn, database: &str, since: &str) -> Result<Vec
 
 /// A table (or `view`) whose CREATE_TIME moved.
 fn table_title(table: &str, view: bool) -> String {
-    if view {
-        format!("View {table} was created or altered")
-    } else {
-        format!("Table {table} was created or altered (its columns or indexes)")
-    }
+    if view { t!("provider.mysql.change.view", view = table) } else { t!("provider.mysql.change.table", table = table) }
 }
 
 /// A stored procedure (or function) that was created (`new`) or altered.
 fn routine_title(name: &str, procedure: bool, new: bool) -> String {
-    let what = if procedure { "Procedure" } else { "Function" };
-    let verb = if new { "was created" } else { "was altered" };
-    format!("{what} {name} {verb}")
+    match (procedure, new) {
+        (true, true) => t!("provider.mysql.change.procedure_created", name = name),
+        (true, false) => t!("provider.mysql.change.procedure_altered", name = name),
+        (false, true) => t!("provider.mysql.change.function_created", name = name),
+        (false, false) => t!("provider.mysql.change.function_altered", name = name),
+    }
 }
 
 fn trigger_title(name: &str, table: &str) -> String {
-    format!("Trigger {name} on {table} was created")
+    t!("provider.mysql.change.trigger", name = name, table = table)
 }
 
 fn setting_title(name: &str) -> String {
-    format!("{name} was set")
+    t!("provider.mysql.change.setting", name = name)
 }
 
 #[cfg(test)]
