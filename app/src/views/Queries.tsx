@@ -546,7 +546,7 @@ function QueryPlans(props: { report: Report; query: QueryStat; focus: number | n
         <span className="actions">
           {variants.length > 1 && (
             <button type="button" className="btn ghost" disabled={comparing} title={t("ui.queries.compare_title")} onClick={compareVariants}>
-              {comparing ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <GitCompareArrows size={13} />} {t("ui.queries.compare")}
+              {comparing ? <span className="spinner" style={{ width: 11, height: 11 }} /> : <GitCompareArrows size={13} />} {t("ui.common.compare")}
             </button>
           )}
           {state.status === "ready" && (

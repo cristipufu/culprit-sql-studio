@@ -30,40 +30,82 @@ import { api, errorMessage, type ApiError } from "../lib/api";
 import { count, duration, percent } from "../lib/format";
 import { estRows, stepShare } from "../lib/plan-format";
 import { useHotkeys } from "../lib/hotkeys";
+import { t, useLanguage } from "../lib/i18n";
 import { SAMPLES, setSide, swapSides, trySample, usePlans, type LoadedPlan } from "../lib/plans";
 import { deliver, exportOptions } from "../lib/share";
 import { can, planEngineName } from "../lib/engines";
 import { remember, rememberedChoice } from "../lib/prefs";
 import { tabListKeys } from "../lib/keys";
 
-const KIND: Record<Plan["kind"], string> = { estimated: "estimated", generic: "generic", actual: "actual" };
 const LOOK_KEY = "culprit.plan.look";
 const SYNC_KEY = "culprit.compare.sync";
 
 type Look = "diagram" | "tree";
 type Tab = "changes" | "why" | "props";
 
-const CHANGE: Record<ChangeKind, { label: string; tone: string }> = {
-  access: { label: "Access", tone: "warn" },
-  operator: { label: "Operator", tone: "warn" },
-  added: { label: "Added", tone: "good" },
-  removed: { label: "Removed", tone: "bad" },
-  cost: { label: "Cost", tone: "info" },
-  rows: { label: "Rows", tone: "info" },
-  warning: { label: "Warning", tone: "warn" },
+const CHANGE_TONE: Record<ChangeKind, string> = {
+  access: "warn",
+  operator: "warn",
+  added: "good",
+  removed: "bad",
+  cost: "info",
+  rows: "info",
+  warning: "warn",
 };
 
-const SCENARIO: Record<ScenarioKind, { label: string; icon: ReactNode }> = {
-  statement: { label: "Statement", icon: <FileDiff size={15} /> },
-  "plan-kind": { label: "Plan kind", icon: <Flag size={15} /> },
-  estimator: { label: "Estimator", icon: <Gauge size={15} /> },
-  parameters: { label: "Parameters", icon: <Variable size={15} /> },
-  estimates: { label: "Estimates", icon: <Ruler size={15} /> },
-  index: { label: "Indexes", icon: <KeyRound size={15} /> },
-  conversion: { label: "Types", icon: <ArrowRightLeft size={15} /> },
-  parallelism: { label: "Parallelism", icon: <Split size={15} /> },
-  memory: { label: "Memory", icon: <MemoryStick size={15} /> },
+function changeLabel(kind: ChangeKind): string {
+  switch (kind) {
+    case "access":
+      return t("ui.plan_compare.change.access");
+    case "operator":
+      return t("ui.plan_compare.change.operator");
+    case "added":
+      return t("ui.plan_compare.change.added");
+    case "removed":
+      return t("ui.plan_compare.change.removed");
+    case "cost":
+      return t("ui.plan_compare.change.cost");
+    case "rows":
+      return t("ui.plan_compare.change.rows");
+    case "warning":
+      return t("ui.plan_compare.change.warning");
+  }
+}
+
+const SCENARIO_ICON: Record<ScenarioKind, ReactNode> = {
+  statement: <FileDiff size={15} />,
+  "plan-kind": <Flag size={15} />,
+  estimator: <Gauge size={15} />,
+  parameters: <Variable size={15} />,
+  estimates: <Ruler size={15} />,
+  index: <KeyRound size={15} />,
+  conversion: <ArrowRightLeft size={15} />,
+  parallelism: <Split size={15} />,
+  memory: <MemoryStick size={15} />,
 };
+
+function scenarioLabel(kind: ScenarioKind): string {
+  switch (kind) {
+    case "statement":
+      return t("ui.plan_compare.scenario.statement");
+    case "plan-kind":
+      return t("ui.plan_compare.scenario.plan_kind");
+    case "estimator":
+      return t("ui.plan_compare.scenario.estimator");
+    case "parameters":
+      return t("ui.plan_compare.scenario.parameters");
+    case "estimates":
+      return t("ui.plan_compare.scenario.estimates");
+    case "index":
+      return t("ui.plan_compare.scenario.index");
+    case "conversion":
+      return t("ui.plan_compare.scenario.conversion");
+    case "parallelism":
+      return t("ui.plan_compare.scenario.parallelism");
+    case "memory":
+      return t("ui.plan_compare.scenario.memory");
+  }
+}
 
 function cost(value: number): string {
   if (value < 10) return value.toFixed(3);
@@ -86,11 +128,11 @@ function nodesOf(plan: Plan): PlanNode[] {
 function verdict(diff: PlanDiff): { tone: "worse" | "better" | "same"; text: string } {
   const timed = diff.time_a_ms != null && diff.time_b_ms != null && diff.time_a_ms > 0 && diff.time_b_ms > 0;
   const r = timed ? diff.time_b_ms! / diff.time_a_ms! : diff.cost_ratio;
-  if (r == null) return { tone: "same", text: diff.comparable ? "no costs to compare" : "different engines" };
+  if (r == null) return { tone: "same", text: diff.comparable ? t("ui.plan_compare.verdict.no_costs") : t("ui.plan_compare.verdict.different_engines") };
   const x = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1).replace(/\.0$/, "")}K×` : v >= 10 ? `${Math.round(v)}×` : `${v.toFixed(1)}×`);
-  if (r >= 1.25) return { tone: "worse", text: `${x(r)} ${timed ? "slower" : "costlier"}` };
-  if (r <= 0.8) return { tone: "better", text: `${x(1 / r)} ${timed ? "faster" : "cheaper"}` };
-  return { tone: "same", text: "about the same" };
+  if (r >= 1.25) return { tone: "worse", text: timed ? t("ui.plan_compare.verdict.slower", { ratio: x(r) }) : t("ui.plan_compare.verdict.costlier", { ratio: x(r) }) };
+  if (r <= 0.8) return { tone: "better", text: timed ? t("ui.plan_compare.verdict.faster", { ratio: x(1 / r) }) : t("ui.plan_compare.verdict.cheaper", { ratio: x(1 / r) }) };
+  return { tone: "same", text: t("ui.plan_compare.verdict.same") };
 }
 
 function contextOf(a: LoadedPlan, b: LoadedPlan): string | null {
@@ -114,7 +156,12 @@ export function PlanCompare() {
   const sideA = useRef<HTMLDivElement>(null);
   const sideB = useRef<HTMLDivElement>(null);
 
-  const names = useMemo((): [string, string] => (!a || !b || a.name === b.name ? ["plan A", "plan B"] : [a.name, b.name]), [a, b]);
+  // The names the comparison says the plans by; two plans of one name are "plan A" and "plan B" in the app's language.
+  const language = useLanguage();
+  const names = useMemo(
+    (): [string, string] => (!a || !b || a.name === b.name ? [t("ui.plan_compare.plan_a"), t("ui.plan_compare.plan_b")] : [a.name, b.name]),
+    [a, b, language],
+  );
 
   useEffect(() => {
     setActive(null);
@@ -214,7 +261,7 @@ export function PlanCompare() {
     x: swapSides,
   });
 
-  if (!a || !b) return <div className="empty">Pick two plans to compare.</div>;
+  if (!a || !b) return <div className="empty">{t("ui.plan_compare.pick_two")}</div>;
 
   const setLook = (next: Look) => {
     setLookState(next);
@@ -233,22 +280,22 @@ export function PlanCompare() {
     <div className="plans-compare cmp">
       <div className="compare-pickers">
         <SidePicker side="A" value={a.id} onChange={(id) => setSide("a", id)} />
-        <button type="button" className="btn icon ghost" title="Swap A and B (X)" aria-label="Swap A and B" onClick={swapSides}>
+        <button type="button" className="btn icon ghost" title={t("ui.plan_compare.swap_title", { key: "X" })} aria-label={t("ui.common.swap_sides")} onClick={swapSides}>
           <ArrowLeftRight size={14} />
         </button>
         <SidePicker side="B" value={b.id} onChange={(id) => setSide("b", id)} />
         <span className="spacer" />
-        <span className="seg" role="group" aria-label="Plan view">
+        <span className="seg" role="group" aria-label={t("ui.plan_compare.plan_view")}>
           <button type="button" className={look === "diagram" ? "on" : ""} onClick={() => setLook("diagram")}>
-            Diagram
+            {t("ui.plan_compare.diagram")}
           </button>
           <button type="button" className={look === "tree" ? "on" : ""} onClick={() => setLook("tree")}>
-            Tree
+            {t("ui.plan_compare.tree")}
           </button>
         </span>
         {look === "diagram" && (
-          <button type="button" className={`btn ghost cmp-sync ${sync ? "on" : ""}`} aria-pressed={sync} title={sync ? "Zoom and scroll move both plans together" : "Zoom and scroll each plan on its own"} onClick={() => setSync(!sync)}>
-            {sync ? <Link2 size={13} /> : <Unlink2 size={13} />} Sync
+          <button type="button" className={`btn ghost cmp-sync ${sync ? "on" : ""}`} aria-pressed={sync} title={sync ? t("ui.plan_compare.sync_on") : t("ui.plan_compare.sync_off")} onClick={() => setSync(!sync)}>
+            {sync ? <Link2 size={13} /> : <Unlink2 size={13} />} {t("ui.plan_compare.sync")}
           </button>
         )}
         <ShareMenu
@@ -256,16 +303,16 @@ export function PlanCompare() {
             {
               id: "md",
               icon: <ClipboardCopy size={15} />,
-              label: "Copy for a pull request",
-              hint: "Markdown: the verdict, what changed and why",
+              label: t("ui.common.share.copy_pr"),
+              hint: t("ui.plan_compare.share.copy_pr_hint"),
               redacts: true,
               run: (redact) => deliver(api().then((c) => c.exportDiff(a.plan, b.plan, names[0], names[1], "markdown", exportOptions(redact), connection)), "copy", redact),
             },
             {
               id: "html",
               icon: <FileCode size={15} />,
-              label: "Save as an HTML page",
-              hint: "One file with both diagrams; opens offline, prints cleanly",
+              label: t("ui.common.share.save_html"),
+              hint: t("ui.plan_compare.share.save_html_hint"),
               redacts: true,
               run: (redact) => deliver(api().then((c) => c.exportDiff(a.plan, b.plan, names[0], names[1], "html", exportOptions(redact), connection)), "save", redact),
             },
@@ -288,7 +335,7 @@ export function PlanCompare() {
               <b>{diff.error.message}</b>
               <div className="muted">{diff.error.hint}</div>
               <div className="cmp-samples">
-                Try a sample:{" "}
+                {t("ui.plan_compare.try_sample")}{" "}
                 {SAMPLES.map((e) => (
                   <button type="button" key={e.id} className="link" onClick={() => trySample(e.id)}>
                     {e.label}
@@ -320,28 +367,28 @@ export function PlanCompare() {
             </ul>
           )}
           <div className="cmp-figures">
-            <Figure label={`cost · ${names[0]}`} value={ready.cost_a == null ? "unavailable" : cost(ready.cost_a)} />
-            <Figure label={`cost · ${names[1]}`} value={ready.cost_b == null ? "unavailable" : cost(ready.cost_b)} tone={v.tone} />
+            <Figure label={t("ui.plan_compare.figure.cost", { plan: names[0] })} value={ready.cost_a == null ? t("ui.plan_compare.unavailable") : cost(ready.cost_a)} />
+            <Figure label={t("ui.plan_compare.figure.cost", { plan: names[1] })} value={ready.cost_b == null ? t("ui.plan_compare.unavailable") : cost(ready.cost_b)} tone={v.tone} />
             {ready.time_a_ms != null && ready.time_b_ms != null && (
               <>
-                <Figure label={`time · ${names[0]}`} value={duration(ready.time_a_ms)} />
-                <Figure label={`time · ${names[1]}`} value={duration(ready.time_b_ms)} tone={v.tone} />
+                <Figure label={t("ui.plan_compare.figure.time", { plan: names[0] })} value={duration(ready.time_a_ms)} />
+                <Figure label={t("ui.plan_compare.figure.time", { plan: names[1] })} value={duration(ready.time_b_ms)} tone={v.tone} />
               </>
             )}
-            <Figure label="operators" value={`${nodesOf(a.plan).length} → ${nodesOf(b.plan).length}`} />
-            <Figure label="identical regions" value={String(ready.regions.length)} />
+            <Figure label={t("ui.plan_compare.figure.operators")} value={`${nodesOf(a.plan).length} → ${nodesOf(b.plan).length}`} />
+            <Figure label={t("ui.plan_compare.figure.regions")} value={String(ready.regions.length)} />
           </div>
         </section>
       )}
 
       {ready && (
         <section className="cmp-panel">
-          <div className="cmp-tabs" role="tablist" aria-label="Comparison details" onKeyDown={tabListKeys}>
-            <TabButton id="changes" tab={tab} onPick={setTab} label="What changed" count={ready.changes.length} hotkey="C" />
-            <TabButton id="why" tab={tab} onPick={setTab} label="Why" count={ready.scenarios.length} hotkey="W" />
-            <TabButton id="props" tab={tab} onPick={setTab} label="Properties" hotkey="P" />
+          <div className="cmp-tabs" role="tablist" aria-label={t("ui.plan_compare.details")} onKeyDown={tabListKeys}>
+            <TabButton id="changes" tab={tab} onPick={setTab} label={t("ui.plan_compare.tab.changes")} count={ready.changes.length} hotkey="C" />
+            <TabButton id="why" tab={tab} onPick={setTab} label={t("ui.plan_compare.tab.why")} count={ready.scenarios.length} hotkey="W" />
+            <TabButton id="props" tab={tab} onPick={setTab} label={t("ui.plan_compare.tab.props")} hotkey="P" />
             <span className="spacer" />
-            {tab === "changes" && ready.changes.length > 0 && <span className="muted cmp-keys">J / K to step through</span>}
+            {tab === "changes" && ready.changes.length > 0 && <span className="muted cmp-keys">{t("ui.plan_compare.step_keys", { keys: "J / K" })}</span>}
           </div>
           <div className="cmp-body" role="tabpanel">
             {tab === "changes" &&
@@ -349,8 +396,8 @@ export function PlanCompare() {
                 <div className="cmp-empty">
                   <CircleCheck size={18} />
                   <div>
-                    <b>{ready.same_shape ? "Same steps in both plans." : "Only minor steps differ."}</b>
-                    <div className="muted">Any difference in speed comes from the data or the server, not from the plan.</div>
+                    <b>{ready.same_shape ? t("ui.plan_compare.same_steps") : t("ui.plan_compare.minor_steps")}</b>
+                    <div className="muted">{t("ui.plan_compare.same_steps_detail")}</div>
                   </div>
                 </div>
               ) : (
@@ -358,7 +405,7 @@ export function PlanCompare() {
                   {ready.changes.map((c, i) => (
                     <li key={i}>
                       <button type="button" className={`cmp-change ${active === i ? "on" : ""}`} onClick={() => pickChange(i)}>
-                        <span className={`cmp-tag ${CHANGE[c.kind].tone}`}>{CHANGE[c.kind].label}</span>
+                        <span className={`cmp-tag ${CHANGE_TONE[c.kind]}`}>{changeLabel(c.kind)}</span>
                         <span className="cmp-change-text">
                           <span className="cmp-title">{c.title}</span>
                           {c.detail && <span className="cmp-detail">{c.detail}</span>}
@@ -373,10 +420,8 @@ export function PlanCompare() {
                 <div className="cmp-empty">
                   <CircleCheck size={18} />
                   <div>
-                    <b>Nothing in the conditions differs.</b>
-                    <div className="muted">
-                      Same estimator, parameter values, memory and parallelism, as far as the plans say. The difference is in the steps under “What changed”.
-                    </div>
+                    <b>{t("ui.plan_compare.same_conditions")}</b>
+                    <div className="muted">{t("ui.plan_compare.same_conditions_detail")}</div>
                   </div>
                 </div>
               ) : (
@@ -384,10 +429,10 @@ export function PlanCompare() {
                   {ready.scenarios.map((s, i) => (
                     <li key={i} className="cmp-scenario">
                       <span className="cmp-scenario-icon" aria-hidden>
-                        {SCENARIO[s.kind].icon}
+                        {SCENARIO_ICON[s.kind]}
                       </span>
                       <div>
-                        <div className="cmp-scenario-kind">{SCENARIO[s.kind].label}</div>
+                        <div className="cmp-scenario-kind">{scenarioLabel(s.kind)}</div>
                         <div className="cmp-title">{s.title}</div>
                         {s.detail && <div className="cmp-detail wrap">{s.detail}</div>}
                         {(s.a != null || s.b != null) && (
@@ -399,7 +444,7 @@ export function PlanCompare() {
                               setTab("props");
                             }}
                           >
-                            Show the step
+                            {t("ui.plan_compare.show_step")}
                           </button>
                         )}
                       </div>
@@ -416,13 +461,13 @@ export function PlanCompare() {
 
       <div className="cmp-legend" aria-hidden>
         <span className="cmp-key">
-          <i className="tint" /> Same color: the same steps in both plans
+          <i className="tint" /> {t("ui.plan_compare.legend.same")}
         </span>
         <span className="cmp-key">
-          <i className="changed" /> Changed operator or index
+          <i className="changed" /> {t("ui.plan_compare.legend.changed")}
         </span>
         <span className="cmp-key">
-          <i className="only" /> Only in this plan
+          <i className="only" /> {t("ui.plan_compare.legend.only")}
         </span>
       </div>
       <div className="compare-sides">
@@ -504,7 +549,7 @@ function SidePicker({ side, value, onChange }: { side: "A" | "B"; value: string;
   return (
     <label className="side-picker">
       <span className="side-badge">{side}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={`Plan ${side}`}>
+      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={t("ui.plan_compare.side", { side })}>
         {items.map((p) => (
           <option key={p.id} value={p.id}>
             {p.origin === p.name ? p.name : `${p.name} — ${p.origin}`}
@@ -522,7 +567,7 @@ function Side({ label, item, innerRef, children }: { label: string; item: Loaded
         <span className="side-badge">{label}</span>
         <b>{item.name}</b>
         <span className="muted">
-          {planEngineName(item.plan)} · {KIND[item.plan.kind]}
+          {t("ui.plan_compare.side_meta", { engine: planEngineName(item.plan), kind: item.plan.kind })}
         </span>
       </div>
       {children}
@@ -537,36 +582,100 @@ function norm(value: string): string {
 
 type Row = { label: string; a: string | null; b: string | null };
 
-function rowsFor(node: PlanNode | null, plan: Plan): Record<string, string | null> {
+type Prop =
+  | "operator"
+  | "table"
+  | "index"
+  | "seek"
+  | "filter"
+  | "est_rows"
+  | "est_executions"
+  | "act_rows"
+  | "rows_read"
+  | "table_rows"
+  | "act_time"
+  | "cost_share"
+  | "subtree_cost"
+  | "warnings";
+
+function rowsFor(node: PlanNode | null, plan: Plan): Partial<Record<Prop, string | null>> {
   if (!node) return {};
   const est = estRows(plan, node);
   // SQLite's plans have no estimates or costs: nothing to show rather than zeros.
   const weighed = can(plan.engine, "plan_estimates") || plan.kind === "actual";
   return {
-    Operator: node.op,
-    Table: node.object,
-    Index: node.index,
-    "Seek on": node.seek_predicate ? norm(node.seek_predicate) : null,
-    Filter: node.predicate ? norm(node.predicate) : null,
-    "Estimated rows": weighed && est != null ? count(est) : null,
-    "Estimated executions": weighed && est != null ? count(node.est_executions) : null,
-    "Actual rows": node.act_rows != null ? count(node.act_rows) : null,
-    "Rows read": node.rows_read != null ? count(node.rows_read) : null,
-    "Rows in table": node.table_rows != null ? count(node.table_rows) : null,
-    "Actual time": node.act_time_ms != null ? duration(node.act_time_ms) : null,
+    operator: node.op,
+    table: node.object,
+    index: node.index,
+    seek: node.seek_predicate ? norm(node.seek_predicate) : null,
+    filter: node.predicate ? norm(node.predicate) : null,
+    est_rows: weighed && est != null ? count(est) : null,
+    est_executions: weighed && est != null ? count(node.est_executions) : null,
+    act_rows: node.act_rows != null ? count(node.act_rows) : null,
+    rows_read: node.rows_read != null ? count(node.rows_read) : null,
+    table_rows: node.table_rows != null ? count(node.table_rows) : null,
+    act_time: node.act_time_ms != null ? duration(node.act_time_ms) : null,
     // Only where the plan can state one (none beside a step it puts no cost on, nor on a default guess): "—".
-    "Share of the plan's cost": weighed ? percent(stepShare(plan, node)) : null,
-    "Subtree cost": weighed && !plan.facts.estimated_cost_unavailable ? cost(node.subtree_cost) : null,
-    Warnings: node.warnings.length ? node.warnings.map((w) => w.replace(/-/g, " ")).join(", ") : null,
+    cost_share: weighed ? percent(stepShare(plan, node)) : null,
+    subtree_cost: weighed && !plan.facts.estimated_cost_unavailable ? cost(node.subtree_cost) : null,
+    warnings: node.warnings.length ? node.warnings.map((w) => w.replace(/-/g, " ")).join(", ") : null,
   };
 }
 
-const GROUPS: { title: string; keys: string[] }[] = [
-  { title: "What it does", keys: ["Operator", "Table", "Index", "Seek on", "Filter"] },
-  { title: "Rows", keys: ["Estimated rows", "Estimated executions", "Actual rows", "Rows read", "Rows in table"] },
-  { title: "Cost", keys: ["Share of the plan's cost", "Subtree cost", "Actual time"] },
-  { title: "Warnings", keys: ["Warnings"] },
+function propLabel(prop: Prop): string {
+  switch (prop) {
+    case "operator":
+      return t("ui.plan_compare.prop.operator");
+    case "table":
+      return t("ui.plan_compare.prop.table");
+    case "index":
+      return t("ui.plan_compare.prop.index");
+    case "seek":
+      return t("ui.plan_compare.prop.seek");
+    case "filter":
+      return t("ui.plan_compare.prop.filter");
+    case "est_rows":
+      return t("ui.plan_compare.prop.est_rows");
+    case "est_executions":
+      return t("ui.plan_compare.prop.est_executions");
+    case "act_rows":
+      return t("ui.plan_compare.prop.act_rows");
+    case "rows_read":
+      return t("ui.plan_compare.prop.rows_read");
+    case "table_rows":
+      return t("ui.plan_compare.prop.table_rows");
+    case "act_time":
+      return t("ui.plan_compare.prop.act_time");
+    case "cost_share":
+      return t("ui.plan_compare.prop.cost_share");
+    case "subtree_cost":
+      return t("ui.plan_compare.prop.subtree_cost");
+    case "warnings":
+      return t("ui.plan_compare.prop.warnings");
+  }
+}
+
+type Group = "does" | "rows" | "cost" | "warnings";
+
+const GROUPS: { group: Group; props: Prop[] }[] = [
+  { group: "does", props: ["operator", "table", "index", "seek", "filter"] },
+  { group: "rows", props: ["est_rows", "est_executions", "act_rows", "rows_read", "table_rows"] },
+  { group: "cost", props: ["cost_share", "subtree_cost", "act_time"] },
+  { group: "warnings", props: ["warnings"] },
 ];
+
+function groupTitle(group: Group): string {
+  switch (group) {
+    case "does":
+      return t("ui.plan_compare.group.does");
+    case "rows":
+      return t("ui.plan_compare.group.rows");
+    case "cost":
+      return t("ui.plan_compare.group.cost");
+    case "warnings":
+      return t("ui.plan_compare.group.warnings");
+  }
+}
 
 /** The selected step on both sides, property by property, with ≠ where they differ. */
 function PropsCompare({ a, b, planA, planB, names }: { a: PlanNode | null; b: PlanNode | null; planA: Plan; planB: Plan; names: [string, string] }) {
@@ -576,8 +685,8 @@ function PropsCompare({ a, b, planA, planB, names }: { a: PlanNode | null; b: Pl
       <div className="cmp-empty">
         <EqualNot size={18} />
         <div>
-          <b>Select a step in either plan.</b>
-          <div className="muted">Its properties appear next to the matching step of the other plan, with ≠ where they differ.</div>
+          <b>{t("ui.plan_compare.select_step")}</b>
+          <div className="muted">{t("ui.plan_compare.select_step_detail")}</div>
         </div>
       </div>
     );
@@ -586,9 +695,9 @@ function PropsCompare({ a, b, planA, planB, names }: { a: PlanNode | null; b: Pl
   const rb = rowsFor(b, planB);
   const label = (n: PlanNode | null) => (n ? `${n.op}${n.object ? ` · ${n.object.split(".").pop()}` : ""}` : "—");
   const groups = GROUPS.map((g) => ({
-    title: g.title,
-    rows: g.keys
-      .map((k): Row => ({ label: k, a: ra[k] ?? null, b: rb[k] ?? null }))
+    title: groupTitle(g.group),
+    rows: g.props
+      .map((k): Row => ({ label: propLabel(k), a: ra[k] ?? null, b: rb[k] ?? null }))
       .filter((r) => r.a != null || r.b != null),
   })).filter((g) => g.rows.length > 0);
   const keys = [...new Set([...Object.keys(a?.props ?? {}), ...Object.keys(b?.props ?? {})])].sort();
@@ -603,7 +712,7 @@ function PropsCompare({ a, b, planA, planB, names }: { a: PlanNode | null; b: Pl
         {r.label}
       </span>
       <span className={`cmp-prop-value ${r.a == null ? "none" : ""}`}>{r.a ?? "—"}</span>
-      <span className="cmp-prop-sign" role="img" aria-label={differs(r) ? "differs" : "same"}>
+      <span className="cmp-prop-sign" role="img" aria-label={differs(r) ? t("ui.plan_compare.differs") : t("ui.plan_compare.same")}>
         {differs(r) ? "≠" : ""}
       </span>
       <span className={`cmp-prop-value ${r.b == null ? "none" : ""}`}>{r.b ?? "—"}</span>
@@ -616,12 +725,12 @@ function PropsCompare({ a, b, planA, planB, names }: { a: PlanNode | null; b: Pl
         <span />
         <span>
           <span className="side-badge">A</span> {label(a)}
-          {!a && <span className="muted"> · only in {names[1]}</span>}
+          {!a && <span className="muted"> · {t("ui.plan_compare.only_in", { plan: names[1] })}</span>}
         </span>
         <span />
         <span>
           <span className="side-badge">B</span> {label(b)}
-          {!b && <span className="muted"> · only in {names[0]}</span>}
+          {!b && <span className="muted"> · {t("ui.plan_compare.only_in", { plan: names[0] })}</span>}
         </span>
       </div>
       {groups.map((g) => (
@@ -633,12 +742,12 @@ function PropsCompare({ a, b, planA, planB, names }: { a: PlanNode | null; b: Pl
       {other.length > 0 && (
         <div className="cmp-prop-group">
           <div className="cmp-prop-title">
-            Engine properties <span className="muted">· {changed.length} differ</span>
+            {t("ui.plan_compare.engine_props")} <span className="muted">· {t("ui.plan_compare.differ_count", { n: changed.length, count: String(changed.length) })}</span>
           </div>
           {changed.map(line)}
           {same.length > 0 && (
             <button type="button" className="link cmp-prop-more" onClick={() => setShowSame((v) => !v)}>
-              {showSame ? "Hide" : "Show"} {same.length} identical
+              {showSame ? t("ui.plan_compare.hide_identical", { count: String(same.length) }) : t("ui.plan_compare.show_identical", { count: String(same.length) })}
             </button>
           )}
           {showSame && same.map(line)}

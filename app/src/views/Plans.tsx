@@ -8,6 +8,7 @@ import { Sql } from "../components/Sql";
 import type { Plan } from "../gen/Plan";
 import { api, type ApiError } from "../lib/api";
 import { useHotkeys } from "../lib/hotkeys";
+import { t } from "../lib/i18n";
 import {
   dismissError,
   exportable,
@@ -29,7 +30,6 @@ import { planEngineName } from "../lib/engines";
 import { keys } from "../lib/keys";
 import { copyAndTell } from "../lib/clipboard";
 
-const KIND: Record<Plan["kind"], string> = { estimated: "estimated", generic: "generic", actual: "actual" };
 function cost(value: number): string {
   if (value < 10) return value.toFixed(3);
   if (value < 100) return value.toFixed(1);
@@ -56,10 +56,10 @@ export function Plans() {
   const pasteFromClipboard = async () => {
     try {
       const text = await navigator.clipboard.readText();
-      if (text.trim()) await importText(text, `Pasted plan ${items.length + 1}`, "Pasted");
-      else toast("The clipboard is empty");
+      if (text.trim()) await importText(text, t("ui.plans.pasted_name", { number: String(items.length + 1) }), t("ui.plans.pasted_origin"));
+      else toast(t("ui.plans.clipboard_empty"));
     } catch {
-      toast(keys("Press ⌘V to paste the plan"));
+      toast(t("ui.plans.press_to_paste", { key: keys("⌘V") }));
     }
   };
   useHotkeys({ "mod+o": openFile });
@@ -73,7 +73,7 @@ export function Plans() {
       return;
     }
     const text = e.dataTransfer.getData("text/plain");
-    if (text.trim()) await importText(text, `Dropped plan ${items.length + 1}`, "Dropped text");
+    if (text.trim()) await importText(text, t("ui.plans.dropped_name", { number: String(items.length + 1) }), t("ui.plans.dropped_origin"));
   };
 
   return (
@@ -106,26 +106,26 @@ export function Plans() {
         <>
           <aside className="plans-list">
             <div className="plans-actions">
-              <button type="button" className="btn" onClick={openFile} title={keys("Open a plan file (⌘O)")}>
-                <FileUp size={13} /> Open
+              <button type="button" className="btn" onClick={openFile} title={t("ui.plans.open_title", { key: keys("⌘O") })}>
+                <FileUp size={13} /> {t("ui.plans.open")}
               </button>
-              <button type="button" className="btn" onClick={pasteFromClipboard} title={keys("Paste a plan (⌘V)")}>
-                <ClipboardPaste size={13} /> Paste
+              <button type="button" className="btn" onClick={pasteFromClipboard} title={t("ui.plans.paste_title", { key: keys("⌘V") })}>
+                <ClipboardPaste size={13} /> {t("ui.plans.paste")}
               </button>
             </div>
             <div className="plans-mode seg">
               <button type="button" className={mode === "single" ? "on" : ""} onClick={() => setMode("single")}>
-                One plan
+                {t("ui.plans.one_plan")}
               </button>
-              <button type="button" className={mode === "compare" ? "on" : ""} disabled={items.length < 2} title={items.length < 2 ? "Open a second plan to compare" : "Compare two plans"} onClick={() => setMode("compare")}>
-                <GitCompareArrows size={12} /> Compare
+              <button type="button" className={mode === "compare" ? "on" : ""} disabled={items.length < 2} title={items.length < 2 ? t("ui.plans.compare_needs_two") : t("ui.plans.compare_title")} onClick={() => setMode("compare")}>
+                <GitCompareArrows size={12} /> {t("ui.common.compare")}
               </button>
             </div>
-            {mode === "compare" && <div className="plans-tip">A is the baseline. Click a plan to compare it as B.</div>}
+            {mode === "compare" && <div className="plans-tip">{t("ui.plans.baseline_tip")}</div>}
             {error && <ErrorNote error={error} onDismiss={dismissError} />}
             {busy && (
               <div className="plans-busy">
-                <span className="spinner" style={{ width: 12, height: 12 }} /> Reading the plan…
+                <span className="spinner" style={{ width: 12, height: 12 }} /> {t("ui.plans.reading")}
               </div>
             )}
             <div className="plans-items">
@@ -133,12 +133,12 @@ export function Plans() {
                 <PlanRow key={item.id} item={item} active={mode === "single" && item.id === current?.id} />
               ))}
             </div>
-            <div className="plans-hint">Drop .sqlplan, EXPLAIN JSON or text anywhere here</div>
+            <div className="plans-hint">{t("ui.plans.drop_hint")}</div>
           </aside>
           <section className="plans-main">{mode === "compare" ? <PlanCompare /> : current && <Single item={current} />}</section>
         </>
       )}
-      {dragging && <div className="drop-veil">Drop to open the plan</div>}
+      {dragging && <div className="drop-veil">{t("ui.plans.drop")}</div>}
     </div>
   );
 }
@@ -148,24 +148,24 @@ function Welcome({ busy, error, onOpen, onPaste }: { busy: boolean; error: ApiEr
     <div className="plans-welcome">
       <div className="welcome-card">
         <GitCompareArrows size={26} className="welcome-icon" />
-        <h2>Paste, drop or open a query plan</h2>
-        <p className="muted">Culprit draws it, shows where the cost goes, and compares any two plans step by step.</p>
+        <h2>{t("ui.plans.welcome.heading")}</h2>
+        <p className="muted">{t("ui.plans.welcome.detail")}</p>
         <div className="welcome-actions">
           <button type="button" className="btn primary" onClick={onOpen}>
-            <FileUp size={14} /> Open a file…
+            <FileUp size={14} /> {t("ui.plans.welcome.open")}
           </button>
           <button type="button" className="btn" onClick={onPaste}>
-            <ClipboardPaste size={14} /> Paste <span className="kbd">{keys("⌘V")}</span>
+            <ClipboardPaste size={14} /> {t("ui.plans.paste")} <span className="kbd">{keys("⌘V")}</span>
           </button>
         </div>
         {busy && (
           <div className="plans-busy">
-            <span className="spinner" style={{ width: 12, height: 12 }} /> Reading the plan…
+            <span className="spinner" style={{ width: 12, height: 12 }} /> {t("ui.plans.reading")}
           </div>
         )}
         {error && <ErrorNote error={error} onDismiss={dismissError} />}
         <PlanCatalog onSample={(product) => void trySample(product)} />
-        <p className="muted small">From Queries, any plan opens here, and two plans of the same query open side by side.</p>
+        <p className="muted small">{t("ui.plans.welcome.from_queries")}</p>
       </div>
     </div>
   );
@@ -180,7 +180,7 @@ function ErrorNote({ error, onDismiss }: { error: ApiError; onDismiss?: () => vo
         {error.hint && <div className="muted">{error.hint}</div>}
       </div>
       {onDismiss && (
-        <button type="button" className="btn icon ghost" title="Dismiss" onClick={onDismiss} style={{ width: 20, height: 20 }}>
+        <button type="button" className="btn icon ghost" title={t("ui.common.dismiss")} onClick={onDismiss} style={{ width: 20, height: 20 }}>
           <X size={12} />
         </button>
       )}
@@ -197,7 +197,7 @@ function PlanRow({ item, active }: { item: LoadedPlan; active: boolean }) {
     <div className={`plan-row ${active ? "on" : ""} ${mode === "compare" && side ? "in-compare" : ""}`}>
       <button type="button"
         className="plan-row-main"
-        title={mode === "compare" ? (side === "A" ? "Swap A and B" : "Compare this plan as B") : undefined}
+        title={mode === "compare" ? (side === "A" ? t("ui.common.swap_sides") : t("ui.plans.compare_as_b")) : undefined}
         onClick={() => (mode !== "compare" ? selectPlan(item.id) : side === "A" ? swapSides() : setSide("b", item.id))}
       >
         <span className="plan-row-name">
@@ -205,11 +205,13 @@ function PlanRow({ item, active }: { item: LoadedPlan; active: boolean }) {
           {item.name}
         </span>
         <span className="plan-row-meta">
-          {planEngineName(item.plan)} · {KIND[item.plan.kind]} · cost {item.plan.facts.estimated_cost_unavailable ? "unavailable" : cost(item.plan.total_cost)}
+          {item.plan.facts.estimated_cost_unavailable
+            ? t("ui.plans.row_meta_no_cost", { engine: planEngineName(item.plan), kind: item.plan.kind })
+            : t("ui.plans.row_meta", { engine: planEngineName(item.plan), kind: item.plan.kind, cost: cost(item.plan.total_cost) })}
         </span>
         {item.origin !== item.name && <span className="plan-row-origin">{item.origin}</span>}
       </button>
-      <button type="button" className="btn icon ghost plan-row-remove" title="Close this plan" onClick={() => removePlan(item.id)}>
+      <button type="button" className="btn icon ghost plan-row-remove" title={t("ui.plans.close")} onClick={() => removePlan(item.id)}>
         <X size={13} />
       </button>
     </div>
@@ -231,7 +233,7 @@ function Single({ item }: { item: LoadedPlan }) {
         <div style={{ minWidth: 0 }}>
           <h2 title={item.name}>{item.name}</h2>
           <div className="muted plans-sub">
-            {planEngineName(plan)} · {KIND[plan.kind]} plan · {nodeCount(plan) === 1 ? "1 operator" : `${nodeCount(plan)} operators`}
+            {t("ui.plans.sub", { engine: planEngineName(plan), kind: plan.kind, n: nodeCount(plan), count: String(nodeCount(plan)) })}
             {item.origin !== item.name && ` · ${item.origin}`}
           </div>
         </div>
@@ -242,26 +244,26 @@ function Single({ item }: { item: LoadedPlan }) {
             {
               id: "md",
               icon: <ClipboardCopy size={15} />,
-              label: "Copy for a pull request",
-              hint: "Markdown: where the cost goes and every step",
+              label: t("ui.common.share.copy_pr"),
+              hint: t("ui.plans.share.copy_pr_hint"),
               redacts: true,
               run: (redact) => deliver(api().then((c) => c.exportPlan(plan, item.name, "markdown", exportOptions(redact))), "copy", redact),
             },
             {
               id: "html",
               icon: <FileCode size={15} />,
-              label: "Save as an HTML page",
-              hint: "One file with the diagram; opens offline, prints cleanly",
+              label: t("ui.common.share.save_html"),
+              hint: t("ui.plans.share.save_html_hint"),
               redacts: true,
               run: (redact) => deliver(api().then((c) => c.exportPlan(plan, item.name, "html", exportOptions(redact))), "save", redact),
             },
             {
               id: "native",
               icon: <FileDown size={15} />,
-              label: plan.engine === "mssql" ? "Save the .sqlplan" : "Save the original plan",
-              hint: plan.engine === "mssql" ? "Opens in SSMS and other plan viewers" : "EXPLAIN output, as it came from the database",
+              label: plan.engine === "mssql" ? t("ui.plans.share.save_sqlplan") : t("ui.plans.share.save_native"),
+              hint: plan.engine === "mssql" ? t("ui.plans.share.save_sqlplan_hint") : t("ui.plans.share.save_native_hint"),
               redacts: true,
-              unavailable: file.native || item.source ? undefined : "This plan was opened as Culprit JSON; there is no original text to save",
+              unavailable: file.native || item.source ? undefined : t("ui.plans.share.no_native"),
               run: (redact) =>
                 deliver(
                   api().then((c) =>
@@ -276,16 +278,16 @@ function Single({ item }: { item: LoadedPlan }) {
             {
               id: "json",
               icon: <Braces size={15} />,
-              label: "Save Culprit JSON",
-              hint: "Opens again in Plans; values as they are",
+              label: t("ui.plans.share.save_json"),
+              hint: t("ui.plans.share.save_json_hint"),
               run: () => savePlan(item, true),
             },
           ]}
         />
-        <button type="button" className="btn icon ghost" title="Copy the plan text" aria-label="Copy the plan text" onClick={() => copyAndTell(file.contents, "Plan copied")}>
+        <button type="button" className="btn icon ghost" title={t("ui.plans.copy_text")} aria-label={t("ui.plans.copy_text")} onClick={() => copyAndTell(file.contents, t("ui.plans.copied"))}>
           <Copy size={13} />
         </button>
-        <button type="button" className="btn icon ghost" title="Close this plan" onClick={() => removePlan(item.id)}>
+        <button type="button" className="btn icon ghost" title={t("ui.plans.close")} onClick={() => removePlan(item.id)}>
           <Trash2 size={13} />
         </button>
       </div>
@@ -302,7 +304,7 @@ function Single({ item }: { item: LoadedPlan }) {
               setShowSql((v) => !v);
             }
           }}
-          title={showSql ? "Collapse" : "Show the whole statement"}
+          title={showSql ? t("ui.plans.collapse") : t("ui.plans.expand")}
         >
           <Sql text={plan.statement} />
         </div>
