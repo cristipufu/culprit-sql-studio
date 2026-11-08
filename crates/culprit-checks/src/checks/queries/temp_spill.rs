@@ -33,8 +33,9 @@ pub struct TempSpill<'s> {
     stopped: bool,
     /// The plan's step that spills, where the plan says which.
     step: Option<u32>,
-    /// Its totals are counted over more than the share and the average beside them (Culprit's scans): over this.
-    basis: Option<String>,
+    /// Its totals are counted over more than the share and the average beside them (Culprit's scans), and are said
+    /// over what they are counted over.
+    counted_over_totals: bool,
     spill: Spill,
 }
 
@@ -119,7 +120,7 @@ fn temp_spills(snapshot: &Snapshot) -> Vec<TempSpill<'_>> {
                 step: spilling_step(q, false),
                 // The spill is kept only in the totals: where the statement's share and average are Culprit's scans',
                 // what it wrote is said over what it is counted over.
-                basis: crate::support::totals_basis(snapshot, q),
+                counted_over_totals: crate::support::totals_basis(snapshot, q).is_some(),
                 spill: Spill::TempFiles {
                     written,
                     per_run,
@@ -141,7 +142,8 @@ fn temp_spill_finding(snapshot: &Snapshot, spill: TempSpill<'_>) -> Finding {
     f.confidence = Confidence::High;
     let query = capitalize(&query_handle(q));
     let tense = if spill.stopped { "past" } else { "present" };
-    let basis = spill.basis.as_deref();
+    let basis = crate::support::totals_basis(snapshot, q).filter(|_| spill.counted_over_totals);
+    let basis = basis.as_deref();
     let runs = format::count(q.executions);
     f.queries = vec![QueryRef { id: q.id.clone(), plan_node: spill.step, note: None }];
     match spill.spill {
@@ -410,7 +412,7 @@ fn mysql_disk_temp_tables(snapshot: &Snapshot) -> Vec<TempSpill<'_>> {
                 stopped: crate::all_stopped(snapshot, &[q]),
                 step: spilling_step(q, true),
                 // Counted only in the totals: said over what they are counted over where the share is Culprit's scans'.
-                basis: crate::support::totals_basis(snapshot, q),
+                counted_over_totals: crate::support::totals_basis(snapshot, q).is_some(),
                 spill: Spill::DiskTables {
                     tables,
                     per_run,
