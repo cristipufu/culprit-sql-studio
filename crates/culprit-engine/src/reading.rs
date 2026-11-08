@@ -74,7 +74,7 @@ fn finding(out: &mut String, report: &Report, f: &Finding) {
         f.actionability.label(),
         format!("{:?}", f.severity).to_lowercase(),
         format!("{:?}", f.confidence).to_lowercase(),
-        f.category.label().to_lowercase(),
+        format!("{:?}", f.category).to_lowercase(),
         match (f.inactive, &f.last_seen) {
             (true, Some(at)) => format!(" · inactive, last seen {at}"),
             (true, None) => " · inactive".to_string(),
