@@ -27,9 +27,32 @@ pub fn heavy_query_info() -> CheckInfo {
     }
 }
 
-check!(HeavyQueryCheck: heavy_query_info, heavy_query, &[Evidence::Query(QueryMeasure::Work)]);
+check!(
+    HeavyQueryCheck: heavy_query_info,
+    decide = heavy_queries,
+    render = heavy_query_case,
+    case<'s> = HeavyQuery<'s>,
+    evidence = &[Evidence::Query(QueryMeasure::Work)],
+);
 
-pub fn heavy_query(snapshot: &Snapshot) -> Vec<Finding> {
+/// The heavy-query findings of `snapshot`: its cases, each worded.
+#[cfg(test)]
+pub(crate) fn heavy_query(snapshot: &Snapshot) -> Vec<Finding> {
+    culprit_core::Check::run(&HeavyQueryCheck, snapshot)
+}
+
+/// A heavy statement and what its finding concludes.
+pub struct HeavyQuery<'a> {
+    query: &'a QueryStat,
+    case: HeavyCase<'a>,
+}
+
+fn heavy_query_case<'s>(snapshot: &'s Snapshot, heavy: HeavyQuery<'s>) -> Finding {
+    render(snapshot, heavy.query, &heavy.case)
+}
+
+/// The statements heavy enough for a finding of their own, each with what it concludes.
+fn heavy_queries(snapshot: &Snapshot) -> Vec<HeavyQuery<'_>> {
     let Some(workload) = &snapshot.workload else {
         return Vec::new();
     };
@@ -47,7 +70,7 @@ pub fn heavy_query(snapshot: &Snapshot) -> Vec<Finding> {
         .into_iter()
         .take(HEAVY_QUERIES)
         .chain(history.into_iter().take(HEAVY_QUERIES))
-        .map(|q| heavy_query_finding(snapshot, q))
+        .map(|query| HeavyQuery { query, case: decide(snapshot, query) })
         .collect()
 }
 
@@ -55,13 +78,9 @@ pub fn heavy_query(snapshot: &Snapshot) -> Vec<Finding> {
 /// them).
 const HEAVY_QUERIES: usize = 6;
 
-pub(super) fn heavy_query_finding(snapshot: &Snapshot, q: &QueryStat) -> Finding {
-    render(snapshot, q, &decide(snapshot, q))
-}
-
 /// What a heavy statement's finding concludes ([`decide`]), before a word of it is written ([`render`]): what explains
 /// its time, how it is graded, the advice the evidence permits, what a later scan shows of it, and the step it is about.
-struct HeavyCase<'a> {
+pub struct HeavyCase<'a> {
     /// Weighed, rated and graded on what Culprit's scans measured of it where they did (`query_impact`), the same
     /// figures the title, the summary and every list of statements state.
     impact: QueryImpact,

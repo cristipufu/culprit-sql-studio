@@ -130,7 +130,7 @@ fn rewrite_observation_is_shared_without_premature_index_sql() {
     assert_eq!(insight.severity, Severity::Low);
     assert!(insight.fix_sql.is_none());
     assert!(insight.fix.contains("permission checks") && insight.verify.contains("selectivity"));
-    let f = heavy_query_finding(&s, &q);
+    let f = render(&s, &q, &decide(&s, &q));
     assert_eq!(f.actionability, culprit_core::Actionability::Information);
     assert!(f.fix.unwrap().sql.is_none());
     assert_eq!(f.queries[0].plan_node, insight.nodes.first().copied());

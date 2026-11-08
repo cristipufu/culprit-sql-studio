@@ -41,7 +41,8 @@ pub struct CheckAssessment {
     pub assessed_queries: Vec<String>,
 }
 
-/// A check is a pure function from a snapshot to findings. It never touches a live connection.
+/// A check is a pure function from a snapshot to findings. It never touches a live connection. Every built-in check is a
+/// [`Diagnosis`], which is a `Check`; an embedder can implement either.
 pub trait Check: Send + Sync {
     fn info(&self) -> CheckInfo;
     fn run(&self, snapshot: &Snapshot) -> Vec<Finding>;
@@ -54,5 +55,46 @@ pub trait Check: Send + Sync {
         CheckEvidence::Insufficient(
             "This check does not declare the evidence needed to establish a negative result.".into(),
         )
+    }
+}
+
+/// A check in two halves, the shape every built-in check has. [`Diagnosis::decide`] establishes what the evidence
+/// supports, as typed cases that hold facts (names, numbers, which advice applies) and no prose; [`Diagnosis::render`]
+/// words one case as a finding, in the current language ([`crate::i18n`]). Language lives only in `render`, so a finding
+/// can be said in another language, and its wording changed, without touching what the check concludes.
+///
+/// Every `Diagnosis` is a [`Check`]: its findings are its cases, each rendered.
+pub trait Diagnosis: Send + Sync {
+    /// What the check concludes about one subject. It may borrow from the snapshot it was decided on.
+    type Case<'s>;
+    fn info(&self) -> CheckInfo;
+    /// The cases the snapshot establishes, in the order their findings are listed.
+    fn decide<'s>(&self, snapshot: &'s Snapshot) -> Vec<Self::Case<'s>>;
+    /// One case, worded as a finding.
+    fn render<'s>(&self, snapshot: &'s Snapshot, case: Self::Case<'s>) -> Finding;
+    /// See [`Check::version`].
+    fn version(&self) -> Option<&str> {
+        None
+    }
+    /// See [`Check::evidence`].
+    fn evidence(&self, _snapshot: &Snapshot) -> CheckEvidence {
+        CheckEvidence::Insufficient(
+            "This check does not declare the evidence needed to establish a negative result.".into(),
+        )
+    }
+}
+
+impl<D: Diagnosis> Check for D {
+    fn info(&self) -> CheckInfo {
+        Diagnosis::info(self)
+    }
+    fn run(&self, snapshot: &Snapshot) -> Vec<Finding> {
+        self.decide(snapshot).into_iter().map(|case| self.render(snapshot, case)).collect()
+    }
+    fn version(&self) -> Option<&str> {
+        Diagnosis::version(self)
+    }
+    fn evidence(&self, snapshot: &Snapshot) -> CheckEvidence {
+        Diagnosis::evidence(self, snapshot)
     }
 }

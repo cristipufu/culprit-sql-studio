@@ -18,6 +18,7 @@ pub mod finding;
 pub mod finding_facts;
 pub mod fingerprint;
 pub mod format;
+pub mod i18n;
 pub mod index_filter;
 pub mod insights;
 pub mod limits;
@@ -47,7 +48,7 @@ pub use actual::{ActualSummary, NodeProgress, NodeRuntime, NodeState, QueryProgr
 pub use advice::*;
 pub use blocking::{BlockNode, Blocking, BlockingChain, HeadKind, LockWait};
 pub use changes::{ChangeStatus, Changes, Period, PeriodStats, PlanSwitch, QueryChange};
-pub use check::{Check, CheckAssessment, CheckEvidence, CheckStatus};
+pub use check::{Check, CheckAssessment, CheckEvidence, CheckStatus, Diagnosis};
 pub use cloud::{CloudPoint, CloudProvider, CloudSeries, CloudSignals, CloudUnit, ThrottleEpisode, ThrottleKind};
 pub use connection::{
     AuthKind, ConnectionAttempt, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, SshConfig,

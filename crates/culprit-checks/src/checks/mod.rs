@@ -16,10 +16,44 @@
 
 use culprit_core::Check;
 
-/// Declares a check as a type: `check!(HeavyQueryCheck: heavy_query_info, heavy_query)` makes `HeavyQueryCheck`, a
-/// `culprit_core::Check` whose description and run are the check's two functions. Built-in checks are the same thing
-/// an embedding application plugs in: a type implementing `Check`, listed in its area's `CHECKS`.
+/// Declares a check as a type, listed in its area's `CHECKS`.
+///
+/// `check!(HeavyQueryCheck: heavy_query_info, decide = cases, render = finding, case<'s> = Case<'s>, evidence = &[..])`
+/// makes `HeavyQueryCheck` a [`culprit_core::Diagnosis`]: `cases(&Snapshot) -> Vec<Case>` establishes what the
+/// evidence supports, with no prose, and `finding(&Snapshot, Case) -> Finding` words one case. That is the shape every
+/// check has (see CLAUDE.md, "decide before you word"); a `Diagnosis` is a `culprit_core::Check`, the same thing an
+/// embedding application plugs in.
 macro_rules! check {
+    ($ty:ident: $info:ident, decide = $decide:path, render = $render:path, case<$l:lifetime> = $case:ty $(, evidence = $requirements:expr)? $(,)?) => {
+        #[doc = concat!("The `", stringify!($info), "` check, as a `culprit_core::Diagnosis`.")]
+        pub struct $ty;
+
+        impl culprit_core::Diagnosis for $ty {
+            type Case<$l> = $case;
+
+            fn info(&self) -> culprit_core::CheckInfo {
+                $info()
+            }
+
+            fn decide<$l>(&self, snapshot: &$l culprit_core::Snapshot) -> Vec<Self::Case<$l>> {
+                $decide(snapshot)
+            }
+
+            fn render<$l>(&self, snapshot: &$l culprit_core::Snapshot, case: Self::Case<$l>) -> culprit_core::Finding {
+                $render(snapshot, case)
+            }
+
+            fn evidence(&self, snapshot: &culprit_core::Snapshot) -> culprit_core::CheckEvidence {
+                crate::evidence::assess(check!(@requirements $($requirements)?), snapshot)
+            }
+        }
+    };
+    (@requirements) => {
+        &[]
+    };
+    (@requirements $requirements:expr) => {
+        $requirements
+    };
     ($ty:ident: $info:ident, $run:ident) => {
         check!($ty: $info, $run, &[]);
     };
