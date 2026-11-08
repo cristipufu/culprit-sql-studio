@@ -2552,6 +2552,7 @@
       },
       "replicas": [
         {
+          "condition": "slot_inactive",
           "database": null,
           "delay_seconds": null,
           "error": null,
@@ -2562,7 +2563,7 @@
           "name": "analytics_slot",
           "role": "slot",
           "safe_wal_bytes": null,
-          "state": "inactive",
+          "state": null,
           "sync": "physical",
           "unsent_bytes": null,
           "wal_status": null

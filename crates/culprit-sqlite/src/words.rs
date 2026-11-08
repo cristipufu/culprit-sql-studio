@@ -115,7 +115,7 @@ Sessions: SQLite has no server, so no sessions to list. | -"
     assert_eq!(wal_unreadable(), "WAL file size could not be read; no file contents were inspected.");
     assert_eq!(journal_mode_unknown(), "The journal mode was unavailable, so WAL file health could not be assessed.");
     assert_eq!(blob(12), "<12 bytes>");
-    assert_eq!(blob(1), "<1 bytes>");
+    assert_eq!(blob(1), "<1 byte>");
     assert_eq!(blob(12345), "<12345 bytes>");
 }
 

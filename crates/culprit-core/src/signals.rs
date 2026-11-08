@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{Digest, Plan, QueryStat, Snapshot};
+use crate::{Digest, Plan, QueryStat, Snapshot, t};
 
 /// Exact compile totals for one retained Query Store entry. Query Store does not timestamp every compilation, so
 /// totals can be compared with windowed runs only when the entry's first compile falls inside that window.
@@ -238,6 +238,50 @@ pub enum ReplicaRole {
     Slot,
 }
 
+/// How a replica, this server or a slot stands, as its provider establishes it from the engine's own fields: what
+/// replica-lag decides on, said from the catalog ([`Replica::state_words`]). `Reported` leaves the engine's own word in
+/// [`Replica::state`].
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ReplicaCondition {
+    /// Running as the engine reports it: `state` holds its word (streaming, catchup, SYNCHRONIZED, a WAL receiver's
+    /// status).
+    #[default]
+    Reported,
+    /// Both MySQL replication threads run.
+    Replicating,
+    /// MySQL's I/O thread is off (`state` keeps the thread's own value: No, Connecting).
+    ReceivingStopped,
+    /// MySQL's SQL thread is off.
+    ApplyingStopped,
+    /// Replication stopped: both MySQL threads off with an error, a PostgreSQL WAL receiver that says it stopped, or
+    /// SQL Server's NOT SYNCHRONIZING. `state` keeps the engine's word when it has one.
+    Stopped,
+    /// Both MySQL threads off with no error on a server that takes writes: usually a former replica promoted to
+    /// primary, its old configuration left behind.
+    LeftConfigured,
+    /// Both MySQL threads off with no error: someone ran STOP REPLICA.
+    StoppedByHand,
+    /// A PostgreSQL standby meant to stream (primary_conninfo set) without a WAL receiver.
+    NotReceiving,
+    /// A PostgreSQL standby without a WAL receiver that restores WAL from an archive.
+    RestoringFromArchive,
+    /// A PostgreSQL standby neither streaming nor set up to (whether it would is unknown).
+    NotStreaming,
+    /// A replication slot with a consumer attached.
+    SlotActive,
+    /// A replication slot without a consumer.
+    SlotInactive,
+}
+
+impl ReplicaCondition {
+    /// Whether replication has stopped: a thread off, a receiver missing or stopped, the engine's own stop.
+    pub fn is_stopped(self) -> bool {
+        matches!(self, Self::ReceivingStopped | Self::ApplyingStopped | Self::Stopped | Self::NotReceiving)
+    }
+}
+
 /// How far a copy of the data is behind, as the engine reports it.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
@@ -245,7 +289,11 @@ pub struct Replica {
     /// Replica, application or slot name (database text).
     pub name: String,
     pub role: ReplicaRole,
-    /// What the engine says it's doing: streaming, catchup, SYNCHRONIZED, "SQL thread stopped", inactive.
+    /// How it stands, as a fact: what replica-lag decides on, and what [`Replica::state_words`] says.
+    #[serde(default)]
+    pub condition: ReplicaCondition,
+    /// The engine's own word for what it's doing (streaming, catchup, SYNCHRONIZED, NOT SYNCHRONIZING, MySQL's I/O
+    /// thread state), shown as data; `None` where the condition says it all.
     pub state: Option<String>,
     /// Synchronous or asynchronous, when known.
     pub sync: Option<String>,
@@ -288,6 +336,7 @@ impl Replica {
         Replica {
             name: name.into(),
             role,
+            condition: ReplicaCondition::Reported,
             state: None,
             sync: None,
             lag_seconds: None,
@@ -301,6 +350,29 @@ impl Replica {
             safe_wal_bytes: None,
             database: None,
         }
+    }
+
+    /// How it stands, in the reader's language: the condition said from the catalog, with the engine's own word where
+    /// it gives one ("not receiving", "receiving stopped (I/O thread: Connecting)", "streaming").
+    pub fn state_words(&self) -> Option<String> {
+        let own = || self.state.clone();
+        Some(match self.condition {
+            ReplicaCondition::Reported => return own(),
+            ReplicaCondition::Stopped => own().unwrap_or_else(|| t!("model.replica.state.stopped")),
+            ReplicaCondition::Replicating => t!("model.replica.state.replicating"),
+            ReplicaCondition::ReceivingStopped => match own() {
+                Some(thread) => t!("model.replica.state.receiving_stopped", thread = thread),
+                None => t!("model.replica.state.receiving_stopped_unknown"),
+            },
+            ReplicaCondition::ApplyingStopped => t!("model.replica.state.applying_stopped"),
+            ReplicaCondition::LeftConfigured => t!("model.replica.state.left_configured"),
+            ReplicaCondition::StoppedByHand => t!("model.replica.state.stopped_by_hand"),
+            ReplicaCondition::NotReceiving => t!("model.replica.state.not_receiving"),
+            ReplicaCondition::RestoringFromArchive => t!("model.replica.state.restoring_from_archive"),
+            ReplicaCondition::NotStreaming => t!("model.replica.state.not_streaming"),
+            ReplicaCondition::SlotActive => t!("model.replica.state.slot_active"),
+            ReplicaCondition::SlotInactive => t!("model.replica.state.slot_inactive"),
+        })
     }
 
     /// A logical consumer: a walsender or slot that decodes changes for a subscription or a CDC tool. Slots said so

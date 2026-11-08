@@ -981,17 +981,19 @@ fn large_rows_on_postgres_count_toast() {
 
 #[test]
 fn replicas_lagging_stopped_and_slots() {
-    let r = |name: &str, role, state: &str, lag_seconds, lag_bytes| Replica {
-        state: Some(state.into()),
+    use culprit_core::ReplicaCondition as C;
+    let r = |name: &str, role, condition, state: Option<&str>, lag_seconds, lag_bytes| Replica {
+        condition,
+        state: state.map(Into::into),
         lag_seconds,
         lag_bytes,
         ..Replica::new(name, role)
     };
     let s = with_pressure(Engine::Postgres, |p| {
         p.replicas = vec![
-            r("reporting", ReplicaRole::Replica, "streaming", Some(95.0), None),
-            r("healthy", ReplicaRole::Replica, "streaming", Some(0.4), Some(1_000.0)),
-            r("old_etl", ReplicaRole::Slot, "inactive", None, Some(14.0 * GB)),
+            r("reporting", ReplicaRole::Replica, C::Reported, Some("streaming"), Some(95.0), None),
+            r("healthy", ReplicaRole::Replica, C::Reported, Some("streaming"), Some(0.4), Some(1_000.0)),
+            r("old_etl", ReplicaRole::Slot, C::SlotInactive, None, None, Some(14.0 * GB)),
         ];
     });
     let titles: Vec<String> = ReplicaLagCheck.run(&s).into_iter().map(|f| f.title).collect();
@@ -999,7 +1001,10 @@ fn replicas_lagging_stopped_and_slots() {
         titles,
         vec!["The replica reporting is 2 min behind", "The inactive replication slot old_etl keeps 14.0 GB of WAL"]
     );
-    let mut stopped = r("from 10.0.0.5", ReplicaRole::ThisServer, "applying stopped (SQL thread)", None, None);
+    // What it finds holds in another language: it decides on the conditions, not on their words.
+    let ids = |s: &Snapshot| ReplicaLagCheck.run(s).into_iter().map(|f| f.id).collect::<Vec<_>>();
+    assert_eq!(culprit_core::i18n::scope("fr", || ids(&s)), ids(&s));
+    let mut stopped = r("from 10.0.0.5", ReplicaRole::ThisServer, C::ApplyingStopped, None, None, None);
     stopped.error = Some("1062 duplicate key".into());
     let s = with_pressure(Engine::Mysql, |p| p.replicas = vec![stopped]);
     let f = ReplicaLagCheck.run(&s);

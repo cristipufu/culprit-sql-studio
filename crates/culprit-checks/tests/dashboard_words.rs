@@ -1039,15 +1039,15 @@ fn storage_connections_replication_failures_and_statistics_say_what_they_said() 
     let s = edited(&pg, |v| {
         let slot = v["pressure"]["replicas"][0].clone();
         let mut all = Vec::new();
-        for (name, role, seconds, bytes, state) in [
-            ("standby-a", "replica", json!(42.0), json!(null), json!(null)),
-            ("standby-b", "this-server", json!(null), json!(null), json!("streaming")),
-            ("standby-c", "replica", json!(null), json!(null), json!(null)),
-            ("analytics_slot", "slot", json!(null), json!(1172682184.0), json!("inactive")),
+        for (name, role, seconds, bytes, state, condition) in [
+            ("standby-a", "replica", json!(42.0), json!(null), json!(null), "reported"),
+            ("standby-b", "this-server", json!(null), json!(null), json!("streaming"), "reported"),
+            ("standby-c", "replica", json!(null), json!(null), json!(null), "reported"),
+            ("analytics_slot", "slot", json!(null), json!(1172682184.0), json!(null), "slot_inactive"),
         ] {
             let mut r = slot.clone();
-            (r["name"], r["role"], r["lag_seconds"], r["lag_bytes"], r["state"]) =
-                (json!(name), json!(role), seconds, bytes, state);
+            (r["name"], r["role"], r["lag_seconds"], r["lag_bytes"], r["state"], r["condition"]) =
+                (json!(name), json!(role), seconds, bytes, state, json!(condition));
             all.push(r);
         }
         v["pressure"]["replicas"] = json!(all);

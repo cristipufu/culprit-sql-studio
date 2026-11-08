@@ -310,7 +310,7 @@ QueryStore: Query Store is off on this database, so workload history is limited 
          | ALTER DATABASE CURRENT SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE);"
     );
     assert_eq!(unparsed_plans(3), "3 Query Store plans could not be parsed");
-    assert_eq!(unparsed_plans(1), "1 Query Store plans could not be parsed");
+    assert_eq!(unparsed_plans(1), "1 Query Store plan could not be parsed");
     let mut c = Coverage::default();
     plan_cache_unreadable(&mut c, &probe());
     index_usage_unreadable(&mut c, &probe());

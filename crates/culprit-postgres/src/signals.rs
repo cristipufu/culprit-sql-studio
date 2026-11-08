@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 
 use culprit_core::{
-    ConstraintIssue, ConstraintKind, Coverage, FileIo, FileKind, Pressure, QueryStat, Replica, ReplicaRole, Setting,
-    Signal, SignalScope, SignalUnit, Snapshot, TableStorage, t,
+    ConstraintIssue, ConstraintKind, Coverage, FileIo, FileKind, Pressure, QueryStat, Replica, ReplicaCondition,
+    ReplicaRole, Setting, Signal, SignalScope, SignalUnit, Snapshot, TableStorage, t,
 };
 use tokio_postgres::Client;
 
@@ -578,11 +578,13 @@ struct Standby {
 /// is stopped only when it is meant to stream (primary_conninfo set); without it, it restores WAL from an archive.
 fn standby_replica(s: Standby) -> Replica {
     let delay = s.delay.filter(|d| *d > 0.0);
-    let state = match (s.receiver, s.streaming_configured) {
-        (Some(status), _) => status,
-        (None, Some(true)) => "not receiving".to_string(),
-        (None, Some(false)) => "restoring from archive".to_string(),
-        (None, None) => "not streaming".to_string(),
+    // The WAL receiver's own status is the engine's word; without a receiver, how it stands is a fact the catalog words.
+    let (condition, state) = match (s.receiver, s.streaming_configured) {
+        (Some(status), _) if status.eq_ignore_ascii_case("stopped") => (ReplicaCondition::Stopped, Some(status)),
+        (Some(status), _) => (ReplicaCondition::Reported, Some(status)),
+        (None, Some(true)) => (ReplicaCondition::NotReceiving, None),
+        (None, Some(false)) => (ReplicaCondition::RestoringFromArchive, None),
+        (None, None) => (ReplicaCondition::NotStreaming, None),
     };
     let lag_seconds = match s.behind {
         Some(b) if b >= culprit_core::signals::STANDBY_BEHIND_BYTES => {
@@ -592,7 +594,8 @@ fn standby_replica(s: Standby) -> Replica {
         None => None,
     };
     Replica {
-        state: Some(state),
+        condition,
+        state,
         lag_seconds,
         lag_bytes: s.behind,
         delay_seconds: delay,
@@ -661,7 +664,7 @@ async fn replicas(
     for r in query(client, &slots_sql(version_num)).await? {
         let slot_type = r.text("slot_type");
         out.push(Replica {
-            state: Some(if r.flag("active") { "active" } else { "inactive" }.into()),
+            condition: if r.flag("active") { ReplicaCondition::SlotActive } else { ReplicaCondition::SlotInactive },
             lag_bytes: r.number("kept"),
             logical: slot_type.as_deref().map(|t| t == "logical"),
             sync: slot_type,
@@ -785,10 +788,19 @@ mod tests {
             streaming_configured: configured,
             ..standby(None, 600.0)
         };
-        assert_eq!(standby_replica(none(Some(true))).state.as_deref(), Some("not receiving"));
+        let stopped = standby_replica(none(Some(true)));
+        assert_eq!(stopped.condition, ReplicaCondition::NotReceiving);
+        assert!(stopped.condition.is_stopped());
+        assert_eq!(stopped.state_words().as_deref(), Some("not receiving"));
         let shipping = standby_replica(none(Some(false)));
-        assert_eq!((shipping.state.as_deref(), shipping.lag_seconds), (Some("restoring from archive"), None));
-        assert_eq!(standby_replica(none(None)).state.as_deref(), Some("not streaming"));
+        assert_eq!((shipping.condition, shipping.lag_seconds), (ReplicaCondition::RestoringFromArchive, None));
+        assert!(!shipping.condition.is_stopped());
+        assert_eq!(shipping.state_words().as_deref(), Some("restoring from archive"));
+        assert_eq!(standby_replica(none(None)).state_words().as_deref(), Some("not streaming"));
+        // A receiver's own status is the engine's word: "stopped" is a stop, "streaming" isn't.
+        let receiving = |status: &str| Standby { receiver: Some(status.into()), ..none(Some(true)) };
+        assert_eq!(standby_replica(receiving("stopped")).condition, ReplicaCondition::Stopped);
+        assert_eq!(standby_replica(receiving("streaming")).state_words().as_deref(), Some("streaming"));
     }
 
     // Without stats_reset (PostgreSQL 15+ until the first reset) how long the counts ran is unknown: no rate, but the

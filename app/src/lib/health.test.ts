@@ -5,7 +5,7 @@ import type { FindingFacts } from "../gen/FindingFacts";
 import type { Replica } from "../gen/Replica";
 import type { Report } from "../gen/Report";
 import type { QueryStat } from "../gen/QueryStat";
-import { findingStatus, querySignalStatus, replicaStatus, storageStatus } from "./health";
+import { findingStatus, querySignalStatus, replicaState, replicaStatus, storageStatus } from "./health";
 import { partial } from "../test/fixtures";
 
 const check = (condition: boolean, message: string) => { if (!condition) throw new Error(message); };
@@ -41,7 +41,7 @@ test("Health warnings follow measured evidence", () => {
   check(storageStatus(report([{ ...storage, severity: "medium", actionability: "needs-attention" }]), file) === "watch", "Assessed slow storage still warns");
 
   // An inactive slot may be between syncs or bounded by a WAL cap; inactivity and byte count alone do not grade it.
-  const slot = { name: "batch_consumer", role: "slot", state: "inactive", lag_bytes: 2 * 1024 ** 3 } as const;
+  const slot = { name: "batch_consumer", role: "slot", condition: "slot_inactive", state: null, lag_bytes: 2 * 1024 ** 3 } as const;
   check(replicaStatus(report([]), slot as Replica) === "info", "An inactive slot alone cannot become an incident");
   check(replicaStatus(report([finding({ check: "replica-lag", subject: { kind: "database", name: slot.name } })]), slot as Replica) === "info", "A bounded slot's Low finding stays informational");
   check(findingStatus(finding({ severity: "high" })) === "bad", "Confirmed incidents retain their warning");
@@ -52,4 +52,13 @@ test("Information and history findings never become health warnings", () => {
     const observation = finding({ severity: "high", actionability });
     check(findingStatus(observation) === "info", `${actionability} never creates a health warning`);
   }
+});
+
+test("A replica's state is its condition said from the catalog, or the engine's own word", () => {
+  const replica = (extra: Partial<Replica>) => ({ name: "r", role: "this-server", condition: "reported", state: null, ...extra }) as Replica;
+  check(replicaState(replica({ state: "streaming" })) === "streaming", "The engine's own word is shown as it is");
+  check(replicaState(replica({ condition: "not_receiving" })) === "not receiving", "A condition Culprit established is said from the catalog");
+  check(replicaState(replica({ condition: "receiving_stopped", state: "Connecting" })) === "receiving stopped (I/O thread: Connecting)", "The I/O thread's own value stays inside the words");
+  check(replicaState(replica({ condition: "slot_inactive" })) === "inactive", "A slot says whether a consumer is attached");
+  check(replicaState(replica({ condition: "stopped", state: "NOT SYNCHRONIZING" })) === "NOT SYNCHRONIZING", "A stop the engine words keeps its word");
 });

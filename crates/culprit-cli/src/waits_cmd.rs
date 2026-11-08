@@ -475,7 +475,7 @@ fn print_replicas(replicas: &[Replica]) {
             ReplicaRole::Slot => t!("cli.waits.role.slot"),
         };
         let mut parts: Vec<String> = Vec::new();
-        parts.extend(r.state.clone());
+        parts.extend(r.state_words());
         parts.extend(r.sync.clone());
         if let Some(s) = r.lag_seconds {
             parts.push(t!("cli.waits.behind", duration = format::duration(s * 1000.0)));

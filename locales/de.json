@@ -1338,7 +1338,6 @@
   "check.replica_lag.info.description": "Replikate, die weit hinter dem Primärserver liegen oder angehalten sind, und PostgreSQL-Replikationsslots, die WAL für einen verschwundenen Consumer vorhalten: pg_stat_replication, Replikatzustände von Verfügbarkeitsgruppen, SHOW REPLICA STATUS.",
   "check.replica_lag.info.title": "Replikate, die zurückfallen",
   "check.replica_lag.lag_bytes": "{bytes} Log",
-  "check.replica_lag.lag_unknown": "unbestimmt weit",
   "check.replica_lag.metric.behind_by": "Rückstand",
   "check.replica_lag.metric.delayed_by": "Absichtlich verzögert um",
   "check.replica_lag.metric.not_applied": "Noch nicht angewendet",

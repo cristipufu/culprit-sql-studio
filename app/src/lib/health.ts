@@ -1,4 +1,5 @@
 import { isActionable } from "./findings";
+import { t } from "./i18n";
 import type { FileIo } from "../gen/FileIo";
 import type { Finding } from "../gen/Finding";
 import type { QueryStat } from "../gen/QueryStat";
@@ -36,4 +37,40 @@ export function storageStatus(report: Report, file: FileIo): SignalStatus {
 
 export function replicaStatus(report: Report, replica: Replica): SignalStatus {
   return findingStatus(worstFinding(report, (f) => f.check === "replica-lag" && f.subject.name === replica.name));
+}
+
+/**
+ * How a replica stands, in the app's language: its condition said from the catalog, with the engine's own word where
+ * it gives one (as `Replica::state_words` says it in Rust).
+ */
+export function replicaState(replica: Replica): string | null {
+  const own = replica.state ?? null;
+  switch (replica.condition) {
+    case "reported":
+      return own;
+    case "stopped":
+      return own ?? t("model.replica.state.stopped");
+    case "replicating":
+      return t("model.replica.state.replicating");
+    case "receiving_stopped":
+      return own != null ? t("model.replica.state.receiving_stopped", { thread: own }) : t("model.replica.state.receiving_stopped_unknown");
+    case "applying_stopped":
+      return t("model.replica.state.applying_stopped");
+    case "left_configured":
+      return t("model.replica.state.left_configured");
+    case "stopped_by_hand":
+      return t("model.replica.state.stopped_by_hand");
+    case "not_receiving":
+      return t("model.replica.state.not_receiving");
+    case "restoring_from_archive":
+      return t("model.replica.state.restoring_from_archive");
+    case "not_streaming":
+      return t("model.replica.state.not_streaming");
+    case "slot_active":
+      return t("model.replica.state.slot_active");
+    case "slot_inactive":
+      return t("model.replica.state.slot_inactive");
+    default:
+      return own;
+  }
 }

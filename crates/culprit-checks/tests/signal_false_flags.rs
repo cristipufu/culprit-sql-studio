@@ -41,8 +41,14 @@ fn replicas(engine: &str, list: Vec<Replica>) -> Report {
     analyze(s)
 }
 
+/// A replica as the engine words its state (streaming, a WAL receiver's status).
 fn replica(name: &str, role: ReplicaRole, state: &str) -> Replica {
     Replica { state: Some(state.into()), ..Replica::new(name, role) }
+}
+
+/// A replica in a condition its provider established, said from the catalog.
+fn stood(name: &str, role: ReplicaRole, condition: culprit_core::ReplicaCondition) -> Replica {
+    Replica { condition, ..Replica::new(name, role) }
 }
 
 /// The heaviest application statement of a demo, to plant numbers on.
@@ -76,9 +82,12 @@ fn a_caught_up_standby_of_a_quiet_primary_is_not_behind() {
 // A log-shipping standby (restore_command, no primary_conninfo) has no WAL receiver by design: not "stopped".
 #[test]
 fn a_standby_restoring_from_an_archive_is_not_stopped() {
-    let shipping = replica("this server", ReplicaRole::ThisServer, "restoring from archive");
+    let shipping = stood("this server", ReplicaRole::ThisServer, culprit_core::ReplicaCondition::RestoringFromArchive);
     assert!(of(&replicas("postgres-demo", vec![shipping]), "replica-lag").is_empty());
-    let r = replicas("postgres-demo", vec![replica("this server", ReplicaRole::ThisServer, "not receiving")]);
+    let r = replicas(
+        "postgres-demo",
+        vec![stood("this server", ReplicaRole::ThisServer, culprit_core::ReplicaCondition::NotReceiving)],
+    );
     let f = of(&r, "replica-lag");
     assert_eq!(f[0].severity, Severity::High);
     assert!(f[0].summary.contains("primary_conninfo is set"), "{}", f[0].summary);
@@ -93,7 +102,7 @@ fn a_replica_delayed_by_design_is_judged_on_the_lag_beyond_its_delay() {
     let delayed = |lag: f64| Replica {
         lag_seconds: Some(lag),
         delay_seconds: Some(3_600.0),
-        ..replica("from 10.0.0.5", ReplicaRole::ThisServer, "replicating")
+        ..stood("from 10.0.0.5", ReplicaRole::ThisServer, culprit_core::ReplicaCondition::Replicating)
     };
     assert!(of(&replicas("mysql-demo", vec![delayed(20.0)]), "replica-lag").is_empty());
     let r = replicas("mysql-demo", vec![delayed(700.0)]);
@@ -108,18 +117,20 @@ fn a_replica_delayed_by_design_is_judged_on_the_lag_beyond_its_delay() {
 
 #[test]
 fn a_channel_stopped_by_hand_is_not_a_replication_failure() {
-    let promoted =
-        replica("from 10.0.0.5", ReplicaRole::ThisServer, "configured, not running (no error; accepts writes)");
+    let promoted = stood("from 10.0.0.5", ReplicaRole::ThisServer, culprit_core::ReplicaCondition::LeftConfigured);
     let r = replicas("mysql-demo", vec![promoted]);
     let f = of(&r, "replica-lag")[0];
     assert_eq!(f.severity, Severity::Low);
     assert_eq!(f.title, "This server is still set up as a replica, but replication isn't running");
     assert!(f.fix.as_ref().unwrap().summary.contains("RESET REPLICA ALL"));
-    let r =
-        replicas("mysql-demo", vec![replica("from 10.0.0.5", ReplicaRole::ThisServer, "stopped by hand (no error)")]);
+    let r = replicas(
+        "mysql-demo",
+        vec![stood("from 10.0.0.5", ReplicaRole::ThisServer, culprit_core::ReplicaCondition::StoppedByHand)],
+    );
     assert_eq!(of(&r, "replica-lag")[0].severity, Severity::Medium);
     // Group Replication's idle recovery channel, in a scan from before the collector left it out.
-    let gr = replica("group_replication_recovery (from )", ReplicaRole::ThisServer, "stopped");
+    let gr =
+        stood("group_replication_recovery (from )", ReplicaRole::ThisServer, culprit_core::ReplicaCondition::Stopped);
     assert!(of(&replicas("mysql-demo", vec![gr]), "replica-lag").is_empty());
 }
 
@@ -131,7 +142,7 @@ fn slot(name: &str, kind: &str, kept: f64) -> Replica {
         logical: Some(kind == "logical"),
         lag_bytes: Some(kept),
         wal_status: Some("extended".into()),
-        ..replica(name, ReplicaRole::Slot, "inactive")
+        ..stood(name, ReplicaRole::Slot, culprit_core::ReplicaCondition::SlotInactive)
     }
 }
 

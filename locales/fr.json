@@ -1340,7 +1340,6 @@
   "check.replica_lag.info.description": "Réplicas très en retard sur le primaire ou arrêtés, et slots de réplication PostgreSQL qui conservent le WAL pour un consommateur disparu : pg_stat_replication, états des réplicas de groupe de disponibilité, SHOW REPLICA STATUS.",
   "check.replica_lag.info.title": "Réplicas en retard",
   "check.replica_lag.lag_bytes": "{bytes} de journal",
-  "check.replica_lag.lag_unknown": "en retard",
   "check.replica_lag.metric.behind_by": "Retard",
   "check.replica_lag.metric.delayed_by": "Retard volontaire",
   "check.replica_lag.metric.not_applied": "Pas encore appliqué",

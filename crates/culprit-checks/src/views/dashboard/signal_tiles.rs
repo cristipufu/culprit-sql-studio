@@ -271,7 +271,7 @@ pub(super) fn lag_text(r: &Replica) -> String {
     r.lag_seconds
         .map(|sec| t!("view.dashboard.replication.behind", duration = format::duration(sec * 1000.0)))
         .or_else(|| r.lag_bytes.map(|b| t!("view.dashboard.replication.log", size = format::bytes(b))))
-        .or_else(|| r.state.clone())
+        .or_else(|| r.state_words())
         .unwrap_or_else(|| t!("view.dashboard.replication.in_sync"))
 }
 

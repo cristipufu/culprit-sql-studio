@@ -33,8 +33,17 @@ pub enum ReplicaStatus {
     /// The same on a server that takes writes: a former replica promoted to primary, its old configuration left behind.
     LeftConfigured,
     /// Behind by this many seconds beyond any configured delay (or by bytes, when that is all the engine says).
-    Behind,
+    Behind(Lag),
     Fine,
+}
+
+/// How far behind a replica is, as the engine measures it.
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum Lag {
+    /// Seconds beyond any configured delay.
+    Seconds(f64),
+    /// Bytes not yet applied, when the engine gives no time.
+    Bytes(f64),
 }
 
 pub(super) fn replica_status(r: &Replica) -> ReplicaStatus {
@@ -42,23 +51,31 @@ pub(super) fn replica_status(r: &Replica) -> ReplicaStatus {
     if r.name.to_ascii_lowercase().starts_with("group_replication_") {
         return ReplicaStatus::Fine;
     }
-    let state = r.state.as_deref().unwrap_or("");
-    if state.starts_with("configured, not running") {
-        return ReplicaStatus::LeftConfigured;
-    }
-    if state.starts_with("stopped by hand") {
-        return ReplicaStatus::StoppedByHand;
-    }
-    if state.contains("stopped") || state == "not receiving" || state.eq_ignore_ascii_case("NOT SYNCHRONIZING") {
-        return ReplicaStatus::Stopped;
+    match r.condition {
+        ReplicaCondition::LeftConfigured => return ReplicaStatus::LeftConfigured,
+        ReplicaCondition::StoppedByHand => return ReplicaStatus::StoppedByHand,
+        c if c.is_stopped() => return ReplicaStatus::Stopped,
+        _ => {}
     }
     let seconds = r.lag_seconds;
     // A configured delay keeps WAL waiting on purpose: only the seconds beyond it say whether it is behind.
     let bytes = r.lag_bytes.filter(|_| r.delay_seconds.is_none() && seconds.is_none_or(|s| s > 0.0));
-    if seconds.is_some_and(|s| s >= 30.0) || bytes.is_some_and(|b| b >= GB) {
-        ReplicaStatus::Behind
-    } else {
-        ReplicaStatus::Fine
+    if !(seconds.is_some_and(|s| s >= 30.0) || bytes.is_some_and(|b| b >= GB)) {
+        return ReplicaStatus::Fine;
+    }
+    // The lag it is behind by: the seconds the engine measures, else the bytes it hasn't applied.
+    match (seconds, r.lag_bytes) {
+        (Some(s), _) => ReplicaStatus::Behind(Lag::Seconds(s)),
+        (None, Some(b)) => ReplicaStatus::Behind(Lag::Bytes(b)),
+        (None, None) => ReplicaStatus::Fine,
+    }
+}
+
+/// How far behind, as a sentence says it: "2 min", "1.5 GB of log".
+fn lag_words(lag: Lag) -> String {
+    match lag {
+        Lag::Seconds(s) => format::duration(s * 1000.0),
+        Lag::Bytes(b) => t!("check.replica_lag.lag_bytes", bytes = format::bytes(b)),
     }
 }
 
@@ -109,7 +126,7 @@ fn stopped_or_behind(snapshot: &Snapshot, r: &Replica) -> Option<ReplicaStatus> 
 /// max_slot_wal_keep_size (13+): with a cap, PostgreSQL gives the slot up instead.
 fn inactive_slot<'s>(snapshot: &Snapshot, r: &'s Replica) -> Option<InactiveSlot<'s>> {
     let kept = r.lag_bytes.filter(|b| *b >= GB)?;
-    if r.state.as_deref() != Some("inactive") || r.wal_status.as_deref() == Some("lost") {
+    if r.condition != ReplicaCondition::SlotInactive || r.wal_status.as_deref() == Some("lost") {
         return None;
     }
     // safe_wal_size exists from 13 and is empty when nothing caps what slots keep.
@@ -146,11 +163,7 @@ fn replica_finding(snapshot: &Snapshot, r: &Replica, status: ReplicaStatus) -> F
     let consumer = r.is_logical();
     let seconds = r.lag_seconds;
     let mut f = finding("replica-lag", &r.name, Category::Configuration, subject(SubjectKind::Database, &r.name));
-    let lag = seconds
-        .map(|s| format::duration(s * 1000.0))
-        .or_else(|| r.lag_bytes.map(|b| t!("check.replica_lag.lag_bytes", bytes = format::bytes(b))))
-        .unwrap_or_else(|| t!("check.replica_lag.lag_unknown"));
-    let state = r.state.clone().unwrap_or_default();
+    let state = r.state_words().unwrap_or_default();
     match status {
         ReplicaStatus::LeftConfigured => {
             f.title = t!("check.replica_lag.title.left_configured");
@@ -174,7 +187,7 @@ fn replica_finding(snapshot: &Snapshot, r: &Replica, status: ReplicaStatus) -> F
             if let Some(e) = &r.error {
                 summary.push(t!("check.replica_lag.summary.last_error", error = e));
             }
-            summary.push(if pg && r.role == ReplicaRole::ThisServer && state == "not receiving" {
+            summary.push(if r.condition == ReplicaCondition::NotReceiving && r.role == ReplicaRole::ThisServer {
                 t!("check.replica_lag.summary.no_receiver")
             } else {
                 t!("check.replica_lag.summary.stopped")
@@ -191,7 +204,9 @@ fn replica_finding(snapshot: &Snapshot, r: &Replica, status: ReplicaStatus) -> F
                 cost: None,
             });
         }
-        _ => {
+        ReplicaStatus::Fine => {}
+        ReplicaStatus::Behind(lag) => {
+            let lag = lag_words(lag);
             if consumer {
                 f.title = t!("check.replica_lag.title.consumer_behind", name = &r.name, lag = &lag);
                 f.summary = t!("check.replica_lag.summary.consumer_behind", name = &r.name, lag = &lag);
@@ -230,10 +245,8 @@ fn replica_finding(snapshot: &Snapshot, r: &Replica, status: ReplicaStatus) -> F
     }
     severity_score(&mut f);
     f.impact.label = match status {
-        ReplicaStatus::LeftConfigured | ReplicaStatus::StoppedByHand | ReplicaStatus::Stopped => {
-            r.state.clone().unwrap_or_else(|| t!("check.replica_lag.impact.stopped"))
-        }
-        _ => t!("check.replica_lag.impact.behind", lag = &lag),
+        ReplicaStatus::Behind(lag) => t!("check.replica_lag.impact.behind", lag = lag_words(lag)),
+        _ => r.state_words().unwrap_or_else(|| t!("check.replica_lag.impact.stopped")),
     };
     f.confidence = Confidence::High;
     f.verify = vec![match status {

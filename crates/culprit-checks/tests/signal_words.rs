@@ -2189,21 +2189,32 @@ fn lagging(name: &str, version: Option<&str>, replicas: Vec<culprit_core::Replic
     run("replica-lag", &s)
 }
 
+/// A replica as the engine words its state (streaming, a WAL receiver's status).
 fn replica(name: &str, role: culprit_core::ReplicaRole, state: &str) -> culprit_core::Replica {
     culprit_core::Replica { state: Some(state.into()), ..culprit_core::Replica::new(name, role) }
 }
 
+/// A replica in a condition its provider established, said from the catalog.
+fn stood(
+    name: &str,
+    role: culprit_core::ReplicaRole,
+    condition: culprit_core::ReplicaCondition,
+) -> culprit_core::Replica {
+    culprit_core::Replica { condition, ..culprit_core::Replica::new(name, role) }
+}
+
 #[test]
 fn replicas_stopped_or_left_configured() {
-    use culprit_core::{Replica, ReplicaRole::Replica as Sends, ReplicaRole::ThisServer};
+    use culprit_core::{Replica, ReplicaCondition as C, ReplicaRole::Replica as Sends, ReplicaRole::ThisServer};
     let mut findings = lagging(
         "mysql-demo",
         None,
         vec![
-            replica("from 10.0.0.5", ThisServer, "configured, not running (no error; accepts writes)"),
-            replica("from 10.0.0.6", ThisServer, "stopped by hand (no error)"),
+            stood("from 10.0.0.5", ThisServer, C::LeftConfigured),
+            stood("from 10.0.0.6", ThisServer, C::StoppedByHand),
             Replica {
                 error: Some("1062 duplicate entry".into()),
+                condition: C::Stopped,
                 ..replica("from 10.0.0.7", ThisServer, "stopped (SQL thread error)")
             },
         ],
@@ -2212,9 +2223,9 @@ fn replicas_stopped_or_left_configured() {
         "postgres-demo",
         None,
         vec![
-            replica("this server", ThisServer, "not receiving"),
-            replica("standby-1", Sends, "stopped"),
-            Replica { logical: Some(true), ..replica("sub_orders", Sends, "stopped") },
+            stood("this server", ThisServer, C::NotReceiving),
+            Replica { condition: C::Stopped, ..replica("standby-1", Sends, "stopped") },
+            Replica { logical: Some(true), condition: C::Stopped, ..replica("sub_orders", Sends, "stopped") },
         ],
     ));
     says(
@@ -2287,7 +2298,7 @@ fn replicas_behind() {
         vec![Replica {
             lag_seconds: Some(700.0),
             delay_seconds: Some(3_600.0),
-            ..replica("from 10.0.0.5", ThisServer, "replicating")
+            ..stood("from 10.0.0.5", ThisServer, culprit_core::ReplicaCondition::Replicating)
         }],
     ));
     findings.extend(lagging(
@@ -2361,7 +2372,7 @@ fn inactive_replication_slots() {
     let slot = |name: &str, logical: bool, gb: f64| Replica {
         logical: Some(logical),
         lag_bytes: Some(gb * GB),
-        ..replica(name, Slot, "inactive")
+        ..stood(name, Slot, culprit_core::ReplicaCondition::SlotInactive)
     };
     let mut findings = lagging(
         "postgres-demo",

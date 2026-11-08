@@ -10,7 +10,7 @@ import { serverName, statementMetrics } from "../lib/engines";
 import { bytes, count, duration, percent, rowCount, when } from "../lib/format";
 import { key, t } from "../lib/i18n";
 import { waitKey } from "../lib/waits";
-import { querySignalStatus, replicaStatus, storageStatus, tableSignalWarning, worstFinding } from "../lib/health";
+import { querySignalStatus, replicaState, replicaStatus, storageStatus, tableSignalWarning, worstFinding } from "../lib/health";
 import { SignalTile } from "./Health";
 
 /**
@@ -341,7 +341,7 @@ export function Replication({ replicas, report }: { replicas: Replica[]; report:
               <span className="io-kind">{roleLabel(r.role)}</span>
             </span>
             <span className="io-cell" role="cell">
-              {[r.state, r.sync].filter(Boolean).join(" · ") || "—"}
+              {[replicaState(r), r.sync].filter(Boolean).join(" · ") || "—"}
             </span>
             <span className="io-cell" role="cell">
               {[

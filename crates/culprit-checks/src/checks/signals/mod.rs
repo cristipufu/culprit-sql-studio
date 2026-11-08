@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use culprit_core::waits::category_key;
 use culprit_core::{
     Category, CheckInfo, Confidence, ConstraintIssue, ConstraintKind, Engine, FileIo, FileKind, Finding, Fix,
-    IndexStat, Metric, QueryRef, QueryStat, Replica, ReplicaRole, Severity, Snapshot, SubjectKind, TableStat, Unit,
-    format, signals::plan_row_bytes,
+    IndexStat, Metric, QueryRef, QueryStat, Replica, ReplicaCondition, ReplicaRole, Severity, Snapshot, SubjectKind,
+    TableStat, Unit, format, signals::plan_row_bytes,
 };
 
 use culprit_core::{Check, key, t};

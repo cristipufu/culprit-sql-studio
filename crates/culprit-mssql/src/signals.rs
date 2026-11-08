@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 
 use culprit_core::{
-    ConstraintIssue, ConstraintKind, Coverage, FileIo, FileKind, IndexContention, Pressure, Replica, ReplicaRole,
-    Signal, SignalScope, SignalUnit, Snapshot, SnapshotOptions,
+    ConstraintIssue, ConstraintKind, Coverage, FileIo, FileKind, IndexContention, Pressure, Replica, ReplicaCondition,
+    ReplicaRole, Signal, SignalScope, SignalUnit, Snapshot, SnapshotOptions,
 };
 
 use crate::conn::{MsClient, query};
@@ -555,6 +555,15 @@ WHERE drs.database_id = DB_ID()
         .iter()
         .filter(|r| !(r.f64_or_zero("is_local") > 0.0 && r.f64_or_zero("is_primary") > 0.0))
         .map(|r| Replica {
+            // The engine's own state, kept as its word; NOT_SYNCHRONIZING is a stop replica-lag decides on.
+            condition: match r.str("state") {
+                Some(s)
+                    if s.eq_ignore_ascii_case("NOT SYNCHRONIZING") || s.eq_ignore_ascii_case("NOT_SYNCHRONIZING") =>
+                {
+                    ReplicaCondition::Stopped
+                }
+                _ => ReplicaCondition::Reported,
+            },
             state: r.str("state"),
             sync: r.str("sync").map(|s| s.replace('_', " ").to_lowercase()),
             lag_seconds: r.f64("lag_s"),

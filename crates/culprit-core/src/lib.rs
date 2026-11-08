@@ -101,8 +101,8 @@ pub use provider::{ExplainMode, Provider, SnapshotOptions};
 pub use refinement::{FixWithholdingBasis, HistoryBasis, PresentationAspect, RefinementDecision, RefinementOutcome};
 pub use signals::{
     ColumnHistogram, ConstraintIssue, ConstraintKind, ContentionBaseline, CountBaseline, EscalationBaseline, FileIo,
-    FileKind, FileScope, FileWriteOperation, IndexContention, IndexLockCounts, QueryCosts, Replica, ReplicaRole,
-    SizeBaseline, TableStorage, escalations_by_table,
+    FileKind, FileScope, FileWriteOperation, IndexContention, IndexLockCounts, QueryCosts, Replica, ReplicaCondition,
+    ReplicaRole, SizeBaseline, TableStorage, escalations_by_table,
 };
 pub use sql::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions};
 pub use verification::{Verification, VerifiedFinding, VerifyStatus, compare_reports};

@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 
 use culprit_core::{
-    ColumnHistogram, Coverage, FileIo, FileKind, Pressure, QueryStat, Replica, ReplicaRole, Setting, Signal,
-    SignalScope, SignalUnit, Snapshot, i18n, key, t,
+    ColumnHistogram, Coverage, FileIo, FileKind, Pressure, QueryStat, Replica, ReplicaCondition, ReplicaRole, Setting,
+    Signal, SignalScope, SignalUnit, Snapshot, i18n, key, t,
 };
 use mysql_async::{Conn, Value};
 
@@ -385,18 +385,19 @@ fn replica(r: ChannelRow, writable: Option<bool>) -> Option<Replica> {
         return None;
     }
     let error = r.sql_errno.or(r.io_errno);
-    // The state and the name stay one string in every language: replica-lag decides on the state's words, and the
-    // name is its finding's id.
-    let state = match (r.io.eq_ignore_ascii_case("yes"), r.sql.eq_ignore_ascii_case("yes")) {
-        (true, true) => "replicating".to_string(),
-        (false, true) => format!("receiving stopped (I/O thread: {})", r.io),
-        (true, false) => "applying stopped (SQL thread)".to_string(),
-        (false, false) if error.is_some() => "stopped".to_string(),
-        (false, false) if writable == Some(true) => "configured, not running (no error; accepts writes)".to_string(),
-        (false, false) => "stopped by hand (no error)".to_string(),
+    // How it stands is a fact replica-lag decides on and the catalog words; the I/O thread's own value is the engine's.
+    // The name stays one string in every language: it is the finding's id.
+    let (condition, state) = match (r.io.eq_ignore_ascii_case("yes"), r.sql.eq_ignore_ascii_case("yes")) {
+        (true, true) => (ReplicaCondition::Replicating, None),
+        (false, true) => (ReplicaCondition::ReceivingStopped, Some(r.io.clone())),
+        (true, false) => (ReplicaCondition::ApplyingStopped, None),
+        (false, false) if error.is_some() => (ReplicaCondition::Stopped, None),
+        (false, false) if writable == Some(true) => (ReplicaCondition::LeftConfigured, None),
+        (false, false) => (ReplicaCondition::StoppedByHand, None),
     };
     Some(Replica {
-        state: Some(state),
+        condition,
+        state,
         // Seconds_Behind_Source counts the configured delay too: only what is beyond it is lag.
         lag_seconds: r.behind.map(|s| (s - r.delay.unwrap_or(0.0)).max(0.0)),
         delay_seconds: r.delay,
@@ -568,13 +569,29 @@ mod tests {
     #[test]
     fn a_channel_stopped_by_hand_is_not_a_failure() {
         let promoted = replica(channel("No", "No"), Some(true)).unwrap();
-        assert_eq!(promoted.state.as_deref(), Some("configured, not running (no error; accepts writes)"));
-        assert_eq!(
-            replica(channel("No", "No"), Some(false)).unwrap().state.as_deref(),
-            Some("stopped by hand (no error)")
-        );
+        assert_eq!(promoted.condition, ReplicaCondition::LeftConfigured);
+        assert_eq!(promoted.state_words().as_deref(), Some("configured, not running (no error; accepts writes)"));
+        let by_hand = replica(channel("No", "No"), Some(false)).unwrap();
+        assert_eq!(by_hand.condition, ReplicaCondition::StoppedByHand);
+        assert_eq!(by_hand.state_words().as_deref(), Some("stopped by hand (no error)"));
         let failed = replica(ChannelRow { sql_errno: Some(1062.0), ..channel("No", "No") }, Some(true)).unwrap();
-        assert_eq!((failed.state.as_deref(), failed.error.as_deref()), (Some("stopped"), Some("1062 duplicate key")));
+        assert_eq!(
+            (failed.condition, failed.error.as_deref()),
+            (ReplicaCondition::Stopped, Some("1062 duplicate key"))
+        );
+        assert_eq!(failed.state_words().as_deref(), Some("stopped"));
+        // The I/O thread's own value is the engine's word, kept as it is.
+        let receiving = replica(channel("Connecting", "Yes"), Some(false)).unwrap();
+        assert_eq!(
+            (receiving.condition, receiving.state.as_deref()),
+            (ReplicaCondition::ReceivingStopped, Some("Connecting"))
+        );
+        assert_eq!(receiving.state_words().as_deref(), Some("receiving stopped (I/O thread: Connecting)"));
+        // What it decides on holds in another language: the condition is a fact, not its words.
+        culprit_core::i18n::scope("fr", || {
+            let by_hand = replica(channel("No", "No"), Some(false)).unwrap();
+            assert_eq!(by_hand.condition, ReplicaCondition::StoppedByHand);
+        });
         // Group Replication's own channels idle by design.
         let gr = ChannelRow { channel: Some("group_replication_recovery".into()), ..channel("No", "No") };
         assert!(replica(gr, Some(true)).is_none());
