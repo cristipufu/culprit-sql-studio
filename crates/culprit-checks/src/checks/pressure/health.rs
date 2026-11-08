@@ -208,9 +208,8 @@ pub(crate) fn grade_on_evidence(snapshot: &mut Snapshot) {
             first.is_some_and(|t| t <= end - i64::from(minutes) * 60 + 30) && last.is_some_and(|t| t >= end - 30)
         });
         let span = culprit_core::span_words(u.hours);
-        let coverage = selected.map(|m| {
-            t!("health.resource.selected", window = culprit_core::window_label(m), span = &span)
-        });
+        let coverage =
+            selected.map(|m| t!("health.resource.selected", window = culprit_core::window_label(m), span = &span));
         let said = [
             t!("health.resource.average", span = &span, peak = format::percent_value(u.peak)),
             t!("health.resource.at_limit", limit = format::percent(0.95), share = format::percent(u.at_limit)),

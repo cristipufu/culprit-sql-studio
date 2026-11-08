@@ -3,8 +3,8 @@
 
 use std::collections::BTreeMap;
 
-use culprit_core::waits::{category_info, category_key};
 use culprit_core::i18n::Arg;
+use culprit_core::waits::{category_info, category_key};
 use culprit_core::{
     ActivityCategory, ActivityQuery, ActivityReport, Capability, Engine, QueryStat, Snapshot, SpanLength, WaitCategory,
     WaitQuery, WaitScope, WaitsReport, format, key, last_span, since_reset_span, span_length, t,
@@ -261,10 +261,9 @@ fn scope_and_source(snapshot: &Snapshot) -> (WaitScope, String) {
                 None => t!("view.waits.source.pg_stat_statements"),
             },
         ),
-        Engine::Mysql if !snapshot.server.has(Capability::PerformanceSchema) => (
-            WaitScope::Statements,
-            t!("view.waits.source.slow_log", window = last_span(hours.unwrap_or_default())),
-        ),
+        Engine::Mysql if !snapshot.server.has(Capability::PerformanceSchema) => {
+            (WaitScope::Statements, t!("view.waits.source.slow_log", window = last_span(hours.unwrap_or_default())))
+        }
         Engine::Mysql => {
             let name = snapshot.server.name();
             (

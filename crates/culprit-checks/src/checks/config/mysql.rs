@@ -175,8 +175,7 @@ pub(super) fn render(snapshot: &Snapshot, case: Case<'_>) -> Finding {
             };
             let (fix_summary, sql) = match slow_log_change(snapshot).filter(|_| !logged) {
                 Some(now) => (
-                    [t!("check.config.performance_schema.fix.slow_log_first"), now.how, at_next_restart]
-                    .join(" "),
+                    [t!("check.config.performance_schema.fix.slow_log_first"), now.how, at_next_restart].join(" "),
                     match (now.sql, restart.sql) {
                         (Some(now), Some(restart)) => Some(format!(
                             "-- Now, no restart (connections opened earlier keep the old threshold):\n{now}\n\n{restart}"
