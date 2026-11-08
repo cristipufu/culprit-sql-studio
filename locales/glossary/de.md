@@ -167,6 +167,16 @@ Baseline, Dashboard, Live, Cache, Latch, Flush, Query Store, JIT, HOT, Tablet, S
 | tenant / subscription (Azure) | Mandant / Abonnement | |
 | burst balance, bastion host, continuation token | Burst-Guthaben, Bastion-Host, Fortsetzungstoken | |
 | reset epoch, retention budget, request trace | Reset-Epoche, Aufbewahrungsbudget, Request-Trace | |
+| insight (plan insight) | Erkenntnis | |
+| sample (verb / noun) | erfassen / Stichprobe | „Jetzt erfassen“ |
+| deploy, log (verb) | Deployment, protokollieren | |
+| linked server, workload group | Verbindungsserver, Arbeitsauslastungsgruppe | Microsoft Learn |
+| cost threshold for parallelism | Kostenschwellenwert für Parallelität | Microsoft Learn |
+| tile (dashboard), collation, rebuild | Kachel, Kollation, neu erstellen | |
+| terminations | Beendigungen | not „Abbrüche“ (cancellations) |
+| a statement handle (`support.handle.*`) | nominative: „eine Leseabfrage auf {table}“, „ein UPDATE auf {table}“ | |
+| `{window}` | accusative („die letzten 7 Tage“): „über {window}“, „umfasst {window}“ | |
+| slow query log in a compound | Slow-Query-Log-Datei | standalone: Slow Query Log |
 
 ## UI verbs
 
