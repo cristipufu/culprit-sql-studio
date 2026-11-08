@@ -3,10 +3,8 @@ use crate::{
     connect::sql_state,
     rows::{iso, query_one, quote_ident},
 };
-use culprit_core::{Capability, Engine, MissingCapability, Platform, Result, ServerInfo};
+use culprit_core::{Capability, Engine, MissingCapability, Platform, Result, ServerInfo, t};
 use tokio_postgres::Client;
-
-const PG_STAT_STATEMENTS_FIX: &str = "Add pg_stat_statements to shared_preload_libraries, restart, then run CREATE EXTENSION pg_stat_statements; in this database.";
 
 /// What the probe learned about the server, shared by every collector.
 pub struct Probe {
@@ -72,17 +70,17 @@ impl Probe {
             StatementsAccess::Usable { .. } => capabilities.push(Capability::PgStatStatements),
             StatementsAccess::NotInstalled => missing.push(MissingCapability {
                 capability: Capability::PgStatStatements,
-                reason: "The pg_stat_statements extension is not installed in this database, so Culprit cannot see which queries use the most time.".into(),
+                reason: t!("provider.postgres.capability.statements.not_installed"),
                 fix: Some(self.statements_fix()),
             }),
             StatementsAccess::NotLoaded(message) => missing.push(MissingCapability {
                 capability: Capability::PgStatStatements,
-                reason: format!("pg_stat_statements is installed but not loaded by the server ({message})."),
+                reason: t!("provider.postgres.capability.statements.not_loaded", error = message),
                 fix: Some(self.statements_fix()),
             }),
             StatementsAccess::Failed(message) => missing.push(MissingCapability {
                 capability: Capability::PgStatStatements,
-                reason: format!("Reading pg_stat_statements failed: {message}"),
+                reason: t!("provider.postgres.capability.statements.failed", error = message),
                 fix: Some(format!("GRANT pg_read_all_stats TO {};", quote_ident(&self.user))),
             }),
         }
@@ -93,19 +91,16 @@ impl Probe {
             } else {
                 missing.push(MissingCapability {
                     capability: Capability::QueryPlans,
-                    reason: "Plans for the heaviest queries come from pg_stat_statements, which is not available."
-                        .into(),
+                    reason: t!("provider.postgres.capability.plans.no_statements"),
                     fix: Some(self.statements_fix()),
                 });
             }
         } else {
-            let reason = format!(
-                "Planning the heaviest queries without running them needs PostgreSQL 12 or newer. This server runs {}.",
-                self.version.split_whitespace().next().unwrap_or(&self.version)
+            let reason = t!(
+                "provider.postgres.capability.generic_plans.old_version",
+                version = self.version.split_whitespace().next().unwrap_or(&self.version)
             );
-            let fix = Some(
-                "Upgrade to PostgreSQL 12 or newer, or explain a query with sample values in the editor.".to_string(),
-            );
+            let fix = Some(t!("provider.postgres.capability.generic_plans.upgrade"));
             missing.push(MissingCapability {
                 capability: Capability::GenericPlans,
                 reason: reason.clone(),
@@ -118,7 +113,7 @@ impl Probe {
         } else {
             missing.push(MissingCapability {
                 capability: Capability::WaitStats,
-                reason: "Other sessions' state and waits are hidden from this login.".into(),
+                reason: t!("provider.postgres.capability.waits.hidden"),
                 fix: Some(format!("GRANT pg_monitor TO {};", quote_ident(&self.user))),
             });
         }
@@ -140,32 +135,29 @@ impl Probe {
 
     fn statements_fix(&self) -> String {
         if self.preloaded == Some(true) {
-            let who = if self.can_create_extension {
-                String::new()
+            let create = if self.can_create_extension {
+                t!("provider.postgres.capability.statements.create")
             } else {
-                " as a user who can create extensions (an admin role, or the database owner)".to_string()
+                t!("provider.postgres.capability.statements.create_as_admin")
             };
-            return format!(
-                "Run CREATE EXTENSION pg_stat_statements; in this database{who}. The server already loads it, so no restart is \
-                 needed and the statistics it has been recording since the last restart appear right away."
-            );
+            return format!("{create} {}", t!("provider.postgres.capability.statements.preloaded"));
         }
         if self.preloaded.is_none() {
-            return "This login cannot read shared_preload_libraries. Ask an administrator to verify whether pg_stat_statements is already loaded. If loaded, creating its extension in this database exposes its statistics without a restart; otherwise configure the preload and restart first.".into();
+            return t!("provider.postgres.capability.statements.preload_unknown");
         }
         self.platform
             .and_then(|p| p.preload_library("pg_stat_statements"))
-            .unwrap_or_else(|| PG_STAT_STATEMENTS_FIX.into())
+            .unwrap_or_else(|| t!("provider.postgres.capability.statements.restart"))
     }
 }
 
 pub async fn probe(client: &Client, spec_host: &str) -> Result<Probe> {
     let build = query_one(client, "SELECT version() AS build")
         .await?
-        .ok_or_else(|| culprit_core::Error::internal("Probe returned no server version"))?;
+        .ok_or_else(|| culprit_core::Error::internal(t!("provider.postgres.error.probe_no_version")))?;
     if build.string("build").contains("-YB-") {
-        return Err(culprit_core::Error::invalid("This server is YugabyteDB and requires its dedicated provider")
-            .with_hint("Choose YugabyteDB for this connection, or use --engine yugabyte. YSQL's compatible wire protocol does not provide PostgreSQL heap statistics."));
+        return Err(culprit_core::Error::invalid(t!("provider.postgres.error.yugabyte"))
+            .with_hint(t!("provider.postgres.error.yugabyte_hint")));
     }
     let sql = format!(
         "SELECT current_setting('server_version_num') AS version_num,
@@ -196,7 +188,9 @@ pub async fn probe(client: &Client, spec_host: &str) -> Result<Probe> {
         elevated = crate::trust::elevated_sql(),
         now = iso("now()"),
     );
-    let row = query_one(client, &sql).await?.ok_or_else(|| culprit_core::Error::internal("Probe returned nothing"))?;
+    let row = query_one(client, &sql)
+        .await?
+        .ok_or_else(|| culprit_core::Error::internal(t!("provider.postgres.error.probe_empty")))?;
     let version_num = row.number("version_num").unwrap_or(0.0) as u32;
     let platform = detect_platform(&row.string("cloud_settings"), row.flag("aurora"), spec_host);
     let mut probe = Probe {

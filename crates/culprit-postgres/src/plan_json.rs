@@ -1,4 +1,6 @@
-use culprit_core::{Engine, Error, NodeKind, NodeRuntime, Plan, PlanKind, PlanNode, PlanWarning, Properties, Result};
+use culprit_core::{
+    Engine, Error, NodeKind, NodeRuntime, Plan, PlanKind, PlanNode, PlanWarning, Properties, Result, t,
+};
 use serde_json::{Map, Value};
 
 pub use crate::tables::parameter_guess;
@@ -21,7 +23,7 @@ const CONSUMED: &[&str] = &[
 /// Parse `EXPLAIN (FORMAT JSON)` output into Culprit's plan model.
 pub fn parse(json: &str, kind: PlanKind, statement: Option<&str>) -> Result<Plan> {
     let value: Value = serde_json::from_str(json)
-        .map_err(|e| Error::internal(format!("PostgreSQL returned a plan Culprit cannot read: {e}")))?;
+        .map_err(|e| Error::internal(t!("provider.postgres.plan.unreadable", error = e.to_string())))?;
     let mut plan = from_value(&value, kind, statement)?;
     plan.raw = Some(json.into());
     Ok(plan)
@@ -35,11 +37,11 @@ pub fn from_value(value: &Value, kind: PlanKind, statement: Option<&str>) -> Res
         _ => None,
     }
     .and_then(Value::as_object)
-    .ok_or_else(|| Error::internal("PostgreSQL returned an empty plan"))?;
+    .ok_or_else(|| Error::internal(t!("provider.postgres.plan.empty")))?;
     let root = top
         .get("Plan")
         .and_then(Value::as_object)
-        .ok_or_else(|| Error::internal("PostgreSQL plan has no root node"))?;
+        .ok_or_else(|| Error::internal(t!("provider.postgres.plan.no_root")))?;
 
     let mut next_id = 0;
     let (mut root, _) = node(root, &mut next_id, 1.0, None);
@@ -430,9 +432,9 @@ fn prop_text(value: &Value) -> Option<String> {
 /// only when it runs. Without a value the planner still estimates `= $n` from statistics (as an average value of the
 /// column); only a range or pattern on `$n` (a fixed share) and `ANY($n)` (an array of guessed length) are guesses.
 pub fn mark_generic(plan: &mut culprit_core::Plan) {
-    let reason = "Planned without parameter values: = $n is estimated from statistics as an average value of the column, a range or pattern on $n by a fixed guess, ANY($n) by a guessed array length; partitions are pruned only when it runs.";
-    plan.facts_mut().generic_plan_reason = Some(reason.into());
-    plan.props.insert("Generic Plan".into(), reason.into());
+    let reason = t!("provider.postgres.plan.generic");
+    plan.facts_mut().generic_plan_reason = Some(reason.clone());
+    plan.props.insert("Generic Plan".into(), reason);
 }
 
 /// Plan prop that says the plan is of the text pg_stat_statements kept, not of the statement the application sent.
@@ -452,9 +454,7 @@ pub(crate) fn mark_planned_text(plan: &mut culprit_core::Plan, statement_id: &st
     plan.props.remove("Query Identifier");
     plan.props.insert(
         PLANNED_TEXT.into(),
-        format!(
-            "Planned from the text pg_stat_statements keeps, in which the application's constants are $n placeholders like its parameters, each typed as PostgreSQL infers it: PostgreSQL identifies what it planned as query {planned}, not as this statement ({statement_id}). Constants the application wrote into the statement are unknown values here, so its own runs, which have them, can be planned differently."
-        ),
+        t!("provider.postgres.plan.planned_text", planned = planned, statement = statement_id),
     );
 }
 

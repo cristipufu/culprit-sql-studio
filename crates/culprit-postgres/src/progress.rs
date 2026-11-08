@@ -1,15 +1,16 @@
 //! A running statement on another backend: pg_stat_activity for state, waits and elapsed time, the pg_stat_progress_*
 //! views for the commands that report progress, and the statement's estimated plan (EXPLAIN, never ANALYZE).
 
-use culprit_core::{Engine, Error, QueryProgress, Result, session_number};
+use culprit_core::format::digits;
+use culprit_core::{Engine, Error, QueryProgress, Result, session_number, t};
 
 use crate::connect::{Connector, INTERACTIVE};
 use crate::rows::{Row, iso, query_one};
 
 /// Postgres doesn't count rows per operator while a query runs; only these commands report how far along they are.
-pub(crate) const NO_OPERATOR_PROGRESS: &str = "PostgreSQL doesn't report how far a running query has got, operator by \
-operator. Culprit shows the plan PostgreSQL estimated for it and how long it has been running. CREATE INDEX, VACUUM, \
-ANALYZE, CLUSTER and COPY report their own progress.";
+fn no_operator_progress() -> String {
+    t!("provider.postgres.progress.no_operator_progress")
+}
 
 struct Phase {
     view: &'static str,
@@ -81,14 +82,17 @@ const PHASES: &[Phase] = &[
 /// A COPY's step: its command and kind ("COPY FROM FILE"), and the rows it has processed so far.
 fn copy_text(command: Option<String>, kind: Option<String>, rows: Option<f64>) -> String {
     let what = format!("{} {}", command.unwrap_or_else(|| "COPY".into()), kind.unwrap_or_default());
-    let rows = rows.map(|t| format!(" · {} rows so far", t as u64)).unwrap_or_default();
-    format!("{}{rows}", what.trim())
+    let step = what.trim();
+    match rows.map(|rows| rows as u64) {
+        Some(n) => t!("provider.postgres.progress.copy_rows", step = step, n = n, count = digits(n.to_string())),
+        None => step.to_string(),
+    }
 }
 
 /// State, waits, elapsed time and command progress. The caller adds the estimated plan when asked for it.
 pub(crate) async fn query_progress(connector: &Connector, session: &str) -> Result<QueryProgress> {
-    let pid =
-        i32::try_from(session_number(session)?).map_err(|_| Error::invalid(format!("'{session}' is not a pid")))?;
+    let pid = i32::try_from(session_number(session)?)
+        .map_err(|_| Error::invalid(t!("provider.postgres.error.not_a_pid", session = session)))?;
     let client = connector.connect(INTERACTIVE).await?;
     let now = query_one(&client, &format!("SELECT {} AS now", iso("now()")))
         .await?
@@ -126,13 +130,12 @@ pub(crate) async fn query_progress(connector: &Connector, session: &str) -> Resu
             progress.phase = Some(text);
             progress.phase_percent = fraction;
             progress.percent = fraction;
-            progress.percent_basis =
-                fraction.map(|_| format!("How far through this step, from PostgreSQL ({})", phase.view));
+            progress.percent_basis = fraction.map(|_| t!("provider.postgres.progress.basis", view = phase.view));
             break;
         }
     }
     if progress.phase.is_none() {
-        progress.note = Some(NO_OPERATOR_PROGRESS.to_string());
+        progress.note = Some(no_operator_progress());
     }
     Ok(progress)
 }
@@ -152,7 +155,7 @@ mod tests {
         assert_eq!(copy_text(None, None, None), "COPY");
         assert_eq!(copy_text(Some("COPY TO".into()), None, Some(0.0)), "COPY TO · 0 rows so far");
         assert_eq!(
-            NO_OPERATOR_PROGRESS,
+            no_operator_progress(),
             "PostgreSQL doesn't report how far a running query has got, operator by operator. Culprit shows the plan \
              PostgreSQL estimated for it and how long it has been running. CREATE INDEX, VACUUM, ANALYZE, CLUSTER and \
              COPY report their own progress."

@@ -47,8 +47,8 @@ fn enrich(node: &mut PlanNode, v: &Value) {
         node.facts_mut().conditions.push(filter.into());
     }
     if let Some(guess) = culprit_postgres::plan_json::parameter_guess(node) {
-        node.facts_mut().selectivity_guess = Some(guess.into());
-        node.props.insert(culprit_core::GUESSED_SELECTIVITY.into(), guess.into());
+        node.facts_mut().selectivity_guess = Some(guess.clone());
+        node.props.insert(culprit_core::GUESSED_SELECTIVITY.into(), guess);
     }
     // No heap row/page enrichment or PostgreSQL buffer measurements can describe DocDB reads.
     node.table_rows = None;

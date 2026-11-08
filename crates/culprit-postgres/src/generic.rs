@@ -4,7 +4,7 @@
 //! `plan_cache_mode = force_generic_plan` and its EXECUTE is explained with NULLs: EXPLAIN without ANALYZE never runs
 //! it, and a forced generic plan doesn't look at the values.
 
-use culprit_core::{Error, ErrorCode, Result};
+use culprit_core::{Error, ErrorCode, Result, t};
 use tokio_postgres::Client;
 
 use crate::rows::{query, query_one, tagged};
@@ -19,11 +19,8 @@ const NAME: &str = "culprit_generic_plan";
 /// role's code is in reach.
 pub async fn plan_json(client: &Client, statement: &str, version_num: u32, elevated: bool) -> Result<String> {
     if version_num < MIN_VERSION {
-        return Err(Error::new(
-            ErrorCode::Unsupported,
-            "Planning statements with $n placeholders needs PostgreSQL 12 or newer",
-        )
-        .with_hint("Replace the placeholders with sample values to see its plan."));
+        return Err(Error::new(ErrorCode::Unsupported, t!("provider.postgres.error.generic_old_version"))
+            .with_hint(t!("provider.postgres.error.generic_old_version_hint")));
     }
     crate::trust::begin(client, elevated).await?;
     let planned = if version_num >= 160_000 {
@@ -69,5 +66,7 @@ async fn via_prepared(client: &Client, statement: &str) -> Result<String> {
 }
 
 fn first_plan(rows: Vec<crate::rows::Row>) -> Result<String> {
-    rows.first().and_then(|r| r.text("QUERY PLAN")).ok_or_else(|| Error::internal("EXPLAIN returned no plan"))
+    rows.first()
+        .and_then(|r| r.text("QUERY PLAN"))
+        .ok_or_else(|| Error::internal(t!("provider.postgres.error.no_plan")))
 }

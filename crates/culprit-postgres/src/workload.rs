@@ -4,8 +4,9 @@ use crate::{
     probe::{Probe, StatementsAccess},
     rows::{TAG, iso, query, query_one},
 };
+use culprit_core::format::digits;
 use culprit_core::{
-    Engine, PlanKind, QueryFamily, QueryStat, Result, Setting, SnapshotOptions, Spread, WaitStat, Workload,
+    Engine, PlanKind, QueryFamily, QueryStat, Result, Setting, SnapshotOptions, Spread, WaitStat, Workload, t,
 };
 use tokio_postgres::Client;
 
@@ -111,7 +112,7 @@ async fn collect_with_base(
                 .map(|ms| {
                     vec![WaitStat {
                         category: "IO".into(),
-                        wait_type: Some("data file reads and writes".into()),
+                        wait_type: Some(t!("provider.postgres.wait.data_files")),
                         wait_ms: ms,
                         tasks: None,
                     }]
@@ -359,9 +360,9 @@ async fn attach_plans(
             if track.eq_ignore_ascii_case("all") {
                 return Err(culprit_core::Error::new(
                     culprit_core::ErrorCode::PermissionDenied,
-                    "Not planned: before PostgreSQL 14, with pg_stat_statements.track = all, statements other roles' functions run on this login's behalf are recorded as its own, and this login can do more than read statistics.",
+                    t!("provider.postgres.plans.track_all"),
                 )
-                .with_hint("Set pg_stat_statements.track = top, or connect with a login that has only pg_monitor, and SELECT on the tables."));
+                .with_hint(t!("provider.postgres.plans.track_all_hint")));
             }
         }
     }
@@ -401,14 +402,15 @@ async fn attach_plans(
 fn plan_notes(planned: u32, attempted: u32, others: u32) -> Option<String> {
     let mut notes = Vec::new();
     if planned < attempted {
-        notes.push(format!(
-            "Planned {planned} of {attempted} heavy statements. The rest could not be planned: their recorded text is truncated, is not valid SQL once constants are replaced by placeholders, or uses objects this login cannot see."
+        notes.push(t!(
+            "provider.postgres.plans.some_failed",
+            planned = digits(planned.to_string()),
+            n = attempted,
+            attempted = digits(attempted.to_string())
         ));
     }
     if others > 0 {
-        notes.push(format!(
-            "{others} heavy statements other roles ran were left unplanned: this login can do more than read statistics, and planning a statement runs the functions it reaches with this login's privileges. A login with only pg_monitor, and SELECT on the tables, plans them."
-        ));
+        notes.push(t!("provider.postgres.plans.others_unplanned", n = others, count = digits(others.to_string())));
     }
     (!notes.is_empty()).then(|| notes.join(" "))
 }

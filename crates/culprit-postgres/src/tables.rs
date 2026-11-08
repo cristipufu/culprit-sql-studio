@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use culprit_core::{NodeKind, Plan, PlanNode};
+use culprit_core::{NodeKind, Plan, PlanNode, t};
 use tokio_postgres::Client;
 
 use crate::rows::tagged;
@@ -97,19 +97,25 @@ fn index_may_serve(filter: &str, indexed: Option<&[String]>) -> bool {
 }
 
 /// Said on a partition's scan under an Append in a generic plan, instead of rows read.
-const UNPRUNED: &str = "Listed because the plan has no parameter values: partitions are pruned only when it runs, so this one may never be read.";
+fn unpruned() -> String {
+    t!("provider.postgres.plan.unpruned")
+}
 /// Said on a scan whose filter compares a column with a parameter by a range, a pattern or ANY, instead of rows read,
 /// where an index of its table has a column the filter names.
-const GUESSED: &str = "Planned with a default selectivity for its parameter (a fixed share of the rows for a range or a pattern, 10 values for ANY): with a real value the planner may well use an index instead.";
+fn guessed_index() -> String {
+    t!("provider.postgres.plan.guessed_index")
+}
 /// Said on any other step whose condition compares a column with a parameter that way.
-const GUESSED_STEP: &str = "Planned with a default selectivity for its parameter (a fixed share of the rows for a range or a pattern, 10 values for ANY): the rows it expects, and the cost of the steps above it, rest on that guess, not on the column's statistics.";
+fn guessed_step() -> String {
+    t!("provider.postgres.plan.guessed")
+}
 
 /// PostgreSQL/YSQL parameter evidence, independent of heap storage and catalog I/O. The annotation makes no promise
 /// that an index exists or can serve the predicate; distributed hash keys need their own lookup evidence.
-pub fn parameter_guess(node: &PlanNode) -> Option<&'static str> {
+pub fn parameter_guess(node: &PlanNode) -> Option<String> {
     (node.act_rows.is_none()
         && [node.predicate.as_deref(), node.seek_predicate.as_deref()].into_iter().flatten().any(guessed_selectivity))
-    .then_some(GUESSED_STEP)
+    .then(guessed_step)
 }
 
 fn apply(node: &mut PlanNode, sizes: &HashMap<String, Size>, under_append: bool) {
@@ -134,14 +140,16 @@ fn apply(node: &mut PlanNode, sizes: &HashMap<String, Size>, under_append: bool)
             && node.act_rows.is_none()
         {
             if under_append && size.partition {
-                node.facts_mut().partition_pruning = Some(UNPRUNED.into());
-                node.props.insert(culprit_core::NOT_READ_IN_FULL.into(), UNPRUNED.into());
+                let text = unpruned();
+                node.facts_mut().partition_pruning = Some(text.clone());
+                node.props.insert(culprit_core::NOT_READ_IN_FULL.into(), text);
             } else if guessed {
                 // A note never promises an index the table doesn't have.
                 let filter = node.predicate.as_deref().unwrap_or_default();
-                let text = if index_may_serve(filter, size.indexed.as_deref()) { GUESSED } else { GUESSED_STEP };
-                node.facts_mut().selectivity_guess = Some(text.into());
-                node.props.insert(culprit_core::GUESSED_SELECTIVITY.into(), text.into());
+                let text =
+                    if index_may_serve(filter, size.indexed.as_deref()) { guessed_index() } else { guessed_step() };
+                node.facts_mut().selectivity_guess = Some(text.clone());
+                node.props.insert(culprit_core::GUESSED_SELECTIVITY.into(), text);
             } else if let Some(rows) = size.rows {
                 // A total over its runs: a scan on a nested loop's inner side reads the table once per outer row.
                 node.rows_read = Some(rows * node.runs());
@@ -149,8 +157,9 @@ fn apply(node: &mut PlanNode, sizes: &HashMap<String, Size>, under_append: bool)
         }
     }
     if guessed && node.facts().selectivity_guess.is_none() {
-        node.facts_mut().selectivity_guess = Some(GUESSED_STEP.into());
-        node.props.insert(culprit_core::GUESSED_SELECTIVITY.into(), GUESSED_STEP.into());
+        let text = guessed_step();
+        node.facts_mut().selectivity_guess = Some(text.clone());
+        node.props.insert(culprit_core::GUESSED_SELECTIVITY.into(), text);
     }
     let append = under_append || node.op.ends_with("Append");
     for child in node.children.iter_mut() {

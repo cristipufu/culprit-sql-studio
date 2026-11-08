@@ -2,7 +2,10 @@
 //! the server log, which SQL can't read; Culprit shows the counter and explains pasted log lines.
 
 use culprit_core::deadlock::classify;
-use culprit_core::{Deadlock, DeadlockProcess, DeadlockReport, DeadlockResource, Engine, LockHolder, LockWait, Result};
+use culprit_core::format::digits;
+use culprit_core::{
+    Deadlock, DeadlockProcess, DeadlockReport, DeadlockResource, Engine, LockHolder, LockWait, Result, t,
+};
 use tokio_postgres::Client;
 
 use crate::rows::{iso, query, query_one};
@@ -68,16 +71,23 @@ pub(crate) async fn recent(client: &Client, since_hours: f64) -> Result<Deadlock
 
 /// What the deadlock counter says, where the details are, and (with `log_lock_waits` off) how to log waits too.
 fn counted_note(counted: Option<f64>, since: Option<&str>, log_waits: bool) -> String {
-    let when = since
-        .map(|s| format!(" since statistics were reset on {}", culprit_core::format::friendly_date_today(s)))
-        .unwrap_or_default();
-    format!(
-        "PostgreSQL counted {} deadlock{} in this database{when}. It writes the details (who waited for whom, and the \
-         statements) only to the server log, which SQL can't read: paste those log lines here to have them explained.{}",
-        counted.map(|c| format!("{c:.0}")).unwrap_or_else(|| "no".into()),
-        if counted == Some(1.0) { "" } else { "s" },
-        if log_waits { "" } else { " Turning on log_lock_waits also logs any lock wait longer than deadlock_timeout." }
-    )
+    let date = since.map(culprit_core::format::friendly_date_today);
+    let count = |n: f64| digits(format!("{n:.0}"));
+    let mut note = vec![
+        match (counted, date) {
+            (Some(n), None) => t!("provider.postgres.deadlocks.counted", n = n, count = count(n)),
+            (Some(n), Some(date)) => {
+                t!("provider.postgres.deadlocks.counted_since", n = n, count = count(n), date = date)
+            }
+            (None, None) => t!("provider.postgres.deadlocks.not_counted"),
+            (None, Some(date)) => t!("provider.postgres.deadlocks.not_counted_since", date = date),
+        },
+        t!("provider.postgres.deadlocks.details"),
+    ];
+    if !log_waits {
+        note.push(t!("provider.postgres.deadlocks.log_lock_waits"));
+    }
+    note.join(" ")
 }
 
 /// Deadlocks in pasted Postgres server log text (`ERROR: deadlock detected` with its DETAIL and CONTEXT lines).

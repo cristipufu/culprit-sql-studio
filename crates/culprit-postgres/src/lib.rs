@@ -27,7 +27,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use culprit_core::{
     ConnectionSpec, Engine, Environment, Error, ExplainMode, LiveState, Plan, PlanKind, Provider, Result, ResultSet,
-    ServerInfo, Session, SessionAction, Snapshot, SnapshotOptions, WaitStat,
+    ServerInfo, Session, SessionAction, Snapshot, SnapshotOptions, WaitStat, t,
 };
 use serde_json::Value;
 use tokio_postgres::Client;
@@ -58,7 +58,7 @@ impl PostgresProvider {
         if let Some(engine) = spec.engine
             && engine != Engine::Postgres
         {
-            return Err(Error::invalid(format!("This connection is for {engine}, not PostgreSQL")));
+            return Err(Error::invalid(t!("provider.postgres.error.other_engine", engine = engine.to_string())));
         }
         Ok(PostgresProvider { connector: Connector::new(spec)?, spec: spec.clone() })
     }
@@ -87,9 +87,11 @@ impl PostgresProvider {
             .await?
             .is_none_or(|row| row.text("backend_type").as_deref() != Some("client backend"))
         {
-            return Err(Error::new(culprit_core::ErrorCode::Unsupported,
-                "Virtual indexes require a direct YSQL backend; pooled workers cannot establish isolated planner memory")
-                .with_hint("Connect to the direct YSQL port to test virtual indexes. No virtual index was registered."));
+            return Err(Error::new(
+                culprit_core::ErrorCode::Unsupported,
+                t!("provider.yugabyte.error.pooled_virtual_indexes"),
+            )
+            .with_hint(t!("provider.yugabyte.error.pooled_virtual_indexes_hint")));
         }
         let hypopg_schema = query_one(
             &client,
@@ -98,11 +100,8 @@ impl PostgresProvider {
         .await?
         .map(|r| r.string("schema"));
         let Some(ext_schema) = hypopg_schema else {
-            return Err(Error::new(
-                culprit_core::ErrorCode::Unsupported,
-                "The `hypopg` extension is not installed on this database",
-            )
-            .with_hint("Install it with `CREATE EXTENSION hypopg;` to test virtual indexes with `--with-index`."));
+            return Err(Error::new(culprit_core::ErrorCode::Unsupported, t!("provider.postgres.error.no_hypopg"))
+                .with_hint(t!("provider.postgres.error.no_hypopg_hint")));
         };
         let q_schema = Engine::Postgres.dialect().quote(&ext_schema);
         let reset_sql = format!("SELECT {q_schema}.hypopg_reset()");
@@ -120,13 +119,14 @@ impl PostgresProvider {
                 for raw_idx in indexes {
                     let idx_stmt = single_statement(raw_idx)?;
                     if !culprit_core::sql::creates_index(idx_stmt, Engine::Postgres) {
-                        return Err(Error::invalid("`--with-index` expects a `CREATE INDEX` statement"));
+                        return Err(Error::invalid(t!("provider.postgres.error.not_create_index")));
                     }
                     let cleaned = strip_concurrently_keyword(idx_stmt);
                     let rows = client.query(&tagged(&create_sql), &[&cleaned]).await.map_err(map_error)?;
                     if rows.is_empty() {
-                        return Err(Error::invalid(format!(
-                            "`hypopg_create_index` did not create a virtual index for `{idx_stmt}`"
+                        return Err(Error::invalid(t!(
+                            "provider.postgres.error.no_virtual_index",
+                            statement = idx_stmt
                         )));
                     }
                     for row in rows {
@@ -218,9 +218,7 @@ impl PostgresProvider {
                 client.batch_execute(&tagged(begin)).await.map_err(map_error)?;
                 let result = async {
                     if parameter_count(&client, statement).await? > 0 {
-                        return Err(Error::invalid(
-                            "Explain Analyze runs the statement, so $n parameters need real values",
-                        ));
+                        return Err(Error::invalid(t!("provider.postgres.error.analyze_parameters")));
                     }
                     explain_text(
                         &client,
@@ -325,7 +323,10 @@ impl Provider for PostgresProvider {
                 if !trust::elevated(&client).await? {
                     return Ok(true);
                 }
-                let pid: i32 = session.trim().parse().map_err(|_| Error::invalid("A session is a process id"))?;
+                let pid: i32 = session
+                    .trim()
+                    .parse()
+                    .map_err(|_| Error::invalid(t!("provider.postgres.error.session_not_pid")))?;
                 trust::session_is_own(&client, pid).await
             };
             let planned = match own_or_plain.await {
@@ -340,8 +341,8 @@ impl Provider for PostgresProvider {
                 }
                 Err(e) => {
                     let base = progress.note.take().unwrap_or_default();
-                    progress.note =
-                        Some(format!("{base} Its plan couldn't be shown: {}", e.message).trim().to_string());
+                    let failed = t!("provider.postgres.progress.plan_failed", error = &e.message);
+                    progress.note = Some(format!("{base} {failed}").trim().to_string());
                 }
             }
         }
@@ -442,7 +443,7 @@ impl Provider for PostgresProvider {
         client.batch_execute(&tagged("SET default_transaction_read_only = off")).await.map_err(map_error)?;
         let mut result = run_in_transaction(&client, statement, limit, false).await?;
         result.elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
-        result.messages.push("Committed.".to_string());
+        result.messages.push(t!("provider.postgres.result.committed"));
         Ok(result)
     }
 }
@@ -469,7 +470,8 @@ fn single_statement_error(error: tokio_postgres::Error) -> Error {
     if sql_state(&error) == Some("42601")
         && error.as_db_error().is_some_and(|d| d.message().contains("multiple commands"))
     {
-        return Error::invalid("Run one statement at a time").with_hint("Remove everything after the first statement.");
+        return Error::invalid(t!("provider.postgres.error.one_statement"))
+            .with_hint(t!("provider.postgres.error.one_statement_hint"));
     }
     map_error(error)
 }
@@ -481,8 +483,10 @@ async fn server_version(client: &Client) -> Result<u32> {
 
 async fn explain_text(client: &Client, sql: &str, kind: PlanKind, statement: &str) -> Result<Plan> {
     let rows = query(client, sql).await?;
-    let json =
-        rows.first().and_then(|r| r.text("QUERY PLAN")).ok_or_else(|| Error::internal("EXPLAIN returned no plan"))?;
+    let json = rows
+        .first()
+        .and_then(|r| r.text("QUERY PLAN"))
+        .ok_or_else(|| Error::internal(t!("provider.postgres.error.no_plan")))?;
     plan_json::parse(&json, kind, Some(statement))
 }
 
@@ -490,7 +494,8 @@ async fn explain_text(client: &Client, sql: &str, kind: PlanKind, statement: &st
 async fn run_in_transaction(client: &Client, statement: &str, limit: usize, cursor: bool) -> Result<ResultSet> {
     let prepared = client.prepare(&tagged(statement)).await.map_err(single_statement_error)?;
     if !prepared.params().is_empty() {
-        return Err(Error::invalid("This statement has $n parameters").with_hint("Replace them with values to run it."));
+        return Err(Error::invalid(t!("provider.postgres.error.parameters"))
+            .with_hint(t!("provider.postgres.error.parameters_hint")));
     }
     let columns: Vec<String> = prepared.columns().iter().map(|c| c.name().to_string()).collect();
     let types: Vec<Type> = prepared.columns().iter().map(|c| c.type_().clone()).collect();

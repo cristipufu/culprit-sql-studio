@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use culprit_core::{
     ConstraintIssue, ConstraintKind, Coverage, FileIo, FileKind, Pressure, QueryStat, Replica, ReplicaRole, Setting,
-    Signal, SignalScope, SignalUnit, Snapshot, TableStorage,
+    Signal, SignalScope, SignalUnit, Snapshot, TableStorage, t,
 };
 use tokio_postgres::Client;
 
@@ -520,30 +520,25 @@ fn session_signals(
         out.push(
             Signal::new(
                 culprit_core::signal_id::NEW_CONNECTIONS,
-                "New connections",
+                &t!("provider.postgres.signal.new_connections"),
                 rate,
                 SignalUnit::PerSecond,
                 SignalScope::SinceStartup,
             )
-            .graded("under 1 a second: pooled connections are opened once", 2.0, 10.0, true),
+            .graded(&t!("provider.postgres.signal.new_connections_healthy"), 2.0, 10.0, true),
         );
     }
     if let Some(ms) = session_ms {
         let length = Signal::new(
             culprit_core::signal_id::SESSION_LENGTH,
-            "Average session length",
+            &t!("provider.postgres.signal.session_length"),
             ms / sessions / 1000.0,
             SignalUnit::Seconds,
             SignalScope::SinceStartup,
         );
         // Short sessions only matter when there are many of them.
         out.push(if rate.is_some_and(|r| r >= 1.0) {
-            length.graded(
-                "minutes: a session that lasts under a second pays more to connect than to work",
-                60.0,
-                1.0,
-                false,
-            )
+            length.graded(&t!("provider.postgres.signal.session_length_healthy"), 60.0, 1.0, false)
         } else {
             length
         });
@@ -552,12 +547,12 @@ fn session_signals(
         out.push(
             Signal::new(
                 culprit_core::signal_id::SESSIONS_ABANDONED,
-                "Sessions the client abandoned",
+                &t!("provider.postgres.signal.sessions_abandoned"),
                 abandoned / sessions * 100.0,
                 SignalUnit::Percent,
                 SignalScope::SinceStartup,
             )
-            .graded("under 1%: clients close their connections", 1.0, 10.0, true),
+            .graded(&t!("provider.postgres.signal.sessions_abandoned_healthy"), 1.0, 10.0, true),
         );
     }
     out

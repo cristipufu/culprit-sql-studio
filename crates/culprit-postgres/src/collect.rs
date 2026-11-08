@@ -9,7 +9,7 @@ use crate::{
 };
 use culprit_core::{
     Capability, ConnectionSpec, Coverage, Engine, Result, SNAPSHOT_FORMAT, Setting, Snapshot, SnapshotOptions,
-    StatisticsInfo,
+    StatisticsInfo, t,
 };
 use std::time::Instant;
 
@@ -72,7 +72,7 @@ pub async fn snapshot(
             coverage.recorded(
                 &sources::STATEMENTS,
                 culprit_core::SourceState::Unavailable,
-                Some("Statement statistics are not enabled or available on this database.".into()),
+                Some(t!("provider.postgres.coverage.statements_unavailable")),
             );
             None
         }
@@ -84,10 +84,7 @@ pub async fn snapshot(
     if !probe.privileged && probe.statements_usable() {
         coverage.partial(
             &sources::STATEMENTS,
-            format!(
-                "Statements run by other roles show as <insufficient privilege>. GRANT pg_read_all_stats TO {}; to see them.",
-                quote_ident(&probe.user)
-            ),
+            t!("provider.postgres.coverage.statements_hidden", user = quote_ident(&probe.user)),
         );
     }
 
@@ -132,7 +129,7 @@ pub async fn snapshot(
     // PostgreSQL keeps no wait history: time by category comes from statement and WAL timing, when they are on.
     let waits_out = crate::pressure::history_waits(&primary, &probe, statements_ms, statements_io_ms).await;
     if statements_io_ms > statements_ms {
-        coverage.note("waits", "Recorded I/O time exceeds statement execution time; parallel or differently covered timing cannot be shown as exclusive shares of execution time. Per-query I/O totals remain available.");
+        coverage.note("waits", t!("provider.postgres.coverage.io_exceeds_execution"));
     }
 
     if waits_out.is_empty() {

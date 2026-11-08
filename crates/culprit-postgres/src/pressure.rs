@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use culprit_core::{
     CleanupHolder, Coverage, Engine, OpenTransaction, Pressure, Result, Signal, SignalScope, SignalUnit, WaitSample,
-    WaitStat,
+    WaitStat, t,
 };
 use tokio_postgres::Client;
 
@@ -47,14 +47,14 @@ fn breakdown(statements_ms: f64, statements_io_ms: f64) -> Vec<WaitStat> {
     let other = (statements_ms - statements_io_ms).max(0.0);
     let mut out = vec![WaitStat {
         category: "IO".into(),
-        wait_type: Some("data file reads and writes".into()),
+        wait_type: Some(t!("provider.postgres.wait.data_files")),
         wait_ms: statements_io_ms,
         tasks: None,
     }];
     if other > 0.0 {
         out.push(WaitStat {
             category: "Other".into(),
-            wait_type: Some("CPU, locks and untimed waits".into()),
+            wait_type: Some(t!("provider.postgres.wait.other")),
             wait_ms: other,
             tasks: None,
         });
@@ -91,12 +91,12 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
                 Signal::new(
                     culprit_core::signal_id::CACHE_HIT,
                     // shared_buffers only: a read the operating system's cache serves counts as a miss here.
-                    "Reads served from shared_buffers",
+                    &t!("provider.postgres.signal.cache_hit"),
                     hit / (hit + read) * 100.0,
                     SignalUnit::Percent,
                     SignalScope::SinceStartup,
                 )
-                .graded("above 99% is healthy for most workloads", 99.0, 95.0, false),
+                .graded(&t!("provider.postgres.signal.cache_hit_healthy"), 99.0, 95.0, false),
             );
         }
         let temp = r.number("temp_bytes").unwrap_or(0.0);
@@ -105,13 +105,13 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
             Some(h) if h >= 1.0 => p.signals.push(
                 Signal::new(
                     culprit_core::signal_id::TEMP_BYTES,
-                    "Temporary files written, per hour",
+                    &t!("provider.postgres.signal.temp_per_hour"),
                     temp / h,
                     SignalUnit::Bytes,
                     SignalScope::SinceStartup,
                 )
                 .graded(
-                    "near zero an hour: queries that sort or hash in memory",
+                    &t!("provider.postgres.signal.temp_per_hour_healthy"),
                     100.0 * 1024.0 * 1024.0,
                     1024.0 * 1024.0 * 1024.0,
                     true,
@@ -120,14 +120,14 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
             // Under an hour, or since an unknown time: the total, which no rate threshold applies to.
             Some(_) => p.signals.push(Signal::new(
                 culprit_core::signal_id::TEMP_BYTES,
-                "Temporary files written since reset",
+                &t!("provider.postgres.signal.temp_since_reset"),
                 temp,
                 SignalUnit::Bytes,
                 SignalScope::SinceStartup,
             )),
             None => p.signals.push(Signal::new(
                 culprit_core::signal_id::TEMP_BYTES,
-                "Temporary files written since statistics began",
+                &t!("provider.postgres.signal.temp_since_began"),
                 temp,
                 SignalUnit::Bytes,
                 SignalScope::SinceStartup,
@@ -136,7 +136,7 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
         if let Some(h) = hours {
             p.signals.push(Signal::new(
                 "commits",
-                "Commits",
+                &t!("provider.postgres.signal.commits"),
                 r.number("xact_commit").unwrap_or(0.0) / (h * 3600.0),
                 SignalUnit::PerSecond,
                 SignalScope::SinceStartup,
@@ -147,23 +147,23 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
             p.signals.push(
                 Signal::new(
                     "rollbacks",
-                    "Transactions rolled back",
+                    &t!("provider.postgres.signal.rollbacks"),
                     rollbacks / (commits + rollbacks) * 100.0,
                     SignalUnit::Percent,
                     SignalScope::SinceStartup,
                 )
-                .graded("under 5% is healthy", 5.0, 20.0, true),
+                .graded(&t!("provider.postgres.signal.rollbacks_healthy"), 5.0, 20.0, true),
             );
         }
         p.signals.push(
             Signal::new(
                 "deadlocks",
-                "Deadlocks",
+                &t!("provider.postgres.signal.deadlocks"),
                 r.number("deadlocks").unwrap_or(0.0),
                 SignalUnit::Count,
                 SignalScope::SinceStartup,
             )
-            .graded("0 is healthy", 1.0, 10.0, true),
+            .graded(&t!("provider.postgres.signal.deadlocks_healthy"), 1.0, 10.0, true),
         );
     }
     let checkpoints_sql = if probe.version_num >= 170_000 {
@@ -176,7 +176,7 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
         if timed + requested > 0.0 {
             p.signals.push(Signal::new(
                 culprit_core::signal_id::CHECKPOINTS,
-                "Checkpoints",
+                &t!("provider.postgres.signal.checkpoints"),
                 timed + requested,
                 SignalUnit::Count,
                 SignalScope::SinceStartup,
@@ -184,14 +184,13 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
             p.signals.push(
                 Signal::new(
                     culprit_core::signal_id::CHECKPOINTS_REQUESTED,
-                    "Checkpoints forced early",
+                    &t!("provider.postgres.signal.checkpoints_requested"),
                     requested / (timed + requested) * 100.0,
                     SignalUnit::Percent,
                     SignalScope::SinceStartup,
                 )
                 .graded(
-                    "under 10% is healthy; more usually means max_wal_size is too small (a manual CHECKPOINT, a \
-                         base backup or CREATE DATABASE also requests one)",
+                    &t!("provider.postgres.signal.checkpoints_requested_healthy"),
                     10.0,
                     30.0,
                     true,
@@ -205,7 +204,7 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
     {
         p.signals.push(Signal::new(
             "wal-buffers-full",
-            "WAL buffer full writes",
+            &t!("provider.postgres.signal.wal_buffers_full"),
             full,
             SignalUnit::Count,
             SignalScope::SinceStartup,
@@ -223,12 +222,12 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
         p.signals.push(
             Signal::new(
                 culprit_core::signal_id::CONNECTIONS,
-                "Connections in use",
+                &t!("provider.postgres.signal.connections"),
                 used / max * 100.0,
                 SignalUnit::Percent,
                 SignalScope::Now,
             )
-            .graded("under 80% of max_connections is healthy", 80.0, 90.0, true),
+            .graded(&t!("provider.postgres.signal.connections_healthy"), 80.0, 90.0, true),
         );
     }
     if probe.privileged
@@ -238,12 +237,17 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
             p.signals.push(
                 Signal::new(
                     culprit_core::signal_id::OLDEST_TRANSACTION,
-                    "Oldest transaction holding cleanup",
+                    &t!("provider.postgres.signal.oldest_transaction"),
                     t.seconds,
                     SignalUnit::Seconds,
                     SignalScope::Now,
                 )
-                .graded("seconds or minutes, not hours", 600.0, 1800.0, true),
+                .graded(
+                    &t!("provider.postgres.signal.oldest_transaction_healthy"),
+                    600.0,
+                    1800.0,
+                    true,
+                ),
             );
         }
         p.oldest_transaction = Some(t);
@@ -391,7 +395,11 @@ pub async fn sample(client: &Client, seconds: u32) -> Result<WaitSample> {
         let entry = by_category.entry(key).or_default();
         entry.0 += n;
         if *n > entry.2 {
-            entry.1 = if event_type.is_empty() { "Running".into() } else { format!("{event_type}: {event}") };
+            entry.1 = if event_type.is_empty() {
+                t!("provider.postgres.wait.running")
+            } else {
+                format!("{event_type}: {event}")
+            };
             entry.2 = *n;
         }
     }
@@ -409,7 +417,7 @@ pub async fn sample(client: &Client, seconds: u32) -> Result<WaitSample> {
     if let (Some(a), Some(b)) = (before, after) {
         signals.push(Signal::new(
             "commits",
-            "Transactions",
+            &t!("provider.postgres.signal.transactions"),
             ((b - a) / elapsed).max(0.0),
             SignalUnit::PerSecond,
             SignalScope::Sampled,
@@ -417,15 +425,13 @@ pub async fn sample(client: &Client, seconds: u32) -> Result<WaitSample> {
     }
     let mut notes = Vec::new();
     if busy == 0.0 {
-        notes.push("No session was running a statement at any of the samples: the database was idle.".into());
+        notes.push(t!("provider.postgres.sample.idle"));
     }
     Ok(WaitSample {
         engine: Engine::Postgres,
         taken_at,
         seconds: elapsed,
-        method: format!(
-            "This database's pg_stat_activity sampled every second for {seconds} s; observations are weighted over the measured sample duration"
-        ),
+        method: t!("provider.postgres.sample.method", seconds = seconds.to_string()),
         total_ms: busy / samples * elapsed * 1000.0,
         categories,
         signals,

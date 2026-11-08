@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use culprit_core::{
     AuthKind, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, Engine, Error, ErrorCode, Result,
-    aws_iam_host_allowed, entra_host_allowed, is_local_host, transport_error,
+    aws_iam_host_allowed, entra_host_allowed, is_local_host, t, transport_error,
 };
 use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
@@ -61,7 +61,7 @@ impl Connector {
     pub fn new(spec: &ConnectionSpec) -> Result<Self> {
         spec.check_transport()?;
         if spec.host.trim().is_empty() {
-            return Err(Error::invalid("A database connection needs a host"));
+            return Err(Error::invalid(t!("provider.postgres.connect.no_host")));
         }
         let port = spec.port.unwrap_or(DEFAULT_PORT);
         let mut config = tokio_postgres::Config::new();
@@ -80,27 +80,21 @@ impl Connector {
             }
             AuthKind::Entra => {
                 if !entra_host_allowed(Engine::Postgres, &spec.host) {
-                    return Err(Error::new(
-                        ErrorCode::PermissionDenied,
-                        "Microsoft Entra ID tokens are only sent to Azure Database for PostgreSQL hosts",
-                    ));
+                    return Err(Error::new(ErrorCode::PermissionDenied, t!("provider.postgres.connect.entra_host")));
                 }
                 let token = spec.token.as_ref().ok_or_else(|| {
-                    Error::new(ErrorCode::AuthFailed, "No Microsoft Entra token was resolved for this connection")
-                        .with_hint("Sign in with `az login`, then try again.")
+                    Error::new(ErrorCode::AuthFailed, t!("provider.postgres.connect.no_entra_token"))
+                        .with_hint(t!("provider.postgres.connect.no_entra_token_hint"))
                 })?;
                 config.password(token.as_bytes());
             }
             AuthKind::AwsIam => {
                 if !aws_iam_host_allowed(&spec.host) {
-                    return Err(Error::new(
-                        ErrorCode::PermissionDenied,
-                        "AWS IAM authentication tokens are only sent to Amazon RDS hosts",
-                    ));
+                    return Err(Error::new(ErrorCode::PermissionDenied, t!("provider.postgres.connect.iam_host")));
                 }
                 let token = spec.token.as_ref().ok_or_else(|| {
-                    Error::new(ErrorCode::AuthFailed, "No AWS IAM token was resolved for this connection")
-                        .with_hint("Sign in with `aws login`, then try again.")
+                    Error::new(ErrorCode::AuthFailed, t!("provider.postgres.connect.no_iam_token"))
+                        .with_hint(t!("provider.postgres.connect.no_iam_token_hint"))
                 })?;
                 config.password(token.as_bytes());
             }
@@ -135,7 +129,10 @@ impl Connector {
         let (client, mut connection) = tokio::time::timeout(CONNECT_TIMEOUT, config.connect(self.tls.clone()))
             .await
             .map_err(|_| {
-                Error::new(ErrorCode::Timeout, format!("Timed out connecting to {}:{}", self.host, self.port))
+                Error::new(
+                    ErrorCode::Timeout,
+                    t!("provider.postgres.connect.timed_out", host = &self.host, port = self.port.to_string()),
+                )
             })?
             .map_err(|error| transport_error(endpoint.as_ref(), map_connect_error(error, &self.host, self.port)))?;
         let notices = Arc::new(AtomicU64::new(0));
@@ -187,22 +184,23 @@ fn tls_for(spec: &ConnectionSpec) -> Result<(SslMode, MakeRustlsConnect)> {
         "verify-ca" => (SslMode::Require, Verification::Chain),
         "verify-full" => (SslMode::Require, Verification::Full),
         other => {
-            return Err(Error::invalid(format!("Unknown sslmode `{other}`"))
-                .with_hint("Use one of disable, prefer, require, verify-ca, verify-full."));
+            return Err(Error::invalid(t!("provider.postgres.connect.unknown_sslmode", mode = other))
+                .with_hint(t!("provider.postgres.connect.unknown_sslmode_hint")));
         }
     };
     let builder = ClientConfig::builder_with_provider(provider.clone())
         .with_safe_default_protocol_versions()
-        .map_err(|e| Error::internal(format!("TLS setup failed: {e}")))?;
+        .map_err(|e| Error::internal(t!("provider.postgres.connect.tls_setup_failed", error = e.to_string())))?;
     let config = match verification {
         Verification::None => builder
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(AcceptAnyCertificate(provider)))
             .with_no_client_auth(),
         Verification::Chain => {
-            let inner = WebPkiServerVerifier::builder_with_provider(Arc::new(roots(root_cert)?), provider)
-                .build()
-                .map_err(|e| Error::internal(format!("TLS setup failed: {e}")))?;
+            let inner =
+                WebPkiServerVerifier::builder_with_provider(Arc::new(roots(root_cert)?), provider).build().map_err(
+                    |e| Error::internal(t!("provider.postgres.connect.tls_setup_failed", error = e.to_string())),
+                )?;
             builder.dangerous().with_custom_certificate_verifier(Arc::new(IgnoreHostname(inner))).with_no_client_auth()
         }
         Verification::Full => builder.with_root_certificates(roots(root_cert)?).with_no_client_auth(),
@@ -219,11 +217,14 @@ enum Verification {
 fn roots(extra_pem: Option<&str>) -> Result<RootCertStore> {
     let mut store = RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     let Some(path) = extra_pem else { return Ok(store) };
-    let certs = CertificateDer::pem_file_iter(path)
-        .map_err(|e| Error::invalid(format!("Cannot read sslrootcert `{path}`: {e}")))?;
+    let certs = CertificateDer::pem_file_iter(path).map_err(|e| {
+        Error::invalid(t!("provider.postgres.connect.unreadable_root_cert", path = path, error = e.to_string()))
+    })?;
+    let invalid =
+        |e: String| Error::invalid(t!("provider.postgres.connect.invalid_certificate", path = path, error = e));
     for cert in certs {
-        let cert = cert.map_err(|e| Error::invalid(format!("Invalid certificate in `{path}`: {e}")))?;
-        store.add(cert).map_err(|e| Error::invalid(format!("Invalid certificate in `{path}`: {e}")))?;
+        let cert = cert.map_err(|e| invalid(e.to_string()))?;
+        store.add(cert).map_err(|e| invalid(e.to_string()))?;
     }
     Ok(store)
 }
@@ -339,50 +340,47 @@ fn map_connect_error(error: tokio_postgres::Error, host: &str, port: u16) -> Err
     }
     let message = full_message(&error);
     let lower = message.to_ascii_lowercase();
+    let port = port.to_string();
+    let timed_out = || {
+        Error::new(ErrorCode::Timeout, t!("provider.postgres.connect.timed_out", host = host, port = &port))
+            .with_hint(t!("provider.postgres.connect.timed_out_hint"))
+    };
     match io_kind(&error) {
         Some(std::io::ErrorKind::ConnectionRefused) => {
-            return Error::new(ErrorCode::ConnectionFailed, format!("Connection refused by {host}:{port}"))
-                .with_hint("Check that the database server is running and reachable on that host and port.");
+            return Error::new(
+                ErrorCode::ConnectionFailed,
+                t!("provider.postgres.connect.refused", host = host, port = &port),
+            )
+            .with_hint(t!("provider.postgres.connect.refused_hint"));
         }
-        Some(std::io::ErrorKind::TimedOut) => {
-            return Error::new(ErrorCode::Timeout, format!("Timed out connecting to {host}:{port}"))
-                .with_hint("Check the host, the port, and any firewall or VPN in between.");
-        }
+        Some(std::io::ErrorKind::TimedOut) => return timed_out(),
         _ => {}
     }
     if lower.contains("timeout") {
-        return Error::new(ErrorCode::Timeout, format!("Timed out connecting to {host}:{port}"))
-            .with_hint("Check the host, the port, and any firewall or VPN in between.");
+        return timed_out();
     }
     if lower.contains("invalid peer certificate") {
-        return Error::new(ErrorCode::ConnectionFailed, message).with_hint(
-            "The server's certificate is not trusted. Point `sslrootcert` at its CA bundle, or use sslmode=require to encrypt without verifying.",
-        );
+        return Error::new(ErrorCode::ConnectionFailed, message)
+            .with_hint(t!("provider.postgres.connect.untrusted_certificate_hint"));
     }
     if lower.contains("tls") || lower.contains("certificate") || lower.contains("ssl") {
         return Error::new(ErrorCode::ConnectionFailed, message)
-            .with_hint("TLS negotiation failed. Check `sslmode` (disable, prefer, require, verify-ca, verify-full).");
+            .with_hint(t!("provider.postgres.connect.tls_failed_hint"));
     }
     if lower.contains("failed to lookup")
         || lower.contains("nodename nor servname")
         || lower.contains("name or service not known")
     {
-        return Error::new(ErrorCode::ConnectionFailed, format!("Cannot resolve host `{host}`"))
-            .with_hint("Check the host name.");
+        return Error::new(ErrorCode::ConnectionFailed, t!("provider.postgres.connect.unresolved_host", host = host))
+            .with_hint(t!("provider.postgres.connect.unresolved_host_hint"));
     }
     if lower.contains("password missing") {
-        return Error::new(
-            ErrorCode::AuthFailed,
-            "The server asks for a password and none is saved for this connection",
-        )
-        .with_hint(
-            "Enter it when Culprit asks, or run `culprit conn set-password <name>`. It's kept in the OS keychain.",
-        );
+        return Error::new(ErrorCode::AuthFailed, t!("provider.postgres.connect.no_password"))
+            .with_hint(t!("provider.postgres.connect.no_password_hint"));
     }
     if lower.contains("authentication") {
-        return Error::new(ErrorCode::AuthFailed, message).with_hint(
-            "The server rejected the user name or password; set it again with `culprit conn set-password <name>`.",
-        );
+        return Error::new(ErrorCode::AuthFailed, message)
+            .with_hint(t!("provider.postgres.connect.rejected_password_hint"));
     }
     Error::new(ErrorCode::ConnectionFailed, message)
 }
@@ -391,7 +389,7 @@ pub fn map_error(error: tokio_postgres::Error) -> Error {
     let Some(db) = error.as_db_error() else {
         let message = full_message(&error);
         if error.is_closed() {
-            return Error::new(ErrorCode::ConnectionFailed, "The connection to the database server was closed");
+            return Error::new(ErrorCode::ConnectionFailed, t!("provider.postgres.connect.closed"));
         }
         return Error::new(ErrorCode::QueryFailed, message);
     };
@@ -401,20 +399,21 @@ pub fn map_error(error: tokio_postgres::Error) -> Error {
     }
     let code = db.code().code();
     match code {
-        "28P01" | "28000" => Error::new(ErrorCode::AuthFailed, message)
-            .with_hint("Check the user name and password (or token) for this connection."),
-        "42501" => Error::new(ErrorCode::PermissionDenied, message).with_hint(
-            "Grant the monitoring role: GRANT pg_read_all_stats TO <user>; (or GRANT pg_monitor TO <user>;)",
-        ),
-        "57014" => Error::new(ErrorCode::Timeout, message)
-            .with_hint("The statement hit Culprit's statement timeout and was cancelled."),
-        "55P03" => Error::new(ErrorCode::Timeout, message)
-            .with_hint("Another session holds a conflicting lock; Culprit gives up after 2 s instead of waiting."),
-        "3D000" => Error::new(ErrorCode::NotFound, message).with_hint("Check the database name."),
-        "53300" => Error::new(ErrorCode::ConnectionFailed, message)
-            .with_hint("The server has no free connection slots right now."),
-        "25006" => Error::new(ErrorCode::PermissionDenied, message)
-            .with_hint("Culprit runs statements in a read-only transaction."),
+        "28P01" | "28000" => {
+            Error::new(ErrorCode::AuthFailed, message).with_hint(t!("provider.postgres.error.auth_hint"))
+        }
+        "42501" => {
+            Error::new(ErrorCode::PermissionDenied, message).with_hint(t!("provider.postgres.error.permission_hint"))
+        }
+        "57014" => Error::new(ErrorCode::Timeout, message).with_hint(t!("provider.postgres.error.timeout_hint")),
+        "55P03" => Error::new(ErrorCode::Timeout, message).with_hint(t!("provider.postgres.error.lock_timeout_hint")),
+        "3D000" => Error::new(ErrorCode::NotFound, message).with_hint(t!("provider.postgres.error.database_hint")),
+        "53300" => {
+            Error::new(ErrorCode::ConnectionFailed, message).with_hint(t!("provider.postgres.error.no_slots_hint"))
+        }
+        "25006" => {
+            Error::new(ErrorCode::PermissionDenied, message).with_hint(t!("provider.postgres.error.read_only_hint"))
+        }
         "42601" | "42P01" | "42703" | "42883" | "42P02" => {
             let hint = db.hint().map(str::to_string);
             let e = Error::new(ErrorCode::InvalidInput, message);

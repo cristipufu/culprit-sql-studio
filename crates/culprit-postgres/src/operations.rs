@@ -4,7 +4,7 @@ use crate::{
     sources,
 };
 use culprit_core::operations::{FreezeAge, OperationalCounter, OperationalCounterKind as Kind, SequenceCapacity};
-use culprit_core::{Coverage, FileScope, Snapshot};
+use culprit_core::{Coverage, FileScope, Snapshot, t};
 use tokio_postgres::Client;
 
 pub async fn collect(client: &Client, version: u32, snapshot: &mut Snapshot) {
@@ -72,10 +72,7 @@ pub async fn collect(client: &Client, version: u32, snapshot: &mut Snapshot) {
             }
         }
     } else {
-        coverage.not_applicable(
-            &sources::SUBSCRIPTION_ERRORS,
-            "Subscription error counters require PostgreSQL 15 or later.",
-        );
+        coverage.not_applicable(&sources::SUBSCRIPTION_ERRORS, t!("provider.postgres.coverage.subscription_errors"));
     }
     let conflicts = format!("SELECT (c.confl_tablespace + c.confl_lock + c.confl_snapshot + c.confl_bufferpin + c.confl_deadlock)::float8 AS count, {} AS since
  FROM pg_stat_database_conflicts c JOIN pg_stat_database d ON d.datid = c.datid
@@ -166,10 +163,7 @@ pub async fn collect(client: &Client, version: u32, snapshot: &mut Snapshot) {
             }
         }
     } else {
-        coverage.not_applicable(
-            &sources::SEQUENCE_CAPACITY,
-            "Sequence allocation metadata requires PostgreSQL 10 or later.",
-        );
+        coverage.not_applicable(&sources::SEQUENCE_CAPACITY, t!("provider.postgres.coverage.sequences"));
     }
     coverage.append_to(snapshot);
 }

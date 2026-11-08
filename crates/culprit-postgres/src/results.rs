@@ -2,7 +2,9 @@
 //! or report a committed write before PostgreSQL finishes it.
 use culprit_core::{
     Result, ResultSet,
+    format::digits,
     limits::{MAX_RESULT_ROWS, ResultBudget, row_bytes},
+    t,
 };
 use futures_util::TryStreamExt;
 use tokio_postgres::{Client, SimpleQueryMessage, types::Type};
@@ -50,10 +52,12 @@ pub async fn collect(
         }
     }
     let count = if columns.is_empty() { affected } else { rows.len() as u64 };
-    let mut message = format!("{count} row{}", if count == 1 { "" } else { "s" });
-    if let Some(notice) = budget.notice() {
-        message.push_str(&format!(" ({notice})"));
-    }
+    let message = match budget.notice() {
+        Some(notice) => {
+            t!("provider.postgres.result.rows_limited", n = count, count = digits(count.to_string()), notice = notice)
+        }
+        None => t!("provider.postgres.result.rows", n = count, count = digits(count.to_string())),
+    };
     Ok(ResultSet { columns, rows, truncated: budget.truncated(), elapsed_ms: 0.0, messages: vec![message] })
 }
 

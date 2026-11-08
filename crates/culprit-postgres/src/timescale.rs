@@ -8,7 +8,7 @@ use crate::{
     sources,
 };
 use culprit_core::signals::{HypertableChunk, HypertableStorage};
-use culprit_core::{Coverage, Snapshot, TableStorage};
+use culprit_core::{Coverage, Snapshot, TableStorage, t};
 use std::collections::{BTreeMap, BTreeSet};
 use tokio_postgres::Client;
 
@@ -137,7 +137,7 @@ pub async fn collect(client: &Client, probe: &Probe, snapshot: &mut Snapshot) {
             stat.last_updated = table.last_analyze.clone();
         }
     }
-    coverage.note("timescale-indexes", "Hypertable index sizes include managed chunks. Logical parent index usage is not recorded by PostgreSQL's parent counters; Culprit leaves it unknown and does not call those indexes unused.");
+    coverage.note("timescale-indexes", t!("provider.postgres.coverage.hypertable_indexes"));
     coverage.append_to(snapshot);
 }
 
