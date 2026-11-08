@@ -166,9 +166,9 @@ fn environment_id(environment: Environment) -> String {
 /// "Estimated plan": the plan's kind as a label of its own.
 pub(crate) fn kind_label(kind: PlanKind) -> String {
     match kind {
-        PlanKind::Estimated => t!("engine.export.plan_kind.estimated"),
-        PlanKind::Generic => t!("engine.export.plan_kind.generic"),
-        PlanKind::Actual => t!("engine.export.plan_kind.actual"),
+        PlanKind::Estimated => t!("common.plan_kind.estimated"),
+        PlanKind::Generic => t!("common.plan_kind.generic"),
+        PlanKind::Actual => t!("common.plan_kind.actual"),
     }
 }
 

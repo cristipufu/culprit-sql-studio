@@ -31,7 +31,7 @@ pub(crate) struct LintSqlArgs {
 pub(crate) fn run(ws: &Workspace, args: LintSqlArgs, out: &Out) -> culprit_core::Result<u8> {
     let LintSqlArgs { connection, sql, files, write, report, fail_on } = args;
     if write && files.is_empty() {
-        return Err(Error::invalid("--write requires --file <PATH>"));
+        return Err(Error::invalid(culprit_core::t!("cli.lint.write_needs_file")));
     }
     let report_path = report.or_else(|| report_file(&connection));
     let mut base_report = load(ws, &connection, report_path.as_ref())?;
@@ -68,7 +68,7 @@ pub(crate) fn run(ws: &Workspace, args: LintSqlArgs, out: &Out) -> culprit_core:
             batches.push((Some(uri), sql_text, findings));
         }
     } else {
-        return Err(Error::invalid("Pass --sql <SQL> or --file <PATH>"));
+        return Err(Error::invalid(culprit_core::t!("cli.lint.pass_sql")));
     }
 
     let opportunities = all_findings.iter().filter(|f| f.is_actionable()).count() as u32;
@@ -92,13 +92,10 @@ pub(crate) fn run(ws: &Workspace, args: LintSqlArgs, out: &Out) -> culprit_core:
         }
     }
     let headline = if all_findings.is_empty() {
-        "No migration or DDL issues found.".to_string()
+        culprit_core::t!("cli.lint.none")
     } else {
-        format!(
-            "{} migration DDL {} found.",
-            all_findings.len(),
-            if all_findings.len() == 1 { "issue" } else { "issues" }
-        )
+        let n = all_findings.len();
+        culprit_core::t!("cli.lint.found", n = n, count = n.to_string())
     };
     base_report.summary = culprit_core::Summary {
         opportunities,
@@ -129,11 +126,11 @@ fn collect_sql_files(inputs: &[PathBuf]) -> culprit_core::Result<Vec<PathBuf>> {
         } else if path.is_dir() {
             collect_sql_dir(path, 0, &mut seen, &mut out)?;
         } else {
-            return Err(Error::invalid(format!("{}: no such file or directory", path.display())));
+            return Err(Error::invalid(culprit_core::t!("cli.lint.no_file", path = path.display().to_string())));
         }
     }
     if out.is_empty() {
-        return Err(Error::invalid("No .sql files found in the specified --file path(s)"));
+        return Err(Error::invalid(culprit_core::t!("cli.lint.no_sql_files")));
     }
     Ok(out)
 }

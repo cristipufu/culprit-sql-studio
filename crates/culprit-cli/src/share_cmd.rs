@@ -4,7 +4,7 @@ use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 
 use clap::Args;
-use culprit_core::{Error, Result, VerifyStatus};
+use culprit_core::{Error, Result, VerifyStatus, t};
 use culprit_engine::Workspace;
 use culprit_engine::export::{self, ExportFile, ExportFormat, ExportOptions};
 
@@ -70,7 +70,7 @@ pub fn digest(ws: &Workspace, args: DigestArgs, out: &Out) -> Result<u8> {
 /// you asked about is still present, so scripts and CI can gate on it.
 pub async fn verify(ws: &Workspace, args: VerifyArgs, out: &Out) -> Result<u8> {
     if out.format() == Format::Text {
-        eprintln!("Re-scanning {} to compare with its latest scan…", args.connection);
+        eprintln!("{}", t!("cli.verify.rescanning", connection = &args.connection));
     }
     let v = ws.verify(&args.connection, &args.ids).await?;
     match out.format() {
@@ -85,24 +85,24 @@ pub async fn verify(ws: &Workspace, args: VerifyArgs, out: &Out) -> Result<u8> {
             println!("{}", paint("1", &v.summary));
             for f in v.findings.iter().chain(v.new_findings.iter()) {
                 let (mark, code) = match f.status {
-                    VerifyStatus::Fixed => ("✓ fixed  ", "32"),
-                    VerifyStatus::StillPresent => ("• still  ", "33"),
-                    VerifyStatus::Unknown => ("? unknown", "2"),
-                    VerifyStatus::New => ("+ new    ", "36"),
+                    VerifyStatus::Fixed => (format!("✓ {:<7}", t!("cli.verify.fixed")), "32"),
+                    VerifyStatus::StillPresent => (format!("• {:<7}", t!("cli.verify.still")), "33"),
+                    VerifyStatus::Unknown => (format!("? {:<7}", t!("cli.verify.unknown")), "2"),
+                    VerifyStatus::New => (format!("+ {:<7}", t!("cli.verify.new")), "36"),
                 };
                 let impact = match (&f.before, &f.after) {
                     (Some(b), Some(a)) if b != a => format!("  {b} → {a}"),
-                    (Some(b), None) => format!("  was {b}"),
+                    (Some(b), None) => format!("  {}", t!("engine.export.verify.was", before = b)),
                     (_, Some(a)) => format!("  {a}"),
                     _ => String::new(),
                 };
-                println!("  {} {}{}", paint(code, mark), f.title, paint("2", &impact));
+                println!("  {} {}{}", paint(code, &mark), f.title, paint("2", &impact));
                 if let Some(note) = &f.note {
                     println!("              {}", paint("2", note));
                 }
             }
             let (before, after) = culprit_core::changes::range_times(&v.before_taken_at, &v.after_taken_at);
-            println!("{}", paint("2", &format!("Scans {before} → {after}")));
+            println!("{}", paint("2", &t!("cli.verify.scans", before = before, after = after)));
         }
     }
     let still = v
@@ -128,7 +128,7 @@ pub fn write_file(file: &ExportFile, path: Option<&PathBuf>) -> Result<u8> {
     match path {
         Some(path) => {
             std::fs::write(path, &file.contents).map_err(|e| Error::invalid(format!("{}: {e}", path.display())))?;
-            eprintln!("Wrote {}", path.display());
+            eprintln!("{}", t!("cli.wrote", path = path.display().to_string()));
         }
         None => {
             let mut stdout = std::io::stdout().lock();

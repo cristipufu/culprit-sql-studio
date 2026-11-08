@@ -4,7 +4,7 @@ use std::io::Read;
 use std::path::PathBuf;
 
 use clap::Args;
-use culprit_core::{BlockNode, Deadlock, DeadlockReport, Error, LiveState, Result, Session, format};
+use culprit_core::{BlockNode, Deadlock, DeadlockReport, Error, LiveState, Result, Session, format, t};
 use culprit_engine::{Workspace, deadlocks};
 use serde_json::{Value, json};
 
@@ -29,15 +29,15 @@ pub fn parse_since(text: &str) -> Result<f64> {
     let n: f64 = number
         .trim()
         .parse()
-        .map_err(|_| Error::invalid(format!("Can't read `{text}` as a time span")).with_hint("Use 90m, 24h or 7d."))?;
+        .map_err(|_| Error::invalid(t!("cli.since.unreadable", text = text)).with_hint(t!("cli.since.hint")))?;
     let hours = match unit {
         "" | "h" | "hour" | "hours" => n,
         "m" | "min" | "minutes" => n / 60.0,
         "d" | "day" | "days" => n * 24.0,
-        _ => return Err(Error::invalid(format!("Unknown time unit `{unit}`")).with_hint("Use 90m, 24h or 7d.")),
+        _ => return Err(Error::invalid(t!("cli.since.unit", unit = unit)).with_hint(t!("cli.since.hint"))),
     };
     if hours.is_nan() || hours <= 0.0 {
-        return Err(Error::invalid("The time span must be positive"));
+        return Err(Error::invalid(t!("cli.since.positive")));
     }
     Ok(hours)
 }
@@ -50,16 +50,14 @@ pub async fn blocking(ws: &Workspace, connection: &str, out: &Out) -> Result<u8>
     }
     let Some(blocking) = live.blocking.as_ref().filter(|b| !b.chains.is_empty()) else {
         if live.blocking_incomplete() {
-            println!("No blocking chain was established; lock visibility is incomplete.");
+            println!("{}", t!("cli.blocking.incomplete"));
             for note in &live.notes {
-                println!("Collection limitation: {note}");
+                println!("{}", t!("cli.live.limitation", note = note));
             }
             return Ok(0);
         }
-        println!(
-            "Nothing is blocked: {} active sessions, none waiting on another.",
-            live.sessions.iter().filter(|s| s.state != "idle").count()
-        );
+        let active = live.sessions.iter().filter(|s| s.state != "idle").count();
+        println!("{}", t!("cli.blocking.none", n = active, count = active.to_string()));
         return Ok(0);
     };
     for chain in &blocking.chains {
@@ -81,10 +79,10 @@ fn print_node(live: &LiveState, node: &BlockNode, out: &Out, depth: usize) {
     let state = match (depth, s) {
         (0, Some(s)) => s.state.clone(),
         (_, Some(s)) => match s.wait_ms.or(s.elapsed_ms) {
-            Some(ms) => format!("waits {}", format::duration(ms)),
-            None => "waiting".into(),
+            Some(ms) => t!("cli.blocking.waits", duration = format::duration(ms)),
+            None => t!("cli.blocking.waiting"),
         },
-        (_, None) => "not visible".into(),
+        (_, None) => t!("cli.blocking.not_visible"),
     };
     let lock = node.waits_for.clone().unwrap_or_default();
     let who = s
@@ -135,25 +133,20 @@ pub async fn deadlocks(ws: &Workspace, args: DeadlocksArgs, out: &Out) -> Result
             } else {
                 std::fs::read_to_string(path).map_err(|e| Error::invalid(format!("{}: {e}", path.display())))?
             };
-            DeadlockReport { deadlocks: deadlocks::parse_deadlock(&text)?, source: "file".into(), ..Default::default() }
+            DeadlockReport {
+                deadlocks: deadlocks::parse_deadlock(&text)?,
+                source: t!("cli.deadlocks.from_file"),
+                ..Default::default()
+            }
         }
         (None, Some(connection)) => ws.deadlocks(connection, parse_since(&args.since)?).await?,
-        (None, None) => return Err(Error::invalid("Name a connection, or pass --file with a saved deadlock")),
+        (None, None) => return Err(Error::invalid(t!("cli.deadlocks.name_one"))),
     };
     if out.format() == Format::Json {
         out.value(&serde_json::to_value(&report).unwrap_or(Value::Null));
         return Ok(0);
     }
-    let span = if report.since_hours > 0.0 {
-        format!(" in the last {}", hours_phrase(report.since_hours))
-    } else {
-        String::new()
-    };
-    match report.deadlocks.len() {
-        0 => println!("No deadlocks{span}{}.", source_phrase(&report)),
-        1 => println!("1 deadlock{span}{}.", source_phrase(&report)),
-        n => println!("{n} deadlocks{span}{}.", source_phrase(&report)),
-    }
+    println!("{}", count_line(report.deadlocks.len(), report.since_hours, &report.source));
     if let Some(note) = &report.note {
         println!("{}", out.dim(note));
     }
@@ -164,18 +157,32 @@ pub async fn deadlocks(ws: &Workspace, args: DeadlocksArgs, out: &Out) -> Result
     Ok(0)
 }
 
-fn hours_phrase(hours: f64) -> String {
-    if hours >= 48.0 && (hours / 24.0).fract() == 0.0 {
-        format!("{:.0} days", hours / 24.0)
-    } else if hours >= 1.0 {
-        format!("{hours:.0} hours")
-    } else {
-        format!("{:.0} minutes", hours * 60.0)
+/// "2 deadlocks in the last 24 hours (Query Store).": how many deadlocks were found, over what and where.
+fn count_line(n: usize, since_hours: f64, source: &str) -> String {
+    let count = n.to_string();
+    let window = (since_hours > 0.0).then(|| hours_phrase(since_hours));
+    match (window, source.is_empty()) {
+        (None, true) => t!("cli.deadlocks.count", n = n, count = count),
+        (None, false) => t!("cli.deadlocks.count_source", n = n, count = count, source = source),
+        (Some(window), true) => t!("cli.deadlocks.count_window", n = n, count = count, window = window),
+        (Some(window), false) => {
+            t!("cli.deadlocks.count_window_source", n = n, count = count, window = window, source = source)
+        }
     }
 }
 
-fn source_phrase(report: &DeadlockReport) -> String {
-    if report.source.is_empty() { String::new() } else { format!(" ({})", report.source) }
+/// "the last 24 hours": the period read, worded whole per unit. Whole days from two days, whole hours from one, minutes
+/// under that; not `culprit_core::last_span`, which rounds a period differently.
+fn hours_phrase(hours: f64) -> String {
+    if hours >= 48.0 && (hours / 24.0).fract() == 0.0 {
+        let days = hours / 24.0;
+        t!("cli.deadlocks.last_days", n = days, count = format!("{days:.0}"))
+    } else if hours >= 1.0 {
+        t!("cli.deadlocks.last_hours", n = hours.round(), count = format!("{hours:.0}"))
+    } else {
+        let minutes = hours * 60.0;
+        t!("cli.deadlocks.last_minutes", n = minutes.round(), count = format!("{minutes:.0}"))
+    }
 }
 
 fn print_deadlock(d: &Deadlock, out: &Out) {
@@ -183,12 +190,17 @@ fn print_deadlock(d: &Deadlock, out: &Out) {
     println!("{}{}", out.dim(&when), out.bold(&d.headline));
     println!("  {}", d.explanation);
     for p in &d.processes {
-        let tag = if p.victim { out.red("rolled back") } else { "           ".to_string() };
-        let who = [p.session.as_deref().map(|s| format!("session {s}")), p.application.clone(), p.login.clone()]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(" · ");
+        let rolled_back = t!("cli.deadlocks.rolled_back");
+        let tag = if p.victim { out.red(&rolled_back) } else { " ".repeat(rolled_back.chars().count()) };
+        let who = [
+            p.session.as_deref().map(|s| t!("cli.deadlocks.session", session = s)),
+            p.application.clone(),
+            p.login.clone(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
         let sql: String =
             p.statement.as_deref().map(|q| q.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default();
         let sql =
@@ -218,7 +230,15 @@ mod tests {
         assert_eq!(parse_since("6").unwrap(), 6.0);
         assert!(parse_since("soon").is_err());
         assert!(parse_since("0h").is_err());
-        assert_eq!(hours_phrase(24.0), "24 hours");
-        assert_eq!(hours_phrase(168.0), "7 days");
+        assert_eq!(hours_phrase(24.0), "the last 24 hours");
+        assert_eq!(hours_phrase(168.0), "the last 7 days");
+        // How many were found, over what and where, as it was said before its words moved into the catalog.
+        assert_eq!(count_line(0, 0.0, ""), "No deadlocks.");
+        assert_eq!(count_line(0, 0.0, "file"), "No deadlocks (file).");
+        assert_eq!(count_line(0, 24.0, "file"), "No deadlocks in the last 24 hours (file).");
+        assert_eq!(count_line(1, 168.0, "Query Store"), "1 deadlock in the last 7 days (Query Store).");
+        assert_eq!(count_line(2, 1.0, ""), "2 deadlocks in the last 1 hours.");
+        assert_eq!(count_line(2, 0.5, ""), "2 deadlocks in the last 30 minutes.");
+        assert_eq!(count_line(12, 50.0, ""), "12 deadlocks in the last 50 hours.");
     }
 }

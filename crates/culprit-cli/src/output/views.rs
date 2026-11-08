@@ -1,7 +1,7 @@
-use culprit_core::{LiveState, Plan, PlanNode, ResultSet, Severity, format};
+use culprit_core::{LiveState, Plan, PlanNode, ResultSet, Severity, format, t};
 use serde_json::{Value, json};
 
-use super::{BLUE, BOLD, DIM, Format, GREEN, Out, RED, YELLOW, bar, kb};
+use super::{BLUE, BOLD, DIM, Format, GREEN, Out, RED, YELLOW, bar, kb, plan_kind};
 
 impl Out {
     pub fn plan(&self, plan: &Plan) {
@@ -22,74 +22,66 @@ impl Out {
         let own = culprit_core::self_times(plan);
         match (&summary, &own) {
             (Some(s), Some(_)) => {
-                let mut parts = vec!["Actual plan".to_string()];
+                let mut parts = vec![plan_kind(culprit_core::PlanKind::Actual)];
                 if let Some(ms) = s.elapsed_ms {
-                    parts.push(format!("{} elapsed", format::duration(ms)));
+                    parts.push(t!("cli.plan.elapsed", duration = format::duration(ms)));
                 }
                 if let Some(ms) = s.cpu_ms {
-                    parts.push(format!("{} CPU", format::duration(ms)));
+                    parts.push(t!("cli.plan.cpu", duration = format::duration(ms)));
                 }
                 if let Some(reads) = s.logical_reads {
-                    parts.push(format!("{} reads", format::count(reads)));
+                    parts.push(t!("cli.plan.reads", n = reads, count = format::count(reads)));
                 }
-                parts.push("% = share of timed operator work".into());
+                parts.push(t!("cli.plan.share_of_time"));
                 println!("{}", self.paint(DIM, &parts.join(" · ")));
                 if let (Some(granted), Some(used)) = (s.memory_granted_kb.filter(|g| *g > 0.0), s.memory_used_kb) {
-                    println!("{}", self.paint(DIM, &format!("Memory: used {} of {} granted", kb(used), kb(granted))));
+                    println!("{}", self.paint(DIM, &t!("cli.plan.memory", used = kb(used), granted = kb(granted))));
                 }
                 if s.spilled {
-                    println!("{}", self.paint(YELLOW, "⚠ Ran out of memory and spilled to disk"));
+                    println!("{}", self.paint(YELLOW, &format!("⚠ {}", t!("cli.plan.spilled"))));
                 }
             }
             (Some(_), None) => {
-                let when = plan
-                    .facts()
-                    .last_run_at
-                    .as_deref()
-                    .map(|at| format!(" · last ran {}", at.replace('T', " ")))
-                    .unwrap_or_default();
-                println!(
-                    "{}",
-                    self.paint(
-                        DIM,
-                        &format!("Actual rows from the last run{when} · % = share of the estimated cost (no per-operator time was kept)")
-                    )
-                );
+                let line = match plan.facts().last_run_at.as_deref() {
+                    Some(at) => t!("cli.plan.last_run_at", at = at.replace('T', " ")),
+                    None => t!("cli.plan.last_run"),
+                };
+                println!("{}", self.paint(DIM, &line));
             }
-            _ if !plan.weighed() => println!(
-                "{}",
-                self.paint(DIM, &format!("{:?} plan · the access path only: no row or cost estimates", plan.kind))
-            ),
+            _ if !plan.weighed() => {
+                println!("{}", self.paint(DIM, &t!("cli.plan.access_path", kind = plan_kind(plan.kind))))
+            }
             _ => {
                 let facts = plan.facts();
-                let virt = if facts.virtual_indexes.is_empty() {
-                    String::new()
+                let cost = format::digits(format!("{:.2}", plan.total_cost));
+                let line = if facts.virtual_indexes.is_empty() {
+                    t!("cli.plan.total_cost", kind = plan_kind(plan.kind), cost = cost)
                 } else {
-                    format!(" · virtual indexes: {}", facts.virtual_indexes.join(", "))
+                    t!(
+                        "cli.plan.total_cost_virtual",
+                        kind = plan_kind(plan.kind),
+                        cost = cost,
+                        indexes = facts.virtual_indexes.join(", ")
+                    )
                 };
-                println!(
-                    "{}",
-                    self.paint(DIM, &format!("{:?} plan · total cost {:.2}{virt}", plan.kind, plan.total_cost))
-                );
+                println!("{}", self.paint(DIM, &line));
             }
         }
         if let Some(s) = &summary {
             if let Some(granted) = s.memory_granted_kb
                 && s.memory_used_kb.is_none()
             {
-                println!("Memory granted: {}; memory used was not recorded.", kb(granted));
+                println!("{}", t!("cli.plan.memory_granted", granted = kb(granted)));
             }
             if !s.triggers.is_empty() {
-                println!(
-                    "Trigger work (BEFORE timing may overlap its modifying operator; do not sum with operator time):"
-                );
-                for t in &s.triggers {
-                    println!(
-                        "  {}: {}{}",
-                        t.name,
-                        format::duration(t.time_ms),
-                        t.calls.map(|c| format!(" across {} calls", format::count(c))).unwrap_or_default()
-                    );
+                println!("{}", t!("cli.plan.triggers"));
+                for trigger in &s.triggers {
+                    let time = format::duration(trigger.time_ms);
+                    let line = match trigger.calls {
+                        Some(c) => t!("cli.plan.trigger_calls", time = time, n = c, count = format::count(c)),
+                        None => time,
+                    };
+                    println!("  {}: {line}", trigger.name);
                 }
             }
         }
@@ -109,42 +101,36 @@ impl Out {
     fn plan_insights(&self, found: &culprit_core::insights::PlanInsights, plan: &Plan) {
         println!();
         if found.items.is_empty() {
-            println!("{}", self.paint(BOLD, "No problems found in this plan."));
+            println!("{}", self.paint(BOLD, &t!("cli.plan.no_problems")));
         } else {
-            println!("{}", self.paint(BOLD, &format!("Insights ({})", found.items.len())));
+            println!("{}", self.paint(BOLD, &t!("cli.plan.insights", count = found.items.len().to_string())));
         }
         for i in &found.items {
             let badge = match i.severity {
-                Severity::High => self.paint(RED, "high  "),
-                Severity::Medium => self.paint(YELLOW, "medium"),
-                Severity::Low => self.paint(DIM, "low   "),
+                Severity::High => self.paint(RED, &format!("{:<6}", t!("cli.severity.high"))),
+                Severity::Medium => self.paint(YELLOW, &format!("{:<6}", t!("cli.severity.medium"))),
+                Severity::Low => self.paint(DIM, &format!("{:<6}", t!("cli.severity.low"))),
+            };
+            let operator = t!("cli.plan.operator", id = i.nodes.first().copied().unwrap_or(0).to_string());
+            // A share of the work only where the plan states one (`insights::stated_share`): not a rule's own weight,
+            // nor on a plan without costs, a cheap plan or a step whose cost rests on a guess.
+            let share = match culprit_core::insights::stated_share(plan, i) {
+                Some(share) => format!("{} · ", t!("cli.plan.share_of_work", share = format::percent(share))),
+                None => String::new(),
             };
             println!(
                 "\n{badge}  {}  {}",
                 self.paint(BOLD, &i.title),
-                self.paint(
-                    DIM,
-                    &format!(
-                        "· {}{} · operator {}",
-                        // A share of the work only where the plan states one (`insights::stated_share`): not a rule's
-                        // own weight, nor on a plan without costs, a cheap plan or a step whose cost rests on a guess.
-                        match culprit_core::insights::stated_share(plan, i) {
-                            Some(share) => format!("{} of the work · ", format::percent(share)),
-                            None => String::new(),
-                        },
-                        i.rule,
-                        i.nodes.first().copied().unwrap_or(0)
-                    )
-                )
+                self.paint(DIM, &format!("· {share}{} · {operator}", i.rule))
             );
             println!("        {}", i.detail);
-            println!("        {} {}", self.paint(BOLD, "Fix:"), i.fix);
+            println!("        {} {}", self.paint(BOLD, &t!("cli.fix")), i.fix);
             if let Some(sql) = &i.fix_sql {
                 for line in sql.lines() {
                     println!("            {}", self.paint(DIM, line));
                 }
             }
-            println!("        {} {}", self.paint(BOLD, "Verify:"), i.verify);
+            println!("        {} {}", self.paint(BOLD, &t!("cli.verify")), i.verify);
         }
         if let Some(note) = &found.note {
             println!("\n{}", self.paint(DIM, note));
@@ -170,8 +156,12 @@ impl Out {
         let weighed = time.is_some() || plan.weighed();
         let rows = match node.act_rows {
             // The estimate for the runs that happened, so an inner seek estimated right per run isn't shown as off.
-            Some(a) => format!("rows {} → {}", format::count(node.est_rows_for_runs()), format::count(a)),
-            None if weighed => format!("rows {}", format::count(node.est_rows_total())),
+            Some(a) => t!(
+                "cli.plan.rows_actual",
+                estimated = format::count(node.est_rows_for_runs()),
+                actual = format::count(a)
+            ),
+            None if weighed => t!("cli.plan.rows", estimated = format::count(node.est_rows_total())),
             None => String::new(),
         };
         let label = format!(
@@ -216,27 +206,24 @@ impl Out {
             return self.json(&value);
         }
         if !progress.running {
-            println!(
-                "{}",
-                self.paint(DIM, &format!("Session {} isn't running a statement right now.", progress.session))
-            );
+            println!("{}", self.paint(DIM, &t!("cli.progress.idle", session = &progress.session)));
             return;
         }
-        let mut head = vec![format!("Session {}", progress.session)];
+        let mut head = vec![t!("cli.progress.session", session = &progress.session)];
         if let Some(ms) = progress.elapsed_ms {
-            head.push(format!("running {}", format::duration(ms)));
+            head.push(t!("cli.progress.running", duration = format::duration(ms)));
         }
         if let Some(ms) = progress.cpu_ms {
-            head.push(format!("CPU {}", format::duration(ms)));
+            head.push(t!("cli.progress.cpu", duration = format::duration(ms)));
         }
         if let Some(reads) = progress.logical_reads {
-            head.push(format!("{} reads", format::count(reads)));
+            head.push(t!("cli.plan.reads", n = reads, count = format::count(reads)));
         }
         if let Some(rows) = progress.rows_examined {
-            head.push(format!("{} rows examined", format::count(rows)));
+            head.push(t!("cli.progress.rows_examined", n = rows, count = format::count(rows)));
         }
         if let Some(wait) = &progress.wait {
-            head.push(format!("waiting on {wait}"));
+            head.push(t!("cli.progress.waiting_on", wait = wait));
         }
         println!("{}", self.paint(BOLD, &head.join(" · ")));
         if let Some(phase) = &progress.phase {
@@ -257,7 +244,7 @@ impl Out {
             progress.nodes.iter().map(|n| (n.node_id, n)).collect();
         if let Some(hot) = progress.hot_node.and_then(|id| plan.nodes().into_iter().find(|n| n.id == id)) {
             let label = format!("{}{}", hot.op, hot.object.as_deref().map(|o| format!(" {o}")).unwrap_or_default());
-            println!("{}", self.paint(YELLOW, &format!("Busiest step right now: {label}")));
+            println!("{}", self.paint(YELLOW, &t!("cli.progress.busiest", step = label)));
         }
         fn visit(
             out: &Out,
@@ -269,34 +256,43 @@ impl Out {
             let line = match by_id.get(&node.id) {
                 Some(p) => {
                     let state = match p.state {
-                        culprit_core::NodeState::Pending => out.paint(DIM, "waiting"),
-                        culprit_core::NodeState::Running => out.paint(GREEN, "running"),
-                        culprit_core::NodeState::Done => out.paint(DIM, "done"),
+                        culprit_core::NodeState::Pending => out.paint(DIM, &t!("cli.progress.state.waiting")),
+                        culprit_core::NodeState::Running => out.paint(GREEN, &t!("cli.progress.state.running")),
+                        culprit_core::NodeState::Done => out.paint(DIM, &t!("cli.progress.state.done")),
                     };
                     let fraction = p.fraction().unwrap_or(0.0);
                     let over = if p.est_rows >= 1.0 && p.rows > p.est_rows * 1.5 {
-                        out.paint(YELLOW, &format!(" ({}× the estimate)", format::count(p.rows / p.est_rows)))
+                        let factor = t!("common.factor", n = format::count(p.rows / p.est_rows));
+                        out.paint(YELLOW, &format!(" {}", t!("cli.progress.over_estimate", factor = factor)))
                     } else {
                         String::new()
                     };
+                    let rows = t!(
+                        "cli.progress.rows",
+                        n = p.est_rows,
+                        done = format::count(p.rows),
+                        estimated = format::count(p.est_rows)
+                    );
                     format!(
-                        "{} {:>4}  {}{}  {} / {} rows{}  {}",
+                        "{} {:>4}  {}{}  {rows}{}  {}",
                         bar(fraction, 10),
                         format::percent(fraction),
                         "  ".repeat(depth),
                         label,
-                        format::count(p.rows),
-                        format::count(p.est_rows),
                         over,
                         state
                     )
                 }
                 None => format!(
-                    "{}  {}{}  {} rows est.",
+                    "{}  {}{}  {}",
                     " ".repeat(16),
                     "  ".repeat(depth),
                     label,
-                    format::count(node.est_rows_total())
+                    t!(
+                        "cli.progress.rows_estimated",
+                        n = node.est_rows_total(),
+                        count = format::count(node.est_rows_total())
+                    )
                 ),
             };
             println!("{line}");
@@ -316,23 +312,17 @@ impl Out {
         }
         let blocked: Vec<_> = live.sessions.iter().filter(|s| s.blocked_by.is_some()).collect();
         if blocked.is_empty() {
-            println!(
-                "{}",
-                if live.blocking_incomplete() {
-                    "No blocker was identified; lock visibility is incomplete."
-                } else {
-                    "No blocking was observed."
-                }
-            );
+            if live.blocking_incomplete() {
+                println!("{}", t!("cli.live.no_blocker"));
+            } else {
+                println!("{}", t!("cli.live.no_blocking"));
+            }
         } else {
-            println!(
-                "{} {} blocked",
-                self.paint(RED, "!"),
-                if blocked.len() == 1 { "1 session".to_string() } else { format!("{} sessions", blocked.len()) }
-            );
+            let n = blocked.len();
+            println!("{} {}", self.paint(RED, "!"), t!("cli.live.blocked", n = n, count = n.to_string()));
         }
         for note in &live.notes {
-            println!("Collection limitation: {note}");
+            println!("{}", t!("cli.live.limitation", note = note));
         }
         for s in &live.sessions {
             println!(
@@ -341,7 +331,10 @@ impl Out {
                 s.state,
                 s.elapsed_ms.map(format::duration).unwrap_or_default(),
                 s.wait.as_deref().unwrap_or(""),
-                s.blocked_by.as_deref().map(|b| format!(" blocked by {b}")).unwrap_or_default(),
+                s.blocked_by
+                    .as_deref()
+                    .map(|b| format!(" {}", t!("cli.live.blocked_by", session = b)))
+                    .unwrap_or_default(),
                 s.sql
                     .as_deref()
                     .map(|q| q.split_whitespace().collect::<Vec<_>>().join(" "))
@@ -373,7 +366,11 @@ impl Out {
             rs.messages.join(" ")
         } else {
             let n = rs.rows.len();
-            format!("{n} row{}{}", if n == 1 { "" } else { "s" }, if rs.truncated { " (truncated)" } else { "" })
+            if rs.truncated {
+                t!("cli.result.rows_truncated", n = n, count = n.to_string())
+            } else {
+                t!("cli.result.rows", n = n, count = n.to_string())
+            }
         };
         println!("{}", self.paint(DIM, &format!("{tail} · {}", format::duration(rs.elapsed_ms))));
     }
@@ -388,12 +385,12 @@ impl Out {
                 "{}.{}{}  {}",
                 t.schema,
                 self.paint(BOLD, &t.name),
-                if t.view { " (view)" } else { "" },
+                if t.view { format!(" {}", t!("cli.catalog.view")) } else { String::new() },
                 self.paint(DIM, &cols.join(", "))
             );
         }
         if !catalog.databases.is_empty() {
-            println!("{}", self.paint(DIM, &format!("databases: {}", catalog.databases.join(", "))));
+            println!("{}", self.paint(DIM, &t!("cli.catalog.databases", databases = catalog.databases.join(", "))));
         }
     }
 
@@ -402,7 +399,7 @@ impl Out {
             return self.json(&json!({ "queries": queries }));
         }
         if queries.is_empty() {
-            println!("No saved queries yet. Save one with `culprit saved add <name> --sql \"…\"`.");
+            println!("{} {}", t!("cli.saved.none"), t!("cli.saved.save_one"));
         }
         for q in queries {
             let first = q.sql.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
@@ -432,46 +429,44 @@ impl Out {
             |text: &str, prefix: &str| text.lines().map(|l| format!("{prefix}{l}")).collect::<Vec<_>>().join("\n");
         println!(
             "{}  {}",
-            self.paint(BOLD, &format!("Index advisor · {}", a.connection)),
+            self.paint(BOLD, &t!("cli.indexes.title", connection = &a.connection)),
             self.paint(
                 DIM,
                 &if a.counters.is_empty() {
-                    "index usage counters unavailable".to_string()
+                    t!("cli.indexes.no_counters")
                 } else {
-                    format!("usage counted {}", a.counters)
+                    t!("cli.indexes.counted", counters = &a.counters)
                 },
             )
         );
         if a.candidates.is_empty() && a.cleanups.is_empty() && a.tables.is_empty() {
-            println!("\nNothing to add or clean up.");
+            println!("\n{}", t!("cli.indexes.nothing"));
         }
         if !a.candidates.is_empty() {
-            println!("\n{}", self.paint(BOLD, &format!("Add ({})", a.candidates.len())));
+            println!("\n{}", self.paint(BOLD, &t!("cli.indexes.add", count = a.candidates.len().to_string())));
             for (n, c) in a.candidates.iter().enumerate() {
                 let weight = match (c.db_time_share, c.queries.len()) {
-                    (Some(share), q) if q > 0 => format!(
-                        "{} of DB time · {} quer{}",
-                        format::percent(share),
-                        q,
-                        if q == 1 { "y" } else { "ies" }
-                    ),
-                    (_, q) if q > 0 => format!("{} quer{}", q, if q == 1 { "y" } else { "ies" }),
+                    (Some(share), q) if q > 0 => {
+                        t!("cli.indexes.share_queries", share = format::percent(share), n = q, count = q.to_string())
+                    }
+                    (_, q) if q > 0 => t!("cli.indexes.queries", n = q, count = q.to_string()),
                     _ => String::new(),
                 };
-                let include =
-                    if c.include.is_empty() { String::new() } else { format!(" include ({})", c.include.join(", ")) };
-                println!(
-                    "  {:>2}  {}  {}",
-                    n + 1,
-                    self.paint(BOLD, &format!("{}.{} ({}){include}", c.schema, c.table, c.keys.join(", "))),
-                    self.paint(DIM, &weight)
-                );
+                let (table, keys) = (format!("{}.{}", c.schema, c.table), c.keys.join(", "));
+                let index = if c.include.is_empty() {
+                    t!("cli.indexes.index", table = table, keys = keys)
+                } else {
+                    t!("cli.indexes.index_include", table = table, keys = keys, columns = c.include.join(", "))
+                };
+                println!("  {:>2}  {}  {}", n + 1, self.paint(BOLD, &index), self.paint(DIM, &weight));
                 println!("{}", indent(&c.reason, "      "));
                 if let Some(w) = &c.widens {
-                    println!("{}", self.paint(DIM, &format!("      widens {w}")));
+                    println!("{}", self.paint(DIM, &format!("      {}", t!("cli.indexes.widens", index = w))));
                 }
                 if c.requests.len() > 1 {
-                    println!("{}", self.paint(DIM, &format!("      merges {} optimizer requests", c.requests.len())));
+                    let n = c.requests.len();
+                    let merges = t!("cli.indexes.merges", n = n, count = n.to_string());
+                    println!("{}", self.paint(DIM, &format!("      {merges}")));
                 }
                 if let Some(sql) = &c.sql {
                     println!("{}", self.paint(BLUE, &indent(sql, "      ")));
@@ -482,13 +477,13 @@ impl Out {
             }
         }
         if !a.cleanups.is_empty() {
-            println!("\n{}", self.paint(BOLD, &format!("Clean up ({})", a.cleanups.len())));
+            println!("\n{}", self.paint(BOLD, &t!("cli.indexes.clean_up", count = a.cleanups.len().to_string())));
             for c in &a.cleanups {
                 let kind = match c.kind {
-                    culprit_core::CleanupKind::Duplicate => "duplicate",
-                    culprit_core::CleanupKind::Prefix => "covered",
-                    culprit_core::CleanupKind::Overlap => "overlaps",
-                    culprit_core::CleanupKind::Unused => "unused",
+                    culprit_core::CleanupKind::Duplicate => t!("cli.indexes.kind.duplicate"),
+                    culprit_core::CleanupKind::Prefix => t!("cli.indexes.kind.covered"),
+                    culprit_core::CleanupKind::Overlap => t!("cli.indexes.kind.overlaps"),
+                    culprit_core::CleanupKind::Unused => t!("cli.indexes.kind.unused"),
                 };
                 println!(
                     "  {}  {}  {}",
@@ -503,7 +498,7 @@ impl Out {
             }
         }
         if !a.tables.is_empty() {
-            println!("\n{}", self.paint(BOLD, &format!("Tables ({})", a.tables.len())));
+            println!("\n{}", self.paint(BOLD, &t!("cli.indexes.tables", count = a.tables.len().to_string())));
             for t in &a.tables {
                 println!("  {}  {}", self.paint(BOLD, &format!("{}.{}", t.schema, t.table)), t.reason);
             }

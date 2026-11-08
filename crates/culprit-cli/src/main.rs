@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use culprit_core::{Error, ExplainMode, Report, SessionAction, Severity, SnapshotOptions};
+use culprit_core::{Error, ExplainMode, Report, SessionAction, Severity, SnapshotOptions, t};
 use culprit_engine::Workspace;
 use culprit_engine::entra::SignInEvent;
 use output::{Format, Out};
@@ -422,22 +422,17 @@ fn main() -> ExitCode {
         // A language Culprit doesn't have: English, with a word on stderr (the output itself stays clean).
         if !culprit_core::i18n::set_language(code) {
             let known: Vec<String> = culprit_core::i18n::languages().iter().map(|l| l.code.clone()).collect();
-            eprintln!("culprit: no language {code:?} (known: {}); writing English", known.join(", "));
+            eprintln!("{}", t!("cli.no_language", code = format!("{code:?}"), known = known.join(", ")));
         }
     }
     // Markdown is written by the commands whose output is meant for a pull request or a ticket; elsewhere it would be
     // plain text under a Markdown label.
     if format == Format::Md && !writes_markdown(&cli.command) {
-        out.error(
-            &Error::invalid("This command has no Markdown output")
-                .with_hint("Markdown is available for scan, findings, show, dashboard, analyze, verify, export, plan export and lint-sql; use --format text or json here."),
-        );
+        out.error(&Error::invalid(t!("cli.no_markdown")).with_hint(t!("cli.no_markdown_hint")));
         return ExitCode::FAILURE;
     }
     if format == Format::Sarif && !writes_sarif(&cli.command) {
-        out.error(&Error::invalid("This command has no SARIF output").with_hint(
-            "SARIF is available for lint-sql, drift, scan, findings and analyze; use --format text or json here.",
-        ));
+        out.error(&Error::invalid(t!("cli.no_sarif")).with_hint(t!("cli.no_sarif_hint")));
         return ExitCode::FAILURE;
     }
     let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
@@ -465,11 +460,10 @@ async fn run(command: Command, out: &Out) -> culprit_core::Result<u8> {
     // A device-code sign-in needs a person to read the code; scripts and agents get an error with a hint instead.
     if std::io::stderr().is_terminal() {
         ws = ws.with_sign_in_handler(std::sync::Arc::new(|event| match event {
-            SignInEvent::Code { prompt } => eprintln!(
-                "To sign in to Microsoft Entra ID, open {} and enter the code {}  (waiting; Ctrl+C stops)",
-                prompt.verification_uri, prompt.user_code
-            ),
-            SignInEvent::Done => eprintln!("Signed in."),
+            SignInEvent::Code { prompt } => {
+                eprintln!("{}", t!("cli.sign_in.code", uri = &prompt.verification_uri, code = &prompt.user_code))
+            }
+            SignInEvent::Done => eprintln!("{}", t!("cli.sign_in.done")),
             SignInEvent::Failed { message } => eprintln!("{message}"),
         }));
     }
@@ -477,11 +471,7 @@ async fn run(command: Command, out: &Out) -> culprit_core::Result<u8> {
         Command::Conn(c) => conn_cmd::run(&ws, c, out).await,
         Command::Auth(AuthCommand::Logout) => {
             let removed = ws.sign_out()?;
-            out.done(&match removed {
-                0 => "No device-code sign-ins were stored".to_string(),
-                1 => "Forgot 1 device-code sign-in".to_string(),
-                n => format!("Forgot {n} device-code sign-ins"),
-            });
+            out.done(&t!("cli.sign_out", n = removed, count = removed.to_string()));
             Ok(0)
         }
         Command::Dashboard(args) => dashboard_cmd::run(&ws, args, out).await,
@@ -496,7 +486,7 @@ async fn run(command: Command, out: &Out) -> culprit_core::Result<u8> {
             let window = window_minutes(args.window, Some(args.window_days)).unwrap_or_default();
             let options = SnapshotOptions { top_queries: args.top, plans: args.plans, ..SnapshotOptions::default() }
                 .with_window_minutes(window);
-            out.progress(&format!("Scanning {}…", args.connection));
+            out.progress(&t!("cli.scanning", connection = &args.connection));
             let report = ws.scan_with_log(&args.connection, &options, args.query_log.as_deref()).await?;
             out.scan(&report, args.full, &ws.paths().reports_dir(&args.connection));
             Ok(fail_code(&report, args.fail_on))
@@ -510,8 +500,8 @@ async fn run(command: Command, out: &Out) -> culprit_core::Result<u8> {
         Command::Show { connection, finding, report } => {
             let report = load(&ws, &connection, report.as_ref())?;
             let f = report.findings.iter().find(|f| f.id == finding).ok_or_else(|| {
-                Error::not_found(format!("No finding '{finding}' in the latest report for {connection}"))
-                    .with_hint(format!("List them with `culprit findings {connection}`"))
+                Error::not_found(t!("engine.share.no_finding", id = &finding, name = &connection))
+                    .with_hint(t!("cli.list_findings", connection = &connection))
             })?;
             out.show(&report, f);
             Ok(0)
@@ -558,8 +548,8 @@ async fn run(command: Command, out: &Out) -> culprit_core::Result<u8> {
             if let Some((id, action)) = target {
                 ws.interrupt_session(&args.connection, &id, action).await?;
                 out.done(&match action {
-                    SessionAction::Cancel => format!("Cancelled the statement in session {id}"),
-                    SessionAction::Terminate => format!("Ended session {id}"),
+                    SessionAction::Cancel => t!("cli.live.cancelled", session = &id),
+                    SessionAction::Terminate => t!("cli.live.ended", session = &id),
                 });
                 return Ok(0);
             }
@@ -595,7 +585,7 @@ async fn run(command: Command, out: &Out) -> culprit_core::Result<u8> {
                         (Some(sql), _) => sql,
                         (None, Some(path)) => std::fs::read_to_string(&path)
                             .map_err(|e| culprit_core::Error::invalid(format!("{}: {e}", path.display())))?,
-                        (None, None) => return Err(culprit_core::Error::invalid("Pass the SQL with --sql or --file")),
+                        (None, None) => return Err(culprit_core::Error::invalid(t!("cli.saved.pass_sql"))),
                     };
                     let query =
                         culprit_engine::saved::SaveQuery { name, sql, connection, description, previous_name: None };
@@ -603,7 +593,7 @@ async fn run(command: Command, out: &Out) -> culprit_core::Result<u8> {
                 }
                 SavedCommand::Rm { name } => {
                     ws.delete_saved_query(&name)?;
-                    out.done(&format!("Forgot '{name}'"));
+                    out.done(&t!("cli.saved.forgot", name = &name));
                 }
                 SavedCommand::Run { name, connection, limit, yes_execute_on_production } => {
                     let rs = ws.run_saved(&name, connection.as_deref(), limit, yes_execute_on_production).await?;
@@ -685,8 +675,8 @@ pub(crate) fn load(ws: &Workspace, connection: &str, path: Option<&PathBuf>) -> 
         return ws.analyze_file(std::path::Path::new(connection));
     }
     ws.latest_report(connection, None)?.ok_or_else(|| {
-        Error::not_found(format!("No saved report for '{connection}'"))
-            .with_hint(format!("Run `culprit scan {connection}` first"))
+        Error::not_found(t!("engine.no_saved_report", name = connection))
+            .with_hint(t!("engine.scan_first", name = connection))
     })
 }
 
@@ -710,10 +700,10 @@ fn explain_sql(ws: &Workspace, args: &ExplainArgs) -> culprit_core::Result<Strin
             .workload
             .as_ref()
             .and_then(|w| w.query(id))
-            .ok_or_else(|| Error::not_found(format!("No query '{id}' in the latest report")))?;
+            .ok_or_else(|| Error::not_found(t!("cli.explain.no_query", id = id)))?;
         return Ok(q.text.clone());
     }
-    Err(Error::invalid("Pass --sql, --file or --query-id"))
+    Err(Error::invalid(t!("cli.explain.pass_sql")))
 }
 
 #[cfg(test)]

@@ -9,7 +9,8 @@ use std::path::Path;
 
 use clap::ValueEnum;
 use culprit_core::{
-    AuthKind, CheckInfo, Engine, Error, Finding, LockedCheck, QueryStat, Report, ServerInfo, Severity, format,
+    AuthKind, CheckInfo, Engine, Environment, Error, Finding, LockedCheck, QueryStat, Report, ServerInfo, Severity,
+    format, t,
 };
 use culprit_engine::{ConnectionInfo, DiscoveryResult, ImportCandidate};
 use serde_json::{Value, json};
@@ -20,7 +21,25 @@ use crate::TopBy;
 pub(crate) fn age(taken_at: &str) -> Option<String> {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs_f64();
     let seconds = (now - format::epoch_seconds(taken_at)?).max(0.0);
-    Some(if seconds < 60.0 { "just now".into() } else { format!("{} ago", format::duration(seconds * 1000.0)) })
+    Some(if seconds < 60.0 {
+        t!("cli.age.just_now")
+    } else {
+        t!("cli.age.ago", duration = format::duration(seconds * 1000.0))
+    })
+}
+
+/// "production", "staging", "development", "local": an environment as a word in a line.
+pub(crate) fn environment_word(environment: Environment) -> String {
+    t!("cli.environment", environment = format!("{environment:?}").to_lowercase())
+}
+
+/// "Estimated plan": a plan's kind as a label.
+pub(crate) fn plan_kind(kind: culprit_core::PlanKind) -> String {
+    match kind {
+        culprit_core::PlanKind::Estimated => t!("common.plan_kind.estimated"),
+        culprit_core::PlanKind::Generic => t!("common.plan_kind.generic"),
+        culprit_core::PlanKind::Actual => t!("common.plan_kind.actual"),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -118,9 +137,9 @@ impl Out {
             eprintln!("{}", serde_json::to_string_pretty(&body).unwrap_or_default());
             return;
         }
-        eprintln!("{} {}", self.paint(RED, "error:"), error.message);
+        eprintln!("{} {}", self.paint(RED, &t!("cli.error")), error.message);
         if let Some(hint) = &error.hint {
-            eprintln!("{} {hint}", self.paint(DIM, "hint:"));
+            eprintln!("{} {hint}", self.paint(DIM, &t!("cli.hint")));
         }
     }
 
@@ -138,20 +157,23 @@ impl Out {
         }
         if list.is_empty() {
             println!(
-                "No saved connections. Add one with:\n  culprit conn add <name> --url '<connection string>' --env development"
+                "{} {}\n  culprit conn add <name> --url '<connection string>' --env development",
+                t!("cli.connections.none"),
+                t!("cli.connections.add_one")
             );
             return;
         }
         for c in list {
-            let env = format!("{:?}", c.environment).to_lowercase();
+            let env = environment_word(c.environment);
             let last = c
                 .last_report
                 .as_ref()
                 .map(|r| {
                     let when = age(&r.taken_at).unwrap_or_else(|| r.taken_at.clone());
-                    format!("{} opportunities · scanned {when}", r.opportunities)
+                    let n = r.opportunities;
+                    t!("cli.connections.scanned", n = n, count = n.to_string(), when = when)
                 })
-                .unwrap_or_else(|| "never scanned".into());
+                .unwrap_or_else(|| t!("cli.connections.never_scanned"));
             println!(
                 "{}  {:<11}  {}  {}",
                 self.paint(BOLD, &format!("{:<20}", c.name)),
@@ -168,30 +190,25 @@ impl Out {
             return self.json(&json!(info));
         }
         let engine = server.map(|s| s.name()).unwrap_or(engine_name(info));
-        println!("Saved {} ({engine}, {}).", self.paint(BOLD, &info.name), info.display);
+        let name = self.paint(BOLD, &info.name);
+        println!("{}", t!("cli.connections.saved", name = name, engine = engine, display = &info.display));
         match (&info.query_log, info.engine.has_server()) {
-            (Some(log), _) => println!(
-                "Statements: read from {log} on every scan (change it with `culprit conn set {} --query-log <file>`, or --no-query-log).",
-                info.name
-            ),
+            (Some(log), _) => println!("{}", t!("cli.connections.query_log", log = log, name = &info.name)),
             (None, false) => println!(
-                "No query log found beside the database. SQLite keeps no history of its statements: to read them from the \
-                 log your framework writes, `culprit conn set {} --query-log <file>`.",
-                info.name
+                "{} {}",
+                t!("cli.connections.no_query_log"),
+                t!("cli.connections.sqlite_history", name = &info.name)
             ),
             (None, true) => {}
         }
-        println!("Next: culprit scan {}", info.name);
+        println!("{}", t!("cli.next", command = format!("culprit scan {}", info.name)));
     }
 
     pub fn connection_renamed(&self, old: &str, info: &ConnectionInfo) {
         if self.format == Format::Json {
             return self.json(&json!(info));
         }
-        println!(
-            "Renamed {old} to {}; its scan history and saved password moved with it.",
-            self.paint(BOLD, &info.name)
-        );
+        println!("{}", t!("cli.connections.renamed", old = old, new = self.paint(BOLD, &info.name)));
     }
 
     pub fn discovered(&self, result: &DiscoveryResult, saved: &[ConnectionInfo]) {
@@ -203,34 +220,28 @@ impl Out {
             println!("{warning}");
         }
         if result.has_more {
-            println!(
-                "Showing {} {}; more may be available. Refine --match or --region.",
-                found.len(),
-                if found.len() == 1 { "match" } else { "matches" }
-            );
+            let n = found.len();
+            println!("{} {}", t!("cli.discover.showing", n = n, count = n.to_string()), t!("cli.discover.refine"));
         }
         if found.is_empty() {
-            println!(
-                "{}",
-                if result.has_more {
-                    "The incomplete search found no matches. Narrow the search and retry."
-                } else {
-                    "No databases match. Try a different --match (or --region for AWS)."
-                }
-            );
+            if result.has_more {
+                println!("{} {}", t!("cli.discover.incomplete_none"), t!("cli.discover.narrow"));
+            } else {
+                println!("{} {}", t!("cli.discover.none"), t!("cli.discover.try_another"));
+            }
             return;
         }
         for d in found {
-            let env = format!("{:?}", d.environment).to_lowercase();
+            let env = environment_word(d.environment);
             let auth = match d.auth {
-                AuthKind::Entra => "Entra ID",
-                AuthKind::AwsIam => "AWS IAM",
-                AuthKind::Password => "password",
-                AuthKind::None => "no auth",
+                AuthKind::Entra => t!("cli.auth.entra"),
+                AuthKind::AwsIam => t!("cli.auth.aws_iam"),
+                AuthKind::Password => t!("cli.auth.password"),
+                AuthKind::None => t!("cli.auth.none"),
             };
             let status = match (&d.saved_as, saved.iter().any(|s| s.name == d.alias)) {
-                (Some(name), _) => self.paint(DIM, &format!("saved as {name}")),
-                (None, true) => self.paint(GREEN, "saved"),
+                (Some(name), _) => self.paint(DIM, &t!("cli.saved_as", name = name)),
+                (None, true) => self.paint(GREEN, &t!("cli.saved")),
                 (None, false) => String::new(),
             };
             println!(
@@ -251,10 +262,7 @@ impl Out {
             && found.iter().any(|d| d.saved_as.is_none())
         {
             println!();
-            println!(
-                "{}",
-                self.paint(DIM, "Add --save to save the unsaved ones (production only with --include-production).")
-            );
+            println!("{}", self.paint(DIM, &t!("cli.discover.save_hint")));
         }
     }
 
@@ -263,16 +271,14 @@ impl Out {
             return self.json(&json!({ "connections": found, "saved": saved, "dry_run": dry_run }));
         }
         if found.is_empty() {
-            println!(
-                "No connections found in Azure Data Studio, VS Code, DBeaver or DataGrip. Point --file at a settings file."
-            );
+            println!("{} {}", t!("cli.import.none"), t!("cli.import.point_file"));
             return;
         }
         for c in found {
-            let env = format!("{:?}", c.environment).to_lowercase();
+            let env = environment_word(c.environment);
             let status = match (&c.saved_as, saved.iter().any(|s| s.name == c.alias)) {
-                (Some(name), _) => self.paint(DIM, &format!("already saved as {name}")),
-                (None, true) => self.paint(GREEN, "imported"),
+                (Some(name), _) => self.paint(DIM, &t!("cli.import.already_saved", name = name)),
+                (None, true) => self.paint(GREEN, &t!("cli.import.imported")),
                 (None, false) => String::new(),
             };
             let target = format!(
@@ -296,13 +302,10 @@ impl Out {
         }
         if dry_run && found.iter().any(|c| c.saved_as.is_none()) {
             println!();
-            println!("{}", self.paint(DIM, "Nothing saved (--dry-run). Run again without it to import."));
+            println!("{}", self.paint(DIM, &format!("{} {}", t!("cli.import.dry_run"), t!("cli.import.run_again"))));
         } else if saved.iter().any(|s| s.auth == AuthKind::Password) {
             println!();
-            println!(
-                "{}",
-                self.paint(DIM, "Passwords were not imported; set each once with `culprit conn set-password <name>`.")
-            );
+            println!("{}", self.paint(DIM, &t!("cli.import.passwords")));
         }
     }
 
@@ -311,10 +314,9 @@ impl Out {
             return self.json(&json!(server));
         }
         println!(
-            "{} {} · database {}{}",
+            "{} {}{}",
             self.paint(GREEN, "✓"),
-            server.product,
-            server.database,
+            t!("cli.server.line", product = &server.product, database = &server.database),
             server.cloud.as_deref().map(|c| format!(" · {c}")).unwrap_or_default()
         );
     }
@@ -325,12 +327,12 @@ impl Out {
         }
         self.server(server);
         println!(
-            "  version {}{}",
-            server.version,
+            "  {}{}",
+            t!("cli.doctor.version", version = &server.version),
             server.edition.as_deref().map(|e| format!(" · {e}")).unwrap_or_default()
         );
         if let Some(started) = &server.started_at {
-            println!("  counters since {started}");
+            println!("  {}", t!("cli.doctor.counters_since", since = started));
         }
         println!();
         for cap in &server.capabilities {
@@ -344,10 +346,10 @@ impl Out {
         }
         if !locked.is_empty() {
             println!();
-            println!("{}", self.paint(BOLD, "Locked checks"));
+            println!("{}", self.paint(BOLD, &t!("cli.doctor.locked")));
             for l in locked {
                 let needs: Vec<String> = l.missing.iter().map(|c| c.label_for(server.engine).to_string()).collect();
-                println!("  {} needs {}", l.check.title, format::list(&needs));
+                println!("  {}", t!("cli.doctor.needs", check = &l.check.title, needs = format::list(&needs)));
             }
         }
     }
@@ -369,23 +371,25 @@ impl Out {
         }
         let s = &report.snapshot;
         println!(
-            "{} · {} · {} · scanned in {}",
-            self.paint(BOLD, &s.connection),
-            s.server.product,
-            s.server.database,
-            format::duration(s.duration_ms)
+            "{}",
+            t!(
+                "cli.scan.line",
+                connection = self.paint(BOLD, &s.connection),
+                product = &s.server.product,
+                database = &s.server.database,
+                duration = format::duration(s.duration_ms)
+            )
         );
         if let Some(w) = &s.workload {
             // Under 20 hours of history a per-day figure would be an extrapolation: say what was measured, and over what.
             let time = if w.measurement_hours() < 20.0 {
-                format!("{} of database time over {}", format::duration(w.total_time_ms), w.window_phrase())
+                t!("cli.scan.time_over", time = format::duration(w.total_time_ms), window = w.window_phrase())
             } else {
-                format!("{} of database time per day", format::duration(w.per_day(w.total_time_ms)))
+                t!("cli.scan.time_per_day", time = format::duration(w.per_day(w.total_time_ms)))
             };
-            println!(
-                "{}",
-                self.paint(DIM, &format!("{} · {} queries · {time}", w.source, format::count(w.query_count)))
-            );
+            let queries =
+                t!("cli.scan.queries", n = w.query_count, count = format::count(w.query_count), source = &w.source);
+            println!("{}", self.paint(DIM, &format!("{queries} · {time}")));
         }
         println!();
         self.findings(report, Severity::Low);
@@ -396,7 +400,7 @@ impl Out {
             }
         }
         println!();
-        println!("{}", self.paint(DIM, &format!("Saved {}", path.display())));
+        println!("{}", self.paint(DIM, &t!("cli.scan.saved", path = path.display().to_string())));
     }
 
     pub fn analyzed(&self, report: &Report) {
@@ -420,7 +424,7 @@ impl Out {
             for (i, f) in report.findings.iter().enumerate() {
                 md.push_str(&format!("\n### {}. {}\n\n{}\n", i + 1, f.title, f.summary));
                 if let Some(fix) = &f.fix {
-                    md.push_str(&format!("\n**Fix:** {}\n", fix.summary));
+                    md.push_str(&format!("\n**{}** {}\n", t!("cli.fix"), fix.summary));
                     if let Some(sql) = &fix.sql {
                         md.push_str(&format!("\n```sql\n{}\n```\n", sql.trim()));
                     }
@@ -441,7 +445,7 @@ impl Out {
             println!("       {}", self.paint(DIM, &f.id));
             println!("       {}", f.summary);
             if let Some(fix) = &f.fix {
-                println!("       {} {}", self.paint(BOLD, "Fix:"), fix.summary);
+                println!("       {} {}", self.paint(BOLD, &t!("cli.fix")), fix.summary);
                 if let Some(sql) = &fix.sql {
                     for line in sql.lines() {
                         println!("           {}", self.paint(BLUE, line));
@@ -478,7 +482,7 @@ impl Out {
         }
         if !stopped.is_empty() {
             println!();
-            println!("{}", self.paint(BOLD, &format!("Information and history ({})", stopped.len())));
+            println!("{}", self.paint(BOLD, &t!("cli.findings.history", count = stopped.len().to_string())));
             for (i, f) in stopped.iter().enumerate() {
                 println!("{:>3}  {}  {}", active.len() + i + 1, self.paint(DIM, "○"), self.paint(DIM, &f.title));
                 println!("       {}", self.paint(DIM, &f.id));
@@ -498,25 +502,28 @@ impl Out {
                     ) || (a.status == culprit_core::CheckStatus::Findings && a.reason.is_some())
                 })
                 .count();
-            println!("\n{}", self.paint(DIM, &format!("Check coverage: {assessed} assessed without a finding; {limited} limited by missing or incomplete evidence. JSON includes each check's reason.")));
+            let coverage = format!(
+                "{} {}",
+                t!("cli.findings.coverage", assessed = assessed.to_string(), limited = limited.to_string()),
+                t!("cli.findings.coverage_json")
+            );
+            println!("\n{}", self.paint(DIM, &coverage));
         }
         if !report.locked.is_empty() {
             println!();
             let names: Vec<String> = report.locked.iter().map(|l| l.check.title.clone()).collect();
+            let n = names.len();
             println!(
-                "{} {} locked ({}). See `culprit doctor {}`.",
+                "{} {} {}",
                 self.paint(YELLOW, "!"),
-                if names.len() == 1 { "1 check is".to_string() } else { format!("{} checks are", names.len()) },
-                format::list(&names),
-                report.snapshot.connection
+                t!("cli.findings.locked", n = n, count = n.to_string(), names = format::list(&names)),
+                t!("cli.findings.see_doctor", connection = &report.snapshot.connection)
             );
         }
         if let Some(first) = list.first() {
             println!();
-            println!(
-                "{}",
-                self.paint(DIM, &format!("Next: culprit show {} '{}'", report.snapshot.connection, first.id))
-            );
+            let command = format!("culprit show {} '{}'", report.snapshot.connection, first.id);
+            println!("{}", self.paint(DIM, &t!("cli.next", command = command)));
         }
     }
 
@@ -536,7 +543,7 @@ impl Out {
 
     pub fn top(&self, report: &Report, by: TopBy, limit: usize) {
         let Some(w) = &report.snapshot.workload else {
-            let why = report.summary.no_workload.clone().unwrap_or_else(|| "This scan has no query history.".into());
+            let why = report.summary.no_workload.clone().unwrap_or_else(|| t!("cli.top.no_history"));
             if self.format == Format::Json {
                 return self.json(&json!({ "queries": [], "note": why }));
             }
@@ -564,11 +571,9 @@ impl Out {
         // states it; the source's totals for the rest.
         let scans = queries.iter().filter_map(|q| w.scans_of(q)).max_by(|a, b| a.hours.total_cmp(&b.hours));
         let header = match &scans {
-            Some(s) => {
-                format!("{} · {} (its totals for the rest) · share of DB time · runs/day · avg", w.source, s.phrase())
-            }
-            None if short_window => format!("{} · {} · share of DB time · runs · avg", w.source, w.window_phrase()),
-            None => format!("{} · {span} · share of DB time · runs/day · avg", w.source),
+            Some(s) => t!("cli.top.header_scans", source = &w.source, scans = s.phrase()),
+            None if short_window => t!("cli.top.header_short", source = &w.source, window = w.window_phrase()),
+            None => t!("cli.top.header", source = &w.source, span = span),
         };
         println!("{}", self.paint(DIM, &header));
         for q in queries {
@@ -610,7 +615,7 @@ impl Out {
                     self.paint(
                         DIM,
                         &if delivers.is_empty() {
-                            format!("{} · adds detail", s.reads)
+                            t!("cli.sources.adds_detail", reads = s.reads)
                         } else {
                             format!("{} · {}", s.reads, delivers.join(", "))
                         }
@@ -740,21 +745,30 @@ pub(super) fn compact_report(report: &Report, path: &Path) -> Value {
 pub(super) fn markdown_report(report: &Report) -> String {
     let s = &report.snapshot;
     let mut out = format!(
-        "# Culprit report: {}\n\n{} · database `{}` · {}\n\n**{}**\n\n",
-        s.connection,
-        s.server.product,
-        s.server.database,
-        culprit_core::changes::dated_time(&s.taken_at),
+        "# {}\n\n{}\n\n**{}**\n\n",
+        t!("cli.md.report_title", connection = &s.connection),
+        t!(
+            "cli.md.report_line",
+            product = &s.server.product,
+            database = format!("`{}`", s.server.database),
+            when = culprit_core::changes::dated_time(&s.taken_at)
+        ),
         report.summary.headline
     );
     let (active, stopped): (Vec<&Finding>, Vec<&Finding>) = report.findings.iter().partition(|f| f.is_actionable());
     let table = |out: &mut String, list: &[&Finding], from: usize| {
-        out.push_str("| # | Status | Finding | Impact | Id |\n|---|---|---|---|---|\n");
+        out.push_str(&format!(
+            "| # | {} | {} | {} | {} |\n|---|---|---|---|---|\n",
+            t!("cli.md.status"),
+            t!("cli.md.finding"),
+            t!("cli.md.impact"),
+            t!("cli.md.id")
+        ));
         for (i, f) in list.iter().enumerate() {
             out.push_str(&format!(
                 "| {} | {} | {} | {} | `{}` |\n",
                 from + i + 1,
-                if f.inactive { "Stopped running".to_string() } else { f.actionability.label() },
+                if f.inactive { t!("cli.stopped_running") } else { f.actionability.label() },
                 md_cell(&f.title),
                 md_cell(&f.impact.label),
                 f.id.replace('`', "'")
@@ -763,7 +777,7 @@ pub(super) fn markdown_report(report: &Report) -> String {
     };
     table(&mut out, &active, 0);
     if !stopped.is_empty() {
-        out.push_str(&format!("\n## Information and history ({})\n\n", stopped.len()));
+        out.push_str(&format!("\n## {}\n\n", t!("cli.findings.history", count = stopped.len().to_string())));
         table(&mut out, &stopped, active.len());
     }
     out
@@ -782,11 +796,11 @@ pub(super) fn md_cell(text: &str) -> String {
 
 pub(super) fn kb(value: f64) -> String {
     if value >= 1024.0 * 1024.0 {
-        format!("{:.1} GB", value / 1024.0 / 1024.0)
+        t!("common.bytes.gb", n = format::digits(format!("{:.1}", value / 1024.0 / 1024.0)))
     } else if value >= 1024.0 {
-        format!("{:.1} MB", value / 1024.0)
+        t!("common.bytes.mb", n = format::digits(format!("{:.1}", value / 1024.0)))
     } else {
-        format!("{value:.0} KB")
+        t!("common.bytes.kb", n = format::digits(format!("{value:.0}")))
     }
 }
 

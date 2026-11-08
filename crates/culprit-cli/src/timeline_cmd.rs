@@ -4,7 +4,7 @@
 
 use clap::Args;
 use culprit_core::changes::short_time;
-use culprit_core::{ChangeEvent, CloudSignals, CloudUnit, Error, EventKind, EventSource, Result, format};
+use culprit_core::{ChangeEvent, CloudSignals, CloudUnit, Error, EventKind, EventSource, Result, format, t};
 use culprit_engine::{EventLog, EventsRequest, Workspace};
 use serde_json::json;
 
@@ -66,7 +66,11 @@ pub fn mark(ws: &Workspace, args: MarkArgs, out: &Out) -> Result<u8> {
         if out.format() == Format::Json {
             out.value(&json!(marks));
         } else if marks.is_empty() {
-            println!("No marks on {} yet. Add one: culprit mark {} deploy v1.4.2", args.connection, args.connection);
+            println!(
+                "{} {}",
+                t!("cli.mark.none", connection = &args.connection),
+                t!("cli.mark.add_one", command = format!("culprit mark {} deploy v1.4.2", args.connection))
+            );
         } else {
             for m in &marks {
                 println!("{}  {}  {}", out.dim(&m.id), short_time(&m.at), m.text);
@@ -79,29 +83,25 @@ pub fn mark(ws: &Workspace, args: MarkArgs, out: &Out) -> Result<u8> {
         if out.format() == Format::Json {
             out.value(&json!({ "removed": removed }));
         } else {
-            println!("Removed \"{}\" from {}'s timeline.", removed.text, args.connection);
+            println!("{}", t!("cli.mark.removed", text = &removed.text, connection = &args.connection));
         }
         return Ok(0);
     }
     let text = args.text.join(" ");
     if text.trim().is_empty() {
-        return Err(Error::invalid("Say what happened, e.g. `culprit mark shop deploy v1.4.2`"));
+        return Err(Error::invalid(t!("cli.mark.say_what")));
     }
     let mark = ws.mark(&args.connection, &text, args.at.as_deref(), "cli")?;
     if out.format() == Format::Json {
         out.value(&json!(mark));
     } else {
         println!(
-            "Marked {} at {}: {} {}",
-            args.connection,
-            short_time(&mark.at),
-            mark.text,
+            "{} {}",
+            t!("cli.mark.marked", connection = &args.connection, at = short_time(&mark.at), text = &mark.text),
             out.dim(&format!("({})", mark.id))
         );
-        println!(
-            "{}",
-            out.dim(&format!("Compare what ran since: culprit changes {} --since {}", args.connection, mark.at))
-        );
+        let command = format!("culprit changes {} --since {}", args.connection, mark.at);
+        println!("{}", out.dim(&t!("cli.mark.compare", command = command)));
     }
     Ok(0)
 }
@@ -118,34 +118,34 @@ pub async fn events(ws: &Workspace, args: PeriodArgs, out: &Out) -> Result<u8> {
 
 fn print_events(log: &EventLog, out: &Out) {
     let (from, to) = culprit_core::changes::range_times(&log.start, &log.end);
-    println!("{}", out.bold(&format!("What changed around {} · {from} → {to}", log.connection)));
+    println!("{}", out.bold(&t!("cli.events.title", connection = &log.connection, from = from, to = to)));
     if log.events.is_empty() {
-        println!("Nothing: no marks, schema, index or settings changes, restarts or throttling in this period.");
+        println!("{}", t!("cli.events.nothing"));
     }
     for e in log.events.iter().filter(|e| !e.minor) {
         print_event(e, out);
     }
     let minor = log.events.iter().filter(|e| e.minor).count();
     if minor > 0 {
-        println!("{}", out.dim(&format!("+ {minor} statistics updates (--json lists them)")));
+        println!("{}", out.dim(&t!("cli.events.minor", n = minor, count = minor.to_string())));
     }
     for note in &log.notes {
         println!("{}", out.dim(note));
     }
 }
 
-fn label(kind: EventKind) -> &'static str {
+fn label(kind: EventKind) -> String {
     match kind {
-        EventKind::Mark => "mark",
-        EventKind::Index => "index",
-        EventKind::Table => "table",
-        EventKind::Code => "code",
-        EventKind::Setting => "setting",
-        EventKind::Version => "version",
-        EventKind::Restart => "restart",
-        EventKind::StatsReset => "reset",
-        EventKind::Statistics => "stats",
-        EventKind::Throttle => "cloud",
+        EventKind::Mark => t!("cli.events.kind.mark"),
+        EventKind::Index => t!("cli.events.kind.index"),
+        EventKind::Table => t!("cli.events.kind.table"),
+        EventKind::Code => t!("cli.events.kind.code"),
+        EventKind::Setting => t!("cli.events.kind.setting"),
+        EventKind::Version => t!("cli.events.kind.version"),
+        EventKind::Restart => t!("cli.events.kind.restart"),
+        EventKind::StatsReset => t!("cli.events.kind.reset"),
+        EventKind::Statistics => t!("cli.events.kind.stats"),
+        EventKind::Throttle => t!("cli.events.kind.cloud"),
     }
 }
 
@@ -153,8 +153,8 @@ fn print_event(e: &ChangeEvent, out: &Out) {
     let tag = format!("{:<8}", label(e.kind));
     let tag = if e.kind == EventKind::Throttle { out.red(&tag) } else { out.dim(&tag) };
     let source = match (e.source, &e.by) {
-        (EventSource::Mark, Some(by)) => format!(" · by {by}"),
-        (EventSource::Scans, _) => " · noticed between scans".to_string(),
+        (EventSource::Mark, Some(by)) => format!(" · {}", t!("cli.events.by", by = by)),
+        (EventSource::Scans, _) => format!(" · {}", t!("cli.events.between_scans")),
         _ => String::new(),
     };
     println!("{tag} {}  {}", e.title, out.dim(&format!("{}{source}", e.when())));
@@ -183,7 +183,7 @@ fn print_cloud(s: &CloudSignals, out: &Out) {
     println!("{}", out.bold(&format!("{} · {}{tier}", s.service, s.resource)));
     println!("{}\n", s.summary);
     for e in &s.episodes {
-        let until = if e.ongoing { "now".to_string() } else { short_time(&e.end) };
+        let until = if e.ongoing { t!("cli.cloud.now") } else { short_time(&e.end) };
         println!("{} {}  {}", out.red("●"), e.title, out.dim(&format!("{} → {until}", short_time(&e.start))));
         println!("  {}", out.dim(&e.detail));
     }
@@ -196,22 +196,29 @@ fn print_cloud(s: &CloudSignals, out: &Out) {
             continue;
         }
         let show = |v: f64| match series.unit {
-            CloudUnit::Percent => format!("{v:.0}%"),
+            CloudUnit::Percent => t!("common.percent", n = format!("{v:.0}")),
             CloudUnit::Ms => format::duration(v),
             CloudUnit::Bytes => format::bytes(v),
-            CloudUnit::Credits => format!("{v:.1}"),
-            CloudUnit::Iops | CloudUnit::Sessions if v < 1.0 => format!("{v:.2}"),
-            CloudUnit::Iops | CloudUnit::Sessions if v < 10.0 => format!("{v:.1}"),
+            CloudUnit::Credits => format::digits(format!("{v:.1}")),
+            CloudUnit::Iops | CloudUnit::Sessions if v < 1.0 => format::digits(format!("{v:.2}")),
+            CloudUnit::Iops | CloudUnit::Sessions if v < 10.0 => format::digits(format!("{v:.1}")),
             CloudUnit::Iops | CloudUnit::Sessions => format::count(v),
         };
         let mean = values.iter().sum::<f64>() / values.len() as f64;
         let (worst_word, worst) = if series.floor {
-            ("min", values.iter().copied().fold(f64::INFINITY, f64::min))
+            (t!("cli.cloud.min"), values.iter().copied().fold(f64::INFINITY, f64::min))
         } else {
-            ("max", values.iter().copied().fold(f64::NEG_INFINITY, f64::max))
+            (t!("cli.cloud.max"), values.iter().copied().fold(f64::NEG_INFINITY, f64::max))
         };
         let limit = series.limit_label.as_deref().map(|l| format!(" · {l}")).unwrap_or_default();
-        println!("  {:<24} avg {:<10} {worst_word} {}{}", series.label, show(mean), show(worst), out.dim(&limit));
+        println!(
+            "  {:<24} {} {:<10} {worst_word} {}{}",
+            series.label,
+            t!("cli.cloud.avg"),
+            show(mean),
+            show(worst),
+            out.dim(&limit)
+        );
     }
     for note in &s.notes {
         println!("{}", out.dim(note));

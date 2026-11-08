@@ -121,32 +121,28 @@ pub fn set(ws: &Workspace, args: SetArgs, out: &Out) -> Result<u8> {
     if args.no_ssh || args.ssh.ssh.is_some() {
         let info = ws.set_ssh(&args.name, if args.no_ssh { None } else { args.ssh.config() })?;
         out.done(&match info.ssh {
-            Some(ssh) => format!("{} uses SSH via {}", info.name, ssh.destination),
-            None => format!("{} connects without SSH forwarding", info.name),
+            Some(ssh) => culprit_core::t!("cli.set.ssh", name = &info.name, destination = &ssh.destination),
+            None => culprit_core::t!("cli.set.no_ssh", name = &info.name),
         });
     }
     if let Some(env) = args.env {
         let info = ws.set_environment(&args.name, env.into())?;
-        out.done(&format!("{} is now marked {}", info.name, format!("{:?}", info.environment).to_lowercase()));
+        let environment = crate::output::environment_word(info.environment);
+        out.done(&culprit_core::t!("cli.set.environment", name = &info.name, environment = environment));
     }
     if args.query_log.is_some() || args.no_query_log {
         let info = ws.set_query_log(&args.name, args.query_log.as_deref())?;
         out.done(&match &info.query_log {
-            Some(path) => format!("Scans of {} read the statements from {path}", info.name),
-            None => format!("Scans of {} no longer read a query log", info.name),
+            Some(path) => culprit_core::t!("cli.set.query_log", name = &info.name, log = path),
+            None => culprit_core::t!("cli.set.no_query_log", name = &info.name),
         });
     }
     let Some(agent) = args.agent else { return Ok(0) };
     let info = ws.set_agent_access(&args.name, agent.into())?;
     let message = match info.agent_access {
-        AgentAccess::Off => format!("Coding agents can no longer see {}", info.name),
-        AgentAccess::Stats => {
-            format!("Coding agents can read findings, statistics, schema and estimated plans for {}", info.name)
-        }
-        AgentAccess::Query => format!(
-            "Coding agents can also run read-only statements on {}, each one after you approve it in the Culprit app",
-            info.name
-        ),
+        AgentAccess::Off => culprit_core::t!("cli.set.agent_off", name = &info.name),
+        AgentAccess::Stats => culprit_core::t!("cli.set.agent_stats", name = &info.name),
+        AgentAccess::Query => culprit_core::t!("cli.set.agent_query", name = &info.name),
     };
     out.done(&message);
     Ok(0)
@@ -159,15 +155,15 @@ pub fn audit(ws: &Workspace, args: AuditArgs, out: &Out) -> Result<u8> {
         return Ok(0);
     }
     if entries.is_empty() {
-        println!("No agent activity yet. Agents reach Culprit through `culprit mcp`.");
+        println!("{} {}", culprit_core::t!("cli.audit.none"), culprit_core::t!("cli.audit.how"));
         return Ok(0);
     }
     let mut stdout = std::io::stdout().lock();
     for e in entries {
         let outcome = match e.outcome {
-            AuditOutcome::Ok => "ok",
-            AuditOutcome::Error => "error",
-            AuditOutcome::Denied => "denied",
+            AuditOutcome::Ok => culprit_core::t!("cli.audit.ok"),
+            AuditOutcome::Error => culprit_core::t!("cli.audit.error"),
+            AuditOutcome::Denied => culprit_core::t!("cli.audit.denied"),
         };
         let sql = e.sql.as_deref().map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default();
         let detail = if sql.is_empty() { e.message.unwrap_or_default() } else { sql };
@@ -203,9 +199,7 @@ pub fn agent(ws: &Workspace, command: AgentCommand, out: &Out) -> Result<u8> {
                 println!("{:<9} {}", f.action, f.path);
             }
             if !args.no_mcp {
-                println!(
-                    "\nClaude Code picks up .mcp.json on its next start. For other agents, run `culprit mcp` as a stdio MCP server."
-                );
+                println!("\n{} {}", culprit_core::t!("cli.agent.claude_code"), culprit_core::t!("cli.agent.others"));
             }
             Ok(0)
         }

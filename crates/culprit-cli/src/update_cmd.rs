@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::Args;
-use culprit_core::{Error, ErrorCode, Result};
+use culprit_core::{Error, ErrorCode, Result, t};
 use serde_json::{Value, json};
 
 use crate::output::{Format, Out};
@@ -107,9 +107,8 @@ pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 fn sibling(target: &Path, suffix: &str) -> io::Result<PathBuf> {
-    let name = target
-        .file_name()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "the executable has no file name"))?;
+    let name =
+        target.file_name().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, t!("cli.update.no_file_name")))?;
     let mut name = name.to_os_string();
     name.push(suffix);
     Ok(target.with_file_name(name))
@@ -180,9 +179,9 @@ fn agent() -> ureq::Agent {
         .into()
 }
 
-fn offline(what: &str, e: ureq::Error) -> Error {
-    Error::new(ErrorCode::ConnectionFailed, format!("{what} failed: {e}"))
-        .with_hint("Check the network connection and any proxy, then retry")
+/// A request that didn't reach GitHub: `message` says which.
+fn offline(message: String) -> Error {
+    Error::new(ErrorCode::ConnectionFailed, message).with_hint(t!("cli.update.offline_hint"))
 }
 
 fn rate_limited(response: &ureq::http::Response<ureq::Body>) -> bool {
@@ -202,53 +201,56 @@ fn latest_tag(agent: &ureq::Agent) -> Result<String> {
     {
         request = request.header("Authorization", &format!("Bearer {}", token.trim()));
     }
-    let mut response = request.call().map_err(|e| offline("Checking for the latest release", e))?;
+    let mut response = request.call().map_err(|e| offline(t!("cli.update.check_failed", why = e.to_string())))?;
     if rate_limited(&response) {
-        return Err(Error::new(ErrorCode::ConnectionFailed, "GitHub's API rate limit for this address is used up")
-            .with_hint("Wait an hour, or set GITHUB_TOKEN to a GitHub token and retry"));
+        return Err(Error::new(ErrorCode::ConnectionFailed, t!("cli.update.rate_limited"))
+            .with_hint(t!("cli.update.rate_limited_hint")));
     }
     let status = response.status().as_u16();
     if status == 404 {
-        return Err(Error::not_found("No published Culprit release was found")
-            .with_hint(format!("See https://github.com/{REPO}/releases")));
+        return Err(Error::not_found(t!("cli.update.no_release"))
+            .with_hint(t!("cli.update.see", url = format!("https://github.com/{REPO}/releases"))));
     }
     if status != 200 {
         return Err(Error::new(
             ErrorCode::ConnectionFailed,
-            format!("GitHub answered {status} for the latest release"),
+            t!("cli.update.status_latest", status = status.to_string()),
         ));
     }
     let text = response
         .body_mut()
         .read_to_string()
-        .map_err(|e| Error::new(ErrorCode::ConnectionFailed, format!("Reading the latest release failed: {e}")))?;
+        .map_err(|e| Error::new(ErrorCode::ConnectionFailed, t!("cli.update.read_failed", why = e.to_string())))?;
     let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
     body.get("tag_name")
         .and_then(Value::as_str)
         .map(str::to_string)
-        .ok_or_else(|| Error::internal("GitHub's latest release has no tag"))
+        .ok_or_else(|| Error::internal(t!("cli.update.no_tag")))
 }
 
 fn download(agent: &ureq::Agent, tag: &str, name: &str) -> Result<Vec<u8>> {
     // By tag, never /latest/download: a release published between two downloads can't mix versions.
     let url = format!("https://github.com/{REPO}/releases/download/{tag}/{name}");
-    let mut response = agent.get(&url).call().map_err(|e| offline(&format!("Downloading {name}"), e))?;
+    let mut response = agent
+        .get(&url)
+        .call()
+        .map_err(|e| offline(t!("cli.update.download_failed", name = name, why = e.to_string())))?;
     match response.status().as_u16() {
         200 => {}
         404 => {
-            return Err(Error::not_found(format!("Release {tag} has no {name}"))
-                .with_hint(format!("See https://github.com/{REPO}/releases/tag/{tag}")));
+            return Err(Error::not_found(t!("cli.update.no_asset", tag = tag, name = name))
+                .with_hint(t!("cli.update.see", url = release_url(tag))));
         }
         status => {
-            return Err(Error::new(ErrorCode::ConnectionFailed, format!("GitHub answered {status} for {name}")));
+            return Err(Error::new(
+                ErrorCode::ConnectionFailed,
+                t!("cli.update.status_asset", status = status.to_string(), name = name),
+            ));
         }
     }
-    response
-        .body_mut()
-        .with_config()
-        .limit(MAX_DOWNLOAD)
-        .read_to_vec()
-        .map_err(|e| Error::new(ErrorCode::ConnectionFailed, format!("Downloading {name} failed: {e}")))
+    response.body_mut().with_config().limit(MAX_DOWNLOAD).read_to_vec().map_err(|e| {
+        Error::new(ErrorCode::ConnectionFailed, t!("cli.update.download_failed", name = name, why = e.to_string()))
+    })
 }
 
 /// Where this binary lives, and a refusal when a package manager owns it: replacing its file would leave the
@@ -256,17 +258,20 @@ fn download(agent: &ureq::Agent, tag: &str, name: &str) -> Result<Vec<u8>> {
 fn this_binary() -> Result<PathBuf> {
     let exe = std::env::current_exe()
         .and_then(|p| p.canonicalize())
-        .map_err(|e| Error::internal(format!("Can't locate this binary: {e}")))?;
+        .map_err(|e| Error::internal(t!("cli.update.no_binary", why = e.to_string())))?;
     let path = exe.to_string_lossy();
     if path.contains("/Cellar/") || path.contains("/nix/store/") {
-        return Err(Error::new(ErrorCode::Unsupported, format!("{} is managed by a package manager", exe.display()))
-            .with_hint("Update Culprit with the package manager that installed it"));
+        return Err(Error::new(
+            ErrorCode::Unsupported,
+            t!("cli.update.package_manager", path = exe.display().to_string()),
+        )
+        .with_hint(t!("cli.update.package_manager_hint")));
     }
     Ok(exe)
 }
 
 fn version_of(text: &str) -> Result<Version> {
-    Version::parse(text).ok_or_else(|| Error::internal(format!("'{text}' isn't a version")))
+    Version::parse(text).ok_or_else(|| Error::internal(t!("cli.update.not_a_version", text = text)))
 }
 
 fn release_url(tag: &str) -> String {
@@ -288,7 +293,11 @@ pub async fn run(args: UpdateArgs, out: &Out) -> Result<u8> {
                     "url": release_url(&tag),
                 }));
             } else if available {
-                println!("culprit {latest} is available (you have {current}). Run `culprit update`.");
+                println!(
+                    "{} {}",
+                    t!("cli.update.available", latest = latest.to_string(), current = current.to_string()),
+                    t!("cli.update.run")
+                );
             } else {
                 println!("{}", up_to_date(&current, &latest));
             }
@@ -309,7 +318,15 @@ pub async fn run(args: UpdateArgs, out: &Out) -> Result<u8> {
                     "path": path.display().to_string(),
                 }));
             } else {
-                println!("Updated culprit {from} → {to} ({})", path.display());
+                println!(
+                    "{}",
+                    t!(
+                        "cli.update.updated",
+                        from = from.to_string(),
+                        to = to.to_string(),
+                        path = path.display().to_string()
+                    )
+                );
             }
         }
     }
@@ -318,9 +335,9 @@ pub async fn run(args: UpdateArgs, out: &Out) -> Result<u8> {
 
 fn up_to_date(current: &Version, latest: &Version) -> String {
     if current == latest {
-        format!("culprit {current} is the latest")
+        t!("cli.update.latest", current = current.to_string())
     } else {
-        format!("culprit {current} is up to date (the latest release is {latest})")
+        t!("cli.update.up_to_date", current = current.to_string(), latest = latest.to_string())
     }
 }
 
@@ -344,26 +361,24 @@ fn update(check_only: bool) -> Result<Outcome> {
     let asset = asset_for(std::env::consts::OS, std::env::consts::ARCH).ok_or_else(|| {
         Error::new(
             ErrorCode::Unsupported,
-            format!("Culprit ships no prebuilt binary for {} on {}", std::env::consts::OS, std::env::consts::ARCH),
+            t!("cli.update.no_prebuilt", os = std::env::consts::OS, arch = std::env::consts::ARCH),
         )
-        .with_hint(format!("Build it from source: https://github.com/{REPO}#get-started"))
+        .with_hint(t!("cli.update.from_source", url = format!("https://github.com/{REPO}#get-started")))
     })?;
     let exe = this_binary()?;
 
     let sums = String::from_utf8(download(&agent, &tag, "SHA256SUMS.txt")?)
-        .map_err(|_| Error::internal("SHA256SUMS.txt isn't text"))?;
+        .map_err(|_| Error::internal(t!("cli.update.sums_not_text")))?;
     let expected = checksum_for(&sums, asset)
-        .ok_or_else(|| Error::internal(format!("Release {tag}'s SHA256SUMS.txt doesn't list {asset}")))?;
+        .ok_or_else(|| Error::internal(t!("cli.update.sums_missing", tag = &tag, asset = asset)))?;
     let binary = download(&agent, &tag, asset)?;
     let actual = sha256_hex(&binary);
     if actual != expected {
         return Err(Error::new(
             ErrorCode::Internal,
-            format!(
-                "{asset} from {tag} doesn't match its SHA-256 (expected {expected}, got {actual}); nothing was changed"
-            ),
+            t!("cli.update.mismatch", asset = asset, tag = &tag, expected = &expected, actual = &actual),
         )
-        .with_hint("Retry; if it keeps failing, download the release by hand and report it"));
+        .with_hint(t!("cli.update.mismatch_hint")));
     }
 
     replace_file(&exe, &binary).map_err(|e| {
@@ -371,16 +386,15 @@ fn update(check_only: bool) -> Result<Outcome> {
         if e.kind() == io::ErrorKind::PermissionDenied {
             Error::new(
                 ErrorCode::PermissionDenied,
-                format!("Can't replace {}: this user can't write to {dir}", exe.display()),
+                t!("cli.update.cant_replace", path = exe.display().to_string(), dir = dir),
             )
             .with_hint(if cfg!(windows) {
-                "Run it again from an elevated prompt, or install culprit somewhere you own".to_string()
+                t!("cli.update.cant_replace_windows")
             } else {
-                "Run it again with sudo (sudo culprit update), or install culprit somewhere you own, such as ~/.local/bin"
-                    .to_string()
+                t!("cli.update.cant_replace_unix")
             })
         } else {
-            Error::internal(format!("Replacing {} failed: {e}; nothing was changed", exe.display()))
+            Error::internal(t!("cli.update.replace_failed", path = exe.display().to_string(), why = e.to_string()))
         }
     })?;
     Ok(Outcome::Updated { from: current, to: latest, path: exe })

@@ -1,8 +1,8 @@
 use culprit_core::changes::{Period, short_time};
-use culprit_core::{ChangeKind, ChangeStatus, Changes, Drift, DriftKind, DriftPresence, PlanDiff, format};
+use culprit_core::{ChangeKind, ChangeStatus, Changes, Drift, DriftKind, DriftPresence, PlanDiff, format, t};
 use serde_json::json;
 
-use super::{BLUE, BOLD, DIM, Format, GREEN, Out, RED, YELLOW};
+use super::{BLUE, BOLD, DIM, Format, GREEN, Out, RED, YELLOW, environment_word};
 
 impl Out {
     pub fn plan_diff(&self, diff: &PlanDiff, name_a: &str, name_b: &str) {
@@ -18,15 +18,11 @@ impl Out {
         let cost = |c: Option<f64>| match c {
             Some(c) if c < 10.0 => format!("{c:.3}"),
             Some(c) => format::count(c),
-            None => "unavailable".into(),
+            None => t!("engine.export.unavailable"),
         };
-        println!(
-            "{}",
-            self.paint(
-                DIM,
-                &format!("A = {name_a} · cost {}   B = {name_b} · cost {}", cost(diff.cost_a), cost(diff.cost_b))
-            )
-        );
+        let sides =
+            t!("cli.plan_diff.sides", a = name_a, cost_a = cost(diff.cost_a), b = name_b, cost_b = cost(diff.cost_b));
+        println!("{}", self.paint(DIM, &sides));
         if diff.changes.is_empty() {
             return;
         }
@@ -53,22 +49,22 @@ impl Out {
             return self.json(&super::sarif::drift_sarif(drift));
         }
         let side = |s: &culprit_core::DriftSide| {
-            format!("{} ({}, {})", s.connection, format!("{:?}", s.environment).to_lowercase(), s.server())
+            format!("{} ({}, {})", s.connection, environment_word(s.environment), s.server())
         };
         println!("{}  vs  {}", self.paint(BOLD, &side(&drift.a)), self.paint(BOLD, &side(&drift.b)));
         println!("{}\n", drift.summary);
         for (kind, heading) in [
-            (DriftKind::Index, "Indexes"),
-            (DriftKind::Table, "Tables"),
-            (DriftKind::Column, "Columns"),
-            (DriftKind::Setting, "Settings"),
-            (DriftKind::Version, "Version"),
+            (DriftKind::Index, t!("cli.drift.indexes")),
+            (DriftKind::Table, t!("cli.drift.tables")),
+            (DriftKind::Column, t!("cli.drift.columns")),
+            (DriftKind::Setting, t!("cli.drift.settings")),
+            (DriftKind::Version, t!("cli.drift.version")),
         ] {
             let items: Vec<_> = drift.items.iter().filter(|i| i.kind == kind).collect();
             if items.is_empty() {
                 continue;
             }
-            println!("{}", self.paint(BOLD, heading));
+            println!("{}", self.paint(BOLD, &heading));
             for item in items {
                 let mark = match item.presence {
                     DriftPresence::OnlyA => self.paint(YELLOW, "◀"),
@@ -78,7 +74,7 @@ impl Out {
                 };
                 println!("  {mark} {}", item.title);
                 if let (Some(sql), Some(target)) = (&item.sql, &item.sql_for) {
-                    println!("{}", self.paint(DIM, &format!("      -- on {target}")));
+                    println!("{}", self.paint(DIM, &format!("      {}", t!("cli.drift.on", target = target))));
                     for line in sql.lines() {
                         println!("      {}", self.paint(GREEN, line));
                     }
@@ -105,8 +101,9 @@ impl Out {
             return self.json(&json!(c));
         }
         let span = |p: &Period| format!("{} → {}", short_time(&p.start), short_time(&p.end));
-        println!("{}", self.paint(BOLD, &format!("What changed on {}", c.connection)));
-        println!("{}", self.paint(DIM, &format!("recent {}  vs  baseline {}", span(&c.recent), span(&c.baseline))));
+        println!("{}", self.paint(BOLD, &t!("cli.changes.title", connection = &c.connection)));
+        let periods = t!("cli.changes.periods", recent = span(&c.recent), baseline = span(&c.baseline));
+        println!("{}", self.paint(DIM, &periods));
         println!("{}\n", c.summary);
         // A note the summary already says (why there's nothing to compare) isn't repeated.
         let notes: Vec<&String> = c.notes.iter().filter(|n| !c.summary.contains(n.as_str())).collect();
@@ -118,22 +115,23 @@ impl Out {
         }
         let shown: Vec<_> = c.events.iter().filter(|e| !e.minor).collect();
         if !shown.is_empty() {
-            println!("{}", self.paint(BOLD, "Around then"));
+            println!("{}", self.paint(BOLD, &t!("cli.changes.around")));
             for e in shown.iter().take(12) {
                 println!("  {}  {}", e.title, self.paint(DIM, &e.when()));
             }
             if shown.len() > 12 {
-                println!("  {}", self.paint(DIM, &format!("… {} more (--json lists all)", shown.len() - 12)));
+                let more = shown.len() - 12;
+                println!("  {}", self.paint(DIM, &t!("cli.more_json", n = more, count = more.to_string())));
             }
             println!();
         }
         for (status, heading, style) in [
-            (ChangeStatus::Regressed, "Got slower", RED),
-            (ChangeStatus::New, "New", YELLOW),
-            (ChangeStatus::Improved, "Got faster", GREEN),
-            (ChangeStatus::Stopped, "Stopped running", BLUE),
-            (ChangeStatus::NotComparable, "Not comparable", DIM),
-            (ChangeStatus::LowSample, "Too few runs", DIM),
+            (ChangeStatus::Regressed, t!("cli.changes.slower"), RED),
+            (ChangeStatus::New, t!("cli.changes.new"), YELLOW),
+            (ChangeStatus::Improved, t!("cli.changes.faster"), GREEN),
+            (ChangeStatus::Stopped, t!("cli.stopped_running"), BLUE),
+            (ChangeStatus::NotComparable, t!("cli.changes.not_comparable"), DIM),
+            (ChangeStatus::LowSample, t!("cli.changes.too_few"), DIM),
         ] {
             let items: Vec<_> = c.queries.iter().filter(|q| q.status == status).collect();
             if items.is_empty() {
@@ -151,13 +149,14 @@ impl Out {
                 println!("            {}", self.paint(DIM, &text));
             }
             if items.len() > 12 {
-                println!("  {}", self.paint(DIM, &format!("… {} more (--json lists all)", items.len() - 12)));
+                let more = items.len() - 12;
+                println!("  {}", self.paint(DIM, &t!("cli.more_json", n = more, count = more.to_string())));
             }
             println!();
         }
         if c.unchanged > 0 {
-            let noun = if c.unchanged == 1 { "query" } else { "queries" };
-            println!("{}", self.paint(DIM, &format!("{} {noun} ran about the same.", c.unchanged)));
+            let same = t!("cli.changes.same", n = c.unchanged, count = c.unchanged.to_string());
+            println!("{}", self.paint(DIM, &same));
         }
     }
 }

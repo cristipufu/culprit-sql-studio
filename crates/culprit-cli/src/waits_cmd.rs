@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use clap::Args;
 use culprit_core::{
     Error, FileIo, Pressure, Replica, ReplicaRole, Result, Signal, SignalScope, SignalStatus, SignalUnit, Snapshot,
-    WaitSample, WaitsReport, format,
+    WaitSample, WaitsReport, format, t,
 };
 use culprit_engine::Workspace;
 use serde_json::json;
@@ -36,10 +36,10 @@ pub struct WaitsArgs {
 
 pub async fn run(ws: &Workspace, args: WaitsArgs, out: &Out) -> Result<u8> {
     if args.now {
-        let connection = args.connection.ok_or_else(|| Error::invalid("Name the connection to sample"))?;
+        let connection = args.connection.ok_or_else(|| Error::invalid(t!("cli.waits.name_one")))?;
         let seconds = args.seconds.clamp(1, 60);
         if out.format() == Format::Text {
-            eprintln!("Sampling what {connection} waits on for {seconds} s…");
+            eprintln!("{}", t!("cli.waits.sampling", connection = &connection, seconds = seconds.to_string()));
         }
         let sample = ws.wait_sample(&connection, seconds).await?;
         match out.format() {
@@ -61,12 +61,12 @@ pub async fn run(ws: &Workspace, args: WaitsArgs, out: &Out) -> Result<u8> {
             let report = ws
                 .latest_report(connection, crate::window_minutes(args.window, args.window_days))?
                 .ok_or_else(|| {
-                    Error::not_found(format!("No report for {connection} yet"))
-                        .with_hint("Scan it first: culprit scan <connection>")
+                    Error::not_found(t!("engine.reporting.no_report_yet", name = connection))
+                        .with_hint(t!("engine.reporting.no_report_yet_hint"))
                 })?;
             (connection.clone(), report.snapshot)
         }
-        (None, None) => return Err(Error::invalid("Name a connection, or pass --file")),
+        (None, None) => return Err(Error::invalid(t!("cli.waits.name_or_file"))),
     };
     let waits = culprit_engine::explain_waits(&snapshot);
     match out.format() {
@@ -100,50 +100,48 @@ fn bar(share: f64) -> String {
 fn print_report(name: &str, snapshot: &Snapshot, waits: Option<&WaitsReport>) {
     match waits {
         Some(w) => {
-            println!(
-                "{} · {}",
-                if w.activity.is_some() {
-                    format!("{name}'s retained active-task samples")
-                } else {
-                    format!("Where {name}'s database time goes")
-                },
-                w.source
-            );
+            let title = if w.activity.is_some() {
+                t!("cli.waits.activity_title", name = name)
+            } else {
+                t!("cli.waits.title", name = name)
+            };
+            println!("{title} · {}", w.source);
             println!();
             if let Some(activity) = &w.activity {
-                println!(
-                    "{} retained observations; {} weighted observations. {}",
-                    format::count(activity.period.observations),
-                    format::count(activity.period.weighted_observations),
-                    if activity.period.partial { "Partial read." } else { "" }
+                let observations = t!(
+                    "cli.waits.observations",
+                    retained = format::count(activity.period.observations),
+                    weighted = format::count(activity.period.weighted_observations)
                 );
+                let partial = if activity.period.partial { t!("cli.waits.partial") } else { String::new() };
+                println!("{observations} {partial}");
                 for c in &activity.categories {
                     println!(
-                        "{:>5}  {}  {:<22} weight {}",
+                        "{:>5}  {}  {:<22} {}",
                         format::percent(c.share),
                         bar(c.share),
                         c.label,
-                        format::count(c.weighted_observations)
+                        t!("cli.waits.weight", weight = format::count(c.weighted_observations))
                     );
                     for e in c.events.iter().take(5) {
+                        let node = e.node.clone().unwrap_or_else(|| t!("cli.unknown"));
                         println!(
-                            "{:>29}{} · {} · node {}{} · weight {}",
+                            "{:>29}{} · {} · {}{} · {}",
                             "",
                             e.component,
                             e.wait_event,
-                            e.node.as_deref().unwrap_or("unknown"),
-                            e.query_id.as_ref().map(|id| format!(" · query {id}")).unwrap_or_default(),
-                            format::count(e.weighted_observations)
+                            t!("cli.waits.node", node = node),
+                            e.query_id
+                                .as_ref()
+                                .map(|id| format!(" · {}", t!("cli.waits.query", id = id)))
+                                .unwrap_or_default(),
+                            t!("cli.waits.weight", weight = format::count(e.weighted_observations))
                         );
                     }
                     for q in c.queries.iter().take(3) {
-                        println!(
-                            "{:>29}{} of this category's sample weight · query {} {}",
-                            "",
-                            format::percent(q.share_of_category),
-                            q.id,
-                            q.text.as_deref().map(|s| short(s, 70)).unwrap_or_default()
-                        );
+                        let share =
+                            t!("cli.waits.share_of_weight", share = format::percent(q.share_of_category), id = &q.id);
+                        println!("{:>29}{share} {}", "", q.text.as_deref().map(|s| short(s, 70)).unwrap_or_default());
                     }
                 }
             }
@@ -160,69 +158,72 @@ fn print_report(name: &str, snapshot: &Snapshot, waits: Option<&WaitsReport>) {
                     println!("{:>29}{detail}", "");
                 }
                 for q in c.queries.iter().take(3) {
-                    println!(
-                        "{:>29}{:>5} of it  query {:<8} {}",
-                        "",
-                        format::percent(q.share_of_category),
-                        q.id,
-                        short(&q.text, 70)
-                    );
+                    let share = t!("cli.waits.of_it", share = format!("{:>5}", format::percent(q.share_of_category)));
+                    let query = t!("cli.waits.query", id = format!("{:<8}", q.id));
+                    println!("{:>29}{share}  {query} {}", "", short(&q.text, 70));
                 }
             }
             for note in &w.notes {
                 println!();
-                println!("Note: {note}");
+                println!("{}", t!("cli.note", note = note));
             }
         }
         None => {
-            println!("{name}'s latest scan recorded no waits.");
+            println!("{}", t!("cli.waits.none", name = name));
             if let Some(reason) = snapshot.source_problem(&[culprit_core::source_id::DOCDB_ACTIVITY_HISTORY]) {
-                println!("Recorded activity unavailable: {reason}");
+                println!("{}", t!("cli.waits.activity_unavailable", reason = reason));
             }
-            println!("Sample what it waits on right now: culprit waits {name} --now");
+            println!("{}", t!("cli.waits.sample_now", command = format!("culprit waits {name} --now")));
         }
     }
     if let Some(history) = &snapshot.operations.termination_history {
-        println!("\nRetained unexpected terminations · {} · {} records", history.source, history.events.len());
+        let n = history.events.len();
+        println!("\n{}", t!("cli.waits.terminations", source = &history.source, n = n, count = n.to_string()));
         println!(
-            "Requested {} to {}. {}. {}",
-            history.requested_start,
-            history.requested_end,
+            "{} {}. {}",
+            t!("cli.waits.requested", from = &history.requested_start, to = &history.requested_end),
             history.visibility,
-            if history.partial { "Partial read." } else { "" }
+            if history.partial { t!("cli.waits.partial") } else { String::new() }
         );
         for event in history.events.iter().take(12) {
+            let node = event.node.clone().unwrap_or_else(|| t!("cli.unknown"));
+            let query = event.query_id.clone().unwrap_or_else(|| t!("cli.waits.unresolved"));
             println!(
-                "  {} · {} · node {} · query {}",
+                "  {} · {} · {} · {}",
                 event.ended_at,
                 event.reason.label(),
-                event.node.as_deref().unwrap_or("unknown"),
-                event.query_id.as_deref().unwrap_or("unresolved")
+                t!("cli.waits.node", node = node),
+                t!("cli.waits.query", id = query)
             );
         }
         if history.events.len() > 12 {
-            println!("  Showing the first 12 retained records; use --json for the full retained set.");
+            println!("  {}", t!("cli.waits.first_records"));
         }
         for note in &history.notes {
             println!("  {note}");
         }
     } else if let Some(reason) = snapshot.source_problem(&[culprit_core::source_id::DOCDB_TERMINATIONS]) {
-        println!("Recorded terminations unavailable: {reason}");
+        println!("{}", t!("cli.waits.terminations_unavailable", reason = reason));
     }
     if let Some(p) = &snapshot.pressure {
-        print_signals("Health", p, &p.signals);
+        print_signals(&t!("cli.waits.health"), p, &p.signals);
         print_storage(&p.files);
         print_replicas(&p.replicas);
     }
     if let Some(resources) = &snapshot.operations.node_resources {
         println!(
-            "\nShared node resources · {} · observed {} to {}",
-            resources.source, resources.observed_from, resources.observed_until
+            "\n{}",
+            t!(
+                "cli.waits.node_resources",
+                source = &resources.source,
+                from = &resources.observed_from,
+                to = &resources.observed_until
+            )
         );
         let limit = |limit: Option<culprit_core::MemoryLimit>| match limit {
-            Some(culprit_core::MemoryLimit::Unlimited) => "unlimited".into(),
+            Some(culprit_core::MemoryLimit::Unlimited) => t!("cli.waits.unlimited"),
             Some(culprit_core::MemoryLimit::Bytes(n)) => format::bytes(n),
-            None => "unknown".into(),
+            None => t!("cli.unknown"),
         };
         for node in resources
             .nodes
@@ -232,115 +233,126 @@ fn print_report(name: &str, snapshot: &Snapshot, waits: Option<&WaitsReport>) {
             .take(12)
         {
             if !node.available {
-                println!("  {}: resource measurements unavailable", node.node);
+                println!("  {}: {}", node.node, t!("cli.waits.node_unavailable"));
                 continue;
             }
-            println!(
-                "  {}: host CPU user {}, system {}; host memory available {} of {}",
-                node.node,
-                node.cpu_user_fraction.map_or_else(|| "unknown".into(), format::percent),
-                node.cpu_system_fraction.map_or_else(|| "unknown".into(), format::percent),
-                node.host_memory_available_bytes.map_or_else(|| "unknown".into(), format::bytes),
-                node.host_memory_total_bytes.map_or_else(|| "unknown".into(), format::bytes)
+            let unknown = || t!("cli.unknown");
+            let host = t!(
+                "cli.waits.host",
+                user = node.cpu_user_fraction.map_or_else(unknown, format::percent),
+                system = node.cpu_system_fraction.map_or_else(unknown, format::percent),
+                available = node.host_memory_available_bytes.map_or_else(unknown, format::bytes),
+                total = node.host_memory_total_bytes.map_or_else(unknown, format::bytes)
             );
+            println!("  {}: {host}", node.node);
             if let Some(memory) = &node.process_memory {
-                println!(
-                    "    {}: tracked {}; soft limit {}; hard limit {}",
-                    memory.name,
-                    memory.tracked_bytes.map_or_else(|| "unknown".into(), format::bytes),
-                    limit(memory.soft_limit),
-                    limit(memory.hard_limit)
+                let tracked = t!(
+                    "cli.waits.process_memory",
+                    tracked = memory.tracked_bytes.map_or_else(unknown, format::bytes),
+                    soft = limit(memory.soft_limit),
+                    hard = limit(memory.hard_limit)
                 );
+                println!("    {}: {tracked}", memory.name);
             }
         }
         if resources.nodes.len() > 12 {
-            println!("  Showing the first 12 retained nodes; use --json for the full retained set.");
+            println!("  {}", t!("cli.waits.first_nodes"));
         }
         if resources.partial {
-            println!("  This resource read was partial.");
+            println!("  {}", t!("cli.waits.resources_partial"));
         }
         for note in &resources.notes {
             println!("  {note}");
         }
     } else if let Some(reason) = snapshot.source_problem(&[culprit_core::source_id::DOCDB_NODE_RESOURCES]) {
-        println!("Node resources unavailable: {reason}");
+        println!("{}", t!("cli.waits.resources_unavailable", reason = reason));
     }
     let o = &snapshot.operations;
     for space in &o.spaces {
-        println!(
-            "{}: {} used of {} allocated ({}, when scanned); growth {}. Filesystem headroom not measured.",
-            space.name,
-            format::bytes(space.used_bytes),
-            format::bytes(space.total_bytes),
-            scope_label(space.scope),
-            space.growth_enabled.map_or("unknown", |g| if g { "configured" } else { "unavailable" })
+        let growth = match space.growth_enabled {
+            Some(true) => t!("cli.waits.growth.configured"),
+            Some(false) => t!("cli.waits.growth.unavailable"),
+            None => t!("cli.unknown"),
+        };
+        let space_line = t!(
+            "cli.waits.space",
+            used = format::bytes(space.used_bytes),
+            total = format::bytes(space.total_bytes),
+            scope = scope_label(space.scope),
+            growth = growth
         );
+        println!("{}: {space_line} {}", space.name, t!("cli.waits.headroom"));
         if let Some(reason) = &space.reuse_wait {
-            println!("  Log reuse reason: {reason}");
+            println!("  {}", t!("cli.waits.log_reuse", reason = reason));
         }
         for part in &space.parts {
             println!("  {}: {}", part.name, format::bytes(part.bytes));
         }
     }
     for c in &o.counters {
+        let since = c.since.clone().unwrap_or_else(|| t!("cli.waits.unknown_reset"));
+        let recorded =
+            t!("cli.waits.counter", count = format::count(c.count), scope = scope_label(c.scope), since = since);
         println!(
-            "{} · {}: {} recorded ({}, since {}). This total does not establish a current incident.",
+            "{} · {}: {recorded} {}",
             culprit_core::wire_name(&c.kind).replace('-', " "),
             c.subject,
-            format::count(c.count),
-            scope_label(c.scope),
-            c.since.as_deref().unwrap_or("unknown reset")
+            t!("cli.waits.counter_not_incident")
         );
     }
     if let Some(wal) = &o.sqlite {
-        println!(
-            "SQLite WAL allocation when scanned: {}. Allocation does not measure uncheckpointed work.",
-            wal.wal_bytes.map_or_else(|| "unknown".into(), format::bytes)
-        );
+        let size = wal.wal_bytes.map_or_else(|| t!("cli.unknown"), format::bytes);
+        println!("{} {}", t!("cli.waits.wal", size = size), t!("cli.waits.wal_not_work"));
     }
     for seq in &o.sequences {
-        println!(
-            "{}: allocation {}, bounds {} to {}, increment {}, cycling {}. Cached/skipped values prevent a remaining-request forecast.",
-            seq.name, seq.current, seq.minimum, seq.maximum, seq.increment, seq.cycles
+        let line = t!(
+            "cli.waits.sequence",
+            current = seq.current.to_string(),
+            minimum = seq.minimum.to_string(),
+            maximum = seq.maximum.to_string(),
+            increment = seq.increment.to_string(),
+            cycles = seq.cycles.to_string()
         );
+        println!("{}: {line} {}", seq.name, t!("cli.waits.sequence_no_forecast"));
     }
     for age in &o.multixacts {
-        println!(
-            "{}: {} MultiXact IDs old when scanned (independent of ordinary XID age).",
-            age.subject,
-            format::count(age.age)
-        );
+        println!("{}: {}", age.subject, t!("cli.waits.multixact", age = format::count(age.age)));
     }
     if let Some(cluster) = &o.cluster {
+        let state = cluster.local_state.clone().unwrap_or_else(|| t!("cli.waits.state_unknown"));
         println!(
-            "Galera node when scanned: ready {}, connected {}, primary component {}; {}.",
-            flag_label(cluster.ready),
-            flag_label(cluster.connected),
-            flag_label(cluster.primary_component),
-            cluster.local_state.as_deref().unwrap_or("state unknown")
+            "{}",
+            t!(
+                "cli.waits.galera",
+                ready = flag_label(cluster.ready),
+                connected = flag_label(cluster.connected),
+                primary = flag_label(cluster.primary_component),
+                state = state
+            )
         );
     }
 }
 
-fn scope_label(scope: culprit_core::FileScope) -> &'static str {
+fn scope_label(scope: culprit_core::FileScope) -> String {
     match scope {
-        culprit_core::FileScope::Database => "current database",
-        culprit_core::FileScope::Server => "whole server",
+        culprit_core::FileScope::Database => t!("cli.waits.scope.database"),
+        culprit_core::FileScope::Server => t!("cli.waits.scope.server"),
     }
 }
-fn flag_label(value: Option<bool>) -> &'static str {
+fn flag_label(value: Option<bool>) -> String {
     match value {
-        Some(true) => "yes",
-        Some(false) => "no",
-        None => "unknown",
+        Some(true) => t!("cli.yes"),
+        Some(false) => t!("cli.no"),
+        None => t!("cli.unknown"),
     }
 }
 
 fn print_sample(name: &str, s: &WaitSample) {
-    println!("What {name} waits on right now · {} s · {}", s.seconds.round(), s.method);
+    let title = t!("cli.waits.now_title", name = name, seconds = s.seconds.round().to_string());
+    println!("{title} · {}", s.method);
     println!();
     if s.categories.is_empty() {
-        println!("Nothing waited during the sample.");
+        println!("{}", t!("cli.waits.nothing_waited"));
     }
     for c in &s.categories {
         let share = if s.total_ms > 0.0 { c.wait_ms / s.total_ms } else { 0.0 };
@@ -356,13 +368,13 @@ fn print_sample(name: &str, s: &WaitSample) {
     }
     if let Some(a) = s.active_sessions {
         println!();
-        println!("Busy sessions on average: {}", format::count(a));
+        println!("{}", t!("cli.waits.busy_sessions", count = format::count(a)));
     }
     if !s.signals.is_empty() {
-        print_signals("During the sample", &Pressure::default(), &s.signals);
+        print_signals(&t!("cli.waits.during_sample"), &Pressure::default(), &s.signals);
     }
     for note in &s.notes {
-        println!("Note: {note}");
+        println!("{}", t!("cli.note", note = note));
     }
 }
 
@@ -372,7 +384,9 @@ fn print_signals(title: &str, p: &Pressure, signals: &[Signal]) {
     }
     println!();
     match p.uptime_hours {
-        Some(h) => println!("{title} (\"since start\" covers {})", format::duration(h * 3_600_000.0)),
+        Some(h) => {
+            println!("{}", t!("cli.waits.signals_since", title = title, span = format::duration(h * 3_600_000.0)))
+        }
         None => println!("{title}"),
     }
     for s in signals {
@@ -383,12 +397,12 @@ fn print_signals(title: &str, p: &Pressure, signals: &[Signal]) {
             SignalStatus::Info => " ",
         };
         let scope = match s.scope {
-            SignalScope::Now => "when scanned",
-            SignalScope::SinceStartup => "since start",
-            SignalScope::Sampled => "sampled",
-            SignalScope::LastHour => "last hour",
-            SignalScope::QueryHistory => "retained query history",
-            SignalScope::Window => "selected period",
+            SignalScope::Now => t!("cli.waits.signal_scope.now"),
+            SignalScope::SinceStartup => t!("cli.waits.signal_scope.since_start"),
+            SignalScope::Sampled => t!("cli.waits.signal_scope.sampled"),
+            SignalScope::LastHour => t!("cli.waits.signal_scope.last_hour"),
+            SignalScope::QueryHistory => t!("cli.waits.signal_scope.query_history"),
+            SignalScope::Window => t!("cli.waits.signal_scope.window"),
         };
         println!("  {mark} {:<36} {:>10}  {:<11} {}", s.label, value(s), scope, s.healthy.as_deref().unwrap_or(""));
     }
@@ -398,9 +412,11 @@ pub fn value(s: &Signal) -> String {
     match s.unit {
         SignalUnit::Percent => format::percent_value(s.value),
         // Under one every ten seconds, a per-minute rate says more than "0.0/s".
-        SignalUnit::PerSecond if s.value > 0.0 && s.value < 0.1 => format!("{}/min", format::count(s.value * 60.0)),
-        SignalUnit::PerSecond => format!("{}/s", format::count(s.value)),
-        SignalUnit::PerHour => format!("{}/h", format::count(s.value)),
+        SignalUnit::PerSecond if s.value > 0.0 && s.value < 0.1 => {
+            t!("cli.unit.per_minute", n = format::count(s.value * 60.0))
+        }
+        SignalUnit::PerSecond => t!("cli.unit.per_second", n = format::count(s.value)),
+        SignalUnit::PerHour => t!("cli.unit.per_hour", n = format::count(s.value)),
         SignalUnit::Count => format::count(s.value),
         SignalUnit::Bytes => format::bytes(s.value),
         SignalUnit::Milliseconds => format::duration(s.value),
@@ -414,10 +430,10 @@ fn print_storage(files: &[FileIo]) {
         return;
     }
     println!();
-    println!("Storage (average per operation, since start)");
+    println!("{}", t!("cli.waits.storage"));
     let avg = |ms: Option<f64>, n: f64| match ms {
         Some(ms) if n > 0.0 => format!("{:>9} × {:<6}", latency(ms / n), format::count(n)),
-        _ if n > 0.0 => format!("{:>9} × {:<6}", "untimed", format::count(n)),
+        _ if n > 0.0 => format!("{:>9} × {:<6}", t!("cli.waits.untimed"), format::count(n)),
         _ => format!("{:>18}", ""),
     };
     for f in files.iter().take(12) {
@@ -425,13 +441,18 @@ fn print_storage(files: &[FileIo]) {
             Some(db) if !f.name.starts_with(db.as_str()) => format!("{db} · {}", f.name),
             _ => f.name.clone(),
         };
-        println!("  {:<34} reads {}  writes {}", short(&name, 34), avg(f.read_ms, f.reads), avg(f.write_ms, f.writes));
+        println!(
+            "  {:<34} {}  {}",
+            short(&name, 34),
+            t!("cli.waits.reads", reads = avg(f.read_ms, f.reads)),
+            t!("cli.waits.writes", writes = avg(f.write_ms, f.writes))
+        );
     }
 }
 
 /// Storage latency reads best in microseconds below a tenth of a millisecond (cache hits, fast SSDs).
 fn latency(ms: f64) -> String {
-    if ms < 0.1 { format!("{:.0} µs", ms * 1000.0) } else { format::duration(ms) }
+    if ms < 0.1 { t!("common.duration.us", n = format!("{:.0}", ms * 1000.0)) } else { format::duration(ms) }
 }
 
 fn print_replicas(replicas: &[Replica]) {
@@ -439,25 +460,25 @@ fn print_replicas(replicas: &[Replica]) {
         return;
     }
     println!();
-    println!("Replication");
+    println!("{}", t!("cli.waits.replication"));
     for r in replicas {
         let role = match r.role {
-            ReplicaRole::Replica => "replica",
-            ReplicaRole::ThisServer => "this server",
-            ReplicaRole::Slot => "slot",
+            ReplicaRole::Replica => t!("cli.waits.role.replica"),
+            ReplicaRole::ThisServer => t!("cli.waits.role.this_server"),
+            ReplicaRole::Slot => t!("cli.waits.role.slot"),
         };
         let mut parts: Vec<String> = Vec::new();
         parts.extend(r.state.clone());
         parts.extend(r.sync.clone());
         if let Some(s) = r.lag_seconds {
-            parts.push(format!("{} behind", format::duration(s * 1000.0)));
+            parts.push(t!("cli.waits.behind", duration = format::duration(s * 1000.0)));
         }
         if let Some(b) = r.lag_bytes {
-            parts.push(format!(
-                "{} {}",
-                format::bytes(b),
-                if r.role == ReplicaRole::Slot { "kept" } else { "not applied" }
-            ));
+            parts.push(if r.role == ReplicaRole::Slot {
+                t!("cli.waits.kept", size = format::bytes(b))
+            } else {
+                t!("cli.waits.not_applied", size = format::bytes(b))
+            });
         }
         parts.extend(r.error.clone());
         println!("  {:<11} {:<28} {}", role, short(&r.name, 28), parts.join(" · "));

@@ -163,16 +163,16 @@ pub(crate) async fn run(ws: &Workspace, command: ConnCommand, out: &Out) -> culp
             let found = match args.cloud {
                 CloudArg::Azure => {
                     if !args.regions.is_empty() {
-                        return Err(Error::invalid("--region only applies to --cloud aws"));
+                        return Err(Error::invalid(culprit_core::t!("cli.discover.region_aws")));
                     }
-                    out.progress("Searching Azure Resource Graph…");
+                    out.progress(&culprit_core::t!("cli.discover.searching_azure"));
                     ws.discover_azure(&args.terms).await?
                 }
                 CloudArg::Aws => {
                     let message = if args.regions.is_empty() {
-                        "Searching Amazon RDS in every enabled region…".to_string()
+                        culprit_core::t!("cli.discover.searching_aws_all")
                     } else {
-                        format!("Searching Amazon RDS in {}…", args.regions.join(", "))
+                        culprit_core::t!("cli.discover.searching_aws", regions = args.regions.join(", "))
                     };
                     out.progress(&message);
                     ws.discover_aws(&args.regions, &args.terms).await?
@@ -181,8 +181,8 @@ pub(crate) async fn run(ws: &Workspace, command: ConnCommand, out: &Out) -> culp
             let mut saved = Vec::new();
             if args.save {
                 if found.has_more || !found.warnings.is_empty() {
-                    return Err(Error::invalid("Discovery is incomplete; no connections were saved")
-                        .with_hint("Refine --match or --region until the search is complete, then retry --save"));
+                    return Err(Error::invalid(culprit_core::t!("cli.discover.incomplete"))
+                        .with_hint(culprit_core::t!("cli.discover.incomplete_hint")));
                 }
                 for d in found.items.iter().filter(|d| d.saved_as.is_none()) {
                     if d.environment.is_production() && !args.include_production {
@@ -223,15 +223,15 @@ pub(crate) async fn run(ws: &Workspace, command: ConnCommand, out: &Out) -> culp
             Ok(0)
         }
         ConnCommand::SetPassword { name } => {
-            let password = read_password(&format!("Password for {name}: "))?;
+            let password = read_password(&format!("{} ", culprit_core::t!("cli.password_prompt", name = &name)))?;
             let info = ws.set_password(&name, &password)?;
-            out.done(&format!("Stored the password for {} in the OS keychain", info.name));
+            out.done(&culprit_core::t!("cli.password_stored", name = &info.name));
             Ok(0)
         }
         ConnCommand::Set(args) => agents::set(ws, args, out),
         ConnCommand::Rm { name } => {
             ws.remove_connection(&name)?;
-            out.done(&format!("Removed {name}"));
+            out.done(&culprit_core::t!("cli.removed", name = &name));
             Ok(0)
         }
         ConnCommand::Add(args) => {
@@ -273,7 +273,7 @@ pub(crate) async fn run(ws: &Workspace, command: ConnCommand, out: &Out) -> culp
             let server = if args.no_test {
                 None
             } else {
-                out.progress(&format!("Testing {}…", args.name));
+                out.progress(&culprit_core::t!("cli.testing", name = &args.name));
                 Some(ws.test_connection(&new).await?)
             };
             let mut info = ws.add_connection(new)?;

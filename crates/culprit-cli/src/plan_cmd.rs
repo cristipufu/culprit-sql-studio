@@ -53,11 +53,11 @@ pub async fn run(ws: &Workspace, command: PlanCommand, out: &Out) -> Result<u8> 
         }
         PlanCommand::Diff { a, b } => {
             if a == "-" && b == "-" {
-                return Err(Error::invalid("Only one side can come from stdin"));
+                return Err(Error::invalid(culprit_core::t!("cli.plan_cmd.one_stdin")));
             }
             let (plan_a, name_a) = load(ws, &a).await?;
             let (plan_b, name_b) = load(ws, &b).await?;
-            let (name_a, name_b) = if name_a == name_b { ("plan A".into(), "plan B".into()) } else { (name_a, name_b) };
+            let (name_a, name_b) = if name_a == name_b { sides() } else { (name_a, name_b) };
             let diff = ws.diff_plans(&plan_a, &name_a, &plan_b, &name_b, connection_of(&a).or(connection_of(&b)));
             out.plan_diff(&diff, &name_a, &name_b);
         }
@@ -74,11 +74,10 @@ pub async fn run(ws: &Workspace, command: PlanCommand, out: &Out) -> Result<u8> 
             let file = match b {
                 Some(b) => {
                     if format == ExportFormat::Native {
-                        return Err(Error::invalid("--native saves one plan; compare two as Markdown or --html"));
+                        return Err(Error::invalid(culprit_core::t!("cli.plan_cmd.native_one")));
                     }
                     let (plan_b, name_b) = load(ws, &b).await?;
-                    let (name_a, name_b) =
-                        if name_a == name_b { ("plan A".to_string(), "plan B".to_string()) } else { (name_a, name_b) };
+                    let (name_a, name_b) = if name_a == name_b { sides() } else { (name_a, name_b) };
                     let diff =
                         ws.diff_plans(&plan_a, &name_a, &plan_b, &name_b, connection_of(&a).or(connection_of(&b)));
                     export_diff(&plan_a, &plan_b, &diff, &name_a, &name_b, format, &options)?
@@ -89,6 +88,11 @@ pub async fn run(ws: &Workspace, command: PlanCommand, out: &Out) -> Result<u8> 
         }
     }
     Ok(0)
+}
+
+/// "plan A" and "plan B": two plans that would read alike by their own names.
+fn sides() -> (String, String) {
+    (culprit_core::t!("cli.plan_cmd.plan_a"), culprit_core::t!("cli.plan_cmd.plan_b"))
 }
 
 /// The connection named by a `<connection>:<query_id>` source, for statistics that explain plan differences.
@@ -104,7 +108,7 @@ async fn load(ws: &Workspace, source: &str) -> Result<(Plan, String)> {
     if source == "-" {
         let mut bytes = Vec::new();
         std::io::stdin().read_to_end(&mut bytes).map_err(|e| Error::invalid(e.to_string()))?;
-        return Ok((plans::parse_plan(&plans::decode(&bytes)?)?, "stdin".into()));
+        return Ok((plans::parse_plan(&plans::decode(&bytes)?)?, culprit_core::t!("cli.plan_cmd.stdin")));
     }
     let path = Path::new(source);
     if path.is_file() {
@@ -117,14 +121,14 @@ async fn load(ws: &Workspace, source: &str) -> Result<(Plan, String)> {
         [c, q] if !c.is_empty() && !q.is_empty() => (*c, *q, None),
         [c, q, p] if !c.is_empty() && !q.is_empty() && !p.is_empty() => (*c, *q, Some(*p)),
         _ => {
-            return Err(Error::not_found(format!("No file '{source}'"))
-                .with_hint("Pass a plan file, `-` for stdin, or <connection>:<query_id>[:<plan_id>]"));
+            return Err(Error::not_found(culprit_core::t!("cli.plan_cmd.no_file", source = source))
+                .with_hint(culprit_core::t!("cli.plan_cmd.no_file_hint")));
         }
     };
     let plan = ws.query_plan(connection, query_id, plan_id).await?;
     let name = match plan_id {
-        Some(id) => format!("Plan {id}"),
-        None => format!("query {query_id}"),
+        Some(id) => culprit_core::t!("cli.plan_cmd.plan_name", id = id),
+        None => culprit_core::t!("cli.plan_cmd.query_name", id = query_id),
     };
     Ok((plan, name))
 }

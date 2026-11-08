@@ -74,14 +74,14 @@ pub(crate) fn drift_sarif(drift: &Drift) -> Value {
         rules_by_id.entry(rule_id.clone()).or_insert_with(|| {
             json!({
                 "id": rule_id,
-                "shortDescription": { "text": format!("Schema or setting drift ({kind_slug})") },
+                "shortDescription": { "text": culprit_core::t!("cli.sarif.drift", kind = kind_slug) },
                 "defaultConfiguration": { "level": level }
             })
         });
 
         let mut text = item.title.clone();
         if let (Some(sql), Some(target)) = (&item.sql, &item.sql_for) {
-            text.push_str(&format!("\n\nTo align on {target}:\n```sql\n{sql}\n```"));
+            text.push_str(&format!("\n\n{}\n```sql\n{sql}\n```", culprit_core::t!("cli.sarif.align", target = target)));
         }
         results.push(json!({
             "ruleId": rule_id,

@@ -34,7 +34,7 @@ pub async fn run(ws: &Workspace, args: DashboardArgs, out: &Out) -> Result<u8> {
             if args.scan {
                 let defaults = SnapshotOptions::default();
                 let options = defaults.clone().with_window_minutes(window.unwrap_or(defaults.window_in_minutes()));
-                out.progress(&format!("Scanning {}…", args.connection));
+                out.progress(&culprit_core::t!("cli.scanning", connection = &args.connection));
                 ws.scan(&args.connection, &options).await?;
             }
             ws.dashboard(&args.connection, window, !args.no_live).await?
@@ -116,13 +116,13 @@ fn mark(out: &Out, status: TileStatus) -> String {
     }
 }
 
-fn status_word(status: TileStatus) -> &'static str {
+fn status_word(status: TileStatus) -> String {
     match status {
-        TileStatus::Bad => "needs a look now",
-        TileStatus::Watch => "worth a look",
-        TileStatus::Good => "fine",
-        TileStatus::Info => "for context",
-        TileStatus::Unavailable => "not available here",
+        TileStatus::Bad => culprit_core::t!("cli.dashboard.status.bad"),
+        TileStatus::Watch => culprit_core::t!("cli.dashboard.status.watch"),
+        TileStatus::Good => culprit_core::t!("cli.dashboard.status.good"),
+        TileStatus::Info => culprit_core::t!("cli.dashboard.status.info"),
+        TileStatus::Unavailable => culprit_core::t!("cli.dashboard.status.unavailable"),
     }
 }
 
@@ -130,8 +130,8 @@ const PAD: usize = 18;
 
 fn print_text(d: &Dashboard, out: &Out) {
     println!("{}", out.bold(&format!("{} · {} · {}", d.connection, d.product, d.database)));
-    let scanned = age(&d.taken_at).map(|a| format!("scanned {a}")).unwrap_or_default();
-    let under = [d.coverage.clone().unwrap_or_default(), format!("{:?}", d.environment).to_lowercase(), scanned]
+    let scanned = age(&d.taken_at).map(|a| culprit_core::t!("cli.dashboard.scanned", age = a)).unwrap_or_default();
+    let under = [d.coverage.clone().unwrap_or_default(), crate::output::environment_word(d.environment), scanned]
         .into_iter()
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
@@ -141,7 +141,7 @@ fn print_text(d: &Dashboard, out: &Out) {
     if d.attention.is_empty() {
         println!("{}", d.headline);
     } else {
-        println!("{} {}", out.bold("Needs a look:"), d.headline);
+        println!("{} {}", out.bold(&culprit_core::t!("cli.dashboard.needs_a_look")), d.headline);
     }
     let indent = " ".repeat(PAD + 2);
     for tile in &d.tiles {
@@ -158,8 +158,11 @@ fn print_text(d: &Dashboard, out: &Out) {
             let value = item.value.as_deref().map(|v| format!("  {}", out.dim(v))).unwrap_or_default();
             let dot = item.status.map(|s| format!("{} ", mark(out, s))).unwrap_or_else(|| "· ".into());
             // Two reads of the same table look alike; the id tells them apart and opens with `culprit query`.
-            let id =
-                item.query_id.as_deref().map(|id| format!("  {}", out.dim(&format!("id {id}")))).unwrap_or_default();
+            let id = item
+                .query_id
+                .as_deref()
+                .map(|id| format!("  {}", out.dim(&culprit_core::t!("cli.dashboard.id", id = id))))
+                .unwrap_or_default();
             println!("{indent}{dot}{}{value}{id}", item.label);
         }
         if let Some(sql) = &tile.fix_sql {
@@ -178,13 +181,14 @@ fn print_markdown(d: &Dashboard) {
     println!("## {} · {}", d.connection, d.product);
     println!();
     if let Some(coverage) = &d.coverage {
-        println!("_{coverage}; scanned {}_", culprit_core::changes::dated_time(&d.taken_at));
+        let when = culprit_core::changes::dated_time(&d.taken_at);
+        println!("_{}_", culprit_core::t!("cli.dashboard.coverage", coverage = coverage, when = when));
         println!();
     }
     if d.attention.is_empty() {
         println!("{}", d.headline);
     } else {
-        println!("**Needs a look:** {}", d.headline);
+        println!("**{}** {}", culprit_core::t!("cli.dashboard.needs_a_look"), d.headline);
     }
     println!();
     for tile in &d.tiles {
