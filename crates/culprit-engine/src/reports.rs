@@ -34,6 +34,9 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct ReportSummary {
+    /// The format of the report it points to ([`culprit_core::SNAPSHOT_FORMAT`]). A summary without it, or with
+    /// another, points to a report another version saved, which this one doesn't read: it is passed over as if absent.
+    pub format: u32,
     pub id: String,
     pub taken_at: String,
     pub opportunities: u32,
@@ -56,6 +59,7 @@ fn summary_path(dir: &Path, window_minutes: Option<u32>) -> PathBuf {
 
 fn summary_of(report: &Report) -> ReportSummary {
     ReportSummary {
+        format: report.snapshot.format,
         id: report.snapshot.id.clone(),
         taken_at: report.snapshot.taken_at.clone(),
         opportunities: report.summary.opportunities,
@@ -364,8 +368,13 @@ pub(crate) fn id_epoch(id: &str) -> Option<f64> {
 }
 
 pub fn latest_summary(dir: &Path, window_minutes: Option<u32>) -> Option<ReportSummary> {
-    let bytes = fs::read(summary_path(dir, window_minutes)).ok()?;
-    serde_json::from_slice(&bytes).ok()
+    read_summary(&summary_path(dir, window_minutes))
+}
+
+/// A summary this version wrote, of a report it reads; `None` for one another version left behind.
+fn read_summary(path: &Path) -> Option<ReportSummary> {
+    let bytes = fs::read(path).ok()?;
+    serde_json::from_slice::<ReportSummary>(&bytes).ok().filter(|s| s.format == culprit_core::SNAPSHOT_FORMAT)
 }
 
 /// The most recent report, or the most recent one taken with a given window (in minutes).
@@ -468,11 +477,7 @@ pub fn list(dir: &Path) -> Result<Vec<ReportSummary>> {
         .filter(|p| is_report_file(p))
         .filter_map(|p| {
             let id = p.file_stem()?.to_str()?;
-            let sidecar = p.with_file_name(format!("{id}.summary.json"));
-            fs::read(&sidecar)
-                .ok()
-                .and_then(|b| serde_json::from_slice::<ReportSummary>(&b).ok())
-                .filter(|s| s.id == id)
+            read_summary(&p.with_file_name(format!("{id}.summary.json"))).filter(|s| s.id == id)
         })
         .collect();
     out.sort_by(|a, b| b.taken_at.cmp(&a.taken_at));
@@ -494,6 +499,36 @@ mod tests {
         }
         report.snapshot.options = Some(SnapshotOptions::default().with_window_minutes(window_minutes));
         report
+    }
+
+    /// A connection scanned by another version keeps that version's files: its reports aren't read, so they are passed
+    /// over as if absent (opening the connection scans; a digest has no scan before it), never an error.
+    #[test]
+    fn a_report_another_version_saved_is_passed_over() {
+        let dir = std::env::temp_dir().join(format!("culprit-other-version-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let report = fixture_report("20261021T100000.000Z", 60);
+        save(&dir, &report).unwrap();
+        assert_eq!(latest_summary(&dir, None).map(|s| s.format), Some(culprit_core::SNAPSHOT_FORMAT));
+        let summaries = [
+            dir.join("latest.json"),
+            dir.join("latest-1h.json"),
+            dir.join(format!("{}.summary.json", report.snapshot.id)),
+        ];
+        for path in &summaries {
+            let mut older: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+            older.as_object_mut().unwrap().remove("format");
+            fs::write(path, serde_json::to_vec(&older).unwrap()).unwrap();
+        }
+        assert!(latest_summary(&dir, None).is_none());
+        assert!(latest_summary(&dir, Some(60)).is_none());
+        assert!(list(&dir).unwrap().is_empty());
+        assert!(latest(&dir, None).unwrap().is_none());
+        // The next scan this version saves is the latest again.
+        save(&dir, &fixture_report("20261021T110000.000Z", 60)).unwrap();
+        assert_eq!(latest_summary(&dir, Some(60)).map(|s| s.id), Some("20261021T110000.000Z".to_string()));
+        assert_eq!(list(&dir).unwrap().len(), 1);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

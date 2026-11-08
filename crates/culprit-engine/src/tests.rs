@@ -108,7 +108,10 @@ async fn a_connection_saved_without_a_password_never_sends_one_left_under_its_na
 fn leave_report(ws: &Workspace, name: &str, id: &str) {
     let dir = ws.paths.reports_dir(name);
     std::fs::create_dir_all(&dir).unwrap();
-    let summary = format!(r#"{{"id":"{id}","taken_at":"2026-10-01T00:00:00Z","opportunities":3,"headline":"{name}"}}"#);
+    let format = culprit_core::SNAPSHOT_FORMAT;
+    let summary = format!(
+        r#"{{"format":{format},"id":"{id}","taken_at":"2026-10-01T00:00:00Z","opportunities":3,"headline":"{name}"}}"#
+    );
     std::fs::write(dir.join("latest.json"), summary).unwrap();
 }
 

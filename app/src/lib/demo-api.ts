@@ -207,6 +207,7 @@ export async function demoApi(): Promise<Api> {
       // A report whose statements came from a log: the desktop would have it saved on the connection.
       query_log: r.snapshot.workload?.log != null ? "log/development.log" : null,
       last_report: {
+        format: r.snapshot.format,
         id: r.snapshot.id,
         taken_at: r.snapshot.taken_at,
         opportunities: r.summary.opportunities,
