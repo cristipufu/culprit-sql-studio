@@ -213,7 +213,7 @@ fn unread_finding(snapshot: &Snapshot, u: UnreadIndexes<'_>) -> Finding {
     let sql = u.indexes.iter().map(|i| crate::index_health::hide_index_sql(snapshot, i)).collect::<Vec<_>>().join("\n");
     let kind = snapshot.table(schema, table).and_then(|t| t.kind.as_deref());
     f.fix = Some(Fix {
-        summary: snapshot.server.engine.spec().unused_index_advice(&snapshot.server, kind).into(),
+        summary: snapshot.server.engine.spec().unused_index_advice(&snapshot.server, kind),
         sql: Some(sql),
         cost: Some(t!("check.unused_index.fix_cost", size = &size, table = &table_name)),
     });

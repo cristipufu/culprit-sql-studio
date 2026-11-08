@@ -107,7 +107,7 @@ pub(super) fn plan_warning_finding(
     let key = format!("{}:{}", q.id, warning_key(warning));
     let mut f = finding("plan-warnings", &key, Category::Queries, subject(SubjectKind::Query, &q.id));
     apply_impact(snapshot, &mut f, impact);
-    f.queries = vec![QueryRef { id: q.id.clone(), plan_node: node.map(|n| n.id), note: Some(warning.label().into()) }];
+    f.queries = vec![QueryRef { id: q.id.clone(), plan_node: node.map(|n| n.id), note: Some(warning.label()) }];
     f.metrics.push(Metric::new(share_metric_label(snapshot), impact.share, Unit::Ratio));
     f.metrics.push(Metric::new("Average duration", q.mean_time_ms, Unit::Ms));
     let handle = query_handle(q);
