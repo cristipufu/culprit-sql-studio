@@ -106,6 +106,20 @@ fn how_often_never_extrapolates_a_short_window() {
         min_logged_ms: None,
         log: None,
     };
+    // What belongs to a window is said by a phrase of its own, word for word what English made of the window's phrase
+    // ("the last 10 hours'", "the last 1 hour's"), never by looking at how that phrase ends.
+    let mut logged = w(5.0, false);
+    logged.log = Some("Rails".into());
+    let mut unknown_log = logged.clone();
+    unknown_log.window_hours = 0.0;
+    for w in [w(10.0, true), w(1.0, true), w(0.25, true), w(72.0, true), w(0.0, true), w(5.0, false), w(0.0, false)]
+        .into_iter()
+        .chain([logged, unknown_log])
+    {
+        let phrase = w.window_phrase();
+        let english = format!("{phrase}{}", if phrase.ends_with('s') { "'" } else { "'s" });
+        assert_eq!(w.window_possessive(), english);
+    }
     // 4 runs in 10 hours is not "~9.6 runs a day".
     assert_eq!(w(10.0, true).how_often(4.0), "4 runs over the last 10 hours");
     assert_eq!(w(10.0, true).per_day_measured(4.0), None);

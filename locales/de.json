@@ -1033,7 +1033,6 @@
   "check.missing_index.impact.previous": "Frühere Anforderung des Optimierers",
   "check.missing_index.info.description": "Vom Optimierer von SQL Server erfasste Indexvorschläge, miteinander zusammengeführt und mit vorhandenen Indizes abgeglichen.",
   "check.missing_index.info.title": "Fehlende Indizes",
-  "check.missing_index.lately": "Über {window}{ends_in_s, select, yes {} other {}} hat keine Anweisung diesen Index angefordert: Der Optimierer von SQL Server tat es zuletzt {when}, {silence} vor dem Ende der Daten dieses Scans; das ist zu kurz, um zu sagen, dass die Anweisungen, die ihn wollten, nicht mehr laufen.",
   "check.missing_index.metric.improvement": "Geschätzte Verbesserung",
   "check.missing_index.metric.lookups": "Anfordernde Lookups",
   "check.missing_index.query_note.previous": "Gehört zu einer Anforderung aus der Zeit vor dem ausgewählten Zeitfenster; die aktuelle Abfrageaktivität datiert diese Anforderung nicht.",

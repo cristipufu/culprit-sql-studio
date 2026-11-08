@@ -331,6 +331,14 @@ impl LastAsked {
             None => t!("check.missing_index.window.last_week"),
         }
     }
+
+    /// [`LastAsked::window`] as a sentence names what belongs to it, before a noun ("the last 2 hours'").
+    pub(super) fn window_possessive(&self, snapshot: &Snapshot) -> String {
+        match &snapshot.workload {
+            Some(w) => w.window_possessive(),
+            None => t!("check.missing_index.window_of.last_week"),
+        }
+    }
 }
 
 /// When SQL Server's optimizer last wanted the index, when that is before the scan's window (or, without query

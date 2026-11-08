@@ -174,6 +174,11 @@ fn postgres_counters_that_outlived_a_restart_say_so() {
     // Counters as old as the server: a restart, as before.
     s.pressure = Some(culprit_core::Pressure { uptime_hours: Some(5.0), ..Default::default() });
     assert_eq!(since_phrase(&s), "in the 5 hours since the server last restarted");
+    // How long they have counted is a phrase of its own in each language, not the sentence's with a word cut off.
+    assert_eq!(counted_span(&s), "the 5 hours since the server last restarted");
+    culprit_core::i18n::scope("fr", || {
+        assert_eq!(counted_span(&s), format!("les 5 heures écoulées {}", culprit_core::t!("support.since.restart")));
+    });
 }
 
 #[test]

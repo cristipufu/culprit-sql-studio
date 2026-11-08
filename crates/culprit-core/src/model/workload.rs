@@ -234,6 +234,36 @@ impl Workload {
         (self.measurement_hours() >= RATE_MIN_HOURS).then(|| self.per_day(value))
     }
 
+    /// [`Workload::window_phrase`] as a sentence names what belongs to it, before a noun: "the last 5 hours'" in "None
+    /// of the last 5 hours' statements". A whole message per window, as the phrase is, so a language can decline it.
+    pub fn window_possessive(&self) -> String {
+        let count = |n: f64| digits(format!("{n}"));
+        if let Some(log) = &self.log {
+            if self.window_unknown() {
+                return t!("model.window_of.log_period", log = log);
+            }
+            return match span_length(self.measurement_hours()) {
+                SpanLength::Days(n) => t!("model.window_of.log_days", n = n, count = count(n), log = log),
+                SpanLength::Hours(n) => t!("model.window_of.log_hours", n = n, count = count(n), log = log),
+                SpanLength::Minutes(n) => t!("model.window_of.log_minutes", n = n, count = count(n), log = log),
+            };
+        }
+        match (self.is_windowed(), self.window_unknown()) {
+            (true, true) => t!("model.window_of.recorded"),
+            (true, false) => match span_length(self.measurement_hours()) {
+                SpanLength::Days(n) => t!("model.window_of.last_days", n = n, count = count(n)),
+                SpanLength::Hours(n) => t!("model.window_of.last_hours", n = n, count = count(n)),
+                SpanLength::Minutes(n) => t!("model.window_of.last_minutes", n = n, count = count(n)),
+            },
+            (false, true) => t!("model.window_of.since_reset_unknown"),
+            (false, false) => match span_length(self.measurement_hours()) {
+                SpanLength::Days(n) => t!("model.window_of.since_reset_days", n = n, count = count(n)),
+                SpanLength::Hours(n) => t!("model.window_of.since_reset_hours", n = n, count = count(n)),
+                SpanLength::Minutes(n) => t!("model.window_of.since_reset_minutes", n = n, count = count(n)),
+            },
+        }
+    }
+
     /// "the last 7 days" for windowed history, "the 35 minutes since statistics were reset" for cumulative counters,
     /// "the 50 minutes the Rails log covers" for an application's log.
     pub fn window_phrase(&self) -> String {

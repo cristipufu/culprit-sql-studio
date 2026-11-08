@@ -114,7 +114,7 @@ fn last_page_insert_finding(snapshot: &Snapshot, latch: LastPageLatch<'_>) -> Fi
         Some(CounterAge::Short) => f.caveats.push(t!(
             "check.last_page_insert.caveat.short",
             engine = engine_name(snapshot),
-            since = since_phrase(snapshot).trim_start_matches("in ")
+            since = crate::support::counted_span(snapshot)
         )),
         Some(CounterAge::Unknown) => {
             f.caveats.push(t!("check.last_page_insert.caveat.unknown", engine = engine_name(snapshot)))

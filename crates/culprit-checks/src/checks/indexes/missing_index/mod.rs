@@ -211,18 +211,11 @@ pub(super) fn request_base(c: &Candidate) -> Finding {
     f
 }
 
-/// "the last 5 hours'" for "None of the last 5 hours' statements": the window's phrase as the sentence takes it.
-fn window_ends_in_s(window: &str) -> &'static str {
-    if window.ends_with('s') { "yes" } else { "no" }
-}
-
 /// Under a day: none of the window's statements asked for it, too soon to say they stopped.
 fn lately_sentence(snapshot: &Snapshot, a: &LastAsked) -> String {
-    let window = a.window(snapshot);
     t!(
         "check.missing_index.lately",
-        window = &window,
-        ends_in_s = window_ends_in_s(&window),
+        window = a.window_possessive(snapshot),
         when = crate::queries::when_phrase(&a.last),
         silence = format::duration(a.silence * 1000.0)
     )

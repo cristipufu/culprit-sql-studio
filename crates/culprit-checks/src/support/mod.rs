@@ -491,31 +491,60 @@ pub fn parse_epoch_seconds(text: &str) -> Option<f64> {
     culprit_core::format::epoch_seconds(text)
 }
 
-pub fn since_phrase(snapshot: &Snapshot) -> String {
+/// How long the server's counters have counted: since what, and for how long when that is known.
+enum Counted {
+    /// Only since what ("since the server last restarted"), with no span.
+    Since(String),
+    Days { days: String, since: String },
+    Hours { n: f64, since: String },
+    Minutes { n: f64, since: String },
+}
+
+fn counted_since(snapshot: &Snapshot) -> Counted {
     if snapshot.server.engine == Engine::Yugabyte && counter_days(snapshot).is_none() {
-        return t!("support.since.cluster_nodes");
+        return Counted::Since(t!("support.since.cluster_nodes"));
     }
     // MariaDB's userstat counters run from when userstat was turned on (or flushed), which the server doesn't say.
     if snapshot.server.engine == Engine::Mysql
         && !snapshot.server.has(Capability::PerformanceSchema)
         && snapshot.server.has(Capability::IndexUsage)
     {
-        return t!("support.since.userstat");
+        return Counted::Since(t!("support.since.userstat"));
     }
     // Truncated with the statements (`sys.ps_truncate_all_tables`), the table and index counters' start is unknown:
     // named for what it may be, with no span.
     if counters_may_be_reset(snapshot) {
-        return t!("support.since.performance_schema");
+        return Counted::Since(t!("support.since.performance_schema"));
     }
     let since = if counters_since_reset(snapshot) { t!("support.since.reset") } else { t!("support.since.restart") };
     match counter_days(snapshot) {
-        Some(days) if days >= 2.0 => t!("support.since.days", days = days_counted(days), since = since),
-        Some(days) if days * 24.0 < 1.0 => {
-            t!("support.since.minutes", n = (days * 24.0 * 60.0).round().max(1.0), since = since)
-        }
+        Some(days) if days >= 2.0 => Counted::Days { days: days_counted(days), since },
+        Some(days) if days * 24.0 < 1.0 => Counted::Minutes { n: (days * 24.0 * 60.0).round().max(1.0), since },
         // An hour and a half or more rounds to 2 hours: "in the hour" is under that.
-        Some(days) => t!("support.since.hours", n = (days * 24.0).round(), since = since),
-        None => since,
+        Some(days) => Counted::Hours { n: (days * 24.0).round(), since },
+        None => Counted::Since(since),
+    }
+}
+
+/// When the server's counters count from, for a sentence about what they counted: "in the 3 days since the server
+/// last restarted", "since userstat was turned on or its statistics last flushed".
+pub fn since_phrase(snapshot: &Snapshot) -> String {
+    match counted_since(snapshot) {
+        Counted::Since(since) => since,
+        Counted::Days { days, since } => t!("support.since.days", days = days, since = since),
+        Counted::Hours { n, since } => t!("support.since.hours", n = n, since = since),
+        Counted::Minutes { n, since } => t!("support.since.minutes", n = n, since = since),
+    }
+}
+
+/// [`since_phrase`] as the time itself, for a sentence about how long they have counted ("only {since}"): "the 3 days
+/// since the server last restarted".
+pub fn counted_span(snapshot: &Snapshot) -> String {
+    match counted_since(snapshot) {
+        Counted::Since(since) => since,
+        Counted::Days { days, since } => t!("support.counted.days", days = days, since = since),
+        Counted::Hours { n, since } => t!("support.counted.hours", n = n, since = since),
+        Counted::Minutes { n, since } => t!("support.counted.minutes", n = n, since = since),
     }
 }
 
