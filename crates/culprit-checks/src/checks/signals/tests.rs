@@ -250,7 +250,7 @@ fn hot_rows_and_last_page() {
     assert_eq!(hot[0].title, format!("{table} has 40 recorded historical lock waits"));
     assert_eq!(hot[0].actionability, culprit_core::Actionability::Information);
     assert!(hot[0].summary.contains("escalated"));
-    let page = last_page_insert(&s);
+    let page = LastPageInsertCheck.run(&s);
     assert_eq!(page[0].title, format!("Inserts into {table} queue for the last page of {index}"));
     assert!(page[0].fix.as_ref().unwrap().sql.as_ref().unwrap().contains("OPTIMIZE_FOR_SEQUENTIAL_KEY = ON"));
 }

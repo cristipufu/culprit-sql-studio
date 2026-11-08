@@ -339,22 +339,6 @@ fn since_start_severity(rate_per_day: Option<f64>, high: f64, medium: f64) -> Se
     }
 }
 
-/// The caveat on a since-start count that has no measured rate: what was counted, over how long, and why it isn't
-/// graded higher.
-fn history_caveat(snapshot: &Snapshot, what: &str) -> String {
-    let engine = engine_name(snapshot);
-    match counter_days(snapshot) {
-        // Counting for less than an hour: too little for a rate, whatever the total.
-        Some(_) => format!(
-            "{engine} has counted these {what} only {}: too little time to make a rate, so the total doesn't raise it. A scan after an hour or more of counting can.",
-            since_phrase(snapshot).trim_start_matches("in ")
-        ),
-        None => format!(
-            "{engine} counts {what} from when it started, with no time for each, and this scan doesn't know when that was: they may come from one burst long ago. Culprit raises it only on a rate measured over an hour or more of counting."
-        ),
-    }
-}
-
 const GB: f64 = 1024.0 * 1024.0 * 1024.0;
 const MB: f64 = 1024.0 * 1024.0;
 

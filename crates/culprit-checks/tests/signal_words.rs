@@ -678,3 +678,79 @@ verify: Re-scan: planning should be a small part of its time.
 caveat: This Query Store entry's first compile falls within the selected period, so its compile totals can be compared with its runs in that period. Older entries' compile totals are shown separately as retained query history."#,
     );
 }
+
+// ── last-page-insert ───────────────────────────────────────────────────────────────────────────────
+
+/// The SQL Server demo with only its first index contended, `uptime_hours` of counters behind it.
+fn latched(uptime_hours: Option<f64>, c: culprit_core::IndexContention) -> Vec<Finding> {
+    let mut s = fixture("mssql-demo");
+    s.indexes.iter_mut().for_each(|i| i.contention = None);
+    s.indexes[0].contention = Some(c);
+    s.pressure.get_or_insert_with(Default::default).uptime_hours = uptime_hours;
+    if uptime_hours.is_none() {
+        s.server.started_at = None;
+    }
+    run("last-page-insert", &s)
+}
+
+fn latch(leaf_inserts: Option<f64>, optimize: Option<bool>) -> culprit_core::IndexContention {
+    culprit_core::IndexContention {
+        page_latch_waits: 5_000.0,
+        page_latch_wait_ms: 600_000.0,
+        leaf_inserts,
+        sequential_key: true,
+        optimize_for_sequential_key: optimize,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn last_page_inserts_on_sql_server_2019() {
+    says(
+        &latched(Some(240.0), latch(None, Some(false))),
+        r#"id: last-page-insert:shop.customers.pk_customers
+title: Inserts into customers queue for the last page of pk_customers
+summary: pk_customers starts with a value that only grows (id), so every insert goes to the same last page. Concurrent inserts wait for each other's latch on it (PAGELATCH_EX): 5.0K waits, 10 min in all since the index was loaded. It gets worse with more concurrent writers.
+impact: 10 min latch waits
+metric: Page latch waits
+metric: Time waiting
+fix: SQL Server 2019 can pace concurrent inserts into a sequential key to help sustain throughput when many writers compete for the last page: try OPTIMIZE_FOR_SEQUENTIAL_KEY on this index and compare throughput. It's a metadata change and takes effect at once.
+sql: ALTER INDEX [pk_customers] ON [shop].[customers] SET (OPTIMIZE_FOR_SEQUENTIAL_KEY = ON);
+verify: Re-scan to confirm OPTIMIZE_FOR_SEQUENTIAL_KEY is ON. Compare completed inserts per second and the time to insert the same batch before and after, under comparable writer concurrency: the goal is better insert throughput under contention.
+verify: Page-latch waits can continue, and BTREE_INSERT_FLOW_CONTROL waits may appear. Compare measurements over equal intervals; cumulative wait totals need not stop growing."#,
+    );
+}
+
+#[test]
+fn hot_pages_counted_for_half_an_hour() {
+    says(
+        &latched(Some(0.5), latch(Some(100.0), Some(false))),
+        r#"id: last-page-insert:shop.customers.pk_customers
+title: Sessions queue for the latch on a few hot pages of pk_customers
+summary: pk_customers waited 5.0K times for page latches (10 min in all) since the index was loaded, but took only 100 inserts: the waits are sessions reading and changing the same few rows over and over (a counter, a queue table), not inserts on its last page.
+impact: 10 min latch waits
+metric: Page latch waits
+metric: Time waiting
+metric: Inserts
+fix: Spread the hot rows (several counter rows summed when read, or a queue that hands out rows by key rather than from one end), and keep the transactions that change them short. OPTIMIZE_FOR_SEQUENTIAL_KEY paces inserts only, so it wouldn't help here.
+verify: Compare completed row changes per second and their time under comparable load before and after. Compare the increase in page-latch wait time over equal intervals for that work; cumulative wait totals need not stop growing.
+caveat: SQL Server has counted these latch waits only the 30 minutes since the server last restarted: too little time to make a rate, so the total doesn't raise it. A scan after an hour or more of counting can."#,
+    );
+}
+
+#[test]
+fn last_page_inserts_before_sql_server_2019_counted_since_an_unknown_start() {
+    says(
+        &latched(None, latch(Some(9_000.0), None)),
+        r#"id: last-page-insert:shop.customers.pk_customers
+title: Inserts into customers queue for the last page of pk_customers
+summary: pk_customers starts with a value that only grows (id), so every insert goes to the same last page. Concurrent inserts wait for each other's latch on it (PAGELATCH_EX): 5.0K waits, 10 min in all since the index was loaded. It gets worse with more concurrent writers.
+impact: 10 min latch waits
+metric: Page latch waits
+metric: Time waiting
+metric: Inserts
+fix: Before SQL Server 2019 the remedies change the key: lead the index with a value that spreads inserts (a hashed or partitioned key column), or batch inserts so fewer sessions compete.
+verify: Compare completed inserts per second and their time under comparable load before and after. Compare the increase in page-latch wait time over equal intervals for that work; cumulative wait totals need not stop growing.
+caveat: SQL Server counts latch waits from when it started, with no time for each, and this scan doesn't know when that was: they may come from one burst long ago. Culprit raises it only on a rate measured over an hour or more of counting."#,
+    );
+}
