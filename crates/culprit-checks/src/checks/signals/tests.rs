@@ -173,8 +173,45 @@ fn big_results_with_bytes_from_the_plan_width() {
     q.executions = 200.0;
     q.rows = Some(200.0 * 80_000.0);
     q.costs = Some(QueryCosts { row_bytes: Some(150.0), ..Default::default() });
-    let f = big_result(&s);
+    let f = BigResultCheck.run(&s);
     assert_eq!(f[0].title, "A read from orders returns 80K rows (≈ 11.4 MB) per run");
+}
+
+// What a spill finding says of the result its statement sends (refine adds it), word for word: over running totals and
+// in a window, and for an export.
+#[test]
+fn the_result_a_spill_finding_says_its_statement_sends() {
+    let mut s = snapshot_with(Engine::Postgres);
+    let q = first_query(&mut s);
+    q.text = "SELECT id, note FROM orders WHERE created_at > $1".into();
+    q.executions = 200.0;
+    q.rows = Some(200.0 * 80_000.0);
+    q.costs = Some(QueryCosts { row_bytes: Some(150.0), ..Default::default() });
+    let q = first_query(&mut s).clone();
+    let said = |s: &Snapshot, q: &QueryStat| {
+        let r = result_of_a_spill(s, q).expect("rows");
+        format!("summary:{}\nfix:{}\nverify: {:?}", r.summary, r.fix, r.verify)
+    };
+    let mut text = vec![said(&s, &q)];
+    let w = s.workload.as_mut().unwrap();
+    w.windowed = !w.windowed;
+    text.push(said(&s, &q));
+    let mut export = q.clone();
+    export.text = "SELECT SQL_NO_CACHE * FROM orders".into();
+    text.push(said(&s, &export));
+    let actual = text.join("\n\n");
+    let expected = r#"summary: Each run also sends 80K rows (≈ 11.4 MB) to the application, and few screens or jobs need that many at once: returning fewer can keep the sort in memory too.
+fix: Where the application doesn't use every row it receives, return only what's used: page the results (keyset pagination, or LIMIT / OFFSET … FETCH), filter in SQL rather than in the application, select only the columns you need, and aggregate in the database.
+verify: Some("If it now returns fewer rows, the rows it returns per run between those two scans should drop to what a page or a job actually uses.")
+
+summary: Each run also sends 80K rows (≈ 11.4 MB) to the application, and few screens or jobs need that many at once: returning fewer can keep the sort in memory too.
+fix: Where the application doesn't use every row it receives, return only what's used: page the results (keyset pagination, or LIMIT / OFFSET … FETCH), filter in SQL rather than in the application, select only the columns you need, and aggregate in the database.
+verify: Some("If it now returns fewer rows, re-scan: rows per run should drop to what a page or a job actually uses.")
+
+summary: Each run also sends 80K rows (≈ 11.4 MB) to the application, the whole table: an export, a dump or an ETL job looks like this, and for those the rows are the point.
+fix: If it is an export or an ETL job, the memory is the fix; run it on a replica or off-peak if it competes with the application.
+verify: None"#;
+    assert!(actual == expected, "what it says changed; it now says:\n---\n{actual}\n---");
 }
 
 fn with_pressure(engine: Engine, f: impl FnOnce(&mut Pressure)) -> Snapshot {

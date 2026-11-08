@@ -1139,3 +1139,78 @@ caveat: SQLite counts connections for the whole server, so other databases' appl
 caveat: A rate since startup: one busy reconnect storm counts for the whole period."#,
     );
 }
+
+// ── big-result ─────────────────────────────────────────────────────────────────────────────────────
+
+fn returning(name: &str, text: &str, runs: f64, rows_a_run: f64, row_bytes: Option<f64>) -> Snapshot {
+    let mut s = fixture(name);
+    let q = only(&mut s, text);
+    q.executions = runs;
+    q.rows = Some(runs * rows_a_run);
+    q.plan = None;
+    q.costs.as_mut().unwrap().row_bytes = row_bytes;
+    s
+}
+
+#[test]
+fn big_results_with_a_width_over_running_totals() {
+    let s =
+        returning("postgres-demo", "SELECT id, note FROM orders WHERE created_at > $1", 200.0, 80_000.0, Some(150.0));
+    says(
+        &run("big-result", &s),
+        r#"id: big-result:9065391607317686058
+title: A read from orders returns 80K rows (≈ 11.4 MB) per run
+summary: Each run sends 80K rows to the application, about 11.4 MB at the plan's estimated 150 B per row; its 200 runs since its statistics began 5 hours ago moved 16.0M rows. Few screens or jobs need that many at once: the database reads them, the network carries them and the application holds them in memory.
+impact: 80K rows per run
+metric: Rows per run
+metric: Runs
+metric: Bytes per run (estimated)
+fix: Return only what's used: page the results (keyset pagination, or LIMIT / OFFSET … FETCH), filter in SQL rather than in the application, select only the columns you need, and aggregate in the database.
+verify: Between two scans, the rows it returns per run should drop to what a page or a job actually uses: pg_stat_statements keeps running totals, so compare its rows and runs in a scan taken once the change is live and one a day or more later (16.0M rows in 200 runs in this scan)."#,
+    );
+}
+
+#[test]
+fn big_results_without_a_width_in_a_window_and_stopped() {
+    let s = returning("mssql-demo", "SELECT id FROM dbo.orders WHERE status = 3", 50.0, 150_000.0, None);
+    let mut findings = run("big-result", &s);
+    let mut s = returning("mssql-demo", "SELECT id FROM dbo.orders WHERE status = 4", 50.0, 20_000.0, None);
+    stopped(&mut s);
+    findings.extend(run("big-result", &s));
+    says(
+        &findings,
+        r#"id: big-result:7
+title: A read from orders returns 150K rows per run
+summary: Each run sends 150K rows to the application; its 50 runs in the last 5 hours moved 7.5M rows. Few screens or jobs need that many at once: the database reads them, the network carries them and the application holds them in memory.
+impact: 150K rows per run
+metric: Rows per run
+metric: Runs
+fix: Return only what's used: page the results (keyset pagination, or LIMIT / OFFSET … FETCH), filter in SQL rather than in the application, select only the columns you need, and aggregate in the database.
+verify: Re-scan: rows per run should drop to what a page or a job actually uses.
+
+id: big-result:7
+title: A read from orders returned 20K rows per run
+summary: Each run sends 20K rows to the application; its 50 runs in the last 3 days moved 1.0M rows. Few screens or jobs need that many at once: the database reads them, the network carries them and the application holds them in memory.
+impact: 20K rows per run
+metric: Rows per run
+metric: Runs
+fix: Return only what's used: page the results (keyset pagination, or LIMIT / OFFSET … FETCH), filter in SQL rather than in the application, select only the columns you need, and aggregate in the database.
+verify: Re-scan: rows per run should drop to what a page or a job actually uses."#,
+    );
+}
+
+#[test]
+fn big_results_of_an_export() {
+    let s = returning("mysql-demo", "SELECT SQL_NO_CACHE * FROM `orders`", 30.0, 20_000.0, None);
+    says(
+        &run("big-result", &s),
+        r#"id: big-result:04cd7be9c366fadc
+title: A read from orders returns 20K rows per run
+summary: Each run sends 20K rows to the application; its 30 runs since its statistics began 2 minutes ago moved 600K rows. It reads the whole table 30 times in 2 minutes: an export, a dump or an ETL job looks like this, and for those the rows are the point. It needs work only if a screen or a request runs it.
+impact: 20K rows per run
+metric: Rows per run
+metric: Runs
+fix: If it is an export or ETL job, leave it as it is, and run it on a replica or off-peak if it competes with the application. If the application runs it: Return only what's used: page the results (keyset pagination, or LIMIT / OFFSET … FETCH), filter in SQL rather than in the application, select only the columns you need, and aggregate in the database.
+verify: Between two scans, the rows it returns per run should drop to what a page or a job actually uses: performance_schema keeps running totals, so compare its rows and runs in a scan taken once the change is live and one a day or more later (600K rows in 30 runs in this scan)."#,
+    );
+}
