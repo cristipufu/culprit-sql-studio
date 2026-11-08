@@ -705,26 +705,35 @@ impl ResidualRead<'_> {
         let seek = self.seek;
         let index = seek.index.as_deref().unwrap_or_default().trim_matches(['[', ']', '"', '`']);
         let expected = seek.est_rows_total().round().max(1.0);
-        let expected =
-            format!("{} row{} from {index}", format::count(expected), if expected == 1.0 { "" } else { "s" });
-        let sought = format::list(&self.sought);
-        let checks = format::list(&self.checked);
+        let (rows, sought, checked) =
+            (format::count(expected), format::list(&self.sought), format::list(&self.checked));
         let shape = if std::ptr::eq(seek, self.check) {
-            format!("The captured plan estimates {expected} (on {sought}) and checks each row it finds for {checks}")
+            t!(
+                "check.heavy_query.lookups.checks",
+                rows = rows,
+                count = expected,
+                index = index,
+                sought = sought,
+                checked = checked
+            )
         } else {
-            format!(
-                "The captured plan estimates {expected} (on {sought}), then looks up each row it finds in the table to check {checks}"
+            t!(
+                "check.heavy_query.lookups.looks_up",
+                rows = rows,
+                count = expected,
+                index = index,
+                sought = sought,
+                checked = checked
             )
         };
-        let (verb, unit) = if self.engine == Engine::Mysql { ("examine", "rows") } else { ("read", "pages") };
-        let nothing = match self.returns {
-            Returns::Nothing => "nothing".to_string(),
-            returns => format!("{} each", returns.words()),
+        // MySQL counts the rows a statement examined, the other engines the pages it read.
+        let (reads, returns) = (format::count(self.reads), self.returns.select());
+        let runs = if self.engine == Engine::Mysql {
+            t!("check.heavy_query.lookups.runs_rows_examined", reads = reads, returns = returns)
+        } else {
+            t!("check.heavy_query.lookups.runs_pages", reads = reads, returns = returns)
         };
-        format!(
-            "{shape}. The statement's runs {verb} {} {unit} each and return {nothing}; those totals do not show how many rows each plan step handled.",
-            format::count(self.reads)
-        )
+        [shape, runs].join(" ")
     }
 }
 

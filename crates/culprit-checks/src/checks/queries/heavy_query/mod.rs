@@ -8,6 +8,7 @@ mod tests;
 
 use super::*;
 use crate::evidence::{QueryMeasure, Requirement as Evidence};
+use culprit_core::t;
 use fix::*;
 pub(super) use idle::idle_time;
 use idle::{DominantWait, Idle, NOTHING_READS, WaitOn, dominant_wait};
@@ -18,12 +19,11 @@ use rewrite::{Narrowing, narrowed_later_fix, narrowing_above};
 pub fn heavy_query_info() -> CheckInfo {
     CheckInfo {
         id: "heavy-query".into(),
-        title: "Queries that dominate database time".into(),
+        title: t!("check.heavy_query.info.title"),
         category: Category::Queries,
         engines: vec![Engine::Mssql, Engine::Postgres, Engine::Yugabyte, Engine::Mysql, Engine::Sqlite],
         requires: vec![],
-        description: "Single queries that take a large share of database time, with what their plan spends it on."
-            .into(),
+        description: t!("check.heavy_query.info.description"),
     }
 }
 
@@ -101,7 +101,7 @@ pub struct HeavyCase<'a> {
     /// The wait that takes most of its time, where the time is not idle.
     wait: Option<DominantWait<'a>>,
     /// The triggers a write fires on its table, whose work runs inside its time: (table, event, names).
-    triggers: Option<(&'a str, &'static str, Vec<String>)>,
+    triggers: Option<(&'a str, TriggerEvent, Vec<String>)>,
     /// It is optimizer statistics maintenance, not an update of application rows.
     statistics_maintenance: bool,
     remedy: Remedy<'a>,
@@ -129,10 +129,33 @@ enum Returns {
 }
 
 impl Returns {
-    fn words(self) -> &'static str {
+    /// Its case in a message's `{returns, select, ..}`.
+    fn select(self) -> &'static str {
         match self {
             Returns::Nothing => "nothing",
-            Returns::LessThanARow => "less than a row",
+            Returns::LessThanARow => "less_than_a_row",
+        }
+    }
+}
+
+/// The event a write's triggers fire on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TriggerEvent {
+    Insert,
+    Update,
+    Delete,
+    /// A MERGE or REPLACE: any of them.
+    Write,
+}
+
+impl TriggerEvent {
+    /// Its case in a message's `{event, select, ..}`.
+    fn select(self) -> &'static str {
+        match self {
+            TriggerEvent::Insert => "insert",
+            TriggerEvent::Update => "update",
+            TriggerEvent::Delete => "delete",
+            TriggerEvent::Write => "write",
         }
     }
 }
@@ -314,7 +337,8 @@ fn decide<'a>(snapshot: &'a Snapshot, q: &'a QueryStat) -> HeavyCase<'a> {
 /// A heavy statement's finding, worded from what [`decide`] concluded. Only phrasing is chosen here: the tense of a
 /// statement that stopped, what the engine counts (MySQL's rows examined, the others' pages), the source's names.
 fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
-    let handle = query_handle(q);
+    // The statement leads its title: "An update of products".
+    let handle = capitalize(&query_handle(q));
     let time = time_noun(snapshot);
     let mut f = finding("heavy-query", &q.id, Category::Queries, subject(SubjectKind::Query, &q.id));
     apply_impact(snapshot, &mut f, &case.impact);
@@ -325,142 +349,183 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
     f.confidence = case.confidence;
     f.actionability = case.actionability;
     let share = format::percent(case.impact.share);
+    // MySQL counts the rows a statement examined, the other engines the pages it read.
     let mysql = snapshot.server.engine == Engine::Mysql;
-    let (reads_verb, reads_unit) = if mysql { ("examines", "rows") } else { ("reads", "pages") };
-    let (takes, read, returns) = match (case.stopped, mysql) {
-        (true, true) => ("took", "examined", "returned"),
-        (true, false) => ("took", "read", "returned"),
-        (false, _) => ("takes", reads_verb, "returns"),
-    };
-    // A statement that stopped running took its share until it stopped, whatever it spent the time on.
-    let until = if case.stopped { " until it stopped" } else { "" };
+    // A statement that stopped running is told in the past: it took its share until it stopped, whatever it spent the
+    // time on.
+    let tense = if case.stopped { "past" } else { "present" };
     f.title = match case.title {
-        TitleForm::Share => {
-            let idle = match &case.lead {
-                Lead::Idle(idle) => format!(", {}", idle.title_tail()),
-                _ => String::new(),
-            };
-            format!("{} {takes} {share} of {time}{until}{idle}", capitalize(&handle))
+        TitleForm::Share => match &case.lead {
+            Lead::Idle(idle) => t!(
+                "check.heavy_query.title.share_idle",
+                handle = &handle,
+                tense = tense,
+                share = &share,
+                time = time,
+                idle = idle.title_tail()
+            ),
+            _ => t!("check.heavy_query.title.share", handle = &handle, tense = tense, share = &share, time = time),
+        },
+        TitleForm::ReadsForNothing { reads, returns } => {
+            let (reads, returns) = (format::count(reads), returns.select());
+            if mysql {
+                t!(
+                    "check.heavy_query.title.reads_for_nothing_rows_examined",
+                    handle = &handle,
+                    tense = tense,
+                    reads = reads,
+                    returns = returns
+                )
+            } else {
+                t!(
+                    "check.heavy_query.title.reads_for_nothing_pages",
+                    handle = &handle,
+                    tense = tense,
+                    reads = reads,
+                    returns = returns
+                )
+            }
         }
-        TitleForm::ReadsForNothing { reads, returns: nothing } => format!(
-            "{} {read} {} {reads_unit} a run to return {}",
-            capitalize(&handle),
-            format::count(reads),
-            nothing.words()
-        ),
         TitleForm::ManyReadsPerRow(r) => {
-            format!("{} {read} {} {reads_unit} for every row it {returns}", capitalize(&handle), format::count(r))
+            let reads = format::count(r);
+            if mysql {
+                t!(
+                    "check.heavy_query.title.reads_per_row_rows_examined",
+                    handle = &handle,
+                    tense = tense,
+                    reads = reads
+                )
+            } else {
+                t!("check.heavy_query.title.reads_per_row_pages", handle = &handle, tense = tense, reads = reads)
+            }
         }
     };
+    let workload = snapshot.workload.as_ref();
     // With time the source couldn't attribute, the share is of what it could.
-    let of = if snapshot.workload.as_ref().is_some_and(|w| w.untracked_time_ms.is_some()) {
-        format!("of the {time} {} could attribute", snapshot.workload.as_ref().map(|w| w.source.as_str()).unwrap_or(""))
-    } else {
-        format!("of all {time}")
+    let of = match workload.filter(|w| w.untracked_time_ms.is_some()) {
+        Some(w) => t!("check.heavy_query.summary.of_attributed", time = time, source = &w.source),
+        None => t!("check.heavy_query.summary.of_all", time = time),
     };
-    let window = snapshot.workload.as_ref().map(window_phrase).unwrap_or_default();
-    let mut summary = match &case.recent {
-        Some(s) => format!(
-            "Its entry in {} is recent: {} of its {} runs came during {} of Culprit's own scans, where it ran about {} times a day at {} on average and took {share} of database time. Over {window} it is {}, a share diluted by all the time before its entry began counting.",
-            snapshot.workload.as_ref().map_or("the statistics", |w| w.source.as_str()),
-            format::count(s.runs),
-            format::count(q.executions),
-            s.length(),
-            format::count(s.per_day(s.runs)),
-            format::duration(s.time_ms / s.runs.max(1.0)),
-            format::percent(snapshot.workload.as_ref().map_or(0.0, |w| w.share_of(q.total_time_ms, q)))
+    let window = workload.map(window_phrase).unwrap_or_default();
+    let mut summary = vec![match &case.recent {
+        Some(s) => t!(
+            "check.heavy_query.summary.recent",
+            source = workload.map_or_else(|| t!("check.heavy_query.the_statistics"), |w| w.source.clone()),
+            runs = format::count(s.runs),
+            executions = format::count(q.executions),
+            length = s.length(),
+            per_day = format::count(s.per_day(s.runs)),
+            mean = format::duration(s.time_ms / s.runs.max(1.0)),
+            share = &share,
+            window = &window,
+            totals_share = format::percent(workload.map_or(0.0, |w| w.share_of(q.total_time_ms, q)))
         ),
         // What runs now, where the source's totals go back further than Culprit's scans: their figures, with the
         // totals' beside them where those differ twofold.
         None => scans_sentence(snapshot, q, &of).unwrap_or_else(|| {
             let (runs, when) = statement_runs(snapshot, q);
-            // Two runs far apart: what each took, never an average that hides it.
-            let at = match q.few_runs_took().filter(|_| q.executions > 1.0) {
-                Some(took) => format!(", taking {took}"),
-                None => format!(
-                    " at {}{}",
-                    format::duration(q.mean_time_ms),
-                    if q.executions > 1.0 { " on average" } else { "" }
+            let mean = format::duration(q.mean_time_ms);
+            match q.few_runs_took().filter(|_| q.executions > 1.0) {
+                // Two runs far apart: what each took, never an average that hides it.
+                Some(took) => t!(
+                    "check.heavy_query.summary.ran_taking",
+                    runs = runs,
+                    took = took,
+                    when = when,
+                    share = &share,
+                    of = &of,
+                    window = &window
                 ),
-            };
-            format!("It ran {runs}{at}{when}: {share} {of} in {window}.")
+                None if q.executions > 1.0 => t!(
+                    "check.heavy_query.summary.ran_on_average",
+                    runs = runs,
+                    mean = mean,
+                    when = when,
+                    share = &share,
+                    of = &of,
+                    window = &window
+                ),
+                None => t!(
+                    "check.heavy_query.summary.ran_at",
+                    runs = runs,
+                    mean = mean,
+                    when = when,
+                    share = &share,
+                    of = &of,
+                    window = &window
+                ),
+            }
         }),
-    };
+    }];
     match &case.lead {
-        Lead::Idle(idle) => {
-            summary.push(' ');
-            summary.push_str(&idle.evidence(snapshot, q));
-        }
+        Lead::Idle(idle) => summary.push(idle.evidence(snapshot, q)),
         Lead::Step { plan, node, share } => {
             // MySQL counts the rows a statement examined: what the step reads, measured, when it is the plan's only
             // table.
             let examined = q.reads_per_execution().filter(|_| mysql);
             let step = describe_node(plan, node, examined);
-            match share {
-                Some(s) => summary.push_str(&format!(" {} of its estimated cost is {step}.", format::percent(*s))),
-                None => summary.push_str(&uncosted_step(snapshot, plan, &step)),
-            }
+            summary.push(match share {
+                Some(s) => t!("check.heavy_query.summary.step_share", share = format::percent(*s), step = step),
+                None => uncosted_step(snapshot, plan, &step),
+            });
         }
-        Lead::Lookups(lookups) => {
-            summary.push(' ');
-            summary.push_str(&lookups.evidence());
+        Lead::Lookups(lookups) => summary.push(lookups.evidence()),
+        Lead::CheapWrite => summary.push(write_cost(snapshot, q)),
+        Lead::CheapPlan { storage_reads: Some(reads) } => {
+            let reads = format::count(reads.round().max(1.0));
+            summary.push(if mysql {
+                t!("check.heavy_query.summary.cheap_plan_reads_rows_examined", reads = reads)
+            } else {
+                t!("check.heavy_query.summary.cheap_plan_reads_pages", reads = reads)
+            });
         }
-        Lead::CheapWrite => {
-            summary.push(' ');
-            summary.push_str(&write_cost(snapshot, q));
-        }
-        Lead::CheapPlan { storage_reads: Some(reads) } => summary.push_str(&format!(
-            " Its plan is cheap: each run {reads_verb} about {} {reads_unit}, and no step of it is where the time goes.",
-            format::count(reads.round().max(1.0))
-        )),
-        Lead::CheapPlan { storage_reads: None } => {
-            summary.push_str(" Its plan is cheap, so the share comes from how often it runs, not from any step of it.")
-        }
+        Lead::CheapPlan { storage_reads: None } => summary.push(t!("check.heavy_query.summary.cheap_plan")),
         Lead::WholeScan { plan, node } => {
             // No share of the cost is put on the scan under the bar, but that every run reads its table is the plan's
             // own.
             let step = describe_node(plan, node, q.reads_per_execution().filter(|_| mysql));
-            summary.push_str(&format!(
-                " Every run includes {step}: a scan reads the whole table, and costs more as the table grows."
-            ));
+            summary.push(t!("check.heavy_query.summary.whole_scan", step = step));
         }
         Lead::Unexplained => {}
     }
     if let Some(wait) = &case.wait {
-        summary.push(' ');
-        summary.push_str(&wait.sentence(snapshot, q));
+        summary.push(wait.sentence(snapshot, q));
     }
-    if let Some((table_name, event_noun, names)) = &case.triggers {
-        summary.push_str(&format!(
-            " {table_name} also fires {} on {event_noun} ({}), whose work runs inside this statement's time.",
-            if names.len() == 1 { "a trigger" } else { "triggers" },
-            names.join(", ")
+    if let Some((table, event, names)) = &case.triggers {
+        summary.push(t!(
+            "check.heavy_query.summary.triggers",
+            table = *table,
+            count = names.len(),
+            event = event.select(),
+            names = names.join(", ")
         ));
     }
     if case.statistics_maintenance {
-        summary.push_str(" This is optimizer statistics maintenance, not an update of application rows.");
+        summary.push(t!("check.heavy_query.summary.statistics_maintenance"));
     }
-    f.summary = summary;
-    let workload = snapshot.workload.as_ref();
+    f.summary = summary.join(" ");
+    // A figure kept only in the source's totals, where the summary leads with Culprit's scans: said over them.
+    let over = |label: String, span: &str| t!("common.metric.over", label = label, span = span);
     match (workload, &case.scans) {
         // What the scans measured, and the totals since the source began counting where they differ twofold (never
         // for a recent entry, whose totals are those runs diluted by the time before it began).
         (Some(w), Some(s)) => {
-            let totals = format!("over {}", w.window_phrase());
+            let totals = w.window_phrase();
             let beside = !s.is_recent(q);
-            f.metrics.push(Metric::new("Share of DB time over Culprit's scans", s.share(), Unit::Ratio));
+            f.metrics.push(Metric::new(t!("common.metric.share_of_db_time_over_scans"), s.share(), Unit::Ratio));
             if beside && s.share_differs(w, q) {
-                let label = format!("{} {totals}", share_metric_label(snapshot));
+                let label = over(share_metric_label(snapshot).to_string(), &totals);
                 f.metrics.push(Metric::new(label, w.share_of(q.total_time_ms, q), Unit::Ratio));
             }
             // Runs that came in bursts are counted, never a rate a day.
             if s.per_day(s.runs) >= 1.0 && !w.cadence(q).is_burst() {
-                f.metrics.push(Metric::new("Runs per day over Culprit's scans", s.per_day(s.runs), Unit::Count));
+                let label = t!("common.metric.runs_per_day_over_scans");
+                f.metrics.push(Metric::new(label, s.per_day(s.runs), Unit::Count));
             } else {
-                f.metrics.push(Metric::new("Runs over Culprit's scans", s.runs, Unit::Count));
+                f.metrics.push(Metric::new(t!("common.metric.runs_over_scans"), s.runs, Unit::Count));
             }
             if beside && s.runs_differ(w, q) && !w.cadence(q).is_burst() {
-                let label = format!("Runs per day {totals}");
+                let label = over(t!("common.metric.runs_per_day"), &totals);
                 f.metrics.push(Metric::new(label, w.per_day(q.executions), Unit::Count));
             }
             f.metrics.extend(average_metrics(snapshot, q));
@@ -468,34 +533,42 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
         _ => {
             f.metrics.push(Metric::new(share_metric_label(snapshot), case.impact.share, Unit::Ratio));
             match workload.and_then(|w| Some((w.runs_per_day_of(q), w.per_day_measured(q.executions)?))) {
-                Some((Some(runs), _)) => f.metrics.push(Metric::new("Runs per day", runs, Unit::Count)),
+                Some((Some(runs), _)) => {
+                    f.metrics.push(Metric::new(t!("common.metric.runs_per_day"), runs, Unit::Count))
+                }
                 // A day or more of window, but not runs that came a day at a time: what was counted.
-                Some((None, _)) => f.metrics.push(Metric::new("Runs", q.executions, Unit::Count)),
+                Some((None, _)) => f.metrics.push(Metric::new(t!("common.metric.runs"), q.executions, Unit::Count)),
                 None => {}
             }
             f.metrics.extend(average_metrics(snapshot, q));
         }
     }
+    let basis = crate::support::totals_basis(snapshot, q);
     if let Some(r) = q.reads_per_execution() {
         // MySQL counts rows examined, the other engines pages.
-        let (label, unit) =
-            if mysql { ("Rows examined per run", Unit::Rows) } else { ("Pages read per run", Unit::Pages) };
-        let label = crate::support::totals_basis(snapshot, q)
-            .map_or_else(|| label.to_string(), |basis| format!("{label} over {basis}"));
+        let (label, unit) = if mysql {
+            (t!("common.metric.rows_examined_per_run"), Unit::Rows)
+        } else {
+            (t!("common.metric.pages_read_per_run"), Unit::Pages)
+        };
+        let label = match &basis {
+            Some(basis) => over(label, basis),
+            None => label,
+        };
         f.metrics.push(Metric::new(label, r, unit));
     }
-    if let (Some(r), Some(label)) = (q.rows_per_execution(), rows_label(snapshot.server.engine, case.kind)) {
-        let mut metric = rows_metric(&label, r, q.executions);
-        if let Some(basis) = crate::support::totals_basis(snapshot, q) {
-            metric.label.push_str(&format!(" over {basis}"));
+    if let (Some(r), Some(labels)) = (q.rows_per_execution(), rows_labels(snapshot.server.engine, case.kind)) {
+        let mut metric = rows_metric(labels, r, q.executions);
+        if let Some(basis) = &basis {
+            metric.label = over(metric.label, basis);
         }
         f.metrics.push(metric);
     }
     if let Some(cpu) = q.cpu_time_ms.filter(|_| q.total_time_ms > 0.0) {
-        f.metrics.push(Metric::new("CPU share of its time", (cpu / q.total_time_ms).min(1.0), Unit::Ratio));
+        f.metrics.push(Metric::new(t!("common.metric.cpu_share"), (cpu / q.total_time_ms).min(1.0), Unit::Ratio));
     }
     if let Some((_, _, names)) = &case.triggers {
-        f.metrics.push(Metric::text("Triggers on table", names.join(", ")));
+        f.metrics.push(Metric::text(t!("check.heavy_query.metric.triggers"), names.join(", ")));
     }
     f.fix = Some(case.remedy.fix(snapshot, q));
     f.verify = vec![match &case.verify {
@@ -584,20 +657,24 @@ fn verify_line(snapshot: &Snapshot, q: &QueryStat, expect: Expect) -> String {
 }
 
 /// "Rows returned per run" as a number, or, for so few that a number per run would read as none ("0.0" for 1 row in
-/// 6.5K runs), as what was counted: "1 row in 6.5K runs".
-fn rows_metric(label: &str, per_run: f64, runs: f64) -> Metric {
+/// 6.5K runs), as what was counted: "Rows returned", "1 row in 6.5K runs". `labels` names the rows a run and in all
+/// ([`rows_labels`]).
+fn rows_metric((per_run_label, total_label): (String, String), per_run: f64, runs: f64) -> Metric {
     let rows = per_run * runs;
     if per_run > 0.0 && per_run < 0.05 && runs > 0.0 {
-        let n = format::count(rows.round().max(1.0));
-        return Metric::text(
-            label.trim_end_matches(" per run"),
-            format!("{n} row{} in {} runs", if n == "1" { "" } else { "s" }, format::count(runs)),
+        let rows = rows.round().max(1.0);
+        let counted = t!(
+            "check.heavy_query.metric.rows_in_runs",
+            rows = format::count(rows),
+            count = rows,
+            runs = format::count(runs)
         );
+        return Metric::text(total_label, counted);
     }
     if per_run > 0.0 && per_run < 1.0 {
-        return Metric::text(label, rows_a_run(per_run));
+        return Metric::text(per_run_label, rows_a_run(per_run));
     }
-    Metric::new(label, per_run, Unit::Rows)
+    Metric::new(per_run_label, per_run, Unit::Rows)
 }
 
 /// Reads per row returned from which a read's title says so, and an aggregate's result is worth keeping up to date
@@ -609,32 +686,50 @@ pub(super) const MANY_READS_PER_ROW: f64 = 1000.0;
 /// scan of shop.orders that examines 500K rows a run (MySQL puts no cost on the sort)." No share is said:
 /// [`Plan::step_share`] gives none.
 fn uncosted_step(snapshot: &Snapshot, plan: &Plan, step: &str) -> String {
-    let mut steps: Vec<String> = Vec::new();
+    let mut steps: Vec<Uncosted> = Vec::new();
     for n in plan.uncosted_steps() {
         let temporary = [Some(n.op.as_str()), n.detail.as_deref()]
             .into_iter()
             .flatten()
             .any(|t| t.to_ascii_lowercase().contains("temporary"));
         let what = match n.kind {
-            _ if temporary => "the temporary table",
-            NodeKind::Sort => "the sort",
-            NodeKind::Aggregate => "the grouping",
-            _ => "the spool",
+            _ if temporary => Uncosted::TemporaryTable,
+            NodeKind::Sort => Uncosted::Sort,
+            NodeKind::Aggregate => Uncosted::Grouping,
+            _ => Uncosted::Spool,
         };
-        if !steps.iter().any(|s| s == what) {
-            steps.push(what.to_string());
+        if !steps.contains(&what) {
+            steps.push(what);
         }
     }
     if steps.is_empty() {
-        return format!(" The step its plan costs highest is {step}.");
+        return t!("check.heavy_query.summary.step_costed_highest", step = step);
     }
+    let uncosted: Vec<String> = steps
+        .into_iter()
+        .map(|what| match what {
+            Uncosted::TemporaryTable => t!("check.heavy_query.uncosted.temporary_table"),
+            Uncosted::Sort => t!("check.heavy_query.uncosted.sort"),
+            Uncosted::Grouping => t!("check.heavy_query.uncosted.grouping"),
+            Uncosted::Spool => t!("check.heavy_query.uncosted.spool"),
+        })
+        .collect();
+    let (engine, uncosted) = (snapshot.server.name(), format::list(&uncosted));
     let costed = plan.nodes().into_iter().filter(|n| n.self_cost > 0.0).count();
-    let lead = if costed <= 1 {
-        "Its only step with a cost is"
+    if costed <= 1 {
+        t!("check.heavy_query.summary.only_costed_step", step = step, engine = engine, uncosted = uncosted)
     } else {
-        "Of the steps its plan puts a cost on, the costliest is"
-    };
-    format!(" {lead} {step} ({} puts no cost on {}).", snapshot.server.name(), format::list(&steps))
+        t!("check.heavy_query.summary.costliest_costed_step", step = step, engine = engine, uncosted = uncosted)
+    }
+}
+
+/// A step doing work that its plan puts no cost on ([`Plan::uncosted_steps`]).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Uncosted {
+    TemporaryTable,
+    Sort,
+    Grouping,
+    Spool,
 }
 
 /// The costliest step that reads a whole table, in a plan that weighs its steps: what keeps a plan costed under the bar
@@ -726,12 +821,16 @@ pub(super) fn calls(squeezed: &str, function: &str) -> bool {
     })
 }
 
-/// "Rows returned per run", or what the engine's row count means for a write. MySQL counts no rows sent for a write.
-pub(super) fn rows_label(engine: Engine, kind: StatementKind) -> Option<std::borrow::Cow<'static, str>> {
+/// What a statement's rows are called, a run and in all: "Rows returned per run" and "Rows returned", or what the
+/// engine's row count means for a write. MySQL counts no rows sent for a write.
+pub(super) fn rows_labels(engine: Engine, kind: StatementKind) -> Option<(String, String)> {
     if kind == StatementKind::Write {
-        engine.spec().statement_metrics().write_rows_label
+        // The engine's label is a run's ("Rows changed per run"); in all, it is the same without "per run".
+        let label = engine.spec().statement_metrics().write_rows_label?;
+        let total = label.trim_end_matches(" per run").to_string();
+        Some((label.into_owned(), total))
     } else {
-        Some("Rows returned per run".into())
+        Some((t!("common.metric.rows_returned_per_run"), t!("common.metric.rows_returned")))
     }
 }
 
@@ -760,13 +859,13 @@ pub(super) fn advice(summary: String) -> Fix {
 
 /// Active triggers on a write statement's target table that fire for the statement's DML event (`INSERT`, `UPDATE`,
 /// `DELETE`, `MERGE`/`REPLACE`).
-fn target_table_triggers<'a>(snapshot: &'a Snapshot, q: &QueryStat) -> Option<(&'a str, &'static str, Vec<String>)> {
+fn target_table_triggers<'a>(snapshot: &'a Snapshot, q: &QueryStat) -> Option<(&'a str, TriggerEvent, Vec<String>)> {
     let verb = first_verb(main_statement(&q.text)).map(|(_, v)| v)?;
-    let (wanted, event_noun): (&[char], &'static str) = match verb {
-        "insert" => (&['I'], "insert"),
-        "update" => (&['U'], "update"),
-        "delete" => (&['D'], "delete"),
-        "merge" | "replace" => (&['I', 'U', 'D'], "write"),
+    let (wanted, event): (&[char], TriggerEvent) = match verb {
+        "insert" => (&['I'], TriggerEvent::Insert),
+        "update" => (&['U'], TriggerEvent::Update),
+        "delete" => (&['D'], TriggerEvent::Delete),
+        "merge" | "replace" => (&['I', 'U', 'D'], TriggerEvent::Write),
         _ => return None,
     };
     let target = culprit_core::sql::tables_in(&q.text, snapshot.server.engine).into_iter().next()?;
@@ -781,5 +880,5 @@ fn target_table_triggers<'a>(snapshot: &'a Snapshot, q: &QueryStat) -> Option<(&
         .collect();
     names.sort();
     names.dedup();
-    (!names.is_empty()).then_some((table.name.as_str(), event_noun, names))
+    (!names.is_empty()).then_some((table.name.as_str(), event, names))
 }

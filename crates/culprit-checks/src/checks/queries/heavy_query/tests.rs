@@ -322,8 +322,9 @@ fn write_row_labels_use_the_declared_counter_meaning() {
         (Engine::Mssql, Some("Rows per run")),
         (Engine::Mysql, None),
     ] {
-        assert_eq!(rows_label(engine, StatementKind::Write).as_deref(), expected);
-        assert_eq!(rows_label(engine, StatementKind::Read).as_deref(), Some("Rows returned per run"));
+        let label = |kind| rows_labels(engine, kind).map(|(per_run, _)| per_run);
+        assert_eq!(label(StatementKind::Write).as_deref(), expected);
+        assert_eq!(label(StatementKind::Read).as_deref(), Some("Rows returned per run"));
     }
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use culprit_core::t;
 
 /// Where a statement's time goes when it isn't reading or computing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,84 +61,140 @@ enum LockFor {
 }
 
 impl Idle {
+    /// What the title says it does instead of working: "most of it waiting for locks".
     pub(super) fn title_tail(&self) -> String {
-        let part = match self.share {
-            Some(s) if s < 0.5 => format!("{} of it", format::percent(s)),
-            _ => "most of it".to_string(),
-        };
-        let most = if self.measured { part.clone() } else { "most likely".to_string() };
+        // "Most of it" from half on; where the engine didn't name the cause, "most likely".
+        let share = self.share.filter(|s| *s < 0.5).map(format::percent);
+        let part = if share.is_some() { "share" } else { "most" };
+        let share = share.unwrap_or_default();
         match self.kind {
-            IdleKind::Sleep => "sleeping".into(),
-            IdleKind::AppLock => "waiting for an application lock".into(),
-            IdleKind::Locks => format!("{most} waiting for locks"),
-            IdleKind::Client => format!("{part} waiting for the application to read the results"),
-            IdleKind::Memory => format!("{part} waiting for memory"),
-            IdleKind::Latch => format!("{part} waiting for pages other sessions are using"),
-            IdleKind::Unknown => "most of it waiting rather than working".into(),
+            IdleKind::Sleep => t!("check.heavy_query.idle.title.sleep"),
+            IdleKind::AppLock => t!("check.heavy_query.idle.title.app_lock"),
+            IdleKind::Locks => {
+                let part = if self.measured { part } else { "likely" };
+                t!("check.heavy_query.idle.title.locks", part = part, share = share)
+            }
+            IdleKind::Client => t!("check.heavy_query.idle.title.client", part = part, share = share),
+            IdleKind::Memory => t!("check.heavy_query.idle.title.memory", part = part, share = share),
+            IdleKind::Latch => t!("check.heavy_query.idle.title.latch", part = part, share = share),
+            IdleKind::Unknown => t!("check.heavy_query.idle.title.unknown"),
         }
     }
 
     /// One or two sentences: what shows it. Its evidence rests on figures the source keeps only in its totals (reads a
     /// run, its run time, its waits): where the summary leads with Culprit's scans, it says what they are over
-    /// ([`over_totals`]).
+    /// ([`crate::support::totals_basis`]).
     pub(super) fn evidence(&self, snapshot: &Snapshot, q: &QueryStat) -> String {
         let engine = snapshot.server.engine;
         let run = format::duration(q.mean_time_ms);
-        let unit = if engine == Engine::Mysql { "rows examined" } else { "pages" };
-        let reads_text =
-            q.reads_per_execution().map(|r| format!("{} {unit} per run", format::count(r))).unwrap_or_default();
-        let sentence = match &self.shown {
-            Shown::Sleep(name) => {
-                return format!(
-                    "It calls {name}: the time is a deliberate pause, not work, and no index or rewrite makes it shorter."
-                );
+        // MySQL counts the rows a statement examined, the other engines the pages it read.
+        let reads = q
+            .reads_per_execution()
+            .map(|r| {
+                let reads = format::count(r);
+                if engine == Engine::Mysql {
+                    t!("check.heavy_query.idle.reads_per_run_rows_examined", reads = reads)
+                } else {
+                    t!("check.heavy_query.idle.reads_per_run_pages", reads = reads)
+                }
+            })
+            .unwrap_or_default();
+        let basis = crate::support::totals_basis(snapshot, q);
+        match &self.shown {
+            Shown::Sleep(name) => t!("check.heavy_query.idle.evidence.sleep", name = *name),
+            Shown::AppLock(name) => t!("check.heavy_query.idle.evidence.app_lock", name = *name),
+            Shown::LockTime(share) => {
+                let (engine, share, time) =
+                    (snapshot.server.name(), format::percent(*share), format::duration(q.total_time_ms));
+                match basis {
+                    Some(basis) => t!(
+                        "check.heavy_query.idle.evidence.lock_time_over",
+                        basis = basis,
+                        engine = engine,
+                        share = share,
+                        time = time
+                    ),
+                    None => {
+                        t!("check.heavy_query.idle.evidence.lock_time", engine = engine, share = share, time = time)
+                    }
+                }
             }
-            Shown::AppLock(name) => {
-                return format!(
-                    "It calls {name}, which waits until the session holding that lock releases it: its time is how long others hold the lock, not work it does."
-                );
+            Shown::QueryStoreWait { cpu, wait_ms, wait } => {
+                let (cpu, wait_time) = (format::percent(*cpu), format::duration(*wait_ms));
+                match basis {
+                    Some(basis) => t!(
+                        "check.heavy_query.idle.evidence.query_store_wait_over",
+                        basis = basis,
+                        cpu = cpu,
+                        wait_time = wait_time,
+                        wait = wait
+                    ),
+                    None => t!(
+                        "check.heavy_query.idle.evidence.query_store_wait",
+                        cpu = cpu,
+                        wait_time = wait_time,
+                        wait = wait
+                    ),
+                }
             }
-            Shown::LockTime(share) => format!(
-                "{} counts {} of its {} waiting for locks.",
-                snapshot.server.name(),
-                format::percent(*share),
-                format::duration(q.total_time_ms)
-            ),
-            Shown::QueryStoreWait { cpu, wait_ms, wait } => format!(
-                "Only {} of its time is CPU, and Query Store records {} of {wait} waits for it.",
-                format::percent(*cpu),
-                format::duration(*wait_ms)
-            ),
-            Shown::LittleCpu(cpu) => format!(
-                "Only {} of its time is CPU, and {reads_text} take far less than {run}: most of each run is spent waiting.",
-                format::percent(*cpu)
-            ),
-            Shown::Unnamed => format!(
-                "It examined {reads_text}, which takes milliseconds, yet ran {run}: most of that time it was waiting, and {} doesn't say for what.",
-                snapshot.server.name()
-            ),
+            Shown::LittleCpu(cpu) => {
+                let cpu = format::percent(*cpu);
+                match basis {
+                    Some(basis) => t!(
+                        "check.heavy_query.idle.evidence.little_cpu_over",
+                        basis = basis,
+                        cpu = cpu,
+                        reads = reads,
+                        run = run
+                    ),
+                    None => t!("check.heavy_query.idle.evidence.little_cpu", cpu = cpu, reads = reads, run = run),
+                }
+            }
+            Shown::Unnamed => {
+                let engine = snapshot.server.name();
+                match basis {
+                    Some(basis) => t!(
+                        "check.heavy_query.idle.evidence.unnamed_over",
+                        basis = basis,
+                        reads = reads,
+                        run = run,
+                        engine = engine
+                    ),
+                    None => t!("check.heavy_query.idle.evidence.unnamed", reads = reads, run = run, engine = engine),
+                }
+            }
             Shown::RowLock(lock) => {
-                let source = match engine {
-                    Engine::Postgres => "pg_stat_statements doesn't record what a statement waited for",
-                    Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite => {
-                        "the statistics don't record what it waited for"
-                    }
+                // What says a statement waited, and doesn't say for what.
+                let statistics = match engine {
+                    Engine::Postgres => "pg_stat_statements",
+                    Engine::Mssql | Engine::Yugabyte | Engine::Mysql | Engine::Sqlite => "statistics",
                 };
-                let lock = match lock {
-                    LockFor::Clause(clause) => {
-                        format!("for the lock its {clause} takes on the rows it finds, which another transaction held")
-                    }
-                    LockFor::LockingRead => {
-                        "for the lock it takes on the rows it finds, which another transaction held".to_string()
-                    }
-                    LockFor::Row => "for a row lock another transaction held".to_string(),
+                let (lock, clause) = match lock {
+                    LockFor::Clause(clause) => ("clause", *clause),
+                    LockFor::LockingRead => ("locking_read", ""),
+                    LockFor::Row => ("row", ""),
                 };
-                format!(
-                    "It read {reads_text}, which takes milliseconds, yet ran {run}: almost all of that time it was waiting, most likely {lock} ({source})."
-                )
+                match basis {
+                    Some(basis) => t!(
+                        "check.heavy_query.idle.evidence.row_lock_over",
+                        basis = basis,
+                        reads = reads,
+                        run = run,
+                        lock = lock,
+                        clause = clause,
+                        statistics = statistics
+                    ),
+                    None => t!(
+                        "check.heavy_query.idle.evidence.row_lock",
+                        reads = reads,
+                        run = run,
+                        lock = lock,
+                        clause = clause,
+                        statistics = statistics
+                    ),
+                }
             }
-        };
-        over_totals(snapshot, q, sentence)
+        }
     }
 
     pub(super) fn verify(&self) -> Expect {
@@ -252,25 +309,41 @@ impl DominantWait<'_> {
     /// In a sentence: "85% of its time is spent waiting for data to come from storage because it wasn't in memory (Query
     /// Store: Buffer IO)."
     pub(super) fn sentence(&self, snapshot: &Snapshot, q: &QueryStat) -> String {
-        let doing = match self.on {
-            WaitOn::Storage if snapshot.server.engine == Engine::Postgres => "reading and writing data files",
-            WaitOn::Storage => "waiting for data to come from storage because it wasn't in memory",
-            WaitOn::Locks => "waiting for locks other transactions hold",
-            WaitOn::Latches => "waiting for pages other sessions are using",
-            WaitOn::Log => "waiting for its changes to reach the transaction log",
-            WaitOn::Client => "waiting for the application to read the results",
-            WaitOn::Memory => "waiting for memory",
-            WaitOn::Compilation => "compiling its plan",
+        // PostgreSQL's time on storage is its time reading and writing data files.
+        let on = match self.on {
+            WaitOn::Storage if snapshot.server.engine == Engine::Postgres => "storage_files",
+            WaitOn::Storage => "storage",
+            WaitOn::Locks => "locks",
+            WaitOn::Latches => "latches",
+            WaitOn::Log => "log",
+            WaitOn::Client => "client",
+            WaitOn::Memory => "memory",
+            WaitOn::Compilation => "compilation",
         };
-        let part = if self.share >= 1.0 {
-            "Most of its time".to_string()
-        } else {
-            format!("{} of its time", format::percent(self.share))
-        };
-        let source = snapshot.workload.as_ref().map_or("the statistics", |w| w.source.as_str());
+        let part = if self.share >= 1.0 { "most" } else { "share" };
+        let share = format::percent(self.share);
+        let source =
+            snapshot.workload.as_ref().map_or_else(|| t!("check.heavy_query.the_statistics"), |w| w.source.clone());
         // A part of its time the source keeps only in its totals: said over them where the share is the scans'.
-        let sentence = format!("{part} is spent {doing} ({source}: {}).", self.name);
-        over_totals(snapshot, q, sentence)
+        match crate::support::totals_basis(snapshot, q) {
+            Some(basis) => t!(
+                "check.heavy_query.wait.sentence_over",
+                basis = basis,
+                part = part,
+                share = share,
+                on = on,
+                source = source,
+                name = self.name
+            ),
+            None => t!(
+                "check.heavy_query.wait.sentence",
+                part = part,
+                share = share,
+                on = on,
+                source = source,
+                name = self.name
+            ),
+        }
     }
 }
 
@@ -302,21 +375,6 @@ pub(super) fn dominant_wait(q: &QueryStat) -> Option<DominantWait<'_>> {
 /// Where a statement's time goes when it isn't work (`idle_time`), for the views that word a finding by it (the brief).
 pub(crate) fn idle_kind(snapshot: &Snapshot, q: &QueryStat) -> Option<IdleKind> {
     idle_time(snapshot, q).map(|i| i.kind)
-}
-
-/// A sentence of figures from statement `q`'s totals, led by what they are over where its share and runs are said over
-/// Culprit's scans ([`crate::support::totals_basis`]): "Over the 1277 days since statistics were reset, it read …".
-fn over_totals(snapshot: &Snapshot, q: &QueryStat, sentence: String) -> String {
-    let Some(basis) = crate::support::totals_basis(snapshot, q) else { return sentence };
-    // A pronoun or an adverb leads in lower case after the basis; a name (MySQL) or a figure stays as it is.
-    let lead = match sentence.split_whitespace().next() {
-        Some("It" | "Only" | "Most") => {
-            let mut chars = sentence.chars();
-            chars.next().map(|c| c.to_lowercase().chain(chars).collect()).unwrap_or_default()
-        }
-        _ => sentence,
-    };
-    format!("Over {basis}, {lead}")
 }
 
 /// When a statement's time isn't work: it sleeps, waits for a lock, or does too little reading and computing to fill
