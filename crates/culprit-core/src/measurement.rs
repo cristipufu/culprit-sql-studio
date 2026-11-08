@@ -449,10 +449,13 @@ impl Snapshot {
             incarnation: None,
         })
     }
+    /// Whether the identity a provider bound names this scan's own engine and database. One that names another is a
+    /// collector's mistake; one that can't say where the database is still names it (it only compares with nothing).
+    pub fn identity_names_this_database(&self) -> bool {
+        self.identity.as_ref().is_none_or(|i| i.engine == self.server.engine && i.database == self.server.database)
+    }
     pub fn database_comparison(&self, other: &Self) -> Comparison {
-        if [&self, &other].iter().any(|s| {
-            s.identity.as_ref().is_some_and(|i| i.engine != s.server.engine || i.database != s.server.database)
-        }) {
+        if !self.identity_names_this_database() || !other.identity_names_this_database() {
             return Comparison::Incompatible(ComparisonReason::UnknownIdentity);
         }
         self.database_identity().comparison(&other.database_identity())
@@ -460,15 +463,20 @@ impl Snapshot {
     pub fn same_database(&self, other: &Self) -> bool {
         self.database_comparison(other).allows_comparison()
     }
+    /// Whether this scan's workload can be compared with another scan's: its identity says which database it read well
+    /// enough to compare (a location, not only a name), and its source measures that database alone. Not whether the
+    /// workload is this database's: see [`Self::identity_names_this_database`].
     pub fn measurement_consistency(&self) -> Comparison {
-        if !self.database_comparison(self).allows_comparison() {
+        let identity = self.database_comparison(self);
+        if !identity.allows_comparison() {
             return Comparison::Incompatible(ComparisonReason::UnknownIdentity);
         }
-        let Some(context) = self.workload_measurement() else { return self.database_comparison(self) };
-        if context.scope != MeasurementScope::Database {
-            return Comparison::Incompatible(ComparisonReason::DifferentScope);
+        match self.workload_measurement() {
+            Some(context) if context.scope != MeasurementScope::Database => {
+                Comparison::Incompatible(ComparisonReason::DifferentScope)
+            }
+            _ => identity,
         }
-        self.database_identity().comparison(&context.database)
     }
     /// The workload's measurement context, for a scan that knows which database it read; `None` for one that doesn't,
     /// which compares with nothing.

@@ -11,6 +11,26 @@ fn demo() -> Snapshot {
     serde_json::from_str(&text).expect("snapshot")
 }
 
+/// A file whose path can't be resolved is bound at an unknown location: its scans compare with no other, but its own
+/// workload is still this database's and is graded.
+#[test]
+fn a_file_at_an_unknown_location_keeps_its_workload() {
+    let mut snapshot = demo();
+    let mut identity = snapshot.identity.clone().expect("the demo's identity");
+    identity.location = culprit_core::DatabaseLocation::Unknown;
+    snapshot.bind_identity(identity);
+    assert!(!snapshot.same_database(&snapshot.clone()), "an unknown location compares with nothing");
+    let queries = demo().workload.expect("the log's statements").queries.len();
+    let report = analyze(snapshot);
+    assert_eq!(
+        report.snapshot.workload.as_ref().map(|w| w.queries.len()),
+        Some(queries),
+        "{:?}",
+        report.snapshot.notes
+    );
+    assert!(report.findings.iter().any(|f| !f.queries.is_empty()), "its statements are still graded");
+}
+
 #[test]
 fn the_log_covers_its_own_period() {
     let w = demo().workload.expect("the Rails log's statements");

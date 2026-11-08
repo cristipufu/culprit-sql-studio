@@ -114,8 +114,11 @@ fn measurement_context(snapshot: &mut Snapshot) {
             "The workload source does not isolate this database; its measurements cannot assess this database."
                 .to_string(),
         )
-    } else if !snapshot.measurement_consistency().allows_comparison() {
-        Some("The workload's recorded database identity does not match this snapshot; its measurements were left unassessed.".to_string())
+    } else if !snapshot.identity_names_this_database() {
+        Some(
+            "The workload's recorded database identity names another database; its measurements were left unassessed."
+                .to_string(),
+        )
     } else {
         None
     };
