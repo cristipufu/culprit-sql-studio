@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use culprit_core::format::friendly_date;
 use culprit_core::{
     Category, CheckInfo, Confidence, Deadlock, DeadlockPattern, Engine, Finding, Fix, Metric, Severity, Snapshot,
-    SubjectKind, Unit,
+    SubjectKind, Unit, format, t,
 };
 
 use culprit_core::Check;
@@ -19,33 +19,66 @@ pub(crate) const CHECKS: &[&dyn Check] = &[&DeadlocksCheck];
 pub fn deadlocks_info() -> CheckInfo {
     CheckInfo {
         id: "deadlocks".into(),
-        title: "Deadlocks".into(),
+        title: t!("check.deadlocks.info.title"),
         category: Category::Queries,
         engines: vec![Engine::Mssql, Engine::Postgres, Engine::Mysql],
         requires: vec![],
-        description: "Deadlocks in the last day, grouped by pattern (key lookup, opposite order, read-then-update, lock \
-                      escalation, parallelism) with the fix that removes them. SQL Server reads system_health (Azure \
-                      SQL Database its deadlock telemetry), MySQL the latest InnoDB report, PostgreSQL only keeps a counter."
-            .into(),
+        description: t!("check.deadlocks.info.description"),
     }
 }
 
-check!(DeadlocksCheck: deadlocks_info, deadlocks, &[Evidence::Deadlocks]);
+check!(
+    DeadlocksCheck: deadlocks_info,
+    decide = deadlock_cases,
+    render = deadlock_finding,
+    case<'s> = DeadlockCase<'s>,
+    evidence = &[Evidence::Deadlocks],
+);
 
-fn count_word(n: usize) -> String {
-    match n {
-        2 => "Two".into(),
-        3 => "Three".into(),
-        _ => n.to_string(),
-    }
+/// What the deadlock report establishes about this database.
+pub enum DeadlockCase<'s> {
+    /// Deadlocks of one pattern on the same tables, with their graphs.
+    Pattern(Pattern<'s>),
+    /// Deadlocks the server counted without keeping their graphs (PostgreSQL).
+    Counted(Counted<'s>),
 }
 
-fn tables(objects: &[String]) -> String {
-    match objects.len() {
-        0 => "the same rows".into(),
-        1 => objects[0].clone(),
-        n => format!("{} and {}", objects[..n - 1].join(", "), objects[n - 1]),
-    }
+/// Deadlocks of one pattern on the same tables.
+pub struct Pattern<'s> {
+    pattern: DeadlockPattern,
+    objects: Vec<String>,
+    /// The most recent one: its story, fixes, victim and time are the finding's.
+    latest: &'s Deadlock,
+    /// Those dated (which count toward the report's window), and those whose time is unknown.
+    dated: usize,
+    undated: usize,
+    /// Who deadlocked in the latest one.
+    who: Participants,
+    /// InnoDB keeps only its most recent deadlock: one says it happened at least once, never how many times.
+    latest_only: bool,
+    /// The report's note, where it says the server keeps only its most recent deadlock.
+    only_latest_kept: Option<&'s str>,
+    /// The hours the report covers.
+    since_hours: f64,
+    severity: Severity,
+    confidence: Confidence,
+}
+
+/// Who took part in a deadlock.
+enum Participants {
+    /// Two processes running at most two statements between them, across the pattern's deadlocks.
+    TwoQueries,
+    /// This many transactions (two at least).
+    Transactions(usize),
+}
+
+/// PostgreSQL's deadlock counter.
+pub struct Counted<'s> {
+    counted: f64,
+    /// When its statistics were last reset: what it counts from. `None` with no reset on record.
+    since: Option<&'s str>,
+    note: Option<&'s str>,
+    severity: Severity,
 }
 
 /// Whether a deadlock is this database's. SQL Server's system_health and InnoDB's report are the whole server's: a
@@ -79,14 +112,11 @@ pub(crate) fn deadlock_severity(n: usize, hours: f64) -> Severity {
     }
 }
 
-pub fn deadlocks(snapshot: &Snapshot) -> Vec<Finding> {
+fn deadlock_cases(snapshot: &Snapshot) -> Vec<DeadlockCase<'_>> {
     let Some(report) = snapshot.deadlocks.as_ref() else { return Vec::new() };
     let mut out = Vec::new();
-    let window = if (report.since_hours - 24.0).abs() < 0.01 {
-        "the last day".into()
-    } else {
-        format!("the last {}", culprit_core::span_words(report.since_hours))
-    };
+    // The note says the server keeps only its most recent deadlock: a caveat on each pattern.
+    let only_latest_kept = report.note.as_deref().filter(|n| n.contains("only keeps") || n.contains("most recent"));
 
     let mut groups: BTreeMap<(DeadlockPattern, Vec<String>), Vec<&Deadlock>> = BTreeMap::new();
     for d in report.deadlocks.iter().filter(|d| in_this_database(d, snapshot)) {
@@ -96,7 +126,6 @@ pub fn deadlocks(snapshot: &Snapshot) -> Vec<Finding> {
         // Only a dated deadlock counts toward "in the last day": InnoDB keeps its latest one however old it is, and
         // one whose time couldn't be read may be from long ago.
         let n = list.iter().filter(|d| d.at.is_some()).count();
-        let undated = list.len() - n;
         let latest = list.iter().max_by(|a, b| a.at.cmp(&b.at)).copied().unwrap_or(list[0]);
         let statements: std::collections::BTreeSet<String> = list
             .iter()
@@ -104,92 +133,25 @@ pub fn deadlocks(snapshot: &Snapshot) -> Vec<Finding> {
             .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase())
             .collect();
         let who = if latest.processes.len() == 2 && statements.len() <= 2 {
-            "Two queries".to_string()
+            Participants::TwoQueries
         } else {
-            format!("{} transactions", count_word(latest.processes.len().max(2)))
+            Participants::Transactions(latest.processes.len().max(2))
         };
-        let times = if n == 1 { "once".to_string() } else { format!("{n} times") };
-        let key =
-            format!("{}:{}", serde_key(pattern), if objects.is_empty() { "unknown".into() } else { objects.join("+") });
-        let subject_name = objects.first().cloned().unwrap_or_else(|| snapshot.server.database.clone());
-        let kind = if objects.is_empty() { SubjectKind::Database } else { SubjectKind::Table };
-        let mut f = finding("deadlocks", &key, Category::Queries, subject(kind, subject_name));
-        f.severity = deadlock_severity(n, report.since_hours);
-        f.confidence = if n > 0 { Confidence::High } else { Confidence::Medium };
-        // InnoDB keeps only its most recent deadlock: one in its report says the pattern happened at least once, and
-        // when it last did, never how many times.
-        let latest_only = snapshot.server.engine == Engine::Mysql;
-        f.title = if n > 0 && latest_only {
-            format!(
-                "{who} deadlocked at least once, most recently {} ({} on {})",
-                latest.at.as_deref().map(crate::queries::when_phrase).unwrap_or_default(),
-                pattern.label(),
-                tables(&objects)
-            )
-        } else if n > 0 {
-            format!(
-                "{who} deadlocked {times} in {window}{} ({} on {})",
-                if undated > 0 { format!(", and {undated} more at an unknown time") } else { String::new() },
-                pattern.label(),
-                tables(&objects)
-            )
-        } else {
-            format!(
-                "{who} deadlocked at an unknown time ({} on {}): the server's latest deadlock report doesn't say when",
-                pattern.label(),
-                tables(&objects)
-            )
-        };
-        f.summary = format!("{} {}", latest.headline, latest.explanation);
-        let all = list.len();
-        f.impact.score = base_score(f.severity) + (n as f64).min(20.0);
-        // What InnoDB keeps is the latest one: a floor, as the title says ("at least once"), never a count.
-        let at_least = if latest_only { "at least " } else { "" };
-        f.impact.label = if all == 1 { format!("{at_least}1 deadlock") } else { format!("{at_least}{all} deadlocks") };
-        if n == 0 {
-            f.caveats.push("When it happened is unknown, so it may be from long ago: InnoDB keeps its most recent deadlock until the next one, however old. Check the error log (innodb_print_all_deadlocks) before acting on it.".into());
-        }
-        f.metrics = vec![
-            Metric {
-                label: if latest_only { "Deadlocks (at least)" } else { "Deadlocks" }.into(),
-                value: all as f64,
-                unit: Unit::Count,
-                text: None,
-            },
-            Metric { label: "Pattern".into(), value: 0.0, unit: Unit::Text, text: Some(pattern.label().into()) },
-        ];
-        if let Some(who) = latest.victim().and_then(victim_text) {
-            f.metrics.push(Metric { label: "Rolled back".into(), value: 0.0, unit: Unit::Text, text: Some(who) });
-        }
-        // Lead with the primary fix; when it has no SQL, offer the first alternative that does.
-        if let Some(primary) = latest.fixes.first() {
-            let mut summary = format!("{}: {}", primary.title, primary.detail);
-            let mut sql = primary.sql.clone();
-            if sql.is_none()
-                && let Some(alt) = latest.fixes.iter().skip(1).find(|x| x.sql.is_some())
-            {
-                summary.push_str(&format!(" Or {}: {}", lowercase_first(&alt.title), alt.detail));
-                sql = alt.sql.clone();
-            }
-            f.fix = Some(Fix { summary, sql, cost: None });
-        }
-        f.verify = vec![
-            // "key-lookup deadlock" is a deadlock already: not "key-lookup deadlock deadlocks".
-            format!(
-                "Re-scan tomorrow: no new {} on {}.",
-                match pattern.label() {
-                    label if label.ends_with("deadlock") => format!("{label}s"),
-                    label => format!("{label} deadlocks"),
-                },
-                tables(&objects)
-            ),
-            "Live › Deadlocks shows the graph of each one, with both statements.".into(),
-        ];
-        f.last_seen = latest.at.clone();
-        if let Some(note) = report.note.as_ref().filter(|n| n.contains("only keeps") || n.contains("most recent")) {
-            f.caveats.push(note.clone());
-        }
-        out.push(f);
+        out.push(DeadlockCase::Pattern(Pattern {
+            pattern,
+            objects,
+            latest,
+            dated: n,
+            undated: list.len() - n,
+            who,
+            // InnoDB keeps only its most recent deadlock: one in its report says the pattern happened at least once,
+            // and when it last did, never how many times.
+            latest_only: snapshot.server.engine == Engine::Mysql,
+            only_latest_kept,
+            since_hours: report.since_hours,
+            severity: deadlock_severity(n, report.since_hours),
+            confidence: if n > 0 { Confidence::High } else { Confidence::Medium },
+        }));
     }
 
     if report.deadlocks.is_empty()
@@ -197,43 +159,182 @@ pub fn deadlocks(snapshot: &Snapshot) -> Vec<Finding> {
     {
         // The counter runs from the statistics' last reset. With no reset on record it runs from an unknown time
         // (statistics survive a clean restart), so it is a total, not a rate.
-        let since = match report.counted_since.as_deref() {
-            Some(s) => format!(" since {}", friendly_date(s, &snapshot.taken_at)),
-            None => " since its statistics began (no reset on record, so it doesn't say when)".into(),
-        };
         let per_day = report
             .counted_since
             .as_deref()
             .and_then(|s| days_between(s, &snapshot.taken_at))
             .filter(|d| d * 24.0 >= culprit_core::RATE_MIN_HOURS)
             .map(|d| counted / d);
-        let mut f = finding(
-            "deadlocks",
-            "counter",
-            Category::Queries,
-            subject(SubjectKind::Database, snapshot.server.database.clone()),
-        );
-        // A count says how many, not when: Medium only for a real rate over a known span (ten a day).
-        f.severity = if per_day.is_some_and(|d| d >= 10.0) { Severity::Medium } else { Severity::Low };
-        f.confidence = Confidence::Medium;
-        f.title = format!("PostgreSQL resolved {counted:.0} deadlock{}{since}", if counted == 1.0 { "" } else { "s" });
-        f.summary = report.note.clone().unwrap_or_default();
-        f.impact.score = base_score(f.severity);
-        f.impact.label = if counted == 1.0 { "1 deadlock".into() } else { format!("{counted:.0} deadlocks") };
-        f.fix = Some(Fix {
-            summary: "Find \"deadlock detected\" in the server log and paste those lines into Live › Deadlocks: Culprit names \
-                      the pattern. Most are fixed by changing rows in the same order everywhere and keeping transactions short."
-                .into(),
-            sql: None,
-            cost: None,
-        });
-        f.verify = vec!["Re-scan later: the counter stops growing.".into()];
-        out.push(f);
+        out.push(DeadlockCase::Counted(Counted {
+            counted,
+            since: report.counted_since.as_deref(),
+            note: report.note.as_deref(),
+            // A count says how many, not when: Medium only for a real rate over a known span (ten a day).
+            severity: if per_day.is_some_and(|d| d >= 10.0) { Severity::Medium } else { Severity::Low },
+        }));
     }
     out
 }
 
-/// The tables a deadlock finding is about, read back from the id [`deadlocks`] gives it (`deadlocks:<pattern>:<table>+
+fn deadlock_finding(snapshot: &Snapshot, case: DeadlockCase<'_>) -> Finding {
+    match case {
+        DeadlockCase::Pattern(p) => pattern_finding(snapshot, p),
+        DeadlockCase::Counted(c) => counted_finding(snapshot, c),
+    }
+}
+
+fn pattern_finding(snapshot: &Snapshot, p: Pattern<'_>) -> Finding {
+    let Pattern { pattern, objects, latest, dated, undated, latest_only, .. } = p;
+    let all = dated + undated;
+    let key =
+        format!("{}:{}", serde_key(pattern), if objects.is_empty() { "unknown".into() } else { objects.join("+") });
+    let subject_name = objects.first().cloned().unwrap_or_else(|| snapshot.server.database.clone());
+    let kind = if objects.is_empty() { SubjectKind::Database } else { SubjectKind::Table };
+    let mut f = finding("deadlocks", &key, Category::Queries, subject(kind, subject_name));
+    f.severity = p.severity;
+    f.confidence = p.confidence;
+    let who = match p.who {
+        Participants::TwoQueries => t!("check.deadlocks.who.two_queries"),
+        Participants::Transactions(n) => t!("check.deadlocks.who.transactions", n = n, count = n.to_string()),
+    };
+    let tables = if objects.is_empty() { t!("check.deadlocks.tables.unknown") } else { format::list(&objects) };
+    let label = pattern.label();
+    f.title = if dated > 0 && latest_only {
+        t!(
+            "check.deadlocks.title.latest",
+            who = who,
+            when = latest.at.as_deref().map(crate::queries::when_phrase).unwrap_or_default(),
+            pattern = label,
+            tables = &tables
+        )
+    } else if dated > 0 {
+        let window = if (p.since_hours - 24.0).abs() < 0.01 {
+            t!("check.deadlocks.window.last_day")
+        } else {
+            t!("check.deadlocks.window.last", span = culprit_core::span_words(p.since_hours))
+        };
+        if undated > 0 {
+            t!(
+                "check.deadlocks.title.dated_and_undated",
+                who = who,
+                n = dated,
+                count = dated.to_string(),
+                window = window,
+                undated = undated.to_string(),
+                pattern = label,
+                tables = &tables
+            )
+        } else {
+            t!(
+                "check.deadlocks.title.dated",
+                who = who,
+                n = dated,
+                count = dated.to_string(),
+                window = window,
+                pattern = label,
+                tables = &tables
+            )
+        }
+    } else {
+        t!("check.deadlocks.title.undated", who = who, pattern = label, tables = &tables)
+    };
+    f.summary = [latest.headline.as_str(), latest.explanation.as_str()].join(" ");
+    f.impact.score = base_score(f.severity) + (dated as f64).min(20.0);
+    // What InnoDB keeps is the latest one: a floor, as the title says ("at least once"), never a count.
+    f.impact.label = if latest_only {
+        t!("check.deadlocks.impact_at_least", n = all, count = all.to_string())
+    } else {
+        t!("check.deadlocks.impact", n = all, count = all.to_string())
+    };
+    if dated == 0 {
+        f.caveats.push(t!("check.deadlocks.caveat.undated"));
+    }
+    f.metrics = vec![
+        Metric::new(
+            if latest_only {
+                t!("check.deadlocks.metric.deadlocks_at_least")
+            } else {
+                t!("check.deadlocks.metric.deadlocks")
+            },
+            all as f64,
+            Unit::Count,
+        ),
+        Metric::text(t!("check.deadlocks.metric.pattern"), label),
+    ];
+    if let Some(who) = latest.victim().and_then(victim_text) {
+        f.metrics.push(Metric::text(t!("check.deadlocks.metric.rolled_back"), who));
+    }
+    // Lead with the primary fix; when it has no SQL, offer the first alternative that does.
+    if let Some(primary) = latest.fixes.first() {
+        let alternative = latest.fixes.iter().skip(1).find(|x| x.sql.is_some()).filter(|_| primary.sql.is_none());
+        f.fix = Some(match alternative {
+            Some(alt) => Fix {
+                summary: t!(
+                    "check.deadlocks.fix_or",
+                    title = &primary.title,
+                    detail = &primary.detail,
+                    alternative = lowercase_first(&alt.title),
+                    alternative_detail = &alt.detail
+                ),
+                sql: alt.sql.clone(),
+                cost: None,
+            },
+            None => Fix {
+                summary: t!("check.deadlocks.fix", title = &primary.title, detail = &primary.detail),
+                sql: primary.sql.clone(),
+                cost: None,
+            },
+        });
+    }
+    f.verify = vec![
+        // A key-lookup deadlock is a deadlock already: not "key-lookup deadlock deadlocks".
+        match pattern {
+            DeadlockPattern::KeyLookup => t!("check.deadlocks.verify.no_new_key_lookup", tables = &tables),
+            _ => t!("check.deadlocks.verify.no_new", pattern = label, tables = &tables),
+        },
+        t!("check.deadlocks.verify.graph"),
+    ];
+    f.last_seen = latest.at.clone();
+    if let Some(note) = p.only_latest_kept {
+        f.caveats.push(note.to_string());
+    }
+    f
+}
+
+fn counted_finding(snapshot: &Snapshot, c: Counted<'_>) -> Finding {
+    let mut f = finding(
+        "deadlocks",
+        "counter",
+        Category::Queries,
+        subject(SubjectKind::Database, snapshot.server.database.clone()),
+    );
+    f.severity = c.severity;
+    f.confidence = Confidence::Medium;
+    let count = format!("{:.0}", c.counted);
+    f.title = match c.since {
+        Some(since) => t!(
+            "check.deadlocks.counter.title",
+            n = c.counted,
+            count = &count,
+            since = friendly_date(since, &snapshot.taken_at)
+        ),
+        None => t!("check.deadlocks.counter.title_no_reset", n = c.counted, count = &count),
+    };
+    f.summary = c.note.unwrap_or_default().to_string();
+    f.impact.score = base_score(f.severity);
+    f.impact.label = t!("check.deadlocks.impact", n = c.counted, count = &count);
+    f.fix = Some(Fix { summary: t!("check.deadlocks.counter.fix"), sql: None, cost: None });
+    f.verify = vec![t!("check.deadlocks.counter.verify")];
+    f
+}
+
+/// The findings the check makes of `snapshot`.
+#[cfg(test)]
+fn deadlocks(snapshot: &Snapshot) -> Vec<Finding> {
+    deadlock_cases(snapshot).into_iter().map(|case| deadlock_finding(snapshot, case)).collect()
+}
+
+/// The tables a deadlock finding is about, read back from the id the check gives it (`deadlocks:<pattern>:<table>+
 /// <table>`): every one, where the subject names only the first. Empty for any other finding, and for a deadlock
 /// whose tables weren't named.
 pub(crate) fn deadlock_tables(f: &Finding) -> Vec<String> {
@@ -248,12 +349,14 @@ pub(crate) fn deadlock_tables(f: &Finding) -> Vec<String> {
 /// (orders-api)". A login or an application alone is a session of it, never a bare name a reader takes for a table or
 /// a person. `None` when the report names nothing.
 pub(crate) fn victim_text(victim: &culprit_core::DeadlockProcess) -> Option<String> {
-    let session = victim.session.as_deref().map(|s| format!("session {s}"));
-    let by = victim.application.clone().or_else(|| victim.login.as_deref().map(|l| format!("login {l}")));
-    match (session, by) {
-        (Some(session), Some(by)) => Some(format!("{session} ({by})")),
-        (Some(session), None) => Some(session),
-        (None, Some(by)) => Some(format!("a session of {by}")),
+    let by = victim
+        .application
+        .clone()
+        .or_else(|| victim.login.as_deref().map(|l| t!("check.deadlocks.victim.login", login = l)));
+    match (victim.session.as_deref(), by) {
+        (Some(session), Some(by)) => Some(t!("check.deadlocks.victim.session_by", session = session, by = by)),
+        (Some(session), None) => Some(t!("check.deadlocks.victim.session", session = session)),
+        (None, Some(by)) => Some(t!("check.deadlocks.victim.by", by = by)),
         (None, None) => None,
     }
 }
