@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::model::{Engine, Environment};
-use crate::t;
 
 /// One database at a glance.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
