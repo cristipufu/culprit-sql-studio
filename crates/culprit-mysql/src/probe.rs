@@ -4,7 +4,7 @@ use crate::{
     rows::{query_one, query_with},
     vars,
 };
-use culprit_core::{Capability, Engine, Error, MissingCapability, Platform, Result, ServerInfo};
+use culprit_core::{Capability, Engine, Error, MissingCapability, Platform, Result, ServerInfo, t};
 use mysql_async::{Conn, Value};
 
 /// What the probe learned about the server, shared by every collector.
@@ -70,22 +70,17 @@ impl Probe {
     }
 
     fn performance_schema_restart(&self) -> String {
-        format!(
-            "For statistics on every statement (not only slow ones) and waits, set performance_schema = ON in the server configuration and restart {}.",
-            self.flavor.name()
-        )
+        t!("provider.mysql.probe.performance_schema_restart", server = self.flavor.name())
     }
 
     /// How to get statement statistics when performance_schema is off: the no-restart path first.
     fn statements_fix(&self) -> String {
         match self.unlock_statement() {
-            Some(sql) => format!(
-                "Run {sql} {} then logs statements slower than long_query_time to mysql.slow_log, which Culprit reads: no restart needed. \
-                 Connections opened earlier keep the old threshold until they reconnect, and the settings last until the next restart unless \
-                 they are also added to the server configuration. {}",
-                self.flavor.name(),
-                self.performance_schema_restart()
-            ),
+            Some(sql) => [
+                t!("provider.mysql.probe.slow_log_now", sql = sql, server = self.flavor.name()),
+                self.performance_schema_restart(),
+            ]
+            .join(" "),
             None => self.performance_schema_restart(),
         }
     }
@@ -96,28 +91,28 @@ impl Probe {
         if self.performance_schema {
             capabilities.extend([Capability::PerformanceSchema, Capability::IndexUsage, Capability::QueryPlans]);
         } else {
+            // MariaDB ships with performance_schema off; MySQL with it on, so off there is someone's choice.
             let reason = match self.flavor {
-                Flavor::Mariadb => {
-                    "performance_schema is off (MariaDB's default), so the server keeps no statement statistics."
-                }
-                Flavor::Mysql => "performance_schema is off, so MySQL keeps no statement statistics.",
+                Flavor::Mariadb => t!("provider.mysql.probe.no_statements.mariadb"),
+                Flavor::Mysql => t!("provider.mysql.probe.no_statements.mysql"),
             };
             missing.push(MissingCapability {
                 capability: Capability::PerformanceSchema,
-                reason: reason.into(),
+                reason,
                 fix: Some(self.statements_fix()),
             });
             if self.userstat == Some(true) {
                 capabilities.push(Capability::IndexUsage);
             } else {
+                // MariaDB also counts index reads with userstat, which needs no restart; MySQL has no such setting.
                 let (reason, fix) = match self.flavor {
                     Flavor::Mariadb => (
-                        "MariaDB counts index reads only with performance_schema or userstat on.".to_string(),
-                        "Run SET GLOBAL userstat = ON; to start counting (no restart needed), then scan again once the application has run for a while.".to_string(),
+                        t!("provider.mysql.probe.no_index_usage.mariadb"),
+                        t!("provider.mysql.probe.no_index_usage.mariadb_fix", sql = "SET GLOBAL userstat = ON;"),
                     ),
                     Flavor::Mysql => (
-                        "performance_schema is off, so MySQL counts no index use.".to_string(),
-                        "Set performance_schema = ON in the server configuration and restart MySQL.".to_string(),
+                        t!("provider.mysql.probe.no_index_usage.mysql"),
+                        t!("provider.mysql.probe.no_index_usage.mysql_fix"),
                     ),
                 };
                 missing.push(MissingCapability { capability: Capability::IndexUsage, reason, fix: Some(fix) });
@@ -127,7 +122,7 @@ impl Probe {
             } else {
                 missing.push(MissingCapability {
                     capability: Capability::QueryPlans,
-                    reason: "Plans come from the statements the server recorded, and it records none.".into(),
+                    reason: t!("provider.mysql.probe.no_recorded_statements"),
                     fix: None,
                 });
             }
@@ -155,8 +150,8 @@ impl Probe {
 
 fn database_of(connector: &Connector) -> Result<String> {
     connector.database.clone().ok_or_else(|| {
-        Error::invalid("A MySQL or MariaDB connection needs a database (schema) to analyze")
-            .with_hint("Add it to the connection string, e.g. mysql://user@host:3306/shop")
+        Error::invalid(t!("provider.mysql.probe.needs_database"))
+            .with_hint(t!("provider.mysql.probe.needs_database_hint"))
     })
 }
 
@@ -170,7 +165,7 @@ pub async fn probe(conn: &mut Conn, connector: &Connector) -> Result<Probe> {
                 @@read_only AS read_only",
     )
     .await?
-    .ok_or_else(|| Error::internal("The server returned no information about itself"))?;
+    .ok_or_else(|| Error::internal(t!("provider.mysql.probe.no_server_information")))?;
     let size = query_with(
         conn,
         "SELECT SUM(DATA_LENGTH + INDEX_LENGTH) AS size, COUNT(*) AS tables FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?",
@@ -187,9 +182,7 @@ pub async fn probe(conn: &mut Conn, connector: &Connector) -> Result<Probe> {
         )
         .await?;
         if exists.is_empty() {
-            return Err(Error::not_found(format!(
-                "Database `{database}` does not exist or is not visible to this login"
-            )));
+            return Err(Error::not_found(t!("provider.mysql.probe.no_such_database", database = &database)));
         }
     }
     let uptime = vars::status(conn, &["Uptime"]).await.ok().and_then(|s| s.get("Uptime").copied());

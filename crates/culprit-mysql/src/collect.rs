@@ -3,11 +3,12 @@ use crate::{
     catalog::{columns, foreign_keys, indexes, replica_role, settings, tables},
     connect::{Connector, Scope},
     probe::probe,
-    slowlog, sources,
+    sources,
     workload::collect_workload,
 };
 use culprit_core::{
     Capability, ConnectionSpec, Coverage, Engine, Error, Result, SNAPSHOT_FORMAT, Setting, Snapshot, SnapshotOptions,
+    WorkloadKind, t,
 };
 use std::time::Instant;
 
@@ -67,7 +68,7 @@ pub async fn snapshot(
             for (collector, message) in collected.notes {
                 coverage.note(collector, message);
             }
-            if collected.workload.source == slowlog::SOURCE {
+            if collected.workload.kind == Some(WorkloadKind::SlowLog) {
                 coverage.delivered(Capability::SlowLog);
             }
             let planned = collected.workload.queries.iter().any(|q| q.plan.is_some());
@@ -84,7 +85,7 @@ pub async fn snapshot(
             coverage.recorded(
                 &sources::STATEMENTS,
                 culprit_core::SourceState::Unavailable,
-                Some("Statement statistics are not enabled or available on this database.".into()),
+                Some(t!("provider.mysql.statements.unavailable")),
             );
             None
         }

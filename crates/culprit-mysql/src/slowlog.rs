@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use culprit_core::changes::{Period, PeriodData, PeriodStats, QueryPeriods};
-use culprit_core::{QueryStat, QueryTrend, Result, Spread, Timeline, TimelineSource, WaitStat, Workload};
+use culprit_core::{QueryStat, QueryTrend, Result, Spread, Timeline, TimelineSource, WaitStat, Workload, format, t};
 use mysql_async::{Conn, Value};
 
 use crate::connect::TAG;
@@ -267,11 +267,8 @@ pub fn workload(
         })
         .collect();
     let threshold_note = match threshold_s {
-        Some(s) if s > 0.0 => format!(
-            "The slow query log only keeps statements that ran longer than long_query_time ({}), so fast, frequent statements are missing from these totals.",
-            seconds_text(s)
-        ),
-        _ => "long_query_time is 0, so the slow query log keeps every statement.".into(),
+        Some(s) if s > 0.0 => t!("provider.mysql.slow_log.threshold", threshold = seconds_text(s)),
+        _ => t!("provider.mysql.slow_log.every_statement"),
     };
     Collected {
         lock_ms: runs.iter().map(|r| r.lock_ms).sum(),
@@ -300,8 +297,13 @@ pub fn workload(
     }
 }
 
+/// long_query_time as the server's setting reads: whole milliseconds under a second, seconds as set above.
 fn seconds_text(s: f64) -> String {
-    if s < 1.0 { format!("{:.0} ms", s * 1000.0) } else { format!("{s} s") }
+    if s < 1.0 {
+        t!("common.duration.ms", n = format::digits(format!("{:.0}", s * 1000.0)))
+    } else {
+        t!("common.duration.s", n = format::digits(format!("{s}")))
+    }
 }
 
 /// Equal buckets from the window start to now: a day in 15-minute buckets, a week in 2-hour ones.
@@ -417,9 +419,7 @@ pub fn periods(runs: &[Run], baseline: &Period, recent: &Period, logged_since: O
     let since = logged_since.unwrap_or(b0);
     data.baseline_coverage = if b1 > b0 { ((b1 - since.max(b0)) / (b1 - b0)).clamp(0.0, 1.0) } else { 0.0 };
     data.queries = by_key.into_values().collect();
-    data.notes.push(
-        "From the slow query log: only runs slower than long_query_time are counted, in both periods alike.".into(),
-    );
+    data.notes.push(t!("provider.mysql.slow_log.periods"));
     data
 }
 

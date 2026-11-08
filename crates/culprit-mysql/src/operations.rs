@@ -5,7 +5,7 @@ use crate::{
     sources, vars,
 };
 use culprit_core::operations::{ClusterHealth, OperationalCounter, OperationalCounterKind, SequenceCapacity};
-use culprit_core::{Coverage, FileScope, Snapshot};
+use culprit_core::{Coverage, FileScope, Snapshot, t};
 use mysql_async::{Conn, Value};
 
 pub async fn collect(conn: &mut Conn, probe: &Probe, snapshot: &mut Snapshot) {
@@ -13,6 +13,8 @@ pub async fn collect(conn: &mut Conn, probe: &Probe, snapshot: &mut Snapshot) {
     if let Some(status) =
         coverage.read(&sources::REDO_PRESSURE, vars::status(conn, &["Innodb_log_waits", "Aborted_connects"]).await)
     {
+        // A counter's subject is part of its finding's id (`<check>:<subject>`), so it reads the same in every
+        // language.
         if let Some(count) = status.get("Innodb_log_waits") {
             snapshot.operations.counters.push(OperationalCounter {
                 kind: OperationalCounterKind::RedoLogWaits,
@@ -47,10 +49,8 @@ pub async fn collect(conn: &mut Conn, probe: &Probe, snapshot: &mut Snapshot) {
     {
         for r in rows {
             let Some((minimum, maximum)) = integer_bounds(&r.string("column_type")) else {
-                coverage.partial(
-                    &sources::SEQUENCE_CAPACITY,
-                    "An auto-increment column has an unsupported numeric type; its allocation range was not assessed.",
-                );
+                coverage
+                    .partial(&sources::SEQUENCE_CAPACITY, t!("provider.mysql.operations.unsupported_auto_increment"));
                 continue;
             };
             let (Some(current), Some(increment)) = (r.text("next_value"), r.text("step")) else { continue };
@@ -73,7 +73,7 @@ pub async fn collect(conn: &mut Conn, probe: &Probe, snapshot: &mut Snapshot) {
         });
         if configuration.is_some() && !enabled {
             // Replace the successful configuration probe: there is no Galera cluster to assess.
-            coverage.not_applicable(&sources::CLUSTER_HEALTH, "Galera replication is not enabled on this server.");
+            coverage.not_applicable(&sources::CLUSTER_HEALTH, t!("provider.mysql.operations.galera_off"));
         }
         if enabled && let Some(rows) = coverage.read(&sources::CLUSTER_HEALTH, query(conn,
             "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_ready','wsrep_connected','wsrep_cluster_status','wsrep_local_state_comment','wsrep_flow_control_paused')").await) {
@@ -82,10 +82,7 @@ pub async fn collect(conn: &mut Conn, probe: &Probe, snapshot: &mut Snapshot) {
             snapshot.operations.cluster = Some(ClusterHealth { ready: flag("wsrep_ready"), connected: flag("wsrep_connected"), primary_component: read("wsrep_cluster_status").map(|v| v.eq_ignore_ascii_case("Primary")), local_state: read("wsrep_local_state_comment"), flow_control_paused: read("wsrep_flow_control_paused").and_then(|v| v.parse().ok()) });
         }
     } else {
-        coverage.not_applicable(
-            &sources::CLUSTER_HEALTH,
-            "Galera health is available only where MariaDB Galera is enabled.",
-        );
+        coverage.not_applicable(&sources::CLUSTER_HEALTH, t!("provider.mysql.operations.galera_mariadb_only"));
     }
     coverage.append_to(snapshot);
 }

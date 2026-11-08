@@ -5,7 +5,7 @@ use crate::{
     rows::{Rec, query, query_one, query_with},
     vars,
 };
-use culprit_core::{ColumnInfo, ForeignKey, IndexStat, Result, Setting, TableStat};
+use culprit_core::{ColumnInfo, ForeignKey, IndexStat, Result, Setting, TableStat, t};
 use mysql_async::{Conn, Value};
 use std::collections::{BTreeMap, HashMap};
 
@@ -214,12 +214,12 @@ pub(crate) async fn indexes(conn: &mut Conn, db: &str, probe: &Probe) -> Result<
                     .collect::<HashMap<_, _>>(),
                 None,
             ),
-            Err(e) => (HashMap::new(), Some(format!("Reading index usage failed: {}", e.message))),
+            Err(e) => (HashMap::new(), Some(t!("provider.mysql.indexes.usage_failed", error = e.message))),
         }
     } else if probe.userstat == Some(true) {
         match userstat_usage(conn, db, &rows).await {
             Ok(usage) => (usage, None),
-            Err(e) => (HashMap::new(), Some(format!("Reading userstat index statistics failed: {}", e.message))),
+            Err(e) => (HashMap::new(), Some(t!("provider.mysql.indexes.userstat_failed", error = e.message))),
         }
     } else {
         (HashMap::new(), None)

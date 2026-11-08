@@ -7,7 +7,9 @@ use crate::{
     rows::{Rec, explain_one, query, query_one, query_with, tagged},
     slowlog,
 };
-use culprit_core::{Engine, Plan, PlanKind, QueryStat, Result, SnapshotOptions, Spread, WaitStat, Workload};
+use culprit_core::{
+    Engine, Plan, PlanKind, QueryStat, Result, SnapshotOptions, Spread, WaitStat, Workload, format, key, t,
+};
 use mysql_async::{Conn, Value, prelude::Queryable};
 use std::collections::HashMap;
 
@@ -41,15 +43,11 @@ enum SampleFrom {
 }
 
 impl SampleFrom {
-    fn sentence(self) -> &'static str {
+    fn sentence(self) -> String {
         match self {
-            SampleFrom::Digest => {
-                "Planned from the sample performance_schema keeps for this statement: its slowest recent run, so the values may be an outlier's rather than a typical run's."
-            }
-            SampleFrom::History => "Planned from the latest run in performance_schema's statement history.",
-            SampleFrom::SlowLog => {
-                "Planned from a run in the slow query log: a slow run, so the values may be an outlier's rather than a typical run's."
-            }
+            SampleFrom::Digest => t!("provider.mysql.plans.sample.digest"),
+            SampleFrom::History => t!("provider.mysql.plans.sample.history"),
+            SampleFrom::SlowLog => t!("provider.mysql.plans.sample.slow_log"),
         }
     }
 }
@@ -179,10 +177,7 @@ pub(crate) async fn collect_workload(
 
 /// The note on statement time (`ms`) performance_schema couldn't keep per digest.
 fn digests_full(ms: f64) -> String {
-    format!(
-        "performance_schema's digest table is full (performance_schema_digests_size), so {} of statement time across the server went into one catch-all row and isn't in these totals: shares are of the time it could attribute.",
-        culprit_core::format::duration(ms)
-    )
+    t!("provider.mysql.workload.digests_full", time = format::duration(ms))
 }
 
 /// Statement time performance_schema couldn't keep per digest once its table was full: the row with no digest. It is
@@ -434,30 +429,28 @@ struct PlanOutcome {
 impl PlanOutcome {
     fn note(&self) -> Option<String> {
         if let Some(error) = &self.error {
-            return Some(format!("Could not open a session to plan statements: {error}"));
+            return Some(t!("provider.mysql.plans.no_session", error = error));
         }
-        if self.no_text + self.unusable + self.failed + self.empty == 0 {
-            return None;
-        }
-        let mut parts = Vec::new();
-        if self.no_text > 0 {
-            parts.push(format!("{} had no recorded statement text", self.no_text));
-        }
-        if self.unusable > 0 {
-            parts.push(format!("{} had only truncated or server-side prepared text", self.unusable));
-        }
-        if self.empty > 0 {
-            parts.push(format!(
-                "{} {} for values that matched no rows, so the server showed no plan",
-                self.empty,
-                if self.empty == 1 { "was sampled" } else { "were sampled" }
-            ));
-        }
-        if self.failed > 0 {
-            parts.push(format!("{} could not be explained", self.failed));
-        }
-        let queries = if self.planned == 1 { "query" } else { "queries" };
-        Some(format!("Planned {} {queries}; {}.", self.planned, parts.join(", ")))
+        // Each statement that couldn't be planned, by why: (its message, how many).
+        let problems: Vec<String> = [
+            (key!("provider.mysql.plans.problem.no_text"), self.no_text),
+            (key!("provider.mysql.plans.problem.unusable"), self.unusable),
+            (key!("provider.mysql.plans.problem.matched_no_rows"), self.empty),
+            (key!("provider.mysql.plans.problem.failed"), self.failed),
+        ]
+        .into_iter()
+        .filter(|(_, n)| *n > 0)
+        .map(|(key, n)| culprit_core::i18n::t(key, &[("n", n.into()), ("count", format::digits(n.to_string()).into())]))
+        .collect();
+        // The reasons, each a clause of its own, listed as the language lists them ("a, b, c").
+        let problems =
+            problems.into_iter().rev().reduce(|rest, first| t!("common.list.more", first = first, rest = rest))?;
+        Some(t!(
+            "provider.mysql.plans.planned",
+            n = self.planned,
+            count = format::digits(self.planned.to_string()),
+            problems = problems
+        ))
     }
 }
 
@@ -509,7 +502,7 @@ async fn attach_plans(connector: &Connector, database: &str, queries: &mut [Dige
                             plan.facts_mut().flavor = Some("MariaDB".into());
                             plan.props.insert("flavor".into(), "MariaDB".into());
                         }
-                        plan.props.insert("Sample".into(), digest.sample_from.sentence().into());
+                        plan.props.insert("Sample".into(), digest.sample_from.sentence());
                         digest.stat.plan = Some(plan);
                         outcome.planned += 1;
                     }
@@ -612,37 +605,38 @@ async fn no_plans_reason(conn: &mut Conn, probe: &Probe, sample_text: bool) -> (
 
 /// Why no logged statement could be planned.
 fn no_logged_plans() -> String {
-    "No logged statement could be planned.".to_string()
+    t!("provider.mysql.plans.none_logged")
 }
 
 /// [`no_plans_reason`] in words: `consumers_off`, the consumers that keep the latest statements are off.
 fn no_plans_words(flavor: Flavor, sample_text: bool, consumers_off: bool) -> (String, Option<String>) {
     if !sample_text && consumers_off {
         let names = ["events_statements_current", "events_statements_history_long"];
-        let config =
-            names.iter().map(|n| format!("performance_schema_consumer_{n} = ON")).collect::<Vec<_>>().join(" and ");
+        let settings: Vec<String> = names.iter().map(|n| format!("performance_schema_consumer_{n} = ON")).collect();
+        // MySQL 8.0 keeps a sample statement per digest; MariaDB never does.
         let why = match flavor {
-            Flavor::Mariadb => "MariaDB keeps statement digests but not the statements themselves",
-            Flavor::Mysql => {
-                "This MySQL keeps statement digests but no sample statement for each (MySQL 8.0 added one)"
-            }
+            Flavor::Mariadb => t!("provider.mysql.plans.no_text.mariadb"),
+            Flavor::Mysql => t!("provider.mysql.plans.no_text.mysql"),
         };
         return (
-            format!("{why}, so there is no text to plan."),
-            Some(format!(
-                "Run UPDATE performance_schema.setup_consumers SET ENABLED = 'YES' WHERE NAME IN ('events_statements_current', 'events_statements_history_long'); \
-                 to keep the latest statements (no restart needed; add {config} to the server configuration to keep them after a restart). \
-                 Or open a statement in the editor and Explain it there."
+            why,
+            Some(t!(
+                "provider.mysql.plans.no_text_fix",
+                sql = format!(
+                    "UPDATE performance_schema.setup_consumers SET ENABLED = 'YES' WHERE NAME IN ({});",
+                    names.map(|n| format!("'{n}'")).join(", ")
+                ),
+                config = format::list(&settings)
             )),
         );
     }
     (
-        "None of the recorded statements could be planned: their text was truncated, prepared with placeholders, or no longer in the statement history.".into(),
+        t!("provider.mysql.plans.none_planned"),
         (!sample_text).then(|| {
-            format!(
-                "{}'s statement history keeps only the latest statements (performance_schema_events_statements_history_long_size). \
-                 Logging slow statements to the mysql.slow_log table gives Culprit lasting samples: SET GLOBAL slow_query_log = ON, GLOBAL log_output = 'FILE,TABLE';",
-                flavor.name()
+            t!(
+                "provider.mysql.plans.history_only_hint",
+                server = flavor.name(),
+                sql = "SET GLOBAL slow_query_log = ON, GLOBAL log_output = 'FILE,TABLE';"
             )
         }),
     )
