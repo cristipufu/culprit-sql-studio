@@ -2,19 +2,32 @@
 
 use super::*;
 use crate::evidence::Requirement as Evidence;
+use culprit_core::{OpenTransaction, TableStat, t};
 
 pub fn dead_rows_info() -> CheckInfo {
     CheckInfo {
         id: "dead-rows".into(),
-        title: "Dead rows and lagging autovacuum".into(),
+        title: t!("check.dead_rows.info.title"),
         category: Category::Maintenance,
         engines: vec![Engine::Postgres],
         requires: vec![Capability::TableStats],
-        description: "Tables carrying many dead tuples, which bloat storage and slow scans.".into(),
+        description: t!("check.dead_rows.info.description"),
     }
 }
 
-check!(DeadRowsCheck: dead_rows_info, dead_rows, &[Evidence::Tables(crate::evidence::TableMeasure::DeadRows), Evidence::Settings]);
+check!(
+    DeadRowsCheck: dead_rows_info,
+    decide = dead_rows_cases,
+    render = dead_rows_finding,
+    case<'s> = DeadRows<'s>,
+    evidence = &[Evidence::Tables(crate::evidence::TableMeasure::DeadRows), Evidence::Settings],
+);
+
+/// The dead-rows findings of `snapshot`: its cases, each worded.
+#[cfg(test)]
+pub(crate) fn dead_rows(snapshot: &Snapshot) -> Vec<Finding> {
+    culprit_core::Check::run(&DeadRowsCheck, snapshot)
+}
 
 /// When autovacuum vacuums `t`: its own storage parameters, else the server's settings, else PostgreSQL's defaults
 /// (50 rows + 20% of the table). `None` when autovacuum is off for it (or for the server).
@@ -30,128 +43,147 @@ pub(super) fn autovacuum_setting(snapshot: &Snapshot, t: &culprit_core::TableSta
         .or_else(|| snapshot.setting(name).and_then(|s| s.value.trim().parse::<f64>().ok()))
 }
 
-pub fn dead_rows(snapshot: &Snapshot) -> Vec<Finding> {
+/// What the dead rows of a table establish.
+pub enum DeadRows<'s> {
+    /// Dead rows past twice the table's autovacuum trigger, or piling up with autovacuum off for it.
+    Backlog(Backlog<'s>),
+    /// A multi-million-row table whose scale factor makes autovacuum wait for a large pile of dead rows.
+    ScaleFactor(ScaleFactor<'s>),
+    /// Autovacuum switched off in the table's storage parameters.
+    Disabled(Disabled<'s>),
+}
+
+/// A table with more dead rows than autovacuum lets pile up, and why they are there.
+pub struct Backlog<'s> {
+    table: &'s TableStat,
+    live: f64,
+    dead: f64,
+    /// Dead rows' share of all its rows.
+    ratio: f64,
+    /// The dead rows at which autovacuum visits it; `None` with autovacuum off for it.
+    trigger: Option<f64>,
+    cause: Cause<'s>,
+    last_vacuum: LastVacuum<'s>,
+    /// The storage options the fix sets, when it vacuums: a smaller scale factor, autovacuum back on, or both.
+    options: Option<&'static str>,
+    severity: Severity,
+}
+
+/// What the scan establishes about why the dead rows are there, which also decides the fix and how to verify it.
+enum Cause<'s> {
+    /// A cleanup holder was observed: it can keep some of them, how many isn't known.
+    Held(&'s OpenTransaction),
+    /// Vacuum ran within the last hour: they may have died since, or an older snapshot may keep them.
+    RecentVacuum,
+    /// Autovacuum should have visited at this many dead rows, and is behind.
+    Behind(f64),
+    /// Autovacuum is off for the table.
+    Off,
+}
+
+/// When the table was last vacuumed.
+enum LastVacuum<'s> {
+    /// This many days before the scan.
+    DaysAgo(f64),
+    /// On this date, which doesn't read as before the scan.
+    On(&'s str),
+    Never,
+}
+
+/// A large, busy table whose scale factor makes autovacuum wait for many dead rows before it starts.
+pub struct ScaleFactor<'s> {
+    table: &'s TableStat,
+    live: f64,
+    dead: f64,
+    trigger: f64,
+    factor: f64,
+}
+
+/// A table whose storage parameters switch autovacuum off.
+pub struct Disabled<'s> {
+    table: &'s TableStat,
+    /// The option as the table's reloptions say it.
+    option: &'s str,
+    /// It is the table's TOAST table that autovacuum skips.
+    toast: bool,
+    live: f64,
+    dead: f64,
+    severity: Severity,
+}
+
+fn dead_rows_cases(snapshot: &Snapshot) -> Vec<DeadRows<'_>> {
     if snapshot.server.engine != Engine::Postgres {
         return Vec::new();
     }
-    let mut out: Vec<Finding> = snapshot
-        .tables
-        .iter()
-        .filter_map(|t| {
-            let live = t.rows?;
-            let dead = t.dead_rows?;
-            // A busy table reaches its trigger (by default 20% of it dead) between every two autovacuum runs: that is
-            // autovacuum's rhythm. Past twice the trigger it is behind; with autovacuum off for the table, any real
-            // pile of dead rows stays.
-            let trigger = vacuum_trigger(snapshot, t, live);
-            let limit = trigger.map_or(live * 0.2, |tr| tr * DEAD_MARGIN);
-            if dead < 10_000.0 || dead < limit {
-                return None;
-            }
-            let table_name = t.qualified();
-            let ratio = dead / (live + dead).max(1.0);
-            let last = t.last_vacuum.as_deref().and_then(|d| days_between(d, &snapshot.taken_at)).filter(|d| *d >= 0.0);
-            // A recent vacuum and a dead-row estimate do not prove a blocked horizon: writes may have followed it.
-            let recent_vacuum = last.is_some_and(|d| d * 24.0 < 1.0);
-            let holder = snapshot
-                .pressure
-                .as_ref()
-                .and_then(|p| p.oldest_transaction.as_ref())
-                .filter(|h| !h.catalog_only && h.xid_age.is_some_and(|age| age > 0.0));
-            let held = trigger.is_some() && holder.is_some();
-            let mut f = finding("dead-rows", &table_name, Category::Maintenance, subject(SubjectKind::Table, &table_name));
-            f.title = format!("{} of {} is dead rows", format::percent(ratio), t.name);
-            f.summary = format!(
-                "{table_name} holds {} dead rows next to {} live ones. Every sequential scan still reads them, indexes still point at them, and the table stays larger than it needs to be. {}{}",
-                format::count(dead),
-                format::count(live),
-                match (trigger, holder) {
-                    (Some(_), Some(h)) => format!(
-                        "A cleanup holder was observed in this scan ({}). It can prevent removal of some dead rows; this count does not establish how many it retains. Check the holder and vacuum progress before changing maintenance.",
-                        cleanup_holder_phrase(h)
-                    ),
-                    (Some(_), None) if recent_vacuum => "Vacuum ran within the last hour. These rows may have become dead afterwards, or an older snapshot may prevent removal; the scan does not establish which. Compare write activity and the next vacuum before treating this as failed cleanup.".to_string(),
-                    (Some(tr), None) => format!(
-                        "Autovacuum should visit it at about {} dead rows; it has {:.1} times that, so it is behind.",
-                        format::count(tr),
-                        dead / tr.max(1.0)
-                    ),
-                    (None, _) => "Autovacuum is off for it, so nothing cleans them up.".into(),
-                },
-                match (t.last_vacuum.as_deref(), last) {
-                    (Some(_), Some(days)) => format!(" It was last vacuumed {} ago.", format::duration(days * 86_400_000.0)),
-                    (Some(d), None) => format!(" It was last vacuumed {}.", short_date(d)),
-                    (None, _) => " It has never been vacuumed since statistics were reset.".into(),
-                }
-            );
-            f.severity = if t.storage.as_ref().is_some_and(|s| s.autovacuum_off()) {
-                Severity::High
-            } else if ratio >= 0.5 && dead >= 1_000_000.0 {
-                Severity::Medium
-            } else {
-                Severity::Low
-            };
-            f.impact.score = base_score(f.severity) + ratio * 10.0;
-            f.impact.label = format!("{} dead rows", format::count(dead));
-            f.confidence = Confidence::High;
-            f.metrics.push(Metric::new("Dead rows", dead, Unit::Rows));
-            f.metrics.push(Metric::new("Live rows", live, Unit::Rows));
-            f.metrics.push(Metric::new("Dead share", ratio, Unit::Ratio));
-            if let Some(tr) = trigger {
-                f.metrics.push(Metric::new("Autovacuum trigger", tr, Unit::Rows));
-            }
-            let target = qualified(Engine::Postgres, &t.schema, &t.name);
-            // Sooner, never later: a table already set below 0.02 keeps its own factor.
-            let factor = autovacuum_setting(snapshot, t, "autovacuum_vacuum_scale_factor").unwrap_or(0.2);
-            let options = match (factor > 0.02, trigger.is_none()) {
-                (true, true) => Some("autovacuum_vacuum_scale_factor = 0.02, autovacuum_enabled = true"),
-                (true, false) => Some("autovacuum_vacuum_scale_factor = 0.02"),
-                (false, true) => Some("autovacuum_enabled = true"),
-                (false, false) => None,
-            };
-            f.fix = Some(if held {
-                Fix {
-                    summary: "Inspect the observed cleanup holder and vacuum progress. Finish a transaction only after checking its owner and purpose; a replication consumer or prepared transaction needs its own recovery procedure. Then measure whether vacuum removes the backlog under representative writes.".into(),
-                    sql: None,
-                    cost: None,
-                }
-            } else if recent_vacuum && trigger.is_some() {
-                Fix {
-                    summary: "Compare representative writes and the next autovacuum with the dead-row estimate. Inspect vacuum progress and any cleanup holders if the backlog persists. Change per-table maintenance only after establishing that its current settings cannot keep up.".into(),
-                    sql: None,
-                    cost: None,
-                }
-            } else {
-                Fix {
-                    summary: "Vacuum it now, and make autovacuum visit this table sooner. If dead rows come back quickly, look for long-running transactions in Live: they stop vacuum from cleaning up.".into(),
-                    sql: Some(match options {
-                        Some(o) => format!("VACUUM (ANALYZE) {target};\nALTER TABLE {target} SET ({o});"),
-                        None => format!("VACUUM (ANALYZE) {target};"),
-                    }),
-                    cost: Some("VACUUM doesn't block reads or writes; it does add I/O while it runs.".into()),
-                }
-            });
-            let when = if held {
-                "After safely resolving the cleanup hold and allowing VACUUM to complete, re-scan"
-            } else if recent_vacuum && trigger.is_some() {
-                "Compare the next completed vacuum under representative writes"
-            } else {
-                "Re-scan after VACUUM (ANALYZE)"
-            };
-            f.verify = vec![format!(
-                "{when}: the dead-row count should fall below the table's autovacuum trigger, the last analyze time should be newer, and changes since analyze should fall. Check again after representative writes to confirm autovacuum keeps the dead-row count near its trigger rather than letting the backlog return."
-            )];
-            Some(f)
-        })
-        .collect();
-    out.extend(large_table_autovacuum_scale(snapshot, &out));
+    let backlogs: Vec<Backlog<'_>> = snapshot.tables.iter().filter_map(|t| backlog(snapshot, t)).collect();
+    let behind: Vec<String> = backlogs.iter().map(|b| b.table.qualified()).collect();
+    let mut out: Vec<DeadRows<'_>> = backlogs.into_iter().map(DeadRows::Backlog).collect();
+    out.extend(large_table_autovacuum_scale(snapshot, &behind).into_iter().map(DeadRows::ScaleFactor));
+    out.extend(disabled_autovacuum(snapshot, &behind).into_iter().map(DeadRows::Disabled));
     out
+}
+
+fn backlog<'s>(snapshot: &'s Snapshot, t: &'s TableStat) -> Option<Backlog<'s>> {
+    let live = t.rows?;
+    let dead = t.dead_rows?;
+    // A busy table reaches its trigger (by default 20% of it dead) between every two autovacuum runs: that is
+    // autovacuum's rhythm. Past twice the trigger it is behind; with autovacuum off for the table, any real pile of
+    // dead rows stays.
+    let trigger = vacuum_trigger(snapshot, t, live);
+    let limit = trigger.map_or(live * 0.2, |tr| tr * DEAD_MARGIN);
+    if dead < 10_000.0 || dead < limit {
+        return None;
+    }
+    let ratio = dead / (live + dead).max(1.0);
+    let last = t.last_vacuum.as_deref().and_then(|d| days_between(d, &snapshot.taken_at)).filter(|d| *d >= 0.0);
+    // A recent vacuum and a dead-row estimate do not prove a blocked horizon: writes may have followed it.
+    let recent_vacuum = last.is_some_and(|d| d * 24.0 < 1.0);
+    let holder = snapshot
+        .pressure
+        .as_ref()
+        .and_then(|p| p.oldest_transaction.as_ref())
+        .filter(|h| !h.catalog_only && h.xid_age.is_some_and(|age| age > 0.0));
+    let cause = match (trigger, holder) {
+        (Some(_), Some(h)) => Cause::Held(h),
+        (Some(_), None) if recent_vacuum => Cause::RecentVacuum,
+        (Some(tr), None) => Cause::Behind(tr),
+        (None, _) => Cause::Off,
+    };
+    // Sooner, never later: a table already set below 0.02 keeps its own factor.
+    let factor = autovacuum_setting(snapshot, t, "autovacuum_vacuum_scale_factor").unwrap_or(0.2);
+    let options = match (factor > 0.02, trigger.is_none()) {
+        (true, true) => Some("autovacuum_vacuum_scale_factor = 0.02, autovacuum_enabled = true"),
+        (true, false) => Some("autovacuum_vacuum_scale_factor = 0.02"),
+        (false, true) => Some("autovacuum_enabled = true"),
+        (false, false) => None,
+    };
+    Some(Backlog {
+        table: t,
+        live,
+        dead,
+        ratio,
+        trigger,
+        cause,
+        last_vacuum: match (t.last_vacuum.as_deref(), last) {
+            (Some(_), Some(days)) => LastVacuum::DaysAgo(days),
+            (Some(d), None) => LastVacuum::On(d),
+            (None, _) => LastVacuum::Never,
+        },
+        options,
+        severity: if t.storage.as_ref().is_some_and(|s| s.autovacuum_off()) {
+            Severity::High
+        } else if ratio >= 0.5 && dead >= 1_000_000.0 {
+            Severity::Medium
+        } else {
+            Severity::Low
+        },
+    })
 }
 
 /// Multi-million-row tables (`>= 5M` live rows) with active row churn (`>= 100k` dead rows or `>= 250k` updates/deletes)
 /// that still use a large `autovacuum_vacuum_scale_factor` (`>= 0.1`), so autovacuum waits for a million or more dead
-/// rows before starting.
-fn large_table_autovacuum_scale(snapshot: &Snapshot, existing: &[Finding]) -> Vec<Finding> {
+/// rows before starting. Tables already `behind` have a finding of their own.
+fn large_table_autovacuum_scale<'s>(snapshot: &'s Snapshot, behind: &[String]) -> Vec<ScaleFactor<'s>> {
     let server_scale =
         snapshot.setting("autovacuum_vacuum_scale_factor").and_then(|s| s.value.trim().parse::<f64>().ok());
     snapshot
@@ -168,7 +200,7 @@ fn large_table_autovacuum_scale(snapshot: &Snapshot, existing: &[Finding]) -> Ve
                 return None;
             }
             let table_name = t.qualified();
-            if existing.iter().any(|f| f.subject.name == table_name) {
+            if behind.contains(&table_name) {
                 return None;
             }
             // Tables >= 10M rows without a per-table scale factor on a server with autovacuum_vacuum_scale_factor >= 0.2
@@ -189,74 +221,24 @@ fn large_table_autovacuum_scale(snapshot: &Snapshot, existing: &[Finding]) -> Ve
             if factor < 0.1 || trigger < 500_000.0 {
                 return None;
             }
-            let mut f = finding(
-                "dead-rows",
-                &format!("scale-factor:{table_name}"),
-                Category::Maintenance,
-                subject(SubjectKind::Table, &table_name),
-            );
-            f.actionability = culprit_core::Actionability::OptionalImprovement;
-            f.severity = Severity::Low;
-            f.impact.score = base_score(Severity::Low);
-            f.impact.label = format!("trigger {} rows", format::count(trigger));
-            f.confidence = Confidence::High;
-            f.title = format!(
-                "{} ({} rows) waits for {} dead rows before autovacuum starts",
-                t.name,
-                format::count(live),
-                format::count(trigger)
-            );
-            f.summary = format!(
-                "{table_name} has {} live rows (and {} dead rows today) with `autovacuum_vacuum_scale_factor` at \
-                 {}. At that scale factor, autovacuum does not start until about {} dead rows accumulate, causing \
-                 infrequent, long-running vacuum passes and larger table/index bloat between runs.",
-                format::count(live),
-                format::count(dead),
-                format::percent(factor),
-                format::count(trigger)
-            );
-            f.metrics.push(Metric::new("Live rows", live, Unit::Rows));
-            if dead > 0.0 {
-                f.metrics.push(Metric::new("Dead rows", dead, Unit::Rows));
-            }
-            f.metrics.push(Metric::new("Autovacuum trigger", trigger, Unit::Rows));
-            let target = qualified(Engine::Postgres, &t.schema, &t.name);
-            f.fix = Some(Fix {
-                summary: format!(
-                    "Set a lower per-table autovacuum and autoanalyze scale factor on {table_name} so vacuum and \
-                     statistics updates run in smaller, more frequent passes."
-                ),
-                sql: Some(format!(
-                    "ALTER TABLE {target} SET (autovacuum_vacuum_scale_factor = 0.01, autovacuum_analyze_scale_factor = 0.005);"
-                )),
-                cost: Some("Setting per-table storage parameters is a fast metadata change and does not rewrite the table.".into()),
-            });
-            f.verify = vec![format!(
-                "Re-scan after applying the storage options: {table_name}'s autovacuum trigger drops to about 1% of its live rows."
-            )];
-            Some(f)
+            Some(ScaleFactor { table: t, live, dead, trigger, factor })
         })
-        .chain(disabled_autovacuum(snapshot, existing))
         .collect()
 }
 
 /// PostgreSQL tables where per-table `autovacuum_enabled` (or `toast.autovacuum_enabled`) was explicitly set to
 /// `false` / `off` in `reloptions`.
-fn disabled_autovacuum(snapshot: &Snapshot, existing: &[Finding]) -> Vec<Finding> {
-    if snapshot.server.engine != Engine::Postgres {
-        return Vec::new();
-    }
+fn disabled_autovacuum<'s>(snapshot: &'s Snapshot, behind: &[String]) -> Vec<Disabled<'s>> {
     snapshot
         .tables
         .iter()
         .filter_map(|t| {
             let table_name = t.qualified();
-            // A table whose main heap already triggered `dead-rows:<table>` includes `autovacuum_enabled = true` in that
-            // finding's fix; emit a separate finding only when `dead-rows:<table>` didn't fire or `toast.autovacuum_enabled` is off.
-            let has_main_dead_rows =
-                existing.iter().any(|f| f.id.eq_ignore_ascii_case(&format!("dead-rows:{table_name}")));
+            // A table whose main heap already has a backlog finding includes `autovacuum_enabled = true` in that
+            // finding's fix; a separate finding only when it hasn't one or `toast.autovacuum_enabled` is off.
+            let has_main_dead_rows = behind.iter().any(|b| b.eq_ignore_ascii_case(&table_name));
             let options = &t.storage.as_ref()?.options;
-            let disabled_opt = options.iter().find(|o| {
+            let option = options.iter().find(|o| {
                 let Some((k, v)) = o.split_once('=') else { return false };
                 let k = k.trim();
                 let v = v.trim();
@@ -265,49 +247,170 @@ fn disabled_autovacuum(snapshot: &Snapshot, existing: &[Finding]) -> Vec<Finding
                 ((is_main && !has_main_dead_rows) || is_toast)
                     && matches!(v.to_ascii_lowercase().as_str(), "false" | "off" | "no" | "0")
             })?;
-            let is_toast = disabled_opt.trim().to_ascii_lowercase().starts_with("toast.");
-            let param = if is_toast { "toast.autovacuum_enabled" } else { "autovacuum_enabled" };
             let live = t.rows.unwrap_or(0.0);
             let dead = t.dead_rows.unwrap_or(0.0);
-            let mut f = finding(
-                "dead-rows",
-                &format!("autovacuum-disabled:{table_name}"),
-                Category::Maintenance,
-                subject(SubjectKind::Table, &table_name),
-            );
-            f.actionability = culprit_core::Actionability::NeedsAttention;
-            f.confidence = Confidence::High;
-            f.severity = if dead >= 10_000.0 || live >= 100_000.0 || t.xid_age.unwrap_or(0.0) >= 50_000_000.0 {
-                Severity::High
-            } else {
-                Severity::Medium
-            };
-            f.impact.score = base_score(f.severity);
-            f.impact.label = format!("{param} = false");
-            f.title = format!("Autovacuum is disabled on {} ({param} = false)", t.name);
-            f.summary = format!(
-                "{table_name} has `{disabled_opt}` set in its table storage parameters (`reloptions`). While \
-                 `{param}` is disabled, PostgreSQL never automatically vacuums dead tuples or updates planner \
-                 statistics on {}, allowing bloat to accumulate until transaction ID wraparound forces an emergency \
-                 anti-wraparound vacuum.",
-                if is_toast { "its TOAST table" } else { &t.name }
-            );
-            if live > 0.0 {
-                f.metrics.push(Metric::new("Live rows", live, Unit::Rows));
-            }
-            if dead > 0.0 {
-                f.metrics.push(Metric::new("Dead rows", dead, Unit::Rows));
-            }
-            let target = qualified(Engine::Postgres, &t.schema, &t.name);
-            f.fix = Some(Fix {
-                summary: format!("Re-enable autovacuum on {table_name} by resetting `{param}`."),
-                sql: Some(format!("ALTER TABLE {target} RESET ({param});")),
-                cost: Some("Re-enabling autovacuum schedules a background vacuum pass if dead rows exceed the table's threshold.".into()),
-            });
-            f.verify = vec![format!(
-                "Re-scan after resetting `{param}`: `{disabled_opt}` should no longer appear on {table_name}."
-            )];
-            Some(f)
+            Some(Disabled {
+                table: t,
+                option,
+                toast: option.trim().to_ascii_lowercase().starts_with("toast."),
+                live,
+                dead,
+                severity: if dead >= 10_000.0 || live >= 100_000.0 || t.xid_age.unwrap_or(0.0) >= 50_000_000.0 {
+                    Severity::High
+                } else {
+                    Severity::Medium
+                },
+            })
         })
         .collect()
+}
+
+fn dead_rows_finding(_: &Snapshot, case: DeadRows<'_>) -> Finding {
+    match case {
+        DeadRows::Backlog(b) => backlog_finding(b),
+        DeadRows::ScaleFactor(s) => scale_factor_finding(s),
+        DeadRows::Disabled(d) => disabled_finding(d),
+    }
+}
+
+fn backlog_finding(b: Backlog<'_>) -> Finding {
+    let t = b.table;
+    let table_name = t.qualified();
+    let mut f = finding("dead-rows", &table_name, Category::Maintenance, subject(SubjectKind::Table, &table_name));
+    f.title = t!("check.dead_rows.title", share = format::percent(b.ratio), table = &t.name);
+    let mut summary = vec![t!(
+        "check.dead_rows.summary.dead",
+        table = &table_name,
+        dead = format::count(b.dead),
+        live = format::count(b.live)
+    )];
+    summary.push(match b.cause {
+        Cause::Held(h) => t!("check.dead_rows.summary.held", holder = cleanup_holder_phrase(h)),
+        Cause::RecentVacuum => t!("check.dead_rows.summary.recent_vacuum"),
+        Cause::Behind(tr) => t!(
+            "check.dead_rows.summary.behind",
+            trigger = format::count(tr),
+            times = format!("{:.1}", b.dead / tr.max(1.0))
+        ),
+        Cause::Off => t!("check.dead_rows.summary.off"),
+    });
+    summary.push(match b.last_vacuum {
+        LastVacuum::DaysAgo(days) => {
+            t!("check.dead_rows.summary.vacuumed_ago", ago = format::duration(days * 86_400_000.0))
+        }
+        LastVacuum::On(date) => t!("check.dead_rows.summary.vacuumed_on", date = short_date(date)),
+        LastVacuum::Never => t!("check.dead_rows.summary.never_vacuumed"),
+    });
+    f.summary = summary.join(" ");
+    f.severity = b.severity;
+    f.impact.score = base_score(f.severity) + b.ratio * 10.0;
+    f.impact.label = t!("check.dead_rows.impact", dead = format::count(b.dead));
+    f.confidence = Confidence::High;
+    f.metrics.push(Metric::new(t!("check.dead_rows.metric.dead"), b.dead, Unit::Rows));
+    f.metrics.push(Metric::new(t!("check.dead_rows.metric.live"), b.live, Unit::Rows));
+    f.metrics.push(Metric::new(t!("check.dead_rows.metric.dead_share"), b.ratio, Unit::Ratio));
+    if let Some(tr) = b.trigger {
+        f.metrics.push(Metric::new(t!("check.dead_rows.metric.trigger"), tr, Unit::Rows));
+    }
+    let target = qualified(Engine::Postgres, &t.schema, &t.name);
+    f.fix = Some(match b.cause {
+        Cause::Held(_) => Fix { summary: t!("check.dead_rows.fix.held"), sql: None, cost: None },
+        Cause::RecentVacuum => Fix { summary: t!("check.dead_rows.fix.recent_vacuum"), sql: None, cost: None },
+        Cause::Behind(_) | Cause::Off => Fix {
+            summary: t!("check.dead_rows.fix.vacuum"),
+            sql: Some(match b.options {
+                Some(o) => format!("VACUUM (ANALYZE) {target};\nALTER TABLE {target} SET ({o});"),
+                None => format!("VACUUM (ANALYZE) {target};"),
+            }),
+            cost: Some(t!("check.dead_rows.fix_cost.vacuum")),
+        },
+    });
+    f.verify = vec![match b.cause {
+        Cause::Held(_) => t!("check.dead_rows.verify.held"),
+        Cause::RecentVacuum => t!("check.dead_rows.verify.recent_vacuum"),
+        Cause::Behind(_) | Cause::Off => t!("check.dead_rows.verify.vacuum"),
+    }];
+    f
+}
+
+fn scale_factor_finding(s: ScaleFactor<'_>) -> Finding {
+    let t = s.table;
+    let table_name = t.qualified();
+    let mut f = finding(
+        "dead-rows",
+        &format!("scale-factor:{table_name}"),
+        Category::Maintenance,
+        subject(SubjectKind::Table, &table_name),
+    );
+    f.actionability = culprit_core::Actionability::OptionalImprovement;
+    f.severity = Severity::Low;
+    f.impact.score = base_score(Severity::Low);
+    f.impact.label = t!("check.dead_rows.scale_factor.impact", trigger = format::count(s.trigger));
+    f.confidence = Confidence::High;
+    f.title = t!(
+        "check.dead_rows.scale_factor.title",
+        table = &t.name,
+        live = format::count(s.live),
+        trigger = format::count(s.trigger)
+    );
+    f.summary = t!(
+        "check.dead_rows.scale_factor.summary",
+        table = &table_name,
+        live = format::count(s.live),
+        dead = format::count(s.dead),
+        factor = format::percent(s.factor),
+        trigger = format::count(s.trigger)
+    );
+    f.metrics.push(Metric::new(t!("check.dead_rows.metric.live"), s.live, Unit::Rows));
+    if s.dead > 0.0 {
+        f.metrics.push(Metric::new(t!("check.dead_rows.metric.dead"), s.dead, Unit::Rows));
+    }
+    f.metrics.push(Metric::new(t!("check.dead_rows.metric.trigger"), s.trigger, Unit::Rows));
+    let target = qualified(Engine::Postgres, &t.schema, &t.name);
+    f.fix = Some(Fix {
+        summary: t!("check.dead_rows.scale_factor.fix", table = &table_name),
+        sql: Some(format!(
+            "ALTER TABLE {target} SET (autovacuum_vacuum_scale_factor = 0.01, autovacuum_analyze_scale_factor = 0.005);"
+        )),
+        cost: Some(t!("check.dead_rows.scale_factor.fix_cost")),
+    });
+    f.verify = vec![t!("check.dead_rows.scale_factor.verify", table = &table_name)];
+    f
+}
+
+fn disabled_finding(d: Disabled<'_>) -> Finding {
+    let t = d.table;
+    let table_name = t.qualified();
+    let param = if d.toast { "toast.autovacuum_enabled" } else { "autovacuum_enabled" };
+    let mut f = finding(
+        "dead-rows",
+        &format!("autovacuum-disabled:{table_name}"),
+        Category::Maintenance,
+        subject(SubjectKind::Table, &table_name),
+    );
+    f.actionability = culprit_core::Actionability::NeedsAttention;
+    f.confidence = Confidence::High;
+    f.severity = d.severity;
+    f.impact.score = base_score(f.severity);
+    f.impact.label = t!("check.dead_rows.disabled.impact", param = param);
+    f.title = t!("check.dead_rows.disabled.title", table = &t.name, param = param);
+    f.summary = if d.toast {
+        t!("check.dead_rows.disabled.summary_toast", table = &table_name, option = d.option, param = param)
+    } else {
+        t!("check.dead_rows.disabled.summary", table = &table_name, option = d.option, param = param, name = &t.name)
+    };
+    if d.live > 0.0 {
+        f.metrics.push(Metric::new(t!("check.dead_rows.metric.live"), d.live, Unit::Rows));
+    }
+    if d.dead > 0.0 {
+        f.metrics.push(Metric::new(t!("check.dead_rows.metric.dead"), d.dead, Unit::Rows));
+    }
+    let target = qualified(Engine::Postgres, &t.schema, &t.name);
+    f.fix = Some(Fix {
+        summary: t!("check.dead_rows.disabled.fix", table = &table_name, param = param),
+        sql: Some(format!("ALTER TABLE {target} RESET ({param});")),
+        cost: Some(t!("check.dead_rows.disabled.fix_cost")),
+    });
+    f.verify = vec![t!("check.dead_rows.disabled.verify", param = param, option = d.option, table = &table_name)];
+    f
 }
