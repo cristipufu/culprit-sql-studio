@@ -19,8 +19,8 @@ fn base() -> (Plan, QueryStat) {
     plan.index_hints.clear();
     plan.warnings.clear();
     plan.props.clear();
-    // A blank plan: each case describes its plan in properties, and its facts are read from them.
-    plan.facts = None;
+    // A blank plan: each case states the facts a parser records, and the properties its engine displays.
+    plan.facts = Some(Default::default());
     plan.kind = PlanKind::Estimated;
     plan.total_cost = 0.001;
     plan.statement = Some("SELECT id FROM shop.widgets WHERE id = @id".into());
@@ -35,7 +35,7 @@ fn base() -> (Plan, QueryStat) {
     n.predicate = None;
     n.seek_predicate = None;
     n.props.clear();
-    n.facts = None;
+    n.facts = Some(Default::default());
     n.warnings.clear();
     n.est_rows = 1.0;
     n.est_executions = 1.0;
@@ -150,12 +150,20 @@ pub fn cases() -> Vec<Case> {
         r#"[{"Trigger Name":"audit","Relation":"items","Time":120.5,"Calls":10},{"Trigger Name":"invalid","Time":-1}]"#
             .into(),
     );
+    trigger.facts_mut().memory_granted_kb = Some(1024.0);
+    trigger.facts_mut().trigger_timings = vec![culprit_core::actual::TriggerTiming {
+        name: "audit".into(),
+        relation: Some("items".into()),
+        time_ms: 120.5,
+        calls: Some(10.0),
+    }];
     cases.push(finish("triggers", trigger, None));
     let mut rows_only = plan.clone();
     rows_only.kind = PlanKind::Actual;
     rows_only.total_cost = 1.0;
     rows_only.root = timed(&plan.root, 0, Some(0.0), vec![]);
     rows_only.props.insert("CpuMs".into(), "0".into());
+    rows_only.facts_mut().cpu_ms = Some(0.0);
     cases.push(finish("rows-only", rows_only, None));
 
     let mut workers = plan.clone();
@@ -166,9 +174,11 @@ pub fn cases() -> Vec<Case> {
     workers.root.act_rows = Some(100_000.0);
     workers.root.act_executions = Some(2.0);
     workers.root.props.insert(culprit_core::plan::PARALLEL_THREADS.into(), "2".into());
+    workers.root.facts_mut().parallel_threads = Some(2);
     workers.root.runtime =
         Some(culprit_core::NodeRuntime { thread_rows: vec![95_000.0, 5_000.0], ..Default::default() });
     workers.props.insert("UsedThreads".into(), "2".into());
+    workers.facts_mut().used_threads = Some(2);
     cases.push(finish("workers", workers, None));
 
     let mut batch = plan.clone();
@@ -180,12 +190,14 @@ pub fn cases() -> Vec<Case> {
         Some(7.0),
         vec![timed(&plan.root, 4, Some(10.0), vec![]), timed(&plan.root, 5, Some(6.0), vec![])],
     );
-    for node in &mut join.children {
+    let batch_mode = |node: &mut culprit_core::PlanNode| {
         node.props.insert("ActualExecutionMode".into(), "Batch".into());
-    }
-    join.props.insert("ActualExecutionMode".into(), "Batch".into());
+        node.facts_mut().actual_execution_mode = Some(culprit_core::PlanExecutionMode::Batch);
+    };
+    join.children.iter_mut().for_each(batch_mode);
+    batch_mode(&mut join);
     let mut hash = timed(&plan.root, 2, Some(15.0), vec![join]);
-    hash.props.insert("ActualExecutionMode".into(), "Batch".into());
+    batch_mode(&mut hash);
     let mut compute = timed(&plan.root, 1, None, vec![hash]);
     compute.kind = NodeKind::Compute;
     compute.op = "Compute Scalar".into();

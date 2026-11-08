@@ -61,7 +61,7 @@ fn planned_partitions_are_not_reported_as_executed_and_filters_are_not_failed_pr
         .map(|id| {
             let mut n = node(id, "Seq Scan", NodeKind::Scan);
             n.object = Some(format!("public.events_{id}"));
-            n.props.insert("Partition Of".into(), "public.events".into());
+            n.facts_mut().partition_parent = Some("public.events".into());
             n.predicate = Some("active = true".into());
             n.act_executions = Some(1.0);
             n.act_rows = Some(100.0);
@@ -87,12 +87,14 @@ fn planned_partitions_are_not_reported_as_executed_and_filters_are_not_failed_pr
 fn separately_recorded_trigger_work_does_not_turn_unknown_memory_into_zero() {
     let mut p = plan(Engine::Postgres, node(1, "Update", NodeKind::Other));
     p.kind = PlanKind::Actual;
-    p.props.insert("MemoryGrantedKB".into(), "1024".into());
-    p.props.insert(
-        "Triggers".into(),
-        r#"[{"Trigger Name":"audit","Relation":"items","Time":120.5,"Calls":10},{"Trigger Name":"bad","Time":-1}]"#
-            .into(),
-    );
+    p.facts_mut().memory_granted_kb = Some(1024.0);
+    // A trigger with a negative time was never timed: only the audit trigger's work is recorded.
+    p.facts_mut().trigger_timings = vec![crate::actual::TriggerTiming {
+        name: "audit".into(),
+        relation: Some("items".into()),
+        time_ms: 120.5,
+        calls: Some(10.0),
+    }];
     let s = crate::actual_summary(&p).unwrap();
     assert_eq!(s.memory_used_kb, None);
     assert_eq!(s.triggers.len(), 1);
@@ -177,7 +179,7 @@ fn separately_opened_plans_receive_the_same_catalog_facts_as_snapshot_plans() {
         root.object = Some("shop.orders".into());
         root.index = Some(index_name.clone());
         root.predicate = Some("CONVERT_IMPLICIT(nvarchar(64),[shop].[orders].[status],0)=[@p1]".into());
-        root.props.insert("possible_keys".into(), index_name);
+        root.facts_mut().possible_index_names = vec![index_name];
         let mut standalone = plan(engine, root);
         standalone.statement = Some("SELECT status FROM shop.orders WHERE status = @p1".into());
         let w = snapshot.workload.as_mut().unwrap();
@@ -393,7 +395,7 @@ fn a_temporary_table_on_the_grouping_differs_from_sorting_the_groups() {
     sort.est_rows = 499_000.0;
     sort.children = vec![temp];
     let mut p = plan(Engine::Mysql, sort);
-    p.props.insert("flavor".into(), "MariaDB".into());
+    p.facts_mut().flavor = Some("MariaDB".into());
     let found = insights(&p).into_iter().find(|i| i.rule == "temp-table-sort").expect("MariaDB's shape");
     assert!(found.title.contains("then sorts them"), "{}", found.title);
     assert!(found.detail.contains("MariaDB"), "{}", found.detail);
@@ -484,10 +486,10 @@ fn a_plan_captured_before_the_column_changed_type_has_no_mismatch() {
     // A scan of 200K rows: enough work for the mismatch to matter.
     scan.rows_read = Some(200_000.0);
     let mut p = plan(Engine::Mssql, scan);
-    p.props.insert(
-        "PlanAffectingConvert".into(),
-        "Seek Plan: CONVERT_IMPLICIT(nvarchar(64),[db].[shop].[jobs].[name],0)=[@p1]".into(),
-    );
+    p.facts_mut().conversions = vec![crate::PlanConversion {
+        issue: crate::PlanConversionIssue::SeekPlan,
+        expression: "CONVERT_IMPLICIT(nvarchar(64),[db].[shop].[jobs].[name],0)=[@p1]".into(),
+    }];
     let column = |data_type: &str| ColumnInfo {
         schema: "shop".into(),
         table: "jobs".into(),
@@ -603,7 +605,7 @@ fn lookups_need_volume_and_name_the_covering_index() {
     lookup.object = Some("shop.orders".into());
     lookup.est_executions = 20_000.0;
     lookup.self_cost = 30.0;
-    lookup.props.insert("OutputList".into(), "[db].[shop].[orders].[total], [db].[shop].[orders].[channel]".into());
+    lookup.facts_mut().output_columns = Some(vec!["total".into(), "channel".into()]);
     let mut join = node(0, "Nested Loops", NodeKind::Join);
     join.children = vec![seek, lookup];
     let p = plan(Engine::Mssql, join);
@@ -672,8 +674,8 @@ fn spills_and_misestimates_explain_each_other() {
     let mut sort = node(1, "Sort", NodeKind::Sort);
     sort.act_rows = Some(49_997.0);
     sort.warnings = vec![PlanWarning::Spill];
-    sort.props.insert("Sort Space Type".into(), "Disk".into());
-    sort.props.insert("Sort Space Used".into(), "5120".into());
+    sort.facts_mut().sort_on_disk = Some(true);
+    sort.facts_mut().sort_space_kb = Some(5120.0);
     sort.children = vec![scan];
     let mut p = plan(Engine::Postgres, sort);
     p.kind = PlanKind::Actual;
@@ -693,9 +695,9 @@ fn spills_and_misestimates_explain_each_other() {
 fn coverage_is_said_plainly_per_engine() {
     let mut p = plan(Engine::Mysql, node(0, "Table scan", NodeKind::Scan));
     assert!(coverage_note(&p).unwrap().contains("EXPLAIN ANALYZE adds actual rows"));
-    p.props.insert("server_version".into(), "5.7.44-log".into());
+    p.facts_mut().server_version = Some("5.7.44-log".into());
     assert!(coverage_note(&p).unwrap().contains("can't measure a run"), "5.7 has no EXPLAIN ANALYZE");
-    p.props.insert("server_version".into(), "8.0.36".into());
+    p.facts_mut().server_version = Some("8.0.36".into());
     assert!(coverage_note(&p).unwrap().contains("EXPLAIN ANALYZE adds actual rows"));
     let mut actual = plan(Engine::Mssql, node(0, "Sort", NodeKind::Sort));
     actual.kind = PlanKind::Actual;
@@ -730,7 +732,7 @@ fn severity_follows_impact_within_rule_limits() {
     assert_eq!(floored().finish(&Cx::new(&few)).severity, Severity::Low);
     // A measured run decides over the estimate: 3 ms is cheap whatever the plan expected.
     let mut fast = scan(50_000.0, 5_000.0);
-    fast.props.insert("ElapsedMs".into(), "3".into());
+    fast.facts_mut().elapsed_ms = Some(3.0);
     assert_eq!(floored().finish(&Cx::new(&fast)).severity, Severity::Low);
     // A problem measured in its own time is material by that time.
     let mut d = floored();
@@ -820,7 +822,7 @@ fn misestimates_compare_per_run_and_ignore_operators_stopped_early() {
     // A parallel scan runs once on each of 8 threads, which SQL Server's estimate counts as one execution.
     let mut parallel = measured(0, "Clustered Index Scan", NodeKind::Scan, 1_000_000.0, 1_000_000.0, 8.0);
     parallel.est_executions = 1.0;
-    parallel.props.insert(crate::plan::PARALLEL_THREADS.into(), "8".into());
+    parallel.facts_mut().parallel_threads = Some(8);
     assert_eq!(parallel.runs(), 1.0);
     assert!(found(&plan(Engine::Mssql, parallel)).is_empty());
 
@@ -862,10 +864,10 @@ fn misestimate_advice_fits_the_table_and_the_server() {
         join.children = vec![s];
         let mut p = actual(Engine::Mysql, join, 400.0);
         if let Some(f) = flavor {
-            p.props.insert("flavor".into(), f.into());
+            p.facts_mut().flavor = Some(f.into());
         }
         if let Some(v) = version {
-            p.props.insert("server_version".into(), v.into());
+            p.facts_mut().server_version = Some(v.into());
         }
         fix(&p).fix_sql.unwrap()
     };
@@ -937,7 +939,7 @@ fn index_advice_from_a_scan_needs_a_scan_that_an_index_would_shrink() {
     let mut columnstore =
         scan("Clustered Index Scan", NodeKind::Scan, 2_000_000.0, 3_000.0, "[db].[dbo].[orders].[status]=(3)");
     assert_eq!(rules(&columnstore), vec!["scan-filter"]);
-    columnstore.root.props.insert("Storage".into(), "ColumnStore".into());
+    columnstore.root.facts_mut().storage = Some("ColumnStore".into());
     assert!(rules(&columnstore).is_empty());
     // Said as the plan shows it, not inferred: no claim about which indexes exist.
     let filtered =
@@ -950,7 +952,7 @@ fn index_advice_from_a_scan_needs_a_scan_that_an_index_would_shrink() {
 fn sqlite_says_when_it_builds_an_index_itself() {
     let mut auto = node(7, "Automatic Index", NodeKind::Other);
     auto.object = Some("visits".into());
-    auto.props.insert("Automatic Index".into(), "visits(event_id)".into());
+    auto.facts_mut().automatic_index = crate::PlanAutomaticIndex::from_description("visits(event_id)");
     let p = plan(Engine::Sqlite, auto);
     let found: Vec<PlanInsight> = insights(&p).into_iter().filter(|i| i.rule == "automatic-index").collect();
     assert_eq!(found.len(), 1, "{:?}", rules(&p));
@@ -976,9 +978,9 @@ fn mysql_guesses_are_not_evidence() {
         n.rows_read = Some(498_573.0);
         n.est_rows = 498_573.0 * filtered.parse::<f64>().unwrap() / 100.0;
         n.self_cost = 50_000.0;
-        n.props.insert("filtered".into(), filtered.into());
+        n.facts_mut().estimated_filtered_percent = crate::plan_facts::percentage(filtered.parse().unwrap());
         if let Some(k) = possible {
-            n.props.insert("possible_keys".into(), k.into());
+            n.facts_mut().possible_index_names = k.split(", ").map(str::to_string).collect();
         }
         n
     };
@@ -1033,9 +1035,9 @@ fn the_share_kept_is_mysqls_own_estimate_unless_it_is_a_guess() {
     items.predicate = Some("(shop.i.status = 'x')".into());
     items.rows_read = Some(800_000.0);
     items.est_rows = 40_000_000.0;
-    items.props.insert("filtered".into(), "0.50".into());
+    items.facts_mut().estimated_filtered_percent = Some(0.5);
     assert_eq!(items.kept_share(), Some(0.005));
-    items.props.insert("filtered".into(), "10.00".into());
+    items.facts_mut().estimated_filtered_percent = Some(10.0);
     assert_eq!(items.kept_share(), None, "MySQL's guess for an equality");
     // What the run measured outweighs any estimate.
     items.act_rows = Some(8_000.0);
@@ -1051,8 +1053,8 @@ fn a_table_joined_through_a_buffer_gets_no_scan_filter_advice() {
     let mut items = node(2, "Table scan", NodeKind::Scan);
     items.object = Some("shop.items".into());
     items.predicate = Some("((shop.i.status = 'x') and (shop.i.order_id = shop.o.id))".into());
-    items.props.insert("using_join_buffer".into(), "hash join".into());
-    items.props.insert("filtered".into(), "0.50".into());
+    items.facts_mut().join_buffer = Some("hash join".into());
+    items.facts_mut().estimated_filtered_percent = Some(0.5);
     items.rows_read = Some(800_000.0);
     items.est_rows = 40_000.0;
     items.self_cost = 80_000.0;
@@ -1071,7 +1073,7 @@ fn join_buffers_advise_an_index_only_over_a_large_read() {
         let mut items = node(2, "Table scan", kind);
         items.object = Some("shop.items".into());
         items.predicate = Some("(shop.i.order_id = shop.o.id)".into());
-        items.props.insert("using_join_buffer".into(), how.into());
+        items.facts_mut().join_buffer = Some(how.into());
         items.rows_read = Some(read);
         let mut join = node(0, "Nested loop", NodeKind::Join);
         join.children = vec![orders, items];
@@ -1201,11 +1203,11 @@ fn a_mariadb_join_buffer_is_no_repeated_read() {
     products.predicate = Some("(p.category = o.status)".into());
     products.rows_read = Some(20_000.0);
     products.est_rows = 20.0;
-    products.props.insert("join_buffer_join_type".into(), "BNL".into());
+    products.facts_mut().join_buffer_join_type = Some("BNL".into());
     let mut join = node(0, "Nested loop", NodeKind::Join);
     join.children = vec![orders, products];
     let mut p = plan(Engine::Mysql, join);
-    p.props.insert("flavor".into(), "MariaDB".into());
+    p.facts_mut().flavor = Some("MariaDB".into());
     assert!(!rules(&p).contains(&"nested-loops".to_string()), "{:?}", rules(&p));
 }
 
@@ -1213,8 +1215,8 @@ fn a_mariadb_join_buffer_is_no_repeated_read() {
 fn spills_say_what_spilled_and_how_much() {
     // An exchange spill resolves a deadlock between parallel threads: no memory-grant advice.
     let mut exchange = node(0, "Parallelism", NodeKind::Parallelism);
-    exchange.props.insert(EXCHANGE_SPILL.into(), "true".into());
-    exchange.props.insert("TempdbWritesPages".into(), "800".into());
+    exchange.facts_mut().exchange_spill = Some(true);
+    exchange.runtime = Some(crate::actual::NodeRuntime { spill_pages: Some(800.0), ..Default::default() });
     let p = actual(Engine::Mssql, exchange, 500.0);
     let i = insights(&p).into_iter().find(|i| i.rule == "spill").expect("exchange spill");
     assert_eq!(i.area, InsightArea::Parallelism);
@@ -1223,9 +1225,9 @@ fn spills_say_what_spilled_and_how_much() {
     // MariaDB's sort merge passes get MariaDB's words.
     let mut sort = node(0, "Sort", NodeKind::Sort);
     sort.warnings = vec![PlanWarning::Spill];
-    sort.props.insert("r_sort_passes".into(), "3".into());
+    sort.facts_mut().sort_merge_passes = Some(3);
     let mut p = actual(Engine::Mysql, sort, 500.0);
-    p.props.insert("flavor".into(), "MariaDB".into());
+    p.facts_mut().flavor = Some("MariaDB".into());
     let i = insights(&p).into_iter().find(|i| i.rule == "spill").expect("sort passes");
     assert!(i.title.contains("3 merge passes") && i.fix.contains("sort_buffer_size"), "{}", i.title);
     assert!(!i.title.contains("tempdb") && !i.fix.contains("memory grant"), "{}", i.fix);
@@ -1233,13 +1235,13 @@ fn spills_say_what_spilled_and_how_much() {
     // PostgreSQL's hash aggregate: its own disk use, not the temp blocks its inputs wrote.
     let mut agg = node(0, "Aggregate", NodeKind::Aggregate);
     agg.warnings = vec![PlanWarning::Spill];
-    agg.props.insert("HashAgg Batches".into(), "5".into());
-    agg.props.insert("Disk Usage".into(), "7600".into());
+    agg.facts_mut().hash_aggregate_batches = Some(5);
+    agg.facts_mut().disk_usage_kb = Some(7600.0);
     agg.props.insert("Temp Written Blocks".into(), "18432".into());
     let i = insights(&actual(Engine::Postgres, agg.clone(), 500.0)).into_iter().find(|i| i.rule == "spill").unwrap();
     assert!(i.title.contains("7.4 MB"), "{}", i.title);
     // Without BUFFERS or Disk Usage, no made-up size.
-    agg.props.remove("Disk Usage");
+    agg.facts_mut().disk_usage_kb = None;
     agg.props.remove("Temp Written Blocks");
     let i = insights(&actual(Engine::Postgres, agg, 500.0)).into_iter().find(|i| i.rule == "spill").unwrap();
     assert!(i.title.contains("5 batches") && !i.title.contains(" 0 B"), "{}", i.title);
@@ -1248,7 +1250,7 @@ fn spills_say_what_spilled_and_how_much() {
     let mut small = node(0, "Sort", NodeKind::Sort);
     small.warnings = vec![PlanWarning::Spill];
     small.act_rows = Some(80_000.0);
-    small.props.insert("TempdbWritesPages".into(), "8".into());
+    small.runtime = Some(crate::actual::NodeRuntime { spill_pages: Some(8.0), ..Default::default() });
     let i = insights(&actual(Engine::Mssql, small, 500.0)).into_iter().find(|i| i.rule == "spill").unwrap();
     assert_eq!(i.severity, Severity::Low);
 }
@@ -1260,7 +1262,7 @@ fn a_spill_is_put_on_an_estimate_only_past_the_misestimate_bars() {
     scan.object = Some("public.customers".into());
     let mut sort = measured(1, "Sort", NodeKind::Sort, 2.0, 40.0, 1.0);
     sort.warnings = vec![PlanWarning::Spill];
-    sort.props.insert("Sort Space Type".into(), "Disk".into());
+    sort.facts_mut().sort_on_disk = Some(true);
     sort.props.insert("Sort Space Used".into(), "5120".into());
     sort.children = vec![scan];
     let spill = insights(&actual(Engine::Postgres, sort, 500.0)).into_iter().find(|i| i.rule == "spill").unwrap();
@@ -1273,9 +1275,9 @@ fn a_lossy_bitmap_counts_rechecked_rows_over_its_loops() {
     let mut heap = node(0, "Bitmap Heap Scan", NodeKind::Lookup);
     heap.act_executions = Some(50.0);
     heap.act_rows = Some(5_000.0);
-    heap.props.insert("Lossy Heap Blocks".into(), "900".into());
-    heap.props.insert("Exact Heap Blocks".into(), "40".into());
-    heap.props.insert("Rows Removed by Index Recheck".into(), "1000".into());
+    heap.facts_mut().lossy_heap_blocks = Some(900.0);
+    heap.facts_mut().exact_heap_blocks = Some(40.0);
+    heap.facts_mut().rows_removed_by_recheck = Some(1000.0);
     let lossy = insights(&actual(Engine::Postgres, heap, 50.0)).into_iter().find(|i| i.rule == "lossy-bitmap").unwrap();
     assert!(lossy.detail.contains("(50K rows thrown away)"), "{}", lossy.detail);
 }
@@ -1289,7 +1291,7 @@ fn not_in_is_only_row_by_row_probing() {
         scan.est_rows = 100_000.0;
         scan.self_cost = 1_000_000.0;
         let mut sub = node(2, "Seq Scan", NodeKind::Scan);
-        sub.props.insert("Parent Relationship".into(), "SubPlan".into());
+        sub.facts_mut().parent_relationship = Some(crate::PlanParentRelationship::from_source("SubPlan"));
         sub.props.insert("Subplan Name".into(), "SubPlan 1".into());
         sub.est_rows = 400_000.0;
         scan.children = vec![sub];
@@ -1344,8 +1346,8 @@ fn subqueries_count_the_runs_they_really_make() {
     scan.predicate = Some("(ANY (customer_id = (hashed SubPlan 1).col1))".into());
     let mut sub = node(2, "Seq Scan", NodeKind::Scan);
     sub.object = Some("public.customers".into());
-    sub.props.insert("Parent Relationship".into(), "SubPlan".into());
-    sub.props.insert("Subplan Name".into(), "SubPlan 1".into());
+    sub.facts_mut().parent_relationship = Some(crate::PlanParentRelationship::from_source("SubPlan"));
+    sub.facts_mut().subplan_name = Some("SubPlan 1".into());
     scan.children = vec![sub];
     let mut p = plan(Engine::Postgres, scan);
     assert!(!rules(&p).contains(&"correlated-subquery".to_string()));
@@ -1359,8 +1361,8 @@ fn subqueries_count_the_runs_they_really_make() {
     table.est_rows = 199_000.0;
     let dependent = |id: u32, rows: f64| {
         let mut d = node(id, "Dependent subquery", NodeKind::Other);
-        d.props.insert("dependent".into(), "true".into());
-        d.props.insert("cacheable".into(), "false".into());
+        d.facts_mut().dependent = Some(true);
+        d.facts_mut().cacheable = Some(false);
         d.est_rows = rows;
         d.self_cost = 50.0;
         d
@@ -1387,8 +1389,8 @@ fn a_subquery_in_the_select_list_runs_once_per_row_returned() {
     scan.self_cost = 20_000.0;
     let mut sub = node(2, "Index Scan", NodeKind::Seek);
     sub.object = Some("public.customers".into());
-    sub.props.insert("Parent Relationship".into(), "SubPlan".into());
-    sub.props.insert("Subplan Name".into(), "SubPlan 1".into());
+    sub.facts_mut().parent_relationship = Some(crate::PlanParentRelationship::from_source("SubPlan"));
+    sub.facts_mut().subplan_name = Some("SubPlan 1".into());
     scan.children = vec![sub];
     let mut p = plan(Engine::Postgres, scan);
     assert!(!rules(&p).contains(&"correlated-subquery".to_string()));
@@ -1409,25 +1411,25 @@ fn smaller_rules_hold_for_this_plan() {
     let mut gather = node(0, "Gather", NodeKind::Parallelism);
     gather.act_executions = Some(0.0);
     gather.act_rows = Some(0.0);
-    gather.props.insert("Workers Planned".into(), "2".into());
-    gather.props.insert("Workers Launched".into(), "0".into());
+    gather.facts_mut().workers_planned = Some(2);
+    gather.facts_mut().workers_launched = Some(0);
     assert!(!rules(&actual(Engine::Postgres, gather.clone(), 50.0)).contains(&"workers-short".to_string()));
     gather.act_executions = Some(1.0);
     assert!(rules(&actual(Engine::Postgres, gather, 50.0)).contains(&"workers-short".to_string()));
 
     // A BRIN bitmap is lossy by design.
     let mut heap = node(0, "Bitmap Heap Scan", NodeKind::Lookup);
-    heap.props.insert("Lossy Heap Blocks".into(), "900".into());
-    heap.props.insert("Exact Heap Blocks".into(), "0".into());
+    heap.facts_mut().lossy_heap_blocks = Some(900.0);
+    heap.facts_mut().exact_heap_blocks = Some(0.0);
     assert!(!rules(&actual(Engine::Postgres, heap.clone(), 50.0)).contains(&"lossy-bitmap".to_string()));
-    heap.props.insert("Exact Heap Blocks".into(), "40".into());
+    heap.facts_mut().exact_heap_blocks = Some(40.0);
     assert!(rules(&actual(Engine::Postgres, heap, 50.0)).contains(&"lossy-bitmap".to_string()));
 
     // JIT that took most of the run can't have paid off; a fifth of it may have.
     let jit = |jit_ms: f64, run_ms: f64| {
         let mut p = actual(Engine::Postgres, node(0, "Seq Scan", NodeKind::Scan), run_ms);
-        p.props.insert("Execution Time".into(), run_ms.to_string());
-        p.props.insert("JIT".into(), format!("{{\"Timing\": {{\"Total\": {jit_ms}}}}}"));
+        p.facts_mut().elapsed_ms = Some(run_ms);
+        p.facts_mut().jit_time_ms = Some(jit_ms);
         insights(&p).into_iter().find(|i| i.rule == "jit").expect("jit")
     };
     let most = jit(300.0, 400.0);
@@ -1439,8 +1441,8 @@ fn smaller_rules_hold_for_this_plan() {
 
     // PostgreSQL's planning on Culprit's fresh connection includes loading table metadata.
     let mut p = actual(Engine::Postgres, node(0, "Seq Scan", NodeKind::Scan), 3.0);
-    p.props.insert("Planning Time".into(), "30".into());
-    p.props.insert("Execution Time".into(), "3".into());
+    p.facts_mut().planning_ms = Some(30.0);
+    p.facts_mut().elapsed_ms = Some(3.0);
     let compile = insights(&p).into_iter().find(|i| i.rule == "slow-compile").expect("slow compile");
     assert_eq!(compile.severity, Severity::Low);
     assert!(compile.detail.contains("twice in one session"), "{}", compile.detail);
@@ -1449,7 +1451,7 @@ fn smaller_rules_hold_for_this_plan() {
     let mut cheap = plan(Engine::Mssql, node(0, "Clustered Index Seek", NodeKind::Seek));
     cheap.total_cost = 0.01;
     cheap.root.subtree_cost = 0.01;
-    cheap.props.insert("StatementOptmEarlyAbortReason".into(), "TimeOut".into());
+    cheap.facts_mut().optimization_early_abort = Some("TimeOut".into());
     let timeout = insights(&cheap).into_iter().find(|i| i.rule == "optimizer-timeout").expect("timeout");
     assert_eq!(timeout.severity, Severity::Low);
 
@@ -1459,7 +1461,7 @@ fn smaller_rules_hold_for_this_plan() {
         root.est_rows = 500_000.0;
         root.self_cost = cost;
         let mut p = plan(Engine::Mssql, root);
-        p.props.insert("NonParallelPlanReason".into(), "MaxDOPSetToOne".into());
+        p.facts_mut().parallelism_blocker = Some("MaxDOPSetToOne".into());
         insights(&p).into_iter().find(|i| i.rule == "parallelism-blocked")
     };
     assert!(blocked(3.0).is_none(), "below the default threshold nothing would go parallel");
@@ -1502,8 +1504,8 @@ fn smaller_rules_hold_for_this_plan() {
     let mut buffered = node(0, "Table scan", NodeKind::Scan);
     buffered.object = Some("shop.items".into());
     buffered.predicate = Some("(shop.i.price = shop.o.total)".into());
-    buffered.props.insert("using_join_buffer".into(), "hash join".into());
-    buffered.props.insert("possible_keys".into(), "ix_items_price".into());
+    buffered.facts_mut().join_buffer = Some("hash join".into());
+    buffered.facts_mut().possible_index_names = vec!["ix_items_price".into()];
     buffered.rows_read = Some(800_000.0);
     let i = insights(&plan(Engine::Mysql, buffered)).into_iter().find(|i| i.rule == "join-buffer").unwrap();
     assert!(!i.title.contains("without an index") && i.detail.contains("ix_items_price"), "{}", i.title);
@@ -1559,13 +1561,13 @@ fn no_index_or_rewrite_advice_on_the_engines_own_objects() {
         lookup.object = Some(table.into());
         lookup.est_executions = 1_531.8;
         lookup.self_cost = 30.0;
-        lookup.props.insert("OutputList".into(), "[count_executions], [total_duration]".into());
+        lookup.facts_mut().output_columns = Some(vec!["count_executions".into(), "total_duration".into()]);
         let mut join = node(1, "Nested Loops", NodeKind::Join);
         join.children = vec![seek, lookup];
         let mut sort = node(0, "Sort", NodeKind::Sort);
         sort.children = vec![join];
         let mut p = plan(Engine::Mssql, sort);
-        p.props.insert("StatementOptmEarlyAbortReason".into(), "TimeOut".into());
+        p.facts_mut().optimization_early_abort = Some("TimeOut".into());
         p
     };
     let system = rules(&lookups_on("sys.plan_persist_runtime_stats_v2"));
@@ -1606,14 +1608,14 @@ fn query_stores_unnamed_functions_are_the_catalogs_own() {
         let mut queries = node(6, "Table-valued function", NodeKind::Other);
         queries.object = Some("QUERY_STORE_QUERY_IN_MEM".into());
         let mut join = node(2, "Merge Join", NodeKind::Join);
-        join.props.insert("ManyToMany".into(), "true".into());
+        join.facts_mut().many_to_many = Some(true);
         join.children = vec![texts, queries];
         let mut sort = node(1, "Sort", NodeKind::Sort);
         sort.children = vec![join];
         let mut root = node(0, "Compute Scalar", NodeKind::Compute);
         root.children = vec![sort];
         let mut p = plan(Engine::Mssql, root);
-        p.props.insert("StatementOptmEarlyAbortReason".into(), "TimeOut".into());
+        p.facts_mut().optimization_early_abort = Some("TimeOut".into());
         rules(&p)
     };
     let system = query_store("sys.plan_persist_query_text");
@@ -1630,10 +1632,10 @@ fn a_plan_level_conversion_warning_does_not_rewrite_the_engines_catalog() {
         seek.object = Some(object.into());
         let mut p = plan(Engine::Mssql, seek);
         // The warning is on QueryPlan; no operator predicate contains this expression.
-        p.props.insert(
-            "PlanAffectingConvert".into(),
-            "Cardinality Estimate: CONVERT_IMPLICIT(int,[aty].[value],0)".into(),
-        );
+        p.facts_mut().conversions = vec![crate::PlanConversion {
+            issue: crate::PlanConversionIssue::CardinalityEstimate,
+            expression: "CONVERT_IMPLICIT(int,[aty].[value],0)".into(),
+        }];
         p
     };
     assert!(!rules(&make("sys.syspalnames")).contains(&"implicit-conversion".to_string()));
@@ -1678,7 +1680,7 @@ fn a_saved_statistics_warning_does_not_prescribe_a_refresh_from_a_seek() {
     seek.index = Some("ix_items_tenant".into());
     seek.seek_predicate = Some("[tenant_id] = [@tenant] AND [account_id] = [@account]".into());
     seek.warnings = vec![PlanWarning::MissingStatistics];
-    seek.props.insert("ColumnsWithNoStatistics".into(), "tenant_id, account_id".into());
+    seek.facts_mut().columns_without_statistics = vec!["tenant_id".into(), "account_id".into()];
     seek.table_rows = Some(100.0);
     let p = plan(Engine::Mssql, seek.clone());
     let warning = insights(&p).into_iter().find(|i| i.rule == "missing-statistics").unwrap();
@@ -1691,7 +1693,7 @@ fn a_saved_statistics_warning_does_not_prescribe_a_refresh_from_a_seek() {
     let detail =
         stale_index_statistics_detail(&context, Some("The statistics were updated today with no changes since"));
     assert!(detail.contains("Current catalog: The statistics were updated today"), "{detail}");
-    seek.props.insert("ColumnsWithNoStatistics".into(), "kind".into());
+    seek.facts_mut().columns_without_statistics = vec!["kind".into()];
     let warning = insights(&plan(Engine::Mssql, seek)).into_iter().find(|i| i.rule == "missing-statistics").unwrap();
     assert!(warning.title.contains("captured plan"));
     assert!(!warning.fix_sql.unwrap().contains("ALTER DATABASE"));
@@ -1705,13 +1707,13 @@ fn a_sort_fed_by_a_guess_states_no_size() {
     scan.object = Some("public.orders".into());
     scan.est_rows = 277_777.0;
     scan.self_cost = 300.0;
-    scan.props.insert(crate::plan::GUESSED_SELECTIVITY.into(), "a default selectivity".into());
+    scan.facts_mut().selectivity_guess = Some("a default selectivity".into());
     let mut sort = node(1, "Sort", NodeKind::Sort);
     sort.est_rows = 277_777.0;
     sort.self_cost = 500.0;
     sort.children = vec![scan];
     assert!(!rules(&plan(Engine::Postgres, sort.clone())).contains(&"big-sort".to_string()));
-    sort.children[0].props.clear();
+    sort.children[0].facts_mut().selectivity_guess = None;
     assert!(rules(&plan(Engine::Postgres, sort)).contains(&"big-sort".to_string()));
 }
 
@@ -1763,7 +1765,7 @@ fn a_serial_plan_says_which_setting_keeps_it_on_one_cpu() {
         root.self_cost = 542.0;
         let mut p = plan(Engine::Mssql, root);
         p.statement = Some(statement.into());
-        p.props.insert("NonParallelPlanReason".into(), "MaxDOPSetToOne".into());
+        p.facts_mut().parallelism_blocker = Some("MaxDOPSetToOne".into());
         let stamped: Vec<(&'static str, String)> = settings.iter().map(|(k, v)| (*k, v.to_string())).collect();
         mark_parallel_settings(&mut p, &stamped);
         insights(&p).into_iter().find(|i| i.rule == "parallelism-blocked").expect("parallelism-blocked")
@@ -1799,7 +1801,7 @@ fn a_serial_plan_says_which_setting_keeps_it_on_one_cpu() {
         root.self_cost = 23.0;
         let mut p = plan(Engine::Mssql, root);
         p.statement = Some("SELECT COUNT(*) FROM shop.order_items OPTION (MAXDOP 1)".into());
-        p.props.insert("NonParallelPlanReason".into(), "MaxDOPSetToOne".into());
+        p.facts_mut().parallelism_blocker = Some("MaxDOPSetToOne".into());
         mark_parallel_settings(&mut p, &[(COST_THRESHOLD, threshold.to_string())]);
         insights(&p).into_iter().find(|i| i.rule == "parallelism-blocked")
     };
@@ -1822,9 +1824,18 @@ fn scan_filter_advice_says_what_the_catalog_has() {
         n.est_rows = 24.0;
         n.rows_read = Some(1_000_000.0);
         n.self_cost = 50.0;
-        if let Some(lines) = indexes {
-            n.props.insert(TABLE_INDEXES.into(), lines.into());
-        }
+        // The catalog's indexes on the table, one `name=key,key` a line.
+        n.facts_mut().table_indexes = indexes.map(|lines| {
+            lines
+                .lines()
+                .filter_map(|line| line.split_once('='))
+                .map(|(name, keys)| crate::PlanIndexColumns {
+                    name: name.into(),
+                    columns: keys.split(',').filter(|k| !k.is_empty()).map(str::to_string).collect(),
+                    hash_columns: None,
+                })
+                .collect()
+        });
         insights(&plan(Engine::Postgres, n)).into_iter().find(|i| i.rule == "scan-filter").expect("scan-filter")
     };
     let two = "((order_items.quantity = $1) AND (order_items.product_id = $2))";
@@ -1894,10 +1905,10 @@ fn scans_are_marked_with_their_tables_indexes() {
 fn loop_over_a_guess(scale: f64) -> Plan {
     let mut index = node(5, "Bitmap Index Scan", NodeKind::Seek);
     index.self_cost = 38.9 * scale;
-    index.props.insert(crate::plan::GUESSED_SELECTIVITY.into(), "10 values for ANY".into());
+    index.facts_mut().selectivity_guess = Some("10 values for ANY".into());
     let mut heap = node(4, "Bitmap Heap Scan", NodeKind::Lookup);
     heap.self_cost = 31.6 * scale;
-    heap.props.insert(crate::plan::GUESSED_SELECTIVITY.into(), "10 values for ANY".into());
+    heap.facts_mut().selectivity_guess = Some("10 values for ANY".into());
     heap.children = vec![index];
     let mut users = node(6, "Index Scan", NodeKind::Seek);
     users.object = Some("public.users".into());
@@ -1932,7 +1943,7 @@ fn a_loop_over_a_guess_repeats_the_guess() {
     // Without the guess, the same plan states its steps' shares.
     let mut clean = loop_over_a_guess(100.0);
     fn unmark(n: &mut PlanNode) {
-        n.props.clear();
+        n.facts_mut().selectivity_guess = None;
         n.children.iter_mut().for_each(unmark);
     }
     unmark(&mut clean.root);
@@ -2089,9 +2100,9 @@ fn a_measured_share_kept_outweighs_a_fixed_guess() {
     scan.object = Some("shop.orders".into());
     scan.predicate = Some("(shop.o.promo_code = '?')".into());
     scan.rows_read = Some(499_000.0);
-    scan.props.insert("filtered".into(), "10.00".into());
+    scan.facts_mut().estimated_filtered_percent = Some(10.0);
     assert_eq!(scan.kept_share(), None, "MySQL's fixed guess");
-    scan.props.insert(crate::plan::MEASURED_KEPT.into(), "0.00001".into());
+    scan.facts_mut().measured_kept_share = Some(1e-05);
     assert_eq!(scan.kept_share(), Some(0.00001));
 }
 

@@ -34,13 +34,13 @@ fn node(id: u32, op: &str, kind: NodeKind, children: Vec<PlanNode>) -> PlanNode 
 fn apps_plan() -> Plan {
     let mut apps = node(7, "Seq Scan", NodeKind::Scan, vec![]);
     apps.object = Some("public.apps".into());
-    apps.props.insert("Alias".into(), "a".into());
+    apps.facts_mut().table_alias = Some("a".into());
     apps.predicate = Some("(a.deleted_at IS NULL)".into());
     (apps.est_rows, apps.rows_read, apps.table_rows) = (5_880.0, Some(6_285.0), Some(6_285.0));
     (apps.self_cost, apps.subtree_cost) = (186.43, 186.43);
     let mut shares = node(5, "Seq Scan", NodeKind::Scan, vec![]);
     shares.object = Some("public.app_shares".into());
-    shares.props.insert("Alias".into(), "s".into());
+    shares.facts_mut().table_alias = Some("s".into());
     (shares.est_rows, shares.rows_read, shares.table_rows) = (845.0, Some(845.0), Some(845.0));
     (shares.self_cost, shares.subtree_cost) = (19.45, 19.45);
     let hash = node(6, "Hash", NodeKind::Other, vec![apps]);

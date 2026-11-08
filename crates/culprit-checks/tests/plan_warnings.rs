@@ -21,8 +21,16 @@ fn with_converts(converts: &str) -> Snapshot {
     let workload = s.workload.as_mut().expect("the demo has a workload");
     let plan = workload.queries.iter_mut().find(|q| q.id == "7").and_then(|q| q.plan.as_mut()).expect("query 7's plan");
     plan.props.insert("PlanAffectingConvert".into(), converts.into());
-    // The conversions as the parser records them: the plan's facts, not its display properties, are what checks read.
-    plan.facts_mut().conversions = culprit_core::PlanFacts::from_properties(&plan.props).conversions;
+    // The conversions as the parser records them, one `issue: expression` a line: the plan's facts, not its display
+    // properties, are what checks read.
+    plan.facts_mut().conversions = converts
+        .lines()
+        .filter_map(|line| line.split_once(": "))
+        .map(|(issue, expression)| culprit_core::PlanConversion {
+            issue: culprit_core::PlanConversionIssue::from_source(issue),
+            expression: expression.into(),
+        })
+        .collect();
     s
 }
 

@@ -545,9 +545,9 @@ mod tests {
         }
     }
 
-    fn plan(root: PlanNode, props: &[(&str, &str)]) -> Plan {
+    fn plan(root: PlanNode, facts: crate::PlanFacts) -> Plan {
         let mut plan = Plan {
-            facts: None,
+            facts: Some(facts),
             view: None,
             engine: Engine::Mssql,
             kind: PlanKind::Estimated,
@@ -556,7 +556,7 @@ mod tests {
             root,
             warnings: Vec::new(),
             index_hints: Vec::new(),
-            props: props.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            props: Properties::new(),
             raw: None,
             insights: None,
         };
@@ -574,11 +574,11 @@ mod tests {
     fn database_names_are_ignored_when_lining_plans_up() {
         let a = plan(
             node("Index Seek", NodeKind::Seek, Some("shop_prod.dbo.orders"), Some("ix_status"), 12.0, vec![]),
-            &[],
+            crate::PlanFacts::default(),
         );
         let b = plan(
             node("Index Seek", NodeKind::Seek, Some("shop_test.dbo.orders"), Some("ix_status"), 12.0, vec![]),
-            &[],
+            crate::PlanFacts::default(),
         );
         let diff = plan_diff_in(&a, "prod", &b, "test", &CompareContext::default());
         assert!(diff.same_shape, "{:#?}", diff.changes);
@@ -589,11 +589,19 @@ mod tests {
     fn stale_statistics_and_parameters_explain_different_estimates() {
         let a = plan(
             node("Index Seek", NodeKind::Seek, Some("dbo.orders"), Some("ix_status"), 12.0, vec![]),
-            &[("Parameters", "@p1 = N'open'"), ("CardinalityEstimationModelVersion", "150")],
+            crate::PlanFacts {
+                compiled_parameters: Some("@p1 = N'open'".into()),
+                cardinality_estimator: Some(150),
+                ..Default::default()
+            },
         );
         let b = plan(
             node("Clustered Index Scan", NodeKind::Scan, Some("dbo.orders"), Some("pk_orders"), 140_000.0, vec![]),
-            &[("Parameters", "@p1 = N'open'"), ("CardinalityEstimationModelVersion", "160")],
+            crate::PlanFacts {
+                compiled_parameters: Some("@p1 = N'open'".into()),
+                cardinality_estimator: Some(160),
+                ..Default::default()
+            },
         );
         let ctx = CompareContext {
             statistics: vec![StatisticsInfo {
@@ -632,11 +640,11 @@ mod tests {
     fn different_parameter_values_are_named() {
         let a = plan(
             node("Index Seek", NodeKind::Seek, Some("dbo.orders"), Some("ix_status"), 12.0, vec![]),
-            &[("Parameters", "@p1 = N'rare'")],
+            crate::PlanFacts { compiled_parameters: Some("@p1 = N'rare'".into()), ..Default::default() },
         );
         let b = plan(
             node("Clustered Index Scan", NodeKind::Scan, Some("dbo.orders"), Some("pk_orders"), 140_000.0, vec![]),
-            &[("Parameters", "@p1 = N'common'")],
+            crate::PlanFacts { compiled_parameters: Some("@p1 = N'common'".into()), ..Default::default() },
         );
         let diff = plan_diff_in(&a, "plan A", &b, "plan B", &CompareContext::default());
         let p = diff.scenarios.iter().find(|s| s.kind == ScenarioKind::Parameters).expect("parameters");
@@ -662,7 +670,10 @@ mod tests {
                 node("Clustered Index Seek", NodeKind::Seek, Some("dbo.customers"), Some("pk"), per_order, vec![]);
             customers.est_executions = orders;
             let outer = node("Index Seek", NodeKind::Seek, Some("dbo.orders"), Some("ix_status"), orders, vec![]);
-            plan(node("Nested Loops", NodeKind::Join, None, None, orders * per_order, vec![outer, customers]), &[])
+            plan(
+                node("Nested Loops", NodeKind::Join, None, None, orders * per_order, vec![outer, customers]),
+                crate::PlanFacts::default(),
+            )
         };
         assert_eq!(
             estimate_titles(&join(1.0, 1.0), &join(140_000.0, 1.0)),
@@ -683,7 +694,7 @@ mod tests {
             n
         };
         let actual = |root: PlanNode| {
-            let mut p = plan(root, &[]);
+            let mut p = plan(root, crate::PlanFacts::default());
             p.kind = PlanKind::Actual;
             p
         };

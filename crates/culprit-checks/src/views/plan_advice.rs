@@ -469,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn lookup_projection_uses_typed_columns_and_legacy_lists_only_when_facts_are_absent() {
+    fn lookup_projection_uses_typed_columns_never_the_display_list() {
         let original: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
         let mut s = workload(Engine::Mssql, 24.0, 500.0);
         let mut index = original.indexes.iter().find(|i| i.table == "orders" && !i.is_clustered).unwrap().clone();
@@ -491,16 +491,14 @@ mod tests {
         plan.root.kind = NodeKind::Lookup;
         plan.root.op = "Key Lookup".into();
         insight.nodes = vec![400, 401];
-        for (facts, legacy, expected) in [
-            (Some(vec!["customer_id".into()]), "stale_not_a_column", Some("[customer_id]")),
-            (Some(vec!["name.with.dot".into()]), "stale_not_a_column", Some("[name.with.dot]")),
-            (Some(vec!["[name.with.dot]".into()]), "stale_not_a_column", Some("[name.with.dot]")),
-            (None, "customer_id,created_at", Some("[customer_id]")),
-            (Some(Vec::new()), "customer_id", None),
+        for (output, display, expected) in [
+            (vec!["customer_id".into()], "stale_not_a_column", Some("[customer_id]")),
+            (vec!["name.with.dot".into()], "stale_not_a_column", Some("[name.with.dot]")),
+            (vec!["[name.with.dot]".into()], "stale_not_a_column", Some("[name.with.dot]")),
+            (Vec::new(), "customer_id", None),
         ] {
-            plan.root.facts =
-                facts.map(|output| culprit_core::PlanNodeFacts { output_columns: Some(output), ..Default::default() });
-            plan.root.props.insert("OutputList".into(), legacy.into());
+            plan.root.facts_mut().output_columns = Some(output);
+            plan.root.props.insert("OutputList".into(), display.into());
             let mut finding = insight.clone();
             lookup_advice(&s, q, &plan, &mut finding);
             match expected {

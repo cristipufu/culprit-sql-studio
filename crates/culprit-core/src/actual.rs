@@ -446,10 +446,10 @@ mod tests {
         );
         let mut hash = node(2, 15.0, 1.0, 1.0, 1.0, vec![]);
         for n in [&mut join, &mut hash] {
-            n.props.insert("ActualExecutionMode".into(), "Batch".into());
+            n.facts_mut().actual_execution_mode = Some(crate::PlanExecutionMode::Batch);
         }
         for child in &mut join.children {
-            child.props.insert("ActualExecutionMode".into(), "Batch".into());
+            child.facts_mut().actual_execution_mode = Some(crate::PlanExecutionMode::Batch);
         }
         hash.children.push(join);
         let mut compute = node(1, 0.0, 1.0, 1.0, 1.0, vec![hash]);
@@ -496,8 +496,8 @@ mod tests {
     #[test]
     fn rows_only_actuals_do_not_report_unknown_timings_as_zero() {
         let mut p = plan(node(0, 0.0, 1.0, 1.0, 1.0, vec![]));
-        p.props.insert("CpuMs".into(), "0".into());
-        p.props.insert("MemoryGrantedKB".into(), "1024".into());
+        p.facts_mut().cpu_ms = Some(0.0);
+        p.facts_mut().memory_granted_kb = Some(1024.0);
         let actual = actual_summary(&p).unwrap();
         assert!(!actual.timed);
         assert_eq!((actual.elapsed_ms, actual.cpu_ms, actual.slowest_node), (None, None, None));
@@ -518,7 +518,8 @@ mod tests {
             1.0,
             vec![node(2, 5.0, 1.0, 1.0, 1.0, vec![]), node(1, 5.0, 1.0, 1.0, 1.0, vec![])],
         ));
-        p.props.insert("Triggers".into(), r#"[{"Trigger Name":"audit","Time":120.5,"Calls":10},{"Time":-1}]"#.into());
+        p.facts_mut().trigger_timings =
+            vec![TriggerTiming { name: "audit".into(), relation: None, time_ms: 120.5, calls: Some(10.0) }];
         for _ in 0..10 {
             let actual = actual_summary(&p).unwrap();
             assert_eq!(actual.slowest_node, Some(2));
@@ -537,8 +538,10 @@ mod tests {
         assert_eq!((skew.node, skew.threads, skew.busiest), (0, 2, 0.95));
         p.root.runtime.as_mut().unwrap().thread_rows[1] = -1.0;
         assert!(actual_summary(&p).unwrap().skew.is_none());
-        p.props.insert("ElapsedMs".into(), "NaN".into());
-        p.props.insert("CpuMs".into(), "inf".into());
+        // Times no clock can read are unknown as they're read, never a measured value.
+        let mut read = serde_json::to_value(crate::PlanFacts::default()).unwrap();
+        (read["elapsed_ms"], read["cpu_ms"]) = ((-5.0).into(), (-1.0).into());
+        *p.facts_mut() = serde_json::from_value(read).unwrap();
         let actual = actual_summary(&p).unwrap();
         assert_eq!(actual.elapsed_ms, Some(10.0));
         assert_eq!(actual.cpu_ms, None);

@@ -1,13 +1,13 @@
 use crate::{
     NodeKind, Plan, PlanExecutionMode, PlanFacts, PlanNode, PlanNodeFacts, Snapshot,
-    plan::{MEASURED_KEPT, NOT_READ_IN_FULL, PARALLEL_THREADS},
+    plan::{MEASURED_KEPT, PARALLEL_THREADS},
 };
 
 fn plan() -> Plan {
     let s: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
     let mut p = s.queries()[0].plan.as_ref().unwrap().clone();
     p.kind = crate::PlanKind::Actual;
-    p.facts = None;
+    p.facts = Some(PlanFacts::default());
     p.props.clear();
     p.root = scan();
     p.root.act_rows = Some(10.0);
@@ -28,11 +28,12 @@ fn facts_json<T: Default + serde::Serialize>(fields: serde_json::Value) -> serde
 #[test]
 fn statement_facts_drive_actuals_and_memory_advice_without_display_properties() {
     let mut p = plan();
+    // What the engine's display says is for reading: it drives no calculation.
     p.props.insert("MemoryGrantedKB".into(), "1024000".into());
     p.props.insert("MemoryMaxUsedKB".into(), "1".into());
     p.props.insert("ElapsedMs".into(), "999".into());
-    assert!(crate::insights::insights(&p).iter().any(|i| i.rule == "memory-grant"));
-    p.facts = Some(PlanFacts { elapsed_ms: Some(0.0), memory_granted_kb: Some(1024000.0), ..Default::default() });
+    assert!(!crate::insights::insights(&p).iter().any(|i| i.rule == "memory-grant"));
+    *p.facts_mut() = PlanFacts { elapsed_ms: Some(0.0), memory_granted_kb: Some(1024000.0), ..Default::default() };
     let summary = crate::actual_summary(&p).unwrap();
     assert_eq!((summary.elapsed_ms, summary.memory_used_kb), (Some(0.0), None));
     assert!(!crate::insights::insights(&p).iter().any(|i| i.rule == "memory-grant"), "unknown use is not zero use");
@@ -73,29 +74,25 @@ fn worker_advice_uses_typed_counts_and_explicit_unknowns_withdraw_stale_warnings
     p.root.op = "Gather".into();
     p.root.props.insert("Workers Planned".into(), "4".into());
     p.root.props.insert("Workers Launched".into(), "4".into());
-    p.root.facts = Some(PlanNodeFacts { workers_planned: Some(4), workers_launched: Some(0), ..Default::default() });
+    *p.root.facts_mut() = PlanNodeFacts { workers_planned: Some(4), workers_launched: Some(0), ..Default::default() };
     let rules = |p: &Plan| crate::insights::insights(p).into_iter().map(|i| i.rule).collect::<Vec<_>>();
-    assert!(rules(&p).contains(&"workers-short".into()));
-    p.root.facts = None;
-    assert!(!rules(&p).contains(&"workers-short".into()));
-    p.root.props.insert("Workers Launched".into(), "0".into());
-    assert!(rules(&p).contains(&"workers-short".into()));
-    p.root.facts = Some(PlanNodeFacts::default());
+    assert!(rules(&p).contains(&"workers-short".into()), "the typed count, not the display's");
+    // An unknown launch count withdraws the warning, whatever the display says.
+    p.root.facts_mut().workers_launched = None;
     assert!(!rules(&p).contains(&"workers-short".into()));
 }
 
 #[test]
-fn parallel_skew_uses_real_workers_and_older_bounds_do_not_allocate_a_worker_vector() {
+fn parallel_skew_uses_real_workers_and_display_counts_allocate_none() {
     let mut n = scan();
     n.act_rows = Some(100000.0);
     n.props.insert("ThreadCount".into(), "4294967295".into());
     n.props.insert("ThreadRowsMax".into(), "90000".into());
     assert_eq!(
         crate::plan_facts::parallel_distribution(&n, crate::Engine::Mssql),
-        Some((4294967295, 100000.0, 90000.0))
+        None,
+        "display counts are no workers"
     );
-    n.facts = Some(PlanNodeFacts::default());
-    assert_eq!(crate::plan_facts::parallel_distribution(&n, crate::Engine::Mssql), None);
     n.runtime = Some(crate::NodeRuntime { thread_rows: vec![90000.0, 3000.0, 2000.0], ..Default::default() });
     assert_eq!(crate::plan_facts::parallel_distribution(&n, crate::Engine::Mssql), Some((3, 95000.0, 90000.0)));
     for engine in [crate::Engine::Mysql, crate::Engine::Sqlite] {
@@ -109,9 +106,7 @@ fn parallel_skew_uses_real_workers_and_older_bounds_do_not_allocate_a_worker_vec
 fn spill_sizes_keep_native_precision_and_do_not_use_stale_property_fallbacks() {
     let mut n = scan();
     n.props.insert("TempdbWritesPages".into(), "8".into());
-    assert_eq!(crate::plan_facts::spill_pages(&n), Some(8.0));
-    n.facts = Some(PlanNodeFacts::default());
-    assert_eq!(crate::plan_facts::spill_pages(&n), None);
+    assert_eq!(crate::plan_facts::spill_pages(&n), None, "a display number is not a spill");
     n.runtime = Some(crate::NodeRuntime { spill_pages: Some(0.0), ..Default::default() });
     assert_eq!(crate::plan_facts::spill_pages(&n), Some(0.0));
     n.runtime.as_mut().unwrap().spill_pages = Some(19.0);
@@ -309,9 +304,7 @@ fn redacting_plan_expressions_preserves_subplan_references_but_masks_lookalike_v
 fn row_width_uses_typed_evidence_without_reviving_stale_display_numbers() {
     let mut p = plan();
     p.root.props.insert("AvgRowSize".into(), "8000".into());
-    assert_eq!(crate::signals::plan_row_bytes(&p), Some(8000.0));
-    p.root.facts = Some(PlanNodeFacts::default());
-    assert_eq!(crate::signals::plan_row_bytes(&p), None);
+    assert_eq!(crate::signals::plan_row_bytes(&p), None, "a display number is not evidence");
     p.root.facts_mut().estimated_row_bytes = Some(64.0);
     assert_eq!(crate::signals::plan_row_bytes(&p), Some(64.0));
 }
@@ -377,13 +370,14 @@ fn scan() -> PlanNode {
     n.table_rows = Some(1000.0);
     n.children.clear();
     n.props.clear();
-    n.facts = None;
+    n.facts = Some(PlanNodeFacts::default());
     n
 }
 
 #[test]
 fn older_plans_read_properties_but_present_facts_never_inherit_stale_display_values() {
     let mut n = scan();
+    n.facts = None;
     n.props.insert(MEASURED_KEPT.into(), "0.004".into());
     assert_eq!(n.kept_share(), Some(0.004));
     let saved = serde_json::to_value(&n).unwrap();
@@ -412,17 +406,15 @@ fn tiny_observed_selectivity_keeps_its_precision_and_a_real_zero_remains_zero() 
 
 #[test]
 fn invalid_selectivity_is_unknown_rather_than_an_empty_result() {
-    for value in ["NaN", "inf", "-0.01", "1.1"] {
+    for value in [f64::NAN, f64::INFINITY, -0.01, 1.1] {
         let mut n = scan();
         n.rows_read = None;
         n.table_rows = None;
-        n.props.insert(MEASURED_KEPT.into(), value.into());
+        n.facts_mut().measured_kept_share = Some(value);
         assert_eq!(n.kept_share(), None, "{value}");
-        n.facts_mut().measured_kept_share = value.parse().ok();
-        assert_eq!(n.kept_share(), None, "typed {value}");
     }
     let mut n = scan();
-    n.props.insert(MEASURED_KEPT.into(), "0".into());
+    n.facts_mut().measured_kept_share = Some(0.0);
     assert_eq!(n.kept_share(), Some(0.0));
 }
 
@@ -431,9 +423,8 @@ fn runtime_threads_normalize_executions_independently_of_properties() {
     let mut n = scan();
     n.act_executions = Some(4.0);
     n.props.insert(PARALLEL_THREADS.into(), "4".into());
-    assert_eq!(n.runs(), 1.0);
-    n.facts = Some(PlanNodeFacts { parallel_threads: Some(2), ..Default::default() });
-    assert_eq!(n.runs(), 3.0);
+    n.facts_mut().parallel_threads = Some(2);
+    assert_eq!(n.runs(), 3.0, "the typed thread count, not the display's");
     n.props.clear();
     assert_eq!(n.runs(), 3.0);
     n.act_executions = Some(0.0);
@@ -444,18 +435,11 @@ fn runtime_threads_normalize_executions_independently_of_properties() {
 fn a_prunable_partition_cannot_borrow_its_full_catalog_size_as_rows_read() {
     let mut n = scan();
     n.rows_read = None;
-    n.facts = Some(PlanNodeFacts {
-        partition_pruning: Some("Pruned when parameter values are known".into()),
-        ..Default::default()
-    });
+    n.facts_mut().partition_pruning = Some("Pruned when parameter values are known".into());
     assert_eq!(n.rows_read_total(), None);
     assert!(!n.reads_table_whole());
     n.props.clear();
     assert_eq!(n.rows_read_total(), None);
-    n.facts = None;
-    n.props.insert(NOT_READ_IN_FULL.into(), "An older captured pruning mark".into());
-    assert_eq!(n.rows_read_total(), None);
-    assert!(!n.reads_table_whole());
 }
 
 #[test]
@@ -487,26 +471,18 @@ fn execution_mode_facts_control_own_time_without_reading_display_labels() {
 #[test]
 fn virtual_indexes_sample_limits_last_run_and_used_key_parts_follow_typed_facts() {
     let mut p = plan();
+    // The display's values are for reading; the typed facts are what the plan is read by.
     p.props.insert("LastRunAt".into(), "2026-01-01T00:00:00Z".into());
     p.props.insert(crate::insights::LIMIT_ROWS.into(), "50".into());
     p.props.insert("VirtualIndexes".into(), "hypo_orders_a, hypo_orders_b".into());
     p.root.props.insert("used_key_parts".into(), "customer_id, created_at".into());
-    assert_eq!(p.facts().last_run_at.as_deref(), Some("2026-01-01T00:00:00Z"));
-    assert_eq!(p.facts().sample_limit_rows, Some(50.0));
-    assert_eq!(p.facts().virtual_indexes, vec!["hypo_orders_a", "hypo_orders_b"]);
-    assert_eq!(p.root.facts().used_key_parts, vec!["customer_id", "created_at"]);
-    assert_eq!(crate::actual_summary(&p).unwrap().last_run_at.as_deref(), Some("2026-01-01T00:00:00Z"));
-
-    // Authoritative facts override and do not revive legacy properties.
-    p.facts = Some(PlanFacts {
+    *p.facts_mut() = PlanFacts {
         last_run_at: Some("2026-02-01T12:00:00Z".into()),
         sample_limit_rows: Some(25.0),
         virtual_indexes: vec!["hypo_only".into()],
         ..Default::default()
-    });
-    p.root.facts = Some(PlanNodeFacts { used_key_parts: vec!["status".into()], ..Default::default() });
-    p.props.clear();
-    p.root.props.clear();
+    };
+    p.root.facts_mut().used_key_parts = vec!["status".into()];
     assert_eq!(crate::actual_summary(&p).unwrap().last_run_at.as_deref(), Some("2026-02-01T12:00:00Z"));
     assert_eq!(p.facts().sample_limit_rows, Some(25.0));
     assert_eq!(p.facts().virtual_indexes, vec!["hypo_only"]);

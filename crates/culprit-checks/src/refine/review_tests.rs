@@ -231,6 +231,9 @@ fn partial_automatic_index_transfer_remeasures_the_remaining_queries() {
     other.mean_time_ms = 2000.0;
     other.text = other.text.replace("customer_id", "region_id");
     fn change_key(n: &mut culprit_core::PlanNode) {
+        if let Some(index) = &mut n.facts_mut().automatic_index {
+            index.columns.iter_mut().filter(|c| *c == "customer_id").for_each(|c| *c = "region_id".into());
+        }
         if let Some(key) = n.props.get_mut("Automatic Index") {
             *key = key.replace("customer_id", "region_id");
         }
