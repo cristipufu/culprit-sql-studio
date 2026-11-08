@@ -276,6 +276,7 @@
       "last_seen": "2026-10-11T16:00:50Z",
       "metrics": [
         {
+          "key": "common.metric.runs",
           "label": "Runs",
           "text": null,
           "unit": "count",
@@ -687,6 +688,7 @@
           "value": 6.0
         },
         {
+          "key": "check.row_lock_waits.metric.time",
           "label": "Time waiting since start",
           "text": null,
           "unit": "ms",
@@ -746,6 +748,7 @@
           "value": 20000.0
         },
         {
+          "key": "common.metric.runs",
           "label": "Runs",
           "text": null,
           "unit": "count",

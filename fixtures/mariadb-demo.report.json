@@ -632,6 +632,7 @@
           "value": 20.0
         },
         {
+          "key": "check.row_lock_waits.metric.time",
           "label": "Time waiting since start",
           "text": null,
           "unit": "ms",

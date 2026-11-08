@@ -491,6 +491,7 @@
           "value": 300.0
         },
         {
+          "key": "common.metric.runs",
           "label": "Runs",
           "text": null,
           "unit": "count",

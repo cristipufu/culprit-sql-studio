@@ -396,6 +396,7 @@
       "last_seen": "2026-10-11T15:55:55Z",
       "metrics": [
         {
+          "key": "common.metric.runs",
           "label": "Runs",
           "text": null,
           "unit": "count",
@@ -461,6 +462,7 @@
       "last_seen": "2026-10-11T15:54:55Z",
       "metrics": [
         {
+          "key": "common.metric.runs",
           "label": "Runs",
           "text": null,
           "unit": "count",
@@ -522,6 +524,7 @@
       "last_seen": "2026-10-11T12:13:47Z",
       "metrics": [
         {
+          "key": "check.lock_escalations.metric.escalations",
           "label": "Escalations since SQL Server started",
           "text": null,
           "unit": "count",
@@ -575,6 +578,7 @@
           "value": 105601.0
         },
         {
+          "key": "check.last_page_insert.metric.time",
           "label": "Time waiting",
           "text": null,
           "unit": "ms",
@@ -1431,6 +1435,7 @@
           "value": 20000.0
         },
         {
+          "key": "common.metric.runs",
           "label": "Runs",
           "text": null,
           "unit": "count",
@@ -1618,6 +1623,7 @@
           "per_row": 8098.226266666667
         },
         "network_wait_share": null,
+        "nothing_to_check": "gone",
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
