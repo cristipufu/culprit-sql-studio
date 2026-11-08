@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { Deadlock } from "../gen/Deadlock";
 import type { DeadlockProcess } from "../gen/DeadlockProcess";
 import type { DeadlockResource } from "../gen/DeadlockResource";
+import { t, useLanguage } from "../lib/i18n";
 
 const W = 640;
 const PROC_W = 172;
@@ -40,13 +41,34 @@ function path(e: Edge): { d: string; mx: number; my: number } {
 }
 
 function who(p: DeadlockProcess): string {
-  return p.session ? `Session ${p.session}` : `Process ${p.id}`;
+  return p.session ? t("ui.deadlock_graph.session", { session: p.session }) : t("ui.deadlock_graph.process", { process: p.id });
 }
 
 function resourceLabel(r: DeadlockResource): { title: string; sub: string } {
   const kind = r.kind.toLowerCase();
-  const scope = kind.includes("key") || kind === "record" || kind === "rid" || kind === "ridlock" || kind === "tuple" ? "row" : kind.includes("page") ? "page" : kind.includes("object") || kind === "table" ? "table" : kind === "transaction" ? "row (transaction)" : r.kind;
+  const scope = kind.includes("key") || kind === "record" || kind === "rid" || kind === "ridlock" || kind === "tuple" ? t("ui.deadlock_graph.scope.row") : kind.includes("page") ? t("ui.deadlock_graph.scope.page") : kind.includes("object") || kind === "table" ? t("ui.deadlock_graph.scope.table") : kind === "transaction" ? t("ui.deadlock_graph.scope.transaction") : r.kind;
   return { title: r.object ?? (kind === "transaction" ? r.id : r.kind), sub: [r.index, scope].filter(Boolean).join(" · ") };
+}
+
+/** A lock's tooltip: what it is, then the modes it is held and wanted in. */
+function lockTitle(r: DeadlockResource, label: { title: string; sub: string }): string {
+  const held = r.holders.map((h) => h.mode ?? "?").join(", ") || "?";
+  const wanted = r.waiters.map((h) => h.mode ?? "?").join(", ") || "?";
+  return label.sub
+    ? t("ui.deadlock_graph.lock_title_scope", { object: label.title, scope: label.sub, held, wanted })
+    : t("ui.deadlock_graph.lock_title", { object: label.title, held, wanted });
+}
+
+/** A process box's accessible name: who, whether it was rolled back, and its statement. */
+function processLabel(p: DeadlockProcess): string {
+  const statement = p.statement ?? t("ui.deadlock_graph.statement_unknown");
+  return p.victim ? t("ui.deadlock_graph.process_label_victim", { process: who(p), statement }) : t("ui.deadlock_graph.process_label", { process: who(p), statement });
+}
+
+/** An edge's label: "holds" or "wants", with the lock mode when it is short enough to fit. */
+function edgeLabel(e: Edge): string {
+  const mode = shortMode(e.mode);
+  return mode ? t("ui.deadlock_graph.edge_mode", { kind: e.kind, mode }) : t("ui.deadlock_graph.edge", { kind: e.kind });
 }
 
 /**
@@ -55,6 +77,7 @@ function resourceLabel(r: DeadlockResource): { title: string; sub: string } {
  */
 export function DeadlockGraph({ deadlock, onPick }: { deadlock: Deadlock; onPick?: (process: DeadlockProcess) => void }) {
   const [focus, setFocus] = useState<string | null>(null);
+  const language = useLanguage();
 
   const layout = useMemo(() => {
     const resources = deadlock.resources.length ? deadlock.resources : [];
@@ -91,7 +114,7 @@ export function DeadlockGraph({ deadlock, onPick }: { deadlock: Deadlock; onPick
   const labelY = useMemo(() => {
     const boxes = layout.edges.map((e, i) => {
       const p = path(e);
-      const text = `${e.kind}${shortMode(e.mode) ? ` ${shortMode(e.mode)}` : ""}`;
+      const text = edgeLabel(e);
       return { i, x: p.mx, half: text.length * 3.3, y: p.my + 4 };
     });
     const sorted = [...boxes].sort((a, b) => a.y - b.y);
@@ -107,11 +130,11 @@ export function DeadlockGraph({ deadlock, onPick }: { deadlock: Deadlock; onPick
       }
     }
     return new Map(boxes.map((b) => [b.i, b.y]));
-  }, [layout]);
+  }, [layout, language]);
 
   return (
     <figure className="dl-graph">
-      <svg viewBox={`0 0 ${W} ${layout.height}`} role="group" aria-label={`Deadlock graph: ${deadlock.headline}`} preserveAspectRatio="xMidYMin meet">
+      <svg viewBox={`0 0 ${W} ${layout.height}`} role="group" aria-label={t("ui.deadlock_graph.label", { headline: deadlock.headline })} preserveAspectRatio="xMidYMin meet">
         <defs>
           <marker id="dl-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" className="dl-arrowhead" />
@@ -121,12 +144,11 @@ export function DeadlockGraph({ deadlock, onPick }: { deadlock: Deadlock; onPick
           const p = path(e);
           return (
             <g key={i} className={`dl-edge ${e.kind} ${lit(e) ? "" : "dim"}`}>
-              <title>{`${e.kind === "holds" ? "Holds" : "Wants"}${e.mode ? ` ${e.mode}` : ""}`}</title>
+              <title>{e.mode ? t("ui.deadlock_graph.edge_title_mode", { kind: e.kind, mode: e.mode }) : t("ui.deadlock_graph.edge_title", { kind: e.kind })}</title>
               <path d={p.d} markerEnd={e.kind === "wants" ? "url(#dl-arrow)" : undefined} />
               {/* The label must fit the gap between boxes: a long lock mode (RangeS-U, X,REC_NOT_GAP) goes to the tooltip. */}
               <text x={p.mx} y={labelY.get(i)} textAnchor="middle" className="dl-edge-label">
-                {e.kind === "holds" ? "holds" : "wants"}
-                {shortMode(e.mode) ? ` ${shortMode(e.mode)}` : ""}
+                {edgeLabel(e)}
               </text>
             </g>
           );
@@ -140,13 +162,13 @@ export function DeadlockGraph({ deadlock, onPick }: { deadlock: Deadlock; onPick
               className={`dl-res ${focus && focus !== r.id && !layout.edges.some((e) => e.res === r.id && e.proc === focus) ? "dim" : ""}`}
               tabIndex={0}
               role="button"
-              aria-label={`Lock on ${label.title} ${label.sub}`}
+              aria-label={t("ui.deadlock_graph.lock_label", { object: label.title, scope: label.sub })}
               onMouseEnter={() => setFocus(r.id)}
               onMouseLeave={() => setFocus(null)}
               onFocus={() => setFocus(r.id)}
               onBlur={() => setFocus(null)}
             >
-              <title>{`${label.title}${label.sub ? ` (${label.sub})` : ""}\nheld by ${r.holders.map((h) => h.mode ?? "?").join(", ") || "?"} · wanted as ${r.waiters.map((h) => h.mode ?? "?").join(", ") || "?"}`}</title>
+              <title>{lockTitle(r, label)}</title>
               <rect x={b.x} y={b.y} width={b.w} height={b.h} rx={b.h / 2} />
               <text x={b.x + b.w / 2} y={b.y + 20} textAnchor="middle" className="dl-res-title">
                 {clip(label.title, 22)}
@@ -166,7 +188,7 @@ export function DeadlockGraph({ deadlock, onPick }: { deadlock: Deadlock; onPick
               className={`dl-proc ${p.victim ? "victim" : ""} ${focus && focus !== p.id && !layout.edges.some((e) => e.proc === p.id && e.res === focus) ? "dim" : ""}`}
               tabIndex={0}
               role="button"
-              aria-label={`${who(p)}${p.victim ? ", rolled back" : ""}: ${p.statement ?? "statement unknown"}`}
+              aria-label={processLabel(p)}
               onMouseEnter={() => setFocus(p.id)}
               onMouseLeave={() => setFocus(null)}
               onFocus={() => setFocus(p.id)}
@@ -183,7 +205,7 @@ export function DeadlockGraph({ deadlock, onPick }: { deadlock: Deadlock; onPick
                 <g className="dl-victim-tag">
                   <rect x={b.x + b.w - 84} y={b.y + 9} width={74} height={17} rx={8.5} />
                   <text x={b.x + b.w - 47} y={b.y + 21} textAnchor="middle">
-                    rolled back
+                    {t("ui.deadlock_graph.rolled_back")}
                   </text>
                 </g>
               )}
@@ -199,12 +221,12 @@ export function DeadlockGraph({ deadlock, onPick }: { deadlock: Deadlock; onPick
       </svg>
       <figcaption className="dl-legend">
         <span>
-          <i className="dl-key holds" /> holds
+          <i className="dl-key holds" /> {t("ui.deadlock_graph.edge", { kind: "holds" })}
         </span>
         <span>
-          <i className="dl-key wants" /> wants
+          <i className="dl-key wants" /> {t("ui.deadlock_graph.edge", { kind: "wants" })}
         </span>
-        <span className="muted">Hover or focus a box to follow its locks.</span>
+        <span className="muted">{t("ui.deadlock_graph.hint")}</span>
       </figcaption>
     </figure>
   );

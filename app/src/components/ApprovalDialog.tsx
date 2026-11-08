@@ -4,6 +4,7 @@ import { useFocusTrap } from "../lib/focus";
 import type { ApprovalRequest } from "../gen/ApprovalRequest";
 import { api, errorMessage } from "../lib/api";
 import { ENVIRONMENT_LABEL } from "../lib/environments";
+import { t } from "../lib/i18n";
 import { useStore } from "../lib/store";
 import { EngineBadge } from "./EngineBadge";
 import { Sql } from "./Sql";
@@ -113,12 +114,12 @@ export default function ApprovalDialog() {
         <div className="approval-head">
           <ShieldAlert size={18} className={production ? "danger" : ""} />
           <div>
-            <h2 id="approval-title">{request.client} wants to run a statement</h2>
+            <h2 id="approval-title">{t("ui.approval_dialog.title", { client: request.client })}</h2>
             <div className="approval-sub">
               {engine && <EngineBadge engine={engine} environment={request.environment} product={target?.last_report?.product} />}
               <b>{request.connection}</b>
               <span className={`env-chip env-${request.environment}`}>{ENVIRONMENT_LABEL[request.environment]}</span>
-              <span className="muted">via {request.tool}</span>
+              <span className="muted">{t("ui.approval_dialog.via", { tool: request.tool })}</span>
             </div>
           </div>
         </div>
@@ -127,29 +128,29 @@ export default function ApprovalDialog() {
         </div>
         <ul className="approval-facts">
           <li>
-            <ShieldCheck size={13} /> Checked: one statement that only reads
+            <ShieldCheck size={13} /> {t("ui.approval_dialog.reads_only")}
           </li>
           <li>
-            <RotateCcw size={13} /> Runs inside a transaction that is rolled back, never committed
+            <RotateCcw size={13} /> {t("ui.approval_dialog.rolled_back")}
           </li>
           <li>
-            <Clock size={13} /> At most 200 rows; cancelled after 30 seconds
+            <Clock size={13} /> {t("ui.approval_dialog.limits")}
           </li>
           <li>
-            <UserRound size={13} /> As this connection's login, exactly as shown
+            <UserRound size={13} /> {t("ui.approval_dialog.login")}
           </li>
         </ul>
-        {production && <p className="approval-prod">This is a production database: the read still costs it CPU and IO.</p>}
+        {production && <p className="approval-prod">{t("ui.approval_dialog.production")}</p>}
         <div className="approval-actions">
           <span className="muted" aria-live="polite">
-            Denied automatically in {secondsLeft} s{waiting.length > 1 ? ` · ${waiting.length - 1} more waiting` : ""}
+            {waiting.length > 1 ? t("ui.approval_dialog.countdown_waiting", { seconds: secondsLeft, more: waiting.length - 1 }) : t("ui.approval_dialog.countdown", { seconds: secondsLeft })}
           </span>
           <span style={{ flex: 1 }} />
           <button type="button" className="btn" autoFocus onClick={() => decide(false)}>
-            Deny <span className="kbd">Esc</span>
+            {t("ui.approval_dialog.deny")} <span className="kbd">Esc</span>
           </button>
           <button type="button" className={`btn ${production ? "danger" : "primary"}`} onClick={() => decide(true)}>
-            Run once <span className="kbd">{keys("⌘↵")}</span>
+            {t("ui.approval_dialog.run_once")} <span className="kbd">{keys("⌘↵")}</span>
           </button>
         </div>
       </div>

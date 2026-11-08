@@ -4,6 +4,7 @@ import type { ChangeEvent } from "../gen/ChangeEvent";
 import type { Changes } from "../gen/Changes";
 import { api, errorMessage } from "../lib/api";
 import { eventSpan, eventTime, eventsChanged, KIND_LABEL } from "../lib/events";
+import { t } from "../lib/i18n";
 import { toast } from "../lib/store";
 import { EventIcon, eventTone } from "./EventIcon";
 import type { ChartEvent } from "./TimeChart";
@@ -34,13 +35,13 @@ export function chartEvents(events: ChangeEvent[], onCompare?: (range: { from: n
 function sourceWords(e: ChangeEvent): string {
   switch (e.source) {
     case "mark":
-      return e.by ? `marked by ${e.by === "app" ? "you" : e.by}` : "marked";
+      return e.by === "app" ? t("ui.change_timeline.marked_by_you") : e.by ? t("ui.change_timeline.marked_by", { who: e.by }) : t("ui.change_timeline.marked");
     case "database":
-      return "dated by the database";
+      return t("ui.change_timeline.dated_by_database");
     case "scans":
-      return "noticed between scans";
+      return t("ui.change_timeline.between_scans");
     default:
-      return e.object ? `from the cloud · ${e.object}` : "from the cloud";
+      return e.object ? t("ui.change_timeline.from_cloud_object", { object: e.object }) : t("ui.change_timeline.from_cloud");
   }
 }
 
@@ -65,15 +66,15 @@ export function AroundThen({ changes, onFocusQuery }: { changes: Changes; onFocu
     try {
       await (await api()).unmark(changes.connection, id);
       eventsChanged();
-      toast("Mark removed");
+      toast(t("ui.change_timeline.mark_removed"));
     } catch (err) {
       toast(errorMessage(err).message);
     }
   };
   return (
-    <section className="around" aria-label="What changed around these periods">
+    <section className="around" aria-label={t("ui.change_timeline.label")}>
       <h3>
-        <Clock size={13} /> Around then <span className="muted">{events.length}</span>
+        <Clock size={13} /> {t("ui.change_timeline.around_then")} <span className="muted">{events.length}</span>
       </h3>
       <ol className="around-list">
         {shown.map((e) => {
@@ -92,12 +93,12 @@ export function AroundThen({ changes, onFocusQuery }: { changes: Changes; onFocu
               </span>
               <span className="around-side">
                 {queries.length > 0 && (
-                  <button type="button" className="around-links" onClick={() => onFocusQuery(queries[0]!)} title="Show the query it may explain">
-                    may explain {queries.length} {queries.length === 1 ? "query" : "queries"}
+                  <button type="button" className="around-links" onClick={() => onFocusQuery(queries[0]!)} title={t("ui.change_timeline.show_query")}>
+                    {t("ui.change_timeline.may_explain", { n: queries.length })}
                   </button>
                 )}
                 {e.kind === "mark" && e.source === "mark" && (
-                  <button type="button" className="icon-btn" title="Remove this mark" aria-label={`Remove the mark ${e.title}`} onClick={() => void remove(e)}>
+                  <button type="button" className="icon-btn" title={t("ui.change_timeline.remove_mark")} aria-label={t("ui.change_timeline.remove_mark_named", { mark: e.title })} onClick={() => void remove(e)}>
                     <X size={12} />
                   </button>
                 )}
@@ -108,7 +109,7 @@ export function AroundThen({ changes, onFocusQuery }: { changes: Changes; onFocu
       </ol>
       {events.length > limit && (
         <button type="button" className="link-button around-toggle" onClick={() => setAll((v) => !v)}>
-          {all ? "Show fewer" : `Show all ${events.length}`}
+          {all ? t("ui.change_timeline.show_fewer") : t("ui.change_timeline.show_all", { count: events.length })}
         </button>
       )}
     </section>

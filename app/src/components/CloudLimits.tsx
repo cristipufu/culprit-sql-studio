@@ -5,6 +5,7 @@ import type { CloudSignals } from "../gen/CloudSignals";
 import type { ThrottleEpisode } from "../gen/ThrottleEpisode";
 import { bytes, count, duration, percentValue } from "../lib/format";
 import { stamp, useCloud } from "../lib/events";
+import { t } from "../lib/i18n";
 import { TimeChart, VH, type Bucket, type ChartEvent } from "./TimeChart";
 import "./timeline.css";
 
@@ -29,7 +30,7 @@ function episodeWhen(e: ThrottleEpisode): string {
   const a = Date.parse(e.start);
   const b = Date.parse(e.end);
   const lasted = duration(b - a);
-  return `${stamp(a)}–${e.ongoing ? "now" : clock.format(b)} · ${lasted}`;
+  return e.ongoing ? t("ui.cloud_limits.episode_ongoing", { from: stamp(a), lasted }) : t("ui.cloud_limits.episode", { from: stamp(a), to: clock.format(b), lasted });
 }
 
 /**
@@ -42,10 +43,10 @@ export function CloudLimits({ connection, windowMinutes, onCompare }: { connecti
   const state = useCloud(connection, hours, refresh);
   if (state.status === "none") return null;
   return (
-    <section className="cloud" aria-label="Cloud limits">
+    <section className="cloud" aria-label={t("ui.cloud_limits.title")}>
       <div className="cloud-head">
         <h3>
-          <Cloud size={14} /> Cloud limits
+          <Cloud size={14} /> {t("ui.cloud_limits.title")}
         </h3>
         {state.status === "ready" && (
           <span className="cloud-tier">
@@ -54,12 +55,12 @@ export function CloudLimits({ connection, windowMinutes, onCompare }: { connecti
           </span>
         )}
         <span className="spacer" />
-        <span className="muted">Selected period · {duration(windowMinutes * 60_000)}</span>
-        <button type="button" className="icon-btn" title="Read the metrics again" aria-label="Read the cloud metrics again" onClick={() => setRefresh((n) => n + 1)}>
+        <span className="muted">{t("ui.cloud_limits.period", { duration: duration(windowMinutes * 60_000) })}</span>
+        <button type="button" className="icon-btn" title={t("ui.cloud_limits.refresh")} aria-label={t("ui.cloud_limits.refresh_label")} onClick={() => setRefresh((n) => n + 1)}>
           <RefreshCw size={13} className={state.status === "loading" ? "spin" : ""} />
         </button>
       </div>
-      {state.status === "loading" && <div className="cloud-note muted">Reading the cloud's metrics…</div>}
+      {state.status === "loading" && <div className="cloud-note muted">{t("ui.cloud_limits.loading")}</div>}
       {state.status === "error" && (
         <div className="cloud-note">
           <b>{state.error.message}</b>
@@ -91,7 +92,7 @@ function Signals({ signals, onCompare }: { signals: CloudSignals; onCompare?: (f
                 <div className="muted">{e.detail}</div>
                 {onCompare && (
                   <button type="button" className="link-button" onClick={() => onCompare(Date.parse(e.start), Date.parse(e.end))}>
-                    What changed while it lasted?
+                    {t("ui.cloud_limits.what_changed")}
                   </button>
                 )}
               </span>
@@ -105,7 +106,7 @@ function Signals({ signals, onCompare }: { signals: CloudSignals; onCompare?: (f
         ))}
       </div>
       <div className="cloud-foot">
-        {signals.notes.join(" ")} {Number.isFinite(fetched) && `Read at ${clock.format(fetched)}.`}
+        {signals.notes.join(" ")} {Number.isFinite(fetched) && t("ui.cloud_limits.read_at", { time: clock.format(fetched) })}
       </div>
     </>
   );
@@ -133,7 +134,7 @@ function CloudChart({ series, signals }: { series: CloudSeries; signals: CloudSi
       <div className="trend-head">
         <span className="label">{series.label}</span>
         <span className="muted" title={series.limit_label ?? undefined}>
-          {series.floor ? "min" : "max"} {cloudValue(series, worst)}
+          {series.floor ? t("ui.cloud_limits.min", { value: cloudValue(series, worst) }) : t("ui.cloud_limits.max", { value: cloudValue(series, worst) })}
           {series.limit_label ? ` · ${series.limit_label}` : ""}
         </span>
         {latest != null && <span className="now">{cloudValue(series, latest)}</span>}
@@ -145,7 +146,7 @@ function CloudChart({ series, signals }: { series: CloudSeries; signals: CloudSi
         height={56}
         lane={false}
         events={episodes}
-        ariaLabel={`${series.label} over the period`}
+        ariaLabel={t("ui.cloud_limits.chart_label", { metric: series.label })}
         readout={(i) => <b>{values[i] != null ? cloudValue(series, values[i]!) : "—"}</b>}
       >
         {({ x, y }) => {

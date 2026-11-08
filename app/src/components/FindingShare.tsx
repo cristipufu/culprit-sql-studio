@@ -5,6 +5,7 @@ import type { Report } from "../gen/Report";
 import type { VerifiedFinding } from "../gen/VerifiedFinding";
 import { api, errorMessage, type ApiError } from "../lib/api";
 import { useHotkeys } from "../lib/hotkeys";
+import { t } from "../lib/i18n";
 import { deliver, exportOptions } from "../lib/share";
 import { getState, setState } from "../lib/store";
 import { ShareMenu } from "./ShareMenu";
@@ -20,16 +21,16 @@ export function FindingShareMenu({ report, finding }: { report: Report; finding:
         {
           id: "md",
           icon: <ClipboardCopy size={15} />,
-          label: "Copy for a pull request",
-          hint: "Markdown: what's happening, evidence, fix and how to verify",
+          label: t("ui.finding_share.copy_pr"),
+          hint: t("ui.finding_share.copy_pr_hint"),
           redacts: true,
           run: (redact) => deliver(api().then((c) => c.exportFinding(name, finding.id, "markdown", exportOptions(redact))), "copy", redact),
         },
         {
           id: "html",
           icon: <FileCode size={15} />,
-          label: "Save as an HTML page",
-          hint: "One file with the query's plan; opens offline, prints cleanly",
+          label: t("ui.finding_share.save_html"),
+          hint: t("ui.finding_share.save_html_hint"),
           redacts: true,
           run: (redact) => deliver(api().then((c) => c.exportFinding(name, finding.id, "html", exportOptions(redact))), "save", redact),
         },
@@ -47,7 +48,7 @@ export function useVerify(report: Report, finding: Finding) {
     try {
       const v = await (await api()).verifyFindings(report.snapshot.connection, [finding.id]);
       const item = v.findings[0];
-      if (!item) throw new Error("The scan didn't return this finding's status");
+      if (!item) throw new Error(t("ui.finding_share.no_status"));
       setResult({ status: "done", item, summary: v.summary, newCount: v.new_findings.length });
     } catch (e) {
       setResult({ status: "error", error: errorMessage(e) });
@@ -59,8 +60,8 @@ export function useVerify(report: Report, finding: Finding) {
 
 export function VerifyButton({ running, onRun }: { running: boolean; onRun: () => void }) {
   return (
-    <button type="button" className="btn" onClick={onRun} disabled={running} title="Re-scan and check whether this finding is gone">
-      {running ? <span className="spinner" style={{ width: 12, height: 12 }} /> : <RotateCw size={13} />} {running ? "Re-scanning…" : "Verify fix"}
+    <button type="button" className="btn" onClick={onRun} disabled={running} title={t("ui.finding_share.verify_hint")}>
+      {running ? <span className="spinner" style={{ width: 12, height: 12 }} /> : <RotateCw size={13} />} {running ? t("ui.finding_share.verifying") : t("ui.finding_share.verify")}
       {!running && <span className="kbd">V</span>}
     </button>
   );
@@ -77,7 +78,7 @@ export function VerifyResult({ result, report, onClose }: { result: Result | nul
           <b>{result.error.message}</b>
           {result.error.hint && <div className="muted">{result.error.hint}</div>}
         </div>
-        <button type="button" className="btn icon ghost" aria-label="Close" onClick={onClose}>
+        <button type="button" className="btn icon ghost" aria-label={t("ui.common.close")} onClick={onClose}>
           <X size={13} />
         </button>
       </div>
@@ -86,7 +87,7 @@ export function VerifyResult({ result, report, onClose }: { result: Result | nul
   const { item, newCount } = result;
   const tone = item.status === "fixed" ? "good" : item.status === "still-present" ? "warn" : "neutral";
   const title =
-    item.status === "fixed" ? "Fixed. The new scan no longer reports it." : item.status === "still-present" ? "Still present in the new scan." : "Can't tell from the new scan.";
+    item.status === "fixed" ? t("ui.finding_share.fixed") : item.status === "still-present" ? t("ui.finding_share.still_present") : t("ui.finding_share.cant_tell");
   const showNewScan = async () => {
     const name = report.snapshot.connection;
     const fresh = await (await api()).latestReport(name, getState().windowMinutes);
@@ -112,14 +113,14 @@ export function VerifyResult({ result, report, onClose }: { result: Result | nul
         {item.note && <div className="muted">{item.note}</div>}
         {newCount > 0 && (
           <div className="muted">
-            The scan also found {newCount} new finding{newCount === 1 ? "" : "s"}.
+            {t("ui.finding_share.new_findings", { n: newCount })}
           </div>
         )}
         <button type="button" className="link" onClick={showNewScan}>
-          Show the new scan
+          {t("ui.finding_share.show_new_scan")}
         </button>
       </div>
-      <button type="button" className="btn icon ghost" aria-label="Close" onClick={onClose}>
+      <button type="button" className="btn icon ghost" aria-label={t("ui.common.close")} onClick={onClose}>
         <X size={13} />
       </button>
     </div>

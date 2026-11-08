@@ -1,5 +1,5 @@
 import { ArrowLeft, Check, Copy, SquarePen } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useState } from "react";
 import type { Drift } from "../gen/Drift";
 import type { DriftItem } from "../gen/DriftItem";
 import type { DriftKind } from "../gen/DriftKind";
@@ -7,6 +7,7 @@ import type { DriftSide } from "../gen/DriftSide";
 import type { Report } from "../gen/Report";
 import { api, errorMessage, type ApiError } from "../lib/api";
 import { ago } from "../lib/format";
+import { t } from "../lib/i18n";
 import { setState, useStore } from "../lib/store";
 import { Sql } from "./Sql";
 import { serverName } from "../lib/engines";
@@ -16,13 +17,21 @@ import { remember, remembered } from "../lib/prefs";
 
 type DriftState = { status: "idle" } | { status: "loading" } | { status: "ready"; drift: Drift } | { status: "error"; error: ApiError };
 
-const GROUPS: { kind: DriftKind; label: string }[] = [
-  { kind: "index", label: "Indexes" },
-  { kind: "table", label: "Tables" },
-  { kind: "column", label: "Columns" },
-  { kind: "setting", label: "Settings" },
-  { kind: "version", label: "Version" },
-];
+/** The kinds of difference, in the order the report lists them, each with its heading. */
+function groups(): { kind: DriftKind; label: string }[] {
+  return [
+    { kind: "index", label: t("ui.drift_panel.group.index") },
+    { kind: "table", label: t("ui.drift_panel.group.table") },
+    { kind: "column", label: t("ui.drift_panel.group.column") },
+    { kind: "setting", label: t("ui.drift_panel.group.setting") },
+    { kind: "version", label: t("ui.drift_panel.group.version") },
+  ];
+}
+
+/** A message whose `{name}` arguments are elements: t() leaves them as `{name}`, and each is put in its place. */
+function place(message: string, elements: Record<string, ReactNode>): ReactNode[] {
+  return message.split(/\{(\w+)\}/).map((piece, i) => (i % 2 ? <Fragment key={i}>{elements[piece] ?? `{${piece}}`}</Fragment> : piece));
+}
 
 function pickKey(name: string): string {
   return `culprit.drift.${name}`;
@@ -61,10 +70,10 @@ export function DriftPanel({ report, onClose }: { report: Report; onClose: () =>
     <div className="drift">
       <div className="toolbar">
         <button type="button" className="btn ghost" onClick={onClose}>
-          <ArrowLeft size={13} /> Schema
+          <ArrowLeft size={13} /> {t("ui.drift_panel.back")}
         </button>
         <span className="drift-with">
-          Compare <b>{active}</b> with
+          {place(t("ui.drift_panel.compare"), { connection: <b>{active}</b> })}
         </span>
         {others.map((c) => (
           <button type="button" key={c.name} className={`chip ${other === c.name ? "on" : ""}`} onClick={() => choose(c.name)}>
@@ -75,14 +84,14 @@ export function DriftPanel({ report, onClose }: { report: Report; onClose: () =>
       <div className="drift-body">
         {others.length === 0 && (
           <div className="empty" style={{ padding: 40 }}>
-            <h3>Nothing to compare with yet</h3>
-            <p>Add another {serverName(report.snapshot.server.engine, report.snapshot.server.product)} connection, such as staging or production, and scan it. Culprit then shows the indexes, columns and settings that differ.</p>
+            <h3>{t("ui.drift_panel.empty")}</h3>
+            <p>{t("ui.drift_panel.empty_hint", { engine: serverName(report.snapshot.server.engine, report.snapshot.server.product) })}</p>
           </div>
         )}
         {state.status === "loading" && (
           <div className="empty" style={{ padding: 40 }}>
             <div className="spinner" />
-            Comparing the latest scans…
+            {t("ui.drift_panel.loading")}
           </div>
         )}
         {state.status === "error" && (
@@ -115,7 +124,7 @@ function SideCard({ side, letter }: { side: DriftSide; letter: string }) {
         <b>{side.connection}</b>
       </div>
       <div className="muted">
-        {serverLabel(side)} · scanned {ago(side.taken_at)}
+        {t("ui.drift_panel.side", { server: serverLabel(side), ago: ago(side.taken_at) })}
       </div>
     </div>
   );
@@ -131,7 +140,7 @@ function DriftReport({ drift, active }: { drift: Drift; active: string }) {
       <p className={`drift-summary ${drift.items.length === 0 ? "same" : ""}`}>
         {drift.items.length === 0 && <Check size={14} />} {drift.summary}
       </p>
-      {GROUPS.map(({ kind, label }) => {
+      {groups().map(({ kind, label }) => {
         const items = drift.items.filter((i) => i.kind === kind);
         if (items.length === 0) return null;
         return (
@@ -153,13 +162,13 @@ function DriftReport({ drift, active }: { drift: Drift; active: string }) {
 function presenceLabel(item: DriftItem, drift: Drift): [string, string] {
   switch (item.presence) {
     case "only-a":
-      return ["only in A", `Only in ${drift.a.connection}`];
+      return [t("ui.drift_panel.only_a"), t("ui.drift_panel.only_in", { connection: drift.a.connection })];
     case "only-b":
-      return ["only in B", `Only in ${drift.b.connection}`];
+      return [t("ui.drift_panel.only_b"), t("ui.drift_panel.only_in", { connection: drift.b.connection })];
     case "different":
-      return ["different", "Present in both, defined differently"];
+      return [t("ui.drift_panel.different"), t("ui.drift_panel.different_hint")];
     case "renamed":
-      return ["renamed", "Same definition under a different name"];
+      return [t("ui.drift_panel.renamed"), t("ui.drift_panel.renamed_hint")];
   }
 }
 
@@ -169,7 +178,7 @@ function DriftRow({ item, drift, active }: { item: DriftItem; drift: Drift; acti
   const definition = item.presence === "only-a" ? item.a : item.presence === "only-b" ? item.b : null;
   const copy = async () => {
     if (!item.sql) return;
-    await copyAndTell(item.sql, "SQL copied");
+    await copyAndTell(item.sql, t("ui.drift_panel.sql_copied"));
   };
   return (
     <div className={`drift-item ${item.presence}`}>
@@ -191,15 +200,15 @@ function DriftRow({ item, drift, active }: { item: DriftItem; drift: Drift; acti
           <div className="drift-sql">
             <div className="drift-sql-head">
               <span className="muted">
-                To align, on <b>{item.sql_for}</b>
+                {place(t("ui.drift_panel.align_on"), { connection: <b>{item.sql_for}</b> })}
               </span>
               <span className="actions">
                 <button type="button" className="btn ghost" onClick={copy}>
-                  <Copy size={12} /> Copy
+                  <Copy size={12} /> {t("ui.common.copy")}
                 </button>
                 {item.sql_for === active && canOpenFixInEditor(item.sql, drift.a.engine) && (
                   <button type="button" className="btn ghost" onClick={() => setState({ view: "editor", editorSql: item.sql })}>
-                    <SquarePen size={12} /> Open in editor
+                    <SquarePen size={12} /> {t("ui.common.open_in_editor")}
                   </button>
                 )}
               </span>
