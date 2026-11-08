@@ -109,7 +109,7 @@ pub async fn attach(
         path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| t!("engine.query_log.the_log"));
     if snapshot.workload.is_some() {
         let mut coverage = culprit_core::Coverage::default();
-        coverage.not_applicable(&QUERY_LOG_SOURCE, &t!("engine.query_log.has_history"));
+        coverage.not_applicable(&QUERY_LOG_SOURCE, t!("engine.query_log.has_history"));
         coverage.append_to(snapshot);
         let said = t!("engine.query_log.not_read", engine = snapshot.server.name(), log = &name);
         snapshot.notes.push(note(said));
