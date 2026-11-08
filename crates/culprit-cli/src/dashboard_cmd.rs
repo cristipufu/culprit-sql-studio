@@ -26,20 +26,35 @@ pub struct DashboardArgs {
     pub no_live: bool,
 }
 
-pub async fn run(ws: &Workspace, args: DashboardArgs, out: &Out) -> Result<u8> {
-    let mut dashboard = match crate::report_file(&args.connection) {
-        Some(path) => culprit_engine::dashboard_report(&ws.analyze_file(&path)?),
-        None => {
-            let window = crate::window_minutes(args.window, args.window_days);
-            if args.scan {
-                let defaults = SnapshotOptions::default();
-                let options = defaults.clone().with_window_minutes(window.unwrap_or(defaults.window_in_minutes()));
-                out.progress(&culprit_core::t!("cli.scanning", connection = &args.connection));
-                ws.scan(&args.connection, &options).await?;
-            }
-            ws.dashboard(&args.connection, window, !args.no_live).await?
-        }
-    };
+pub fn run<'a>(ws: &'a Workspace, args: DashboardArgs, out: &'a Out) -> crate::CommandTask<'a> {
+    match crate::report_file(&args.connection) {
+        Some(path) => Box::pin(async move {
+            print_dashboard(from_file(ws, &path)?, out);
+            Ok(0)
+        }),
+        None => Box::pin(async move {
+            print_dashboard(from_connection(ws, &args, out).await?, out);
+            Ok(0)
+        }),
+    }
+}
+
+fn from_file(ws: &Workspace, path: &std::path::Path) -> Result<Dashboard> {
+    Ok(culprit_engine::dashboard_report(&ws.analyze_file(path)?))
+}
+
+async fn from_connection(ws: &Workspace, args: &DashboardArgs, out: &Out) -> Result<Dashboard> {
+    let window = crate::window_minutes(args.window, args.window_days);
+    if args.scan {
+        let defaults = SnapshotOptions::default();
+        let options = defaults.clone().with_window_minutes(window.unwrap_or(defaults.window_in_minutes()));
+        out.progress(&culprit_core::t!("cli.scanning", connection = &args.connection));
+        ws.scan(&args.connection, &options).await?;
+    }
+    ws.dashboard(&args.connection, window, !args.no_live).await
+}
+
+fn print_dashboard(mut dashboard: Dashboard, out: &Out) {
     let connection = dashboard.connection.clone();
     let engine = dashboard.engine;
     for tile in &mut dashboard.tiles {
@@ -50,7 +65,6 @@ pub async fn run(ws: &Workspace, args: DashboardArgs, out: &Out) -> Result<u8> {
         Format::Md => print_markdown(&dashboard),
         Format::Text => print_text(&dashboard, out),
     }
-    Ok(0)
 }
 
 /// The command that shows more of what a tile is about; none where the engine has nothing more to say (SQLite has no

@@ -1,7 +1,7 @@
 //! `culprit waits`: where database time goes, by wait category with the queries behind each, plus the server's pressure
 //! signals; `--now` samples what it waits on right now.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Args;
 use culprit_core::{
@@ -34,41 +34,54 @@ pub struct WaitsArgs {
     pub file: Option<PathBuf>,
 }
 
-pub async fn run(ws: &Workspace, args: WaitsArgs, out: &Out) -> Result<u8> {
-    if args.now {
-        let connection = args.connection.ok_or_else(|| Error::invalid(t!("cli.waits.name_one")))?;
-        let seconds = args.seconds.clamp(1, 60);
-        if out.format() == Format::Text {
-            eprintln!("{}", t!("cli.waits.sampling", connection = &connection, seconds = seconds.to_string()));
-        }
-        let sample = ws.wait_sample(&connection, seconds).await?;
-        match out.format() {
-            Format::Json => println!(
-                "{}",
-                serde_json::to_string_pretty(&json!({ "connection": connection, "sample": sample }))
-                    .unwrap_or_default()
-            ),
-            _ => print_sample(&connection, &sample),
-        }
-        return Ok(0);
+pub fn run<'a>(ws: &'a Workspace, args: WaitsArgs, out: &'a Out) -> crate::CommandTask<'a> {
+    if args.now { Box::pin(sample_now(ws, args, out)) } else { Box::pin(async move { read_report(ws, &args, out) }) }
+}
+
+async fn sample_now(ws: &Workspace, args: WaitsArgs, out: &Out) -> Result<u8> {
+    let connection = args.connection.ok_or_else(|| Error::invalid(t!("cli.waits.name_one")))?;
+    let seconds = args.seconds.clamp(1, 60);
+    if out.format() == Format::Text {
+        eprintln!("{}", t!("cli.waits.sampling", connection = &connection, seconds = seconds.to_string()));
     }
-    let (name, snapshot) = match (&args.file, &args.connection) {
-        (Some(path), _) => {
-            let snapshot = ws.analyze_file(path)?.snapshot;
-            (snapshot.connection.clone(), snapshot)
-        }
+    let sample = ws.wait_sample(&connection, seconds).await?;
+    match out.format() {
+        Format::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({ "connection": connection, "sample": sample })).unwrap_or_default()
+        ),
+        _ => print_sample(&connection, &sample),
+    }
+    Ok(0)
+}
+
+fn read_report(ws: &Workspace, args: &WaitsArgs, out: &Out) -> Result<u8> {
+    match (&args.file, &args.connection) {
+        (Some(path), _) => from_file(ws, path, out),
         (None, Some(connection)) => {
-            let report = ws
-                .latest_report(connection, crate::window_minutes(args.window, args.window_days))?
-                .ok_or_else(|| {
-                    Error::not_found(t!("engine.reporting.no_report_yet", name = connection))
-                        .with_hint(t!("engine.reporting.no_report_yet_hint"))
-                })?;
-            (connection.clone(), report.snapshot)
+            from_connection(ws, connection, crate::window_minutes(args.window, args.window_days), out)
         }
-        (None, None) => return Err(Error::invalid(t!("cli.waits.name_or_file"))),
-    };
-    let waits = culprit_engine::explain_waits(&snapshot);
+        (None, None) => Err(Error::invalid(t!("cli.waits.name_or_file"))),
+    }
+}
+
+fn from_file(ws: &Workspace, path: &Path, out: &Out) -> Result<u8> {
+    let report = ws.analyze_file(path)?;
+    print_snapshot(&report.snapshot.connection, &report.snapshot, out);
+    Ok(0)
+}
+
+fn from_connection(ws: &Workspace, connection: &str, window: Option<u32>, out: &Out) -> Result<u8> {
+    let report = ws.latest_report(connection, window)?.ok_or_else(|| {
+        Error::not_found(t!("engine.reporting.no_report_yet", name = connection))
+            .with_hint(t!("engine.reporting.no_report_yet_hint"))
+    })?;
+    print_snapshot(connection, &report.snapshot, out);
+    Ok(0)
+}
+
+fn print_snapshot(name: &str, snapshot: &Snapshot, out: &Out) {
+    let waits = culprit_engine::explain_waits(snapshot);
     match out.format() {
         Format::Json => {
             let mut value = json!({ "connection": name, "waits": waits, "pressure": snapshot.pressure, "operations": snapshot.operations.counters_only() });
@@ -87,9 +100,8 @@ pub async fn run(ws: &Workspace, args: WaitsArgs, out: &Out) -> Result<u8> {
             }
             println!("{}", serde_json::to_string_pretty(&value).unwrap_or_default());
         }
-        _ => print_report(&name, &snapshot, waits.as_ref()),
+        _ => print_report(name, snapshot, waits.as_ref()),
     }
-    Ok(0)
 }
 
 fn bar(share: f64) -> String {

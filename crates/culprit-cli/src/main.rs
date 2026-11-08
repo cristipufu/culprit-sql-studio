@@ -1,4 +1,5 @@
 mod agents;
+mod commands;
 mod conn_cmd;
 mod dashboard_cmd;
 mod lint_cmd;
@@ -16,7 +17,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use culprit_core::{Error, ExplainMode, Report, SessionAction, Severity, SnapshotOptions, t};
+use culprit_core::{Error, Report, Severity, t};
 use culprit_engine::Workspace;
 use culprit_engine::entra::SignInEvent;
 use output::{Format, Out};
@@ -467,198 +468,60 @@ async fn run(command: Command, out: &Out) -> culprit_core::Result<u8> {
             SignInEvent::Failed { message } => eprintln!("{message}"),
         }));
     }
+    dispatch(command, ws, out).await
+}
+
+type CommandTask<'a> = std::pin::Pin<Box<dyn std::future::Future<Output = culprit_core::Result<u8>> + 'a>>;
+
+/// Poll only the selected command's frame; unrelated commands must not consume its caller's stack.
+fn dispatch<'a>(command: Command, ws: Workspace, out: &'a Out) -> CommandTask<'a> {
     match command {
-        Command::Conn(c) => conn_cmd::run(&ws, c, out).await,
-        Command::Auth(AuthCommand::Logout) => {
+        Command::Conn(c) => Box::pin(async move { conn_cmd::run(&ws, c, out).await }),
+        Command::Auth(AuthCommand::Logout) => Box::pin(async move {
             let removed = ws.sign_out()?;
             out.done(&t!("cli.sign_out", n = removed, count = removed.to_string()));
             Ok(0)
-        }
-        Command::Dashboard(args) => dashboard_cmd::run(&ws, args, out).await,
-        Command::Doctor { connection } => {
-            let info = ws.connection(&connection)?;
-            let server = ws.probe(&connection).await?;
-            let locked = ws.locked_checks(&server);
-            out.doctor(&info, &server, &locked);
-            Ok(0)
-        }
-        Command::Scan(args) => {
-            let window = window_minutes(args.window, Some(args.window_days)).unwrap_or_default();
-            let options = SnapshotOptions { top_queries: args.top, plans: args.plans, ..SnapshotOptions::default() }
-                .with_window_minutes(window);
-            out.progress(&t!("cli.scanning", connection = &args.connection));
-            let report = ws.scan_with_log(&args.connection, &options, args.query_log.as_deref()).await?;
-            out.scan(&report, args.full, &ws.paths().reports_dir(&args.connection));
-            Ok(fail_code(&report, args.fail_on))
-        }
-        Command::Findings(args) => {
-            let report = load(&ws, &args.connection, args.report.as_ref())?;
-            let min: Severity = args.min_severity.map(Into::into).unwrap_or(Severity::Low);
-            out.findings(&report, min);
-            Ok(0)
-        }
+        }),
+        Command::Dashboard(args) => Box::pin(async move { dashboard_cmd::run(&ws, args, out).await }),
+        Command::Doctor { connection } => Box::pin(async move { commands::doctor(&ws, &connection, out).await }),
+        Command::Scan(args) => Box::pin(async move { commands::scan(&ws, args, out).await }),
+        Command::Findings(args) => Box::pin(async move { commands::findings(&ws, args, out) }),
         Command::Show { connection, finding, report } => {
-            let report = load(&ws, &connection, report.as_ref())?;
-            let f = report.findings.iter().find(|f| f.id == finding).ok_or_else(|| {
-                Error::not_found(t!("engine.share.no_finding", id = &finding, name = &connection))
-                    .with_hint(t!("cli.list_findings", connection = &connection))
-            })?;
-            out.show(&report, f);
-            Ok(0)
+            Box::pin(async move { commands::show(&ws, connection, finding, report, out) })
         }
-        Command::Top(args) => {
-            let report = load(&ws, &args.connection, args.report.as_ref())?;
-            out.top(&report, args.by, args.limit);
-            Ok(0)
-        }
-        Command::Explain(args) if args.last_actual => {
-            let query_id = args.query_id.as_deref().unwrap_or_default();
-            let plan = ws.last_actual_plan(&args.connection, query_id, args.plan_id.as_deref()).await?;
-            out.plan(&plan);
-            Ok(0)
-        }
-        Command::Explain(args) if args.query_id.is_some() && !args.analyze && args.with_index.is_empty() => {
-            let query_id = args.query_id.as_deref().unwrap_or_default();
-            let plan = ws.query_plan(&args.connection, query_id, args.plan_id.as_deref()).await?;
-            out.plan(&plan);
-            Ok(0)
-        }
-        Command::Explain(args) => {
-            let sql = explain_sql(&ws, &args)?;
-            let plan = if !args.with_index.is_empty() {
-                ws.explain_hypothetical(&args.connection, &sql, &args.with_index).await?
-            } else {
-                let mode = if args.analyze { ExplainMode::Analyze } else { ExplainMode::Estimated };
-                ws.explain(&args.connection, &sql, mode, args.yes_execute_on_production).await?
-            };
-            out.plan(&plan);
-            Ok(0)
-        }
-        Command::Plan(command) => plan_cmd::run(&ws, command, out).await,
-        Command::Waits(args) => waits_cmd::run(&ws, args, out).await,
-        Command::Verify(args) => share_cmd::verify(&ws, args, out).await,
-        Command::Digest(args) => share_cmd::digest(&ws, args, out),
-        Command::Export(args) => share_cmd::export(&ws, args),
-        Command::Live(args) => {
-            let target = match (args.cancel, args.kill) {
-                (Some(id), _) => Some((id, SessionAction::Cancel)),
-                (None, Some(id)) => Some((id, SessionAction::Terminate)),
-                (None, None) => None,
-            };
-            if let Some((id, action)) = target {
-                ws.interrupt_session(&args.connection, &id, action).await?;
-                out.done(&match action {
-                    SessionAction::Cancel => t!("cli.live.cancelled", session = &id),
-                    SessionAction::Terminate => t!("cli.live.ended", session = &id),
-                });
-                return Ok(0);
-            }
-            if let Some(session) = args.progress.as_deref() {
-                let mut first = true;
-                loop {
-                    let progress = ws.query_progress(&args.connection, session, first || !args.watch).await?;
-                    out.query_progress(&progress, !first);
-                    if !args.watch || !progress.running {
-                        return Ok(0);
-                    }
-                    first = false;
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                }
-            }
-            let live = ws.live(&args.connection).await?;
-            out.live(&live);
-            Ok(0)
-        }
-        Command::Blocking { connection } => locks::blocking(&ws, &connection, out).await,
-        Command::Deadlocks(args) => locks::deadlocks(&ws, args, out).await,
-        Command::Run(args) => {
-            let rs = ws.run(&args.connection, &args.sql, args.limit, args.yes_execute_on_production).await?;
-            out.result_set(&rs);
-            Ok(0)
-        }
-        Command::Saved(command) => {
-            match command {
-                SavedCommand::List => out.saved_queries(&ws.saved_queries()?),
-                SavedCommand::Show { name } => out.saved_query(&ws.saved_query(&name)?),
-                SavedCommand::Add { name, sql, file, connection, description } => {
-                    let sql = match (sql, file) {
-                        (Some(sql), _) => sql,
-                        (None, Some(path)) => std::fs::read_to_string(&path)
-                            .map_err(|e| culprit_core::Error::invalid(format!("{}: {e}", path.display())))?,
-                        (None, None) => return Err(culprit_core::Error::invalid(t!("cli.saved.pass_sql"))),
-                    };
-                    let query =
-                        culprit_engine::saved::SaveQuery { name, sql, connection, description, previous_name: None };
-                    out.saved_query(&ws.save_query(query)?);
-                }
-                SavedCommand::Rm { name } => {
-                    ws.delete_saved_query(&name)?;
-                    out.done(&t!("cli.saved.forgot", name = &name));
-                }
-                SavedCommand::Run { name, connection, limit, yes_execute_on_production } => {
-                    let rs = ws.run_saved(&name, connection.as_deref(), limit, yes_execute_on_production).await?;
-                    out.result_set(&rs);
-                }
-            }
-            Ok(0)
-        }
-        Command::Catalog { connection } => {
-            out.catalog(&ws.catalog(&connection).await?);
-            Ok(0)
-        }
-        Command::Checks => {
+        Command::Top(args) => Box::pin(async move { commands::top(&ws, args, out) }),
+        Command::Explain(args) => Box::pin(async move { commands::explain(&ws, args, out).await }),
+        Command::Plan(command) => Box::pin(async move { plan_cmd::run(&ws, command, out).await }),
+        Command::Waits(args) => Box::pin(async move { waits_cmd::run(&ws, args, out).await }),
+        Command::Verify(args) => Box::pin(async move { share_cmd::verify(&ws, args, out).await }),
+        Command::Digest(args) => Box::pin(async move { share_cmd::digest(&ws, args, out) }),
+        Command::Export(args) => Box::pin(async move { share_cmd::export(&ws, args) }),
+        Command::Live(args) => Box::pin(async move { commands::live(&ws, args, out).await }),
+        Command::Blocking { connection } => Box::pin(async move { locks::blocking(&ws, &connection, out).await }),
+        Command::Deadlocks(args) => Box::pin(async move { locks::deadlocks(&ws, args, out).await }),
+        Command::Run(args) => Box::pin(async move { commands::run_query(&ws, args, out).await }),
+        Command::Saved(command) => Box::pin(async move { commands::saved(&ws, command, out).await }),
+        Command::Catalog { connection } => Box::pin(async move { commands::catalog(&ws, &connection, out).await }),
+        Command::Checks => Box::pin(async move {
             out.checks(&ws.checks());
             Ok(0)
-        }
-        Command::Sources => {
+        }),
+        Command::Sources => Box::pin(async move {
             out.sources(&culprit_core::Engine::ALL.map(|e| (e, culprit_engine::registry::sources(e))));
             Ok(0)
-        }
-        Command::Drift { a, b } => {
-            let drift = match (report_file(&a), report_file(&b)) {
-                (None, None) => ws.drift(&a, &b)?,
-                (fa, fb) => {
-                    let side = |name: &str, file: Option<PathBuf>| match file {
-                        Some(path) => ws.analyze_file(&path),
-                        None => load(&ws, name, None).map(|mut r| {
-                            r.snapshot.connection = name.to_string();
-                            r
-                        }),
-                    };
-                    culprit_engine::drift_reports(&side(&a, fa)?, &side(&b, fb)?)?
-                }
-            };
-            out.drift(&drift);
-            Ok(0)
-        }
-        Command::Changes(args) => {
-            out.changes(&ws.changes(&args.connection, &args.request()).await?);
-            Ok(0)
-        }
-        Command::Mark(args) => timeline_cmd::mark(&ws, args, out),
-        Command::Events(args) => timeline_cmd::events(&ws, args, out).await,
-        Command::Cloud(args) => timeline_cmd::cloud(&ws, args, out).await,
-        Command::Indexes { connection } => {
-            let advice = match report_file(&connection) {
-                Some(path) => culprit_engine::index_advice(&ws.analyze_file(&path)?),
-                None => ws.index_advice(&connection)?,
-            };
-            out.index_advice(&advice);
-            Ok(0)
-        }
-        Command::Analyze { file, connection } => {
-            let mut report = ws.analyze_file(&file)?;
-            if let Some(name) = connection {
-                report.snapshot.connection = name;
-            }
-            out.analyzed(&report);
-            Ok(0)
-        }
-        Command::LintSql(args) => lint_cmd::run(&ws, args, out),
-        Command::Mcp(args) => agents::mcp(ws, args).await,
-        Command::Audit(args) => agents::audit(&ws, args, out),
-        Command::Agent(command) => agents::agent(&ws, command, out),
-        Command::Update(_) => unreachable!("an update is run before the workspace opens"),
+        }),
+        Command::Drift { a, b } => Box::pin(async move { commands::drift(&ws, a, b, out) }),
+        Command::Changes(args) => Box::pin(async move { commands::changes(&ws, args, out).await }),
+        Command::Mark(args) => Box::pin(async move { timeline_cmd::mark(&ws, args, out) }),
+        Command::Events(args) => Box::pin(async move { timeline_cmd::events(&ws, args, out).await }),
+        Command::Cloud(args) => Box::pin(async move { timeline_cmd::cloud(&ws, args, out).await }),
+        Command::Indexes { connection } => Box::pin(async move { commands::indexes(&ws, connection, out) }),
+        Command::Analyze { file, connection } => Box::pin(async move { commands::analyze(&ws, file, connection, out) }),
+        Command::LintSql(args) => Box::pin(async move { lint_cmd::run(&ws, args, out) }),
+        Command::Mcp(args) => Box::pin(async move { agents::mcp(ws, args).await }),
+        Command::Audit(args) => Box::pin(async move { agents::audit(&ws, args, out) }),
+        Command::Agent(command) => Box::pin(async move { agents::agent(&ws, command, out) }),
+        Command::Update(_) => Box::pin(async move { unreachable!("an update is run before the workspace opens") }),
     }
 }
 
@@ -684,26 +547,6 @@ pub(crate) fn load(ws: &Workspace, connection: &str, path: Option<&PathBuf>) -> 
 pub(crate) fn report_file(arg: &str) -> Option<PathBuf> {
     let path = PathBuf::from(arg);
     (arg.ends_with(".json") && path.is_file()).then_some(path)
-}
-
-fn explain_sql(ws: &Workspace, args: &ExplainArgs) -> culprit_core::Result<String> {
-    if let Some(sql) = &args.sql {
-        return Ok(sql.clone());
-    }
-    if let Some(file) = &args.file {
-        return std::fs::read_to_string(file).map_err(|e| Error::invalid(format!("{}: {e}", file.display())));
-    }
-    if let Some(id) = &args.query_id {
-        let report = load(ws, &args.connection, None)?;
-        let q = report
-            .snapshot
-            .workload
-            .as_ref()
-            .and_then(|w| w.query(id))
-            .ok_or_else(|| Error::not_found(t!("cli.explain.no_query", id = id)))?;
-        return Ok(q.text.clone());
-    }
-    Err(Error::invalid(t!("cli.explain.pass_sql")))
 }
 
 #[cfg(test)]
