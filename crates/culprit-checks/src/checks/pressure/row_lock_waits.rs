@@ -105,12 +105,7 @@ fn row_lock_waits_finding(snapshot: &Snapshot, r: RowLockWaits<'_>) -> Finding {
     );
     let total = crate::signals::total_wait(r.total_ms);
     let average = format::duration(r.avg_ms);
-    f.title = t!(
-        "check.row_lock_waits.title",
-        total = &total,
-        since = uptime_phrase(snapshot),
-        average = &average
-    );
+    f.title = t!("check.row_lock_waits.title", total = &total, since = uptime_phrase(snapshot), average = &average);
     let since = uptime_opening(snapshot);
     let (count, per_hour) = (format::count(r.count), format::duration(r.per_hour_ms));
     let mut summary = vec![match r.share {

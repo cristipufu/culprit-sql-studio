@@ -47,7 +47,8 @@ pub struct NetworkWait<'s> {
 fn network_waits(snapshot: &Snapshot) -> Vec<NetworkWait<'_>> {
     let mut cases: Vec<NetworkWait<'_>> = app_queries(snapshot)
         .filter_map(|q| {
-            let network: f64 = q.waits.iter().filter(|w| category_key(&w.category) == "network").map(|w| w.wait_ms).sum();
+            let network: f64 =
+                q.waits.iter().filter(|w| category_key(&w.category) == "network").map(|w| w.wait_ms).sum();
             let share = if q.total_time_ms > 0.0 { network / q.total_time_ms } else { 0.0 };
             let query = query_impact(snapshot, &[q])?;
             if share < 0.25 || query.share < 0.01 {

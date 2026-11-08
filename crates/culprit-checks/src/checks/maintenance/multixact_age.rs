@@ -73,11 +73,8 @@ fn multixact_age_finding(s: &Snapshot, case: MultixactAge<'_>) -> Finding {
         Metric::new(t!("check.multixact_age.metric.age"), age.age, Unit::Count),
         Metric::text(t!("check.multixact_age.metric.oldest"), &age.subject),
     ];
-    f.fix = Some(Fix {
-        summary: t!("check.multixact_age.fix"),
-        sql: None,
-        cost: Some(t!("check.multixact_age.fix_cost")),
-    });
+    f.fix =
+        Some(Fix { summary: t!("check.multixact_age.fix"), sql: None, cost: Some(t!("check.multixact_age.fix_cost")) });
     f.verify = vec![t!("check.multixact_age.verify")];
     f
 }

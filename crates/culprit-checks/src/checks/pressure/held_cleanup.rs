@@ -89,10 +89,9 @@ fn held_cleanups(snapshot: &Snapshot) -> Vec<HeldCleanup<'_>> {
             snapshot_reader: t.held_bytes.is_some_and(|b| b > 0.0) || t.state.as_deref() == Some("snapshot"),
             wrote: t.wrote == Some(true),
         },
-        (Engine::Postgres, CleanupHolder::ReplicationSlot) => Holding::PgSlot {
-            catalog_only: t.catalog_only,
-            inactive: t.state.as_deref() == Some("inactive slot"),
-        },
+        (Engine::Postgres, CleanupHolder::ReplicationSlot) => {
+            Holding::PgSlot { catalog_only: t.catalog_only, inactive: t.state.as_deref() == Some("inactive slot") }
+        }
         (Engine::Postgres, CleanupHolder::PreparedTransaction) => Holding::PgPrepared { by: t.program.as_deref() },
         (Engine::Postgres, CleanupHolder::Session) => {
             Holding::PgSession { idle: t.state.as_deref().is_some_and(|s| s.contains("idle")) }
@@ -237,7 +236,6 @@ fn held_cleanup_finding(snapshot: &Snapshot, h: HeldCleanup<'_>) -> Finding {
             }
         }
     });
-    f.verify =
-        vec![if slot { t!("check.held_cleanup.verify.slot") } else { t!("check.held_cleanup.verify.open") }];
+    f.verify = vec![if slot { t!("check.held_cleanup.verify.slot") } else { t!("check.held_cleanup.verify.open") }];
     f
 }

@@ -114,11 +114,8 @@ fn stale_tables(snapshot: &Snapshot) -> Vec<StaleTable<'_>> {
         .map(|s| {
             let ratio = s.modifications / s.rows.max(1.0);
             let auto_update = snapshot.server.engine == Engine::Mssql && !mssql_auto_update_off(snapshot);
-            let in_use = if auto_update {
-                saved_plans_referencing(snapshot, &s.schema, &s.table, &s.names)
-            } else {
-                Vec::new()
-            };
+            let in_use =
+                if auto_update { saved_plans_referencing(snapshot, &s.schema, &s.table, &s.names) } else { Vec::new() };
             let hot = !auto_update && heavy_reads(snapshot, &s.schema, &s.table);
             let severity = if hot && ratio >= 0.5 { Severity::Medium } else { Severity::Low };
             StaleTable { stale: s, ratio, auto_update, in_use, hot, severity }

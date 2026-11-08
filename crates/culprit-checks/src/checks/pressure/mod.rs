@@ -115,11 +115,9 @@ fn uptime(snapshot: &Snapshot, opening: bool) -> String {
         (Some(h), true) if h >= 1.5 => {
             t!("common.since_started.hours_opening", engine = engine, hours = format!("{}", h.round()))
         }
-        (Some(h), false) => t!(
-            "common.since_started.minutes",
-            engine = engine,
-            minutes = format!("{}", (h * 60.0).round().max(1.0))
-        ),
+        (Some(h), false) => {
+            t!("common.since_started.minutes", engine = engine, minutes = format!("{}", (h * 60.0).round().max(1.0)))
+        }
         (Some(h), true) => t!(
             "common.since_started.minutes_opening",
             engine = engine,
