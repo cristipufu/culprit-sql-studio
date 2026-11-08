@@ -61,7 +61,7 @@ async fn worker(
     let result = async {
         stage(setup(&mut conn, setting, &marker), &mut control, &mut canceled, OBSERVE_TIMEOUT, id, &marker).await?;
         let result = stage(
-            crate::read_result(&mut conn, &format!("{marker} {sql}"), limit),
+            crate::read_result(&mut conn, &format!("{marker} {sql}"), limit, false),
             &mut control,
             &mut canceled,
             PREVIEW_TIMEOUT + REPLY_GRACE,

@@ -59,7 +59,7 @@ impl MysqlProvider {
         if let Some(engine) = spec.engine
             && engine != Engine::Mysql
         {
-            return Err(Error::invalid(format!("This connection is for {engine}, not MySQL")));
+            return Err(not_mysql(engine));
         }
         Ok(MysqlProvider { connector: Arc::new(Connector::new(spec)?), spec: spec.clone() })
     }
@@ -69,7 +69,7 @@ impl MysqlProvider {
         let mut conn = self.connector.connect(Scope::Database).await?;
         let started = Instant::now();
         conn.query_drop(tagged("START TRANSACTION READ ONLY")).await.map_err(map_error)?;
-        let result = run_in_transaction(&mut conn, statement, limit).await;
+        let result = run_in_transaction(&mut conn, statement, limit, false).await;
         let rollback = conn.query_drop(tagged("ROLLBACK")).await;
         let mut result = result?;
         rollback.map_err(map_error)?;
@@ -98,14 +98,7 @@ impl MysqlProvider {
             ExplainMode::Estimated => {
                 let verb = leading_verb(statement);
                 if !EXPLAINABLE.contains(&verb.as_str()) {
-                    return Err(Error::new(
-                        culprit_core::ErrorCode::Unsupported,
-                        format!("{} can't EXPLAIN a {} statement", flavor.name(), verb.to_ascii_uppercase()),
-                    )
-                    .with_hint(
-                        "EXPLAIN covers SELECT, INSERT, UPDATE, DELETE and REPLACE. The scan's statement statistics show \
-                         this one's measured times.",
-                    ));
+                    return Err(cant_explain(flavor, &verb));
                 }
                 if flavor == Flavor::Mysql {
                     let _ = conn.query_drop(tagged("SET SESSION explain_json_format_version = 1")).await;
@@ -114,43 +107,19 @@ impl MysqlProvider {
                     // Culprit's sessions are read-only (EXPLAIN can evaluate stored functions), and the server refuses
                     // to plan a write inside one. Nothing would have been written: say what happened instead.
                     Err(e) if WRITES.contains(&verb.as_str()) && e.message.contains("READ ONLY") => {
-                        return Err(Error::new(
-                            culprit_core::ErrorCode::Unsupported,
-                            format!(
-                                "{} won't plan {} {} in a read-only session, and Culprit's sessions are always read-only",
-                                flavor.name(),
-                                if matches!(verb.as_str(), "insert" | "update") { "an" } else { "a" },
-                                verb.to_ascii_uppercase()
-                            ),
-                        )
-                        .with_hint(if lower_starts_values(statement) {
-                            "An INSERT … VALUES searches no rows, so there's nothing to plan; its cost is the indexes and \
-                             triggers on the table."
-                        } else {
-                            "Explain the SELECT with the same FROM and WHERE: the server usually finds the rows the \
-                             same way."
-                        }));
+                        return Err(no_plan_for_write(flavor, &verb, lower_starts_values(statement)));
                     }
-                    result => result?.ok_or_else(|| Error::internal("EXPLAIN returned no plan"))?,
+                    result => result?.ok_or_else(|| no_plan(Explain::Explain))?,
                 };
-                let json = row.text("explain").ok_or_else(|| Error::internal("EXPLAIN returned no plan"))?;
+                let json = row.text("explain").ok_or_else(|| no_plan(Explain::Explain))?;
                 plan_json::parse(&json, PlanKind::Estimated, Some(statement), schema).map(|plan| self.versioned(plan))
             }
             ExplainMode::Analyze => {
                 if !self.connector.measures_runs() {
-                    let version = self.connector.version().unwrap_or_default();
-                    let short = version.split('-').next().unwrap_or(version);
-                    return Err(Error::new(
-                        culprit_core::ErrorCode::Unsupported,
-                        format!("MySQL {short} can't measure a run: EXPLAIN ANALYZE arrived in MySQL 8.0.18"),
-                    )
-                    .with_hint("Explain shows the estimated plan; the scan's statement statistics show each query's measured times."));
+                    return Err(cant_measure(self.connector.version().unwrap_or_default()));
                 }
                 if !reads_only(statement) {
-                    return Err(Error::invalid(
-                        "Explain Analyze runs the statement, so Culprit only allows it for SELECT",
-                    )
-                    .with_hint("Use Explain (estimated) for statements that change data."));
+                    return Err(analyze_reads_only());
                 }
                 // MySQL's EXPLAIN ANALYZE prints a tree; MariaDB's ANALYZE prints the EXPLAIN JSON with measurements.
                 let sql = match flavor {
@@ -160,16 +129,15 @@ impl MysqlProvider {
                 conn.query_drop(tagged("START TRANSACTION READ ONLY")).await.map_err(map_error)?;
                 let result = explain_one(&mut conn, &sql).await;
                 let rollback = conn.query_drop(tagged("ROLLBACK")).await;
-                let row = result?.ok_or_else(|| Error::internal("ANALYZE returned no plan"))?;
+                let row = result?.ok_or_else(|| no_plan(Explain::Analyze))?;
                 rollback.map_err(map_error)?;
                 match flavor {
                     Flavor::Mysql => {
-                        let tree =
-                            row.text("explain").ok_or_else(|| Error::internal("EXPLAIN ANALYZE returned no plan"))?;
+                        let tree = row.text("explain").ok_or_else(|| no_plan(Explain::ExplainAnalyze))?;
                         plan_tree::parse(&tree, Some(statement), schema)
                     }
                     Flavor::Mariadb => {
-                        let json = row.first_text().ok_or_else(|| Error::internal("ANALYZE returned no plan"))?;
+                        let json = row.first_text().ok_or_else(|| no_plan(Explain::Analyze))?;
                         plan_json::parse(&json, PlanKind::Actual, Some(statement), schema)
                     }
                 }
@@ -215,14 +183,12 @@ impl Provider for MysqlProvider {
     async fn explain_recorded(&self, sql: &str, _query_id: Option<&str>) -> Result<Plan> {
         let text = fingerprint::runnable(sql);
         self.explain(&text, ExplainMode::Estimated).await.map_err(|e| {
-            if !fingerprint::has_placeholders(&text) || !matches!(e.code, ErrorCode::QueryFailed | ErrorCode::InvalidInput) {
+            if !fingerprint::has_placeholders(&text)
+                || !matches!(e.code, ErrorCode::QueryFailed | ErrorCode::InvalidInput)
+            {
                 return e;
             }
-            let name = if self.connector.flavor() == Flavor::Mariadb { "MariaDB" } else { "MySQL" };
-            Error::invalid(format!(
-                "{name} recorded this statement without its values (each ? stands for one), so it can't be planned as recorded"
-            ))
-            .with_hint("Open it in the editor, put a real value in place of each ?, and explain it there.")
+            recorded_without_values(self.connector.flavor())
         })
     }
 
@@ -384,7 +350,7 @@ impl Provider for MysqlProvider {
             s.blocked_by.is_none()
                 && s.wait.as_deref().is_some_and(|w| w.to_ascii_lowercase().contains("metadata lock"))
         }) {
-            notes.push("A metadata-lock wait is visible but its holder could not be resolved. Check sys.schema_table_lock_waits, metadata-lock instrumentation and this login's visibility; an unresolved blocker is not an unblocked session.".into());
+            notes.push(unresolved_metadata_lock());
         }
         let blocking = culprit_core::blocking::analyze(Engine::Mysql, &sessions, &locks);
         Ok(LiveState {
@@ -416,26 +382,124 @@ impl Provider for MysqlProvider {
         if let Some(lift) = self.connector.flavor().no_timeout() {
             conn.query_drop(tagged(lift)).await.map_err(map_error)?;
         }
-        let result = run_in_transaction(&mut conn, statement, limit).await;
+        let result = run_in_transaction(&mut conn, statement, limit, true).await;
         let _ = conn.disconnect().await;
         let mut result = result?;
         result.elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
-        // "3 rows changed, committed." for a write; a statement that returned rows just says it committed.
-        match result.messages.last_mut().filter(|_| result.columns.is_empty()) {
-            Some(last) => last.push_str(" changed, committed."),
-            None => result.messages.push("Committed.".to_string()),
-        }
         Ok(result)
     }
 }
 
 /// A process-list state with MariaDB's progress report, when the statement has one (ALTER TABLE, LOAD DATA, …).
 fn with_progress(state: String, r: &rows::Rec) -> String {
-    let Some(progress) = r.number("progress").filter(|p| *p > 0.0) else { return state };
-    match (r.number("stage"), r.number("max_stage")) {
+    progress_label(state, r.number("progress"), r.number("stage"), r.number("max_stage"))
+}
+
+fn progress_label(state: String, progress: Option<f64>, stage: Option<f64>, max: Option<f64>) -> String {
+    let Some(progress) = progress.filter(|p| *p > 0.0) else { return state };
+    match (stage, max) {
         (Some(stage), Some(max)) if max > 1.0 => format!("{state} · stage {stage:.0} of {max:.0}, {progress:.0}%"),
         _ => format!("{state} · {progress:.0}%"),
     }
+}
+
+fn not_mysql(engine: Engine) -> Error {
+    Error::invalid(format!("This connection is for {engine}, not MySQL"))
+}
+
+/// A statement EXPLAIN doesn't take (`verb` lowercased).
+fn cant_explain(flavor: Flavor, verb: &str) -> Error {
+    Error::new(
+        culprit_core::ErrorCode::Unsupported,
+        format!("{} can't EXPLAIN a {} statement", flavor.name(), verb.to_ascii_uppercase()),
+    )
+    .with_hint(
+        "EXPLAIN covers SELECT, INSERT, UPDATE, DELETE and REPLACE. The scan's statement statistics show \
+         this one's measured times.",
+    )
+}
+
+/// A write (`verb` lowercased) the server refused to plan in Culprit's read-only session; `values`: an INSERT … VALUES,
+/// which searches nothing.
+fn no_plan_for_write(flavor: Flavor, verb: &str, values: bool) -> Error {
+    Error::new(
+        culprit_core::ErrorCode::Unsupported,
+        format!(
+            "{} won't plan {} {} in a read-only session, and Culprit's sessions are always read-only",
+            flavor.name(),
+            if matches!(verb, "insert" | "update") { "an" } else { "a" },
+            verb.to_ascii_uppercase()
+        ),
+    )
+    .with_hint(if values {
+        "An INSERT … VALUES searches no rows, so there's nothing to plan; its cost is the indexes and \
+         triggers on the table."
+    } else {
+        "Explain the SELECT with the same FROM and WHERE: the server usually finds the rows the \
+         same way."
+    })
+}
+
+/// The command that returned no plan.
+#[derive(Clone, Copy, Debug)]
+enum Explain {
+    Explain,
+    Analyze,
+    ExplainAnalyze,
+}
+
+fn no_plan(command: Explain) -> Error {
+    Error::internal(match command {
+        Explain::Explain => "EXPLAIN returned no plan",
+        Explain::Analyze => "ANALYZE returned no plan",
+        Explain::ExplainAnalyze => "EXPLAIN ANALYZE returned no plan",
+    })
+}
+
+/// MySQL before 8.0.18 (`version` as the server reports it) has no EXPLAIN ANALYZE.
+fn cant_measure(version: &str) -> Error {
+    let short = version.split('-').next().unwrap_or(version);
+    Error::new(
+        culprit_core::ErrorCode::Unsupported,
+        format!("MySQL {short} can't measure a run: EXPLAIN ANALYZE arrived in MySQL 8.0.18"),
+    )
+    .with_hint("Explain shows the estimated plan; the scan's statement statistics show each query's measured times.")
+}
+
+fn analyze_reads_only() -> Error {
+    Error::invalid("Explain Analyze runs the statement, so Culprit only allows it for SELECT")
+        .with_hint("Use Explain (estimated) for statements that change data.")
+}
+
+/// A recorded statement whose placeholders stop it from being planned.
+fn recorded_without_values(flavor: Flavor) -> Error {
+    let name = if flavor == Flavor::Mariadb { "MariaDB" } else { "MySQL" };
+    Error::invalid(format!(
+        "{name} recorded this statement without its values (each ? stands for one), so it can't be planned as recorded"
+    ))
+    .with_hint("Open it in the editor, put a real value in place of each ?, and explain it there.")
+}
+
+fn unresolved_metadata_lock() -> String {
+    "A metadata-lock wait is visible but its holder could not be resolved. Check sys.schema_table_lock_waits, metadata-lock instrumentation and this login's visibility; an unresolved blocker is not an unblocked session.".into()
+}
+
+/// What running a statement says: how many rows it returned (`notice`: why Culprit stopped reading them), or, for a
+/// change the person ran (`committed`), how many it changed; a change that returned rows says it committed.
+fn result_messages(count: u64, notice: Option<String>, columns: bool, committed: bool) -> Vec<String> {
+    let mut message = format!("{count} row{}", if count == 1 { "" } else { "s" });
+    if let Some(notice) = notice {
+        message.push_str(&format!(" ({notice})"));
+    }
+    let mut messages = vec![message];
+    if committed {
+        // "3 rows changed, committed." for a write; a statement that returned rows just says it committed.
+        match messages.last_mut().filter(|_| !columns) {
+            Some(last) => last.push_str(" changed, committed."),
+            None => messages.push("Committed.".to_string()),
+        }
+    }
+    messages
 }
 
 /// Trim and reject empty or multi-statement input (the server would refuse the second statement anyway).
@@ -448,11 +512,17 @@ fn reads_only(statement: &str) -> bool {
     culprit_core::sql::reads_only(statement, Engine::Mysql)
 }
 
-async fn run_in_transaction(conn: &mut Conn, statement: &str, limit: usize) -> Result<ResultSet> {
-    read_result(conn, &tagged(statement), limit).await.map_err(map_error)
+/// `committed`: a change the person ran, which commits as it finishes (autocommit).
+async fn run_in_transaction(conn: &mut Conn, statement: &str, limit: usize, committed: bool) -> Result<ResultSet> {
+    read_result(conn, &tagged(statement), limit, committed).await.map_err(map_error)
 }
 
-async fn read_result(conn: &mut Conn, tagged_statement: &str, limit: usize) -> mysql_async::Result<ResultSet> {
+async fn read_result(
+    conn: &mut Conn,
+    tagged_statement: &str,
+    limit: usize,
+    committed: bool,
+) -> mysql_async::Result<ResultSet> {
     let mut result = conn.query_iter(tagged_statement).await?;
     let columns_meta = result.columns();
     let columns: Vec<String> = columns_meta
@@ -482,11 +552,8 @@ async fn read_result(conn: &mut Conn, tagged_statement: &str, limit: usize) -> m
     let affected = result.affected_rows();
     result.drop_result().await?;
     let count = if columns.is_empty() { affected } else { rows.len() as u64 };
-    let mut message = format!("{count} row{}", if count == 1 { "" } else { "s" });
-    if let Some(notice) = budget.notice() {
-        message.push_str(&format!(" ({notice})"));
-    }
-    Ok(ResultSet { columns, rows, truncated: budget.truncated(), elapsed_ms: 0.0, messages: vec![message] })
+    let messages = result_messages(count, budget.notice(), !columns.is_empty(), committed);
+    Ok(ResultSet { columns, rows, truncated: budget.truncated(), elapsed_ms: 0.0, messages })
 }
 
 fn json_value(value: &Value, kind: Option<&ColumnType>) -> Json {
@@ -599,5 +666,132 @@ mod tests {
     fn rejects_other_engines() {
         let spec = ConnectionSpec { engine: Some(Engine::Postgres), host: "h".into(), ..Default::default() };
         assert_eq!(MysqlProvider::new(&spec).err().unwrap().code, ErrorCode::InvalidInput);
+    }
+
+    /// An error's message and hint, as a person reads them.
+    fn said(e: Error) -> (String, Option<String>) {
+        (e.message, e.hint)
+    }
+
+    // What explaining, running and watching a statement say, word for word: its messages come from locales/en.json.
+    #[test]
+    fn explain_errors_say_why_in_english() {
+        let spec = ConnectionSpec { engine: Some(Engine::Postgres), host: "h".into(), ..Default::default() };
+        assert_eq!(MysqlProvider::new(&spec).err().unwrap().message, "This connection is for PostgreSQL, not MySQL");
+        assert_eq!(
+            said(cant_explain(Flavor::Mariadb, "do")),
+            (
+                "MariaDB can't EXPLAIN a DO statement".into(),
+                Some(
+                    "EXPLAIN covers SELECT, INSERT, UPDATE, DELETE and REPLACE. The scan's statement statistics show \
+                     this one's measured times."
+                        .into()
+                )
+            )
+        );
+        assert_eq!(
+            said(no_plan_for_write(Flavor::Mysql, "insert", true)),
+            (
+                "MySQL won't plan an INSERT in a read-only session, and Culprit's sessions are always read-only".into(),
+                Some(
+                    "An INSERT … VALUES searches no rows, so there's nothing to plan; its cost is the indexes and \
+                     triggers on the table."
+                        .into()
+                )
+            )
+        );
+        assert_eq!(
+            said(no_plan_for_write(Flavor::Mariadb, "update", false)),
+            (
+                "MariaDB won't plan an UPDATE in a read-only session, and Culprit's sessions are always read-only"
+                    .into(),
+                Some(
+                    "Explain the SELECT with the same FROM and WHERE: the server usually finds the rows the same way."
+                        .into()
+                )
+            )
+        );
+        assert_eq!(
+            no_plan_for_write(Flavor::Mysql, "delete", false).message,
+            "MySQL won't plan a DELETE in a read-only session, and Culprit's sessions are always read-only"
+        );
+        assert_eq!(
+            no_plan_for_write(Flavor::Mysql, "replace", true).message,
+            "MySQL won't plan a REPLACE in a read-only session, and Culprit's sessions are always read-only"
+        );
+        assert_eq!(no_plan(Explain::Explain).message, "EXPLAIN returned no plan");
+        assert_eq!(no_plan(Explain::Analyze).message, "ANALYZE returned no plan");
+        assert_eq!(no_plan(Explain::ExplainAnalyze).message, "EXPLAIN ANALYZE returned no plan");
+        assert_eq!(
+            said(cant_measure("8.0.17-log")),
+            (
+                "MySQL 8.0.17 can't measure a run: EXPLAIN ANALYZE arrived in MySQL 8.0.18".into(),
+                Some(
+                    "Explain shows the estimated plan; the scan's statement statistics show each query's measured times."
+                        .into()
+                )
+            )
+        );
+        assert_eq!(
+            said(analyze_reads_only()),
+            (
+                "Explain Analyze runs the statement, so Culprit only allows it for SELECT".into(),
+                Some("Use Explain (estimated) for statements that change data.".into())
+            )
+        );
+        let raw =
+            Error::new(ErrorCode::QueryFailed, "Driver error: `Statement takes 1 parameters but 0 was supplied.'");
+        assert_eq!(
+            said(parameter_error(raw)),
+            (
+                "This statement has `?` parameters, which MySQL needs values for to plan it".into(),
+                Some(
+                    "Replace each ? with a sample value of its type (a quoted string for text, a number for an id) and \
+                     explain again. Queries Culprit captured open from Queries with the plan of a real statement."
+                        .into()
+                )
+            )
+        );
+        for (flavor, name) in [(Flavor::Mysql, "MySQL"), (Flavor::Mariadb, "MariaDB")] {
+            assert_eq!(
+                said(recorded_without_values(flavor)),
+                (
+                    format!(
+                        "{name} recorded this statement without its values (each ? stands for one), so it can't be \
+                         planned as recorded"
+                    ),
+                    Some("Open it in the editor, put a real value in place of each ?, and explain it there.".into())
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn results_and_sessions_say_what_happened_in_english() {
+        assert_eq!(result_messages(1, None, true, false), ["1 row"]);
+        assert_eq!(result_messages(1500, None, true, false), ["1500 rows"]);
+        assert_eq!(result_messages(0, None, true, false), ["0 rows"]);
+        assert_eq!(result_messages(1000, Some("stopped at 1000".into()), true, false), ["1000 rows (stopped at 1000)"]);
+        assert_eq!(result_messages(3, None, false, true), ["3 rows changed, committed."]);
+        assert_eq!(result_messages(1, None, false, true), ["1 row changed, committed."]);
+        assert_eq!(result_messages(2, None, true, true), ["2 rows", "Committed."]);
+        assert_eq!(result_messages(0, None, false, false), ["0 rows"]);
+        assert_eq!(progress_label("altering table".into(), None, None, None), "altering table");
+        assert_eq!(progress_label("altering table".into(), Some(0.0), Some(1.0), Some(2.0)), "altering table");
+        assert_eq!(
+            progress_label("altering table".into(), Some(42.4), Some(1.0), Some(2.0)),
+            "altering table · stage 1 of 2, 42%"
+        );
+        assert_eq!(
+            progress_label("copy to tmp table".into(), Some(7.6), Some(1.0), Some(1.0)),
+            "copy to tmp table · 8%"
+        );
+        assert_eq!(progress_label("copy to tmp table".into(), Some(50.0), None, None), "copy to tmp table · 50%");
+        assert_eq!(
+            unresolved_metadata_lock(),
+            "A metadata-lock wait is visible but its holder could not be resolved. Check sys.schema_table_lock_waits, \
+             metadata-lock instrumentation and this login's visibility; an unresolved blocker is not an unblocked \
+             session."
+        );
     }
 }

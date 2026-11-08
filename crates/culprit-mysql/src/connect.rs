@@ -511,6 +511,201 @@ mod tests {
         assert_eq!(map_error(server(1049)).code, ErrorCode::NotFound);
     }
 
+    /// An error's code, message and hint, as a person reads them.
+    fn said(e: Error) -> (ErrorCode, String, Option<String>) {
+        (e.code, e.message, e.hint)
+    }
+
+    fn io(kind: std::io::ErrorKind, text: &str) -> mysql_async::Error {
+        mysql_async::Error::Io(IoError::Io(std::io::Error::new(kind, text.to_string())))
+    }
+
+    // What connecting says when it can't, word for word: its messages come from locales/en.json.
+    #[test]
+    fn connection_errors_say_why_in_english() {
+        assert_eq!(
+            said(Tls::parse("bogus").unwrap_err()),
+            (
+                ErrorCode::InvalidInput,
+                "Unknown ssl-mode `bogus`".into(),
+                Some("Use one of DISABLED, PREFERRED, REQUIRED, VERIFY_CA, VERIFY_IDENTITY.".into())
+            )
+        );
+        let mut s = spec();
+        s.host = " ".into();
+        assert_eq!(Connector::new(&s).err().unwrap().message, "A MySQL host is required");
+        let mut s = spec();
+        s.user = None;
+        assert_eq!(
+            said(Connector::new(&s).err().unwrap()),
+            (
+                ErrorCode::InvalidInput,
+                "MySQL needs a user name".into(),
+                Some("Add one to the connection string, e.g. mysql://app@host/db".into())
+            )
+        );
+        let mut s = spec();
+        s.auth = AuthKind::Entra;
+        s.token = Some("t".into());
+        assert_eq!(
+            Connector::new(&s).err().unwrap().message,
+            "Microsoft Entra ID tokens are only sent to Azure Database for MySQL hosts"
+        );
+        s.host = "shop.mysql.database.azure.com".into();
+        s.token = None;
+        assert_eq!(
+            said(Connector::new(&s).err().unwrap()),
+            (
+                ErrorCode::AuthFailed,
+                "No Microsoft Entra ID token is available".into(),
+                Some("Sign in with `az login`, then try again.".into())
+            )
+        );
+        let mut s = spec();
+        s.auth = AuthKind::AwsIam;
+        s.token = Some("t".into());
+        assert_eq!(
+            Connector::new(&s).err().unwrap().message,
+            "AWS IAM authentication tokens are only sent to Amazon RDS hosts"
+        );
+        s.host = "shop.abc123.eu-central-1.rds.amazonaws.com".into();
+        s.token = None;
+        assert_eq!(
+            said(Connector::new(&s).err().unwrap()),
+            (
+                ErrorCode::AuthFailed,
+                "No AWS IAM authentication token is available".into(),
+                Some("Sign in with the AWS CLI (aws sso login or aws configure), then try again.".into())
+            )
+        );
+
+        let connector = Connector::new(&spec()).unwrap();
+        assert_eq!(
+            said(connector.database_connect_error(io(std::io::ErrorKind::TimedOut, "connection timed out"))),
+            (
+                ErrorCode::Timeout,
+                "Timed out connecting to db.example.com:3306".into(),
+                Some("Check the host, the port, and any firewall or VPN in between.".into())
+            )
+        );
+        assert_eq!(
+            said(connector.database_connect_error(io(std::io::ErrorKind::ConnectionRefused, "Connection refused"))),
+            (
+                ErrorCode::ConnectionFailed,
+                "Nothing is listening on db.example.com:3306".into(),
+                Some("Check the host and port, and that the MySQL or MariaDB server is running.".into())
+            )
+        );
+        assert_eq!(
+            said(connector.database_connect_error(io(
+                std::io::ErrorKind::Other,
+                "failed to lookup address information: nodename nor servname provided, or not known"
+            ))),
+            (
+                ErrorCode::ConnectionFailed,
+                "Cannot resolve host `db.example.com`".into(),
+                Some("Check the host name.".into())
+            )
+        );
+        assert_eq!(
+            said(connector.database_connect_error(io(std::io::ErrorKind::Other, "tls: unexpected message"))),
+            (
+                ErrorCode::ConnectionFailed,
+                "Input/output error: tls: unexpected message".into(),
+                Some(
+                    "TLS failed. Check `ssl-mode` (DISABLED, PREFERRED, REQUIRED, VERIFY_CA, VERIFY_IDENTITY) and \
+                     `ssl-ca`."
+                        .into()
+                )
+            )
+        );
+        // An error of the server's own passes through as it said it.
+        let denied = mysql_async::Error::Server(mysql_async::ServerError {
+            code: 1045,
+            message: "Access denied for user 'reader'".into(),
+            state: "28000".into(),
+        });
+        assert_eq!(connector.database_connect_error(denied).message, "Access denied for user 'reader'");
+    }
+
+    #[test]
+    fn server_and_driver_errors_say_what_to_do_in_english() {
+        let server = |code| {
+            map_error(mysql_async::Error::Server(mysql_async::ServerError {
+                code,
+                message: "m".into(),
+                state: "HY000".into(),
+            }))
+        };
+        let hint = |code| server(code).hint;
+        assert_eq!(hint(1045).as_deref(), Some("Check the user name and password (or token) for this connection."));
+        for code in [1044, 1142, 1143, 1227, 1370] {
+            assert_eq!(
+                hint(code).as_deref(),
+                Some(
+                    "Grant the monitoring privileges: GRANT PROCESS ON *.* TO <user>; GRANT SELECT ON \
+                     performance_schema.* TO <user>;"
+                )
+            );
+        }
+        assert_eq!(hint(1049).as_deref(), Some("Check the database name."));
+        assert_eq!(hint(1792).as_deref(), Some("Culprit's sessions are read-only; this statement would write."));
+        for code in [1205, 3024, 1969] {
+            assert_eq!(
+                hint(code).as_deref(),
+                Some("The statement hit Culprit's lock or execution timeout and was stopped.")
+            );
+        }
+        assert_eq!(hint(1064).as_deref(), Some("Check the statement's syntax."));
+        assert_eq!(server(1045).message, "m");
+        assert_eq!(said(server(1146)), (ErrorCode::QueryFailed, "m (error 1146)".into(), None));
+
+        assert_eq!(
+            said(map_error(io(std::io::ErrorKind::InvalidData, "invalid peer certificate: UnknownIssuer"))),
+            (
+                ErrorCode::ConnectionFailed,
+                "The server's TLS certificate didn't verify: Input/output error: invalid peer certificate: \
+                 UnknownIssuer"
+                    .into(),
+                Some(
+                    "Point ssl-ca at the server's CA bundle (ssl-ca=rds for Amazon RDS), or add ssl-mode=REQUIRED to \
+                     encrypt without verifying the certificate."
+                        .into()
+                )
+            )
+        );
+        assert_eq!(
+            said(map_error(io(std::io::ErrorKind::InvalidData, "received fatal alert: HandshakeFailure"))),
+            (
+                ErrorCode::ConnectionFailed,
+                "The server and Culprit share no TLS cipher suite, so no encrypted session could be set up".into(),
+                Some(
+                    "Culprit needs TLS 1.2+ with ECDHE and AES-GCM or ChaCha20. MySQL 5.7 built on OpenSSL 1.0 only \
+                     negotiates DHE suites: enable ECDHE on the server (OpenSSL 1.1+, ssl_cipher), or use \
+                     ssl-mode=PREFERRED or DISABLED on a trusted network."
+                        .into()
+                )
+            )
+        );
+        assert_eq!(
+            said(map_error(mysql_async::Error::Driver(DriverError::ConnectionClosed))),
+            (ErrorCode::ConnectionFailed, "The server closed the connection".into(), None)
+        );
+        assert_eq!(
+            said(map_error(mysql_async::Error::Driver(DriverError::NoClientSslFlagFromServer))),
+            (
+                ErrorCode::ConnectionFailed,
+                "The server does not support TLS".into(),
+                Some("Use ssl-mode=PREFERRED or DISABLED for this server, or enable TLS on it.".into())
+            )
+        );
+        // Whatever the driver says with no advice of Culprit's stays the driver's.
+        assert_eq!(
+            said(map_error(io(std::io::ErrorKind::TimedOut, "connection timed out"))),
+            (ErrorCode::Timeout, "Input/output error: connection timed out".into(), None)
+        );
+    }
+
     #[test]
     fn a_failed_tls_handshake_is_told_apart_from_the_network() {
         // MySQL 5.7 on OpenSSL 1.0 offers only DHE suites; rustls answers with a handshake_failure alert.
