@@ -26,6 +26,7 @@ mod provider_audit;
 mod query_checks;
 mod registry;
 mod signal_false_flags;
+mod signal_words;
 mod sqlite;
 
 /// Record `source`'s outcome in `s`, in place of any the scan recorded for it.
