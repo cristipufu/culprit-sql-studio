@@ -3966,14 +3966,21 @@
         "title": "Health"
       },
       {
-        "detail": "Scan again to read the last day of deadlocks.",
+        "detail": "PostgreSQL counted 0 deadlocks in this database. It writes the details (who waited for whom, and the statements) only to the server log, which SQL can't read: paste those log lines here to have them explained. Turning on log_lock_waits also logs any lock wait longer than deadlock_timeout.",
         "fix_sql": null,
         "items": [],
         "key": "deadlocks",
-        "metrics": [],
+        "metrics": [
+          {
+            "key": "counted",
+            "label": "Counted",
+            "text": "0",
+            "value": 0.0
+          }
+        ],
         "next": "culprit deadlocks timescale-demo",
-        "status": "unavailable",
-        "takeaway": "This scan didn't read deadlocks.",
+        "status": "good",
+        "takeaway": "No deadlocks counted.",
         "title": "Deadlocks"
       },
       {

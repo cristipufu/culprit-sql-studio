@@ -143,7 +143,7 @@
     },
     {
       "check": "deadlocks",
-      "reason": "No deadlock evidence was collected.",
+      "reason": "A cumulative counter or a limited deadlock sample cannot verify the absence of this deadlock pattern.",
       "status": "insufficient-evidence",
       "title": "Deadlocks"
     },
@@ -599,7 +599,14 @@
     "connection": "timescale-demo",
     "constraints": [],
     "contention_before": null,
-    "deadlocks": null,
+    "deadlocks": {
+      "counted": 0.0,
+      "counted_since": null,
+      "deadlocks": [],
+      "note": "PostgreSQL counted 0 deadlocks in this database. It writes the details (who waited for whom, and the statements) only to the server log, which SQL can't read: paste those log lines here to have them explained. Turning on log_lock_waits also logs any lock wait longer than deadlock_timeout.",
+      "since_hours": 24.0,
+      "source": "pg_stat_database"
+    },
     "duration_ms": 657.663583,
     "environment": "local",
     "escalations_before": null,

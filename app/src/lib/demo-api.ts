@@ -13,8 +13,6 @@ import type { LiveState } from "../gen/LiveState";
 import type { Mark } from "../gen/Mark";
 import type { Plan } from "../gen/Plan";
 import type { DatabaseProduct } from "../gen/DatabaseProduct";
-import type { PlanVariant } from "../gen/PlanVariant";
-import type { QueryStat } from "../gen/QueryStat";
 import type { PlanInsights } from "../gen/PlanInsights";
 import type { PlanDiff } from "../gen/PlanDiff";
 import type { QueryProgress } from "../gen/QueryProgress";
@@ -22,15 +20,12 @@ import type { Report } from "../gen/Report";
 import type { CheckInfo } from "../gen/CheckInfo";
 import type { SavedQuery } from "../gen/SavedQuery";
 import type { SaveQuery } from "../gen/SaveQuery";
-import type { Pressure } from "../gen/Pressure";
-import type { ResourceSample } from "../gen/ResourceSample";
 import type { WaitSample } from "../gen/WaitSample";
 import type { WaitsReport } from "../gen/WaitsReport";
 import type { Api, UpdateProgress } from "./api";
 import { demoCloud } from "./demo-cloud";
 import { demoRows } from "./demo-rows";
 import { previewSql } from "./schema-model";
-import { signalsFor, signalsSample, withSignals } from "./demo-signals";
 import { can, connectFacts, refusal, sessionActions, waitingState } from "./engines";
 import { sameSamplePlan } from "./plan-samples";
 import { discoveryPage } from "./discovery-results";
@@ -41,7 +36,7 @@ import { fromRust } from "./rust-json";
 const windowMinutesOf = (options: { window_days: number; window_minutes?: number } | null | undefined): number | null =>
   options ? options.window_minutes ?? options.window_days * 1440 : null;
 
-
+/** The fixture reports, served as saved. The staging connection's resource samples are synthetic, to show the tier-limit chart. */
 const reports: Record<string, () => Promise<Report>> = import.meta.env.DEV
   ? import.meta.glob<Report>("../../../fixtures/*.report.json", { import: "default" })
   : {};
@@ -88,43 +83,6 @@ const eventsSample: () => Promise<Record<string, ChangeEvent[]> | null> = import
   ? () => import("../../../fixtures/events.sample.json").then((m) => fromRust<Record<string, ChangeEvent[]>>(m.default))
   : async () => null;
 
-/** Runtime spread captured from the demo databases: fixture reports predate it. `extra` adds a planted
- * parameter-sensitive query (SQL Server). */
-type SpreadPatch = Pick<QueryStat, "spread" | "max_time_ms" | "stddev_time_ms"> & {
-  plans?: Record<string, Pick<PlanVariant, "min_time_ms" | "max_time_ms" | "stddev_time_ms" | "compiled" | "variant_query">>;
-};
-type SpreadSample = Record<string, { queries: Record<string, SpreadPatch>; extra: QueryStat[] }>;
-const spreadSample: () => Promise<SpreadSample | null> = import.meta.env.DEV
-  ? () => import("../../../fixtures/spread.sample.json").then((m) => fromRust<SpreadSample>(m.default))
-  : async () => null;
-
-function withSpread(report: Report, sample: SpreadSample[string] | undefined): Report {
-  const workload = report.snapshot.workload;
-  if (!sample || !workload) return report;
-  const patched = workload.queries.map((q) => {
-    const patch = sample.queries[q.id];
-    if (!patch) return q;
-    const plans = q.plans.map((p) => ({ ...p, ...(patch.plans?.[p.id] ?? {}) }));
-    return { ...q, spread: patch.spread, max_time_ms: patch.max_time_ms ?? q.max_time_ms, stddev_time_ms: patch.stddev_time_ms ?? q.stddev_time_ms, plans };
-  });
-  const extra = sample.extra.filter((x) => !patched.some((q) => q.id === x.id));
-  const queries = [...patched, ...extra];
-  const added = extra.reduce((sum, q) => sum + q.total_time_ms, 0);
-  return {
-    ...report,
-    snapshot: {
-      ...report.snapshot,
-      workload: {
-        ...workload,
-        queries,
-        query_count: workload.query_count + extra.length,
-        total_time_ms: workload.total_time_ms + added,
-        total_executions: workload.total_executions + extra.reduce((sum, q) => sum + q.executions, 0),
-      },
-    },
-  };
-}
-
 /** Comparisons and exports the desktop app's Rust code made from plans captured on the demo databases. */
 export type ShareSample = {
   compares: { product: DatabaseProduct; names: [string, string]; a: Plan; b: Plan; diff: PlanDiff; reverse: PlanDiff; markdown: string; html: string; plan_markdown: [string, string] }[];
@@ -150,12 +108,10 @@ function flipped(d: Drift): Drift {
   return { ...d, a: d.b, b: d.a, items: d.items.map((i) => ({ ...i, presence: presence[i.presence], a: i.b, b: i.a })) };
 }
 
-/** Waits, pressure and samples captured from the demo databases (see fixtures/waits.sample.json). */
+/** The Waits panel's reports and samples, from the demo databases (see fixtures/waits.sample.json). */
 type WaitsSidecar = {
   reports: Record<string, WaitsReport | null>;
-  pressure: Record<string, Pressure | null>;
   samples: Record<string, WaitSample>;
-  resources: Record<string, ResourceSample[]>;
 };
 
 const waitsSample: () => Promise<WaitsSidecar | null> = import.meta.env.DEV
@@ -236,26 +192,7 @@ function unsupported(): Promise<never> {
 
 /** Demo backed by fixtures, for UI work and screenshots outside Tauri. Connection edits live in memory only. */
 export async function demoApi(): Promise<Api> {
-  const loaded = await Promise.all(Object.keys(reports).map((p) => load(nameOf(p))));
-  // Fixture reports predate pressure signals; the waits sidecar fills them in.
-  const waits = await waitsSample();
-  const spread = await spreadSample();
-  const recordedDeadlocks = await deadlockSample();
-  const signals = await signalsSample();
-  const all = loaded.map((loadedReport) => {
-    const r = loadedReport && spread ? withSpread(loadedReport, spread[loadedReport.snapshot.connection]) : loadedReport;
-    if (!r || !waits) return r;
-    const name = r.snapshot.connection;
-    const resources = r.snapshot.resources.length ? r.snapshot.resources : (waits.resources[name] ?? []);
-    // Older fixtures carry no waits for engines that gained them later; the card and the panel must agree.
-    const report = waits.reports[name];
-    const recorded = r.snapshot.waits.length
-      ? r.snapshot.waits
-      : (report?.categories ?? []).map((c) => ({ category: c.key, wait_type: c.top_wait, wait_ms: c.wait_ms, tasks: null }));
-    // Every scan records a day of deadlocks; the fixtures predate that, so the captured sample stands in.
-    const deadlocks = r.snapshot.deadlocks ?? recordedDeadlocks?.[name] ?? recordedDeadlocks?.[r.snapshot.server.engine] ?? null;
-    return { ...r, snapshot: { ...r.snapshot, waits: recorded, pressure: r.snapshot.pressure ?? waits.pressure[name] ?? null, resources, deadlocks } };
-  }).map((r) => (r && signals ? withSignals(r, signalsFor(signals, r.snapshot.connection)) : r));
+  const all = await Promise.all(Object.keys(reports).map((p) => load(nameOf(p))));
   // `?first-run` in the dev demo starts with no saved connections, to see the first-run screen.
   const firstRun = import.meta.env.DEV && typeof location !== "undefined" && location.search.includes("first-run");
   let connections: ConnectionInfo[] = all
