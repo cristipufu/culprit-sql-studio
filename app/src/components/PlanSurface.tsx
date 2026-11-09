@@ -9,6 +9,7 @@ import { NodeDetails } from "./NodeDetails";
 import { DocdbWork } from "./DocdbWork";
 import { PlanDiagram } from "./PlanDiagram";
 import { PlanInsights } from "./PlanInsights";
+import { PlanAssessmentNotes } from "./PlanAssessmentNotes";
 import { PlanOperations } from "./PlanOperations";
 import { PlanView, planKindLabel } from "./PlanView";
 import { remember, rememberedChoice } from "../lib/prefs";
@@ -59,7 +60,13 @@ export function PlanSurface({ plan, query, focus, look, badge }: { plan: Plan; q
   return (
     <div className="plan-surface">
       {plan.facts.constants_redacted && <p className="notice">{t("ui.plan_surface.redacted")}</p>}
-      {!plan.insights?.note && plan.kind !== "actual" && (plan.props["Generic Plan"] || plan.kind === "generic") && <p className="notice">{t("ui.plan_surface.generic")} {plan.engine === "sqlite" ? t("ui.plan_surface.generic_sqlite") : t("ui.plan_surface.generic_settings")} {t("ui.plan_surface.generic_history")}</p>}
+      {!plan.insights?.note && plan.kind !== "actual" && (plan.props["Generic Plan"] || plan.kind === "generic") && (
+        <PlanAssessmentNotes note={[
+          t("ui.plan_surface.generic"),
+          plan.engine === "sqlite" ? t("ui.plan_surface.generic_sqlite") : t("ui.plan_surface.generic_settings"),
+          t("ui.plan_surface.generic_history"),
+        ].join(" ")} />
+      )}
       <PlanInsights plan={plan} selectedNode={selected} onSelectNode={setSelected} />
       <DocdbWork metrics={plan.facts.docdb} basis="execution" />
       {look === "diagram" && <PlanDiagram plan={plan} query={query} focus={focus} selectedId={selected} onSelect={setSelected} badge={badge} />}

@@ -136,6 +136,17 @@ fn top_queries_and_plans_link_to_queries() {
 }
 
 #[test]
+fn plans_tile_keeps_individual_assessment_notes_in_the_plan() {
+    let r = report("pg-demo");
+    let d = dashboard(&r);
+    let plans = tile(&d, TileKey::Plans);
+    assert_eq!(plans.detail.as_deref(), Some("8 current queries have plans. 4 past or one-off queries are excluded."));
+    let query = r.snapshot.queries().iter().find(|q| q.plan.is_some()).expect("a captured plan");
+    let reading = culprit_checks::query_plan_insights(&r.snapshot, query, query.plan.as_ref().unwrap());
+    assert!(reading.note.as_deref().is_some_and(|note| note.contains("parameter values")));
+}
+
+#[test]
 fn findings_count_by_severity_and_show_the_top_three() {
     let r = report("pg-demo");
     let d = dashboard(&r);
@@ -544,7 +555,7 @@ fn postgres_storage_waits_and_plan_counts_keep_their_own_meaning() {
     let waits = tile(&d, TileKey::Waits);
     assert!(waits.metrics.iter().any(|m| m.label == "Statement execution time"));
     assert!(waits.detail.as_deref().unwrap().contains("not a measurement of time spent waiting"));
-    assert!(tile(&d, TileKey::Plans).detail.as_deref().unwrap().contains("historical or once-only"));
+    assert!(tile(&d, TileKey::Plans).detail.as_deref().unwrap().contains("past or one-off"));
     assert!(tile(&d, TileKey::Statistics).metrics.iter().any(|m| m.label == "All queries with plans"));
 }
 

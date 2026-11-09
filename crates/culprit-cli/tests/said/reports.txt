@@ -165,7 +165,7 @@ Needs a look: 22 opportunities; the top ones touch 2 min of database time over t
                     → culprit indexes mssql-demo
 
 ● Plans             5 of 12 current query plans have something to fix; a missing index shows up in 3 plans (8% of database time).
-                    12 current application queries have plans; 13 application queries have plans in all. 1 historical or once-only queries are excluded from the current assessment. Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.
+                    12 current queries have plans. 1 past or one-off query is excluded.
                     Current plans 12 · With problems 5
                     ● A missing index  3 plans  id 249
                     ● An implicit conversion  1 plan  id 7
@@ -398,7 +398,7 @@ Needs a look: 14 opportunities; the top ones touch 2 min of database time over t
                     → culprit indexes pg-demo
 
 ● Plans             2 of 8 current query plans have something to fix; a scan reading far more rows than it keeps shows up in 2 plans (28% of database time).
-                    8 current application queries have plans; 12 application queries have plans in all. 4 historical or once-only queries are excluded from the current assessment. This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.
+                    8 current queries have plans. 4 past or one-off queries are excluded.
                     Current plans 8 · With problems 2
                     ● A scan reading far more rows than it keeps  2 plans  id 5308963031944094559
                     → culprit explain pg-demo --query-id 5308963031944094559
@@ -573,8 +573,8 @@ Needs a look: 10 opportunities; the top ones touch 4 min of database time over t
                     · ix_products_sku on products  432 KB
                     → culprit indexes mysql-demo
 
-○ Plans             No urgent plan change is established in this workload; 1 current query plan retains structural observations to review as the data or workload changes.
-                    8 current application queries have plans; 8 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.
+○ Plans             1 plan has suggestions to review.
+                    8 current queries have plans.
                     Current plans 8 · With problems 0
 
 ○ Storage           Recorded storage averages: reads average 8 µs, log writes 5 µs.
@@ -735,8 +735,8 @@ Needs a look: 5 opportunities; the top ones touch 43.9 s of database time over t
                     · ix_orders_status_again on orders  3.5 MB
                     → culprit indexes sqlite-demo
 
-○ Plans             No urgent plan change is established in this workload; 1 current query plan retains structural observations to review as the data or workload changes.
-                    5 current application queries have plans; 5 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values.
+○ Plans             1 plan has suggestions to review.
+                    5 current queries have plans.
                     Current plans 5 · With problems 0
 
 ○ Storage           This scan has no storage timings.
@@ -842,8 +842,8 @@ Needs a look: YSQL pg_stat_statements (node 3d2d9e10555b4ae2a683a8402505e416) co
                     To add 0 · To clean up 0 · Space back 0 B · Tables to look at 0
                     → culprit indexes yugabyte-demo
 
-○ Plans             No urgent plan change is established in this workload; 1 current query plan retains structural observations to review as the data or workload changes.
-                    5 current application queries have plans; 5 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.
+○ Plans             1 plan has suggestions to review.
+                    5 current queries have plans.
                     Current plans 5 · With problems 0
 
 ○ Storage           This scan has no storage timings.
@@ -1061,7 +1061,7 @@ _pg_stat_statements, the 5 hours since statistics were reset; scanned Sun Oct 11
   - order_items (product_id) — 4%
   - order_items (order_id)
 - **Plans** (worth a look): 2 of 8 current query plans have something to fix; a scan reading far more rows than it keeps shows up in 2 plans (28% of database time).
-  8 current application queries have plans; 12 application queries have plans in all. 4 historical or once-only queries are excluded from the current assessment. This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.
+  8 current queries have plans. 4 past or one-off queries are excluded.
   - A scan reading far more rows than it keeps — 2 plans
 - **Storage** (for context): Recorded storage averages: reads average 3 µs.
   tables and indexes: whole server, over an unknown statistics period

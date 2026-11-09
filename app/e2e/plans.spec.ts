@@ -11,6 +11,15 @@ test("A sample plan draws its steps, a step explains itself, and the view tabs f
   const main = page.getByRole("main");
   await expect(main.getByRole("heading", { level: 2, name: /^Plan \d+$/ })).toBeVisible();
 
+  const assessment = main.locator(".ins-context");
+  await expect(assessment.locator("summary")).toHaveText("Assessment notes");
+  await expect(assessment.locator(".ins-note")).toBeHidden();
+  await assessment.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(assessment.locator(".ins-note")).toBeVisible();
+  await page.keyboard.press("Space");
+  await expect(assessment.locator(".ins-note")).toBeHidden();
+
   await main.getByRole("button", { name: "Seq Scan on orders, 43% of the work" }).click();
   await expect(main.getByRole("heading", { name: "What it does" })).toBeVisible();
   await expect(main.getByRole("code").filter({ hasText: "(status = 'shipped'::text)" })).toBeVisible();

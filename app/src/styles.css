@@ -9543,6 +9543,59 @@ button.health-pill:hover {
   line-height: 1.45;
 }
 
+.ins-context {
+  border-bottom: 1px solid var(--border);
+}
+
+.ins-context > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  cursor: pointer;
+  list-style: none;
+}
+
+.ins-context > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ins-context > summary:hover {
+  color: var(--text-2);
+}
+
+.ins-context > summary:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: -2px;
+}
+
+.ins-context-chevron {
+  margin-inline-start: auto;
+}
+
+.ins-context[open] .ins-context-chevron {
+  transform: rotate(180deg);
+}
+
+.ins-context .ins-note {
+  margin: 0;
+  padding: 0 12px 10px;
+}
+
+.empty-insights .ins-context {
+  border: 0;
+}
+
+.empty-insights .ins-context > summary {
+  padding: 6px 0;
+}
+
+.empty-insights .ins-context .ins-note {
+  padding: 0;
+}
+
 .look-toggle button {
   display: inline-flex;
   align-items: center;

@@ -47,7 +47,6 @@ pub(super) fn plans(s: &Snapshot) -> Tile {
     let mut groups: HashMap<String, Group> = HashMap::new();
     let mut flagged = 0;
     let mut observations = 0;
-    let mut note = None;
     for q in &with_plans {
         let Some(plan) = &q.plan else { continue };
         // What the plan-insights check reports: an insight capped at Low (a cheap plan, a small spill) isn't a fix.
@@ -56,9 +55,6 @@ pub(super) fn plans(s: &Snapshot) -> Tile {
             observations += 1;
         }
         let found: Vec<_> = reading.items.into_iter().filter(|i| i.severity > Severity::Low).collect();
-        if note.is_none() {
-            note = reading.note;
-        }
         if found.is_empty() {
             continue;
         }
@@ -128,16 +124,12 @@ pub(super) fn plans(s: &Snapshot) -> Tile {
     let mut tile = Tile::new(TileKey::Plans, status, takeaway);
     let total = app_queries(s).filter(|q| q.plan.is_some()).count();
     let excluded = total - captured;
-    let coverage = t!(
-        "view.dashboard.plans.coverage",
-        captured = captured.to_string(),
-        total = total.to_string(),
-        excluded = excluded.to_string()
-    );
-    tile.detail = Some(match note {
-        Some(note) => [coverage, note].join(" "),
-        None => coverage,
-    });
+    let mut coverage = t!("view.dashboard.plans.coverage", n = captured, captured = captured.to_string(),);
+    if excluded > 0 {
+        coverage.push(' ');
+        coverage.push_str(&t!("view.dashboard.plans.excluded", n = excluded, count = excluded.to_string()));
+    }
+    tile.detail = Some(coverage);
     tile.metrics = vec![
         TileMetric::new(
             "captured",

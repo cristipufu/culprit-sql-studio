@@ -754,33 +754,33 @@ Plans Unavailable Plans: No plans were captured in this scan.
 Plans Unavailable Plans: No plans were captured: The login can't read plans.
   detail: Open a query to plan it on demand, or paste a plan into Plans.
 Plans Watch Plans: One of the 1 current query plan has something to fix: an implicit conversion (7% of database time).
-  detail: 1 current application queries have plans; 1 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.
+  detail: 1 current query has a plan.
   metric Current plans: 1
   metric With problems: 1
   item An implicit conversion: 1 plan
 Plans Watch Plans: One of the 1 current query plan has something to fix: a missing index (2% of database time).
-  detail: 1 current application queries have plans; 1 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.
+  detail: 1 current query has a plan.
   metric Current plans: 1
   metric With problems: 1
   item A missing index: 1 plan
 Plans Good Plans: None of the 1 current query plan shows a known problem.
-  detail: 1 current application queries have plans; 1 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.
+  detail: 1 current query has a plan.
   metric Current plans: 1
   metric With problems: 0
 Plans Watch Plans: 2 of 2 current query plans have something to fix; the costliest is an implicit conversion (7% of database time).
-  detail: 2 current application queries have plans; 2 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.
+  detail: 2 current queries have plans.
   metric Current plans: 2
   metric With problems: 2
   item An implicit conversion: 1 plan
   item A missing index: 1 plan
 Plans Watch Plans: 2 of 3 current query plans have something to fix; the costliest is an implicit conversion (7% of database time).
-  detail: 3 current application queries have plans; 3 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.
+  detail: 3 current queries have plans.
   metric Current plans: 3
   metric With problems: 2
   item An implicit conversion: 1 plan
   item A missing index: 1 plan
 Plans Watch Plans: 3 of 4 current query plans have something to fix; the costliest is an implicit conversion (7% of database time).
-  detail: 4 current application queries have plans; 4 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.
+  detail: 4 current queries have plans.
   metric Current plans: 4
   metric With problems: 3
   item An implicit conversion: 1 plan
@@ -794,11 +794,11 @@ Plans Unavailable Plans: No plans were captured in this scan.
 Plans Unavailable Plans: No plans were captured: The login can't read plans.
   detail: Open a query to plan it on demand, or paste a plan into Plans.
 Plans Good Plans: None of the 1 current query plan shows a known problem.
-  detail: 1 current application queries have plans; 1 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.
+  detail: 1 current query has a plan.
   metric Current plans: 1
   metric With problems: 0
 Plans Watch Plans: One of the 1 current query plan has something to fix: a scan reading far more rows than it keeps (23% of database time).
-  detail: 1 current application queries have plans; 1 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.
+  detail: 1 current query has a plan.
   metric Current plans: 1
   metric With problems: 1
   item A scan reading far more rows than it keeps: 1 plan
@@ -807,17 +807,17 @@ Plans Info Plans: 1 application queries have plans, all historical or once-only;
   metric Current plans: 0
   metric All queries with plans: 1
 Plans Watch Plans: One of the 2 current query plans has something to fix: a scan reading far more rows than it keeps (23% of database time).
-  detail: 2 current application queries have plans; 2 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.
+  detail: 2 current queries have plans.
   metric Current plans: 2
   metric With problems: 1
   item A scan reading far more rows than it keeps: 1 plan
 Plans Watch Plans: One of the 2 current query plans has something to fix: a scan reading far more rows than it keeps (23% of database time).
-  detail: 2 current application queries have plans; 3 application queries have plans in all. 1 historical or once-only queries are excluded from the current assessment. This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.
+  detail: 2 current queries have plans. 1 past or one-off query is excluded.
   metric Current plans: 2
   metric With problems: 1
   item A scan reading far more rows than it keeps: 1 plan
 Plans Watch Plans: One of the 2 current query plans has something to fix: a scan reading far more rows than it keeps (23% of database time).
-  detail: 2 current application queries have plans; 4 application queries have plans in all. 2 historical or once-only queries are excluded from the current assessment. This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.
+  detail: 2 current queries have plans. 2 past or one-off queries are excluded.
   metric Current plans: 2
   metric With problems: 1
   item A scan reading far more rows than it keeps: 1 plan
@@ -829,28 +829,28 @@ Plans Unavailable Plans: No plans were captured in this scan.
   detail: Open a query to plan it on demand, or paste a plan into Plans.
 Plans Unavailable Plans: No plans were captured: The login can't read plans.
   detail: Open a query to plan it on demand, or paste a plan into Plans.
-Plans Info Plans: No urgent plan change is established in this workload; 1 current query plan retains structural observations to review as the data or workload changes.
-  detail: 1 current application queries have plans; 1 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.
+Plans Info Plans: 1 plan has suggestions to review.
+  detail: 1 current query has a plan.
   metric Current plans: 1
   metric With problems: 0
 Plans Good Plans: None of the 1 current query plan shows a known problem.
-  detail: 1 current application queries have plans; 1 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.
+  detail: 1 current query has a plan.
   metric Current plans: 1
   metric With problems: 0
 Plans Good Plans: None of the 1 current query plan shows a known problem.
-  detail: 1 current application queries have plans; 1 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.
+  detail: 1 current query has a plan.
   metric Current plans: 1
   metric With problems: 0
-Plans Info Plans: No urgent plan change is established in this workload; 1 current query plan retains structural observations to review as the data or workload changes.
-  detail: 2 current application queries have plans; 2 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.
+Plans Info Plans: 1 plan has suggestions to review.
+  detail: 2 current queries have plans.
   metric Current plans: 2
   metric With problems: 0
-Plans Info Plans: No urgent plan change is established in this workload; 1 current query plan retains structural observations to review as the data or workload changes.
-  detail: 3 current application queries have plans; 3 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.
+Plans Info Plans: 1 plan has suggestions to review.
+  detail: 3 current queries have plans.
   metric Current plans: 3
   metric With problems: 0
-Plans Info Plans: No urgent plan change is established in this workload; 1 current query plan retains structural observations to review as the data or workload changes.
-  detail: 4 current application queries have plans; 4 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.
+Plans Info Plans: 1 plan has suggestions to review.
+  detail: 4 current queries have plans.
   metric Current plans: 4
   metric With problems: 0"#;
 

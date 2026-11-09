@@ -465,7 +465,7 @@
         "title": "Indexes"
       },
       {
-        "detail": "5 current application queries have plans; 5 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. MariaDB's EXPLAIN has no actual rows or timings; ANALYZE adds them, with pages read and sort spills.",
+        "detail": "5 current queries have plans.",
         "fix_sql": null,
         "items": [],
         "key": "plans",
@@ -485,7 +485,7 @@
         ],
         "next": null,
         "status": "info",
-        "takeaway": "No urgent plan change is established in this workload; 1 current query plan retains structural observations to review as the data or workload changes.",
+        "takeaway": "1 plan has suggestions to review.",
         "title": "Plans"
       },
       {
@@ -1166,7 +1166,7 @@
         "title": "Indexes"
       },
       {
-        "detail": "12 current application queries have plans; 13 application queries have plans in all. 1 historical or once-only queries are excluded from the current assessment. Estimated plan: misestimates, spills, unused memory grants and uneven threads need an actual plan.",
+        "detail": "12 current queries have plans. 1 past or one-off query is excluded.",
         "fix_sql": null,
         "items": [
           {
@@ -2345,7 +2345,7 @@
         "title": "Indexes"
       },
       {
-        "detail": "8 current application queries have plans; 8 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. MySQL's EXPLAIN has no actual rows, spills, memory or threads; EXPLAIN ANALYZE adds actual rows.",
+        "detail": "8 current queries have plans.",
         "fix_sql": null,
         "items": [],
         "key": "plans",
@@ -2365,7 +2365,7 @@
         ],
         "next": null,
         "status": "info",
-        "takeaway": "No urgent plan change is established in this workload; 1 current query plan retains structural observations to review as the data or workload changes.",
+        "takeaway": "1 plan has suggestions to review.",
         "title": "Plans"
       },
       {
@@ -3059,7 +3059,7 @@
         "title": "Indexes"
       },
       {
-        "detail": "8 current application queries have plans; 12 application queries have plans in all. 4 historical or once-only queries are excluded from the current assessment. This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+        "detail": "8 current queries have plans. 4 past or one-off queries are excluded.",
         "fix_sql": null,
         "items": [
           {
@@ -3558,7 +3558,7 @@
         "title": "Indexes"
       },
       {
-        "detail": "5 current application queries have plans; 5 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. Planned with Culprit's SQLite library and unknown parameter values. The application's version, modules and build options may differ. This plan shows access paths, without row counts, costs or timings. Compare application-log durations and a plan from the application's connection with representative values.",
+        "detail": "5 current queries have plans.",
         "fix_sql": null,
         "items": [],
         "key": "plans",
@@ -3578,7 +3578,7 @@
         ],
         "next": null,
         "status": "info",
-        "takeaway": "No urgent plan change is established in this workload; 1 current query plan retains structural observations to review as the data or workload changes.",
+        "takeaway": "1 plan has suggestions to review.",
         "title": "Plans"
       },
       {
@@ -4020,7 +4020,7 @@
         "title": "Indexes"
       },
       {
-        "detail": "3 current application queries have plans; 3 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+        "detail": "3 current queries have plans.",
         "fix_sql": null,
         "items": [],
         "key": "plans",
@@ -4522,7 +4522,7 @@
         "title": "Indexes"
       },
       {
-        "detail": "5 current application queries have plans; 5 application queries have plans in all. 0 historical or once-only queries are excluded from the current assessment. This generic plan was obtained without the application's parameter values. Its estimates and connection settings may differ from an application's run, and partitions listed here may be skipped at runtime. It does not identify the plan used by historical executions. Actual rows and timing require a measured plan with representative values.",
+        "detail": "5 current queries have plans.",
         "fix_sql": null,
         "items": [],
         "key": "plans",
@@ -4542,7 +4542,7 @@
         ],
         "next": null,
         "status": "info",
-        "takeaway": "No urgent plan change is established in this workload; 1 current query plan retains structural observations to review as the data or workload changes.",
+        "takeaway": "1 plan has suggestions to review.",
         "title": "Plans"
       },
       {

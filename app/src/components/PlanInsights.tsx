@@ -1,4 +1,4 @@
-import { ChartColumn, ChevronDown, CircleCheck, Copy, Cpu, Crosshair, Info, KeyRound, ListChecks, MemoryStick, Server, SquareCode, type LucideIcon } from "lucide-react";
+import { ChartColumn, ChevronDown, CircleCheck, Copy, Cpu, Crosshair, KeyRound, ListChecks, MemoryStick, Server, SquareCode, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { InsightArea } from "../gen/InsightArea";
 import type { Plan } from "../gen/Plan";
@@ -13,6 +13,7 @@ import { Sql } from "./Sql";
 import { copyAndTell } from "../lib/clipboard";
 import { can } from "../lib/engines";
 import { t } from "../lib/i18n";
+import { PlanAssessmentNotes } from "./PlanAssessmentNotes";
 
 const AREA: Record<InsightArea, { icon: LucideIcon; label: () => string }> = {
   index: { icon: KeyRound, label: () => t("ui.plan_insights.area.index") },
@@ -100,7 +101,7 @@ export function PlanInsights({ plan, selectedNode, onSelectNode }: { plan: Plan;
         <CircleCheck size={16} className="ok" />
         <div>
           <div className="ins-empty-title">{t("ui.plan_insights.none")}</div>
-          {note && <div className="ins-note">{note}</div>}
+          <PlanAssessmentNotes note={note} />
         </div>
       </div>
     );
@@ -133,7 +134,7 @@ export function PlanInsights({ plan, selectedNode, onSelectNode }: { plan: Plan;
           <Copy size={12} /> {t("ui.common.copy")}
         </button>
       </header>
-      {note && <p className="ins-note"><Info size={13} /> {note}</p>}
+      <PlanAssessmentNotes note={note} />
       <div className="ins-list" ref={list} role="list" aria-label={t("ui.plan_insights.list_label")}>
         {shown.map((i, index) => {
           const area = AREA[i.area];
