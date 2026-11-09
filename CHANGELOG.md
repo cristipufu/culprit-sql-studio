@@ -6,13 +6,20 @@ Each release's notes are its section below: the release workflow publishes them 
 
 ### Improvements
 
-- **Compact scan-error badge in the top bar.** Failed scan notices now show a short "Last scan failed" badge instead of stretching the full error across the header. Hover or focus the badge to read and copy the complete error message and hint.
-- **Hypothetical index plan verification.** Index verification compares a query's baseline plan against its plan with virtual indexes, showing whether the planner adopts the proposed index and how the plan changes.
+- **Localization.** German, Spanish and French throughout the app and CLI, including dates and numbers.
+- **Lighter startup.** Roughly two-thirds smaller UI entry bundle.
+- **Index verification.** Compare plans with hypothetical indexes before creating real ones.
+- **UI improvements.** Compact scan-error badge, better keyboard navigation and screen-reader support.
+- **Broader validation.** Automated live-provider, cluster and SSH/TLS tests, plus updated dependencies.
 
 ### Fixes
 
-- **More accurate migration SQL linting.** `culprit lint-sql` and the editor linter handle multi-clause `ALTER TABLE` statements, `CREATE INDEX CONCURRENTLY IF NOT EXISTS`, MySQL `ADD INDEX` and `CHANGE COLUMN` clauses, shorthand column renames, quoted identifiers and inline comments when highlighting statements or applying quick fixes.
-- **Hardened SQL redaction, plan reparsing and CLI path handling.** Saved plans keep their structured facts when reparsed, SQL lexing and redaction handle edge-case quoting and comments across dialects, and `culprit lint-sql` skips duplicate symlinked paths.
+- **SQL linting.** Improved migration checks and quick fixes that preserve subsequent edits.
+- **Editor reliability.** Preserved tabs and undo history; closing a tab stops queued statements.
+- **Language switching.** Cached advice and other report text refresh correctly.
+- **Stability and safety.** Fixed Windows CLI crashes, plan-parser hangs and SQL-redaction edge cases.
+
+**Upgrade note:** Take a fresh scan after upgrading; earlier saved scans and history use an unsupported format.
 
 ## 0.5.4
 
