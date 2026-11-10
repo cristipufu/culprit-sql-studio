@@ -4,4 +4,4 @@ import type { StatementProblem } from "./StatementProblem";
 /**
  * Facts a caller can act on independently of a localized error message or hint.
  */
-export type ErrorDetail = { "statement": StatementProblem } | "actual-plan-statistics-unavailable";
+export type ErrorDetail = { "statement": StatementProblem } | "actual-plan-statistics-unavailable" | "connection-security";

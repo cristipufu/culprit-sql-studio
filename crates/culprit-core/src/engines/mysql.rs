@@ -21,6 +21,10 @@ fn index_hiding(server: &ServerInfo) -> Option<&'static str> {
 }
 
 impl EngineSpec for Mysql {
+    fn connection_security(&self) -> Option<crate::ConnectionSecuritySpec> {
+        Some(connection_security())
+    }
+
     fn products(&self) -> &'static [ProductSpec] {
         const PRODUCTS: &[ProductSpec] = &[
             ProductSpec::primary(DatabaseProduct::Mysql, "MySQL", key!("core.engines.mysql.plan_format")),
@@ -197,5 +201,53 @@ impl Dialect for Mysql {
 
     fn end_session(&self, session: &str) -> String {
         format!("KILL {session};")
+    }
+}
+
+pub(super) fn connection_security() -> crate::ConnectionSecuritySpec {
+    crate::ConnectionSecuritySpec {
+        modes: vec![
+            crate::ConnectionSecurityMode::new(
+                "DISABLED",
+                key!("ui.connection_security.mode.disabled"),
+                key!("ui.connection_security.description.disabled"),
+            )
+            .aliases(&["disable", "false", "off"])
+            .permits_plaintext()
+            .without_certificates(),
+            crate::ConnectionSecurityMode::new(
+                "PREFERRED",
+                key!("ui.connection_security.mode.preferred"),
+                key!("ui.connection_security.description.preferred"),
+            )
+            .aliases(&["prefer", "allow"])
+            .permits_plaintext(),
+            crate::ConnectionSecurityMode::new(
+                "REQUIRED",
+                key!("ui.connection_security.mode.required"),
+                key!("ui.connection_security.description.required"),
+            )
+            .aliases(&["require", "true", "on"]),
+            crate::ConnectionSecurityMode::new(
+                "VERIFY_CA",
+                key!("ui.connection_security.mode.verify_ca"),
+                key!("ui.connection_security.description.verify_ca"),
+            ),
+            crate::ConnectionSecurityMode::new(
+                "VERIFY_IDENTITY",
+                key!("ui.connection_security.mode.verify_identity"),
+                key!("ui.connection_security.description.verify_identity"),
+            )
+            .aliases(&["verify-full"])
+            .verifies_identity(),
+        ],
+        default_mode: "VERIFY_IDENTITY".into(),
+        local_default_mode: "PREFERRED".into(),
+        mode_aliases: vec!["sslmode".into(), "ssl-mode".into(), "ssl_mode".into()],
+        ca_aliases: vec!["sslrootcert".into(), "ssl-ca".into(), "ssl_ca".into()],
+        mode_option: "ssl-mode".into(),
+        ca_option: "ssl-ca".into(),
+        trust_certificate_option: None,
+        hostname_option: None,
     }
 }

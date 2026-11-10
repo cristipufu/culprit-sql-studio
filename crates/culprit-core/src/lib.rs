@@ -5,6 +5,7 @@ pub mod changes;
 pub mod check;
 pub mod cloud;
 pub mod connection;
+pub mod connection_security;
 pub mod coverage;
 pub mod dashboard;
 pub mod deadlock;
@@ -57,6 +58,10 @@ pub use cloud::{
 pub use connection::{
     AuthKind, ConnectionAttempt, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, SshConfig,
     aws_iam_host_allowed, entra_host_allowed, expand_home, is_local_host, transport_error,
+};
+pub use connection_security::{
+    ConnectionSecurity, ConnectionSecurityInfo, ConnectionSecurityMode, ConnectionSecuritySpec,
+    apply_connection_security, connection_security,
 };
 pub use coverage::{Coverage, Source, SourceOutcome, SourceState, same_source, source_id};
 pub use dashboard::{Dashboard, DashboardLive, ItemKind, Tile, TileItem, TileKey, TileMetric, TileStatus};

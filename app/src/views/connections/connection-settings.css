@@ -1,0 +1,82 @@
+.new-conn > .new-conn-fields { display: contents; padding: 0; margin: 0; border: 0; }
+.connection-security {
+  min-inline-size: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.connection-security-heading { display: flex; align-items: center; gap: 10px; padding: 17px 18px 13px; color: var(--text-2); }
+.connection-security-heading > svg { flex-shrink: 0; }
+.connection-security-heading h3 { margin: 0; color: var(--text); font-size: 13px; font-weight: 600; letter-spacing: -0.15px; }
+.connection-security-heading p { margin: 3px 0 0; font-size: 11px; color: var(--text-3); line-height: 1.45; }
+.connection-security-summary { margin-inline-start: auto; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--good) 25%, var(--border)); border-radius: 5px; background: var(--good-bg); color: var(--good); font-size: 10px; font-weight: 500; white-space: nowrap; }
+.connection-security.caution .connection-security-summary { color: var(--medium); background: var(--medium-bg); border-color: color-mix(in srgb, var(--medium) 30%, var(--border)); }
+.connection-security-body { padding: 0 18px 17px; }
+.connection-security-label { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-block-end: 8px; }
+.connection-security .connection-security-label label { padding: 0; font-size: 12px; color: var(--text-2); }
+.connection-security-label code { background: transparent; padding: 0; font-size: 10px; color: var(--text-3); }
+.connection-security select, .connection-security input:not([type="checkbox"]) { inline-size: 100%; min-inline-size: 0; block-size: 40px; padding: 0 11px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--raised); color: var(--text); font: inherit; font-size: 13px; }
+.connection-security select:focus-visible, .connection-security input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.connection-security-description { margin: 9px 0 0; color: var(--text-2); font-size: 12px; line-height: 1.6; }
+.connection-security-description.caution { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--medium) 28%, var(--border)); border-radius: 7px; background: var(--medium-bg); color: var(--medium); }
+.connection-security-source { margin: 10px 0 0; color: var(--text-3); font-size: 10px; line-height: 1.5; }
+.connection-security-hint { margin: 6px 0 0; color: var(--text-3); font-size: 11px; line-height: 1.6; }
+.connection-security-auth { margin: 12px 0 0; padding: 10px 12px; border-radius: 7px; background: var(--low-bg); color: var(--low); font-size: 11px; line-height: 1.6; }
+.connection-certificate-options { margin-block-start: 15px; padding-block-start: 13px; border-block-start: 1px solid var(--border); }
+.connection-certificate-options summary { color: var(--text-2); font-size: 12px; cursor: pointer; }
+.connection-certificate-fields { display: grid; gap: 9px; margin-block-start: 14px; }
+.connection-security .connection-certificate-fields label { padding: 0; font-size: 12px; color: var(--text-2); }
+.connection-certificate-file { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.connection-certificate-file .btn { block-size: 40px; padding-inline: 11px; }
+.connection-certificate-trust { margin-block-start: 5px; }
+.connection-certificate-trust > label { display: flex; align-items: center; gap: 8px; }
+.connection-certificate-trust input { inline-size: 14px; block-size: 14px; accent-color: var(--focus); }
+.connection-file-security { display: flex; align-items: center; gap: 10px; padding: 15px 17px; border: 1px solid var(--border); border-radius: 10px; color: var(--text-2); font-size: 12px; line-height: 1.6; }
+.connection-file-security svg { flex-shrink: 0; color: var(--text-3); }
+.connection-environments { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); min-inline-size: 0; inline-size: 100%; }
+.connection-environments button { display: flex; align-items: center; justify-content: center; gap: 7px; min-inline-size: 0; padding: 8px 7px; font-size: 12px; }
+.connection-environments .env-dot { inline-size: 6px; block-size: 6px; margin: 0; box-shadow: none; flex-shrink: 0; }
+.new-conn .connection-security, .new-conn .connection-file-security { margin-block: 3px; }
+.new-conn-actions .btn { min-block-size: 33px; padding-inline: 12px; }
+.new-conn .notice .btn { margin-block-start: 9px; }
+.connection-settings-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: rgb(0 0 0 / 50%); backdrop-filter: blur(5px); padding: 24px; }
+.connection-settings-dialog { display: flex; flex-direction: column; inline-size: min(590px, 100%); max-block-size: min(880px, calc(100dvh - 48px)); background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: 16px; box-shadow: var(--shadow-pop); overflow: hidden; outline: none; }
+.connection-settings-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 25px 26px 19px; border-block-end: 1px solid var(--border); }
+.connection-settings-title { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
+.connection-settings-title h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.65px; line-height: 1.25; }
+.connection-settings-header p { margin: 7px 0 0; color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; }
+.connection-settings-header .icon-btn { margin: -3px -6px 0 0; flex-shrink: 0; }
+.connection-settings-unsaved { font-size: 10px; padding: 4px 6px; border: 1px solid color-mix(in srgb, var(--medium) 25%, var(--border)); border-radius: 5px; color: var(--medium); background: var(--medium-bg); }
+.connection-settings-content { padding: 21px 26px 0; overflow-y: auto; overscroll-behavior: contain; }
+.connection-settings-intro { margin: 0 0 15px; color: var(--text-2); font-size: 12px; line-height: 1.6; }
+.connection-settings-endpoint { display: grid; gap: 9px; margin: 0 0 20px; padding: 14px 15px; border: 1px solid var(--border); border-radius: 9px; background: var(--sunken); }
+.connection-settings-endpoint > div { display: flex; justify-content: space-between; gap: 20px; font-size: 12px; }
+.connection-settings-endpoint dt { color: var(--text-3); flex-shrink: 0; }
+.connection-settings-endpoint dd { margin: 0; text-align: end; overflow-wrap: anywhere; min-inline-size: 0; }
+.connection-settings-endpoint .mono { font-size: 11px; }
+.connection-settings-environment > span { display: block; margin-block-end: 8px; color: var(--text-2); font-size: 12px; }
+.connection-settings-credentials { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 11px; line-height: 1.6; margin: 17px 0; }
+.connection-settings-credentials svg { flex-shrink: 0; }
+.connection-settings-content > .connection-security, .connection-settings-content > .connection-file-security { margin-block-start: 18px; }
+.connection-settings-scope { margin: 15px 0 18px; color: var(--text-3); font-size: 11px; line-height: 1.6; }
+.connection-settings-actions { display: flex; align-items: center; gap: 8px; padding: 17px 26px; border-block-start: 1px solid var(--border); background: var(--surface); }
+.connection-settings-actions .btn { block-size: 35px; padding-inline: 12px; font-size: 12px; }
+.connection-settings-spacer { flex: 1; }
+.connection-settings-status { margin-block-start: 15px; }
+.connection-settings-status .btn { margin-block-start: 8px; }
+.connection-settings-success { display: flex; align-items: center; gap: 8px; padding: 12px; margin-block-start: 15px; border: 1px solid color-mix(in srgb, var(--good) 25%, var(--border)); border-radius: 8px; background: var(--good-bg); color: var(--good); font-size: 12px; line-height: 1.5; }
+@media (max-width: 600px) {
+  .connection-settings-backdrop { padding: 12px; }
+  .connection-settings-dialog { max-block-size: calc(100dvh - 24px); border-radius: 12px; }
+  .connection-settings-header { padding: 20px 18px 16px; }
+  .connection-settings-content { padding: 18px 18px 0; }
+  .connection-settings-actions { padding: 14px 18px; flex-wrap: wrap; }
+  .connection-settings-actions .btn { padding-inline: 9px; }
+  .connection-security-heading { flex-wrap: wrap; padding-inline: 14px; }
+  .connection-security-summary { font-size: 9px; }
+  .connection-security-body { padding-inline: 14px; }
+  .connection-environments button { padding-inline: 4px; font-size: 10px; gap: 5px; }
+  .connection-certificate-file { grid-template-columns: minmax(0, 1fr); }
+  .connection-certificate-file .btn { justify-self: start; block-size: 33px; }
+}

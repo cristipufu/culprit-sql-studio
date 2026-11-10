@@ -38,6 +38,7 @@ fn app_folder(name: &str) -> PathBuf {
 
 fn add_file(ws: &Workspace, name: &str, path: &Path) -> culprit_core::Result<culprit_engine::ConnectionInfo> {
     ws.add_connection(NewConnection {
+        security: None,
         name: name.into(),
         input: database_file_input(path),
         environment: Environment::Development,

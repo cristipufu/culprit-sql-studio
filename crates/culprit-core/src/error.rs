@@ -26,6 +26,7 @@ pub enum ErrorCode {
 pub enum ErrorDetail {
     Statement(crate::sql::StatementProblem),
     ActualPlanStatisticsUnavailable,
+    ConnectionSecurity,
 }
 
 #[derive(Serialize, TS, Clone, Debug, thiserror::Error)]

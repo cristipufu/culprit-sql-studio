@@ -174,6 +174,7 @@ fn keys_used() -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     scan(&root().join("crates"), &mut out);
     scan(&root().join("app/src"), &mut out);
+    scan(&root().join("app/src-tauri/src"), &mut out);
     out
 }
 

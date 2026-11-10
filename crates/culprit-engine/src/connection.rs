@@ -7,8 +7,9 @@ use culprit_core::{
 };
 
 use crate::{
-    ConnectionInfo, DiscoveredDatabase, DiscoveryResult, ImportCandidate, ImportSource, NewConnection,
-    ParsedConnection, ProviderFactory, aws, connstr, discover, entra, import, query_log, registry, reports,
+    ConnectionInfo, ConnectionSettings, DiscoveredDatabase, DiscoveryResult, ImportCandidate, ImportSource,
+    NewConnection, ParsedConnection, ProviderFactory, aws, connstr, discover, entra, import, query_log, registry,
+    reports,
     secrets::SecretStore,
     store::{self, Paths, Store, StoredConnection},
 };
@@ -58,6 +59,7 @@ impl Connections<'_> {
 
     fn info(&self, name: &str, stored: &StoredConnection) -> ConnectionInfo {
         ConnectionInfo {
+            security: culprit_core::connection_security(&stored.spec()),
             name: name.to_string(),
             engine: stored.engine,
             environment: stored.environment,
@@ -140,6 +142,36 @@ impl Connections<'_> {
             .or(info.database.as_deref())
             .map(culprit_core::expand_home)
             .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+    }
+
+    pub(crate) fn set_connection_settings(&self, name: &str, settings: &ConnectionSettings) -> Result<ConnectionInfo> {
+        self.store.try_update(name, |stored| {
+            let mut spec = stored.spec();
+            culprit_core::apply_connection_security(&mut spec, &settings.security)?;
+            stored.options = spec.options;
+            stored.environment = settings.environment;
+            Ok(())
+        })?;
+        self.connection(name)
+    }
+
+    pub(crate) async fn test_connection_settings(
+        &self,
+        name: &str,
+        settings: &ConnectionSettings,
+    ) -> Result<ServerInfo> {
+        let stored = self.store.get(name)?;
+        let mut spec = stored.spec();
+        culprit_core::apply_connection_security(&mut spec, &settings.security)?;
+        spec.environment = settings.environment;
+        self.ssh.attach(&mut spec)?;
+        self.resolve_secrets(name, &stored, &mut spec).await?;
+        self.materialize_certificates(&mut spec)?;
+        let provider = self.open_provider(&spec)?;
+        self.forget_rejected(
+            name,
+            crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, provider.probe()).await,
+        )
     }
 
     pub(crate) fn add_connection(&self, new: NewConnection) -> Result<ConnectionInfo> {
@@ -633,6 +665,9 @@ fn merge(new: &NewConnection) -> Result<ConnectionSpec> {
     {
         spec.database = Some(absolute.to_string_lossy().into_owned());
     }
+    if let Some(security) = &new.security {
+        culprit_core::apply_connection_security(&mut spec, security)?;
+    }
     spec.environment = new.environment;
     spec.ssh = new.ssh.clone();
     crate::ssh::validate_spec(&mut spec)?;
@@ -655,6 +690,7 @@ pub(crate) fn parse_connection(input: &str, engine: Option<Engine>, via_ssh: boo
         _ => Environment::Development,
     };
     Ok(ParsedConnection {
+        security: culprit_core::connection_security(&spec),
         engine: spec.engine,
         host: spec.host.clone(),
         port: spec.port,

@@ -1,7 +1,9 @@
 //! The plain data the workspace takes and returns: connections as the app lists them, a new connection, a pasted
 //! connection string read back, and the request and answer for a period's events.
 
-use culprit_core::{AuthKind, Engine, Environment, Error, Result, SshConfig, t};
+use culprit_core::{
+    AuthKind, ConnectionSecurity, ConnectionSecurityInfo, Engine, Environment, Error, Result, SshConfig, t,
+};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -29,6 +31,9 @@ pub struct ConnectionInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub ssh: Option<SshConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub security: Option<ConnectionSecurityInfo>,
 }
 
 /// A period on a connection's timeline. Everything is optional: by default the last 7 days.
@@ -107,6 +112,9 @@ pub struct NewConnection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub ssh: Option<SshConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub security: Option<ConnectionSecurity>,
 }
 
 /// What a chosen database file is as a connection's input: its path when the extension says SQLite (`.db`, `.sqlite`,
@@ -130,4 +138,15 @@ pub struct ParsedConnection {
     pub display: String,
     pub suggested_name: String,
     pub environment: Environment,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub security: Option<ConnectionSecurityInfo>,
+}
+
+/// Editable metadata. Endpoints, credentials, SSH routes and report ownership are retained.
+#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[ts(export)]
+pub struct ConnectionSettings {
+    pub environment: Environment,
+    pub security: ConnectionSecurity,
 }

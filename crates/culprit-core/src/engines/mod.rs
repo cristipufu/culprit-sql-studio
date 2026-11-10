@@ -47,6 +47,11 @@ pub struct SettingChange {
 
 /// One engine, as checks and every surface see it.
 pub trait EngineSpec: Send + Sync {
+    /// TLS policy and native option names; file engines have no network security settings.
+    fn connection_security(&self) -> Option<crate::ConnectionSecuritySpec> {
+        None
+    }
+
     /// The provider's default product followed by any independently identified products it also serves.
     fn products(&self) -> &'static [ProductSpec];
 
@@ -403,6 +408,7 @@ pub struct EngineFacts {
     pub sql_syntax: SqlSyntax,
     pub statement_metrics: StatementMetrics,
     pub wait_sampling: Option<WaitSampling>,
+    pub connection_security: Option<crate::ConnectionSecuritySpec>,
 }
 
 impl Engine {
@@ -453,6 +459,7 @@ impl Engine {
         let spec = self.spec();
         let abilities = spec.abilities();
         EngineFacts {
+            connection_security: spec.connection_security(),
             products: spec.products().iter().map(|product| product.facts()).collect(),
             statement_metrics: spec.statement_metrics(),
             wait_sampling: spec.wait_sampling(),

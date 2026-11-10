@@ -29,6 +29,10 @@ pub fn session_target(session: &str) -> crate::Result<(String, i32, String)> {
 }
 
 impl EngineSpec for Yugabyte {
+    fn connection_security(&self) -> Option<crate::ConnectionSecuritySpec> {
+        Some(super::postgres::connection_security())
+    }
+
     fn products(&self) -> &'static [ProductSpec] {
         const PRODUCTS: &[ProductSpec] =
             &[ProductSpec::primary(DatabaseProduct::Yugabyte, "YugabyteDB", key!("core.engines.yugabyte.plan_format"))];

@@ -23,10 +23,11 @@ import type { SaveQuery } from "../gen/SaveQuery";
 import type { WaitSample } from "../gen/WaitSample";
 import type { WaitsReport } from "../gen/WaitsReport";
 import type { Api, UpdateProgress } from "./api";
+import { demoSecurityInfo, validateDemoSettings } from "./demo-security";
 import { demoCloud } from "./demo-cloud";
 import { demoRows } from "./demo-rows";
 import { previewSql } from "./schema-model";
-import { can, connectFacts, refusal, sessionActions, waitingState } from "./engines";
+import { can, connectionSecurityFacts, connectFacts, refusal, sessionActions, waitingState } from "./engines";
 import { sameSamplePlan } from "./plan-samples";
 import { discoveryPage } from "./discovery-results";
 import { t } from "./i18n";
@@ -201,6 +202,7 @@ export async function demoApi(): Promise<Api> {
   let connections: ConnectionInfo[] = all
     .filter((r): r is Report => r !== null && !firstRun)
     .map((r) => ({
+      security: demoSecurityInfo(r.snapshot.server.engine, "localhost", can(r.snapshot.server.engine, "sign_in") ? "password" : "none"),
       name: r.snapshot.connection,
       engine: r.snapshot.server.engine,
       environment: r.snapshot.environment,
@@ -283,6 +285,16 @@ export async function demoApi(): Promise<Api> {
     parseConnection: unsupported,
     testConnection: unsupported,
     addConnection: unsupported,
+    setConnectionSettings: async (name, settings) => {
+      const current = connections.find((connection) => connection.name === name);
+      if (!current) throw noConnection(name);
+      validateDemoSettings(current.engine, current.security, settings);
+      const security = current.security ? { ...current.security, settings: { ...settings.security }, effective_mode: settings.security.mode ?? current.security.default_mode } : undefined;
+      const updated = { ...current, environment: settings.environment, security };
+      connections = connections.map((connection) => connection.name === name ? updated : connection);
+      return updated;
+    },
+    testConnectionSettings: () => desktopOnly(t("ui.connection_settings.test")),
     removeConnection: async (name) => {
       if (!connections.some((c) => c.name === name)) return Promise.reject(noConnection(name));
       connections = connections.filter((c) => c.name !== name);
@@ -328,6 +340,7 @@ export async function demoApi(): Promise<Api> {
     },
     importConnections: async (items) => {
       const added: ConnectionInfo[] = items.map((c) => ({
+        security: demoSecurityInfo(c.engine, c.host, c.auth, c.options),
         name: c.alias,
         engine: c.engine,
         environment: c.environment,
@@ -369,7 +382,10 @@ export async function demoApi(): Promise<Api> {
       const added: ConnectionInfo[] = items.map((d) => {
         const port = d.port ?? 1433;
         const auth = d.cloud === "aws" ? d.auth : "entra";
+        const facts = connectionSecurityFacts(d.engine);
+        const securityOptions = facts ? { [facts.mode_option]: facts.default_mode, ...(d.cloud === "aws" ? { [facts.ca_option]: "rds" } : {}) } : {};
         return {
+          security: demoSecurityInfo(d.engine, d.host, auth, securityOptions),
           name: d.alias,
           engine: d.engine,
           environment: d.environment,
@@ -665,6 +681,7 @@ export async function demoApi(): Promise<Api> {
     },
     chooseQueryLog: () => unsupported(),
     chooseDatabaseFile: () => unsupported(),
+    chooseCaCertificate: () => desktopOnly(t("ui.connection_security.choose_ca")),
     chooseSshIdentity: () => desktopOnly(t("ui.demo_api.ssh_identity")),
     // `?demo-approval` shows a sample request so the approval dialog can be designed without an agent.
     pendingApprovals: async () => (demoApproval ? [demoApproval] : []),

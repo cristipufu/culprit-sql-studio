@@ -243,6 +243,7 @@ pub(crate) async fn run(ws: &Workspace, command: ConnCommand, out: &Out) -> culp
                 None
             };
             let new = NewConnection {
+                security: None,
                 name: args.name.clone(),
                 input: args.url,
                 environment: match args.env {

@@ -601,6 +601,7 @@ mod tests {
 
     fn info(engine: Engine, environment: Environment) -> ConnectionInfo {
         ConnectionInfo {
+            security: None,
             name: "shop".into(),
             engine,
             environment,

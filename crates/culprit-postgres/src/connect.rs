@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use culprit_core::{
     AuthKind, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, Engine, Error, ErrorCode, Result,
-    aws_iam_host_allowed, entra_host_allowed, is_local_host, t, transport_error,
+    aws_iam_host_allowed, entra_host_allowed, t, transport_error,
 };
 use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
@@ -166,13 +166,13 @@ impl Connector {
 fn tls_for(spec: &ConnectionSpec) -> Result<(SslMode, MakeRustlsConnect)> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     // Entra and IAM tokens are bearer credentials: never send them over unverified TLS.
+    let security =
+        culprit_core::Engine::Postgres.spec().connection_security().expect("PostgreSQL has network security settings");
+    let default = security.describe(spec).default_mode;
     let mode = if matches!(spec.auth, AuthKind::Entra | AuthKind::AwsIam) {
-        "verify-full".to_string()
+        default
     } else {
-        // libpq defaults to `prefer`; Culprit only does that for a local server and verifies every other host's
-        // certificate unless the connection string asks for less.
-        let default = if is_local_host(&spec.host) { "prefer" } else { "verify-full" };
-        spec.option("sslmode").unwrap_or(default).to_ascii_lowercase()
+        spec.option("sslmode").unwrap_or(&default).to_ascii_lowercase()
     };
     let root_cert = spec.option("sslrootcert").filter(|p| !p.is_empty() && *p != "system");
     let (ssl_mode, verification) = match mode.as_str() {
@@ -361,11 +361,13 @@ fn map_connect_error(error: tokio_postgres::Error, host: &str, port: u16) -> Err
     }
     if lower.contains("invalid peer certificate") {
         return Error::new(ErrorCode::ConnectionFailed, message)
-            .with_hint(t!("provider.postgres.connect.untrusted_certificate_hint"));
+            .with_hint(t!("provider.postgres.connect.untrusted_certificate_hint"))
+            .with_detail(culprit_core::ErrorDetail::ConnectionSecurity);
     }
     if lower.contains("tls") || lower.contains("certificate") || lower.contains("ssl") {
         return Error::new(ErrorCode::ConnectionFailed, message)
-            .with_hint(t!("provider.postgres.connect.tls_failed_hint"));
+            .with_hint(t!("provider.postgres.connect.tls_failed_hint"))
+            .with_detail(culprit_core::ErrorDetail::ConnectionSecurity);
     }
     if lower.contains("failed to lookup")
         || lower.contains("nodename nor servname")

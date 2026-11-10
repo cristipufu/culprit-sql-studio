@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use culprit_core::{
     AuthKind, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, Engine, Error, ErrorCode, Result,
-    aws_iam_host_allowed, entra_host_allowed, is_local_host, t,
+    aws_iam_host_allowed, entra_host_allowed, t,
 };
 use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, DriverError, IoError, OptsBuilder, SslOpts};
@@ -133,7 +133,8 @@ impl Connector {
         let mode = ["sslmode", "ssl-mode", "ssl_mode"].iter().find_map(|k| spec.option(k));
         // Like the mysql client, a local server gets TLS when it offers it; anything else must present a certificate that
         // verifies, unless the connection string asks for less (ssl-mode=REQUIRED encrypts without verifying).
-        let default = if is_local_host(&host) { Tls::Preferred } else { Tls::VerifyIdentity };
+        let security = Engine::Mysql.spec().connection_security().expect("MySQL has network security settings");
+        let default = Tls::parse(&security.describe(spec).default_mode)?;
         let mut tls = mode.map(Tls::parse).transpose()?.unwrap_or(default);
         let mut base = OptsBuilder::default()
             .ip_or_hostname(host.clone())
@@ -321,7 +322,8 @@ impl Connector {
         // A specific TLS diagnosis (certificate, cipher suites) already carries its own advice.
         if mapped.hint.is_none() && (lower.contains("certificate") || lower.contains("tls") || lower.contains("ssl")) {
             return Error::new(ErrorCode::ConnectionFailed, mapped.message)
-                .with_hint(t!("provider.mysql.connect.tls_failed_hint"));
+                .with_hint(t!("provider.mysql.connect.tls_failed_hint"))
+                .with_detail(culprit_core::ErrorDetail::ConnectionSecurity);
         }
         mapped
     }
@@ -386,11 +388,13 @@ pub fn map_error(error: mysql_async::Error) -> Error {
                     ErrorCode::ConnectionFailed,
                     t!("provider.mysql.error.certificate", error = message),
                 )
-                .with_hint(t!("provider.mysql.error.certificate_hint"));
+                .with_hint(t!("provider.mysql.error.certificate_hint"))
+                .with_detail(culprit_core::ErrorDetail::ConnectionSecurity);
             }
             if lower.contains("handshakefailure") || lower.contains("handshake_failure") {
                 return Error::new(ErrorCode::ConnectionFailed, t!("provider.mysql.error.no_shared_cipher"))
-                    .with_hint(t!("provider.mysql.error.no_shared_cipher_hint"));
+                    .with_hint(t!("provider.mysql.error.no_shared_cipher_hint"))
+                    .with_detail(culprit_core::ErrorDetail::ConnectionSecurity);
             }
             Error::new(ErrorCode::ConnectionFailed, message)
         }
@@ -400,6 +404,7 @@ pub fn map_error(error: mysql_async::Error) -> Error {
         mysql_async::Error::Driver(DriverError::NoClientSslFlagFromServer) => {
             Error::new(ErrorCode::ConnectionFailed, t!("provider.mysql.error.no_server_tls"))
                 .with_hint(t!("provider.mysql.error.no_server_tls_hint"))
+                .with_detail(culprit_core::ErrorDetail::ConnectionSecurity)
         }
         other => Error::new(ErrorCode::QueryFailed, other.to_string()),
     }

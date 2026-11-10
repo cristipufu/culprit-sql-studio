@@ -6,6 +6,7 @@ use culprit_core::{AuthKind, Environment};
 
 fn info(engine: Engine, host: &str, database: Option<&str>) -> ConnectionInfo {
     ConnectionInfo {
+        security: None,
         name: "x".into(),
         engine,
         environment: Environment::Production,

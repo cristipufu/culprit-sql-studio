@@ -9,6 +9,7 @@ import type { CloudSignals } from "../gen/CloudSignals";
 import type { CheckInfo } from "../gen/CheckInfo";
 import type { AgentAccess } from "../gen/AgentAccess";
 import type { ApprovalRequest } from "../gen/ApprovalRequest";
+import type { ConnectionSettings } from "../gen/ConnectionSettings";
 import type { ConnectionInfo } from "../gen/ConnectionInfo";
 import type { Deadlock } from "../gen/Deadlock";
 import type { Dashboard } from "../gen/Dashboard";
@@ -66,7 +67,9 @@ export interface Api {
   connections(): Promise<ConnectionInfo[]>;
   /** What `input` connects to, read as `engine` wherever the text leaves the engine open. */
   parseConnection(input: string, engine: Engine | null, ssh?: boolean): Promise<ParsedConnection>;
-  testConnection(input: NewConnection): Promise<ServerInfo>;
+  testConnection(input: NewConnection, signal?: AbortSignal): Promise<ServerInfo>;
+  setConnectionSettings(name: string, settings: ConnectionSettings): Promise<ConnectionInfo>;
+  testConnectionSettings(name: string, settings: ConnectionSettings, signal?: AbortSignal): Promise<ServerInfo>;
   addConnection(input: NewConnection): Promise<ConnectionInfo>;
   removeConnection(name: string): Promise<void>;
   renameConnection(old: string, next: string): Promise<ConnectionInfo>;
@@ -150,6 +153,7 @@ export interface Api {
   /** Pick a SQLite file in the system's file dialog (desktop only): its path, for the new-connection input. */
   chooseDatabaseFile(): Promise<string | null>;
   chooseSshIdentity(): Promise<string | null>;
+  chooseCaCertificate(): Promise<string | null>;
   pendingApprovals(): Promise<ApprovalRequest[]>;
   decideApproval(id: string, hash: string, approved: boolean): Promise<void>;
   /** A newer published release, or null. Asked by the app itself at most once a day, or when the person checks. */
@@ -177,6 +181,7 @@ export function isDesktop(): boolean {
 async function desktopApi(): Promise<Api> {
   const { invoke } = await import("@tauri-apps/api/core");
   const discover = discoveryRequests(invoke);
+  const connectionTests = ownedRequests(invoke, "begin_connection_test", "cancel_connection_test");
   const preview = ownedRequests(invoke, "begin_preview", "cancel_preview");
   // Before anything is read: the backend words what it reads in the app's language.
   await invoke("set_language", { code: language() });
@@ -185,7 +190,9 @@ async function desktopApi(): Promise<Api> {
     setLanguage: (code) => invoke("set_language", { code }),
     connections: () => invoke("connections"),
     parseConnection: (input, engine, ssh = false) => invoke("parse_connection", { input, engine, ssh }),
-    testConnection: (input) => invoke("test_connection", { input }),
+    testConnection: (input, signal) => connectionTests("test_connection", { input }, signal),
+    setConnectionSettings: (name, settings) => invoke("set_connection_settings", { name, settings }),
+    testConnectionSettings: (name, settings, signal) => connectionTests("test_connection_settings", { name, settings }, signal),
     addConnection: (input) => invoke("add_connection", { input }),
     removeConnection: (name) => invoke("remove_connection", { name }),
     renameConnection: (old, next) => invoke("rename_connection", { old, new: next }),
@@ -251,6 +258,7 @@ async function desktopApi(): Promise<Api> {
     chooseQueryLog: (name) => invoke("choose_query_log", { name }),
     chooseDatabaseFile: () => invoke("choose_database_file"),
     chooseSshIdentity: () => invoke("choose_ssh_identity"),
+    chooseCaCertificate: () => invoke("choose_ca_certificate"),
     pendingApprovals: () => invoke("pending_approvals"),
     decideApproval: (id, hash, approved) => invoke("decide_approval", { id, hash, approved }),
     checkUpdate: () => invoke("check_update"),

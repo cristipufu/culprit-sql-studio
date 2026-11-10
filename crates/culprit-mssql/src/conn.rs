@@ -97,7 +97,8 @@ fn auth_method(spec: &ConnectionSpec) -> Result<AuthMethod> {
 }
 
 fn encryption_level(spec: &ConnectionSpec) -> EncryptionLevel {
-    let Some(value) = spec.option("encrypt") else { return EncryptionLevel::Required };
+    let security = Engine::Mssql.spec().connection_security().expect("SQL Server has network security settings");
+    let value = spec.option("encrypt").unwrap_or(&security.default_mode);
     match value.trim().to_ascii_lowercase().as_str() {
         "strict" => EncryptionLevel::Strict,
         "false" | "no" | "0" | "optional" => EncryptionLevel::Off,
@@ -315,7 +316,8 @@ pub(crate) fn map_error(err: tiberius::error::Error) -> Error {
                 .with_hint(t!("provider.mssql.error.unreachable.hint"))
         }
         T::Tls(message) => Error::new(ErrorCode::ConnectionFailed, t!("provider.mssql.error.tls", error = message))
-            .with_hint(t!("provider.mssql.error.tls.hint")),
+            .with_hint(t!("provider.mssql.error.tls.hint"))
+            .with_detail(culprit_core::ErrorDetail::ConnectionSecurity),
         T::Routing { host, port } => Error::new(
             ErrorCode::ConnectionFailed,
             t!("provider.mssql.error.redirected_twice", host = host, port = port.to_string()),

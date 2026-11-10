@@ -58,7 +58,9 @@ pub use reports::ReportSummary;
 use secrets::SecretStore;
 pub use share::{export_diff, export_plan};
 use store::{Paths, Store};
-pub use types::{ConnectionInfo, EventLog, EventsRequest, NewConnection, ParsedConnection, database_file_input};
+pub use types::{
+    ConnectionInfo, ConnectionSettings, EventLog, EventsRequest, NewConnection, ParsedConnection, database_file_input,
+};
 
 /// Builds a provider for a connection; lets an embedding app supply its own engine implementation.
 pub type ProviderFactory = Arc<dyn Fn(&ConnectionSpec) -> Result<Box<dyn Provider>> + Send + Sync>;
@@ -222,6 +224,16 @@ impl Workspace {
     /// file picker starts there). `None` for a connection with neither.
     pub fn query_log_folder(info: &ConnectionInfo) -> Option<std::path::PathBuf> {
         connection::Connections::query_log_folder(info)
+    }
+
+    /// Update a saved connection's security without changing its identity or credentials.
+    pub fn set_connection_settings(&self, name: &str, settings: &ConnectionSettings) -> Result<ConnectionInfo> {
+        self.connection_service().set_connection_settings(name, settings)
+    }
+
+    /// Test the draft security policy with saved credentials, without saving or scanning.
+    pub async fn test_connection_settings(&self, name: &str, settings: &ConnectionSettings) -> Result<ServerInfo> {
+        self.connection_service().test_connection_settings(name, settings).await
     }
 
     pub fn add_connection(&self, new: NewConnection) -> Result<ConnectionInfo> {

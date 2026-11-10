@@ -18,6 +18,7 @@ export const ENGINES = Object.keys(FACTS) as Engine[];
 export const PRODUCTS = ENGINES.flatMap((engine) => FACTS[engine].products.map((product) => ({ ...product, engine })));
 export const sqlSyntax = (engine: Engine) => FACTS[engine].sql_syntax;
 export const statementMetrics = (engine: Engine) => FACTS[engine].statement_metrics;
+export const connectionSecurityFacts = (engine: Engine) => FACTS[engine].connection_security;
 export const waitSampling = (engine: Engine) => FACTS[engine].wait_sampling;
 
 function productIdentity(engine: Engine, product?: string | null) {

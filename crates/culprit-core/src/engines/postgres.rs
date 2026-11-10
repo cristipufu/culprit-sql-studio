@@ -43,6 +43,10 @@ const USER_SETTINGS: &[&str] = &[
 ];
 
 impl EngineSpec for Postgres {
+    fn connection_security(&self) -> Option<crate::ConnectionSecuritySpec> {
+        Some(connection_security())
+    }
+
     fn products(&self) -> &'static [ProductSpec] {
         const PRODUCTS: &[ProductSpec] = &[
             ProductSpec::primary(DatabaseProduct::Postgres, "PostgreSQL", key!("core.engines.postgres.plan_format")),
@@ -218,5 +222,52 @@ impl Dialect for Postgres {
 
     fn end_session(&self, session: &str) -> String {
         format!("SELECT pg_terminate_backend({session});")
+    }
+}
+
+pub(super) fn connection_security() -> crate::ConnectionSecuritySpec {
+    crate::ConnectionSecuritySpec {
+        modes: vec![
+            crate::ConnectionSecurityMode::new(
+                "disable",
+                key!("ui.connection_security.mode.disabled"),
+                key!("ui.connection_security.description.disabled"),
+            )
+            .aliases(&["disabled"])
+            .permits_plaintext()
+            .without_certificates(),
+            crate::ConnectionSecurityMode::new(
+                "prefer",
+                key!("ui.connection_security.mode.preferred"),
+                key!("ui.connection_security.description.preferred"),
+            )
+            .aliases(&["allow"])
+            .permits_plaintext(),
+            crate::ConnectionSecurityMode::new(
+                "require",
+                key!("ui.connection_security.mode.required"),
+                key!("ui.connection_security.description.required"),
+            )
+            .ca_verifies_certificate(),
+            crate::ConnectionSecurityMode::new(
+                "verify-ca",
+                key!("ui.connection_security.mode.verify_ca"),
+                key!("ui.connection_security.description.verify_ca"),
+            ),
+            crate::ConnectionSecurityMode::new(
+                "verify-full",
+                key!("ui.connection_security.mode.verify_identity"),
+                key!("ui.connection_security.description.verify_identity"),
+            )
+            .verifies_identity(),
+        ],
+        default_mode: "verify-full".into(),
+        local_default_mode: "prefer".into(),
+        mode_aliases: vec!["sslmode".into()],
+        ca_aliases: vec!["sslrootcert".into()],
+        mode_option: "sslmode".into(),
+        ca_option: "sslrootcert".into(),
+        trust_certificate_option: None,
+        hostname_option: None,
     }
 }

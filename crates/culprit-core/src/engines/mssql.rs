@@ -7,6 +7,10 @@ use crate::model::Capability;
 pub(super) struct Mssql;
 
 impl EngineSpec for Mssql {
+    fn connection_security(&self) -> Option<crate::ConnectionSecuritySpec> {
+        Some(connection_security())
+    }
+
     fn products(&self) -> &'static [ProductSpec] {
         const PRODUCTS: &[ProductSpec] =
             &[ProductSpec::primary(DatabaseProduct::Mssql, "SQL Server", key!("core.engines.mssql.plan_format"))];
@@ -175,5 +179,42 @@ impl Dialect for Mssql {
 
     fn end_session(&self, session: &str) -> String {
         format!("KILL {session};")
+    }
+}
+
+pub(super) fn connection_security() -> crate::ConnectionSecuritySpec {
+    crate::ConnectionSecuritySpec {
+        modes: vec![
+            crate::ConnectionSecurityMode::new(
+                "false",
+                key!("ui.connection_security.mode.optional"),
+                key!("ui.connection_security.description.optional"),
+            )
+            .aliases(&["no", "0", "optional"])
+            .permits_plaintext()
+            .permits_trust_override(),
+            crate::ConnectionSecurityMode::new(
+                "true",
+                key!("ui.connection_security.mode.required"),
+                key!("ui.connection_security.description.mssql_required"),
+            )
+            .aliases(&["yes", "1", "required", "mandatory"])
+            .verifies_identity()
+            .permits_trust_override(),
+            crate::ConnectionSecurityMode::new(
+                "strict",
+                key!("ui.connection_security.mode.strict"),
+                key!("ui.connection_security.description.strict"),
+            )
+            .verifies_identity(),
+        ],
+        default_mode: "true".into(),
+        local_default_mode: "true".into(),
+        mode_aliases: vec!["encrypt".into()],
+        ca_aliases: vec!["trustServerCertificateCA".into()],
+        mode_option: "encrypt".into(),
+        ca_option: "trustServerCertificateCA".into(),
+        trust_certificate_option: Some("trustServerCertificate".into()),
+        hostname_option: Some("hostNameInCertificate".into()),
     }
 }

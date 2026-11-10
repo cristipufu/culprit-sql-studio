@@ -280,6 +280,12 @@ fn absorb_option(spec: &mut ConnectionSpec, key: &str, value: &str) {
         "trustservercertificate" => {
             spec.options.insert("trustServerCertificate".into(), value.to_string());
         }
+        "trustservercertificateca" => {
+            spec.options.insert("trustServerCertificateCA".into(), value.to_string());
+        }
+        "hostnameincertificate" => {
+            spec.options.insert("hostNameInCertificate".into(), value.to_string());
+        }
         "sslmode" => {
             spec.options.insert("sslmode".into(), value.to_string());
         }
@@ -439,6 +445,16 @@ mod tests {
         assert_eq!(s.port, Some(3307));
         assert_eq!(s.database.as_deref(), Some("shop"));
         assert_eq!(parse("db.example.com:3306/shop").unwrap().engine, Some(Engine::Mysql));
+    }
+
+    #[test]
+    fn sql_server_certificate_options_survive_pasted_urls() {
+        let spec = parse("mssql://reader@db.example/orders?encrypt=strict&trustServerCertificateCA=%2Ftmp%2Fcompany.pem&hostNameInCertificate=db.internal").unwrap();
+        assert_eq!(spec.option("trustServerCertificateCA"), Some("/tmp/company.pem"));
+        assert_eq!(spec.option("hostNameInCertificate"), Some("db.internal"));
+        let security = culprit_core::connection_security(&spec).unwrap();
+        assert_eq!(security.settings.ca_certificate.as_deref(), Some("/tmp/company.pem"));
+        assert_eq!(security.settings.certificate_hostname.as_deref(), Some("db.internal"));
     }
 
     #[test]
