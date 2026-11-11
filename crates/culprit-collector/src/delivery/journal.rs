@@ -17,6 +17,29 @@ const JOURNAL_PAGES: u32 = 131_072;
 const MAX_UPDATE_PAGE: usize = 128;
 // Keep room for mutable proof progress and bounded WAL work while target hydration is backpressured.
 pub(super) const MAX_IMMUTABLE_BYTES: u64 = JOURNAL_PAGES as u64 * 4096 / 2;
+const CURRENT_METADATA_RESERVE: u64 = 2 * MAX_MANIFEST_BYTES as u64;
+const CURRENT_RANGE_RESERVE: u32 = 128;
+
+/// Historical hydration cannot consume the capacity reserved for current observations.
+#[derive(Clone, Copy)]
+pub enum HydrationPriority {
+    Historical,
+    Current,
+}
+impl HydrationPriority {
+    fn metadata_limit(self) -> u64 {
+        match self {
+            Self::Historical => MAX_IMMUTABLE_BYTES - CURRENT_METADATA_RESERVE,
+            Self::Current => MAX_IMMUTABLE_BYTES,
+        }
+    }
+    fn range_limit(self) -> u32 {
+        match self {
+            Self::Historical => MAX_PENDING - CURRENT_RANGE_RESERVE,
+            Self::Current => MAX_PENDING,
+        }
+    }
+}
 const BACKLOG_QUERY: &str = "SELECT phase,count(*),min(captured_at) FROM deliveries GROUP BY phase";
 fn storage(_: impl std::fmt::Display) -> culprit_core::Error {
     DeliveryProblem::Storage.error()
@@ -124,7 +147,7 @@ impl Journal {
         Ok(Self { contract, connection, _owner: owner })
     }
     pub fn register(&mut self, range: &PreparedRange) -> Result<()> {
-        self.insert_range(range.manifest(), &range.directory, &State::default())
+        self.insert_range(range.manifest(), &range.directory, &State::default(), HydrationPriority::Current)
     }
     fn bind_store(&self, store_id: &str) -> Result<()> {
         if !valid_digest(store_id) {
@@ -140,7 +163,7 @@ impl Journal {
             .map_err(storage)?;
         Ok(())
     }
-    fn restore(&mut self, range: &CommittedRange) -> Result<()> {
+    fn restore(&mut self, range: &CommittedRange, priority: HydrationPriority) -> Result<()> {
         if range.manifest().digest()? != range.manifest_digest() {
             return Err(integrity());
         }
@@ -149,14 +172,20 @@ impl Journal {
         }
         self.bind_store(range.store_id())?;
         let state = State { phase: DeliveryPhase::Committed, ..State::default() };
-        self.insert_range(range.manifest(), Path::new(""), &state)?;
+        self.insert_range(range.manifest(), Path::new(""), &state, priority)?;
         let existing = self.load(&range.manifest().range_id)?;
         if existing.state.phase == DeliveryPhase::Captured {
             self.save(existing.id(), &state, existing.version)?;
         }
         Ok(())
     }
-    fn insert_range(&mut self, manifest: &RangeManifest, directory: &Path, initial: &State) -> Result<()> {
+    fn insert_range(
+        &mut self,
+        manifest: &RangeManifest,
+        directory: &Path,
+        initial: &State,
+        priority: HydrationPriority,
+    ) -> Result<()> {
         manifest.validate()?;
         if manifest.contract != self.contract {
             return Err(DeliveryProblem::DestinationChanged.error());
@@ -179,7 +208,7 @@ impl Journal {
             return Ok(());
         }
         let count: i64 = tx.query_row("SELECT count(*) FROM deliveries", [], |row| row.get(0)).map_err(storage)?;
-        if count >= i64::from(MAX_PENDING) {
+        if count >= i64::from(priority.range_limit()) {
             return Err(DeliveryProblem::Capacity.error());
         }
         let used: i64 = tx
@@ -188,7 +217,7 @@ impl Journal {
         if u64::try_from(used)
             .map_err(|_| integrity())?
             .checked_add(json.len() as u64)
-            .is_none_or(|total| total > MAX_IMMUTABLE_BYTES)
+            .is_none_or(|total| total > priority.metadata_limit())
         {
             return Err(DeliveryProblem::Capacity.error());
         }
@@ -467,11 +496,11 @@ impl DeliveryJournal {
             .await
     }
     /// Restores delivery from a verified remote capability. Original local payload files are unnecessary.
-    pub async fn restore(&self, range: &CommittedRange) -> Result<()> {
+    pub async fn restore(&self, range: &CommittedRange, priority: HydrationPriority) -> Result<()> {
         self.state
             .run(|| {
                 let range = range.clone();
-                move |journal| journal.restore(&range)
+                move |journal| journal.restore(&range, priority)
             })
             .await
     }
@@ -580,6 +609,41 @@ fn configure(connection: &Connection) -> Result<()> {
 #[cfg(test)]
 mod health_tests {
     use super::*;
+    #[tokio::test]
+    async fn historical_hydration_leaves_capacity_for_current_observations_and_preserves_exact_identity() {
+        use crate::delivery::{file_store::FileRecoveryStore, recovery::stage_and_commit};
+        let root = tempfile::tempdir().unwrap();
+        let contract = crate::delivery::tests::contract();
+        let store = FileRecoveryStore::create(&root.path().join("recovery"), contract.clone()).unwrap();
+        let owner = store.acquire().await.unwrap();
+        let mut head = None;
+        let mut committed = vec![];
+        for sequence in 1..=3 {
+            let prepared = crate::delivery::tests::prepared(root.path(), sequence);
+            let range = stage_and_commit(&store, owner.fence(), head.as_deref(), &prepared).await.unwrap();
+            head = Some(range.manifest().range_id.clone());
+            committed.push(range);
+        }
+        let mut journal = Journal::create(&root.path().join("journal"), contract).unwrap();
+        journal.restore(&committed[0], HydrationPriority::Historical).unwrap();
+        // Exercise admission accounting without manufacturing hundreds of MiB of immutable payload.
+        journal
+            .connection
+            .execute("UPDATE delivery_manifests SET bytes=?1", [HydrationPriority::Historical.metadata_limit() as i64])
+            .unwrap();
+        let error = journal.restore(&committed[1], HydrationPriority::Historical).unwrap_err();
+        assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Capacity)));
+        journal.restore(&committed[2], HydrationPriority::Current).unwrap();
+        assert_eq!(
+            journal.load(&committed[2].manifest().range_id).unwrap().manifest_digest,
+            committed[2].manifest_digest()
+        );
+        assert!(journal.load(&committed[1].manifest().range_id).is_err());
+        journal.connection.execute("UPDATE delivery_manifests SET bytes=length(CAST(manifest AS BLOB))", []).unwrap();
+        journal.restore(&committed[1], HydrationPriority::Historical).unwrap();
+        assert_eq!(journal.load(&committed[1].manifest().range_id).unwrap().state.phase, DeliveryPhase::Committed);
+    }
+
     #[test]
     fn backlog_distinguishes_quarantine_and_retirement_without_scanning_large_manifests() {
         let root = tempfile::tempdir().unwrap();

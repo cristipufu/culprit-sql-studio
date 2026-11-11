@@ -93,7 +93,7 @@ async fn pending_commit_order_is_independent_of_how_many_distinct_native_ranges_
     let mut actual = vec![];
     let mut cursor = None;
     loop {
-        let page = store.pending_ranges(cursor.as_deref(), 1).await.unwrap();
+        let page = store.pending_ranges(cursor.as_deref(), 1, RecoveryOrder::OldestFirst).await.unwrap();
         actual.extend(page.ranges.into_iter().map(|range| range.range_id));
         let Some(next) = page.next_cursor else {
             break;

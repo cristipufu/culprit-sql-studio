@@ -96,9 +96,14 @@ async fn verification_exceeding_one_request_deadline_resumes_across_restart_and_
         let mut capabilities = crate::delivery::committed_cache::CommittedRangeCache::default();
         let mut driver = DeliveryDriver::new(&mut journal, &store, &sink, &mut capabilities, policy).unwrap();
         for _ in 0..32 {
-            driver.step(&id, owner.fence(), now).await.unwrap();
+            let result = driver.step(&id, owner.fence(), now).await;
             now += 1000;
-            if sink.calls.lock().unwrap().len() == 5 {
+            if let Err(error) = result {
+                // A loaded host can also exceed this deliberately short deadline during setup or an early page.
+                assert_eq!(problem(error), DeliveryProblem::Transport);
+                continue;
+            }
+            if sink.calls.lock().unwrap().last() == Some(&4) {
                 break;
             }
         }

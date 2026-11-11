@@ -14,7 +14,7 @@ async fn publication_retirement_is_fenced_atomic_and_recovers_a_lost_acknowledge
     let range = stage_and_commit(&*store, &stale, None, &first).await.unwrap();
     let second = prepared(root.path(), 2);
     stage_and_commit(&*store, &stale, Some(&range.manifest().range_id), &second).await.unwrap();
-    let before = store.pending_ranges(None, 1).await.unwrap();
+    let before = store.pending_ranges(None, 1, RecoveryOrder::OldestFirst).await.unwrap();
     assert!(before.next_cursor.is_some());
     let sink = FileTelemetrySink::create(&root.path().join("warehouse"), contract(), store.clone()).unwrap();
     let attempt = DeliveryAttempt::new(1).unwrap();
@@ -26,14 +26,15 @@ async fn publication_retirement_is_fenced_atomic_and_recovers_a_lost_acknowledge
     assert_eq!(problem(store.retire(&stale, &publication).await.err().unwrap()), DeliveryProblem::Fenced);
     blobs.fail(ROOT_KEY, false);
     assert_eq!(problem(store.retire(&fence, &publication).await.err().unwrap()), DeliveryProblem::Transport);
-    assert_eq!(store.pending_ranges(None, 1).await.unwrap().ranges, before.ranges);
+    assert_eq!(store.pending_ranges(None, 1, RecoveryOrder::OldestFirst).await.unwrap().ranges, before.ranges);
     blobs.fail(ROOT_KEY, true);
     assert_eq!(problem(store.retire(&fence, &publication).await.err().unwrap()), DeliveryProblem::Transport);
     let reopened = BlobRecoveryStore::open(blobs, contract()).await.unwrap();
-    let pending = reopened.pending_ranges(None, 128).await.unwrap();
+    let pending = reopened.pending_ranges(None, 128, RecoveryOrder::OldestFirst).await.unwrap();
     assert_eq!(pending.ranges, [second.manifest().clone()]);
     assert!(pending.next_cursor.is_none());
-    let continued = reopened.pending_ranges(before.next_cursor.as_deref(), 1).await.unwrap();
+    let continued =
+        reopened.pending_ranges(before.next_cursor.as_deref(), 1, RecoveryOrder::OldestFirst).await.unwrap();
     assert_eq!(continued.ranges, [second.manifest().clone()]);
     assert!(continued.next_cursor.is_none());
     reopened.retire(&fence, &publication).await.unwrap();

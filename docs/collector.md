@@ -99,7 +99,11 @@ the database. No Blob request is made while restoring an incident inside an open
 
 Unfinished analytical deliveries hydrate incrementally after startup, within a local metadata budget. Native
 archiving has a separate journal and I/O loop, so stalled warehouse readback or a full analytical journal cannot
-prevent archival of new captures. Both recent observations and older backlog receive delivery work. Verified
+prevent archival of new captures. Current discovery walks a bounded newest-first window independently of the
+historical recovery cursor, refreshing on native commits and periodically. Each lane retains at most one verified
+manifest under backpressure. Historical hydration leaves 64 MiB and 128 entries of the analytical journal's budget
+available for current observations; exhausting the remaining budget backpressures current work too. Both recent
+observations and older backlog receive delivery work. Verified
 manifests are cached within bounded process-local limits; restarting reopens their authoritative recovery commits.
 
 Native archive commits precede ready-object dispatch. Successful upload alone does not publish a range: readback

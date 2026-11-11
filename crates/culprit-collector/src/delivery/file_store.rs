@@ -412,7 +412,7 @@ impl RecoveryStore for FileRecoveryStore {
     fn id(&self) -> &str {
         &self.id
     }
-    async fn pending_ranges(&self, cursor: Option<&str>, limit: u32) -> Result<RecoveryPage> {
+    async fn pending_ranges(&self, cursor: Option<&str>, limit: u32, order: RecoveryOrder) -> Result<RecoveryPage> {
         if !(1..=128).contains(&limit) {
             return Err(DeliveryProblem::Capacity.error());
         }
@@ -436,6 +436,7 @@ impl RecoveryStore for FileRecoveryStore {
                         1,
                         &files.id,
                         u64::try_from(committed_order).map_err(|_| integrity())?,
+                        order,
                     )?;
                     let ranges = ids.iter().map(|id| files.load(id)).collect::<Result<_>>()?;
                     Ok(RecoveryPage {

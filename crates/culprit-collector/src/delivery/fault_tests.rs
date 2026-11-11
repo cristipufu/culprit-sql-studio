@@ -30,8 +30,8 @@ struct CrashStore {
 }
 #[async_trait]
 impl RecoveryStore for CrashStore {
-    async fn pending_ranges(&self, cursor: Option<&str>, limit: u32) -> Result<RecoveryPage> {
-        self.inner.pending_ranges(cursor, limit).await
+    async fn pending_ranges(&self, cursor: Option<&str>, limit: u32, order: RecoveryOrder) -> Result<RecoveryPage> {
+        self.inner.pending_ranges(cursor, limit, order).await
     }
     async fn retire(&self, fence: &Fence, publication: &PublishedRange) -> Result<()> {
         self.inner.retire(fence, publication).await

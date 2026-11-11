@@ -4,8 +4,9 @@ use super::{
     committed_cache::CommittedRangeCache,
     contract::Contract,
     driver::{DeliveryDriver, DeliveryPolicy},
+    hydration::Hydration,
     journal::DeliveryJournal,
-    recovery::{self, Fence, RecoveryStore},
+    recovery::{Fence, RecoveryStore},
     sink::TelemetrySink,
 };
 use crate::{capture::CollectionCancellation, lifecycle::with_background, outbox::OutboxDelivery};
@@ -35,17 +36,9 @@ struct AnalyticalWorker<'a> {
     policy: DeliveryPolicy,
     after: u64,
     next_poll: i64,
-    restore_cursor: Option<String>,
-    restored: bool,
-    next_restore_scan: i64,
     committed: Arc<Notify>,
     capabilities: CommittedRangeCache,
-    pending_hydration: Option<PendingHydration>,
-    next_hydration_attempt: i64,
-}
-struct PendingHydration {
-    committed: recovery::CommittedRange,
-    next_cursor: Option<String>,
+    hydration: Hydration,
 }
 impl<'a> DeliveryWorker<'a> {
     pub fn new(
@@ -82,13 +75,9 @@ impl<'a> DeliveryWorker<'a> {
                 policy,
                 after: 0,
                 next_poll: 0,
-                restore_cursor: None,
-                restored: false,
-                next_restore_scan: 0,
                 committed,
                 capabilities: CommittedRangeCache::default(),
-                pending_hydration: None,
-                next_hydration_attempt: 0,
+                hydration: Hydration::default(),
             },
         })
     }
@@ -148,7 +137,8 @@ impl AnalyticalWorker<'_> {
         }
         self.journal.bind_store(self.store.id()).await?;
         self.journal.compact_retired(WORK_PAGE).await?;
-        let hydration = self.hydrate(now).await;
+        let notified = tokio::select! {biased;_=self.committed.notified()=>true,_=std::future::ready(())=>false};
+        let hydration = self.hydration.step(self.journal, self.store, self.policy, now, notified).await;
         if hydration.as_ref().err().is_some_and(fatal) {
             return hydration;
         }
@@ -182,64 +172,6 @@ impl AnalyticalWorker<'_> {
         }
         self.after = next.unwrap_or(0);
         hydration
-    }
-    async fn hydrate(&mut self, now: i64) -> Result<()> {
-        if now < self.next_hydration_attempt {
-            return Ok(());
-        }
-        if self.pending_hydration.is_some() {
-            return self.admit_hydration(now).await;
-        }
-        if self.restored {
-            let notified = tokio::select! {biased;_=self.committed.notified()=>true,_=std::future::ready(())=>false};
-            if now < self.next_restore_scan && !notified {
-                return Ok(());
-            }
-            self.restore_cursor = None;
-            self.restored = false;
-        }
-        let page = self.store.pending_ranges(self.restore_cursor.as_deref(), 1).await?;
-        if page.ranges.len() > 1 {
-            return Err(DeliveryProblem::Integrity.error());
-        }
-        for manifest in &page.ranges {
-            match self.journal.status(&manifest.range_id).await {
-                Ok(_) => continue,
-                Err(error) if error.detail == Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::NotReady)) => {}
-                Err(error) => return Err(error),
-            }
-            let committed = recovery::reopen(self.store, &manifest.range_id).await?;
-            if committed.manifest() != manifest {
-                return Err(DeliveryProblem::Integrity.error());
-            }
-            // Keep one verified candidate while the metadata journal drains. Re-listing this page could
-            // otherwise download a large native manifest on every turn during a long destination outage.
-            self.pending_hydration = Some(PendingHydration { committed, next_cursor: page.next_cursor });
-            return self.admit_hydration(now).await;
-        }
-        self.advance_hydration(page.next_cursor, now);
-        Ok(())
-    }
-    async fn admit_hydration(&mut self, now: i64) -> Result<()> {
-        let candidate = self.pending_hydration.as_ref().ok_or_else(|| DeliveryProblem::Integrity.error())?;
-        match self.journal.restore(&candidate.committed).await {
-            Ok(()) => (),
-            Err(error) if error.detail == Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Capacity)) => {
-                self.next_hydration_attempt = now.saturating_add(i64::from(self.policy.retry_delay_ms));
-                return Ok(());
-            }
-            Err(error) => return Err(error),
-        }
-        let candidate = self.pending_hydration.take().ok_or_else(|| DeliveryProblem::Integrity.error())?;
-        self.advance_hydration(candidate.next_cursor, now);
-        Ok(())
-    }
-    fn advance_hydration(&mut self, next_cursor: Option<String>, now: i64) {
-        self.restore_cursor = next_cursor;
-        self.restored = self.restore_cursor.is_none();
-        if self.restored {
-            self.next_restore_scan = now.saturating_add(UPDATE_POLL_MILLIS);
-        }
     }
 }
 fn handle_turn(result: Result<()>, report: &Report<'_>, retry_delay_ms: u32) -> Result<Duration> {

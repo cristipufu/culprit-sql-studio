@@ -185,7 +185,12 @@ impl Recovery {
 }
 #[async_trait]
 impl RecoveryStore for Recovery {
-    async fn pending_ranges(&self, _: Option<&str>, _: u32) -> Result<RecoveryPage> {
+    async fn pending_ranges(
+        &self,
+        _: Option<&str>,
+        _: u32,
+        _: culprit_collector::delivery::recovery::RecoveryOrder,
+    ) -> Result<RecoveryPage> {
         unreachable!("not a recovery enumeration fixture")
     }
     async fn retire(&self, _: &Fence, _: &culprit_collector::delivery::sink::PublishedRange) -> Result<()> {

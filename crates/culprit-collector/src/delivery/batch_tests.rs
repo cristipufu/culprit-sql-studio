@@ -5,7 +5,7 @@ use super::{
     evidence::*,
     file_sink::FileTelemetrySink,
     file_store::FileRecoveryStore,
-    journal::DeliveryJournal,
+    journal::{DeliveryJournal, HydrationPriority},
     recovery::*,
     sink::*,
     tests::contract,
@@ -32,12 +32,12 @@ struct Transfers {
 }
 #[async_trait]
 impl RecoveryStore for Transfers {
-    async fn pending_ranges(&self, cursor: Option<&str>, limit: u32) -> Result<RecoveryPage> {
+    async fn pending_ranges(&self, cursor: Option<&str>, limit: u32, order: RecoveryOrder) -> Result<RecoveryPage> {
         self.pending_calls.fetch_add(1, Ordering::SeqCst);
         if self.pending_unavailable.load(Ordering::SeqCst) {
             return Err(DeliveryProblem::Transport.error());
         }
-        self.store.pending_ranges(cursor, limit).await
+        self.store.pending_ranges(cursor, limit, order).await
     }
     async fn retire(&self, fence: &Fence, publication: &PublishedRange) -> Result<()> {
         self.store.retire(fence, publication).await
@@ -217,7 +217,7 @@ async fn an_unavailable_pending_index_does_not_block_already_committed_analytica
     outbox.recover().await.unwrap();
     let mut archive = DeliveryJournal::create(&root.path().join("archive"), contract()).unwrap();
     let mut analytical = DeliveryJournal::create(&root.path().join("analytical"), contract()).unwrap();
-    analytical.restore(&committed).await.unwrap();
+    analytical.restore(&committed, HydrationPriority::Historical).await.unwrap();
     let mut worker = DeliveryWorker::new(
         outbox.delivery(),
         DeliveryJournals { archive: &mut archive, analytical: &mut analytical },
@@ -255,7 +255,7 @@ async fn an_unavailable_pending_index_does_not_block_already_committed_analytica
 }
 
 #[tokio::test]
-async fn metadata_backpressure_keeps_one_verified_candidate_without_repeated_remote_reads() {
+async fn metadata_backpressure_keeps_bounded_verified_candidates_without_repeated_remote_reads() {
     use super::worker::{DeliveryJournals, DeliveryWorker};
     use crate::{capture::CollectionCancellation, outbox::Outbox};
     let root = tempfile::tempdir().unwrap();
@@ -277,7 +277,7 @@ async fn metadata_backpressure_keeps_one_verified_candidate_without_repeated_rem
     outbox.recover().await.unwrap();
     let mut archive = DeliveryJournal::create(&root.path().join("archive"), contract()).unwrap();
     let mut analytical = DeliveryJournal::create(&root.path().join("analytical"), contract()).unwrap();
-    analytical.restore(&first).await.unwrap();
+    analytical.restore(&first, HydrationPriority::Historical).await.unwrap();
     let accounting = rusqlite::Connection::open(root.path().join("analytical/delivery.sqlite3")).unwrap();
     // Simulate an already charged metadata set without writing hundreds of MiB in a unit test.
     accounting
@@ -310,7 +310,7 @@ async fn metadata_backpressure_keeps_one_verified_candidate_without_repeated_rem
     }
     assert_eq!(
         transfers.pending_calls.load(Ordering::SeqCst),
-        2,
+        3,
         "a quota-deferred manifest must not be downloaded on every turn"
     );
     transfers.pending_unavailable.store(true, Ordering::SeqCst);
@@ -323,6 +323,50 @@ async fn metadata_backpressure_keeps_one_verified_candidate_without_repeated_rem
         .await
         .unwrap();
     drop(worker);
-    assert_eq!(transfers.pending_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(transfers.pending_calls.load(Ordering::SeqCst), 3);
     assert_eq!(analytical.status(&second.manifest().range_id).await.unwrap().phase, DeliveryPhase::DispatchPending);
+}
+
+#[tokio::test]
+async fn cold_recovery_admits_fresh_commits_without_traversing_the_historical_backlog() {
+    use super::worker::{DeliveryJournals, DeliveryWorker};
+    use crate::{capture::CollectionCancellation, outbox::Outbox};
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(FileRecoveryStore::create(&root.path().join("recovery"), contract()).unwrap());
+    let owner = store.acquire().await.unwrap();
+    let mut head = None;
+    for sequence in 1..=40 {
+        let prepared = super::tests::prepared(root.path(), sequence);
+        let committed = stage_and_commit(&*store, owner.fence(), head.as_deref(), &prepared).await.unwrap();
+        head = Some(committed.manifest().range_id.clone());
+    }
+    let newest = head.unwrap();
+    let sink = FileTelemetrySink::create(&root.path().join("sink"), contract(), store.clone()).unwrap();
+    let mut outbox = Outbox::create_remote(&root.path().join("outbox"), OutboxLimits::default(), store.id()).unwrap();
+    outbox.recover().await.unwrap();
+    let mut archive = DeliveryJournal::create(&root.path().join("archive"), contract()).unwrap();
+    let mut analytical = DeliveryJournal::create(&root.path().join("analytical"), contract()).unwrap();
+    let mut worker = DeliveryWorker::new(
+        outbox.delivery(),
+        DeliveryJournals { archive: &mut archive, analytical: &mut analytical },
+        &*store,
+        &sink,
+        owner.fence().clone(),
+        contract(),
+        DeliveryPolicy::default(),
+    )
+    .unwrap();
+    for now in [0, 250] {
+        worker.work_once(now, &CollectionCancellation::default(), |_, result| result.map(|_| ())).await.unwrap();
+    }
+    let fresh = super::tests::prepared(root.path(), 41);
+    let fresh = stage_and_commit(&*store, owner.fence(), Some(&newest), &fresh).await.unwrap();
+    // The remote commit is not a local notification. Periodic discovery must also interrupt an old traversal.
+    worker.work_once(60_001, &CollectionCancellation::default(), |_, result| result.map(|_| ())).await.unwrap();
+    drop(worker);
+    assert!(
+        analytical.status(&newest).await.is_ok(),
+        "current committed observations must be admitted while cold recovery still owns a historical cursor"
+    );
+    assert!(analytical.status(&fresh.manifest().range_id).await.is_ok());
 }

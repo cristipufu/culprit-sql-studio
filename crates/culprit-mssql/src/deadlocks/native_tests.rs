@@ -127,16 +127,28 @@ async fn native_deadlock_graphs_keep_positions_and_share_the_interactive_parser(
     // disposable instance, then establish the fixture independently before exercising the reader.
     batch(&mut admin,"ALTER EVENT SESSION [system_health] ON SERVER STATE=STOP;ALTER EVENT SESSION [system_health] ON SERVER STATE=START;").await;
     let file = target.first().unwrap().string("path");
-    let mut retained = tiberius::Query::new(
-        "SELECT COUNT_BIG(*) AS events FROM sys.fn_xe_file_target_read_file(@P1,NULL,NULL,NULL) WHERE object_name=N'xml_deadlock_report' AND timestamp_utc>=CONVERT(datetime2(7),@P2,127)",
-    );
-    retained.bind(file.as_str());
-    retained.bind(from.as_str());
-    let retained = retained.query(&mut admin).await.unwrap().into_row().await.unwrap().unwrap();
-    assert!(
-        retained.get::<i64, _>("events").unwrap() > 0,
-        "the generated deadlock must exist in the retained fixture file"
-    );
+    let ready = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let mut retained = tiberius::Query::new(
+            "SELECT COUNT_BIG(*) AS events FROM sys.fn_xe_file_target_read_file(@P1,NULL,NULL,NULL) WHERE object_name=N'xml_deadlock_report' AND CAST(timestamp_utc AS datetime2(7))>=CONVERT(datetime2(7),@P2,127)",
+        );
+        retained.bind(file.as_str());
+        retained.bind(from.as_str());
+        let row = retained.query(&mut admin).await.unwrap().into_row().await.unwrap().unwrap();
+        if row.get::<i64, _>("events").unwrap() > 0 {
+            break;
+        }
+        if tokio::time::Instant::now() >= ready {
+            let mut diagnostic = tiberius::Query::new(
+                "SELECT object_name,file_name,CONVERT(varchar(40),timestamp_utc,127) AS at,CONVERT(varchar(40),CONVERT(datetime2(7),@P1,127),127) AS lower_bound,CASE WHEN timestamp_utc>=CONVERT(datetime2(7),@P1,127) THEN 1 ELSE 0 END AS matches_lower FROM sys.fn_xe_file_target_read_file(N'/var/opt/mssql/log/system_health*.xel',NULL,NULL,NULL) WHERE object_name=N'xml_deadlock_report'",
+            );
+            diagnostic.bind(from.as_str());
+            let rows = diagnostic.query(&mut admin).await.unwrap().into_first_result().await.unwrap();
+            eprintln!("retained fixture inventory: {rows:?}; client lower bound={from}; original file={file}");
+            panic!("the generated deadlock must exist in the retained fixture file");
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     let mut reader = ReadSession::new(
         pool.clone(),
         CollectionBudget { page_bytes: 8 * 1024 * 1024, total_timeout_ms: 120000, ..Default::default() },
@@ -151,8 +163,6 @@ async fn native_deadlock_graphs_keep_positions_and_share_the_interactive_parser(
             break (events, until);
         }
         if tokio::time::Instant::now() >= deadline {
-            let ring = reader.query(native::RING, vec![], 1).await.map_err(crate::read::ReadError::into_error).unwrap();
-            eprintln!("fixture ring target: {ring:?}");
             panic!("system_health did not make the fixture event available");
         }
         tokio::time::sleep(Duration::from_secs(1)).await;

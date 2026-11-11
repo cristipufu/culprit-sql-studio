@@ -8,6 +8,7 @@ pub mod committed_cache;
 pub mod contract;
 pub mod evidence;
 pub mod file_store;
+mod hydration;
 mod object;
 mod operation;
 mod pending;

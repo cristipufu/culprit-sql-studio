@@ -88,7 +88,7 @@ async fn cold_recovery_restores_only_unpublished_work_and_keeps_historical_sourc
     store.retire(owner.fence(), &publication).await.unwrap();
     drop(owner);
     let store = FileRecoveryStore::open(&root.path().join("recovery"), contract()).unwrap();
-    let page = store.pending_ranges(None, 128).await.unwrap();
+    let page = store.pending_ranges(None, 128, RecoveryOrder::OldestFirst).await.unwrap();
     assert_eq!(page.ranges.len(), 1);
     assert_eq!(page.ranges[0], *second.manifest());
     assert!(page.next_cursor.is_none());

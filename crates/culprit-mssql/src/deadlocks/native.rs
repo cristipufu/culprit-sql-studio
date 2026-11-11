@@ -79,8 +79,12 @@ fn file_pattern(path: &str) -> Result<String> {
 }
 pub(super) fn read_sql(origin: Origin, newest_first: bool) -> String {
     let direction = if newest_first { "DESC" } else { "ASC" };
+    // SQL Server 2022 can discard real events when a timestamp predicate is pushed into the XEL reader.
+    // Convert the returned timestamp explicitly, as Microsoft's documented system_health example does:
+    // https://learn.microsoft.com/sql/relational-databases/system-functions/sys-fn-xe-file-target-read-file-transact-sql
+    let timestamp = "CAST(x.timestamp_utc AS datetime2(7))";
     format!(
-        "SELECT TOP (@P1) /* culprit */ x.file_name,x.file_offset,CONVERT(varchar(40),x.timestamp_utc,127)+'Z' AS at,CAST(x.event_data AS nvarchar(max)) AS event_xml FROM {} x WHERE x.object_name=N'{}' AND x.timestamp_utc>=CONVERT(datetime2(7),@P2,127) AND x.timestamp_utc<CONVERT(datetime2(7),@P3,127) ORDER BY x.timestamp_utc {direction},x.file_name {direction},x.file_offset {direction},HASHBYTES('SHA2_256',CAST(x.event_data AS nvarchar(max))) {direction} OPTION(MAXDOP 1)",
+        "SELECT TOP (@P1) /* culprit */ x.file_name,x.file_offset,CONVERT(varchar(40),{timestamp},127)+'Z' AS at,CAST(x.event_data AS nvarchar(max)) AS event_xml FROM {} x WHERE x.object_name=N'{}' AND {timestamp}>=CONVERT(datetime2(7),@P2,127) AND {timestamp}<CONVERT(datetime2(7),@P3,127) ORDER BY {timestamp} {direction},x.file_name {direction},x.file_offset {direction},HASHBYTES('SHA2_256',CAST(x.event_data AS nvarchar(max))) {direction} OPTION(MAXDOP 1)",
         origin.relation(),
         origin.event()
     )

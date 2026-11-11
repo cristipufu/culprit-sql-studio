@@ -58,6 +58,13 @@ pub struct CommitReceipt {
     pub manifest_digest: String,
     pub head: String,
 }
+/// Commit order controls scheduling only; it never changes native source ordering or identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryOrder {
+    OldestFirst,
+    NewestFirst,
+}
 #[derive(Clone)]
 pub struct RecoveryPage {
     pub ranges: Vec<RangeManifest>,
@@ -86,7 +93,7 @@ pub trait RecoveryStore: Send + Sync {
     async fn load(&self, range_id: &str) -> Result<RangeManifest>;
     async fn recover(&self, cursor: Option<&str>, limit: u32) -> Result<RecoveryPage>;
     /// Cold recovery enumerates unpublished work, rather than replaying the entire retained history.
-    async fn pending_ranges(&self, cursor: Option<&str>, limit: u32) -> Result<RecoveryPage>;
+    async fn pending_ranges(&self, cursor: Option<&str>, limit: u32, order: RecoveryOrder) -> Result<RecoveryPage>;
     async fn retire(&self, fence: &Fence, publication: &super::sink::PublishedRange) -> Result<()>;
     /// Latest complete activity checkpoint per native source, including successful empty sets.
     /// This is stored collector state, never a claim that present source activity is fresh or unchanged.

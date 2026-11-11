@@ -1,8 +1,8 @@
 //! Rebuilds bounded delivery metadata from remote commits without querying a source database.
 use super::{
     activity_recovery::{ActivityRestoreBudget, load_activity_checkpoint},
-    journal::DeliveryJournal,
-    recovery::{self, RecoveryPage, RecoveryStore},
+    journal::{DeliveryJournal, HydrationPriority},
+    recovery::{self, RecoveryOrder, RecoveryPage, RecoveryStore},
 };
 use culprit_core::{Result, telemetry::DeliveryProblem};
 #[cfg(test)]
@@ -29,7 +29,7 @@ pub async fn restore_pending_page(
     limit: u32,
 ) -> Result<RecoveryPage> {
     journal.bind_store(store.id()).await?;
-    let page = store.pending_ranges(cursor, limit).await?;
+    let page = store.pending_ranges(cursor, limit, RecoveryOrder::OldestFirst).await?;
     restore_ranges(journal, store, &page, limit).await?;
     Ok(page)
 }
@@ -47,7 +47,7 @@ async fn restore_ranges(
         if committed.manifest() != manifest {
             return Err(DeliveryProblem::Integrity.error());
         }
-        journal.restore(&committed).await?;
+        journal.restore(&committed, HydrationPriority::Historical).await?;
     }
     Ok(())
 }

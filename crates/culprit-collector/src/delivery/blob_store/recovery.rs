@@ -120,13 +120,13 @@ impl RecoveryStore for BlobRecoveryStore {
         let (root, _) = self.root().await?;
         root.activity_heads.page(cursor, limit, root.high_sequence)
     }
-    async fn pending_ranges(&self, cursor: Option<&str>, limit: u32) -> Result<RecoveryPage> {
+    async fn pending_ranges(&self, cursor: Option<&str>, limit: u32, order: RecoveryOrder) -> Result<RecoveryPage> {
         if !(1..=128).contains(&limit) {
             return Err(DeliveryProblem::Capacity.error());
         }
         let (root, _) = self.root().await?;
         let (ids, next_cursor) =
-            root.pending.page(cursor, 1, &self.id, root.head.as_ref().map_or(0, |head| head.order))?;
+            root.pending.page(cursor, 1, &self.id, root.head.as_ref().map_or(0, |head| head.order), order)?;
         let mut ranges = Vec::new();
         for id in ids {
             let index = self.committed_index(&id, &root).await?.ok_or_else(integrity)?;
