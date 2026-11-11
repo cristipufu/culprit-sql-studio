@@ -22,7 +22,7 @@ fn one_schema_drives_column_types_mapping_and_exact_value_verification() {
     changed = returned.clone();
     changed[1] = json!(true);
     assert_ne!(schema.returned_digest(&changed).unwrap(), expected);
-    assert!(schema.create_table().contains("Count:decimal, HasLabel:bool, Label:string, Facts:dynamic"));
+    assert!(schema.create_table().contains("Count:decimal, HasLabel:bool, Label:string, Facts:string"));
     assert!(schema.verification_projection().contains("Count=tostring(Count)"));
     assert!(schema.verification_projection().contains("Facts=tostring(Facts)"));
     assert!(schema.create_mapping().unwrap().contains("$.HasLabel"));
@@ -48,6 +48,33 @@ fn schema_changes_cannot_reuse_projection_indexes_and_invalid_column_sets_are_re
     );
     assert!(first.project(&json!({})).is_err());
     assert!(first.returned_digest(&[]).is_err());
+}
+
+#[test]
+fn structured_json_is_stored_as_text_without_promoting_native_strings_or_losing_counter_digits() {
+    let schema = Schema::new(
+        "FixtureV1",
+        [
+            Field::required("Facts", "/facts", ScalarType::JsonContainer),
+            Field::optional("Missing", "/missing", ScalarType::JsonContainer),
+        ],
+    )
+    .unwrap();
+    let facts = json!({"at":"2020-01-01T06:00:00Z","id":"ABCDEF01-2345-6789-ABCD-EF0123456789","count":"18446744073709551615","values":["21",null,2.0]});
+    let expected = schema.project(&json!({"facts":facts})).unwrap();
+    let wire: Value = serde_json::from_slice(&schema.encode(&expected).unwrap()).unwrap();
+    assert_eq!(wire["Facts"].as_str().unwrap(), serde_json::to_string(&facts).unwrap());
+    assert!(wire["Missing"].is_null());
+    let returned = vec![wire["Facts"].clone(), json!("")];
+    assert_eq!(schema.returned_digest(&returned).unwrap(), projection::digest(&expected).unwrap());
+    let mut changed = facts.clone();
+    changed["at"] = json!("2020-01-01T06:00:00.0000000Z");
+    assert_ne!(
+        schema.returned_digest(&[json!(changed.to_string()), json!("")]).unwrap(),
+        projection::digest(&expected).unwrap(),
+        "ingestion must not silently rewrite a nested native string"
+    );
+    assert!(schema.create_table().contains("Facts:string"));
 }
 
 #[test]
@@ -198,11 +225,12 @@ fn resource_metrics_preserve_scope_units_aggregation_and_unknown_values() {
     let native =
         ResourceMeasurement { at: "2026-11-11T06:00:00Z".into(), replica_id: "primary".into(), metrics: vec![metric] };
     let projected = wire(&samples::resources(&[]).unwrap(), native);
-    assert_eq!(projected["Metrics"][0]["scope"], "database");
-    assert_eq!(projected["Metrics"][0]["unit"], "percent");
-    assert_eq!(projected["Metrics"][0]["statistic"], "maximum");
-    assert_eq!(projected["Metrics"][0]["period_ms"], 15000);
-    assert!(projected["Metrics"][0]["value"].is_null());
+    let metrics: Value = serde_json::from_str(projected["Metrics"].as_str().unwrap()).unwrap();
+    assert_eq!(metrics[0]["scope"], "database");
+    assert_eq!(metrics[0]["unit"], "percent");
+    assert_eq!(metrics[0]["statistic"], "maximum");
+    assert_eq!(metrics[0]["period_ms"], 15000);
+    assert!(metrics[0]["value"].is_null());
 }
 
 #[test]

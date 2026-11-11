@@ -152,9 +152,9 @@ impl Scenario {
             )
             .await;
         for (column, actual) in schema.columns().iter().zip(&rows[0]) {
-            let expected = &stored[&column.name];
+            let expected = column.kind.returned(&stored[&column.name], column.nullable).unwrap();
             let normalized = column.kind.returned(actual, column.nullable);
-            if normalized.as_ref().ok() != Some(expected) {
+            if normalized.as_ref().ok() != Some(&expected) {
                 // This test uses synthetic fixtures only; retain useful readback evidence without changing
                 // production errors or relaxing any membership/value verification.
                 eprintln!(

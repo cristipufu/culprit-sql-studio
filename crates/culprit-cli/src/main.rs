@@ -466,14 +466,8 @@ async fn run(command: Command, out: &Out) -> culprit_core::Result<u8> {
     if let Command::Update(args) = command {
         return update_cmd::run(args, out).await;
     }
-    if let Command::Collect(collect_cmd::CollectCommand::Outbox(command)) = command {
-        return outbox_cmd::run(command, out).await;
-    }
-    if let Command::Collect(collect_cmd::CollectCommand::Schema) = command {
-        return collect_cmd::schema(out);
-    }
-    if let Command::Collect(collect_cmd::CollectCommand::Service(command)) = command {
-        return service_cmd::run(command, out).await;
+    if let Command::Collect(command) = command {
+        return collect_cmd::run(command, out).await;
     }
     let mut ws = Workspace::open()?;
     // A device-code sign-in needs a person to read the code; scripts and agents get an error with a hint instead.
@@ -491,6 +485,14 @@ async fn run(command: Command, out: &Out) -> culprit_core::Result<u8> {
 
 type CommandTask<'a> = std::pin::Pin<Box<dyn std::future::Future<Output = culprit_core::Result<u8>> + 'a>>;
 
+/// Construct only the selected operation, outside the caller's async frame and polling stack.
+fn command_task<'a, F>(factory: impl FnOnce() -> F) -> CommandTask<'a>
+where
+    F: std::future::Future<Output = culprit_core::Result<u8>> + 'a,
+{
+    Box::pin(factory())
+}
+
 /// Poll only the selected command's frame; unrelated commands must not consume its caller's stack.
 fn dispatch<'a>(command: Command, ws: Workspace, out: &'a Out) -> CommandTask<'a> {
     match command {
@@ -503,7 +505,7 @@ fn dispatch<'a>(command: Command, ws: Workspace, out: &'a Out) -> CommandTask<'a
         Command::Dashboard(args) => Box::pin(async move { dashboard_cmd::run(&ws, args, out).await }),
         Command::Doctor { connection } => Box::pin(async move { commands::doctor(&ws, &connection, out).await }),
         Command::Scan(args) => Box::pin(async move { commands::scan(&ws, args, out).await }),
-        Command::Collect(command) => Box::pin(async move { collect_cmd::run(ws, command, out).await }),
+        Command::Collect(_) => Box::pin(async move { unreachable!("collection dispatch precedes workspace creation") }),
         Command::Findings(args) => Box::pin(async move { commands::findings(&ws, args, out) }),
         Command::Show { connection, finding, report } => {
             Box::pin(async move { commands::show(&ws, connection, finding, report, out) })
@@ -573,6 +575,14 @@ mod tests {
     use clap::Parser;
 
     use super::*;
+
+    #[test]
+    fn unrelated_commands_do_not_retain_background_collection_state_on_their_stack() {
+        let out = Out::new(Format::Json);
+        let request = run(Command::Checks, &out);
+        let bytes = std::mem::size_of_val(&request);
+        assert!(bytes <= 4096, "command entry retains {bytes} inline bytes; only the selected handler owns its state");
+    }
 
     #[test]
     fn ssh_connection_flags_parse_and_cannot_silently_drop_an_incomplete_route() {

@@ -11,7 +11,7 @@ mod canonical;
 mod tests;
 
 const MAX_COLUMN_BYTES: usize = 256 * 1024;
-pub const PROJECTION_NORMALIZATION_VERSION: u32 = 1;
+pub const PROJECTION_NORMALIZATION_VERSION: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum ScalarType {
@@ -32,7 +32,9 @@ impl ScalarType {
             Self::ExactCounter => "decimal",
             Self::Real => "real",
             Self::Timestamp => "datetime",
-            Self::JsonContainer => "dynamic",
+            // Dynamic ingestion promotes nested timestamp/GUID strings and rewrites their representation.
+            // Keep exact JSON in storage; canonical analytical functions parse it after verification.
+            Self::JsonContainer => "string",
         }
     }
     /// Decimal counters are selected with tostring(Column) during verification, preserving all uint64 digits.

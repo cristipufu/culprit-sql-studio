@@ -136,6 +136,11 @@ The generated contract has 15 analytical tables and one completion table:
 Incident checkpoints are recovery-only. They are not duplicated into a seventeenth analytical table. Multiple logical
 datasets deliberately share a typed physical table; `Dataset`, native source and fact kind identify their meaning.
 
+Structured JSON is stored as text so ingestion preserves nested timestamp strings, identifiers and exact counter
+digits. The generated analytical functions parse those fields after verification. Raw-table consumers can parse the
+JSON explicitly. Kusto `dynamic` ingestion can promote string values to other types; see the
+[dynamic type documentation](https://learn.microsoft.com/en-us/kusto/query/scalar-data-types/dynamic).
+
 Query the generated `...Rows` functions with explicit contract, store, database and collection-time bounds. Apply
 native measurement-time filters separately. Current activity and snapshot functions additionally require an
 `asof` and positive maximum age. Complete empty observations replace prior sets; partial sources cannot clear them.
@@ -190,8 +195,10 @@ python3 dev/licenses.py
 python3 -B dev/smoke-container.py --binary target/release/culprit
 ```
 
-Run this on a Linux builder. The script refuses a macOS/Windows executable before Docker, copies only the executable,
-licenses and Dockerfile into a private build context, and tests the image with networking disabled, a non-root user,
+Run this on a Linux builder whose glibc baseline is compatible with the Debian bookworm runtime. CI uses Ubuntu 22.04,
+the same baseline as the Linux release, with an isolated compiler cache. The script refuses a macOS/Windows
+executable before Docker, copies only the executable, licenses and Dockerfile into a private build context, and tests
+the image with networking disabled, a non-root user,
 read-only filesystem and dropped capabilities. Fabricated connection metadata exercises offline validation; no real
 workspace is mounted. Owned test containers/images are removed; `--keep-image` retains the resulting local image.
 CI performs the Linux container check. It does not publish an image or deploy the Kubernetes resources.

@@ -40,7 +40,7 @@ impl Fixture {
             .map(|column| {
                 let value = &row[&column.name];
                 match column.kind {
-                    ScalarType::JsonContainer => json!(if value.is_null() { String::new() } else { value.to_string() }),
+                    ScalarType::JsonContainer => value.as_str().map_or_else(|| json!(""), |text| json!(text)),
                     ScalarType::ExactCounter => {
                         json!(value.as_str().map(|text| format!("{text}.0")).unwrap_or_default())
                     }

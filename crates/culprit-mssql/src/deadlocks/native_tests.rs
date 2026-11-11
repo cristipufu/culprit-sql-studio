@@ -123,6 +123,20 @@ async fn native_deadlock_graphs_keep_positions_and_share_the_interactive_parser(
     });
     let (first, second) = tokio::join!(first, second);
     assert_ne!(first.unwrap().is_ok(), second.unwrap().is_ok(), "one transaction is the deadlock victim");
+    // A dispatch-latency setting is not proof that an event reached a retained file. Flush only this
+    // disposable instance, then establish the fixture independently before exercising the reader.
+    batch(&mut admin,"ALTER EVENT SESSION [system_health] ON SERVER STATE=STOP;ALTER EVENT SESSION [system_health] ON SERVER STATE=START;").await;
+    let file = target.first().unwrap().string("path");
+    let mut retained = tiberius::Query::new(
+        "SELECT COUNT_BIG(*) AS events FROM sys.fn_xe_file_target_read_file(@P1,NULL,NULL,NULL) WHERE object_name=N'xml_deadlock_report' AND timestamp_utc>=CONVERT(datetime2(7),@P2,127)",
+    );
+    retained.bind(file.as_str());
+    retained.bind(from.as_str());
+    let retained = retained.query(&mut admin).await.unwrap().into_row().await.unwrap().unwrap();
+    assert!(
+        retained.get::<i64, _>("events").unwrap() > 0,
+        "the generated deadlock must exist in the retained fixture file"
+    );
     let mut reader = ReadSession::new(
         pool.clone(),
         CollectionBudget { page_bytes: 8 * 1024 * 1024, total_timeout_ms: 120000, ..Default::default() },

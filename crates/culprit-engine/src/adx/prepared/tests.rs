@@ -74,7 +74,10 @@ fn activity_and_incidents_keep_owner_generations_separate_counters_and_bounded_u
     assert_eq!(projected["SessionCpuMs"], "11");
     assert_eq!(projected["RequestCpuMs"], "0");
     assert!(projected["RequestWrites"].is_null());
-    assert_eq!(projected["WaitOwners"][0]["generation"], Value::Null);
+    assert_eq!(
+        serde_json::from_str::<Value>(projected["WaitOwners"].as_str().unwrap()).unwrap()[0]["generation"],
+        Value::Null
+    );
     assert_eq!(projected["ClientApplication"], "collector-name");
     let change = ActivityIncidentChange {
         id: digest(b"change"),
@@ -106,8 +109,9 @@ fn catalog_expressions_and_tuning_bodies_are_references_with_their_native_metada
     let row = ObjectDefinitionRecord::new("columns".into(), fact).unwrap();
     let projected = wire(schema::facts::objects(&[]).unwrap(), &input(&TelemetryRecord::ObjectDefinition(row.clone())));
     assert_eq!(projected["DefinitionVersion"], row.version);
-    assert_eq!(projected["Details"]["default"]["payload"]["reason"], "oversized");
-    assert_eq!(projected["Details"]["max_length"], 80);
+    let details: Value = serde_json::from_str(projected["Details"].as_str().unwrap()).unwrap();
+    assert_eq!(details["default"]["payload"]["reason"], "oversized");
+    assert_eq!(details["max_length"], 80);
     let hint = NativeQueryHint {
         hint_id: "1".into(),
         query_id: "7".into(),
@@ -124,9 +128,10 @@ fn catalog_expressions_and_tuning_bodies_are_references_with_their_native_metada
     assert!(row.is_valid());
     let projected = wire(schema::facts::tuning(&[]).unwrap(), &input(&row));
     assert_eq!(projected["DetailState"], "inline");
-    assert_eq!(projected["Details"]["failures"], "9007199254740993");
-    assert_eq!(projected["Details"]["hint"]["bytes"], 200_000);
-    assert!(projected["Details"]["hint"]["text"].is_null());
+    let details: Value = serde_json::from_str(projected["Details"].as_str().unwrap()).unwrap();
+    assert_eq!(details["failures"], "9007199254740993");
+    assert_eq!(details["hint"]["bytes"], 200_000);
+    assert!(details["hint"]["text"].is_null());
 }
 #[test]
 fn large_deadlock_graphs_keep_signal_fields_and_explicit_full_evidence_references() {
@@ -147,7 +152,8 @@ fn large_deadlock_graphs_keep_signal_fields_and_explicit_full_evidence_reference
     };
     let projected = wire(schema::facts::deadlocks(&[]).unwrap(), &input(&TelemetryRecord::Deadlock(row.clone())));
     assert_eq!(projected["DetailState"], "inline");
-    assert_eq!(projected["Details"]["processes"][0]["statement"]["bytes"], 200_000);
+    let details: Value = serde_json::from_str(projected["Details"].as_str().unwrap()).unwrap();
+    assert_eq!(details["processes"][0]["statement"]["bytes"], 200_000);
     row.resources = vec![
         culprit_core::DeadlockResource {
             id: "r1".into(),

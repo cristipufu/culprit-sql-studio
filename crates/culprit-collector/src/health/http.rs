@@ -21,6 +21,7 @@ impl HealthServer {
         Ok(Self { listener: TcpListener::bind(address).await.map_err(|_| failed())?, health })
     }
     pub async fn run(self, cancellation: &CollectionCancellation) -> Result<()> {
+        let Self { listener, health } = self;
         let mut tasks = JoinSet::new();
         let result = loop {
             tokio::select! {
@@ -29,13 +30,14 @@ impl HealthServer {
                 result=tasks.join_next(),if !tasks.is_empty()=>{
                     if result.is_some_and(|r|r.is_err()){break Err(failed());}
                 },
-                accepted=self.listener.accept(),if tasks.len()<MAX_CONNECTIONS=>{
+                accepted=listener.accept(),if tasks.len()<MAX_CONNECTIONS=>{
                     let (socket,_)=match accepted {Ok(pair)=>pair,Err(_)=>break Err(failed())};
-                    let health=self.health.clone();
+                    let health=health.clone();
                     tasks.spawn(async move{let _=reply(socket,health).await;});
                 },
             }
         };
+        drop(listener);
         // Every accepted socket has a deadline. Shutdown retains ownership until these tasks end.
         while tasks.join_next().await.is_some() {}
         result

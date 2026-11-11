@@ -131,8 +131,15 @@ impl Schema {
             .columns
             .iter()
             .zip(values)
-            .map(|(column, value)| (column.name.clone(), value.clone()))
-            .collect::<serde_json::Map<_, _>>();
+            .map(|(column, value)| {
+                let value = if column.kind == ScalarType::JsonContainer && !value.is_null() {
+                    Value::String(serde_json::to_string(value).map_err(|_| DeliveryProblem::Integrity.error())?)
+                } else {
+                    value.clone()
+                };
+                Ok((column.name.clone(), value))
+            })
+            .collect::<Result<serde_json::Map<_, _>>>()?;
         let mut bytes = serde_json::to_vec(&object).map_err(|_| DeliveryProblem::Integrity.error())?;
         if bytes.len() >= MAX_WIRE_RECORD_BYTES {
             return Err(DeliveryProblem::Capacity.error());

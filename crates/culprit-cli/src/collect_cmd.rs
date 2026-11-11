@@ -232,23 +232,27 @@ impl OnceArgs {
     }
 }
 
-pub(crate) async fn run(ws: Workspace, command: CollectCommand, out: &Out) -> Result<u8> {
-    let args = match command {
-        CollectCommand::Schema => return schema(out),
-        CollectCommand::Service(command) => return crate::service_cmd::run(command, out).await,
-        CollectCommand::Once(args) => args,
-        CollectCommand::Activity(args) => {
-            let ws = args.identity.configure(ws)?;
-            return crate::activity_cmd::run(&ws, args, out).await;
+pub(crate) fn run(command: CollectCommand, out: &Out) -> crate::CommandTask<'_> {
+    match command {
+        CollectCommand::Schema => crate::command_task(|| async { schema(out) }),
+        CollectCommand::Service(command) => crate::command_task(|| crate::service_cmd::run(command, out)),
+        CollectCommand::Outbox(command) => crate::command_task(|| crate::outbox_cmd::run(command, out)),
+        CollectCommand::Once(args) => crate::command_task(|| once(args, out)),
+        CollectCommand::Activity(args) => crate::command_task(|| async move {
+            let ws = args.identity.configure(Workspace::open()?)?;
+            crate::activity_cmd::run(&ws, args, out).await
+        }),
+        CollectCommand::Fleet(args) => crate::command_task(|| async move {
+            let ws = args.identity.configure(Workspace::open()?)?;
+            crate::fleet_cmd::run(&ws, args, out).await
+        }),
+        CollectCommand::Admission(command) => {
+            crate::command_task(|| async move { crate::admission_cmd::run(&Workspace::open()?, command, out).await })
         }
-        CollectCommand::Fleet(args) => {
-            let ws = args.identity.configure(ws)?;
-            return crate::fleet_cmd::run(&ws, args, out).await;
-        }
-        CollectCommand::Outbox(command) => return crate::outbox_cmd::run(command, out).await,
-        CollectCommand::Admission(command) => return crate::admission_cmd::run(&ws, command, out).await,
-    };
-    let ws = args.identity.configure(ws)?;
+    }
+}
+async fn once(args: OnceArgs, out: &Out) -> Result<u8> {
+    let ws = args.identity.configure(Workspace::open()?)?;
     let request = args.request()?;
     let cancellation = CollectionCancellation::default();
     let directory = args

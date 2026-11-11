@@ -17,7 +17,7 @@ fn returned(schema: &super::super::schema::Schema, row: &Value) -> Vec<Value> {
         .map(|column| {
             let value = &row[&column.name];
             match column.kind {
-                ScalarType::JsonContainer => json!(if value.is_null() { String::new() } else { value.to_string() }),
+                ScalarType::JsonContainer => value.as_str().map_or_else(|| json!(""), |text| json!(text)),
                 ScalarType::ExactCounter => json!(value.as_str().unwrap_or_default()),
                 _ => value.clone(),
             }
@@ -57,8 +57,11 @@ async fn data_readback_precedes_completion_and_publication_waits_for_exact_contr
         let row: Value = serde_json::from_slice(rows[0].1).unwrap();
         assert_eq!(row["ReceiptsSha256"], verified.receipts_digest());
         assert_eq!(row["RecoveryStoreId"], range.store_id());
-        assert_eq!(row["Batches"][0]["rows"], 1);
-        assert_eq!(row["SourceDescription"]["continuity"], "unverified");
+        assert_eq!(serde_json::from_str::<Value>(row["Batches"].as_str().unwrap()).unwrap()[0]["rows"], 1);
+        assert_eq!(
+            serde_json::from_str::<Value>(row["SourceDescription"].as_str().unwrap()).unwrap()["continuity"],
+            "unverified"
+        );
         assert!(row["ReadMetrics"].is_null());
         returned(catalog.publication(), &row)
     };
@@ -104,8 +107,9 @@ async fn an_empty_successful_capture_has_explicit_coverage_and_no_empty_data_blo
         let objects = blobs.objects.lock().unwrap();
         assert_eq!(objects.len(), 1);
         let row: Value = serde_json::from_slice(objects.values().next().unwrap()).unwrap();
-        assert_eq!(row["Batches"][0]["rows"], 0);
-        assert_eq!(row["Batches"][0]["native_sha256"], digest(b""));
+        let batches: Value = serde_json::from_str(row["Batches"].as_str().unwrap()).unwrap();
+        assert_eq!(batches[0]["rows"], 0);
+        assert_eq!(batches[0]["native_sha256"], digest(b""));
         returned(catalog.publication(), &row)
     };
     query.replies.lock().unwrap().push_back(Reply::Rows(vec![values]));
