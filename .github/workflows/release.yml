@@ -359,13 +359,23 @@ jobs:
         with:
           ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
+      - name: Check out the packaging tools from this workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tools
+          sparse-checkout: .github/scripts/configure_ubuntu_mirror.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-licenses
           path: target/licenses
       - name: Linux libraries
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
+          sudo python3 .release-tools/.github/scripts/configure_ubuntu_mirror.py
+          sudo apt-get update -o APT::Update::Error-Mode=any
           sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
             librsvg2-dev libayatana-appindicator3-dev libssl-dev libxdo-dev patchelf
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
