@@ -95,7 +95,13 @@ def run(binary, licenses, keep_image):
                     "--platform", selected_platform, "--network", "none", "--read-only", "--cap-drop", "ALL",
                     "--security-opt", "no-new-privileges", "--pids-limit", "64", "--memory", "512m", "--cpus", "1",
                     "--mount", f"type=bind,source={mounted},target=/fixture,readonly", image, *command,
-                ], capture_output=True, text=True, check=True, timeout=60)
+                ], capture_output=True, text=True, check=False, timeout=60)
+                if result.returncode:
+                    # Only synthetic offline entry points run here. Preserve loader/runtime diagnostics
+                    # before the owned container and image are removed.
+                    print(result.stdout, end="")
+                    print(result.stderr, end="")
+                    result.check_returncode()
                 if command[1:2] == ["schema"]:
                     assets = json.loads(result.stdout)
                     if len(assets["routes"]) != 16:

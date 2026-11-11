@@ -10,6 +10,7 @@ use culprit_core::{
 
 pub(crate) const SERVER: &str = "SELECT /* culprit */ CAST(SERVERPROPERTY('EngineEdition') AS int) AS edition,DB_NAME() AS db,CONVERT(varchar(40),SYSUTCDATETIME(),127)+'Z' AS observed_at";
 pub(crate) const RING: &str = "SELECT /* culprit */ CAST(t.target_data AS nvarchar(max)) AS target_xml FROM sys.dm_xe_session_targets t JOIN sys.dm_xe_sessions s ON s.address=t.event_session_address WHERE s.name=N'system_health' AND t.target_name=N'ring_buffer'";
+const FILE_TARGET: &str = "SELECT TOP(1) /* culprit */ CAST(t.target_data AS xml).value('(EventFileTarget/File/@name)[1]','nvarchar(4000)') AS file_path FROM sys.dm_xe_session_targets t JOIN sys.dm_xe_sessions s ON s.address=t.event_session_address WHERE s.name=N'system_health' AND t.target_name=N'event_file'";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Origin {
@@ -20,7 +21,7 @@ impl Origin {
     fn relation(self) -> &'static str {
         match self {
             Self::AzureTelemetry => "sys.fn_xe_telemetry_blob_target_read_file('dl',NULL,NULL,NULL)",
-            Self::SystemHealth => "sys.fn_xe_file_target_read_file(N'system_health*.xel',NULL,NULL,NULL)",
+            Self::SystemHealth => "sys.fn_xe_file_target_read_file(@P4,NULL,NULL,NULL)",
         }
     }
     fn event(self) -> &'static str {
@@ -49,15 +50,32 @@ pub(crate) async fn read<R: NativeRead>(
     newest_first: bool,
 ) -> Result<Vec<Event>> {
     let sql = read_sql(origin, newest_first);
-    let rows = io
-        .query(
-            &sql,
-            vec![Parameter::Integer(limit as i64), Parameter::Text(from.into()), Parameter::Text(until.into())],
-            limit,
-        )
-        .await
-        .map_err(ReadError::into_error)?;
+    let mut parameters =
+        vec![Parameter::Integer(limit as i64), Parameter::Text(from.into()), Parameter::Text(until.into())];
+    if origin == Origin::SystemHealth {
+        // Resolve the active target rather than relying on the process's default directory. A relative
+        // system_health wildcard can return an empty set even while the configured target contains events.
+        let target = io.query(FILE_TARGET, vec![], 1).await.map_err(ReadError::into_error)?;
+        let path = text(target.first().ok_or_else(invalid_data)?, "file_path")?;
+        parameters.push(Parameter::Text(file_pattern(&path)?));
+    }
+    let rows = io.query(&sql, parameters, limit).await.map_err(ReadError::into_error)?;
     rows.iter().map(|row| decode(row, origin, database)).collect()
+}
+fn file_pattern(path: &str) -> Result<String> {
+    let (stem, extension) = path.rsplit_once('.').ok_or_else(invalid_data)?;
+    let (numbered, timestamp) = stem.rsplit_once('_').ok_or_else(invalid_data)?;
+    let (prefix, number) = numbered.rsplit_once('_').ok_or_else(invalid_data)?;
+    if !extension.eq_ignore_ascii_case("xel")
+        || prefix.is_empty()
+        || prefix.contains(['*', '?'])
+        || number.is_empty()
+        || timestamp.is_empty()
+        || !number.bytes().chain(timestamp.bytes()).all(|byte| byte.is_ascii_digit())
+    {
+        return Err(invalid_data());
+    }
+    Ok(format!("{prefix}_*.{extension}"))
 }
 pub(super) fn read_sql(origin: Origin, newest_first: bool) -> String {
     let direction = if newest_first { "DESC" } else { "ASC" };
@@ -113,5 +131,30 @@ mod tests {
         assert_eq!(event.position.len(), 64);
         assert!(event.graphs.is_empty());
         assert_eq!(io.calls.len(), 1);
+    }
+    #[tokio::test]
+    async fn system_health_uses_its_observed_target_and_binds_the_rollover_pattern_as_data() {
+        for path in [
+            "/var/opt/mssql/log/system_health_0_134388425128000000.xel",
+            r"C:\SQL logs\health's events_3_134388425128000000.xel",
+        ] {
+            let mut io = FakeRead::new(vec![Ok(vec![Rec::of(&[("file_path", Val::Text(path.into()))])]), Ok(vec![])]);
+            assert!(
+                read(&mut io, Origin::SystemHealth, "db", "2020-01-01T06:00:00Z", "2020-01-01T07:00:00Z", 10, false)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            assert_eq!(io.calls.len(), 2);
+            assert!(io.calls[0].sql.contains("event_file"));
+            assert!(io.calls[1].sql.contains("fn_xe_file_target_read_file(@P4"));
+            assert!(!io.calls[1].sql.contains(path));
+            assert!(
+                matches!(&io.calls[1].parameters[3],Parameter::Text(pattern) if pattern==&file_pattern(path).unwrap())
+            );
+        }
+        for path in ["", "health.xel", "health_bad_123.xel", "health_0_bad.xel", "health*_0_123.xel"] {
+            assert!(file_pattern(path).is_err(), "unrecognized native target: {path}");
+        }
     }
 }

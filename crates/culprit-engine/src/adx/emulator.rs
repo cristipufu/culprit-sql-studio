@@ -121,7 +121,48 @@ impl Scenario {
         let publication = self.sink.publish(&verified, &DeliveryAttempt::new(2).unwrap()).await.unwrap();
         assert!(!self.sink.publication_visible(&publication, &self.range).await.unwrap());
         self.ingest(emulator);
-        assert!(self.sink.publication_visible(&publication, &self.range).await.unwrap());
+        match self.sink.publication_visible(&publication, &self.range).await {
+            Ok(visible) => assert!(visible),
+            Err(error) => {
+                self.describe_publication(emulator).await;
+                panic!("synthetic publication readback failed: {error:?}");
+            }
+        }
+    }
+    async fn describe_publication(&self, emulator: &Emulator) {
+        let catalog = SchemaCatalog::new().unwrap();
+        let schema = catalog.publication();
+        let stored = {
+            let objects = self.blobs.objects.lock().unwrap();
+            serde_json::from_slice::<Value>(
+                objects.iter().find(|(key, _)| key.starts_with("ready/CulpritPublishedRangesV1/")).unwrap().1,
+            )
+            .unwrap()
+        };
+        let text = format!(
+            "declare query_parameters(pRange:string); {} | where RangeId == pRange | project {} | take 1",
+            schema.table(),
+            schema.verification_projection()
+        );
+        let rows = emulator
+            .values(
+                text,
+                BTreeMap::from([("pRange".into(), json!(self.range.manifest().range_id))]),
+                schema.verification_columns(),
+            )
+            .await;
+        for (column, actual) in schema.columns().iter().zip(&rows[0]) {
+            let expected = &stored[&column.name];
+            let normalized = column.kind.returned(actual, column.nullable);
+            if normalized.as_ref().ok() != Some(expected) {
+                // This test uses synthetic fixtures only; retain useful readback evidence without changing
+                // production errors or relaxing any membership/value verification.
+                eprintln!(
+                    "Synthetic control column {}: expected={expected:?}, returned={actual:?}, normalized={normalized:?}",
+                    column.name
+                );
+            }
+        }
     }
 }
 fn activity(catalog: &SchemaCatalog, sequence: u64, empty: bool) -> Recovery {

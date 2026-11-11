@@ -40,6 +40,12 @@ struct AnalyticalWorker<'a> {
     next_restore_scan: i64,
     committed: Arc<Notify>,
     capabilities: CommittedRangeCache,
+    pending_hydration: Option<PendingHydration>,
+    next_hydration_attempt: i64,
+}
+struct PendingHydration {
+    committed: recovery::CommittedRange,
+    next_cursor: Option<String>,
 }
 impl<'a> DeliveryWorker<'a> {
     pub fn new(
@@ -81,27 +87,31 @@ impl<'a> DeliveryWorker<'a> {
                 next_restore_scan: 0,
                 committed,
                 capabilities: CommittedRangeCache::default(),
+                pending_hydration: None,
+                next_hydration_attempt: 0,
             },
         })
     }
     pub async fn run(&mut self, cancellation: &CollectionCancellation, report: &Report<'_>) -> Result<()> {
         let archive = async {
             while !cancellation.is_cancelled() {
-                handle_turn(
+                let delay = handle_turn(
                     self.archive.work_once(chrono::Utc::now().timestamp_millis(), cancellation, report).await,
                     report,
+                    self.archive.policy.retry_delay_ms,
                 )?;
-                wait(cancellation).await;
+                wait(cancellation, delay).await;
             }
             Ok(())
         };
         let analytical = async {
             while !cancellation.is_cancelled() {
-                handle_turn(
+                let delay = handle_turn(
                     self.analytical.work_once(chrono::Utc::now().timestamp_millis(), cancellation, report).await,
                     report,
+                    self.analytical.policy.retry_delay_ms,
                 )?;
-                wait(cancellation).await;
+                wait(cancellation, delay).await;
             }
             Ok(())
         };
@@ -118,8 +128,17 @@ impl<'a> DeliveryWorker<'a> {
         let report = |before: Option<&DeliveryEntry>, result: Result<DeliveryEntry>| {
             report.lock().map_err(|_| DeliveryProblem::Storage.error())?(before, result)
         };
-        handle_turn(self.archive.work_once(now, cancellation, &report).await, &report)?;
-        handle_turn(self.analytical.work_once(now, cancellation, &report).await, &report)
+        handle_turn(
+            self.archive.work_once(now, cancellation, &report).await,
+            &report,
+            self.archive.policy.retry_delay_ms,
+        )?;
+        handle_turn(
+            self.analytical.work_once(now, cancellation, &report).await,
+            &report,
+            self.analytical.policy.retry_delay_ms,
+        )
+        .map(|_| ())
     }
 }
 impl AnalyticalWorker<'_> {
@@ -129,7 +148,10 @@ impl AnalyticalWorker<'_> {
         }
         self.journal.bind_store(self.store.id()).await?;
         self.journal.compact_retired(WORK_PAGE).await?;
-        self.hydrate(now).await?;
+        let hydration = self.hydrate(now).await;
+        if hydration.as_ref().err().is_some_and(fatal) {
+            return hydration;
+        }
         if now >= self.next_poll {
             self.next_poll = now.saturating_add(UPDATE_POLL_MILLIS);
             DeliveryDriver::new(self.journal, self.store, self.sink, &mut self.capabilities, self.policy)?
@@ -159,9 +181,15 @@ impl AnalyticalWorker<'_> {
             }
         }
         self.after = next.unwrap_or(0);
-        Ok(())
+        hydration
     }
     async fn hydrate(&mut self, now: i64) -> Result<()> {
+        if now < self.next_hydration_attempt {
+            return Ok(());
+        }
+        if self.pending_hydration.is_some() {
+            return self.admit_hydration(now).await;
+        }
         if self.restored {
             let notified = tokio::select! {biased;_=self.committed.notified()=>true,_=std::future::ready(())=>false};
             if now < self.next_restore_scan && !notified {
@@ -171,6 +199,9 @@ impl AnalyticalWorker<'_> {
             self.restored = false;
         }
         let page = self.store.pending_ranges(self.restore_cursor.as_deref(), 1).await?;
+        if page.ranges.len() > 1 {
+            return Err(DeliveryProblem::Integrity.error());
+        }
         for manifest in &page.ranges {
             match self.journal.status(&manifest.range_id).await {
                 Ok(_) => continue,
@@ -181,33 +212,48 @@ impl AnalyticalWorker<'_> {
             if committed.manifest() != manifest {
                 return Err(DeliveryProblem::Integrity.error());
             }
-            match self.journal.restore(&committed).await {
-                Ok(()) => (),
-                Err(error) if error.detail == Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Capacity)) => {
-                    return Ok(());
-                }
-                Err(error) => return Err(error),
-            }
+            // Keep one verified candidate while the metadata journal drains. Re-listing this page could
+            // otherwise download a large native manifest on every turn during a long destination outage.
+            self.pending_hydration = Some(PendingHydration { committed, next_cursor: page.next_cursor });
+            return self.admit_hydration(now).await;
         }
-        self.restore_cursor = page.next_cursor;
+        self.advance_hydration(page.next_cursor, now);
+        Ok(())
+    }
+    async fn admit_hydration(&mut self, now: i64) -> Result<()> {
+        let candidate = self.pending_hydration.as_ref().ok_or_else(|| DeliveryProblem::Integrity.error())?;
+        match self.journal.restore(&candidate.committed).await {
+            Ok(()) => (),
+            Err(error) if error.detail == Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Capacity)) => {
+                self.next_hydration_attempt = now.saturating_add(i64::from(self.policy.retry_delay_ms));
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        }
+        let candidate = self.pending_hydration.take().ok_or_else(|| DeliveryProblem::Integrity.error())?;
+        self.advance_hydration(candidate.next_cursor, now);
+        Ok(())
+    }
+    fn advance_hydration(&mut self, next_cursor: Option<String>, now: i64) {
+        self.restore_cursor = next_cursor;
         self.restored = self.restore_cursor.is_none();
         if self.restored {
             self.next_restore_scan = now.saturating_add(UPDATE_POLL_MILLIS);
         }
-        Ok(())
     }
 }
-fn handle_turn(result: Result<()>, report: &Report<'_>) -> Result<()> {
+fn handle_turn(result: Result<()>, report: &Report<'_>, retry_delay_ms: u32) -> Result<Duration> {
     if let Err(error) = result {
         report(None, Err(error.clone()))?;
         if fatal(&error) {
             return Err(error);
         }
+        return Ok(Duration::from_millis(u64::from(retry_delay_ms)).max(TURN_DELAY));
     }
-    Ok(())
+    Ok(TURN_DELAY)
 }
-async fn wait(cancellation: &CollectionCancellation) {
-    tokio::select! {biased;_=cancellation.cancelled()=>{},_=tokio::time::sleep(TURN_DELAY)=>{}}
+async fn wait(cancellation: &CollectionCancellation, delay: Duration) {
+    tokio::select! {biased;_=cancellation.cancelled()=>{},_=tokio::time::sleep(delay)=>{}}
 }
 pub(super) fn fatal(error: &culprit_core::Error) -> bool {
     !matches!(

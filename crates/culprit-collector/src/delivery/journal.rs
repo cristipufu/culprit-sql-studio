@@ -16,7 +16,7 @@ const MAX_PENDING: u32 = 100_000;
 const JOURNAL_PAGES: u32 = 131_072;
 const MAX_UPDATE_PAGE: usize = 128;
 // Keep room for mutable proof progress and bounded WAL work while target hydration is backpressured.
-const MAX_IMMUTABLE_BYTES: u64 = JOURNAL_PAGES as u64 * 4096 / 2;
+pub(super) const MAX_IMMUTABLE_BYTES: u64 = JOURNAL_PAGES as u64 * 4096 / 2;
 const BACKLOG_QUERY: &str = "SELECT phase,count(*),min(captured_at) FROM deliveries GROUP BY phase";
 fn storage(_: impl std::fmt::Display) -> culprit_core::Error {
     DeliveryProblem::Storage.error()
