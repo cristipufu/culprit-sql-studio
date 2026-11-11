@@ -101,7 +101,7 @@ fn runtime_metrics(row: &Rec) -> Result<Vec<RuntimeMetric>> {
         ("avg_logical_io_writes", Key::LogicalWrites, pages),
         ("avg_rowcount", Key::Rows, Unit::Count),
         ("avg_dop", Key::Parallelism, Unit::Ratio),
-        ("avg_query_max_used_memory", Key::Memory, pages),
+        ("avg_query_max_used_memory", Key::PeakMemory, pages),
         ("avg_clr_time", Key::Native("mssql.clr-time".into()), Unit::Microseconds),
         ("avg_log_bytes_used", Key::LogBytes, Unit::Bytes),
         ("avg_tempdb_space_used", Key::TemporaryStorage, pages),

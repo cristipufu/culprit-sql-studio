@@ -174,8 +174,17 @@ fn optional_runtime_costs_preserve_nulls_and_reject_invalid_values() {
         panic!("runtime")
     };
     assert_eq!(record.metric(&RuntimeMetricKey::Rows).map(|metric| metric.average), Some(1.0));
-    assert_eq!(record.metric(&RuntimeMetricKey::Memory), None);
+    assert_eq!(record.metric(&RuntimeMetricKey::PeakMemory), None);
     assert_eq!(record.metric(&RuntimeMetricKey::LogBytes), None);
+    let with_peak = replace(&runtime_row(1000), &[("avg_query_max_used_memory", Val::Float(19.5))]);
+    let TelemetryRecord::QueryRuntime(record) =
+        decode::record(&with_peak, TelemetryStream::QueryRuntime, StatementReferences::default()).unwrap()
+    else {
+        panic!("runtime")
+    };
+    let peak = record.metric(&RuntimeMetricKey::PeakMemory).unwrap();
+    assert_eq!(peak.average, 19.5);
+    assert_eq!(peak.unit, RuntimeMetricUnit::Pages { bytes_per_page: 8192 });
     assert!(
         decode::record(
             &replace(&runtime_row(1000), &[("avg_tempdb_space_used", Val::Float(-1.0))]),

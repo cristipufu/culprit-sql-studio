@@ -122,7 +122,11 @@ fn runtime_projection_covers_the_native_contract_and_preserves_counts_units_and_
             ),
             RuntimeMetric::average(RuntimeMetricKey::Rows, RuntimeMetricUnit::Count, 17.5),
             RuntimeMetric::average(RuntimeMetricKey::Parallelism, RuntimeMetricUnit::Ratio, 4.5),
-            RuntimeMetric::average(RuntimeMetricKey::Memory, RuntimeMetricUnit::Pages { bytes_per_page: 8192 }, 19.5),
+            RuntimeMetric::average(
+                RuntimeMetricKey::PeakMemory,
+                RuntimeMetricUnit::Pages { bytes_per_page: 8192 },
+                19.5,
+            ),
             RuntimeMetric::average(
                 RuntimeMetricKey::Native("mssql.clr-time".into()),
                 RuntimeMetricUnit::Microseconds,

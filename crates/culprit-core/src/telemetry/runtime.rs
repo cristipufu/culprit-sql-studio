@@ -32,7 +32,8 @@ pub enum RuntimeMetricKey {
     LogicalWrites,
     Rows,
     Parallelism,
-    Memory,
+    /// Per-execution peak memory; an average of peaks is distinct from average resident memory.
+    PeakMemory,
     LogBytes,
     TemporaryStorage,
     Native(String),
@@ -68,7 +69,7 @@ impl RuntimeMetricKey {
                     unit,
                     RuntimeMetricUnit::Count | RuntimeMetricUnit::Bytes | RuntimeMetricUnit::Pages { .. }
                 ),
-                Self::Memory | Self::TemporaryStorage => {
+                Self::PeakMemory | Self::TemporaryStorage => {
                     matches!(unit, RuntimeMetricUnit::Bytes | RuntimeMetricUnit::Pages { .. })
                 }
                 Self::LogBytes => unit == RuntimeMetricUnit::Bytes,
