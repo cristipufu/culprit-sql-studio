@@ -3,7 +3,8 @@ name: Release
 # Push a tag that matches the app's version (app/src-tauri/tauri.conf.json), e.g. `git tag v0.1.0 && git push origin v0.1.0`,
 # to build every platform, sign and notarize the macOS app and CLI, and open a DRAFT release with the files under the
 # stable names culpritsql.com links to. Publish the draft from the Releases page when it looks right.
-# "Run workflow" from the Actions tab builds the same files as artifacts without releasing anything.
+# "Run workflow" builds artifacts only by default. Supply an existing release_tag to rebuild that immutable tag
+# with the current packaging workflow and create its draft release.
 #
 # macOS signing turns itself on once these repository (or `release` environment) secrets exist; without them the
 # macOS build is ad-hoc signed and the run warns not to ship it:
@@ -28,25 +29,72 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing tag to rebuild and draft (blank builds artifacts only)"
+        required: false
+        type: string
+        default: ""
 
 # Least privilege: builds only read the repo. Only the publish job can write, and only to create the draft release.
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
   cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  source:
+    name: Resolve release source
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      tag: ${{ steps.source.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
+          persist-credentials: false
+      - id: source
+        name: Pin the source commit and validate its release version
+        env:
+          REQUESTED_TAG: ${{ inputs.release_tag }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, subprocess, tomllib
+          from pathlib import Path
+          tag = os.environ["REQUESTED_TAG"]
+          if not tag and os.environ["EVENT_NAME"] == "push" and os.environ["EVENT_REF"].startswith("refs/tags/v"):
+              tag = os.environ["EVENT_REF"].removeprefix("refs/tags/")
+          version = json.loads(Path("app/src-tauri/tauri.conf.json").read_text())["version"]
+          versions = [version, json.loads(Path("app/package.json").read_text())["version"],
+                      tomllib.loads(Path("Cargo.toml").read_text())["workspace"]["package"]["version"]]
+          if len(set(versions)) != 1:
+              raise SystemExit("Workspace, interface and desktop versions do not match")
+          if tag and tag != "v" + version:
+              raise SystemExit("Release tag does not match the checked-out app version")
+          if tag and "## " + version + "\n" not in Path("CHANGELOG.md").read_text():
+              raise SystemExit("Release notes are missing for the checked-out app version")
+          sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"sha={sha}\ntag={tag}\n")
+          print(f"Pinned release source: {sha}; tag: {tag or '(artifacts only)'}")
+          PYTHON
+
   licenses:
     name: Third-party licenses
+    needs: [source]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
@@ -68,7 +116,7 @@ jobs:
 
   macos:
     name: macOS (universal, signed and notarized)
-    needs: [licenses]
+    needs: [source, licenses]
     runs-on: macos-latest
     # Signing secrets can live in this environment, so required reviewers can gate who may sign a build.
     environment: release
@@ -79,6 +127,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - name: Check out the packaging tools from this workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tools
+          sparse-checkout: .github/scripts/create_macos_dmg.py
+          sparse-checkout-cone-mode: false
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -89,6 +146,8 @@ jobs:
           toolchain: stable
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          cache-on-failure: true
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - name: Install UI dependencies
         working-directory: app
@@ -168,7 +227,7 @@ jobs:
 
           # The disk image: the app plus an Applications shortcut, signed, notarized and stapled too.
           mkdir dmg && ditto "$APP" "dmg/$APP" && ln -s /Applications dmg/Applications
-          hdiutil create -volname "Culprit SQL Studio" -srcfolder dmg -ov -format UDZO Culprit-SQL-Studio-macOS.dmg
+          python3 ../.release-tools/.github/scripts/create_macos_dmg.py dmg Culprit-SQL-Studio-macOS.dmg
           rm -rf dmg
           codesign --force --timestamp --sign "$SIGN_IDENTITY" Culprit-SQL-Studio-macOS.dmg
           notarize Culprit-SQL-Studio-macOS.dmg
@@ -187,7 +246,7 @@ jobs:
           echo "::warning::MACOS_CERT_P12 isn't set: this macOS build is ad-hoc signed and Gatekeeper refuses it on other Macs. Don't ship it."
           cd dist
           mkdir dmg && ditto Culprit.app dmg/Culprit.app && ln -s /Applications dmg/Applications
-          hdiutil create -volname "Culprit SQL Studio" -srcfolder dmg -ov -format UDZO Culprit-SQL-Studio-macOS.dmg
+          python3 ../.release-tools/.github/scripts/create_macos_dmg.py dmg Culprit-SQL-Studio-macOS.dmg
           rm -rf dmg
 
       - name: Package the CLI
@@ -202,8 +261,8 @@ jobs:
 
       - name: Package and sign the update
         # Only a notarized app may reach installed copies: an ad-hoc signed one would stop opening.
-        # Release tags only: a manual run, from any branch, never signs an update.
-        if: startsWith(github.ref, 'refs/tags/v') && env.HAS_APPLE_SIGNING == 'true' && env.HAS_UPDATER_SIGNING == 'true'
+        # Tagged releases only, including explicit rebuilds; artifacts-only manual runs never sign an update.
+        if: needs.source.outputs.tag != '' && env.HAS_APPLE_SIGNING == 'true' && env.HAS_UPDATER_SIGNING == 'true'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -230,7 +289,7 @@ jobs:
 
   windows:
     name: Windows (x64)
-    needs: [licenses]
+    needs: [source, licenses]
     runs-on: windows-latest
     # The update-signing secrets can live in this environment, limited to release tags.
     environment: release
@@ -240,6 +299,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -264,7 +324,7 @@ jobs:
           cp target/release/culprit.exe out/culprit-cli-windows-x64.exe
       - name: Sign the update
         # The installer is the update: the app runs it, unattended, in place of the installed version.
-        if: startsWith(github.ref, 'refs/tags/v') && env.HAS_UPDATER_SIGNING == 'true'
+        if: needs.source.outputs.tag != '' && env.HAS_UPDATER_SIGNING == 'true'
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -283,7 +343,7 @@ jobs:
 
   linux:
     name: Linux (x86_64)
-    needs: [licenses]
+    needs: [source, licenses]
     # The oldest supported runner, so the AppImage and CLI run on older glibc too.
     runs-on: ubuntu-22.04
     # The update-signing secrets can live in this environment, limited to release tags.
@@ -294,6 +354,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -323,7 +384,7 @@ jobs:
           cp target/release/culprit out/culprit-cli-linux-x86_64
       - name: Sign the updates
         # Each kind of install updates from its own package: the AppImage replaces itself, the .deb reinstalls.
-        if: startsWith(github.ref, 'refs/tags/v') && env.HAS_UPDATER_SIGNING == 'true'
+        if: needs.source.outputs.tag != '' && env.HAS_UPDATER_SIGNING == 'true'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -342,14 +403,15 @@ jobs:
 
   publish:
     name: Draft the GitHub release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [macos, windows, linux]
+    if: needs.source.outputs.tag != ''
+    needs: [source, macos, windows, linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -358,14 +420,14 @@ jobs:
           merge-multiple: true
       - name: Check the tag matches the app's version
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.source.outputs.tag }}
         run: |
           set -euo pipefail
           VERSION=$(jq -r .version app/src-tauri/tauri.conf.json)
           [ "$TAG" = "v$VERSION" ] || { echo "::error::tag $TAG doesn't match the app's version $VERSION"; exit 1; }
       - name: Take the release notes from CHANGELOG.md
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.source.outputs.tag }}
         run: |
           set -euo pipefail
           VERSION="${TAG#v}"
@@ -375,12 +437,12 @@ jobs:
           cat "$RUNNER_TEMP/notes.md"
       - name: Write the update manifest
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.source.outputs.tag }}
         run: python3 .github/scripts/updater_manifest.py out "$TAG" "$GITHUB_REPOSITORY" "$RUNNER_TEMP/notes.md"
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.source.outputs.tag }}
         run: |
           set -euo pipefail
           cd out

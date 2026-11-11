@@ -32,10 +32,11 @@ jobs:
           toolchain: stable
           components: rustfmt
       - run: cargo fmt --all --check
-      - name: Catalog tooling and translation freshness
+      - name: Python tooling and translation freshness
         run: |
           python3 -B -m unittest discover -s dev -p test_catalog.py
           python3 -B -m unittest discover -s dev -p test_smoke_providers.py
+          python3 -B -m unittest discover -s .github/scripts -p 'test_*.py'
           python3 dev/catalog.py stale --check
 
   check:
