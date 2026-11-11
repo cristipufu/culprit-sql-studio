@@ -49,7 +49,7 @@ When query profiling is available, live progress shows measured operator activit
 
 Deadlock history comes from the readable Extended Events history, such as `system_health`. A missing or truncated event source does not establish that no deadlocks happened.
 
-## Resource history
+### Resource history
 
 On Azure SQL Database, scans and background capture share the same native resource reader. Scans reuse their retained samples for the resource timeline and pressure summary. Selected export windows and workload admission request their own bounded projections, with the same units, scope, null handling and timestamps. Instance CPU and memory remain shared context. Background resource capture currently supports primary replicas; native reads preserve the connected replica's role.
 

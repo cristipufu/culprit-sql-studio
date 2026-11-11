@@ -68,7 +68,7 @@ Operational sources cover independent database/table MultiXact ages, shared arch
 
 Counters retain their own reset clocks. New event findings require a comparable interval inside the requested period. Catalog-only retention does not establish retained application rows. Generic plans do not identify the plan used by historical requests, or prove that every listed partition ran.
 
-## Background telemetry
+### Background telemetry
 
 The CLI can archive 16 snapshot datasets and persistent activity through the shared collector service. See the
 [PostgreSQL collection table](../collector.md#postgresql-source-coverage) for selections, native sources and starting
