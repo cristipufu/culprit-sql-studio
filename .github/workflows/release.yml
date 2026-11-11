@@ -122,6 +122,7 @@ jobs:
     environment: release
     timeout-minutes: 90
     env:
+      CULPRIT_BUILD_REVISION: ${{ needs.source.outputs.sha }}
       HAS_APPLE_SIGNING: ${{ secrets.MACOS_CERT_P12 != '' }}
       HAS_UPDATER_SIGNING: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
     steps:
@@ -295,6 +296,7 @@ jobs:
     environment: release
     timeout-minutes: 60
     env:
+      CULPRIT_BUILD_REVISION: ${{ needs.source.outputs.sha }}
       HAS_UPDATER_SIGNING: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -350,6 +352,7 @@ jobs:
     environment: release
     timeout-minutes: 60
     env:
+      CULPRIT_BUILD_REVISION: ${{ needs.source.outputs.sha }}
       HAS_UPDATER_SIGNING: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
