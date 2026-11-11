@@ -71,6 +71,14 @@ pub(super) async fn activity(
     at: &str,
     observation: Option<ActivityObservation>,
 ) -> CollectionManifest {
+    activity_with_baseline(outbox, at, observation, &[]).await
+}
+pub(super) async fn activity_with_baseline(
+    outbox: &mut Outbox,
+    at: &str,
+    observation: Option<ActivityObservation>,
+    before: &[ActivityIncidentState],
+) -> CollectionManifest {
     let request = CollectionRequest {
         selection: CollectionSelection::Activity { policy: ActivityPolicy::default() },
         budget: CollectionBudget::default(),
@@ -81,12 +89,21 @@ pub(super) async fn activity(
     source.observation = SourceObservation::Activity(ActivitySnapshotDescription {
         epoch: "native-activity-epoch".into(),
         at: at.into(),
-        database_wide: true,
+        scope: culprit_core::MeasurementScope::Database,
+        complete_scope: true,
         policy: ActivityPolicy::default(),
         native_rows: u32::from(observation.is_some()),
-        qualifying: u32::from(observation.is_some()),
+        qualifying: observation
+            .as_ref()
+            .map_or(0, |row| u32::from(!row.conditions(request.activity_policy().unwrap()).is_empty())),
+        uncertain: observation
+            .as_ref()
+            .map_or(0, |row| u32::from(row.blocking_uncertain(request.activity_policy().unwrap()))),
         observations: u32::from(observation.is_some()),
-        blocking_edges: 0,
+        blocking_edges: observation
+            .as_ref()
+            .and_then(|row| row.wait.as_ref())
+            .map_or(0, |wait| wait.owners.iter().filter(|owner| owner.is_blocker()).count() as u32),
         details: if observation.is_some() { ActivityDetailStatus::Collected } else { ActivityDetailStatus::NotNeeded },
     });
     let mut files = ObservationFiles::create(lease.directory(), request.clone(), lease.identity().clone()).unwrap();
@@ -94,13 +111,21 @@ pub(super) async fn activity(
     files.describe(source).unwrap();
     if let Some(observation) = observation {
         files.begin_page(0).unwrap();
+        let selected =
+            ActivityEvidence::select(std::slice::from_ref(&observation), request.activity_policy().unwrap()).unwrap();
         files.write_page(0, &[TelemetryRecord::Activity(observation)]).unwrap();
+        if !selected.blocking.is_empty() {
+            files.begin_page(1).unwrap();
+            files
+                .write_page(1, &selected.blocking.into_iter().map(TelemetryRecord::Blocking).collect::<Vec<_>>())
+                .unwrap();
+        }
     }
     for index in 0..request.collection().source_streams().len() {
         files.seal(index).unwrap();
     }
     files.confirm_source(SourceCompletion::Verified).unwrap();
-    files.derive_activity(&[]).unwrap();
+    files.derive_activity(before).unwrap();
     lease.source_closed(SourceShutdown::Quiescent).await.unwrap();
     let manifest = files.finish(0).unwrap();
     lease.finish().await.unwrap();

@@ -1,6 +1,7 @@
+use crate::read::query;
 use crate::{global, probe};
 use culprit_core::{Engine, Result, WaitSample, WaitStat, t};
-use culprit_postgres::wire::{Connector, INTERACTIVE, SessionLimits, query};
+use culprit_postgres::wire::{Connector, NativeRead, ReadSession};
 use std::{collections::BTreeMap, time::Duration};
 use tokio::time::{Instant, sleep_until};
 
@@ -27,9 +28,15 @@ pub(crate) fn category(kind: &str, event: &str) -> &'static str {
 }
 
 pub(crate) async fn sample(connector: &Connector, requested: u32) -> Result<WaitSample> {
-    let session = connector.connect_observed(SessionLimits { catalog_path: true, ..INTERACTIVE }).await?;
-    let p = probe::read(&session.client).await?;
-    let inventory = if p.global { Some(global::nodes(&session).await) } else { None };
+    let mut session = crate::read::application(connector.clone(), Duration::from_secs(requested.clamp(1, 60).into()));
+    let result = observe(&mut session, requested).await;
+    session.close().await;
+    result
+}
+async fn observe(session: &mut ReadSession, requested: u32) -> Result<WaitSample> {
+    let p = probe::read_from(session).await?;
+    let inventory =
+        if p.global { Some(Ok::<_, culprit_core::Error>(global::nodes_from(session).await?)) } else { None };
     let relation = if p.global { "pg_catalog.\"gv$pg_stat_activity\"" } else { "pg_catalog.pg_stat_activity" };
     let seconds = requested.clamp(1, 60);
     let started = Instant::now();
@@ -45,7 +52,7 @@ pub(crate) async fn sample(connector: &Connector, requested: u32) -> Result<Wait
             sleep_until(started + Duration::from_secs(tick.into())).await
         }
         let rows = query(
-            &session.client,
+            session,
             &format!(
                 "SELECT state,wait_event_type AS kind,wait_event AS event,count(*)::float8 AS n
             FROM {relation} WHERE datid={} AND (state='active' OR state IS NULL)
@@ -71,7 +78,7 @@ pub(crate) async fn sample(connector: &Connector, requested: u32) -> Result<Wait
         }
     }
     if let Some(before) = inventory {
-        let after = global::nodes(&session).await;
+        let after = global::nodes_from(session).await;
         partial |= before.ok().zip(after.ok()).is_none_or(|(a, b)| a != b);
     }
     partial |= session.notices() != notices;

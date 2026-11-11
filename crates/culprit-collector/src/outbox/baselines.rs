@@ -152,8 +152,8 @@ impl Files {
             .map_err(|_| problem(OutboxProblem::Integrity))?;
         let snapshot = metadata.source.observation.activity().ok_or_else(|| problem(OutboxProblem::Integrity))?;
         if states.len() != metadata.states as usize
-            || states.len() != snapshot.qualifying as usize
-            || states.iter().any(|state| !state.is_valid() || state.last_seen_at != snapshot.at)
+            || states.len() < snapshot.qualifying as usize
+            || states.iter().any(|state| !state.is_valid_at(&snapshot.at))
         {
             return Err(problem(OutboxProblem::Integrity));
         }

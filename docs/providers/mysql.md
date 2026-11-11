@@ -54,6 +54,14 @@ The schema view, migration linter and drift use these same collected definitions
 
 ## Limits and evidence
 
+### Background telemetry
+
+The collector shares the app's owned native reader and source layouts. It exports exact digest counters, bounded
+catalog/operational observations, persistent activity and InnoDB's latest deadlock report. It does not execute
+application statements or assume a digest's first-seen time establishes its reset. Required instrumentation and
+visibility govern complete coverage. See [collector source coverage](../collector.md#other-provider-source-coverage)
+for datasets, cadence policies, cancellation and retention limits.
+
 Digest, histogram, table and index counters can have different reset histories. Histograms count their recorded period, not an arbitrary selected window. A missing histogram can mean an unsupported version, disabled instrumentation, permissions or collection failure; it is not proof of one particular cause.
 
 Culprit does not attribute shared redo or host observations to this database's query delays without matching evidence. Transaction age does not establish when a consistent read view was acquired. Missing lock instrumentation leaves unresolved blocking rather than a clean bill of health.

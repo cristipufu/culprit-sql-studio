@@ -14,8 +14,10 @@ pub enum CounterNature {
 #[ts(export)]
 pub enum CounterUnit {
     Count,
+    Ratio,
     Bytes,
     Pages { bytes_per_page: u32 },
+    Picoseconds,
     Seconds,
     Milliseconds,
     Kibibytes,

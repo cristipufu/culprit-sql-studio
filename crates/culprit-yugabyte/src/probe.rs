@@ -1,11 +1,14 @@
 use culprit_core::{Capability, Engine, Error, Result, ServerInfo, t};
-use culprit_postgres::wire::query_one;
+#[cfg(test)]
 use tokio_postgres::Client;
 
 pub(crate) const ALL_STATS: &str = "(EXISTS(SELECT 1 FROM pg_roles WHERE rolname=current_user AND rolsuper) OR pg_has_role(current_user,'pg_read_all_stats','USAGE'))";
 
-pub(crate) async fn require_all_stats(client: &Client) -> Result<()> {
-    if query_one(client, &format!("SELECT {ALL_STATS} AS allowed")).await?.is_some_and(|r| r.flag("allowed")) {
+pub(crate) async fn require_all_stats_from(reader: &mut impl culprit_postgres::wire::QueryRead) -> Result<()> {
+    if crate::read::query_one(reader, &format!("SELECT {ALL_STATS} AS allowed"))
+        .await?
+        .is_some_and(|r| r.flag("allowed"))
+    {
         Ok(())
     } else {
         Err(Error::new(
@@ -15,6 +18,7 @@ pub(crate) async fn require_all_stats(client: &Client) -> Result<()> {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct Probe {
     pub now: String,
     pub started: Option<String>,
@@ -64,10 +68,21 @@ pub(crate) fn timestamp(expression: &str) -> String {
     format!("to_char(({expression}) AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')")
 }
 
+#[cfg(test)]
 pub(crate) async fn read(client: &Client) -> Result<Probe> {
+    read_from(&mut &*client).await
+}
+async fn one(reader: &mut impl culprit_postgres::wire::QueryRead, sql: &str) -> Result<culprit_postgres::wire::Row> {
+    let mut rows = reader.query(sql, 2).await?;
+    if rows.len() != 1 {
+        return Err(Error::invalid(t!("provider.yugabyte.error.no_identity")));
+    }
+    Ok(rows.remove(0))
+}
+pub(crate) async fn read_from(reader: &mut impl culprit_postgres::wire::QueryRead) -> Result<Probe> {
     // The initial probe is deliberately independent of all PostgreSQL/DocDB size and heap APIs.
-    let row = query_one(
-        client,
+    let row = one(
+        reader,
         &format!(
             "SELECT version() AS version, current_setting('server_version_num') AS compatibility,
         current_database() AS database, (SELECT oid::text FROM pg_database WHERE datname=current_database()) AS oid,
@@ -83,8 +98,7 @@ pub(crate) async fn read(client: &Client) -> Result<Probe> {
             timestamp("pg_postmaster_start_time()")
         ),
     )
-    .await?
-    .ok_or_else(|| Error::invalid(t!("provider.yugabyte.error.no_identity")))?;
+    .await?;
     let version = row.string("version");
     let version = version
         .split_once("-YB-")
@@ -94,10 +108,9 @@ pub(crate) async fn read(client: &Client) -> Result<Probe> {
                 .with_hint(t!("provider.yugabyte.error.not_yugabyte_hint"))
         })?
         .to_string();
-    let node = query_one(client, "SELECT yb_get_local_tserver_uuid()::text AS node")
+    let node = one(reader, "SELECT yb_get_local_tserver_uuid()::text AS node")
         .await
         .ok()
-        .flatten()
         .and_then(|r| node_id(&r.string("node")));
     Ok(Probe {
         now: row.string("now"),

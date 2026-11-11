@@ -9,10 +9,12 @@ fn source(at: &str, qualifying: u32) -> CollectionDescription {
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
             epoch: "native-epoch-1".into(),
             at: at.into(),
-            database_wide: true,
+            scope: crate::MeasurementScope::Database,
+            complete_scope: true,
             policy: ActivityPolicy::default(),
             native_rows: qualifying,
             qualifying,
+            uncertain: 0,
             observations: qualifying,
             blocking_edges: 0,
             details: ActivityDetailStatus::NotNeeded,
@@ -81,7 +83,7 @@ fn restricted_visibility_cannot_resolve_existing_incidents() {
             .unwrap();
     let mut restricted = source("2020-01-01T00:01:00Z", 0);
     let SourceObservation::Activity(snapshot) = &mut restricted.observation else { unreachable!() };
-    snapshot.database_wide = false;
+    snapshot.complete_scope = false;
     assert!(ActivityIncidentUpdate::observe(&restricted, &capture("2"), &[], &before.active).is_err());
     assert_eq!(before.active.len(), 1);
 }
@@ -92,4 +94,72 @@ fn the_same_native_activity_in_another_epoch_has_an_independent_identity() {
     let SourceObservation::Activity(snapshot) = &mut replacement.observation else { unreachable!() };
     snapshot.epoch = "native-epoch-2".into();
     assert_ne!(original.scoped_id("scope", &()).unwrap(), replacement.scoped_id("scope", &()).unwrap());
+}
+
+fn observed_source(at: &str, rows: &[ActivityObservation]) -> CollectionDescription {
+    let selected = ActivityEvidence::select(rows, &ActivityPolicy::default()).unwrap();
+    let mut source = source(at, selected.conditions.len() as u32);
+    let SourceObservation::Activity(snapshot) = &mut source.observation else { panic!() };
+    snapshot.native_rows = rows.len() as u32;
+    snapshot.observations = selected.observations.len() as u32;
+    snapshot.uncertain = selected.uncertain.len() as u32;
+    snapshot.blocking_edges = selected.blocking.len() as u32;
+    assert!(snapshot.is_valid());
+    source
+}
+#[test]
+fn unknown_lock_evidence_retains_the_request_and_old_blocker_as_uncertain_until_native_evidence_returns() {
+    let mut owner = request("owner");
+    owner.key.request = None;
+    owner.key.transaction = Some("transaction-1".into());
+    owner.request_counters = None;
+    owner.idle = true;
+    owner.open_transactions = 1;
+    owner.elapsed_ms = None;
+    let mut waiter = request("waiter");
+    waiter.elapsed_ms = Some("45000".into());
+    waiter.wait = Some(ActivityWait {
+        native_type: Some("DocDB lock".into()),
+        elapsed_ms: Some("40000".into()),
+        owners: vec![ActivityWaitOwner::Session {
+            id: owner.key.session.id.clone(),
+            generation: Some(owner.key.session.generation.clone()),
+        }],
+        resources: None,
+    });
+    let initial_rows = vec![waiter.clone(), owner];
+    let initial = observed_source("2026-11-12T00:00:00Z", &initial_rows);
+    let first = ActivityIncidentUpdate::observe(&initial, &capture("first"), &initial_rows, &[]).unwrap();
+    assert_eq!(first.active.len(), 2);
+    waiter.blocking_status = ActivityBlockingStatus::Unknown;
+    waiter.wait = None;
+    let unknown = observed_source("2026-11-12T00:00:01Z", &[waiter.clone()]);
+    let update =
+        ActivityIncidentUpdate::observe(&unknown, &capture("unknown"), &[waiter.clone()], &first.active).unwrap();
+    assert_eq!(update.active.len(), 2);
+    assert_eq!(update.changes.len(), 2);
+    assert!(update.active.iter().all(|state| state.status == ActivityIncidentStatus::Uncertain
+        && state.last_seen_at == "2026-11-12T00:00:00Z"
+        && state.progress == ActivityProgress::Unknown));
+    assert!(update.changes.iter().all(|change| change.transition == ActivityIncidentTransition::Updated));
+    let again = observed_source("2026-11-12T00:00:02Z", &[waiter.clone()]);
+    let repeated =
+        ActivityIncidentUpdate::observe(&again, &capture("again"), &[waiter.clone()], &update.active).unwrap();
+    assert!(repeated.changes.is_empty(), "unknown polls must not repeatedly alert or claim a resolution");
+    waiter.blocking_status = ActivityBlockingStatus::Known;
+    waiter.elapsed_ms = Some("120000".into());
+    let known = observed_source("2026-11-12T00:00:03Z", &[waiter.clone()]);
+    let refreshed = ActivityIncidentUpdate::observe(&known, &capture("known"), &[waiter], &repeated.active).unwrap();
+    assert_eq!(refreshed.active.len(), 1);
+    assert_eq!(refreshed.active[0].status, ActivityIncidentStatus::Current);
+    assert!(
+        refreshed
+            .changes
+            .iter()
+            .any(|change| change.transition == ActivityIncidentTransition::Resolved && change.state.observation.idle)
+    );
+    let ended = observed_source("2026-11-12T00:00:04Z", &[]);
+    let resolved = ActivityIncidentUpdate::observe(&ended, &capture("ended"), &[], &refreshed.active).unwrap();
+    assert!(resolved.active.is_empty());
+    assert_eq!(resolved.changes[0].transition, ActivityIncidentTransition::Resolved);
 }

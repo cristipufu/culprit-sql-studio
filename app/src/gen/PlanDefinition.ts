@@ -2,4 +2,8 @@
 import type { DefinitionPayload } from "./DefinitionPayload";
 import type { NativePlanIdentity } from "./NativePlanIdentity";
 
-export type PlanDefinition = { id: string, identity: NativePlanIdentity, query_definition_id: string, engine_version: string | null, native_properties: { [key in string]: string }, source_text_bytes: string | null, plan: DefinitionPayload, };
+export type PlanDefinition = { id: string, identity: NativePlanIdentity, 
+/**
+ * Absent when this native cache does not share a definition namespace with statement statistics.
+ */
+query_definition_id: string | null, engine_version: string | null, native_properties: { [key in string]: string }, source_text_bytes: string | null, plan: DefinitionPayload, };

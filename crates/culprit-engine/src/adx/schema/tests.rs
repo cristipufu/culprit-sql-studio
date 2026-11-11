@@ -255,7 +255,7 @@ fn definitions_keep_native_provenance_and_payload_references_without_copying_lar
             ]
             .into(),
         },
-        query_definition_id: query.id,
+        query_definition_id: Some(query.id),
         source_text_bytes: None,
         plan: DefinitionPayload::Unavailable { reason: PayloadUnavailable::Restricted },
         engine_version: Some("native-version".into()),

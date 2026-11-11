@@ -57,6 +57,7 @@ pub(super) fn record(row: &Rec) -> Result<Option<ActivityRecord>> {
         None
     };
     let observation = ActivityObservation {
+        blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
         key: ActivityKey {
             session: NativeActivityIdentity { id: session, generation: generation(row, "session_generation")? },
             transaction: if request.is_none() { optional_counter(row, "transaction_id")? } else { None },

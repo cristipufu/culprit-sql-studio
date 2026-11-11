@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ts_rs::TS;
 
-pub const EXPORT_FORMAT_VERSION: u32 = 9;
+pub const EXPORT_FORMAT_VERSION: u32 = 10;
 pub const REPRESENTATION_VERSION: u32 = 2;
 
 impl DatabaseIdentity {
@@ -55,7 +55,8 @@ impl super::CapturedRange {
     }
 }
 fn scoped_id(domain: &str, database: &DatabaseIdentity, source: &str, identity: &impl Serialize) -> Result<String> {
-    // A native database incarnation survives endpoint/alias changes. Without it the observed endpoint remains
+    // A native server incarnation survives endpoint/alias changes. File IDs are scoped to their filesystem path.
+    // Without a global native identity the observed endpoint remains
     // part of the namespace; uncertainty is retained rather than guessed away.
     #[derive(Serialize)]
     #[serde(untagged)]
@@ -63,7 +64,11 @@ fn scoped_id(domain: &str, database: &DatabaseIdentity, source: &str, identity: 
         Native { engine: crate::Engine, incarnation: &'a str },
         Endpoint(&'a DatabaseIdentity),
     }
-    let database = match database.incarnation.as_deref().filter(|value| !value.is_empty()) {
+    let database = match database
+        .incarnation
+        .as_deref()
+        .filter(|value| !value.is_empty() && !matches!(database.location, crate::DatabaseLocation::File { .. }))
+    {
         Some(incarnation) => DatabaseScope::Native { engine: database.engine, incarnation },
         None => DatabaseScope::Endpoint(database),
     };
@@ -189,6 +194,16 @@ mod tests {
         assert_eq!(original.telemetry_id().unwrap(), alias.telemetry_id().unwrap());
         alias.incarnation = Some("recreated-guid".into());
         assert_ne!(original.telemetry_id().unwrap(), alias.telemetry_id().unwrap());
+    }
+    #[test]
+    fn a_local_file_incarnation_does_not_claim_a_global_server_identity() {
+        let mut first = DatabaseIdentity::file("sample", "/first/sample.sqlite".into());
+        first.incarnation = Some("local-file-id".into());
+        let mut second = DatabaseIdentity::file("sample", "/second/sample.sqlite".into());
+        second.incarnation = first.incarnation.clone();
+        assert_ne!(first.telemetry_id().unwrap(), second.telemetry_id().unwrap());
+        second.location = first.location.clone();
+        assert_eq!(first.telemetry_id().unwrap(), second.telemetry_id().unwrap());
     }
     use crate::telemetry::{
         NativeMeasurementKey, NativePlanIdentity, NativeQueryIdentity, SourceContinuity, TelemetryInterval,

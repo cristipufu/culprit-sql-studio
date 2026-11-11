@@ -1,187 +1,46 @@
-//! Short, owned previews. A control session cancels our tagged query even when server timeouts are unavailable.
-use std::future::{Future, pending, poll_fn};
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering},
-};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+//! The display policy owns its concurrency slot; all native setup, query and cancellation belong to the common reader.
+use crate::connect::Connector;
+use culprit_core::{Error, Result, ResultSet, t};
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 
-use culprit_core::{
-    Error, ErrorCode, Result, ResultSet,
-    limits::{OBSERVE_TIMEOUT, PREVIEW_TIMEOUT, timeout_error},
-    t,
-};
-use mysql_async::{Conn, prelude::Queryable};
-use tokio::sync::{Semaphore, oneshot};
-
-use crate::connect::{Connector, Scope, TAG, map_error};
-use crate::rows::tagged;
-
-// Include retiring workers: rapid navigation cannot accumulate cancellation connections behind the UI's gate.
+// Include retiring workers so navigation cannot accumulate native requests behind the UI gate.
 static PREVIEWS: Semaphore = Semaphore::const_new(2);
-/// Closing a preview's connections after it ends or is cancelled.
-const CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
-/// Time past the preview budget for the server's own timeout reply to arrive before Culprit sends KILL QUERY.
-const REPLY_GRACE: Duration = Duration::from_millis(250);
-
-fn marker() -> String {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
-    format!("{TAG} /* preview:{:x}-{epoch:x}-{:x} */", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed))
-}
-
 pub(crate) async fn read(connector: Arc<Connector>, sql: String, limit: usize) -> Result<ResultSet> {
     let permit = PREVIEWS.acquire().await.map_err(|_| Error::internal(t!("provider.mysql.preview.gate_closed")))?;
-    let conn = connector.connect(Scope::Database).await?;
-    let control = connector.connect(Scope::Server).await?;
-    let setting = connector.flavor().timeout_for(PREVIEW_TIMEOUT);
-    let (owner, canceled) = oneshot::channel::<()>();
-    let task = tokio::spawn(async move {
-        // Retain the SSH route and worker slot through cancellation and bounded disconnects.
-        let _transport = connector;
-        let _permit = permit;
-        worker(conn, control, &sql, limit, &setting, canceled).await
-    });
-    let result = task.await.map_err(|_| Error::internal(t!("provider.mysql.preview.worker_stopped")))?;
-    drop(owner);
-    result
-}
-
-async fn worker(
-    mut conn: Conn,
-    mut control: Conn,
-    sql: &str,
-    limit: usize,
-    setting: &str,
-    canceled: oneshot::Receiver<()>,
-) -> Result<ResultSet> {
-    let id = conn.id();
-    let marker = marker();
-    let started = Instant::now();
-    let mut canceled = canceled;
-    let result = async {
-        stage(setup(&mut conn, setting, &marker), &mut control, &mut canceled, OBSERVE_TIMEOUT, id, &marker).await?;
-        let result = stage(
-            crate::read_result(&mut conn, &format!("{marker} {sql}"), limit, false),
-            &mut control,
-            &mut canceled,
-            PREVIEW_TIMEOUT + REPLY_GRACE,
-            id,
-            &marker,
-        )
-        .await?;
-        stage(conn.query_drop(format!("{marker} ROLLBACK")), &mut control, &mut canceled, OBSERVE_TIMEOUT, id, &marker)
-            .await?;
-        Ok(result)
-    }
-    .await;
-    // mysql_async's Drop normally drains pending results. Disconnect marks the connection closed before awaiting I/O,
-    // so timing out these disconnects closes the sockets instead of leaving an unbounded background drain.
-    tokio::join!(disconnect(conn), disconnect(control));
-    result.map(|mut result| {
-        result.elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
-        result
-    })
-}
-
-/// Each phase is bounded; setup round-trips never consume the query's execution budget.
-async fn stage<T>(
-    work: impl Future<Output = mysql_async::Result<T>>,
-    control: &mut Conn,
-    canceled: &mut oneshot::Receiver<()>,
-    timeout: Duration,
-    id: u32,
-    marker: &str,
-) -> Result<T> {
-    tokio::pin!(work);
-    let mut started = false;
-    {
-        let response = poll_fn(|cx| {
-            started = true;
-            work.as_mut().poll(cx)
-        });
-        tokio::pin!(response);
-        tokio::select! {
-            biased;
-            _ = canceled => {},
-            result = &mut response => return result.map_err(map_error),
-            _ = tokio::time::sleep(timeout) => {},
-        }
-    }
-    // Cancellation before the first poll must never dispatch a fresh SQL command during confirmation.
-    if !started {
-        return Err(timeout_error());
-    }
-    // Keep the original reply alive: a native timeout may finish between our deadline and the process-list read.
-    if confirmed_stop(work, cancel(control, id, marker)).await {
-        Err(timeout_error())
-    } else {
-        Err(Error::new(ErrorCode::Timeout, t!("provider.mysql.preview.cancel_unconfirmed")))
-    }
-}
-
-async fn confirmed_stop<T>(
-    response: impl Future<Output = mysql_async::Result<T>>,
-    cancellation: impl Future<Output = bool>,
-) -> bool {
-    let response = async {
-        match response.await {
-            Ok(_) | Err(mysql_async::Error::Server(_)) => {}
-            // A broken socket does not prove that the server stopped its statement.
-            Err(_) => pending::<()>().await,
-        }
-    };
-    let cancellation = async {
-        if !cancellation.await {
-            pending::<()>().await;
-        }
-    };
-    tokio::time::timeout(CLEANUP_TIMEOUT, async {
-        tokio::select! {
-            biased;
-            _ = response => {},
-            _ = cancellation => {},
-        }
-    })
-    .await
-    .is_ok()
-}
-
-async fn setup(conn: &mut Conn, setting: &str, marker: &str) -> mysql_async::Result<()> {
-    // Older servers and proxies may refuse this optional setting. The owned worker still enforces its deadline.
-    let _ = conn.query_drop(format!("{marker} {setting}")).await;
-    conn.query_drop(format!("{marker} START TRANSACTION READ ONLY")).await
-}
-
-async fn cancel(control: &mut Conn, id: u32, marker: &str) -> bool {
-    // A proxy or load balancer may route the control session elsewhere. Never kill an unrelated reused/server-local ID.
-    let current: mysql_async::Result<Option<(Option<String>,)>> =
-        control.exec_first(tagged("SELECT INFO FROM information_schema.PROCESSLIST WHERE ID = ?"), (id,)).await;
-    match current {
-        Ok(Some((Some(sql),))) if sql.starts_with(marker) => {
-            control.query_drop(tagged(&format!("KILL QUERY {id}"))).await.is_ok()
-        }
-        _ => false,
-    }
-}
-
-async fn disconnect(conn: Conn) {
-    let _ = tokio::time::timeout(CLEANUP_TIMEOUT, conn.disconnect()).await;
+    crate::read::preview(connector, sql, limit, permit).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use culprit_core::{ConnectionSpec, Engine, ErrorCode};
-
-    #[test]
-    fn preview_markers_are_unique_tagged_comments() {
-        let first = marker();
-        let second = marker();
-        assert_ne!(first, second);
-        assert!(first.starts_with(TAG) && first.ends_with("*/") && first.len() < 100);
-        assert!(culprit_core::sql::reads_only(&format!("{first} SELECT 1"), Engine::Mysql));
+    use crate::{
+        cancellation,
+        connect::{Scope, TAG},
+        rows::tagged,
+    };
+    use culprit_core::{limits::PREVIEW_TIMEOUT, telemetry::SourceShutdown};
+    use mysql_async::{Conn, prelude::Queryable};
+    use std::time::{Duration, Instant};
+    use tokio::sync::oneshot;
+    const CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
+    fn marker() -> String {
+        format!("{TAG} /* unmatched-preview-fixture */")
     }
+    async fn disconnect(conn: Conn) {
+        let _ = tokio::time::timeout(CLEANUP_TIMEOUT, conn.disconnect()).await;
+    }
+    async fn worker(
+        client: Conn,
+        control: Conn,
+        sql: &str,
+        limit: usize,
+        setting: &str,
+        cancellation: oneshot::Receiver<()>,
+    ) -> Result<ResultSet> {
+        crate::read::preview_with_clients(connector(), client, control, sql, limit, setting, cancellation).await
+    }
+    use culprit_core::{ConnectionSpec, Engine, ErrorCode};
 
     #[tokio::test]
     async fn a_late_native_timeout_confirms_completion_after_an_idle_process_list() {
@@ -193,20 +52,24 @@ mod tests {
                 state: "HY000".into(),
             }))
         };
-        assert!(confirmed_stop(response, std::future::ready(false)).await);
-        assert!(confirmed_stop(std::future::ready(Ok::<_, mysql_async::Error>(())), pending()).await);
-    }
-
-    #[tokio::test]
-    async fn lost_connections_require_a_separate_cancellation_confirmation() {
-        let response = std::future::ready(Err::<(), _>(std::io::Error::other("connection lost").into()));
-        let cancellation = async {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            true
-        };
-        assert!(confirmed_stop(response, cancellation).await);
-        let response = std::future::ready(Err::<(), _>(std::io::Error::other("connection lost").into()));
-        assert!(!confirmed_stop(response, std::future::ready(false)).await);
+        assert_eq!(
+            cancellation::settle(
+                response,
+                std::future::ready(cancellation::ControlCompletion::Settled),
+                CLEANUP_TIMEOUT
+            )
+            .await,
+            SourceShutdown::Quiescent
+        );
+        assert_eq!(
+            cancellation::settle(
+                std::future::ready(Ok::<_, mysql_async::Error>(())),
+                std::future::pending(),
+                CLEANUP_TIMEOUT
+            )
+            .await,
+            SourceShutdown::Quiescent
+        );
     }
 
     fn connector() -> Arc<Connector> {
@@ -330,7 +193,17 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert!(!cancel(&mut control, id, &marker()).await, "mismatched query was killed");
+        assert_eq!(
+            cancellation::request(
+                &mut control,
+                id,
+                &marker(),
+                &crate::read::accounting::Accounting::new(Default::default())
+            )
+            .await,
+            cancellation::ControlCompletion::Settled,
+            "control lookup did not settle"
+        );
         assert_eq!(active(&connector, id).await, 1, "different-tag cancellation stopped the query");
         control.query_drop(tagged(&format!("KILL QUERY {id}"))).await.unwrap();
         let _ = task.await.unwrap();

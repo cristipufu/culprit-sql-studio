@@ -1,7 +1,7 @@
 //! Bounded row delivery is independent of a native protocol. Every emitted page stays provisional until the driver
 //! has consumed its completion response. This crate owns no connections, schedules, secrets or destination state.
 use culprit_core::{Result, telemetry::CollectionStop};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 mod fence;
 mod frozen;
@@ -9,8 +9,8 @@ mod progress;
 pub use frozen::{FrozenObservation, FrozenSource, ObservationReader};
 pub use progress::{PagedProgress, SourceProgress};
 mod snapshot;
-pub use fence::ReadFence;
-pub use snapshot::{SnapshotReader, SnapshotRecheck, SnapshotRecord, SnapshotScope, SnapshotSource};
+pub use fence::{ReadFence, ReadWork};
+pub use snapshot::{SnapshotBuffer, SnapshotReader, SnapshotRecheck, SnapshotRecord, SnapshotScope, SnapshotSource};
 
 const BUFFERED_BATCHES: usize = 1;
 
@@ -18,11 +18,32 @@ pub struct ReadBatch<T> {
     pub rows: Vec<T>,
     pub complete: bool,
 }
-pub enum RowOutput<T> {
+enum Storage<T> {
     Buffered(Vec<T>),
     Streaming(Batches<T>),
 }
-pub struct Batches<T> {
+pub struct RowOutput<T> {
+    storage: Storage<T>,
+    retention: RetentionControl,
+}
+/// Stop retaining/delivering rows so the native owner can drain under backpressure. This never establishes SQL
+/// shutdown: the provider must still consume its native completion response before reporting quiescence.
+#[derive(Clone)]
+pub struct RetentionControl(watch::Sender<bool>);
+impl Default for RetentionControl {
+    fn default() -> Self {
+        Self(watch::channel(false).0)
+    }
+}
+impl RetentionControl {
+    pub fn discard(&self) {
+        self.0.send_replace(true);
+    }
+    fn discarded(&self) -> bool {
+        *self.0.borrow()
+    }
+}
+struct Batches<T> {
     sender: mpsc::Sender<ReadBatch<T>>,
     rows: Vec<T>,
     bytes: usize,
@@ -32,16 +53,36 @@ pub struct Batches<T> {
 }
 impl<T> RowOutput<T> {
     pub fn buffered() -> Self {
-        Self::Buffered(Vec::new())
+        Self { storage: Storage::Buffered(Vec::new()), retention: RetentionControl::default() }
     }
     pub fn streaming(max_rows: usize, max_bytes: usize) -> (Self, mpsc::Receiver<ReadBatch<T>>) {
         let (sender, receiver) = mpsc::channel(BUFFERED_BATCHES);
-        (Self::Streaming(Batches { sender, rows: vec![], bytes: 0, max_rows, max_bytes, discarding: false }), receiver)
+        (
+            Self {
+                storage: Storage::Streaming(Batches {
+                    sender,
+                    rows: vec![],
+                    bytes: 0,
+                    max_rows,
+                    max_bytes,
+                    discarding: false,
+                }),
+                retention: RetentionControl::default(),
+            },
+            receiver,
+        )
+    }
+    pub fn retention_control(&self) -> RetentionControl {
+        self.retention.clone()
     }
     pub async fn push(&mut self, row: T, bytes: usize) -> Result<()> {
-        match self {
-            Self::Buffered(rows) => rows.push(row),
-            Self::Streaming(batch) => {
+        if self.retention.discarded() {
+            self.discard();
+            return Ok(());
+        }
+        match &mut self.storage {
+            Storage::Buffered(rows) => rows.push(row),
+            Storage::Streaming(batch) => {
                 if batch.discarding || batch.sender.is_closed() {
                     batch.discarding = true;
                     batch.rows.clear();
@@ -55,7 +96,7 @@ impl<T> RowOutput<T> {
                     && (batch.rows.len() >= batch.max_rows
                         || batch.bytes.checked_add(bytes).is_none_or(|sum| sum > batch.max_bytes))
                 {
-                    batch.flush(false).await;
+                    batch.flush(false, &self.retention).await;
                     if batch.discarding {
                         return Ok(());
                     }
@@ -67,9 +108,10 @@ impl<T> RowOutput<T> {
         Ok(())
     }
     pub fn discard(&mut self) {
-        match self {
-            Self::Buffered(rows) => rows.clear(),
-            Self::Streaming(batch) => {
+        self.retention.discard();
+        match &mut self.storage {
+            Storage::Buffered(rows) => rows.clear(),
+            Storage::Streaming(batch) => {
                 batch.discarding = true;
                 batch.rows.clear();
                 batch.bytes = 0;
@@ -77,26 +119,42 @@ impl<T> RowOutput<T> {
         }
     }
     pub fn discarding(&self) -> bool {
-        matches!(self,Self::Streaming(batch) if batch.discarding || batch.sender.is_closed())
+        self.retention.discarded()
+            || matches!(&self.storage,Storage::Streaming(batch) if batch.discarding || batch.sender.is_closed())
     }
     pub async fn finish(self) -> Vec<T> {
-        match self {
-            Self::Buffered(rows) => rows,
-            Self::Streaming(mut batch) => {
-                batch.flush(true).await;
+        match self.storage {
+            Storage::Buffered(rows) => {
+                if self.retention.discarded() {
+                    vec![]
+                } else {
+                    rows
+                }
+            }
+            Storage::Streaming(mut batch) => {
+                batch.flush(true, &self.retention).await;
                 vec![]
             }
         }
     }
 }
 impl<T> Batches<T> {
-    async fn flush(&mut self, complete: bool) {
+    async fn flush(&mut self, complete: bool, retention: &RetentionControl) {
         let rows = std::mem::take(&mut self.rows);
         self.bytes = 0;
         // The session pairs receiver release with native cancellation. Let the existing decoder drain within its
         // bounded grace period instead of losing normal completion that raced with cancellation.
-        if !self.discarding && self.sender.send(ReadBatch { rows, complete }).await.is_err() {
+        let mut changes = retention.0.subscribe();
+        if self.discarding || *changes.borrow() {
             self.discarding = true;
+            return;
+        }
+        tokio::select! {
+            biased;
+            _ = changes.changed() => self.discarding = true,
+            result = self.sender.send(ReadBatch { rows, complete }) => {
+                if result.is_err() { self.discarding = true; }
+            }
         }
     }
 }
@@ -151,6 +209,26 @@ mod tests {
             CollectionStop::from_error(&output.push(row(3), 17).await.err().unwrap()),
             CollectionStop::ByteLimit
         );
+    }
+    #[tokio::test]
+    async fn retirement_unblocks_a_producer_even_when_the_slow_consumer_keeps_its_receiver() {
+        let (mut output, mut receiver) = RowOutput::streaming(1, 1024);
+        let retention = output.retention_control();
+        output.push(row(1), 16).await.unwrap();
+        output.push(row(2), 16).await.unwrap();
+        {
+            let blocked = output.push(row(3), 16);
+            tokio::pin!(blocked);
+            assert!(futures_util::poll!(&mut blocked).is_pending());
+            retention.discard();
+            blocked.await.unwrap();
+        }
+        assert!(output.discarding());
+        assert!(output.finish().await.is_empty());
+        let provisional = receiver.recv().await.unwrap();
+        assert_eq!(provisional.rows, [1]);
+        assert!(!provisional.complete);
+        assert!(receiver.recv().await.is_none(), "retirement cannot manufacture a final EOF page");
     }
 }
 

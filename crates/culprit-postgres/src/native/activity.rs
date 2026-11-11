@@ -5,12 +5,17 @@ use culprit_core::{Engine, Session, telemetry::*};
 use std::collections::{BTreeMap, BTreeSet};
 const MAX_BLOCKING_LOOKUPS: usize = 64;
 const MAX_BLOCKING_DEPTH: usize = 8;
-pub(crate) struct ActivityRecord {
+pub struct ActivityRecord {
     pub facts: Option<ActivityObservation>,
     row: Row,
     sql: Option<String>,
 }
-pub(crate) struct ActivityFrame {
+impl ActivityRecord {
+    pub fn native_text(&self, name: &str) -> Option<String> {
+        self.row.text(name)
+    }
+}
+pub struct ActivityFrame {
     pub at: String,
     pub records: Vec<ActivityRecord>,
     pub locks: Vec<culprit_core::LockWait>,
@@ -19,13 +24,14 @@ impl ActivityFrame {
     pub fn observations(&self) -> Vec<ActivityObservation> {
         self.records.iter().filter_map(|row| row.facts.clone()).collect()
     }
-    pub fn fully_visible(&self, meta: &Metadata) -> bool {
-        meta.full_visibility
-            && self
-                .records
-                .iter()
-                .filter(|row| row.row.text("database_oid").as_deref() == Some(&meta.database_oid))
-                .all(|row| row.facts.is_some() && row.row.text("state").as_deref() != Some("disabled"))
+    pub(crate) fn fully_visible(&self, meta: &Metadata) -> bool {
+        meta.full_visibility && self.fully_visible_for(&meta.database_oid)
+    }
+    pub fn fully_visible_for(&self, database_oid: &str) -> bool {
+        self.records
+            .iter()
+            .filter(|row| row.row.text("database_oid").as_deref() == Some(database_oid))
+            .all(|row| row.facts.is_some() && row.row.text("state").as_deref() != Some("disabled"))
     }
 }
 fn age(start: &str) -> String {
@@ -34,16 +40,19 @@ fn age(start: &str) -> String {
     )
 }
 pub(crate) fn query(version: u32, limit: usize) -> String {
-    let query_id = if version >= 140_000 { "a.query_id::text" } else { "NULL::text" };
+    query_layout(version >= 140_000, "'client backend'", "", limit)
+}
+pub fn query_layout(query_id: bool, backend_types: &str, extra_columns: &str, limit: usize) -> String {
+    let query_id = if query_id { "a.query_id::text" } else { "NULL::text" };
     format!(
         "WITH stamp AS MATERIALIZED (SELECT pg_catalog.clock_timestamp() AS at)
         SELECT {} AS observed_at,a.pid::text AS pid,{} AS backend_start,{} AS query_start,{} AS transaction_start,
         a.datid::text AS database_oid,a.datname AS database,a.usename AS username,a.application_name,
         coalesce(a.client_hostname,pg_catalog.host(a.client_addr)) AS host,coalesce(a.state,a.backend_type) AS state,
         a.wait_event_type,a.wait_event,{} AS elapsed_ms,{} AS transaction_ms,{} AS idle_ms,
-        {query_id} AS query_id
+        {query_id} AS query_id{extra_columns}
         FROM stamp LEFT JOIN LATERAL (SELECT * FROM pg_catalog.pg_stat_activity
-            WHERE pid<>pg_catalog.pg_backend_pid() AND backend_type='client backend' LIMIT {limit}) a ON true",
+            WHERE pid<>pg_catalog.pg_backend_pid() AND backend_type IN ({backend_types}) LIMIT {limit}) a ON true",
         iso("stamp.at"),
         iso("a.backend_start"),
         iso("a.query_start"),
@@ -56,12 +65,12 @@ pub(crate) fn query(version: u32, limit: usize) -> String {
 fn optional_counter(row: &Row, name: &str) -> Result<Option<String>> {
     row.text(name).map(|raw| raw.parse::<u64>().map(|value| value.to_string()).map_err(|_| invalid())).transpose()
 }
-fn decode(row: Row, meta: &Metadata) -> Result<ActivityRecord> {
+fn decode(row: Row, database_oid: &str) -> Result<ActivityRecord> {
     let pid = text(&row, "pid")?;
     pid.parse::<u32>().map_err(|_| invalid())?;
     let state = text(&row, "state")?;
     let active = state == "active";
-    let scope = if row.text("database_oid").as_deref() == Some(&meta.database_oid) {
+    let scope = if row.text("database_oid").as_deref() == Some(database_oid) {
         ActivityScopeBasis::SessionDatabase
     } else {
         ActivityScopeBasis::OtherDatabase
@@ -84,6 +93,7 @@ fn decode(row: Row, meta: &Metadata) -> Result<ActivityRecord> {
             _ => None,
         };
         let observation = ActivityObservation {
+            blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
             key: ActivityKey {
                 session: NativeActivityIdentity { id: pid, generation: backend_start },
                 request,
@@ -134,9 +144,15 @@ pub(crate) async fn observe<R: QueryRead>(
             culprit_core::t!("collection.unsupported"),
         ));
     }
-    let rows = reader
-        .query(&query(meta.version, budget.max_snapshot_rows as usize + 1), budget.max_snapshot_rows as usize + 1)
-        .await?;
+    observe_rows(reader, &query(meta.version, budget.max_snapshot_rows as usize + 1), &meta.database_oid, budget).await
+}
+pub async fn observe_rows<R: QueryRead>(
+    reader: &mut R,
+    sql: &str,
+    database_oid: &str,
+    budget: &CollectionBudget,
+) -> Result<ActivityFrame> {
+    let rows = reader.query(sql, budget.max_snapshot_rows as usize + 1).await?;
     let at = text(rows.first().ok_or_else(invalid)?, "observed_at")?;
     let mut records = vec![];
     for row in rows {
@@ -144,7 +160,7 @@ pub(crate) async fn observe<R: QueryRead>(
             return Err(invalid());
         }
         if row.text("pid").is_some() {
-            records.push(decode(row, meta)?);
+            records.push(decode(row, database_oid)?);
         }
     }
     if records.len() > budget.max_snapshot_rows as usize {
@@ -300,6 +316,16 @@ pub(crate) async fn enrich<R: QueryRead>(
     max_sql_bytes: usize,
     include_idle: bool,
 ) -> Result<ActivityDetailStatus> {
+    enrich_for(reader, frame, selected, max_sql_bytes, include_idle, Engine::Postgres).await
+}
+pub async fn enrich_for<R: QueryRead>(
+    reader: &mut R,
+    frame: &mut ActivityFrame,
+    selected: &BTreeSet<ActivityKey>,
+    max_sql_bytes: usize,
+    include_idle: bool,
+    engine: Engine,
+) -> Result<ActivityDetailStatus> {
     let targets = frame
         .records
         .iter()
@@ -328,7 +354,7 @@ pub(crate) async fn enrich<R: QueryRead>(
             record.sql = row.text("query");
             if facts.key.request.is_some() {
                 facts.statement = if let Some(sql) = &record.sql {
-                    DefinitionPayload::sql(sql, Engine::Postgres)
+                    DefinitionPayload::sql(sql, engine)
                 } else {
                     DefinitionPayload::Unavailable {
                         reason: if integer(row, "query_bytes").is_ok_and(|bytes| bytes > max_sql_bytes as u64) {

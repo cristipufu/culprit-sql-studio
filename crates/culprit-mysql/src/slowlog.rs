@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use culprit_core::changes::{Period, PeriodData, PeriodStats, QueryPeriods};
 use culprit_core::{QueryStat, QueryTrend, Result, Spread, Timeline, TimelineSource, WaitStat, Workload, t};
-use mysql_async::{Conn, Value};
+use mysql_async::Value;
 
 use crate::connect::TAG;
 use crate::fingerprint::{self, fingerprint};
@@ -40,12 +40,22 @@ fn ms_of(column: &str) -> String {
 }
 
 /// Runs logged for `database` between `since` and `until` (UTC, `YYYY-MM-DD HH:MM:SS`), newest first.
-pub async fn read(conn: &mut Conn, database: &str, since: &str, until: Option<&str>) -> Result<Vec<Run>> {
+pub async fn read(
+    conn: &mut impl crate::read::QueryRead,
+    database: &str,
+    since: &str,
+    until: Option<&str>,
+) -> Result<Vec<Run>> {
     Ok(read_runs(conn, database, since, until).await?.0)
 }
 
 /// [`read`], and whether the read stopped at [`MAX_ROWS`] before reaching `since`.
-pub async fn read_runs(conn: &mut Conn, database: &str, since: &str, until: Option<&str>) -> Result<(Vec<Run>, bool)> {
+pub async fn read_runs(
+    conn: &mut impl crate::read::QueryRead,
+    database: &str,
+    since: &str,
+    until: Option<&str>,
+) -> Result<(Vec<Run>, bool)> {
     let sql = format!(
         "SELECT DATE_FORMAT(start_time, '%Y-%m-%dT%H:%i:%sZ') AS at, UNIX_TIMESTAMP(start_time) AS epoch,
                 {query} AS ms, {lock} AS lock_ms, rows_sent, rows_examined, CONVERT(sql_text USING utf8mb4) AS sql_text

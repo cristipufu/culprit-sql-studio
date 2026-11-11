@@ -103,6 +103,51 @@ operational observations. Graphs still require server logs, which the app's exis
 PostgreSQL `deadlock-history` collection is explicitly unsupported. Query/runtime interval history, historical wait
 events, CPU utilization, application parameters and executed plans are not invented from current statistics.
 
+## Other provider source coverage
+
+All providers use the same capture, outbox, recovery, incident and delivery components. Native readers own SQL,
+permissions, cancellation and measurement meaning; the scheduler and ADX adapter do not select database-specific
+queries. Unsupported selections fail explicitly rather than returning a complete empty observation.
+
+| Provider | Point observations | Activity and retained evidence |
+|---|---|---|
+| MySQL / MariaDB | Statement counters and definitions; operational, settings, tables, indexes, columns, foreign keys, check constraints, objects, triggers, partitions, statistics, replication, sequences and cleanup | Persistent requests and blockers; InnoDB's latest deadlock report, with limited retention |
+| YugabyteDB | Node-local statement counters and definitions; operational, settings, tables, indexes, columns, foreign keys, constraints, objects, triggers, partitions, statistics and retained plans | Persistent YSQL requests and bounded DocDB blocker lookups; sampled ASH and retained terminations are operational observations |
+| SQLite | Settings, operational file metadata, tables, indexes, columns, foreign keys, objects, triggers, statistics and sequences | No server sessions, native statement counters or retained deadlock history |
+
+Keep the three-minute activity and five-minute health cadences as conservative starting policies, subject to the
+shared resource gap. Catalogs and definitions belong in slower profiles. These are policy defaults, not measured
+production overhead guarantees. Native fixture tests exercise capture, cancellation, restart/replay and ADX
+projection; production load qualification and the live ADX round trip remain separate.
+
+MySQL and MariaDB retain exact picosecond counters. Digest entry eviction and independent resets remain unknown
+unless native evidence establishes them. Disabled instrumentation, insufficient visibility and digest overflow
+prevent complete coverage. Histogram export contains metadata, never histogram values. The deadlock source can
+miss overwritten reports between polls; repeated reads do not create new historical events.
+
+Yugabyte exports node scope, not fabricated cluster totals or PostgreSQL heap/buffer statistics. Native fan-out
+is capped before expensive distributed lookups. ASH is sampled task activity, not CPU time. QPM is an independently
+evictable plan cache; its averages are not converted into exact duration totals, and it requires effective
+`pg_read_all_stats` access because the verified server's foreign-role redaction path is unsafe. CPU and memory
+observations describe shared hosts/TServers. Optional native features can remain unavailable.
+
+Activity distinguishes positive blocking evidence from unavailable or capped lookups. An unresolved lookup marks
+an existing incident `uncertain`, preserving its last verified timestamp and blocker context. It does not resolve
+the incident or silently claim fresh evidence. Repeated uncertainty does not emit repeated change notifications.
+The next complete request frame can refresh or resolve the incident.
+
+SQLite opens files read-only with trusted schema disabled. Its background metadata read has a 250 ms ceiling,
+releases its transaction and closes the file before destination paging, and validates file identity through
+completion. It does not run `dbstat`, execute application statements or export schema/default bodies. Framework
+query logs remain separate app-supplied evidence, not native telemetry history.
+
+Timescale uses the PostgreSQL reader and native counter semantics. Hypertable/chunk-specific size aggregation is
+not part of background telemetry; base relation observations must not be interpreted as logical hypertable totals.
+SQL Server background admission remains restricted to the separately qualified Azure SQL Database topology.
+
+The current export format is **10**. New contracts require new collector/recovery state; there is no migration of
+old saved captures. SQL text and retained plans pass through the common payload inventory and redaction rules.
+
 ## Recovery and activation
 
 Cloud resources and permissions are provisioned separately. The explicit initialization command creates only a new

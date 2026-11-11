@@ -1,8 +1,14 @@
 //! One paged snapshot lifecycle for every native provider. Drivers supply facts and completion evidence only.
+mod buffer;
 use crate::{ReadBatch, SourceProgress as Progress, invalid_source};
+pub use buffer::SnapshotBuffer;
 use culprit_core::{ErrorCode, Result, telemetry::*};
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(test)]
+mod tests;
+
+#[derive(Clone)]
 pub struct SnapshotRecord {
     pub source: String,
     pub record: TelemetryRecord,
@@ -11,6 +17,7 @@ pub struct SnapshotRecord {
 pub enum SnapshotScope {
     Available { source: String, complete: bool, error_code: Option<ErrorCode> },
     NotApplicable { source: String },
+    Unavailable { source: String, error_code: ErrorCode },
 }
 impl SnapshotScope {
     pub fn complete(source: impl Into<String>) -> Self {
@@ -18,7 +25,9 @@ impl SnapshotScope {
     }
     fn source(&self) -> &str {
         match self {
-            Self::Available { source, .. } | Self::NotApplicable { source } => source,
+            Self::Available { source, .. } | Self::NotApplicable { source } | Self::Unavailable { source, .. } => {
+                source
+            }
         }
     }
 }
@@ -96,7 +105,21 @@ impl<R: SnapshotReader> SnapshotSource<R> {
             return Err(invalid_source());
         }
         let decoded = batch.rows.iter().map(|row| self.reader.decode(row, description)).collect::<Result<Vec<_>>>()?;
-        if decoded.iter().any(|row| !declared.sources.contains(&row.source)) {
+        if decoded.iter().any(|row| {
+            let source = match row.record.native_identity() {
+                NativeRecordIdentity::Operational { source, .. }
+                | NativeRecordIdentity::WaitCounter { source, .. }
+                | NativeRecordIdentity::Replication { source, .. }
+                | NativeRecordIdentity::Setting { source, .. }
+                | NativeRecordIdentity::Tuning { source, .. }
+                | NativeRecordIdentity::ObjectDefinition { source, .. } => Some(source),
+                _ => None,
+            };
+            !declared.sources.contains(&row.source)
+                || row.record.stream() != stream
+                || source.as_deref() != Some(&row.source)
+                || !row.record.is_valid()
+        }) {
             return Err(invalid_source());
         }
         self.rows = self
@@ -137,6 +160,10 @@ impl<R: SnapshotReader> SnapshotSource<R> {
                         Ok(StateSourceCoverage::not_applicable(source))
                     }
                     SnapshotScope::NotApplicable { .. } => Err(invalid_source()),
+                    SnapshotScope::Unavailable { source, error_code } if rows == 0 => {
+                        Ok(StateSourceCoverage::unavailable(source, error_code, None))
+                    }
+                    SnapshotScope::Unavailable { .. } => Err(invalid_source()),
                     SnapshotScope::Available { source, complete, error_code } => {
                         let mut coverage = StateSourceCoverage::observed(
                             source,

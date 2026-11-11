@@ -1,6 +1,7 @@
 //! Opt-in verification against dev/yugabyte/cluster.compose.yml, never an application database.
 use super::*;
 use culprit_core::{CounterScope, Coverage, SourceState};
+use culprit_postgres::wire::{BorrowedRead, COLLECTOR};
 use culprit_postgres::wire::{INTERACTIVE, query_one, tagged};
 use std::collections::BTreeSet;
 
@@ -14,6 +15,52 @@ enum Endpoint {
     Second,
     Third,
     Pool,
+}
+
+#[tokio::test]
+#[ignore = "requires the seeded disposable three-node cluster and CULPRIT_YSQL_CLUSTER_TEST=1"]
+async fn live_cluster_telemetry_keeps_node_captures_in_distinct_namespaces() {
+    use culprit_core::telemetry::*;
+    let _fixture = CLUSTER.lock().await;
+    let mut sources = Vec::new();
+    for endpoint in [Endpoint::First, Endpoint::Second] {
+        let provider = YugabyteProvider::new(&spec(endpoint, "culprit_cluster_monitor")).unwrap();
+        for dataset in [SnapshotDataset::Settings, SnapshotDataset::RetainedPlans] {
+            let request =
+                CollectionRequest { selection: CollectionSelection::Snapshot { dataset }, budget: Default::default() };
+            let mut source = provider.telemetry_source(&request).unwrap();
+            assert_eq!(source.query_count(), 0);
+            let initial = source.describe().await.unwrap();
+            let mut cursor = None;
+            loop {
+                let CollectionRead::Page { records, next_cursor } =
+                    source.read_page(dataset.stream(), cursor.as_deref()).await.unwrap()
+                else {
+                    panic!()
+                };
+                assert!(records.iter().all(TelemetryRecord::is_valid));
+                cursor = next_cursor;
+                if cursor.is_none() {
+                    break;
+                }
+            }
+            let completed = initial.completed(source.finish().await.unwrap()).unwrap().unwrap();
+            assert!(completed.observation.covers_request());
+            if dataset == SnapshotDataset::Settings {
+                sources.push((completed.logical_source_id().unwrap(), completed.captured_range().unwrap().scope_id));
+            } else {
+                let templates = serde_json::to_string(&source.read_metrics()).unwrap();
+                assert!(templates.contains("yb_pg_stat_plans"));
+                assert!(
+                    !templates.contains("gv$yb_pg_stat_plans"),
+                    "node-local exports must not relabel cluster cache rows"
+                );
+            }
+            assert_eq!(source.close().await, SourceShutdown::Quiescent);
+        }
+    }
+    assert_ne!(sources[0].0, sources[1].0);
+    assert_ne!(sources[0].1, sources[1].1);
 }
 
 impl Endpoint {
@@ -76,7 +123,7 @@ async fn workload(session: &culprit_postgres::wire::ObservedSession) -> culprit_
     let p = probe::read(&session.client).await.unwrap();
     assert!(p.cluster && p.global);
     let mut coverage = Coverage::default();
-    crate::workload::read(session, &p, 100, &mut coverage).await.unwrap()
+    crate::workload::read(&mut BorrowedRead::new(session), &p, 100, &mut coverage).await.unwrap()
 }
 
 #[tokio::test]
@@ -302,7 +349,8 @@ async fn live_cluster_skipped_node_withdraws_complete_counters_and_marks_native_
         let before = monitor.notices();
         let p = probe::read(&monitor.client).await?;
         let mut coverage = Coverage::default();
-        let mut workload = crate::workload::read(&monitor, &p, 100, &mut coverage).await.unwrap();
+        let mut workload =
+            crate::workload::read(&mut BorrowedRead::new(&monitor), &p, 100, &mut coverage).await.unwrap();
         eprintln!("Cluster failure workload read: {:?}", began.elapsed());
         assert!(!workload.counter_set.as_ref().unwrap().complete);
         assert!(!workload.counter_set.as_ref().unwrap().epochs_known());
@@ -311,8 +359,8 @@ async fn live_cluster_skipped_node_withdraws_complete_counters_and_marks_native_
         assert!(
             coverage.outcomes().iter().any(|o| o.source == sources::WORKLOAD.name && o.state == SourceState::Partial)
         );
-        snapshot.indexes = crate::catalog::indexes(&monitor.client, &p).await?;
-        crate::index_usage::read(&monitor, &p, &mut snapshot, &mut coverage).await;
+        snapshot.indexes = crate::catalog::indexes(&mut &monitor.client, &p).await?;
+        crate::index_usage::read(&mut BorrowedRead::new(&monitor), &p, &mut snapshot, &mut coverage).await;
         assert!(snapshot.indexes.iter().all(|i| i.reads.is_none()));
         assert!(
             coverage
@@ -327,7 +375,7 @@ async fn live_cluster_skipped_node_withdraws_complete_counters_and_marks_native_
         let terminations = crate::terminations::read(&monitor, &p, &options, 1000).await?;
         eprintln!("Cluster failure termination read: {:?}", began.elapsed());
         assert!(terminations.partial);
-        crate::history::collect(&monitor, &p, &mut workload, &mut coverage).await;
+        crate::history::collect(&mut BorrowedRead::new(&monitor), &p, &mut workload, &mut coverage).await;
         eprintln!("Cluster failure plan-history read: {:?}", began.elapsed());
         assert!(
             coverage

@@ -2,6 +2,7 @@ use super::*;
 
 pub(crate) fn request(id: &str) -> ActivityObservation {
     ActivityObservation {
+        blocking_status: crate::telemetry::ActivityBlockingStatus::Known,
         key: ActivityKey {
             session: NativeActivityIdentity { id: id.into(), generation: "login-1".into() },
             request: Some(NativeActivityIdentity { id: "0".into(), generation: "request-1".into() }),

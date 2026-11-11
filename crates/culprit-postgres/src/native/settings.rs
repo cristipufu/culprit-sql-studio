@@ -40,7 +40,7 @@ const COLLECTION: &[&str] = &[
     "track_activities",
     "stats_fetch_consistency",
 ];
-pub(crate) fn query(names: &[&str], limit: usize) -> String {
+pub fn query(names: &[&str], limit: usize) -> String {
     let names = names.iter().map(|name| format!("'{}'", name.replace("'", "''"))).collect::<Vec<_>>().join(", ");
     format!(
         "SELECT name, setting, unit, boot_val, source, context, pending_restart FROM pg_catalog.pg_settings WHERE name IN ({names}) ORDER BY name LIMIT {limit}"
@@ -50,8 +50,15 @@ pub(crate) fn capture_query(limit: usize) -> String {
     query(&SETTINGS.iter().chain(ADVICE).chain(COLLECTION).copied().collect::<Vec<_>>(), limit)
 }
 pub(crate) fn decode(row: &Row) -> Result<SettingObservation> {
+    decode_native(row, SETTINGS.iter().chain(ADVICE).chain(COLLECTION).copied(), MeasurementScope::Server)
+}
+pub fn decode_native<'a>(
+    row: &Row,
+    allowed: impl IntoIterator<Item = &'a str>,
+    server_scope: MeasurementScope,
+) -> Result<SettingObservation> {
     let name = text(row, "name")?;
-    if !SETTINGS.iter().chain(ADVICE).chain(COLLECTION).any(|allowed| *allowed == name) {
+    if !allowed.into_iter().any(|allowed| allowed == name) {
         return Err(invalid());
     }
     let source = text(row, "source")?;
@@ -60,7 +67,7 @@ pub(crate) fn decode(row: &Row) -> Result<SettingObservation> {
         if source == "session" || matches!(context.as_str(), "user" | "superuser" | "backend" | "superuser-backend") {
             MeasurementScope::Session
         } else {
-            MeasurementScope::Server
+            server_scope
         };
     let default_value = row.text("boot_val");
     let observation = SettingObservation {

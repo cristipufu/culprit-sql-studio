@@ -79,6 +79,9 @@ impl ObjectDefinitionFact {
                     Some(reference("/record/data/fact/data/estimated_plan/payload", &value.estimated_plan.payload)),
                 ];
             }
+            Self::RetainedPlan(value) => {
+                Some(reference("/record/data/fact/data/definition/plan", &value.definition.plan))
+            }
             Self::MssqlRetainedPlan(value) => {
                 Some(reference("/record/data/fact/data/batch_plan/payload", &value.batch_plan.payload))
             }

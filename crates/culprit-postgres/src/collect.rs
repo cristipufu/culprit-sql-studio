@@ -32,7 +32,7 @@ pub async fn snapshot(
                 tables(&client, probe.version_num).await,
                 indexes(&client, &probe).await,
                 foreign_keys(&client).await,
-                columns(&client).await,
+                columns(&client, probe.version_num).await,
             ))
         },
         async {

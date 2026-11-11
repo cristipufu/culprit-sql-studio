@@ -42,6 +42,7 @@ mod read_accounting;
 mod read_metrics;
 mod replication;
 mod resources;
+mod retained_plans;
 mod runtime;
 mod settings;
 mod state;
@@ -86,6 +87,7 @@ pub use read_accounting::*;
 pub use read_metrics::*;
 pub use replication::*;
 pub use resources::*;
+pub use retained_plans::*;
 pub use runtime::*;
 pub use settings::*;
 pub use state::*;
@@ -386,7 +388,10 @@ impl TelemetryRecord {
                     row.plan = DefinitionPayload::plan(text, source.database.engine);
                 }
                 row.id == row.identity.definition_id(source)?
-                    && row.query_definition_id == row.identity.query.definition_id(source)?
+                    && row
+                        .query_definition_id
+                        .as_ref()
+                        .is_none_or(|id| row.identity.query.definition_id(source).is_ok_and(|expected| *id == expected))
             }
             Self::ResourceSample(row) => {
                 row.at = canonical_time(&row.at)?;

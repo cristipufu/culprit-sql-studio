@@ -3,6 +3,7 @@ use crate::adx::{catalog::SchemaCatalog, schema};
 
 fn activity() -> ActivityObservation {
     ActivityObservation {
+        blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
         key: ActivityKey {
             session: NativeActivityIdentity { id: "61".into(), generation: "login-1".into() },
             request: Some(NativeActivityIdentity { id: "0".into(), generation: "request-1".into() }),
@@ -85,6 +86,7 @@ fn activity_and_incidents_keep_owner_generations_separate_counters_and_bounded_u
         at: "2026-11-11T06:05:00Z".into(),
         transition: ActivityIncidentTransition::Resolved,
         state: ActivityIncidentState {
+            status: culprit_core::telemetry::ActivityIncidentStatus::Current,
             id: digest(b"incident"),
             first_seen_at: "2026-11-11T06:00:00Z".into(),
             last_seen_at: "2026-11-11T06:04:00Z".into(),
@@ -177,6 +179,7 @@ fn large_deadlock_graphs_keep_signal_fields_and_explicit_full_evidence_reference
 #[test]
 fn cumulative_query_facts_keep_exact_totals_units_and_resets_in_the_analytical_contract() {
     let sample = StatementCounterSample {
+        scope: culprit_core::MeasurementScope::Database,
         distributions: vec![],
         identity: NativeQueryIdentity {
             query_id: "fingerprint".into(),

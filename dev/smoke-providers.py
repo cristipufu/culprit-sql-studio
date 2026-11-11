@@ -241,6 +241,11 @@ class Database:
             self.sql(f"ALTER DATABASE {fixture.database} SET QUERY_STORE=ON (OPERATION_MODE=READ_WRITE, QUERY_CAPTURE_MODE=ALL);")
         schema = "dbo" if fixture.engine == "mssql" else (fixture.database if fixture.engine == "mysql" else "public")
         table = f"{schema}.smoke_rows"
+        if fixture.engine == "mysql":
+            # Explicit setup on this owned fixture, never collector behavior. MariaDB leaves the current-statement
+            # consumer off by default; provider tests separately verify that disabled instrumentation stays unknown.
+            self.sql("UPDATE performance_schema.setup_consumers SET ENABLED='YES' WHERE NAME IN "
+                     "('global_instrumentation','thread_instrumentation','statements_digest','events_statements_current');")
         values = ",".join(f"({i},{i * 3})" for i in range(1, 101))
         self.sql(f"CREATE TABLE {table} (id int PRIMARY KEY, value int NOT NULL); INSERT INTO {table} VALUES {values};")
         self.create_reader(table)
@@ -300,7 +305,7 @@ class Database:
         self.test("culprit-engine", "live_providers::live_registered_provider", library=False)
         fixture = self.fixture
         if fixture.engine == "postgres":
-            self.test("culprit-engine", "live_providers::postgres_telemetry_", library=False)
+            self.test("culprit-engine", "live_providers::native_telemetry_", library=False)
             self.test("culprit-postgres", "read::native_tests::")
             self.test("culprit-postgres", "telemetry::native_tests::")
             self.test("culprit-postgres", "wire::tests::live_table_preview")
@@ -309,11 +314,16 @@ class Database:
             else:
                 self.test("culprit-postgres", "wire::tests::live_postgres_hypothetical_")
         elif fixture.engine == "mysql":
+            self.test("culprit-engine", "live_providers::native_telemetry_", library=False)
+            self.test("culprit-mysql", "telemetry::native_tests::")
+            self.test("culprit-mysql", "read::native_tests::")
             self.test("culprit-mysql", "preview::tests::live_")
         elif fixture.engine == "mssql":
             self.test("culprit-mssql", "statement::tests::live_")
             self.test("culprit-mssql", "native_tests::")
         else:
+            self.test("culprit-engine", "live_providers::native_telemetry_", library=False)
+            self.test("culprit-yugabyte", "telemetry::native_tests::")
             self.test("culprit-yugabyte", "tests::live_", skip="cluster_tests::")
             self.test("culprit-postgres", "wire::tests::live_ysql_")
             self.test("culprit-engine", "services::live_native_", library=False)

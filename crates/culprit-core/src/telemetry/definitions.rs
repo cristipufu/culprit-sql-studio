@@ -116,6 +116,30 @@ impl StatementOrigin {
     pub fn is_culprit(self) -> bool {
         matches!(self, Self::CulpritMonitoring | Self::Culprit)
     }
+    /// Only SQL comments establish a marker. A literal containing the same words is application data.
+    pub fn from_sql(text: Option<&str>, engine: Engine) -> (Self, Option<String>) {
+        let Some(text) = text else { return (Self::Unknown, None) };
+        let Ok(Some(comments)) = crate::sql::block_comments(text, engine) else { return (Self::Unknown, None) };
+        let origin = if comments.contains(&"/* culprit:monitor */") {
+            Self::CulpritMonitoring
+        } else if comments.contains(&"/* culprit */") {
+            Self::Culprit
+        } else {
+            Self::Application
+        };
+        let template = (origin == Self::CulpritMonitoring)
+            .then(|| {
+                comments.iter().find_map(|comment| {
+                    comment
+                        .strip_prefix("/* culprit:template:")
+                        .and_then(|value| value.strip_suffix(" */"))
+                        .filter(|value| valid_digest(value))
+                        .map(str::to_owned)
+                })
+            })
+            .flatten();
+        (origin, template)
+    }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -149,7 +173,8 @@ impl QueryDefinition {
 pub struct PlanDefinition {
     pub id: String,
     pub identity: NativePlanIdentity,
-    pub query_definition_id: String,
+    /// Absent when this native cache does not share a definition namespace with statement statistics.
+    pub query_definition_id: Option<String>,
     pub engine_version: Option<String>,
     pub native_properties: std::collections::BTreeMap<String, String>,
     pub source_text_bytes: Option<String>,
@@ -159,7 +184,7 @@ pub struct PlanDefinition {
 impl PlanDefinition {
     pub fn is_valid(&self) -> bool {
         valid_digest(&self.id)
-            && valid_digest(&self.query_definition_id)
+            && self.query_definition_id.as_deref().is_none_or(valid_digest)
             && self.identity.is_valid()
             && self.plan.is_valid()
             && self.engine_version.as_ref().is_none_or(|version| !version.is_empty() && version.len() <= 128)

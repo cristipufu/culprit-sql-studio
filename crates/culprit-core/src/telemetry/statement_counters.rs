@@ -35,6 +35,8 @@ impl StatementDistribution {
 #[ts(export)]
 pub struct StatementCounterSample {
     pub identity: NativeQueryIdentity,
+    /// A database observed on one distributed node is not a database-wide or cluster-wide total.
+    pub scope: crate::MeasurementScope,
     pub observed_at: String,
     /// Unknown remains unknown: two observations alone do not establish a safe delta.
     pub reset: crate::ResetMarker,

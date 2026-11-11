@@ -2,6 +2,14 @@
 
 Each release's notes are its section below: the release workflow publishes them on GitHub, and the desktop app shows them when it offers the update. A release without a section here isn't drafted.
 
+## Unreleased
+
+- **More collector providers (preview).** Background telemetry now supports MySQL, MariaDB, YugabyteDB and SQLite metadata through shared bounded readers, outbox recovery and delivery contracts.
+- **Honest blocking evidence.** Missing native lock details retain an uncertain incident and its last verified timestamp instead of falsely resolving it.
+- **Safer native reads.** Shared cancellation fencing and backpressure handling; SQLite closes metadata transactions before paging and accounts for setup and cleanup queries.
+
+Export format 10 requires fresh collector/recovery state. Live ADX delivery and production-load qualification remain pending.
+
 ## 0.5.6
 
 ### Added

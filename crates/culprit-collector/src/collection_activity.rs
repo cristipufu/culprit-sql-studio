@@ -33,7 +33,7 @@ impl ActivityRecords {
         }
     }
     fn verify(&self, snapshot: &ActivitySnapshotDescription) -> bool {
-        if !snapshot.database_wide {
+        if !snapshot.complete_scope {
             return false;
         }
         let Ok(expected) = ActivityEvidence::select(&self.observations, &snapshot.policy) else {
@@ -42,35 +42,45 @@ impl ActivityRecords {
         if self.observations.len() != snapshot.observations as usize
             || self.blocking.len() != snapshot.blocking_edges as usize
             || expected.conditions.len() != snapshot.qualifying as usize
+            || expected.uncertain.len() != snapshot.uncertain as usize
             || expected.observations.len() != self.observations.len()
             || expected.blocking.iter().collect::<BTreeSet<_>>() != self.blocking.iter().collect::<BTreeSet<_>>()
         {
             return false;
         }
         let current: BTreeMap<_, _> = self.checkpoints.iter().map(|state| (&state.observation.key, state)).collect();
-        if current.len() != self.checkpoints.len() || current.len() != expected.conditions.len() {
+        if current.len() != self.checkpoints.len() || expected.conditions.keys().any(|key| !current.contains_key(key)) {
             return false;
         }
-        for row in &self.observations {
-            let Some(conditions) = expected.conditions.get(&row.key) else {
-                continue;
-            };
-            let Some(state) = current.get(&row.key) else {
+        let prior_rows = self.checkpoints.iter().map(|state| state.observation.clone()).collect::<Vec<_>>();
+        let Ok(uncertain) = ActivityEvidence::context_for(&prior_rows, &expected.uncertain) else {
+            return false;
+        };
+        for state in &self.checkpoints {
+            if !state.is_valid_at(&snapshot.at) {
                 return false;
-            };
-            if !state.is_valid()
-                || state.conditions != *conditions
-                || state.observation != *row
-                || state.last_seen_at != snapshot.at
-            {
-                return false;
+            }
+            if state.status == ActivityIncidentStatus::Uncertain {
+                if !uncertain.contains(&state.observation.key) {
+                    return false;
+                }
+            } else {
+                let Some(conditions) = expected.conditions.get(&state.observation.key) else {
+                    return false;
+                };
+                if state.conditions != *conditions || !self.observations.contains(&state.observation) {
+                    return false;
+                }
             }
         }
         self.changes.iter().all(|change| {
             change.is_valid()
                 && change.at == snapshot.at
                 && match change.transition {
-                    ActivityIncidentTransition::Resolved => !current.contains_key(&change.state.observation.key),
+                    ActivityIncidentTransition::Resolved => {
+                        !current.contains_key(&change.state.observation.key)
+                            && !uncertain.contains(&change.state.observation.key)
+                    }
                     _ => current.get(&change.state.observation.key).is_some_and(|state| **state == change.state),
                 }
         })
@@ -108,7 +118,7 @@ mod tests {
     fn baseline() -> ActivityBaseline {
         let observation: ActivityObservation = serde_json::from_value(serde_json::json!({
             "key":{"session":{"id":"61","generation":"login-1"},"request":{"id":"0","generation":"request-1"}},
-            "idle":false,"scope":"request-database","state":"running","open_transactions":0,"elapsed_ms":"120000",
+            "blocking_status":"known","idle":false,"scope":"request-database","state":"running","open_transactions":0,"elapsed_ms":"120000",
             "session_counters":{},"request_counters":{},"statement":{"state":"unavailable","reason":"not-collected"}
         }))
         .unwrap();
@@ -126,10 +136,12 @@ mod tests {
             observation: SourceObservation::Activity(ActivitySnapshotDescription {
                 epoch: "epoch-1".into(),
                 at: "2020-01-01T06:00:00Z".into(),
-                database_wide: true,
+                scope: culprit_core::MeasurementScope::Database,
+                complete_scope: true,
                 policy: ActivityPolicy::default(),
                 native_rows: 1,
                 qualifying: 1,
+                uncertain: 0,
                 observations: 1,
                 blocking_edges: 0,
                 details: ActivityDetailStatus::Collected,
@@ -138,6 +150,7 @@ mod tests {
         let mut source = source;
         source.database.incarnation = Some("native-database".into());
         let state = ActivityIncidentState {
+            status: culprit_core::telemetry::ActivityIncidentStatus::Current,
             id: digest(b"incident"),
             first_seen_at: "2020-01-01T06:00:00Z".into(),
             last_seen_at: "2020-01-01T06:00:00Z".into(),
@@ -174,5 +187,43 @@ mod tests {
         assert_eq!(before.matching(&source).len(), 1);
         source.database.incarnation = Some("different-native-database".into());
         assert!(before.matching(&source).is_empty());
+    }
+    #[test]
+    fn incomplete_lock_details_keep_a_closed_reference_set_without_freshening_an_old_incident() {
+        let baseline = baseline();
+        let mut source = baseline.source.clone();
+        let SourceObservation::Activity(snapshot) = &mut source.observation else { panic!() };
+        snapshot.at = "2020-01-01T06:01:00Z".into();
+        snapshot.uncertain = 1;
+        let mut row = baseline.states[0].observation.clone();
+        row.blocking_status = ActivityBlockingStatus::Unknown;
+        let update =
+            ActivityIncidentUpdate::observe(&source, &baseline.capture, &[row.clone()], &baseline.states).unwrap();
+        let snapshot = source.observation.activity().unwrap();
+        let mut records = ActivityRecords {
+            observations: vec![row],
+            checkpoints: update.active,
+            changes: update.changes,
+            ..Default::default()
+        };
+        assert!(records.coverage(snapshot).complete);
+        assert_eq!(records.checkpoints[0].status, ActivityIncidentStatus::Uncertain);
+        assert_eq!(records.checkpoints[0].last_seen_at, "2020-01-01T06:00:00Z");
+        records.checkpoints[0].status = ActivityIncidentStatus::Current;
+        assert!(!records.coverage(snapshot).complete, "stale proof cannot masquerade as a fresh observation");
+    }
+    #[test]
+    fn a_node_scoped_poll_cannot_inherit_or_resolve_a_different_nodes_incidents() {
+        let mut baseline = baseline();
+        baseline.source.source = "ysql-activity-node-a".into();
+        let SourceObservation::Activity(snapshot) = &mut baseline.source.observation else { panic!() };
+        snapshot.scope = culprit_core::MeasurementScope::Node;
+        snapshot.epoch = "node-a-epoch".into();
+        let mut other = baseline.source.clone();
+        other.source = "ysql-activity-node-b".into();
+        let SourceObservation::Activity(snapshot) = &mut other.observation else { panic!() };
+        snapshot.epoch = "node-b-epoch".into();
+        assert!(baseline.matching(&other).is_empty());
+        assert_eq!(baseline.matching(&baseline.source).len(), 1);
     }
 }

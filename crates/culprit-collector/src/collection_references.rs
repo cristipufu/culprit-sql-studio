@@ -24,7 +24,7 @@ impl RequiredDefinitions {
 struct ObservedPlan {
     native: NativeIdentity,
     query_native: NativeIdentity,
-    query_definition_id: String,
+    query_definition_id: Option<String>,
 }
 #[derive(Default)]
 pub(crate) struct ObservationReferences {
@@ -122,11 +122,12 @@ impl ObservationReferences {
     }
     fn plan_is_resolved(&self, native: &NativeIdentity, id: &str) -> bool {
         let Some(plan) = self.plans.get(id) else { return false };
+        let Some(query_definition_id) = plan.query_definition_id.as_ref() else { return false };
         let Some(query) = self.plan_queries.get(native).and_then(Option::as_ref) else { return false };
         plan.native == *native
             && plan.query_native == query.native
-            && query.definition_id.as_ref() == Some(&plan.query_definition_id)
-            && self.queries.get(&plan.query_definition_id) == Some(&query.native)
+            && query.definition_id.as_ref() == Some(query_definition_id)
+            && self.queries.get(query_definition_id) == Some(&query.native)
     }
     pub(crate) fn coverage(&self, source_rechecked: bool, source: Option<&CollectionDescription>) -> ReferenceCoverage {
         let queries = self
@@ -198,6 +199,34 @@ mod tests {
         assert_eq!(coverage.plans.required, 0);
     }
     #[test]
+    fn an_unlinked_native_plan_cannot_close_a_runtime_reference() {
+        let query = query("native-query");
+        let plan = PlanDefinition {
+            id: digest(b"independent-cache-plan"),
+            identity: NativePlanIdentity {
+                plan_id: "plan".into(),
+                query: query.identity.clone(),
+                qualifiers: Default::default(),
+            },
+            query_definition_id: None,
+            engine_version: None,
+            native_properties: Default::default(),
+            source_text_bytes: None,
+            plan: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
+        };
+        let required =
+            NativeDefinitionReference { native: plan.identity.native(), definition_id: Some(plan.id.clone()) };
+        let mut references = ObservationReferences::default();
+        for record in [
+            measurement(&query, Some(required)),
+            TelemetryRecord::QueryDefinition(query),
+            TelemetryRecord::PlanDefinition(plan),
+        ] {
+            references.record(&record);
+        }
+        assert_eq!(references.coverage(true, None).plans.unresolved, 1);
+    }
+    #[test]
     fn an_unrelated_query_definition_cannot_close_a_plan_reference() {
         let expected = query("expected");
         let other = query("other");
@@ -208,7 +237,7 @@ mod tests {
                 query: other.identity.clone(),
                 qualifiers: Default::default(),
             },
-            query_definition_id: other.id.clone(),
+            query_definition_id: Some(other.id.clone()),
             engine_version: None,
             native_properties: Default::default(),
             source_text_bytes: None,

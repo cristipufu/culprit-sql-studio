@@ -7,7 +7,7 @@ use crate::{
     workload::collect_workload,
 };
 use culprit_core::{
-    Capability, ConnectionSpec, Coverage, Engine, Error, Result, SNAPSHOT_FORMAT, Setting, Snapshot, SnapshotOptions,
+    Capability, ConnectionSpec, Coverage, Engine, Result, SNAPSHOT_FORMAT, Setting, Snapshot, SnapshotOptions,
     WorkloadKind,
 };
 use std::time::Instant;
@@ -16,45 +16,32 @@ const PS_GRANT: &str = "GRANT SELECT ON performance_schema.* TO";
 
 /// Collect a full snapshot. Each collector that fails becomes a note; only an unreachable server is an error.
 pub async fn snapshot(
-    connector: &Connector,
+    connector: &std::sync::Arc<Connector>,
     spec: &ConnectionSpec,
     connection: &str,
     options: &SnapshotOptions,
 ) -> Result<Snapshot> {
     let started = Instant::now();
-    let mut primary = connector.connect(Scope::Server).await?;
-    let probe = probe(&mut primary, connector).await?;
+    let mut reader = crate::read::ReadSession::application(connector.clone(), Scope::Server);
+    let probe = probe(&mut reader, connector).await?;
     let db = probe.database.clone();
-
-    let (workload, schema, misc) = tokio::join!(
-        async {
-            let mut conn = primary;
-            collect_workload(&mut conn, connector, &probe, options).await
-        },
-        async {
-            let mut conn = connector.connect(Scope::Server).await?;
-            let tables = tables(&mut conn, &db).await;
-            let columns = columns(&mut conn, &db).await;
-            let indexes = indexes(&mut conn, &db, &probe).await;
-            let fks = foreign_keys(&mut conn, &db).await;
-            Ok::<_, Error>((tables, columns, indexes, fks))
-        },
-        async {
-            let mut conn = connector.connect(Scope::Server).await?;
-            let mut settings = settings(&mut conn, probe.flavor).await;
-            if let (Ok(settings), Some(role)) = (settings.as_mut(), replica_role(&mut conn, &probe).await) {
-                settings.push(Setting {
-                    name: culprit_core::REPLICA_SETTING.into(),
-                    value: role.into(),
-                    default_value: None,
-                    scope: "server".into(),
-                });
-            }
-            let waits = crate::pressure::waits(&mut conn).await;
-            let pressure = crate::pressure::collect(&mut conn).await;
-            Ok::<_, Error>((settings, waits, pressure))
-        },
-    );
+    // Metadata readers share one native owner. A scan does not multiply pressure with parallel source connections.
+    let workload = collect_workload(&mut reader, connector, &probe, options).await;
+    let tables_result = tables(&mut reader, &db).await;
+    let columns_result = columns(&mut reader, &db).await;
+    let indexes_result = indexes(&mut reader, &db, &probe).await;
+    let fks_result = foreign_keys(&mut reader, &db).await;
+    let mut settings_result = settings(&mut reader, probe.flavor).await;
+    if let (Ok(settings), Some(role)) = (settings_result.as_mut(), replica_role(&mut reader, &probe).await) {
+        settings.push(Setting {
+            name: culprit_core::REPLICA_SETTING.into(),
+            value: role.into(),
+            default_value: None,
+            scope: "server".into(),
+        });
+    }
+    let waits_result = crate::pressure::waits(&mut reader).await;
+    let (pressure, pressure_coverage) = crate::pressure::collect(&mut reader).await;
 
     let mut server = probe.server_info();
     // What the sources could read, starting from what the probe found (`culprit_core::Coverage`).
@@ -101,51 +88,27 @@ pub async fn snapshot(
     };
 
     // Each source through `Coverage::read`: one that fails is a note and its capabilities locked (`sources`).
-    let (tables_out, columns_out, indexes_out, fks_out) = match schema {
-        Ok((tables, columns, indexes, fks)) => {
-            let indexes = coverage.read(&sources::INDEXES, indexes).map(|(i, usage_note)| {
-                coverage.completed(&sources::INDEXES, i.len());
-                // Read, but without usage counters: the indexes stand, the counters are locked with why.
-                if let Some(message) = usage_note {
-                    coverage.note("index_usage", message.clone());
-                    coverage.lost(
-                        Capability::IndexUsage,
-                        message,
-                        Some(format!("{PS_GRANT} {};", probe.grant_target())),
-                    );
-                }
-                i
-            });
-            (
-                coverage.read_rows(&sources::TABLES, tables).unwrap_or_default(),
-                coverage.read_rows(&sources::COLUMNS, columns).unwrap_or_default(),
-                indexes.unwrap_or_default(),
-                coverage.read_rows(&sources::FOREIGN_KEYS, fks).unwrap_or_default(),
-            )
-        }
-        // The connection they share failed: every one of them did.
-        Err(e) => {
-            for source in [&sources::TABLES, &sources::COLUMNS, &sources::INDEXES, &sources::FOREIGN_KEYS] {
-                coverage.source_failed(source, &e);
+    let indexes_out = coverage
+        .read(&sources::INDEXES, indexes_result)
+        .map(|(indexes, usage_note)| {
+            coverage.completed(&sources::INDEXES, indexes.len());
+            if let Some(message) = usage_note {
+                coverage.note("index_usage", message.clone());
+                coverage.lost(Capability::IndexUsage, message, Some(format!("{PS_GRANT} {};", probe.grant_target())));
             }
-            Default::default()
-        }
-    };
-
-    let (settings_out, mut waits_out, pressure_out) = match misc {
-        Ok((settings, waits, (pressure, read))) => {
-            coverage.merge(read);
-            let waits = coverage.read_rows(&sources::WAITS, waits).unwrap_or_default();
-            if !waits.is_empty() {
-                coverage.delivered(Capability::WaitStats);
-            }
-            (coverage.read_rows(&sources::SETTINGS, settings).unwrap_or_default(), waits, Some(pressure))
-        }
-        Err(e) => {
-            coverage.sources_failed(sources::MISC, &e);
-            (Vec::new(), Vec::new(), None)
-        }
-    };
+            indexes
+        })
+        .unwrap_or_default();
+    let tables_out = coverage.read_rows(&sources::TABLES, tables_result).unwrap_or_default();
+    let columns_out = coverage.read_rows(&sources::COLUMNS, columns_result).unwrap_or_default();
+    let fks_out = coverage.read_rows(&sources::FOREIGN_KEYS, fks_result).unwrap_or_default();
+    coverage.merge(pressure_coverage);
+    let mut waits_out = coverage.read_rows(&sources::WAITS, waits_result).unwrap_or_default();
+    if !waits_out.is_empty() {
+        coverage.delivered(Capability::WaitStats);
+    }
+    let settings_out = coverage.read_rows(&sources::SETTINGS, settings_result).unwrap_or_default();
+    let pressure_out = Some(pressure);
     if waits_out.is_empty() {
         waits_out = std::mem::take(&mut source_waits);
     }
@@ -197,7 +160,8 @@ pub async fn snapshot(
         connector.port,
         None,
     ));
-    crate::signals::collect(connector, &probe, &mut snapshot).await;
+    crate::signals::collect(&mut reader, &probe, &mut snapshot).await;
+    reader.close().await;
     snapshot.duration_ms = started.elapsed().as_secs_f64() * 1000.0;
     Ok(snapshot)
 }

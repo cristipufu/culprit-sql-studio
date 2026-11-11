@@ -204,7 +204,7 @@ impl Definitions {
                 }
                 Ok(TelemetryRecord::PlanDefinition(PlanDefinition {
                     id: identity.definition_id(source)?,
-                    query_definition_id: identity.query.definition_id(source)?,
+                    query_definition_id: Some(identity.query.definition_id(source)?),
                     identity,
                     engine_version: Some(decode::text(row, "engine_version")?),
                     native_properties: [(

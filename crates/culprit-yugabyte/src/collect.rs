@@ -1,6 +1,6 @@
 use crate::{YugabyteProvider, catalog, probe, sources, workload};
 use culprit_core::{Capability, Coverage, SNAPSHOT_FORMAT, Snapshot, SnapshotOptions, StatisticsInfo};
-use culprit_postgres::wire::COLLECTOR;
+use culprit_postgres::wire::{COLLECTOR, NativeRead, ReadSession};
 use std::time::Instant;
 
 pub(crate) async fn snapshot(
@@ -8,26 +8,34 @@ pub(crate) async fn snapshot(
     name: &str,
     options: &SnapshotOptions,
 ) -> culprit_core::Result<Snapshot> {
+    let mut session = crate::read::application(provider.connector.clone(), std::time::Duration::ZERO);
+    let result = observe(provider, name, options, &mut session).await;
+    session.close().await;
+    result
+}
+async fn observe(
+    provider: &YugabyteProvider,
+    name: &str,
+    options: &SnapshotOptions,
+    session: &mut ReadSession,
+) -> culprit_core::Result<Snapshot> {
     let started = Instant::now();
-    let session = provider.connector.connect_observed(COLLECTOR).await?;
-    let probe = probe::read(&session.client).await?;
+    let probe = probe::read_from(session).await?;
     let mut coverage = Coverage::default();
-    let tables = coverage.read_rows(&sources::TABLES, catalog::tables(&session.client).await).unwrap_or_default();
-    let indexes =
-        coverage.read_rows(&sources::INDEXES, catalog::indexes(&session.client, &probe).await).unwrap_or_default();
-    let columns =
-        coverage.read_rows(&sources::COLUMNS, catalog::columns(&session.client, &probe).await).unwrap_or_default();
+    let tables = coverage.read_rows(&sources::TABLES, catalog::tables(session).await).unwrap_or_default();
+    let indexes = coverage.read_rows(&sources::INDEXES, catalog::indexes(session, &probe).await).unwrap_or_default();
+    let columns = coverage.read_rows(&sources::COLUMNS, catalog::columns(session, &probe).await).unwrap_or_default();
     let foreign_keys =
-        coverage.read_rows(&sources::FOREIGN_KEYS, catalog::foreign_keys(&session.client).await).unwrap_or_default();
-    let settings = coverage.read_rows(&sources::SETTINGS, catalog::settings(&session.client).await).unwrap_or_default();
-    let constraints = catalog::constraints(&session.client).await;
+        coverage.read_rows(&sources::FOREIGN_KEYS, catalog::foreign_keys(session, &probe).await).unwrap_or_default();
+    let settings = coverage.read_rows(&sources::SETTINGS, catalog::settings(session).await).unwrap_or_default();
+    let constraints = catalog::constraints(session, &probe).await;
     let truncated = constraints.as_ref().is_ok_and(|(_, truncated)| *truncated);
     let constraints = coverage.read_rows(&sources::CONSTRAINTS, constraints.map(|(rows, _)| rows)).unwrap_or_default();
     if truncated {
         coverage
             .partial(&sources::CONSTRAINTS, culprit_core::message!("provider.yugabyte.coverage.constraints_truncated"));
     }
-    let workload = workload::read(&session, &probe, options.top_queries, &mut coverage).await;
+    let workload = workload::read(session, &probe, options.top_queries, &mut coverage).await;
     let mut snapshot = Snapshot {
         format: SNAPSHOT_FORMAT,
         id: probe.now.replace(['-', ':'], ""),
@@ -63,12 +71,12 @@ pub(crate) async fn snapshot(
         identity: None,
         operations: Default::default(),
     };
-    catalog::details(&session.client, &mut snapshot, &mut coverage).await;
-    crate::index_usage::read(&session, &probe, &mut snapshot, &mut coverage).await;
-    snapshot.operations.node_resources = crate::resources::collect(&session, &mut coverage).await;
-    snapshot.operations.activity_history = crate::ash::collect(&session, &probe, options, &mut coverage).await;
+    catalog::details(session, &mut snapshot, &mut coverage).await;
+    crate::index_usage::read(session, &probe, &mut snapshot, &mut coverage).await;
+    snapshot.operations.node_resources = crate::resources::collect(session, &mut coverage).await;
+    snapshot.operations.activity_history = crate::ash::collect(session, &probe, options, &mut coverage).await;
     snapshot.operations.termination_history =
-        crate::terminations::collect(&session, &probe, options, &mut coverage).await;
+        crate::terminations::collect(session, &probe, options, &mut coverage).await;
     snapshot.statistics = snapshot
         .tables
         .iter()
@@ -84,7 +92,7 @@ pub(crate) async fn snapshot(
         })
         .collect();
     if let Some(w) = &mut snapshot.workload {
-        capture_plans(provider, &session, &probe, w, options.plans, &mut coverage).await;
+        capture_plans(provider, session, &probe, w, options.plans, &mut coverage).await;
     }
     coverage.note("DocDB measurements", culprit_core::message!("provider.yugabyte.coverage.docdb_measurements"));
     coverage.append_to(&mut snapshot);
@@ -103,13 +111,13 @@ pub(crate) async fn snapshot(
 
 pub(crate) async fn capture_plans(
     provider: &YugabyteProvider,
-    session: &culprit_postgres::wire::ObservedSession,
+    session: &mut impl culprit_postgres::wire::NoticeRead,
     probe: &probe::Probe,
     workload: &mut culprit_core::Workload,
     requested: u32,
     coverage: &mut Coverage,
 ) {
-    use culprit_postgres::wire::{elevated_login, own_ysql_text};
+    use culprit_postgres::wire::{elevated_read, own_ysql_text_from};
     use tokio::time::{Instant, timeout_at};
     if workload.queries.is_empty() {
         return;
@@ -139,8 +147,7 @@ pub(crate) async fn capture_plans(
             culprit_core::message!("provider.yugabyte.coverage.plan_capture_deadline"),
         );
     }
-    let client = &session.client;
-    let elevated = match timeout_at(deadline, elevated_login(client)).await {
+    let elevated = match timeout_at(deadline, elevated_read(session)).await {
         Ok(Ok(value)) => Some(value),
         _ => {
             coverage.note("YSQL plans", culprit_core::message!("provider.yugabyte.coverage.plan_permissions"));
@@ -155,7 +162,7 @@ pub(crate) async fn capture_plans(
         }
         let capture = async {
             let text = if elevated.ok_or_else(culprit_postgres::wire::foreign_statement)? {
-                own_ysql_text(client, &q.id, probe.cluster)
+                own_ysql_text_from(session, &q.id, probe.cluster)
                     .await?
                     .ok_or_else(culprit_postgres::wire::foreign_statement)?
             } else {

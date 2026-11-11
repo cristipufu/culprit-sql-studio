@@ -3,8 +3,12 @@
 //! missing capabilities with the reason, never zeros. See `docs/providers/sqlite.md`.
 
 mod collect;
+mod file;
+mod native;
 pub mod plan;
+mod read;
 pub mod sources;
+mod telemetry;
 #[cfg(test)]
 mod words;
 
@@ -16,7 +20,8 @@ use culprit_core::{
     Ability, ConnectionSpec, Engine, Error, ErrorCode, ExplainMode, LiveState, Plan, Provider, Result, ResultSet,
     ServerInfo, Snapshot, SnapshotOptions, t,
 };
-use rusqlite::{Connection, OpenFlags};
+#[cfg(test)]
+use rusqlite::Connection;
 
 pub use plan::plan_from_rows;
 
@@ -32,6 +37,7 @@ pub fn component_version() -> culprit_core::ComponentVersion {
 pub struct SqliteProvider {
     path: PathBuf,
     spec: ConnectionSpec,
+    reader: read::FileReader,
 }
 
 impl SqliteProvider {
@@ -45,20 +51,14 @@ impl SqliteProvider {
             .map(str::trim)
             .filter(|p| !p.is_empty())
             .ok_or_else(|| Error::invalid(t!("provider.sqlite.open.path_required")))?;
-        Ok(SqliteProvider { path: culprit_core::expand_home(path), spec: spec.clone() })
+        let path = culprit_core::expand_home(path);
+        Ok(SqliteProvider { reader: read::FileReader::new(path.clone()), path, spec: spec.clone() })
     }
 }
 
-fn open(path: &PathBuf) -> Result<Connection> {
-    if !path.exists() {
-        return Err(Error::new(
-            ErrorCode::NotFound,
-            t!("provider.sqlite.open.no_file", path = path.display().to_string()),
-        )
-        .with_hint(t!("provider.sqlite.open.no_file.hint")));
-    }
-    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
-        .map_err(|e| map_error(&e))?;
+#[cfg(test)]
+fn open(path: &std::path::Path) -> Result<Connection> {
+    let conn = read::open(path)?;
     conn.busy_timeout(Duration::from_secs(2)).map_err(|e| map_error(&e))?;
     conn.execute_batch("PRAGMA query_only = 1;").map_err(|e| map_error(&e))?;
     Ok(conn)
@@ -85,11 +85,6 @@ pub(crate) fn map_error(e: &rusqlite::Error) -> Error {
     }
 }
 
-/// Run SQLite's blocking calls off the async runtime.
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
-    tokio::task::spawn_blocking(f).await.map_err(|e| task_stopped(&e))?
-}
-
 /// The blocking task running SQLite's calls ended without an answer (`error`).
 pub(crate) fn task_stopped(error: &dyn std::fmt::Display) -> Error {
     Error::internal(t!("provider.sqlite.error.task_stopped", error = error.to_string()))
@@ -101,29 +96,13 @@ pub(crate) fn execution_unavailable() -> Error {
 }
 
 const STATEMENT_TIMEOUT: Duration = culprit_core::limits::QUERY_TIMEOUT;
-static STATEMENTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
-
-/// Dropping an async caller cannot abort spawn_blocking: make SQLite observe the cancellation inside its VM instead.
+#[cfg(test)]
 async fn interactive<T: Send + 'static>(
     path: PathBuf,
     budget: Duration,
     operation: impl FnOnce(&Connection) -> Result<T> + Send + 'static,
 ) -> Result<T> {
-    let guard = culprit_core::limits::OperationGuard::new(budget)?;
-    let handle = guard.handle();
-    let permit = tokio::time::timeout(handle.remaining(), STATEMENTS.acquire())
-        .await
-        .map_err(|_| culprit_core::limits::timeout_error())?
-        .map_err(|_| execution_unavailable())?;
-    blocking(move || {
-        let _permit = permit;
-        handle.check()?;
-        let mut conn = open(&path)?;
-        handle.check()?;
-        conn.progress_handler(1_000, Some(move || handle.stopped())).map_err(|e| map_error(&e))?;
-        operation(&conn)
-    })
-    .await
+    read::FileReader::new(path).execute(budget, move |conn, _| operation(conn)).await
 }
 
 #[async_trait]
@@ -136,25 +115,33 @@ impl Provider for SqliteProvider {
         Engine::Sqlite
     }
 
+    fn source_shutdown(&self) -> culprit_core::telemetry::SourceShutdown {
+        self.reader.shutdown()
+    }
+
+    fn telemetry_source(
+        &self,
+        request: &culprit_core::telemetry::CollectionRequest,
+    ) -> Result<Box<dyn culprit_core::telemetry::TelemetrySource>> {
+        telemetry::source(self.reader.clone(), self.path.clone(), request)
+    }
+
     async fn probe(&self) -> Result<ServerInfo> {
-        let path = self.path.clone();
-        blocking(move || {
-            let conn = open(&path)?;
-            let (have, missing) = collect::capabilities(&conn, collect::whole_file_read(&conn).map(|_| ()));
-            Ok(collect::server_info(&conn, &path, have, missing))
-        })
-        .await
+        self.reader
+            .execute(culprit_core::limits::OBSERVE_TIMEOUT, move |conn, path| {
+                let (have, missing) = collect::capabilities(conn, collect::whole_file_read(conn).map(|_| ()));
+                Ok(collect::server_info(conn, path, have, missing))
+            })
+            .await
     }
 
     async fn snapshot(&self, connection: &str, _options: &SnapshotOptions) -> Result<Snapshot> {
-        let path = self.path.clone();
         let (connection, environment) = (connection.to_string(), self.spec.environment);
-        blocking(move || {
-            let started = Instant::now();
-            let mut conn = open(&path)?;
-            collect::snapshot(&mut conn, &path, &connection, environment, started)
-        })
-        .await
+        self.reader
+            .with_handle(culprit_core::limits::OBSERVE_TIMEOUT, move |conn, path, handle| {
+                collect::snapshot_with_handle(conn, path, &connection, environment, Instant::now(), handle)
+            })
+            .await
     }
 
     async fn explain(&self, sql: &str, mode: ExplainMode) -> Result<Plan> {
@@ -162,10 +149,7 @@ impl Provider for SqliteProvider {
             return Err(Engine::Sqlite.refused(Ability::MeasuresRuns));
         }
         let statement = culprit_core::sql::single_statement(sql, Engine::Sqlite)?.to_string();
-        interactive(self.path.clone(), culprit_core::limits::OBSERVE_TIMEOUT, move |conn| {
-            plan::explain(conn, &statement)
-        })
-        .await
+        self.reader.execute(culprit_core::limits::OBSERVE_TIMEOUT, move |conn, _| plan::explain(conn, &statement)).await
     }
 
     async fn live(&self) -> Result<LiveState> {
@@ -174,15 +158,14 @@ impl Provider for SqliteProvider {
 
     async fn run(&self, sql: &str, limit: usize) -> Result<ResultSet> {
         let statement = culprit_core::sql::single_statement(sql, Engine::Sqlite)?.to_string();
-        interactive(self.path.clone(), STATEMENT_TIMEOUT, move |conn| collect::run(conn, &statement, limit)).await
+        self.reader.execute(STATEMENT_TIMEOUT, move |conn, _| collect::run(conn, &statement, limit)).await
     }
 
     async fn preview(&self, sql: &str, limit: usize) -> Result<ResultSet> {
         let statement = culprit_core::sql::single_statement(sql, Engine::Sqlite)?.to_string();
-        interactive(self.path.clone(), culprit_core::limits::PREVIEW_TIMEOUT, move |conn| {
-            collect::run(conn, &statement, limit)
-        })
-        .await
+        self.reader
+            .execute(culprit_core::limits::PREVIEW_TIMEOUT, move |conn, _| collect::run(conn, &statement, limit))
+            .await
     }
 }
 
@@ -211,19 +194,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execution_deadline_includes_waiting_for_a_worker() {
-        let workers = STATEMENTS.acquire_many(4).await.unwrap();
-        let path = query_file("queued-deadline");
-        let result = interactive(path.clone(), Duration::from_millis(10), |_| -> Result<()> {
-            panic!("expired queued work must not start");
-        });
-        let error = tokio::time::timeout(Duration::from_secs(2), result).await.unwrap().unwrap_err();
-        assert_eq!(error.code, ErrorCode::Timeout);
-        drop(workers);
-        std::fs::remove_file(path).unwrap();
-    }
-
-    #[tokio::test]
     async fn dropping_a_caller_stops_its_blocking_query() {
         let path = query_file("cancellation");
         let (started, ready) = tokio::sync::oneshot::channel();
@@ -241,8 +211,6 @@ mod tests {
             tokio::time::timeout(Duration::from_secs(2), stopped).await.unwrap().unwrap(),
             Some(ErrorCode::Timeout)
         );
-        // The aborted caller no longer owns a JoinHandle: wait until blocking workers have released their files too.
-        let _workers = tokio::time::timeout(Duration::from_secs(2), STATEMENTS.acquire_many(4)).await.unwrap().unwrap();
         std::fs::remove_file(path).unwrap();
     }
 
@@ -253,7 +221,7 @@ mod tests {
         std::fs::create_dir(&dir).unwrap();
         let path = dir.join("shop.sqlite");
         let read = |path: &std::path::Path| {
-            let mut conn = open(&path.to_path_buf()).unwrap();
+            let mut conn = open(path).unwrap();
             collect::snapshot(&mut conn, path, "shop", culprit_core::Environment::Local, Instant::now()).unwrap()
         };
         drop(Connection::open(&path).unwrap());
@@ -274,10 +242,7 @@ mod tests {
         std::fs::rename(&path, dir.join("original.sqlite")).unwrap();
         drop(Connection::open(&path).unwrap());
         let replacement = read(&path);
-        #[cfg(unix)]
         assert!(!first.same_database(&replacement));
-        #[cfg(not(unix))]
-        assert!(first.same_database(&replacement), "only path identity is available on this platform");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

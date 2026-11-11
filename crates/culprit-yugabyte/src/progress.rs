@@ -3,7 +3,9 @@ use crate::{
     sessions::{literal, target},
 };
 use culprit_core::{Engine, QueryProgress, Result, format, t};
-use culprit_postgres::wire::{Connector, INTERACTIVE, ObservedSession, Row, SessionLimits, elevated_login, query_one};
+#[cfg(test)]
+use culprit_postgres::wire::ObservedSession;
+use culprit_postgres::wire::{Connector, Row};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Command {
@@ -114,17 +116,28 @@ fn copy_step(
 
 pub(crate) async fn read(connector: &Connector, id: &str, with_plan: bool) -> Result<(QueryProgress, bool)> {
     target(id)?;
-    let session = connector.connect_observed(SessionLimits { catalog_path: true, ..INTERACTIVE }).await?;
-    read_session(&session, id, with_plan).await
+    use culprit_postgres::wire::NativeRead;
+    let mut session = crate::read::application(connector.clone(), std::time::Duration::ZERO);
+    let result = read_from(&mut session, id, with_plan).await;
+    session.close().await;
+    result
 }
 
+#[cfg(test)]
 pub(crate) async fn read_session(
     session: &ObservedSession,
     id: &str,
     with_plan: bool,
 ) -> Result<(QueryProgress, bool)> {
+    read_from(&mut culprit_postgres::wire::BorrowedRead::new(session), id, with_plan).await
+}
+pub(crate) async fn read_from(
+    session: &mut impl culprit_postgres::wire::NoticeRead,
+    id: &str,
+    with_plan: bool,
+) -> Result<(QueryProgress, bool)> {
     let (node, pid, started) = target(id)?;
-    let p = probe::read(&session.client).await?;
+    let p = probe::read_from(session).await?;
     let relation = if p.global { "pg_catalog.\"gv$pg_stat_activity\"" } else { "pg_catalog.pg_stat_activity" };
     let node_guard = if p.global {
         // Keep the native UUID column bare so the global FDW prunes unrelated nodes during planning.
@@ -133,8 +146,8 @@ pub(crate) async fn read_session(
         format!("replace(yb_get_local_tserver_uuid()::text,'-','')={}", literal(&node))
     };
     let notices = session.notices();
-    let activity = query_one(
-        &session.client,
+    let activity = crate::read::query_one(
+        session,
         &format!(
             "SELECT a.state,a.query,a.backend_type,a.wait_event_type,a.wait_event,{} AS query_start,
         extract(epoch FROM clock_timestamp()-a.query_start)*1000 AS elapsed_ms,
@@ -181,8 +194,8 @@ pub(crate) async fn read_session(
             if p.global { format!("pg_catalog.\"gv${view}\"") } else { format!("pg_catalog.{view}") };
         let guard = if p.global { format!(" AND server_uuid={}::uuid", literal(&node)) } else { String::new() };
         let before = session.notices();
-        let phase = query_one(
-            &session.client,
+        let phase = crate::read::query_one(
+            session,
             &format!(
                 "SELECT {} FROM {command_relation} WHERE pid={pid}{guard} AND datid={} AND EXISTS(
                     SELECT 1 FROM {relation} a WHERE a.datid={} AND a.pid={pid}
@@ -214,7 +227,7 @@ pub(crate) async fn read_session(
         && !worker
         && !partial
         && progress.statement.is_some()
-        && (row.flag("own") || !elevated_login(&session.client).await?);
+        && (row.flag("own") || !culprit_postgres::wire::elevated_read(session).await?);
     Ok((progress, allowed))
 }
 

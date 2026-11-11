@@ -1,3 +1,4 @@
+use crate::read::{NoticeRead, Row, query, query_bounded};
 use crate::{
     probe::{Probe, node_id},
     sources,
@@ -7,18 +8,17 @@ use culprit_core::{
     signals::{DocdbMetrics, QueryCosts},
     t,
 };
-use culprit_postgres::wire::{ObservedSession, Row, query, query_bounded};
 use serde_json::json;
 use std::collections::BTreeMap;
 
-async fn epochs(session: &ObservedSession, probe: &Probe, coverage: &mut Coverage) -> CounterSet {
+async fn epochs(session: &mut impl NoticeRead, probe: &Probe, coverage: &mut Coverage) -> CounterSet {
     let mut result = CounterSet {
         scope: if probe.cluster { CounterScope::Cluster } else { CounterScope::Node },
         members: BTreeMap::new(),
         complete: false,
     };
     let relation = if probe.cluster {
-        let found = crate::global::configured(&session.client, "pg_stat_statements_info").await.ok().flatten();
+        let found = crate::global::configured(session, "pg_stat_statements_info").await.ok().flatten();
         match found {
             Some(relation) => relation,
             None => {
@@ -40,7 +40,7 @@ async fn epochs(session: &ObservedSession, probe: &Probe, coverage: &mut Coverag
         crate::probe::timestamp("stats_reset"),
         if probe.cluster { ",server_uuid::text AS node" } else { "" }
     );
-    if let Some(rows) = coverage.read_rows(&sources::EPOCHS, query(&session.client, &sql).await) {
+    if let Some(rows) = coverage.read_rows(&sources::EPOCHS, query(session, &sql).await) {
         result.complete = session.notices() == before;
         for row in rows {
             if let Some(node) = if probe.cluster { node_id(&row.string("node")) } else { probe.node.clone() } {
@@ -50,7 +50,7 @@ async fn epochs(session: &ObservedSession, probe: &Probe, coverage: &mut Coverag
             }
         }
         if probe.cluster {
-            match query(&session.client, "SELECT uuid::text AS node FROM yb_servers()").await {
+            match query(session, "SELECT uuid::text AS node FROM yb_servers()").await {
                 Ok(rows) => {
                     let expected: Option<std::collections::BTreeSet<_>> =
                         rows.iter().map(|r| node_id(&r.string("node"))).collect();
@@ -71,22 +71,12 @@ async fn epochs(session: &ObservedSession, probe: &Probe, coverage: &mut Coverag
     result
 }
 async fn statement_rows(
-    session: &ObservedSession,
+    session: &mut impl NoticeRead,
     probe: &Probe,
     relation: &str,
     top: u32,
 ) -> culprit_core::Result<(Vec<Row>, bool)> {
-    let columns: std::collections::BTreeSet<_> = query(
-        &session.client,
-        &format!(
-            "SELECT attname FROM pg_attribute WHERE attrelid='{}'::regclass AND attnum>0 AND NOT attisdropped",
-            relation.replace('\'', "''")
-        ),
-    )
-    .await?
-    .into_iter()
-    .map(|row| row.string("attname"))
-    .collect();
+    let columns = crate::native::statements::columns(session, relation).await?;
     let time_column = |modern: &str, legacy: &str| {
         if columns.contains(modern) {
             Ok(modern.to_string())
@@ -140,17 +130,17 @@ async fn statement_rows(
          min({min}::float8) AS min_ms,max({max}::float8) AS max_ms,
          sum(calls::float8*(power({stddev}::float8,2)+power({mean}::float8,2))) AS moment,
          {extras} FROM {relation} WHERE dbid={} AND calls>0{role_filter}
-         AND query NOT LIKE '%/* culprit */%' GROUP BY queryid)
+         AND rtrim(query) NOT LIKE '%/* culprit */' GROUP BY queryid)
          SELECT *,sum(ms) OVER() AS all_ms,sum(calls) OVER() AS all_calls,count(*) OVER() AS all_queries
          FROM grouped ORDER BY ms DESC,id LIMIT {}",
         probe.oid,
         top.clamp(1, 1000)
     );
-    query_bounded(&session.client, &sql, top.clamp(1, 1000) as usize).await
+    query_bounded(session, &sql, top.clamp(1, 1000) as usize).await
 }
 
 pub(crate) async fn read(
-    session: &ObservedSession,
+    session: &mut impl NoticeRead,
     probe: &Probe,
     top: u32,
     coverage: &mut Coverage,
@@ -167,6 +157,9 @@ pub(crate) async fn read(
             Some(t!("provider.yugabyte.capability.statements.enable")),
         );
         return None;
+    }
+    if probe.cluster {
+        coverage.read(&sources::WORKLOAD, crate::global::nodes_from(session).await)?;
     }
     let mut counter_set = epochs(session, probe, coverage).await;
     let relation = if probe.cluster {
@@ -326,7 +319,7 @@ pub(crate) async fn read(
     })
 }
 
-async fn metric_settings(session: &ObservedSession, probe: &Probe, coverage: &mut Coverage) -> (bool, bool) {
+async fn metric_settings(session: &mut impl NoticeRead, probe: &Probe, coverage: &mut Coverage) -> (bool, bool) {
     if !probe.cluster {
         coverage.recorded_message(
             &sources::COSTS,
@@ -339,21 +332,21 @@ async fn metric_settings(session: &ObservedSession, probe: &Probe, coverage: &mu
         );
         return (probe.metrics, probe.rpc_metrics);
     }
-    let Some(relation) = crate::global::configured(&session.client, "pg_settings").await.ok().flatten() else {
+    let Some(relation) = crate::global::configured(session, "pg_settings").await.ok().flatten() else {
         coverage
             .partial(&sources::COSTS, culprit_core::message!("provider.yugabyte.coverage.costs_need_global_settings"));
         return (false, false);
     };
     let before = session.notices();
-    let expected = crate::global::nodes(session).await;
-    let result = query(&session.client, &format!("SELECT server_uuid::text AS node,
+    let expected = crate::global::nodes_from(session).await;
+    let result = query(session, &format!("SELECT server_uuid::text AS node,
         bool_or(name='yb_enable_pg_stat_statements_docdb_metrics' AND setting='on') AS metrics,
         bool_or(name='yb_enable_pg_stat_statements_rpc_stats' AND setting='on') AS rpc_metrics
         FROM {relation} WHERE name IN ('yb_enable_pg_stat_statements_docdb_metrics','yb_enable_pg_stat_statements_rpc_stats')
         GROUP BY server_uuid")).await;
     let rows = coverage.read_rows(&sources::COSTS, result).unwrap_or_default();
     let actual: Option<std::collections::BTreeSet<_>> = rows.iter().map(|r| node_id(&r.string("node"))).collect();
-    let after = crate::global::nodes(session).await;
+    let after = crate::global::nodes_from(session).await;
     let complete = expected
         .ok()
         .zip(after.ok())

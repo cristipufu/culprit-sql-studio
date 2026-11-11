@@ -6,9 +6,9 @@ use crate::{
 };
 use culprit_core::operations::{ClusterHealth, OperationalCounter, OperationalCounterKind, SequenceCapacity};
 use culprit_core::{Coverage, FileScope, Snapshot};
-use mysql_async::{Conn, Value};
+use mysql_async::Value;
 
-pub async fn collect(conn: &mut Conn, probe: &Probe, snapshot: &mut Snapshot) {
+pub async fn collect(conn: &mut impl crate::read::QueryRead, probe: &Probe, snapshot: &mut Snapshot) {
     let mut coverage = Coverage::default();
     if let Some(status) =
         coverage.read(&sources::REDO_PRESSURE, vars::status(conn, &["Innodb_log_waits", "Aborted_connects"]).await)
@@ -38,12 +38,7 @@ pub async fn collect(conn: &mut Conn, probe: &Probe, snapshot: &mut Snapshot) {
             });
         }
     }
-    let sql = "SELECT CONCAT(t.TABLE_SCHEMA, '.', t.TABLE_NAME, '.', c.COLUMN_NAME) AS name,
-        CONCAT(t.TABLE_SCHEMA, '.', t.TABLE_NAME) AS table_name, CAST(t.AUTO_INCREMENT AS CHAR) AS next_value,
-        c.COLUMN_TYPE AS column_type, CAST(@@GLOBAL.auto_increment_increment AS CHAR) AS step
-        FROM information_schema.TABLES t JOIN information_schema.COLUMNS c
-        ON c.TABLE_SCHEMA = t.TABLE_SCHEMA AND c.TABLE_NAME = t.TABLE_NAME
-        WHERE t.TABLE_SCHEMA = ? AND c.EXTRA LIKE '%auto_increment%' AND t.AUTO_INCREMENT IS NOT NULL";
+    let sql = crate::native::catalog::AUTO_INCREMENT_QUERY;
     if let Some(rows) = coverage
         .read_rows(&sources::SEQUENCE_CAPACITY, query_with(conn, sql, vec![Value::from(probe.database.clone())]).await)
     {

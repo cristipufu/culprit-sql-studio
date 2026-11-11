@@ -4,12 +4,12 @@ use crate::{
     fingerprint::{fingerprint, matches_digest},
     plan_json,
     probe::Probe,
-    rows::{Rec, explain_one, query, query_one, query_with, tagged},
+    rows::{Rec, explain_one, query, query_one, query_with},
     slowlog,
 };
 use culprit_core::i18n::{Message, MessageValue};
 use culprit_core::{Engine, Plan, PlanKind, QueryStat, Result, SnapshotOptions, Spread, WaitStat, Workload, key};
-use mysql_async::{Conn, Value, prelude::Queryable};
+use mysql_async::Value;
 use std::collections::HashMap;
 
 pub(crate) struct CollectedWorkload {
@@ -33,21 +33,9 @@ use culprit_core::PlanSampleSource as SampleFrom;
 
 const PICOS_PER_MS: f64 = 1e9;
 
-async fn digest_columns(conn: &mut Conn) -> Result<Vec<String>> {
-    Ok(query(
-        conn,
-        "SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS
-          WHERE TABLE_SCHEMA = 'performance_schema' AND TABLE_NAME = 'events_statements_summary_by_digest'",
-    )
-    .await?
-    .into_iter()
-    .map(|r| r.string("name").to_ascii_uppercase())
-    .collect())
-}
-
 pub(crate) async fn collect_workload(
-    conn: &mut Conn,
-    connector: &Connector,
+    conn: &mut impl crate::read::QueryRead,
+    connector: &std::sync::Arc<Connector>,
     probe: &Probe,
     options: &SnapshotOptions,
 ) -> Result<Option<CollectedWorkload>> {
@@ -57,7 +45,7 @@ pub(crate) async fn collect_workload(
             false => Ok(None),
         };
     }
-    let available = digest_columns(conn).await?;
+    let available = crate::native::statements::columns(conn).await?;
     let has = |c: &str| available.iter().any(|a| a == c);
     let optional = |c: &str| if has(c) { c.to_string() } else { format!("NULL AS {c}") };
     // Rows examined stands in for "logical reads": MySQL counts rows the storage engine handed to the server, not pages.
@@ -82,7 +70,11 @@ pub(crate) async fn collect_workload(
     let rows = query_with(conn, &sql, vec![Value::from(probe.database.clone())]).await?;
     let all: Vec<Digest> = rows
         .iter()
-        .filter(|r| !r.text("query_sample_text").is_some_and(|s| s.contains(TAG)))
+        .filter(|r| {
+            !r.text("query_sample_text").is_some_and(|s| {
+                culprit_core::telemetry::StatementOrigin::from_sql(Some(&s), Engine::Mysql).0.is_culprit()
+            })
+        })
         .map(|r| digest(r, has("SUM_CPU_TIME")))
         .collect();
     let total_time_ms: f64 = all.iter().map(|d| d.stat.total_time_ms).sum();
@@ -163,7 +155,7 @@ fn digests_full(ms: f64) -> Message {
 
 /// Statement time performance_schema couldn't keep per digest once its table was full: the row with no digest. It is
 /// the whole server's (it has no schema). `None` when there is none, or it can't be read.
-async fn untracked_ms(conn: &mut Conn) -> Option<f64> {
+async fn untracked_ms(conn: &mut impl crate::read::QueryRead) -> Option<f64> {
     query_one(
         conn,
         "SELECT SUM_TIMER_WAIT AS total_ps FROM performance_schema.events_statements_summary_by_digest WHERE DIGEST IS NULL",
@@ -178,8 +170,8 @@ async fn untracked_ms(conn: &mut Conn) -> Option<f64> {
 
 /// Statements recorded in the slow query log table over the scan window, grouped by shape.
 async fn slow_log_workload(
-    conn: &mut Conn,
-    connector: &Connector,
+    conn: &mut impl crate::read::QueryRead,
+    connector: &std::sync::Arc<Connector>,
     probe: &Probe,
     options: &SnapshotOptions,
 ) -> Result<Option<CollectedWorkload>> {
@@ -292,7 +284,7 @@ fn digest(r: &Rec, has_cpu: bool) -> Digest {
 
 /// MySQL 8.0.19+ keeps a run-time histogram per digest: enough to tell a long tail from a uniformly slow statement.
 /// Older servers have no histogram table; the spread then shows fastest, average and slowest only.
-async fn attach_histograms(conn: &mut Conn, database: &str, kept: &mut [Digest]) {
+async fn attach_histograms(conn: &mut impl crate::read::QueryRead, database: &str, kept: &mut [Digest]) {
     let digests: Vec<String> = kept.iter().filter_map(|d| d.stat.query_hash.clone()).collect();
     if digests.is_empty() {
         return;
@@ -443,17 +435,22 @@ fn reads_shape(text: &str) -> bool {
     ["select", "with", "table "].iter().any(|k| lower.starts_with(k))
 }
 
-async fn attach_plans(connector: &Connector, database: &str, queries: &mut [Digest], limit: usize) -> PlanOutcome {
+async fn attach_plans(
+    connector: &std::sync::Arc<Connector>,
+    database: &str,
+    queries: &mut [Digest],
+    limit: usize,
+) -> PlanOutcome {
     let mut outcome = PlanOutcome::default();
-    let mut conn = match connector.connect(Scope::Database).await {
-        Ok(conn) => conn,
-        Err(e) => {
-            outcome.error = Some(e.message);
-            return outcome;
-        }
-    };
+    let mut conn = crate::read::ReadSession::application(connector.clone(), Scope::Database);
+    // Initializes/version-checks inside the native owner before selecting flavor-specific setup.
+    if let Err(error) = query_one(&mut conn, "SELECT VERSION() AS version").await {
+        outcome.error = Some(error.message);
+        conn.close().await;
+        return outcome;
+    }
     if connector.flavor() == Flavor::Mysql {
-        let _ = conn.query_drop(tagged("SET SESSION explain_json_format_version = 1")).await;
+        let _ = query(&mut conn, "SET SESSION explain_json_format_version = 1").await;
     }
     for digest in queries.iter_mut().take(limit) {
         // Sample text was written by whoever ran the statement: it must lex as exactly one statement, and EXPLAIN goes
@@ -496,7 +493,7 @@ async fn attach_plans(connector: &Connector, database: &str, queries: &mut [Dige
             _ => outcome.failed += 1,
         }
     }
-    let _ = conn.disconnect().await;
+    conn.close().await;
     outcome
 }
 
@@ -523,7 +520,12 @@ fn sample_plan(json: &str, sample: &str, database: &str, digest_text: &str) -> R
 
 /// Statement text to plan each digest by. MySQL 8 keeps a sample per digest; MariaDB (and older MySQL) only keep the
 /// statements in the history tables, and the slow query log table has real statements of the same shape.
-async fn attach_samples(conn: &mut Conn, probe: &Probe, options: &SnapshotOptions, kept: &mut [Digest]) {
+async fn attach_samples(
+    conn: &mut impl crate::read::QueryRead,
+    probe: &Probe,
+    options: &SnapshotOptions,
+    kept: &mut [Digest],
+) {
     let wanted = |d: &Digest| reads_shape(&d.stat.text) && !d.sample.as_deref().is_some_and(plannable);
     let digests: Vec<String> = kept.iter().filter(|d| wanted(d)).filter_map(|d| d.stat.query_hash.clone()).collect();
     if !digests.is_empty() {
@@ -572,7 +574,11 @@ async fn attach_samples(conn: &mut Conn, probe: &Probe, options: &SnapshotOption
 
 /// Why nothing could be planned, and the change that would let Culprit plan statements. `sample_text`: the digest
 /// table keeps a sample statement per digest (MySQL 8.0.3+); without it the statement history is the only text.
-async fn no_plans_reason(conn: &mut Conn, probe: &Probe, sample_text: bool) -> (Message, Option<Message>) {
+async fn no_plans_reason(
+    conn: &mut impl crate::read::QueryRead,
+    probe: &Probe,
+    sample_text: bool,
+) -> (Message, Option<Message>) {
     // The history tables fill only under the current-statement consumer.
     let off: Vec<String> = query(
         conn,

@@ -4,8 +4,60 @@
 use culprit_core::{ConnectionSpec, Engine, ExplainMode, Plan, Provider, Result, ResultSet};
 
 pub use crate::connect::{COLLECTOR, Connector, EXECUTION, INTERACTIVE, ObservedSession, SessionLimits, map_error};
+pub use crate::read::{NativeRead, QueryRead, ReadSession};
+/// Distributed native observations must carry warning counts alongside bounded wire reads.
+#[async_trait::async_trait]
+pub trait NoticeRead: QueryRead {
+    fn notices(&self) -> u64;
+}
+/// Interactive projection over the same bounded SQL interface. It makes no owned-shutdown claim.
+pub struct BorrowedRead<'a>(&'a ObservedSession);
+impl<'a> BorrowedRead<'a> {
+    pub fn new(session: &'a ObservedSession) -> Self {
+        Self(session)
+    }
+}
+#[async_trait::async_trait]
+impl QueryRead for BorrowedRead<'_> {
+    async fn query(&mut self, sql: &str, limit: usize) -> Result<Vec<crate::rows::Row>> {
+        let (rows, truncated) = crate::rows::query_bounded(&self.0.client, sql, limit).await?;
+        if truncated {
+            return Err(culprit_core::telemetry::CollectionStop::RowLimit.error());
+        }
+        Ok(rows)
+    }
+}
+impl NoticeRead for BorrowedRead<'_> {
+    fn notices(&self) -> u64 {
+        self.0.notices()
+    }
+}
+impl NoticeRead for ReadSession {
+    fn notices(&self) -> u64 {
+        ReadSession::notices(self)
+    }
+}
+
+/// SQL catalog structure shared by PostgreSQL-compatible wire engines. No physical sizes, heap counters, probes,
+/// global-view selection or counter resets are inferred here; those belong to each provider.
+pub mod catalog {
+    pub use crate::native::catalog::{
+        CatalogReading, Kind, USER_SCHEMA, column, constraint, decode, foreign_key, query, statistics_visible,
+    };
+}
+/// SQL activity row layout and generation-checked enrichment only. Blocking semantics remain native-provider code.
+pub mod activity {
+    pub use crate::native::activity::{ActivityFrame, ActivityRecord, enrich_for, observe_rows, query_layout};
+}
+/// Native SQL configuration layout, with an explicit allowlist and source scope supplied by its provider.
+pub mod settings {
+    pub use crate::native::settings::{decode_native, query};
+}
+
 pub use crate::rows::{Row, iso, query, query_bounded, query_one, quote_ident, tagged};
-pub use crate::trust::{elevated as elevated_login, not_its_own as foreign_statement, own_ysql_text};
+pub use crate::trust::{
+    elevated as elevated_login, elevated_read, not_its_own as foreign_statement, own_ysql_text, own_ysql_text_from,
+};
 
 /// SQL execution with the same authentication, TLS, planner trust restrictions, read-only transactions, rollback,
 /// deadlines and streaming result budgets as the PostgreSQL provider. The caller interprets the native plan.
@@ -15,9 +67,13 @@ pub struct SqlExecutor {
 
 impl SqlExecutor {
     pub fn new(spec: &ConnectionSpec) -> Result<Self> {
+        Ok(Self::with_connector(spec, Connector::new(spec)?))
+    }
+    /// Use one native admission fence for telemetry and interactive execution on this provider instance.
+    pub fn with_connector(spec: &ConnectionSpec, connector: Connector) -> Self {
         let mut wire = spec.clone();
         wire.engine = Some(Engine::Postgres);
-        Ok(Self { inner: crate::PostgresProvider::new(&wire)? })
+        Self { inner: crate::PostgresProvider { connector, spec: wire } }
     }
 
     /// YSQL's distributed storage has no PostgreSQL heap pages. Do not enrich it with the heap-based catalog reader;

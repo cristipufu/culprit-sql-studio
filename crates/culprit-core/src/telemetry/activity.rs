@@ -60,6 +60,7 @@ impl ActivityKey {
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
 pub enum TransactionWaitOwner {
+    Active,
     Prepared,
     Orphaned,
     Recovery,
@@ -159,9 +160,18 @@ pub struct ActivityClient {
     pub host: Option<String>,
 }
 
+/// Unknown blocking evidence cannot clear an incident previously established for the same request.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum ActivityBlockingStatus {
+    Known,
+    Unknown,
+}
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct ActivityObservation {
+    pub blocking_status: ActivityBlockingStatus,
     pub key: ActivityKey,
     pub idle: bool,
     pub scope: ActivityScopeBasis,
@@ -229,6 +239,17 @@ impl ActivityObservation {
     }
     pub fn counters(&self) -> &ActivityCounters {
         self.request_counters.as_ref().unwrap_or(&self.session_counters)
+    }
+    pub fn blocking_uncertain(&self, policy: &ActivityPolicy) -> bool {
+        self.blocking_status == ActivityBlockingStatus::Unknown
+            && self.scope != ActivityScopeBasis::OtherDatabase
+            && self.scope != ActivityScopeBasis::BlockingReference
+            && self.key.request.is_some()
+            && self
+                .elapsed_ms
+                .as_deref()
+                .and_then(|value| value.parse::<u64>().ok())
+                .is_some_and(|age| age >= policy.blocked_after_ms.into())
     }
     pub fn conditions(&self, policy: &ActivityPolicy) -> Vec<ActivityCondition> {
         let mut conditions = Vec::new();
@@ -318,10 +339,12 @@ pub enum ActivityDetailStatus {
 pub struct ActivitySnapshotDescription {
     pub epoch: String,
     pub at: String,
-    pub database_wide: bool,
+    pub scope: crate::MeasurementScope,
+    pub complete_scope: bool,
     pub policy: ActivityPolicy,
     pub native_rows: u32,
     pub qualifying: u32,
+    pub uncertain: u32,
     pub observations: u32,
     pub blocking_edges: u32,
     pub details: ActivityDetailStatus,
@@ -330,11 +353,19 @@ impl ActivitySnapshotDescription {
     pub fn is_valid(&self) -> bool {
         identifier(&self.epoch)
             && valid_time(&self.at)
+            && (!self.complete_scope
+                || matches!(
+                    self.scope,
+                    crate::MeasurementScope::Database
+                        | crate::MeasurementScope::Node
+                        | crate::MeasurementScope::Cluster
+                ))
             && self.policy.validate().is_ok()
+            && self.uncertain <= self.observations
             && self.qualifying <= self.observations
             && self.observations <= self.native_rows
             && self.blocking_edges <= self.observations.saturating_mul(64)
-            && (self.qualifying > 0 || (self.observations == 0 && self.blocking_edges == 0))
+            && (self.qualifying > 0 || self.uncertain > 0 || (self.observations == 0 && self.blocking_edges == 0))
     }
 }
 
@@ -342,10 +373,17 @@ pub struct ActivityEvidence {
     pub observations: Vec<ActivityObservation>,
     pub blocking: Vec<BlockingObservation>,
     pub conditions: BTreeMap<ActivityKey, Vec<ActivityCondition>>,
+    pub uncertain: BTreeSet<ActivityKey>,
 }
 impl ActivityEvidence {
     pub fn validate(rows: &[ActivityObservation]) -> Result<()> {
         ActivityIndex::new(rows).map(|_| ())
+    }
+    /// Follow previously observed blockers when current native lock details cannot establish their status.
+    pub fn context_for(rows: &[ActivityObservation], roots: &BTreeSet<ActivityKey>) -> Result<BTreeSet<ActivityKey>> {
+        let ActivityIndex { by_key, by_session } = ActivityIndex::new(rows)?;
+        let roots = roots.iter().filter(|key| by_key.contains_key(*key)).cloned().collect::<Vec<_>>();
+        Ok(context(&roots, &by_key, &by_session))
     }
     pub fn select(rows: &[ActivityObservation], policy: &ActivityPolicy) -> Result<Self> {
         policy.validate()?;
@@ -374,7 +412,10 @@ impl ActivityEvidence {
                 conditions.entry(key.clone()).or_default().push(ActivityCondition::IdleBlocker);
             }
         }
-        let selected = context(&conditions.keys().cloned().collect::<Vec<_>>(), &by_key, &by_session);
+        let uncertain: BTreeSet<_> =
+            rows.iter().filter(|row| row.blocking_uncertain(policy)).map(|row| row.key.clone()).collect();
+        let roots = conditions.keys().chain(uncertain.iter()).cloned().collect::<Vec<_>>();
+        let selected = context(&roots, &by_key, &by_session);
         let observations: Vec<_> = selected.iter().map(|key| (*by_key[key]).clone()).collect();
         let observed_sessions: BTreeSet<_> = observations.iter().map(|row| row.key.session.clone()).collect();
         let mut blocking = BTreeSet::new();
@@ -387,7 +428,7 @@ impl ActivityEvidence {
                 blocking.insert(BlockingObservation { waiter: row.key.clone(), owner: owner.clone(), owner_observed });
             }
         }
-        Ok(Self { observations, blocking: blocking.into_iter().collect(), conditions })
+        Ok(Self { observations, blocking: blocking.into_iter().collect(), conditions, uncertain })
     }
 }
 struct ActivityIndex<'a> {

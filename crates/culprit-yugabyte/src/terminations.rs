@@ -3,19 +3,21 @@ use crate::{global, probe::Probe, sources};
 use culprit_core::{
     CounterScope, Coverage, Error, QueryTermination, Result, SnapshotOptions, TerminationHistory, TerminationReason,
 };
-use culprit_postgres::wire::{ObservedSession, query_bounded, query_one};
+use culprit_postgres::wire::NoticeRead;
+#[cfg(test)]
+use culprit_postgres::wire::{BorrowedRead, ObservedSession};
 use std::collections::BTreeSet;
 
 const MAX_RECORDS: usize = 1000;
 
 pub(crate) async fn collect(
-    session: &ObservedSession,
+    session: &mut impl NoticeRead,
     probe: &Probe,
     options: &SnapshotOptions,
     coverage: &mut Coverage,
 ) -> Option<TerminationHistory> {
     let result =
-        crate::deadline(culprit_core::limits::OBSERVE_TIMEOUT, read(session, probe, options, MAX_RECORDS)).await;
+        crate::deadline(culprit_core::limits::OBSERVE_TIMEOUT, read_from(session, probe, options, MAX_RECORDS)).await;
     let history = coverage.read(&sources::TERMINATIONS, result)?;
     coverage.completed(&sources::TERMINATIONS, history.events.len());
     if history.partial {
@@ -25,8 +27,17 @@ pub(crate) async fn collect(
     Some(history)
 }
 
+#[cfg(test)]
 pub(crate) async fn read(
     session: &ObservedSession,
+    probe: &Probe,
+    options: &SnapshotOptions,
+    limit: usize,
+) -> Result<TerminationHistory> {
+    read_from(&mut BorrowedRead::new(session), probe, options, limit).await
+}
+pub(crate) async fn read_from(
+    session: &mut impl NoticeRead,
     probe: &Probe,
     options: &SnapshotOptions,
     limit: usize,
@@ -39,7 +50,7 @@ pub(crate) async fn read(
     // Global views cannot filter an owner id for these records. Preserve native local visibility for restricted
     // logins instead of relying on a remote view's privilege mapping to establish a role boundary.
     let cluster = probe.global && probe.statement_role.is_none();
-    let inventory = if cluster { Some(global::nodes(session).await) } else { None };
+    let inventory = if cluster { Some(Ok::<_, culprit_core::Error>(global::nodes_from(session).await?)) } else { None };
     let relation = if cluster { "pg_catalog.\"gv$yb_terminated_queries\"" } else { "pg_catalog.yb_terminated_queries" };
     let node = if cluster {
         "server_uuid::text".into()
@@ -63,7 +74,9 @@ pub(crate) async fn read(
         probe.database.replace('\'', "''"),
         limit + 1
     );
-    let (rows, truncated) = query_bounded(&session.client, &sql, limit).await?;
+    let rows = session.query(&sql, limit + 1).await?;
+    let truncated = rows.len() > limit;
+    let rows = rows.into_iter().take(limit);
     let mut partial = truncated;
     let mut seen = BTreeSet::new();
     let mut events = Vec::with_capacity(rows.len());
@@ -98,7 +111,7 @@ pub(crate) async fn read(
         events.push(QueryTermination { query_id, node, started_at, ended_at, reason });
     }
     let nodes = if let Some(inventory) = inventory {
-        match inventory.ok().zip(global::nodes(session).await.ok()) {
+        match inventory.ok().zip(global::nodes_from(session).await.ok()) {
             Some((a, b)) if a == b && seen.is_subset(&a) => a,
             _ => {
                 partial = true;
@@ -109,17 +122,20 @@ pub(crate) async fn read(
         partial |= probe.node.is_none();
         probe.node.iter().cloned().collect()
     };
-    let window = query_one(
-        &session.client,
-        &format!(
-            "SELECT {} AS start,{} AS end,{} AS allowed",
-            crate::probe::timestamp(&format!("to_timestamp({start})")),
-            crate::probe::timestamp(&format!("to_timestamp({end})")),
-            privilege
-        ),
-    )
-    .await?
-    .ok_or_else(|| Error::invalid(culprit_core::message!("provider.yugabyte.error.no_termination_bounds")))?;
+    let window = session
+        .query(
+            &format!(
+                "SELECT {} AS start,{} AS end,{} AS allowed",
+                crate::probe::timestamp(&format!("to_timestamp({start})")),
+                crate::probe::timestamp(&format!("to_timestamp({end})")),
+                privilege
+            ),
+            2,
+        )
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| Error::invalid(culprit_core::message!("provider.yugabyte.error.no_termination_bounds")))?;
     if !window.flag("allowed") {
         return Err(Error::new(
             culprit_core::ErrorCode::PermissionDenied,

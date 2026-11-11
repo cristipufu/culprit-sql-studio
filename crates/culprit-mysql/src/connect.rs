@@ -13,10 +13,30 @@ pub const DEFAULT_PORT: u16 = 3306;
 /// Marks Culprit's own statements so workload collection leaves them out of the application's history.
 pub const TAG: &str = "/* culprit */";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const NATIVE_PACKET_BYTES: usize = 16 * 1024 * 1024;
+const NATIVE_CLIENT_IDLE_SECONDS: usize = 60;
+
+#[derive(Clone, Copy)]
+enum Bootstrap {
+    DriverManaged,
+    Owned,
+}
+impl Bootstrap {
+    fn options(self, base: OptsBuilder) -> OptsBuilder {
+        match self {
+            Self::DriverManaged => base,
+            // mysql_async otherwise sends untagged SELECTs from Conn::new. These are client-side limits, not
+            // changes to server variables; the owned reader performs its own bounded, accounted SQL setup.
+            Self::Owned => {
+                base.max_allowed_packet(Some(NATIVE_PACKET_BYTES)).wait_timeout(Some(NATIVE_CLIENT_IDLE_SECONDS))
+            }
+        }
+    }
+}
 
 /// Every session is read-only, gives up on locks after two seconds and never runs a statement for more than ten
 /// seconds. Settings a server refuses are skipped; read-only and UTC are required.
-const SESSION_SETUP: [(&str, bool); 4] = [
+pub(crate) const SESSION_SETUP: [(&str, bool); 4] = [
     ("SET SESSION TRANSACTION READ ONLY", true),
     ("SET SESSION time_zone = '+00:00'", true),
     ("SET SESSION lock_wait_timeout = 2", false),
@@ -115,6 +135,7 @@ pub struct Connector {
     pub host: String,
     pub port: u16,
     pub database: Option<String>,
+    pub(crate) fence: culprit_read::ReadFence,
 }
 
 impl Connector {
@@ -189,6 +210,7 @@ impl Connector {
             host,
             port,
             database: spec.database.clone().filter(|d| !d.is_empty()),
+            fence: culprit_read::ReadFence::default(),
         })
     }
 
@@ -210,27 +232,14 @@ impl Connector {
     /// Open a session in `scope`, prepared with the read-only settings. The session is set up before it enters the
     /// application's database, so the setup statements are never counted as the application's workload.
     pub async fn connect(&self, scope: Scope) -> Result<Conn> {
-        let (base, endpoint) = self.dial_options().await?;
-        let attempt = self.open(self.tls, &base).await;
-        let mut conn = match attempt {
-            // PREFERRED: the server doesn't do TLS at all, or no encrypted session can be agreed (MySQL 5.7 builds on
-            // OpenSSL 1.0 only negotiate DHE suites, which rustls doesn't offer). Continue in plaintext like the mysql
-            // client does; PREFERRED never verified the certificate, so nothing that was protected is given up.
-            Err(e) if self.tls == Tls::Preferred && (no_server_tls(&e) || is_tls_handshake_error(&e)) => {
-                let (base, endpoint) = self.dial_options().await?;
-                self.open(Tls::Disabled, &base).await.map_err(|e| self.connect_error(endpoint.as_ref(), e))?
-            }
-            other => other.map_err(|e| self.connect_error(endpoint.as_ref(), e))?,
-        };
+        self.fence.ensure_available()?;
+        let mut conn = self.open_connection(Bootstrap::DriverManaged).await?;
         let flavor = match self.flavor.get() {
             Some(flavor) => *flavor,
             None => {
                 let version: Option<String> =
                     conn.query_first(format!("SELECT VERSION() {TAG}")).await.map_err(map_error)?;
-                let version = version.unwrap_or_default();
-                let flavor = *self.flavor.get_or_init(|| Flavor::of_version(&version));
-                let _ = self.version.set(version);
-                flavor
+                self.record_version(version.unwrap_or_default())
             }
         };
         for (statement, required) in SESSION_SETUP.into_iter().chain([(flavor.timeout(), false)]) {
@@ -243,6 +252,48 @@ impl Connector {
             conn.query_drop(format!("USE `{}` {TAG}", db.replace('`', "``"))).await.map_err(map_error)?;
         }
         Ok(conn)
+    }
+
+    pub(crate) async fn connect_unconfigured(&self) -> Result<Conn> {
+        self.fence.ensure_available()?;
+        self.open_connection(Bootstrap::Owned).await
+    }
+
+    /// Retirement must still be able to stop already admitted work after its caller closes the shared fence.
+    pub(crate) async fn connect_for_cancellation(&self) -> Result<Conn> {
+        self.open_connection(Bootstrap::Owned).await
+    }
+
+    pub(crate) fn record_version(&self, version: String) -> Flavor {
+        let flavor = *self.flavor.get_or_init(|| Flavor::of_version(&version));
+        let _ = self.version.set(version);
+        flavor
+    }
+
+    async fn open_connection(&self, bootstrap: Bootstrap) -> Result<Conn> {
+        let (base, endpoint) = self.dial_options().await?;
+        let base = bootstrap.options(base);
+        let attempt = self.open(self.tls, &base).await;
+        match attempt {
+            // PREFERRED: the server doesn't do TLS at all, or no encrypted session can be agreed (MySQL 5.7 builds on
+            // OpenSSL 1.0 only negotiate DHE suites, which rustls doesn't offer). Continue in plaintext like the mysql
+            // client does; PREFERRED never verified the certificate, so nothing that was protected is given up.
+            Err(e) if self.tls == Tls::Preferred && (no_server_tls(&e) || is_tls_handshake_error(&e)) => {
+                let (base, endpoint) = self.dial_options().await?;
+                self.open(Tls::Disabled, &bootstrap.options(base))
+                    .await
+                    .map_err(|e| self.connect_error(endpoint.as_ref(), e))
+            }
+            other => other.map_err(|e| self.connect_error(endpoint.as_ref(), e)),
+        }
+    }
+
+    pub(crate) fn source_shutdown(&self) -> culprit_core::telemetry::SourceShutdown {
+        if self.fence.is_uncertain() {
+            culprit_core::telemetry::SourceShutdown::Unconfirmed
+        } else {
+            culprit_core::telemetry::SourceShutdown::Quiescent
+        }
     }
 
     /// Which server this is, once a session has been opened (MySQL until then).

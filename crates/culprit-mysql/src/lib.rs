@@ -1,12 +1,14 @@
 //! MySQL and MariaDB provider for Culprit: read-only snapshots from performance_schema, information_schema and the
 //! slow query log table, plans via EXPLAIN (and MariaDB's ANALYZE), live sessions with lock waits.
 
+mod cancellation;
 mod catalog;
 mod collect;
 mod connect;
 pub mod deadlocks;
 pub mod fingerprint;
 mod json_members;
+mod native;
 mod operations;
 pub mod plan_json;
 pub mod plan_maria;
@@ -15,12 +17,14 @@ mod pressure;
 mod preview;
 mod probe;
 mod progress;
+mod read;
 mod recorded;
 mod rows;
 mod sessions;
 mod signals;
 mod slowlog;
 pub mod sources;
+mod telemetry;
 mod vars;
 mod workload;
 
@@ -164,10 +168,21 @@ impl Provider for MysqlProvider {
         Engine::Mysql
     }
 
+    fn source_shutdown(&self) -> culprit_core::telemetry::SourceShutdown {
+        self.connector.source_shutdown()
+    }
+
+    fn telemetry_source(
+        &self,
+        request: &culprit_core::telemetry::CollectionRequest,
+    ) -> Result<Box<dyn culprit_core::telemetry::TelemetrySource>> {
+        telemetry::source(self.connector.clone(), request)
+    }
+
     async fn probe(&self) -> Result<ServerInfo> {
-        let mut conn = self.connector.connect(Scope::Server).await?;
+        let mut conn = crate::read::ReadSession::application(self.connector.clone(), Scope::Server);
         let probe = probe::probe(&mut conn, &self.connector).await?;
-        let _ = conn.disconnect().await;
+        conn.close().await;
         Ok(probe.server_info())
     }
 
@@ -203,32 +218,37 @@ impl Provider for MysqlProvider {
     }
 
     async fn lock_waits(&self) -> Result<Vec<culprit_core::LockWait>> {
-        let mut conn = self.connector.connect(Scope::Server).await?;
+        let mut conn = crate::read::ReadSession::application(self.connector.clone(), Scope::Server);
+        query_one(&mut conn, "SELECT VERSION() AS version").await?;
         let out = deadlocks::lock_waits(&mut conn, self.connector.flavor()).await;
-        let _ = conn.disconnect().await;
+        conn.close().await;
         out
     }
 
     async fn deadlocks(&self, since_hours: f64) -> Result<culprit_core::DeadlockReport> {
-        let mut conn = self.connector.connect(Scope::Server).await?;
+        let mut conn = crate::read::ReadSession::application(self.connector.clone(), Scope::Server);
         let out = deadlocks::recent(&mut conn, since_hours).await;
-        let _ = conn.disconnect().await;
+        conn.close().await;
         out
     }
 
     async fn recorded_changes(&self, since: &str) -> Result<Vec<culprit_core::ChangeEvent>> {
         let Some(database) = self.connector.database.clone() else { return Ok(Vec::new()) };
         // No default database: these catalog reads must not count as the application's statements.
-        let mut conn = self.connector.connect(Scope::Server).await?;
+        let mut conn = crate::read::ReadSession::application(self.connector.clone(), Scope::Server);
         let out = recorded::changes(&mut conn, &database, since).await;
-        let _ = conn.disconnect().await;
+        conn.close().await;
         out
     }
 
     async fn wait_sample(&self, seconds: u32) -> Result<culprit_core::WaitSample> {
-        let mut conn = self.connector.connect(Scope::Server).await?;
+        let mut conn = crate::read::ReadSession::application_window(
+            self.connector.clone(),
+            Scope::Server,
+            std::time::Duration::from_secs(seconds.into()),
+        );
         let result = crate::pressure::sample(&mut conn, seconds).await;
-        let _ = conn.disconnect().await;
+        conn.close().await;
         result
     }
 
@@ -238,10 +258,10 @@ impl Provider for MysqlProvider {
         baseline: &culprit_core::changes::Period,
         recent: &culprit_core::changes::Period,
     ) -> Result<Option<culprit_core::changes::PeriodData>> {
-        let mut conn = self.connector.connect(Scope::Server).await?;
+        let mut conn = crate::read::ReadSession::application(self.connector.clone(), Scope::Server);
         let probe = probe::probe(&mut conn, &self.connector).await?;
         if probe.performance_schema || !probe.slow_log_table() {
-            let _ = conn.disconnect().await;
+            conn.close().await;
             return Ok(None);
         }
         let runs = slowlog::read(
@@ -251,7 +271,7 @@ impl Provider for MysqlProvider {
             Some(&slowlog::sql_time(&recent.end)),
         )
         .await;
-        let _ = conn.disconnect().await;
+        conn.close().await;
         let runs = runs?;
         let logged_since = runs.iter().map(|r| r.at).reduce(f64::min);
         Ok(Some(slowlog::periods(&runs, baseline, recent, logged_since)))
@@ -262,7 +282,11 @@ impl Provider for MysqlProvider {
     }
 
     async fn live(&self) -> Result<LiveState> {
-        let mut conn = self.connector.connect(Scope::Server).await?;
+        let mut conn = crate::read::ReadSession::application(self.connector.clone(), Scope::Server);
+        let now = query_one(&mut conn, "SELECT DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%sZ') AS now")
+            .await?
+            .map(|row| row.string("now"))
+            .unwrap_or_default();
         let flavor = self.connector.flavor();
         // MariaDB's process list also has the time in milliseconds and progress for ALTER TABLE, LOAD DATA and others.
         let extra = match flavor {
@@ -284,15 +308,15 @@ impl Provider for MysqlProvider {
         .await?;
         let (blockers, locks, mut notes) = deadlocks::blocking_evidence(&mut conn, flavor).await;
         let last_statements = deadlocks::last_statements(&mut conn).await;
-        let now = query_one(&mut conn, "SELECT DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%sZ') AS now")
-            .await?
-            .map(|r| r.string("now"))
-            .unwrap_or_default();
-        let _ = conn.disconnect().await;
+        conn.close().await;
 
         let sessions: Vec<Session> = rows
             .iter()
-            .filter(|r| !r.text("info").is_some_and(|i| i.contains(connect::TAG)))
+            .filter(|r| {
+                !r.text("info").is_some_and(|i| {
+                    culprit_core::telemetry::StatementOrigin::from_sql(Some(&i), Engine::Mysql).0.is_culprit()
+                })
+            })
             .map(|r| {
                 let id = r.string("id");
                 let command = r.string("command");
@@ -515,6 +539,17 @@ async fn read_result(
     limit: usize,
     committed: bool,
 ) -> mysql_async::Result<ResultSet> {
+    read_result_tracked(conn, tagged_statement, limit, committed, &culprit_core::telemetry::ReadProgress::default())
+        .await
+}
+
+async fn read_result_tracked(
+    conn: &mut Conn,
+    tagged_statement: &str,
+    limit: usize,
+    committed: bool,
+    progress: &culprit_core::telemetry::ReadProgress,
+) -> mysql_async::Result<ResultSet> {
     let mut result = conn.query_iter(tagged_statement).await?;
     let columns_meta = result.columns();
     let columns: Vec<String> = columns_meta
@@ -526,10 +561,13 @@ async fn read_result(
     let mut rows: Vec<Vec<Json>> = Vec::new();
     let mut budget = culprit_core::limits::ResultBudget::new(limit);
     while let Some(row) = result.next().await? {
+        progress.rows.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let values = row.unwrap();
+        let charged = rows::decoded_value_bytes(&values);
+        progress.bytes.fetch_add(charged as u64, std::sync::atomic::Ordering::Relaxed);
         if budget.truncated() {
             continue;
         }
-        let values = row.unwrap();
         let bytes = values.iter().fold(0usize, |n, v| {
             n.saturating_add(match v {
                 Value::Bytes(b) => culprit_core::limits::text_bytes(b),
@@ -543,6 +581,7 @@ async fn read_result(
     }
     let affected = result.affected_rows();
     result.drop_result().await?;
+    progress.drained.store(true, std::sync::atomic::Ordering::Release);
     let count = if columns.is_empty() { affected } else { rows.len() as u64 };
     let messages = result_messages(count, budget.notice(), !columns.is_empty(), committed);
     Ok(ResultSet { columns, rows, truncated: budget.truncated(), elapsed_ms: 0.0, messages })

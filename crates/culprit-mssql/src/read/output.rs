@@ -19,6 +19,9 @@ impl Output {
     pub fn discarding(&self) -> bool {
         self.0.discarding()
     }
+    pub fn retention_control(&self) -> culprit_read::RetentionControl {
+        self.0.retention_control()
+    }
     pub async fn finish(self) -> Vec<Rec> {
         self.0.finish().await
     }

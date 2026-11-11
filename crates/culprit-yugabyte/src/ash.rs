@@ -3,19 +3,21 @@ use crate::{global, probe::Probe, sources};
 use culprit_core::{
     ActivityEvent, ActivityHistory, ActivityPeriod, CounterScope, Coverage, Error, Result, SnapshotOptions,
 };
-use culprit_postgres::wire::{ObservedSession, query_bounded, query_one};
+use culprit_postgres::wire::NoticeRead;
+#[cfg(test)]
+use culprit_postgres::wire::{BorrowedRead, ObservedSession};
 use std::collections::{BTreeMap, BTreeSet};
 
 const MAX_SAMPLES: usize = 10_000;
 
 pub(crate) async fn collect(
-    session: &ObservedSession,
+    session: &mut impl NoticeRead,
     probe: &Probe,
     options: &SnapshotOptions,
     coverage: &mut Coverage,
 ) -> Option<ActivityHistory> {
     let result =
-        crate::deadline(culprit_core::limits::OBSERVE_TIMEOUT, read(session, probe, options, MAX_SAMPLES)).await;
+        crate::deadline(culprit_core::limits::OBSERVE_TIMEOUT, read_from(session, probe, options, MAX_SAMPLES)).await;
     let history = coverage.read(&sources::ACTIVITY_HISTORY, result)?;
     coverage.completed(&sources::ACTIVITY_HISTORY, history.period.observations as usize);
     if history.period.partial {
@@ -33,8 +35,17 @@ fn relation(probe: &Probe, start: f64, end: f64) -> String {
     format!("pg_catalog.yb_active_session_history(to_timestamp({start}),to_timestamp({end}))")
 }
 
+#[cfg(test)]
 pub(crate) async fn read(
     session: &ObservedSession,
+    probe: &Probe,
+    options: &SnapshotOptions,
+    limit: usize,
+) -> Result<ActivityHistory> {
+    read_from(&mut BorrowedRead::new(session), probe, options, limit).await
+}
+pub(crate) async fn read_from(
+    session: &mut impl NoticeRead,
     probe: &Probe,
     options: &SnapshotOptions,
     limit: usize,
@@ -44,7 +55,8 @@ pub(crate) async fn read(
     let minutes = options.window_in_minutes().min(culprit_core::MAX_WINDOW_MINUTES);
     let start = end - f64::from(minutes) * 60.0;
     let before = session.notices();
-    let inventory = if probe.global { Some(global::nodes(session).await) } else { None };
+    let inventory =
+        if probe.global { Some(Ok::<_, culprit_core::Error>(global::nodes_from(session).await?)) } else { None };
     let relation = relation(probe, start, end);
     let role = probe
         .statement_role
@@ -68,7 +80,9 @@ pub(crate) async fn read(
         probe.oid,
         limit + 1
     );
-    let (rows, truncated) = query_bounded(&session.client, &sql, limit).await?;
+    let rows = session.query(&sql, limit + 1).await?;
+    let truncated = rows.len() > limit;
+    let rows = rows.into_iter().take(limit);
     let mut partial = truncated;
     let mut seen = BTreeSet::new();
     let mut events = BTreeMap::<(String, String, String, Option<String>, Option<String>), ActivityEvent>::new();
@@ -127,7 +141,7 @@ pub(crate) async fn read(
         weighted += weight;
     }
     let nodes = if let Some(inventory) = inventory {
-        let after = global::nodes(session).await;
+        let after = global::nodes_from(session).await;
         match inventory.ok().zip(after.ok()) {
             Some((a, b)) if a == b && seen.is_subset(&a) => a,
             _ => {
@@ -142,17 +156,20 @@ pub(crate) async fn read(
         probe.node.iter().cloned().collect()
     };
     partial |= session.notices() != before;
-    let window = query_one(
-        &session.client,
-        &format!(
-            "SELECT {} AS start,{} AS end,{} AS all_stats",
-            crate::probe::timestamp(&format!("to_timestamp({start})")),
-            crate::probe::timestamp(&format!("to_timestamp({end})")),
-            crate::probe::ALL_STATS
-        ),
-    )
-    .await?
-    .ok_or_else(|| Error::invalid(culprit_core::message!("provider.yugabyte.error.no_ash_bounds")))?;
+    let window = session
+        .query(
+            &format!(
+                "SELECT {} AS start,{} AS end,{} AS all_stats",
+                crate::probe::timestamp(&format!("to_timestamp({start})")),
+                crate::probe::timestamp(&format!("to_timestamp({end})")),
+                crate::probe::ALL_STATS
+            ),
+            2,
+        )
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| Error::invalid(culprit_core::message!("provider.yugabyte.error.no_ash_bounds")))?;
     if probe.statement_role.is_none() && !window.flag("all_stats") {
         return Err(Error::new(
             culprit_core::ErrorCode::PermissionDenied,

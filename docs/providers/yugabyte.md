@@ -211,6 +211,14 @@ leave activity visible with an explicit progress-unavailable note.
 
 ## Limits and evidence
 
+### Background telemetry
+
+Background collection shares the app's owned PostgreSQL-wire reader and Yugabyte-native source workflows.
+Statement counters retain node scope and exact native units; PostgreSQL heap collectors are not used. Operational
+capture includes shared node resources, sampled ASH and retained terminations where available. Persistent activity
+uses bounded, targeted DocDB lock reads; missing lookups retain uncertainty. Retained QPM plans have independent
+cache lifetimes and require effective monitoring privileges. See [collector source coverage](../collector.md#other-provider-source-coverage).
+
 Workload retention streams at most 8 MiB of statement text and counters, without whole-row latency-histogram expansion.
 An oversized response retains a contiguous prefix and records partial coverage; no retained totals means unknown
 workload rather than a zero. Completion and late errors are still read after retention stops.

@@ -40,6 +40,13 @@ Physical chunks are associated with their owning hypertable in plan analysis. Ac
 
 ## Limits and evidence
 
+### Background telemetry
+
+Timescale shares PostgreSQL's bounded telemetry reader, counters and persistent activity. Background relation
+metadata describes native PostgreSQL relations; it does not aggregate logical hypertable or compressed-chunk
+sizes. The app's extension-specific storage enrichment remains separate. See
+[collector source coverage](../collector.md#other-provider-source-coverage) before scheduling profiles.
+
 - Parent `pg_stat_user_tables` and `pg_stat_user_indexes` counters do not measure all chunk activity. Logical hypertable scans, writes, vacuum/analyze timestamps and index usage are unknown. Culprit does not call a parent index unused based on its empty counters. Index sizes use TimescaleDB's aggregate API.
 - `_timescaledb_*` storage, compressed implementation tables and continuous-aggregate materializations are not independent application tables. They are excluded from standalone schema/index/maintenance advice. Continuous aggregate definitions, jobs, retention/compression policies, columnstore-specific sparse indexes and columnstore tuning are not managed by Culprit.
 - When the native hypertable catalog cannot be read, Culprit withholds potentially misleading table/index measurements, explains the missing source, and avoids concurrent index DDL on unresolved tables. When only chunk details fail, logical totals remain available but an unidentified internal chunk receives no index script.

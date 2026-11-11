@@ -171,15 +171,18 @@ fn activity(catalog: &SchemaCatalog, sequence: u64, empty: bool) -> Recovery {
     manifest.source.observation = SourceObservation::Activity(ActivitySnapshotDescription {
         epoch: "native-epoch".into(),
         at: "2020-01-01T12:00:00Z".into(),
-        database_wide: true,
+        scope: culprit_core::MeasurementScope::Database,
+        complete_scope: true,
         policy: ActivityPolicy::default(),
         native_rows: u32::from(!empty),
         qualifying: u32::from(!empty),
+        uncertain: 0,
         observations: u32::from(!empty),
         blocking_edges: 0,
         details: ActivityDetailStatus::Collected,
     });
     let record = TelemetryRecord::Activity(ActivityObservation {
+        blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
         key: ActivityKey {
             session: NativeActivityIdentity { id: "61".into(), generation: "login-1".into() },
             request: Some(NativeActivityIdentity { id: "0".into(), generation: "request-1".into() }),

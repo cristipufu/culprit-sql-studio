@@ -24,7 +24,7 @@ pub(crate) struct CompletedRead {
     confirmed: bool,
 }
 #[async_trait::async_trait]
-pub(crate) trait QueryRead: Send {
+pub trait QueryRead: Send {
     async fn query(&mut self, sql: &str, row_limit: usize) -> Result<Vec<Row>>;
 }
 /// Borrowed interactive reads expose no ownership or shutdown claim.
@@ -39,13 +39,13 @@ impl QueryRead for &Client {
     }
 }
 #[async_trait::async_trait]
-pub(crate) trait NativeRead: QueryRead {
+pub trait NativeRead: QueryRead {
     fn queries(&self) -> u32;
     fn metrics(&self) -> Option<ReadWorkMetrics>;
     async fn close(&mut self) -> SourceShutdown;
 }
 
-pub(crate) struct ReadSession {
+pub struct ReadSession {
     connector: Connector,
     client: Option<Client>,
     streaming: Option<StreamingRead>,
@@ -58,6 +58,7 @@ pub(crate) struct ReadSession {
     closed: bool,
     fence: culprit_read::ReadFence,
     metrics: ReadMetricsRecorder,
+    notices: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
 }
 struct StreamingRead {
     _owner: tokio::sync::oneshot::Sender<()>,
@@ -65,6 +66,11 @@ struct StreamingRead {
 }
 impl ReadSession {
     pub(crate) fn new(connector: Connector, budget: CollectionBudget) -> Self {
+        Self::for_engine(connector, budget, Engine::Postgres)
+    }
+    /// Shared wire ownership only. The caller supplies its engine for SQL redaction/accounting and owns every
+    /// source query, scope, identity and counter interpretation; this never selects PostgreSQL collectors.
+    pub fn for_engine(connector: Connector, budget: CollectionBudget, engine: Engine) -> Self {
         let fence = connector.fence.clone();
         Self {
             connector,
@@ -78,7 +84,8 @@ impl ReadSession {
             initialized: false,
             closed: false,
             fence,
-            metrics: ReadMetricsRecorder::new(Engine::Postgres),
+            metrics: ReadMetricsRecorder::new(engine),
+            notices: None,
         }
     }
     fn remaining(&self) -> Result<Duration> {
@@ -102,14 +109,14 @@ impl ReadSession {
         }
         Ok(())
     }
-    pub(crate) async fn begin_stream(&mut self, sql: &str, row_limit: usize) -> Result<()> {
+    pub async fn begin_stream(&mut self, sql: &str, row_limit: usize) -> Result<()> {
         self.initialize().await?;
         let (output, receiver) = RowOutput::streaming(self.budget.page_rows as usize, self.budget.page_bytes as usize);
         let owner = self.start(sql, row_limit, self.budget.total_bytes as usize, output).await?;
         self.streaming = Some(StreamingRead { _owner: owner, receiver });
         Ok(())
     }
-    pub(crate) async fn next_batch(&mut self) -> Result<ReadBatch<Row>> {
+    pub async fn next_batch(&mut self) -> Result<ReadBatch<Row>> {
         let batch = self.streaming.as_mut().ok_or_else(|| CollectionStop::InvalidPage.error())?.receiver.recv().await;
         match batch {
             Some(batch) if !batch.complete => Ok(batch),
@@ -133,12 +140,19 @@ impl ReadSession {
         let result = tokio::time::timeout(timeout, self.connector.connect_unconfigured()).await;
         self.acquiring = false;
         match result {
-            Ok(result) => result.map(|session| session.client),
+            Ok(result) => result.map(|session| {
+                self.notices = Some(session.notices.clone());
+                session.client
+            }),
             Err(_) => {
                 self.fence.mark_uncertain();
                 Err(CollectionStop::CancellationUnconfirmed.error())
             }
         }
+    }
+    /// Native notices can mean a distributed reader skipped a node. No server-controlled text is retained.
+    pub fn notices(&self) -> u64 {
+        self.notices.as_ref().map_or(0, |count| count.load(Ordering::SeqCst))
     }
     async fn start(
         &mut self,

@@ -66,6 +66,13 @@ Column-statistics recommendations use `ANALYZE TABLE … PERSISTENT FOR COLUMNS`
 
 ## Limits and evidence
 
+### Background telemetry
+
+MariaDB uses the shared MySQL-family owned reader with native timeout, digest, lock and replication layouts.
+Background collection exports exact counters, bounded catalog/health observations, persistent blockers and the
+latest InnoDB deadlock report. Instrumentation and permission gaps remain explicit. See
+[collector source coverage](../collector.md#other-provider-source-coverage) for datasets and retention limits.
+
 MariaDB's server-wide status counters are not all attributable to one database. Shared redo, metadata-lock visibility, old transactions, replication channels and Galera flow-control observations keep their own scope and periods.
 
 Slow-log entries are individual logged executions; digest and userstat counters are aggregates with independent retention and reset limits. A table-lock duration can overlap other measurements and is not added blindly to them. No duration or missing source is represented as zero just to make views line up.

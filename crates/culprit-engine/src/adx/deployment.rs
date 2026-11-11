@@ -34,7 +34,7 @@ impl DeploymentAssets {
             });
         }
         commands.push(published(&catalog));
-        commands.push(heads("CulpritActivityHeadsV1","tostring(SourceDescription.observation.kind) == \"activity\" and tobool(SourceDescription.observation.data.database_wide)",false));
+        commands.push(heads("CulpritActivityHeadsV1","tostring(SourceDescription.observation.kind) == \"activity\" and tobool(SourceDescription.observation.data.complete_scope)",false));
         commands.push(heads(
             "CulpritSnapshotHeadsV1",
             "tostring(SourceDescription.observation.kind) == \"snapshot\"",

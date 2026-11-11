@@ -1,16 +1,16 @@
+use crate::read::{NoticeRead, query};
 use crate::{
     global,
     probe::{Probe, node_id},
     sources,
 };
 use culprit_core::{Capability, Coverage, Pressure, Result, Snapshot, SourceState, t};
-use culprit_postgres::wire::{ObservedSession, query};
 use std::collections::{BTreeMap, BTreeSet};
 
 type Epochs = BTreeMap<String, Option<String>>;
-async fn epochs(session: &ObservedSession, probe: &Probe) -> Result<Epochs> {
+async fn epochs(session: &mut impl NoticeRead, probe: &Probe) -> Result<Epochs> {
     let rows = query(
-        &session.client,
+        session,
         &format!(
             "SELECT server_uuid::text AS node,{} AS reset
         FROM pg_catalog.\"gv$pg_stat_database\" WHERE datid={}",
@@ -30,7 +30,12 @@ async fn epochs(session: &ObservedSession, probe: &Probe) -> Result<Epochs> {
         .collect()
 }
 
-pub(crate) async fn read(session: &ObservedSession, probe: &Probe, snapshot: &mut Snapshot, coverage: &mut Coverage) {
+pub(crate) async fn read(
+    session: &mut impl NoticeRead,
+    probe: &Probe,
+    snapshot: &mut Snapshot,
+    coverage: &mut Coverage,
+) {
     if !probe.global {
         coverage.recorded_message(
             &sources::INDEX_USAGE,
@@ -45,12 +50,21 @@ pub(crate) async fn read(session: &ObservedSession, probe: &Probe, snapshot: &mu
         return;
     }
     let notices = session.notices();
+    let inventory = global::nodes_from(session).await;
+    if let Err(error) = &inventory {
+        coverage.read::<()>(&sources::INDEX_USAGE, Err(error.clone()));
+        coverage.lacking(
+            Capability::IndexUsage,
+            culprit_core::message!("provider.yugabyte.capability.index_usage.contributors"),
+            None,
+        );
+        return;
+    }
     let before = epochs(session, probe).await;
-    let inventory = global::nodes(session).await;
     let rows = coverage.read_rows(
         &sources::INDEX_USAGE,
         query(
-            &session.client,
+            session,
             "SELECT schemaname,relname,indexrelname,sum(idx_scan)::float8 AS reads,
             count(DISTINCT server_uuid)::text AS nodes FROM pg_catalog.\"gv$pg_stat_user_indexes\"
          GROUP BY schemaname,relname,indexrelname",
@@ -58,7 +72,7 @@ pub(crate) async fn read(session: &ObservedSession, probe: &Probe, snapshot: &mu
         .await,
     );
     let after = epochs(session, probe).await;
-    let last_inventory = global::nodes(session).await;
+    let last_inventory = global::nodes_from(session).await;
     let complete = before
         .as_ref()
         .ok()

@@ -49,7 +49,7 @@ pub struct Connector {
 /// return rows after skipping a node: callers must distinguish that partial read from an empty successful read.
 pub struct ObservedSession {
     pub client: Client,
-    notices: Arc<AtomicU64>,
+    pub(crate) notices: Arc<AtomicU64>,
 }
 
 impl ObservedSession {
@@ -59,7 +59,7 @@ impl ObservedSession {
 }
 
 impl Connector {
-    pub(crate) fn source_shutdown(&self) -> culprit_core::telemetry::SourceShutdown {
+    pub fn source_shutdown(&self) -> culprit_core::telemetry::SourceShutdown {
         if self.fence.is_uncertain() {
             culprit_core::telemetry::SourceShutdown::Unconfirmed
         } else {

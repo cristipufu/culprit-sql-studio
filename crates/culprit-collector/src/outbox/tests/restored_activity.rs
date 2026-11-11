@@ -4,7 +4,7 @@ use crate::delivery::{activity_recovery::*, recovery::*};
 fn observation() -> ActivityObservation {
     serde_json::from_value(serde_json::json!({
         "key":{"session":{"id":"61","generation":"login-1"},"request":{"id":"0","generation":"request-1"}},
-        "idle":false,"scope":"request-database","state":"running","open_transactions":0,"elapsed_ms":"120000",
+        "blocking_status":"known","idle":false,"scope":"request-database","state":"running","open_transactions":0,"elapsed_ms":"120000",
         "session_counters":{},"request_counters":{},"statement":{"state":"unavailable","reason":"not-collected"}
     }))
     .unwrap()
@@ -137,4 +137,55 @@ async fn checkpoint_budget_identity_and_complete_native_eof_are_required_before_
     std::fs::write(path, b"[]\n").unwrap();
     let source = first.description.unwrap();
     assert!(outbox.files.run(|| move |files| files.restored_baseline(&source)).await.is_err());
+}
+
+#[tokio::test]
+async fn volume_loss_preserves_uncertain_incidents_when_current_lock_details_are_missing() {
+    let root = tempfile::tempdir().unwrap();
+    let (store, owner, contract, mut outbox) = super::eviction::remote_box(root.path()).await;
+    let mut row = observation();
+    row.elapsed_ms = Some("45000".into());
+    row.wait = Some(ActivityWait {
+        native_type: Some("native-lock".into()),
+        elapsed_ms: Some("40000".into()),
+        resources: None,
+        owners: vec![ActivityWaitOwner::Transaction {
+            native_id: "transaction-2".into(),
+            owner: TransactionWaitOwner::Active,
+        }],
+    });
+    let first = super::eviction::activity(&mut outbox, "2020-01-01T06:00:00Z", Some(row.clone())).await;
+    assert_eq!(first.status, CollectionStatus::Complete);
+    let prepared = outbox.delivery().prepare(&first.capture.observation_id, contract.clone(), vec![]).await.unwrap();
+    let first_range = stage_and_commit(&store, owner.fence(), None, &prepared).await.unwrap();
+    let initial = checkpoint(&store).await;
+    let previous = initial.states().to_vec();
+    row.blocking_status = ActivityBlockingStatus::Unknown;
+    row.wait = None;
+    row.elapsed_ms = Some("46000".into());
+    let next = super::eviction::activity_with_baseline(&mut outbox, "2020-01-01T06:00:01Z", Some(row), &previous).await;
+    assert_eq!(next.status, CollectionStatus::Complete, "{next:?}");
+    assert_eq!(next.description.as_ref().unwrap().observation.activity().unwrap().qualifying, 0);
+    let prepared = outbox.delivery().prepare(&next.capture.observation_id, contract, vec![]).await.unwrap();
+    stage_and_commit(&store, owner.fence(), Some(&first_range.manifest().range_id), &prepared).await.unwrap();
+    let recovered = checkpoint(&store).await;
+    assert_eq!(recovered.states().len(), 1);
+    assert_eq!(recovered.states()[0].status, ActivityIncidentStatus::Uncertain);
+    assert_eq!(recovered.states()[0].last_seen_at, "2020-01-01T06:00:00Z");
+    let replacement = root.path().join("replacement");
+    let mut restored = Outbox::create_remote(&replacement, OutboxLimits::default(), store.id()).unwrap();
+    restored.recover().await.unwrap();
+    restored.restore_activity(recovered).await.unwrap();
+    drop(restored);
+    let mut restored = Outbox::open(&replacement).unwrap();
+    restored.recover().await.unwrap();
+    restored
+        .begin_remote_epoch(&Fence::issued(2, "restored-owner".into(), store.id().into()).unwrap(), 1)
+        .await
+        .unwrap();
+    let lease = restored.reserve("renamed", &next.request).await.unwrap();
+    let baseline = lease.baseline(next.description.as_ref().unwrap()).await.unwrap().unwrap();
+    assert_eq!(baseline.states.len(), 1);
+    assert_eq!(baseline.states[0].status, ActivityIncidentStatus::Uncertain);
+    assert_eq!(baseline.states[0].id, previous[0].id);
 }

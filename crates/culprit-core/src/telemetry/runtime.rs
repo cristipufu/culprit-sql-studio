@@ -49,6 +49,7 @@ pub enum RuntimeMetricKey {
 #[serde(tag = "kind", rename_all = "kebab-case")]
 #[ts(export)]
 pub enum RuntimeMetricUnit {
+    Picoseconds,
     Nanoseconds,
     Microseconds,
     Milliseconds,
@@ -63,7 +64,7 @@ impl RuntimeMetricUnit {
         !matches!(self, Self::Pages { bytes_per_page: 0 })
     }
     pub(super) fn is_time(self) -> bool {
-        matches!(self, Self::Nanoseconds | Self::Microseconds | Self::Milliseconds | Self::Seconds)
+        matches!(self, Self::Picoseconds | Self::Nanoseconds | Self::Microseconds | Self::Milliseconds | Self::Seconds)
     }
 }
 impl RuntimeMetricKey {

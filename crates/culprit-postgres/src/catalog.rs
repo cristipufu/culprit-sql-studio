@@ -49,26 +49,38 @@ pub(crate) async fn indexes(client: &Client, probe: &Probe) -> Result<Vec<IndexS
     Ok(indexes)
 }
 
-pub(crate) async fn columns(client: &Client) -> Result<Vec<ColumnInfo>> {
+pub(crate) async fn columns(client: &Client, version: u32) -> Result<Vec<ColumnInfo>> {
     let kind = crate::native::catalog::Kind::Columns;
-    query(client, &crate::native::catalog::query(kind, true, 100_001))
+    query(client, &crate::native::catalog::query(kind, version, true, 100_001))
         .await?
         .into_iter()
         .map(|row| {
-            crate::native::catalog::decode(kind, row, None, culprit_core::telemetry::MAX_CATALOG_EXPRESSION_BYTES)
+            crate::native::catalog::decode(
+                kind,
+                row,
+                None,
+                culprit_core::telemetry::MAX_CATALOG_EXPRESSION_BYTES,
+                culprit_core::Engine::Postgres,
+            )
         })
         .map(|result| result.and_then(crate::native::catalog::column))
         .collect()
 }
 pub(crate) async fn foreign_keys(client: &Client) -> Result<Vec<ForeignKey>> {
     let kind = crate::native::catalog::Kind::ForeignKeys;
-    query(client, &crate::native::catalog::query(kind, false, 100_001))
+    query(client, &crate::native::catalog::query(kind, 110_000, false, 100_001))
         .await?
         .into_iter()
         .map(|row| {
-            crate::native::catalog::decode(kind, row, None, culprit_core::telemetry::MAX_CATALOG_EXPRESSION_BYTES)
+            crate::native::catalog::decode(
+                kind,
+                row,
+                None,
+                culprit_core::telemetry::MAX_CATALOG_EXPRESSION_BYTES,
+                culprit_core::Engine::Postgres,
+            )
         })
-        .map(|result| result.map(crate::native::catalog::foreign_key))
+        .map(|result| result.and_then(crate::native::catalog::foreign_key))
         .collect()
 }
 

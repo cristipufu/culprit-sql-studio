@@ -90,8 +90,28 @@ async fn live_registered_provider_collects_and_degrades_without_changing_data() 
 
 /// No ADX account is involved: native data crosses the real journal, restart, replay and ADX wire projection.
 #[tokio::test]
-#[ignore = "requires the owned loopback PostgreSQL fixture from dev/smoke-providers.py"]
-async fn postgres_telemetry_survives_outbox_restart_and_adx_projection() {
+#[ignore = "requires an owned loopback fixture from dev/smoke-providers.py"]
+async fn native_telemetry_survives_outbox_restart_and_adx_projection() {
+    telemetry_roundtrip(connection(), true).await;
+}
+
+#[tokio::test]
+async fn sqlite_telemetry_survives_outbox_restart_and_adx_projection() {
+    let root = tempfile::TempDir::with_prefix("culprit-file-pipeline-").unwrap();
+    let path = root.path().join("fixture.sqlite");
+    let spec = ConnectionSpec {
+        engine: Some(Engine::Sqlite),
+        database: Some(path.to_string_lossy().into_owned()),
+        ..Default::default()
+    };
+    // The file is created through the fixture connection, never by the read-only provider.
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch("CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT); CREATE INDEX ix_name ON items(name); INSERT INTO items VALUES(1,'private-value'); ANALYZE;").unwrap();
+    drop(conn);
+    telemetry_roundtrip(spec, false).await;
+}
+
+async fn telemetry_roundtrip(spec: ConnectionSpec, activity: bool) {
     use culprit_collector::{capture::CollectionCancellation, delivery::contract::Contract, outbox::Outbox};
     use culprit_core::{AuthKind, telemetry::*};
     use culprit_engine::{
@@ -100,16 +120,18 @@ async fn postgres_telemetry_survives_outbox_restart_and_adx_projection() {
     };
     use std::sync::Arc;
 
-    let spec = connection();
-    assert_eq!(spec.engine, Some(Engine::Postgres));
-    assert!(matches!(spec.database.as_deref(), Some("culprit_smoke" | "culprit_timescale")));
+    let engine = spec.engine.unwrap();
+    let input = match engine {
+        Engine::Sqlite => format!("sqlite://{}", spec.database.as_ref().unwrap()),
+        _ => format!("{}://reader@fixture.invalid/sample", serde_json::to_value(engine).unwrap().as_str().unwrap()),
+    };
     let root = tempfile::TempDir::with_prefix("culprit-native-pipeline-").unwrap();
     let workspace = Workspace::open_in(root.path().join("workspace"))
-        .with_provider(Engine::Postgres, Arc::new(move |_| culprit_engine::registry::provider(&spec)));
+        .with_provider(engine, Arc::new(move |_| culprit_engine::registry::provider(&spec)));
     workspace
         .add_connection(NewConnection {
             name: "native".into(),
-            input: "postgres://reader@fixture.invalid/sample".into(),
+            input,
             auth: Some(AuthKind::None),
             ..Default::default()
         })
@@ -120,31 +142,39 @@ async fn postgres_telemetry_survives_outbox_restart_and_adx_projection() {
     let contract =
         Contract::new("owned-test".into(), "shard-0".into(), "adx:fixture".into(), catalog.digest().into()).unwrap();
     let mut projected = 0;
-    for dataset in [
-        SnapshotDataset::StatementCounters,
-        SnapshotDataset::StatementDefinitions,
-        SnapshotDataset::Operational,
-        SnapshotDataset::Settings,
-        SnapshotDataset::Tables,
-        SnapshotDataset::Columns,
-    ] {
+    let mut selections: Vec<_> =
+        [SnapshotDataset::Operational, SnapshotDataset::Settings, SnapshotDataset::Tables, SnapshotDataset::Columns]
+            .into_iter()
+            .map(|dataset| CollectionSelection::Snapshot { dataset })
+            .collect();
+    if activity {
+        selections.extend([
+            CollectionSelection::Snapshot { dataset: SnapshotDataset::StatementCounters },
+            CollectionSelection::Snapshot { dataset: SnapshotDataset::StatementDefinitions },
+            CollectionSelection::Activity { policy: Default::default() },
+        ]);
+    }
+    for (number, selection) in selections.into_iter().enumerate() {
         let request = CollectionRequest {
-            selection: CollectionSelection::Snapshot { dataset },
+            selection: selection.clone(),
             budget: CollectionBudget { page_rows: 2, max_snapshot_rows: 10000, max_pages: 1000, ..Default::default() },
         };
         let manifest = workspace
             .collect_into_outbox("native", request, &mut outbox, &CollectionCancellation::default())
             .await
             .unwrap();
-        assert_eq!(manifest.status, CollectionStatus::Complete, "{dataset:?}: {manifest:?}");
+        assert_eq!(manifest.status, CollectionStatus::Complete, "{selection:?}: {manifest:?}");
         drop(outbox);
         outbox = Outbox::open(&path).unwrap();
-        let replay_dir = root.path().join(format!("replay-{dataset:?}"));
+        let replay_dir = root.path().join(format!("replay-{number}"));
         let replay = Outbox::replay(&path, &manifest.capture.observation_id, &replay_dir).await.unwrap();
         assert_eq!(replay.capture, manifest.capture);
         let prepared =
             outbox.delivery().prepare(&manifest.capture.observation_id, contract.clone(), vec![]).await.unwrap();
         for file in &manifest.files {
+            if file.stream == TelemetryStream::ActivityCheckpoints {
+                continue; // Recovery-only state is deliberately absent from the analytical schema.
+            }
             let schema = catalog.get(file.stream).unwrap();
             let envelope = Envelope::new(prepared.manifest(), &file.batch_id).unwrap();
             let bytes = std::fs::read(replay_dir.join(&file.file)).unwrap();
@@ -155,7 +185,7 @@ async fn postgres_telemetry_survives_outbox_restart_and_adx_projection() {
                 let encoded: serde_json::Value = serde_json::from_slice(&schema.encode(&values).unwrap()).unwrap();
                 let returned: Vec<_> = schema.columns().iter().map(|column| encoded[&column.name].clone()).collect();
                 assert_eq!(schema.returned_digest(&returned).unwrap(), projection::digest(&values).unwrap());
-                assert_eq!(encoded["Engine"], "postgres");
+                assert_eq!(encoded["Engine"], serde_json::to_value(engine).unwrap());
                 projected += 1;
             }
         }

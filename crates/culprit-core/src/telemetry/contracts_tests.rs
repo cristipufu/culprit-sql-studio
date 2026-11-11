@@ -126,6 +126,7 @@ fn query_only_records_get_stable_native_ids_but_unresolved_queries_do_not() {
 #[test]
 fn cumulative_statement_counters_preserve_exact_values_and_reset_uncertainty() {
     let sample = StatementCounterSample {
+        scope: crate::MeasurementScope::Database,
         distributions: vec![],
         identity: NativeQueryIdentity {
             query_id: "fingerprint".into(),
@@ -156,6 +157,45 @@ fn cumulative_statement_counters_preserve_exact_values_and_reset_uncertainty() {
     assert_eq!(sample.key().unwrap(), reset.key().unwrap(), "reset evidence changes the sample, not its native query");
     reset.totals[0].total = MeasurementValue::Real(1.5);
     assert!(!reset.is_valid(), "execution counts must stay exact integers");
+}
+
+#[test]
+fn native_picosecond_totals_keep_exact_precision_and_node_scope() {
+    let sample = StatementCounterSample {
+        identity: NativeQueryIdentity { query_id: "digest".into(), qualifiers: Default::default() },
+        scope: crate::MeasurementScope::Node,
+        observed_at: "2026-11-11T00:00:00Z".into(),
+        reset: crate::ResetMarker::Unknown,
+        totals: vec![StatementCounter {
+            key: RuntimeMetricKey::Duration,
+            unit: RuntimeMetricUnit::Picoseconds,
+            total: MeasurementValue::Integer(u64::MAX.to_string()),
+        }],
+        distributions: vec![],
+    };
+    assert!(sample.is_valid());
+    let encoded = serde_json::to_value(&sample).unwrap();
+    assert_eq!(encoded["scope"], "node");
+    assert_eq!(encoded["totals"][0]["unit"]["kind"], "picoseconds");
+    assert_eq!(encoded["totals"][0]["total"]["value"], u64::MAX.to_string());
+    assert_eq!(serde_json::from_value::<StatementCounterSample>(encoded).unwrap(), sample);
+}
+
+#[test]
+fn sql_markers_in_literals_never_change_statement_provenance() {
+    for engine in [crate::Engine::Postgres, crate::Engine::Mysql, crate::Engine::Yugabyte] {
+        assert_eq!(
+            StatementOrigin::from_sql(Some("SELECT '/* culprit:monitor */'"), engine).0,
+            StatementOrigin::Application
+        );
+        assert_eq!(StatementOrigin::from_sql(Some("/* culprit */ SELECT 1"), engine).0, StatementOrigin::Culprit);
+        let sql = format!("/* culprit:monitor */ /* culprit:template:{} */ SELECT 1", digest(b"template"));
+        assert_eq!(
+            StatementOrigin::from_sql(Some(&sql), engine),
+            (StatementOrigin::CulpritMonitoring, Some(digest(b"template")))
+        );
+        assert_eq!(StatementOrigin::from_sql(None, engine).0, StatementOrigin::Unknown);
+    }
 }
 
 #[test]

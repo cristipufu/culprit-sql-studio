@@ -75,7 +75,7 @@ impl ActivityHeads {
         let Some(snapshot) = manifest.source.observation.activity() else {
             return Ok(());
         };
-        if !snapshot.is_valid() || !snapshot.database_wide {
+        if !snapshot.is_valid() || !snapshot.complete_scope {
             return Err(invalid());
         }
         let source = &manifest.source;

@@ -124,10 +124,12 @@ pub(super) fn quiet_activity(root: &Path) -> PreparedRange {
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
             epoch: "native-epoch".into(),
             at: "2020-01-01T06:00:00Z".into(),
-            database_wide: true,
+            scope: culprit_core::MeasurementScope::Database,
+            complete_scope: true,
             policy,
             native_rows: 0,
             qualifying: 0,
+            uncertain: 0,
             observations: 0,
             blocking_edges: 0,
             details: ActivityDetailStatus::NotNeeded,

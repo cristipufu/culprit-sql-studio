@@ -9,9 +9,8 @@ use culprit_core::{
     ColumnHistogram, Coverage, FileIo, FileKind, Pressure, QueryStat, Replica, ReplicaCondition, ReplicaRole, Setting,
     Signal, SignalScope, SignalUnit, Snapshot, key, t,
 };
-use mysql_async::{Conn, Value};
+use mysql_async::Value;
 
-use crate::connect::{Connector, Scope};
 use crate::probe::Probe;
 use crate::rows::{Rec, query, query_with};
 use crate::sources;
@@ -20,48 +19,39 @@ const PICOS_PER_MS: f64 = 1_000_000_000.0;
 
 /// Collect every signal into `snapshot` on a connection of its own, each source read through `Coverage::read`
 /// (`crate::sources`): these add detail and lock nothing, so a failure is a note.
-pub async fn collect(connector: &Connector, probe: &Probe, snapshot: &mut Snapshot) {
+pub async fn collect(conn: &mut impl crate::read::QueryRead, probe: &Probe, snapshot: &mut Snapshot) {
     let mut coverage = Coverage::default();
-    let connection = connector.connect(Scope::Server).await;
-    if let Err(error) = &connection {
-        coverage.sources_failed(sources::SIGNAL_READS, error);
-    }
-    let Some(mut conn) = coverage.read(&sources::SIGNALS, connection) else {
-        coverage.append_to(snapshot);
-        return;
-    };
     let mariadb = probe.version.to_ascii_lowercase().contains("mariadb");
-    crate::operations::collect(&mut conn, probe, snapshot).await;
+    crate::operations::collect(conn, probe, snapshot).await;
     if probe.performance_schema
         && let Some(workload) = snapshot.workload.as_mut()
     {
-        coverage.read(&sources::QUERY_ERRORS, attach_errors(&mut conn, &probe.database, &mut workload.queries).await);
+        coverage.read(&sources::QUERY_ERRORS, attach_errors(conn, &probe.database, &mut workload.queries).await);
     }
-    let found = histograms(&mut conn, &probe.database, &probe.version, mariadb).await;
+    let found = histograms(conn, &probe.database, &probe.version, mariadb).await;
     if let Some(found) = coverage.read(&sources::HISTOGRAMS, found) {
         snapshot.histograms = found;
     }
-    attach_table_metadata(&mut conn, &probe.database, snapshot).await;
+    attach_table_metadata(conn, &probe.database, snapshot).await;
     let pressure = snapshot.pressure.get_or_insert_with(Pressure::default);
     if probe.performance_schema
-        && let Some(files) = coverage.read(&sources::FILE_LATENCY, files(&mut conn).await)
+        && let Some(files) = coverage.read(&sources::FILE_LATENCY, files(conn).await)
     {
         pressure.files = files;
     }
-    pressure.signals.extend(coverage.read(&sources::CONNECTIONS, connections(&mut conn).await).unwrap_or_default());
+    pressure.signals.extend(coverage.read(&sources::CONNECTIONS, connections(conn).await).unwrap_or_default());
     // What replication and connection advice depend on: whether this server takes writes, and its thread cache.
     let variables =
-        coverage.read(&sources::SERVER_VARIABLES, server_variables(&mut conn).await).unwrap_or_else(HashMap::new);
+        coverage.read(&sources::SERVER_VARIABLES, server_variables(conn).await).unwrap_or_else(HashMap::new);
     let writable = variables.get("read_only").map(|v| !is_on(v));
     // Product/version-specific monitoring privilege; only relevant when replication is configured.
-    let replicas = replica_status(&mut conn, writable, mariadb).await.map_err(|e| {
+    let replicas = replica_status(conn, writable, probe.flavor, &probe.version).await.map_err(|e| {
         let message = needs_replica_privilege(&e.message, mariadb, &probe.version);
         e.with_message(message)
     });
     if let Some(replicas) = coverage.read(&sources::REPLICATION, replicas) {
         pressure.replicas = replicas;
     }
-    let _ = conn.disconnect().await;
     if let Some(value) = variables.get("thread_cache_size")
         && snapshot.setting("thread_cache_size").is_none()
     {
@@ -125,7 +115,11 @@ fn error_label(code: u32) -> String {
     }
 }
 
-async fn attach_errors(conn: &mut Conn, database: &str, queries: &mut [QueryStat]) -> culprit_core::Result<()> {
+async fn attach_errors(
+    conn: &mut impl crate::read::QueryRead,
+    database: &str,
+    queries: &mut [QueryStat],
+) -> culprit_core::Result<()> {
     let digests: Vec<String> = queries.iter().filter_map(|q| q.query_hash.clone()).collect();
     if digests.is_empty() {
         return Ok(());
@@ -209,7 +203,7 @@ pub fn short_path(path: &str) -> String {
 }
 
 /// Read and write time per file since startup, for the 24 files that took the most time.
-async fn files(conn: &mut Conn) -> culprit_core::Result<Vec<FileIo>> {
+async fn files(conn: &mut impl crate::read::QueryRead) -> culprit_core::Result<Vec<FileIo>> {
     let rows = query(
         conn,
         "SELECT FILE_NAME AS file_name, EVENT_NAME AS event_name, COUNT_READ AS read_count, SUM_TIMER_READ AS read_ps,
@@ -248,7 +242,7 @@ async fn files(conn: &mut Conn) -> culprit_core::Result<Vec<FileIo>> {
 }
 
 /// Connections opened per second since startup, how many needed a new thread, and failed connection attempts.
-async fn connections(conn: &mut Conn) -> culprit_core::Result<Vec<Signal>> {
+async fn connections(conn: &mut impl crate::read::QueryRead) -> culprit_core::Result<Vec<Signal>> {
     let rows = query(
         conn,
         "SHOW GLOBAL STATUS WHERE Variable_name IN
@@ -342,19 +336,20 @@ fn is_on(value: &str) -> bool {
 }
 
 /// The server variables advice depends on: read_only (does it take writes) and thread_cache_size.
-async fn server_variables(conn: &mut Conn) -> culprit_core::Result<HashMap<String, String>> {
+async fn server_variables(conn: &mut impl crate::read::QueryRead) -> culprit_core::Result<HashMap<String, String>> {
     let rows = query(conn, "SHOW GLOBAL VARIABLES WHERE Variable_name IN ('read_only', 'thread_cache_size')").await?;
     Ok(rows.iter().filter_map(|r| Some((r.string("variable_name").to_ascii_lowercase(), r.text("value")?))).collect())
 }
 
 /// This server's replication channels when it is a replica: lag beyond any configured delay, thread state and the
 /// last error code. `writable` is whether it takes writes (read_only off), when known.
-async fn replica_status(conn: &mut Conn, writable: Option<bool>, mariadb: bool) -> culprit_core::Result<Vec<Replica>> {
-    let rows = match query(conn, if mariadb { "SHOW ALL REPLICAS STATUS" } else { "SHOW REPLICA STATUS" }).await {
-        Ok(rows) => rows,
-        // Before MySQL 8.0.22 and MariaDB 10.5.1.
-        Err(_) => query(conn, if mariadb { "SHOW ALL SLAVES STATUS" } else { "SHOW SLAVE STATUS" }).await?,
-    };
+async fn replica_status(
+    conn: &mut impl crate::read::QueryRead,
+    writable: Option<bool>,
+    flavor: crate::connect::Flavor,
+    version: &str,
+) -> culprit_core::Result<Vec<Replica>> {
+    let rows = query(conn, crate::native::replication::query(flavor, version)).await?;
     Ok(rows.iter().filter_map(|r| replica(ChannelRow::from(r), writable)).collect())
 }
 
@@ -429,59 +424,32 @@ fn replica(r: ChannelRow, writable: Option<bool>) -> Option<Replica> {
 /// and average frequency already keep the optimizer from assuming a condition keeps every row (before 10.4,
 /// histogram_size = 0 collects them without a histogram).
 async fn histograms(
-    conn: &mut Conn,
+    conn: &mut impl crate::read::QueryRead,
     database: &str,
     version: &str,
     mariadb: bool,
 ) -> culprit_core::Result<Option<Vec<ColumnHistogram>>> {
-    let params = vec![Value::from(database.to_string())];
-    if mariadb {
-        let rows = query_with(
-            conn,
-            "SELECT db_name AS schema_name, table_name, column_name, hist_type AS kind
-               FROM mysql.column_stats WHERE db_name = ?",
-            params,
-        )
-        .await?;
-        return Ok(Some(
-            rows.iter()
-                .map(|r| ColumnHistogram {
-                    schema: r.string("schema_name"),
-                    table: r.string("table_name"),
-                    column: r.string("column_name"),
-                    kind: r.text("kind"),
-                    buckets: None,
-                })
-                .collect(),
-        ));
-    }
-    let major: u32 = version.split('.').next().and_then(|m| m.parse().ok()).unwrap_or(0);
-    if major < 8 {
+    if !mariadb && version.split('.').next().and_then(|major| major.parse::<u32>().ok()).is_none_or(|major| major < 8) {
         return Ok(None);
     }
-    let rows = query_with(
-        conn,
-        "SELECT SCHEMA_NAME AS schema_name, TABLE_NAME AS table_name, COLUMN_NAME AS column_name,
-                JSON_UNQUOTE(JSON_EXTRACT(HISTOGRAM, '$.\"histogram-type\"')) AS kind,
-                JSON_LENGTH(JSON_EXTRACT(HISTOGRAM, '$.buckets')) AS buckets
-           FROM information_schema.COLUMN_STATISTICS WHERE SCHEMA_NAME = ?",
-        params,
-    )
-    .await?;
+    let flavor = if mariadb { crate::connect::Flavor::Mariadb } else { crate::connect::Flavor::Mysql };
+    let rows =
+        query_with(conn, &crate::native::catalog::histogram_query(flavor), vec![Value::from(database.to_string())])
+            .await?;
     Ok(Some(
         rows.iter()
-            .map(|r| ColumnHistogram {
-                schema: r.string("schema_name"),
-                table: r.string("table_name"),
-                column: r.string("column_name"),
-                kind: r.text("kind"),
-                buckets: r.number("buckets"),
+            .map(|row| ColumnHistogram {
+                schema: row.string("schema_name"),
+                table: row.string("table_name"),
+                column: row.string("column_name"),
+                kind: row.text("kind"),
+                buckets: row.number("buckets"),
             })
             .collect(),
     ))
 }
 
-async fn attach_table_metadata(conn: &mut Conn, database: &str, snapshot: &mut Snapshot) {
+async fn attach_table_metadata(conn: &mut impl crate::read::QueryRead, database: &str, snapshot: &mut Snapshot) {
     if let Ok(rows) = query_with(
         conn,
         "SELECT EVENT_OBJECT_TABLE AS table_name, TRIGGER_NAME AS trigger_name, EVENT_MANIPULATION AS event_name

@@ -7,13 +7,15 @@ use culprit_core::deadlock::classify;
 use culprit_core::{
     Deadlock, DeadlockProcess, DeadlockReport, DeadlockResource, Engine, LockHolder, LockWait, Result, t,
 };
-use mysql_async::{Conn, Value};
+use mysql_async::Value;
 
 use crate::connect::Flavor;
 use crate::rows::{Rec, query, query_one, query_with};
+pub(crate) const LATEST_SQL: &str = "SHOW ENGINE INNODB STATUS";
 
 /// MySQL 8.0+: performance_schema's lock views.
-const LOCK_WAITS_SQL: &str = "SELECT t.PROCESSLIST_ID AS session, b.PROCESSLIST_ID AS blocking, rl.LOCK_MODE AS mode,
+pub(crate) const LOCK_WAITS_SQL: &str =
+    "SELECT t.PROCESSLIST_ID AS session, b.PROCESSLIST_ID AS blocking, rl.LOCK_MODE AS mode,
        rl.LOCK_TYPE AS resource, CONCAT(rl.OBJECT_SCHEMA, '.', rl.OBJECT_NAME) AS object, rl.INDEX_NAME AS index_name
   FROM performance_schema.data_lock_waits w
   JOIN performance_schema.data_locks rl ON rl.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID
@@ -26,7 +28,7 @@ const LOCK_WAITS_SQL: &str = "SELECT t.PROCESSLIST_ID AS session, b.PROCESSLIST_
 /// INNODB_TRX on 10.6+, while 10.5 shows a different internal number there). So the waiter is found by the lock it
 /// asked for, which is unique; a blocker reported as trx 0 can't be told apart from other readers and is left out
 /// rather than pinned on the wrong session.
-const INNODB_LOCK_WAITS_SQL: &str = "SELECT r.trx_mysql_thread_id AS session, b.trx_mysql_thread_id AS blocking,
+pub(crate) const INNODB_LOCK_WAITS_SQL: &str = "SELECT r.trx_mysql_thread_id AS session, b.trx_mysql_thread_id AS blocking,
        l.lock_mode AS mode, l.lock_type AS resource, REPLACE(l.lock_table, '`', '') AS object, l.lock_index AS index_name
   FROM information_schema.INNODB_LOCK_WAITS w
   JOIN information_schema.INNODB_TRX r ON r.trx_requested_lock_id = w.requested_lock_id
@@ -35,14 +37,14 @@ const INNODB_LOCK_WAITS_SQL: &str = "SELECT r.trx_mysql_thread_id AS session, b.
 
 /// sys reports candidate metadata-lock pairs. Keep only exclusive conflicts: compatible readers can appear in the
 /// view too. Other lock modes and queue-priority effects remain unresolved rather than naming a false blocker.
-const METADATA_LOCK_WAITS_SQL: &str = "SELECT CAST(waiting_pid AS CHAR) AS session,
+pub(crate) const METADATA_LOCK_WAITS_SQL: &str = "SELECT CAST(waiting_pid AS CHAR) AS session,
        CAST(blocking_pid AS CHAR) AS blocking, waiting_lock_type AS mode, 'METADATA' AS resource,
        CONCAT(object_schema, '.', object_name) AS object, NULL AS index_name
   FROM sys.schema_table_lock_waits WHERE waiting_pid <> blocking_pid
    AND (waiting_lock_type = 'EXCLUSIVE' OR blocking_lock_type = 'EXCLUSIVE')";
 
 pub(crate) async fn blocking_evidence(
-    conn: &mut Conn,
+    conn: &mut impl crate::read::QueryRead,
     flavor: Flavor,
 ) -> (HashMap<String, String>, Vec<LockWait>, Vec<String>) {
     let mut coverage = culprit_core::Coverage::default();
@@ -74,7 +76,7 @@ pub(crate) async fn blocking_evidence(
 }
 
 /// Every (waiting, blocking) pair with what the waiter asked for, from whichever lock views this server has.
-async fn wait_pairs(conn: &mut Conn, flavor: Flavor) -> Result<Vec<Rec>> {
+async fn wait_pairs(conn: &mut impl crate::read::QueryRead, flavor: Flavor) -> Result<Vec<Rec>> {
     match flavor {
         Flavor::Mariadb => query(conn, INNODB_LOCK_WAITS_SQL).await,
         Flavor::Mysql => match query(conn, LOCK_WAITS_SQL).await {
@@ -103,14 +105,14 @@ fn direct_blockers(pairs: &[(String, String)]) -> HashMap<String, String> {
     out
 }
 
-pub(crate) async fn lock_waits(conn: &mut Conn, flavor: Flavor) -> Result<Vec<LockWait>> {
+pub(crate) async fn lock_waits(conn: &mut impl crate::read::QueryRead, flavor: Flavor) -> Result<Vec<LockWait>> {
     let (_, locks, _) = blocking_evidence(conn, flavor).await;
     Ok(locks)
 }
 
 /// The most recent statement of each sleeping connection (performance_schema keeps it after it finished). MariaDB
 /// turns the current-statement consumer off by default; the per-thread history, when on, has it too.
-pub(crate) async fn last_statements(conn: &mut Conn) -> HashMap<String, String> {
+pub(crate) async fn last_statements(conn: &mut impl crate::read::QueryRead) -> HashMap<String, String> {
     let mut out: HashMap<String, String> = HashMap::new();
     for sql in [
         "SELECT t.PROCESSLIST_ID AS id, s.SQL_TEXT AS sql_text
@@ -124,9 +126,14 @@ pub(crate) async fn last_statements(conn: &mut Conn) -> HashMap<String, String> 
           ORDER BY s.THREAD_ID, s.EVENT_ID DESC",
     ] {
         for r in query(conn, sql).await.unwrap_or_default() {
-            if let (Some(id), Some(text)) =
-                (r.text("id"), r.text("sql_text").filter(|t| !t.contains(crate::connect::TAG)))
-            {
+            if let (Some(id), Some(text)) = (
+                r.text("id"),
+                r.text("sql_text").filter(|t| {
+                    !culprit_core::telemetry::StatementOrigin::from_sql(Some(t), culprit_core::Engine::Mysql)
+                        .0
+                        .is_culprit()
+                }),
+            ) {
                 out.entry(id).or_insert(text);
             }
         }
@@ -134,9 +141,9 @@ pub(crate) async fn last_statements(conn: &mut Conn) -> HashMap<String, String> 
     out
 }
 
-pub(crate) async fn recent(conn: &mut Conn, since_hours: f64) -> Result<DeadlockReport> {
+pub(crate) async fn recent(conn: &mut impl crate::read::QueryRead, since_hours: f64) -> Result<DeadlockReport> {
     let mut report = DeadlockReport { source: "InnoDB status".into(), since_hours, ..Default::default() };
-    let status = match query_one(conn, "SHOW ENGINE INNODB STATUS").await {
+    let status = match query_one(conn, LATEST_SQL).await {
         Ok(row) => row.and_then(|r| r.text("Status").or_else(|| r.text("status"))).unwrap_or_default(),
         Err(_) => {
             report.note = Some(needs_process_privilege());
@@ -231,12 +238,46 @@ pub fn parse_innodb_status(text: &str, utc: bool) -> Vec<Deadlock> {
     parse_at(text, at)
 }
 
+pub(crate) fn latest_section(text: &str) -> Option<&str> {
+    let start = text.find("LATEST DETECTED DEADLOCK")?;
+    let section = &text[start..];
+    Some(&section[..section.find("\nTRANSACTIONS\n").unwrap_or(section.len())])
+}
+/// Attribute a graph using native lock-resource identifiers, never SQL text or dotted display labels.
+pub(crate) fn native_databases(section: &str) -> culprit_core::Result<std::collections::BTreeSet<String>> {
+    let mut databases = std::collections::BTreeSet::new();
+    for line in section
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("RECORD LOCKS ") || line.starts_with("TABLE LOCK "))
+    {
+        let raw = line.split_once("table ").map(|(_, name)| name).ok_or_else(crate::native::invalid)?;
+        if !raw.starts_with('`') {
+            return Err(crate::native::invalid());
+        }
+        let end =
+            culprit_core::sql::quoted_end(raw.as_bytes(), 0, b'`', false).map_err(|_| crate::native::invalid())?;
+        if raw.as_bytes().get(end..end + 2) != Some(b".`") {
+            return Err(crate::native::invalid());
+        }
+        let end = culprit_core::sql::quoted_end(raw.as_bytes(), end + 1, b'`', false)
+            .map_err(|_| crate::native::invalid())?;
+        let name = culprit_core::sql::identifier_parts(&raw[..end]).ok_or_else(crate::native::invalid)?;
+        if name.len() != 2 {
+            return Err(crate::native::invalid());
+        }
+        databases.insert(name[0].clone());
+    }
+    if databases.is_empty() {
+        return Err(crate::native::invalid());
+    }
+    Ok(databases)
+}
+
 /// [`parse_innodb_status`] with the deadlock's time (RFC 3339 UTC) already known.
 fn parse_at(text: &str, at: Option<String>) -> Vec<Deadlock> {
-    let Some(start) = text.find("LATEST DETECTED DEADLOCK") else { return Vec::new() };
-    let section = &text[start..];
-    let end = section.find("\nTRANSACTIONS\n").unwrap_or(section.len());
-    let lines: Vec<&str> = section[..end].lines().skip(1).collect();
+    let Some(section) = latest_section(text) else { return Vec::new() };
+    let lines: Vec<&str> = section.lines().skip(1).collect();
 
     let mut txns: Vec<Txn> = Vec::new();
     let mut resources: Vec<DeadlockResource> = Vec::new();
@@ -436,6 +477,13 @@ fn mode_label(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_graph_scope_preserves_quoted_dots_and_escapes_without_reading_statement_labels() {
+        let section = "RECORD LOCKS index PRIMARY of table `db.with``quote`.`t.name` trx id 1\nTABLE LOCK table `second`.`tab` trx id 2";
+        assert_eq!(native_databases(section).unwrap(), ["db.with`quote".to_owned(), "second".into()].into());
+        assert!(native_databases("SELECT 'table `secret`.`data`'").is_err());
+        assert!(native_databases("RECORD LOCKS table `unterminated").is_err());
+    }
     use culprit_core::DeadlockPattern;
 
     pub(crate) const STATUS: &str = "=====================================

@@ -1,4 +1,5 @@
 use super::*;
+use culprit_postgres::wire::{BorrowedRead, COLLECTOR};
 use culprit_postgres::wire::{INTERACTIVE, query_one, tagged};
 
 // These opt-in cases share a disposable database. Role DDL invalidates active transactions' catalog snapshots;
@@ -32,7 +33,7 @@ async fn live_partitioned_indexes_preserve_physical_catalog_and_cluster_usage() 
             .map_err(culprit_postgres::wire::map_error)?;
         let probe = crate::probe::read(&global.client).await?;
         let mut coverage = culprit_core::Coverage::default();
-        crate::index_usage::read(&global, &probe, &mut snapshot, &mut coverage).await;
+        crate::index_usage::read(&mut BorrowedRead::new(&global), &probe, &mut snapshot, &mut coverage).await;
         coverage.append_to(&mut snapshot);
         Ok::<_, Error>(snapshot)
     }
@@ -558,13 +559,14 @@ async fn live_qpm_history_retains_independent_periods_and_redacted_plans() {
     let mut workload = snapshot.workload.clone().unwrap();
     workload.queries.retain(|entry| entry.id == q.id);
     let mut coverage = culprit_core::Coverage::default();
-    crate::collect::capture_plans(&provider, &session, &probe, &mut workload, 1, &mut coverage).await;
+    crate::collect::capture_plans(&provider, &mut BorrowedRead::new(&session), &probe, &mut workload, 1, &mut coverage)
+        .await;
     let captured = workload.queries[0].plan_history.as_ref().unwrap();
     assert!(captured.captured_plan.is_some(), "a retained body should be captured alongside the current estimate");
     assert!(workload.queries[0].plan.is_some());
     session.client.batch_execute(&tagged("SET yb_enable_global_views=on")).await.unwrap();
     let global_probe = crate::probe::read(&session.client).await.unwrap();
-    crate::history::collect(&session, &global_probe, &mut workload, &mut coverage).await;
+    crate::history::collect(&mut BorrowedRead::new(&session), &global_probe, &mut workload, &mut coverage).await;
     assert!(workload.queries[0].plan_history.as_ref().unwrap().source.contains("cluster"));
     let local: std::collections::BTreeMap<_, _> = q.plans.iter().map(|p| (&p.id, p.executions)).collect();
     let global: std::collections::BTreeMap<_, _> =
@@ -651,7 +653,7 @@ async fn live_ash_history_has_its_own_weights_period_bounds_and_role_scope() {
         session.client.batch_execute(&tagged(&format!("REVOKE pg_read_all_stats FROM {role}"))).await.map_err(culprit_postgres::wire::map_error)?;
         let denied_activity=crate::ash::read(&own,&stale,&options,10_000).await;
         // A stale probe must not enter QPM's native foreign-role redaction path, which crashes this release.
-        let denied_cache=crate::history::stored(&own,&stale,"1","1").await;
+        let denied_cache=crate::history::stored(&mut BorrowedRead::new(&own),&stale,"1","1").await;
         Ok::<_,culprit_core::Error>((history,expected,id,denied_activity,denied_cache))
     }.await;
     session.client.batch_execute(&tagged(&format!("DROP ROLE {role}"))).await.unwrap();
@@ -786,7 +788,7 @@ async fn live_native_catalog_workload_sessions_and_stale_identity_guards() {
     let mut context = snapshot.clone();
     context.sources.retain(|source| source.source != culprit_core::source_id::DOCDB_INDEX_USAGE);
     let mut coverage = culprit_core::Coverage::default();
-    crate::index_usage::read(&global, &probe, &mut context, &mut coverage).await;
+    crate::index_usage::read(&mut BorrowedRead::new(&global), &probe, &mut context, &mut coverage).await;
     coverage.append_to(&mut context);
     assert!(context.server.has(culprit_core::Capability::IndexUsage));
     assert!(context.server.missing.iter().all(|missing| missing.capability != culprit_core::Capability::IndexUsage));

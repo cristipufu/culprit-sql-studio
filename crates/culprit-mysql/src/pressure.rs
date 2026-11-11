@@ -8,7 +8,7 @@ use culprit_core::{
     CleanupHolder, Coverage, Engine, OpenTransaction, Pressure, Result, Signal, SignalScope, SignalUnit,
     TransactionActivity, WaitSample, WaitStat, format, t,
 };
-use mysql_async::{Conn, Value};
+use mysql_async::Value;
 
 use crate::connect::TAG;
 use crate::rows::{query, query_one, query_with};
@@ -43,7 +43,7 @@ pub fn category(event: &str) -> &'static str {
 /// Event name → (wait ms, count) from performance_schema's server-wide wait totals.
 /// Wait totals since startup. `wait/io/table/sql/handler` is left out: it times row reads inside the storage engine,
 /// the statements' own work rather than waiting, and would otherwise dwarf every real wait.
-async fn wait_totals(conn: &mut Conn) -> Result<HashMap<String, (f64, f64)>> {
+async fn wait_totals(conn: &mut impl crate::read::QueryRead) -> Result<HashMap<String, (f64, f64)>> {
     Ok(query(
         conn,
         "SELECT EVENT_NAME AS event, COUNT_STAR AS tasks, SUM_TIMER_WAIT AS wait_ps
@@ -57,7 +57,7 @@ async fn wait_totals(conn: &mut Conn) -> Result<HashMap<String, (f64, f64)>> {
 }
 
 /// Server-wide wait totals since startup, folded into categories, each with its biggest event.
-pub async fn waits(conn: &mut Conn) -> Result<Vec<WaitStat>> {
+pub async fn waits(conn: &mut impl crate::read::QueryRead) -> Result<Vec<WaitStat>> {
     Ok(fold(wait_totals(conn).await?.into_iter().map(|(e, (ms, n))| (e, ms, n))))
 }
 
@@ -88,7 +88,7 @@ fn fold(items: impl IntoIterator<Item = (String, f64, f64)>) -> Vec<WaitStat> {
     out
 }
 
-async fn status(conn: &mut Conn) -> Result<HashMap<String, f64>> {
+async fn status(conn: &mut impl crate::read::QueryRead) -> Result<HashMap<String, f64>> {
     crate::vars::status(
         conn,
         &[
@@ -112,7 +112,7 @@ async fn status(conn: &mut Conn) -> Result<HashMap<String, f64>> {
 
 /// Seconds since connections peaked at Max_used_connections (MySQL 5.7.5+; MariaDB doesn't keep the time). The status
 /// value is written in the session's time zone, which Culprit sets to UTC.
-async fn peak_connections_ago(conn: &mut Conn) -> Option<f64> {
+async fn peak_connections_ago(conn: &mut impl crate::read::QueryRead) -> Option<f64> {
     let rows = query(conn, "SHOW GLOBAL STATUS LIKE 'Max_used_connections_time'").await.ok()?;
     let at = rows.first().and_then(|r| r.text("Value").or_else(|| r.text("value")))?;
     let rows = query_with(conn, "SELECT TIMESTAMPDIFF(SECOND, ?, UTC_TIMESTAMP()) AS ago", vec![Value::from(at)])
@@ -148,7 +148,7 @@ fn oldest_sql(with_program: bool) -> String {
 
 /// Culprit's own connections: those named `program_name = culprit` where performance_schema shows connection
 /// attributes, otherwise this session and any running a tagged statement.
-async fn own_sessions(conn: &mut Conn) -> f64 {
+async fn own_sessions(conn: &mut impl crate::read::QueryRead) -> f64 {
     let named = "SELECT COUNT(DISTINCT PROCESSLIST_ID) AS n FROM performance_schema.session_connect_attrs
                   WHERE ATTR_NAME = 'program_name' AND ATTR_VALUE = 'culprit'";
     if let Ok(rows) = query(conn, named).await
@@ -166,7 +166,7 @@ async fn own_sessions(conn: &mut Conn) -> f64 {
 
 /// Statements running right now, counted the way Live counts them: other sessions' work, never Culprit's own (a scan
 /// runs several collectors at once, each on its own session, so `Threads_running - 1` still counts some of them).
-async fn running_statements(conn: &mut Conn) -> Option<f64> {
+async fn running_statements(conn: &mut impl crate::read::QueryRead) -> Option<f64> {
     let sql = "SELECT COUNT(*) AS n FROM information_schema.PROCESSLIST
                 WHERE ID <> CONNECTION_ID() AND COMMAND NOT IN ('Sleep', 'Daemon', 'Binlog Dump', 'Binlog Dump GTID')
                   AND USER <> 'system user' AND (INFO IS NULL OR INFO NOT LIKE ?)";
@@ -197,7 +197,7 @@ struct ConnectionLimit {
 }
 
 /// The pressure counters, each source read through `Coverage::read` (`crate::sources`).
-pub async fn collect(conn: &mut Conn) -> (Pressure, Coverage) {
+pub async fn collect(conn: &mut impl crate::read::QueryRead) -> (Pressure, Coverage) {
     let mut coverage = Coverage::default();
     let mut r = Readings { running: running_statements(conn).await, ..Readings::default() };
     r.status = coverage.read(&sources::GLOBAL_STATUS, status(conn).await);
@@ -452,7 +452,7 @@ pub fn state_category(state: &str, lock_wait: bool) -> &'static str {
 /// Readings of performance_schema's wait totals `seconds` apart, with the process list sampled once a second in
 /// between. The instruments time waits precisely but most are off by default (and all of them are without
 /// performance_schema, MariaDB's default); the samples show what busy sessions were doing either way.
-pub async fn sample(conn: &mut Conn, seconds: u32) -> Result<WaitSample> {
+pub async fn sample(conn: &mut impl crate::read::QueryRead, seconds: u32) -> Result<WaitSample> {
     let started = Instant::now();
     let taken_at = query_one(conn, "SELECT DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%sZ') AS now")
         .await?

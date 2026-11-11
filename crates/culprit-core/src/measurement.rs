@@ -183,6 +183,8 @@ pub enum MeasurementSource {
 #[ts(export)]
 pub enum MeasurementScope {
     Database,
+    Node,
+    Cluster,
     Server,
     Session,
     File,

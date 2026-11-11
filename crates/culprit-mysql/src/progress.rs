@@ -4,7 +4,6 @@
 //! and SHOW ANALYZE, which reads the running statement's plan with every operator's counters so far.
 
 use culprit_core::{Engine, PlanKind, QueryProgress, Result, format, session_number, t};
-use mysql_async::Conn;
 
 use crate::connect::{Connector, Flavor, Scope};
 use crate::rows::{explain_one, query_one};
@@ -65,9 +64,13 @@ fn mariadb_no_analyze() -> String {
     t!("provider.mysql.progress.no_show_analyze")
 }
 
-pub(crate) async fn query_progress(connector: &Connector, session: &str, with_plan: bool) -> Result<QueryProgress> {
+pub(crate) async fn query_progress(
+    connector: &std::sync::Arc<Connector>,
+    session: &str,
+    with_plan: bool,
+) -> Result<QueryProgress> {
     let id = session_number(session)?;
-    let mut conn = connector.connect(Scope::Server).await?;
+    let mut conn = crate::read::ReadSession::application(connector.clone(), Scope::Server);
     let taken_at = query_one(&mut conn, "SELECT DATE_FORMAT(UTC_TIMESTAMP(3), '%Y-%m-%dT%H:%i:%s.%fZ') AS now")
         .await?
         .map(|r| r.string("now"))
@@ -75,7 +78,7 @@ pub(crate) async fn query_progress(connector: &Connector, session: &str, with_pl
     let mut progress = QueryProgress::idle(session, Engine::Mysql, taken_at);
     if connector.flavor() == Flavor::Mariadb {
         let result = mariadb(&mut conn, id, with_plan, progress).await;
-        let _ = conn.disconnect().await;
+        conn.close().await;
         return result;
     }
     let detailed = query_one(&mut conn, &STATEMENT_SQL.replace("{id}", &id.to_string())).await;
@@ -86,7 +89,7 @@ pub(crate) async fn query_progress(connector: &Connector, session: &str, with_pl
         _ => query_one(&mut conn, &PROCESSLIST_SQL.replace("{id}", &id.to_string())).await?,
     };
     let Some(row) = row else {
-        let _ = conn.disconnect().await;
+        conn.close().await;
         return Ok(progress);
     };
     let statement = row.text("sql_text").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
@@ -94,7 +97,7 @@ pub(crate) async fn query_progress(connector: &Connector, session: &str, with_pl
     progress.state = row.text("state").filter(|s| !s.is_empty()).or_else(|| row.text("command"));
     progress.statement = statement;
     if !progress.running {
-        let _ = conn.disconnect().await;
+        conn.close().await;
         return Ok(progress);
     }
     progress.elapsed_ms = row.number("elapsed_ms");
@@ -141,11 +144,16 @@ pub(crate) async fn query_progress(connector: &Connector, session: &str, with_pl
     if progress.note.is_none() && progress.percent.is_none() {
         progress.note = Some(no_operator_progress());
     }
-    let _ = conn.disconnect().await;
+    conn.close().await;
     Ok(progress)
 }
 
-async fn mariadb(conn: &mut Conn, id: u64, with_plan: bool, mut progress: QueryProgress) -> Result<QueryProgress> {
+async fn mariadb(
+    conn: &mut impl crate::read::QueryRead,
+    id: u64,
+    with_plan: bool,
+    mut progress: QueryProgress,
+) -> Result<QueryProgress> {
     let Some(row) = query_one(conn, &MARIADB_SQL.replace("{id}", &id.to_string())).await? else {
         return Ok(progress);
     };

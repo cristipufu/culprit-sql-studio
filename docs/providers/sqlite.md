@@ -122,6 +122,13 @@ Schema and index advice can identify unindexed foreign keys, duplicate or overla
 
 ## Limits and evidence
 
+### Background telemetry
+
+The collector exports bounded native file/schema metadata through the same owned reader as scans. It releases the
+read transaction and closes the connection before paging, with a 250 ms metadata ceiling and file-replacement
+checks. It runs no `dbstat` page scan and exports no schema/default bodies. Server activity and native statement
+history are unsupported; supplied framework logs remain app evidence. See [collector source coverage](../collector.md#other-provider-source-coverage).
+
 A whole-file `dbstat` read is bounded by both size and time: up to 4 GiB and three seconds in WAL mode, or 128 MiB and half a second with a rollback journal. Beyond those budgets, sizes or counted rows stay unknown and the scan explains why. WAL allocation is read from filesystem metadata; the scan neither checkpoints nor deletes the WAL.
 
 Culprit's linked SQLite library can differ from the application's. Per-connection pragmas such as `foreign_keys`, `synchronous`, `cache_size` and `busy_timeout` describe the application's connection, not a setting Culprit can safely infer from its own.

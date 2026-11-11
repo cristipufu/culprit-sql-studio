@@ -6,7 +6,7 @@ use crate::{
 };
 use culprit_core::i18n::Message;
 use culprit_core::{Capability, Engine, Error, MissingCapability, Platform, Result, ServerInfo, t};
-use mysql_async::{Conn, Value};
+use mysql_async::Value;
 
 /// What the probe learned about the server, shared by every collector.
 pub struct Probe {
@@ -160,14 +160,14 @@ impl Probe {
     }
 }
 
-fn database_of(connector: &Connector) -> Result<String> {
+pub(crate) fn database_of(connector: &Connector) -> Result<String> {
     connector.database.clone().ok_or_else(|| {
         Error::invalid(t!("provider.mysql.probe.needs_database"))
             .with_hint(t!("provider.mysql.probe.needs_database_hint"))
     })
 }
 
-pub async fn probe(conn: &mut Conn, connector: &Connector) -> Result<Probe> {
+pub async fn probe(conn: &mut impl crate::read::QueryRead, connector: &Connector) -> Result<Probe> {
     let database = database_of(connector)?;
     let row = query_one(
         conn,
@@ -242,7 +242,7 @@ pub async fn probe(conn: &mut Conn, connector: &Connector) -> Result<Probe> {
 }
 
 async fn detect_platform(
-    conn: &mut Conn,
+    conn: &mut impl crate::read::QueryRead,
     host: &str,
     basedir: &str,
     comment: &str,

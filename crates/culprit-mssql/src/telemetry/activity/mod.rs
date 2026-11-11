@@ -88,10 +88,12 @@ pub(crate) async fn capture<R: crate::read::NativeRead>(
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
             epoch: frame.context.epoch.ok_or_else(decode::malformed)?,
             at: frame.context.at,
-            database_wide: true,
+            scope: culprit_core::MeasurementScope::Database,
+            complete_scope: true,
             policy: policy.clone(),
             native_rows: frame.records.len() as u32,
             qualifying: selected.conditions.len() as u32,
+            uncertain: 0,
             observations: selected.observations.len() as u32,
             blocking_edges: selected.blocking.len() as u32,
             details,

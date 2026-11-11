@@ -12,6 +12,7 @@ doctest = false
 [dependencies]
 culprit-core.workspace = true
 culprit-postgres.workspace = true
+culprit-read.workspace = true
 async-trait.workspace = true
 serde_json.workspace = true
 serde.workspace = true

@@ -43,7 +43,7 @@ async fn native_streamed_statements_definitions_and_health_pass_through_common_c
        CREATE TRIGGER reject_writes BEFORE INSERT ON culprit_native.child FOR EACH ROW EXECUTE FUNCTION culprit_native.reject_writes();
        ANALYZE culprit_native.child; ANALYZE culprit_native.parent;
        SELECT pg_catalog.pg_create_physical_replication_slot('culprit_native_slot',false);")).await.unwrap();
-    let columns = crate::catalog::columns(&admin).await.unwrap();
+    let columns = crate::catalog::columns(&admin, 180_000).await.unwrap();
     assert!(columns.iter().any(|column| column.schema == "culprit_native"
         && column.name == "note"
         && column.default.as_deref().is_some_and(|value| value.contains("private-literal"))));

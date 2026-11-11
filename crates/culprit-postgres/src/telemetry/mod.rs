@@ -76,7 +76,7 @@ impl Recipe {
             }
             Self::Operational => Ok(native::operational::query(meta, limit)),
             Self::Settings => Ok(native::settings::capture_query(limit)),
-            Self::Catalog(kind) => Ok(native::catalog::query(kind, false, limit)),
+            Self::Catalog(kind) => Ok(native::catalog::query(kind, meta.version, false, limit)),
             Self::Sequences => Ok(native::sequences::query(Some(limit))),
             Self::Cleanup => Ok(native::cleanup::capture_query(limit)),
             Self::Replication => Ok(native::replication::query(meta.version, meta.standby, &meta.database_oid, limit)),
@@ -119,6 +119,7 @@ impl Recipe {
                     row.clone(),
                     Some(&meta.database_oid),
                     budget.max_sql_bytes as usize,
+                    culprit_core::Engine::Postgres,
                 )?
                 .definition;
                 let source = kind.source().to_owned();

@@ -128,7 +128,7 @@ fn records(stream: TelemetryStream) -> Vec<TelemetryRecord> {
         TelemetryStream::PlanDefinitions => vec![TelemetryRecord::PlanDefinition(PlanDefinition {
             identity: identity.clone(),
             id: identity.definition_id(&source).unwrap(),
-            query_definition_id: identity.query.definition_id(&source).unwrap(),
+            query_definition_id: Some(identity.query.definition_id(&source).unwrap()),
             source_text_bytes: Some("200".into()),
             plan: DefinitionPayload::plan(
                 "<ShowPlanXML><StmtSimple StatementText=\"SELECT 'private-value'\" /></ShowPlanXML>",

@@ -19,7 +19,7 @@ use rusqlite::types::ValueRef;
 use crate::map_error;
 
 /// The settings that live in the file (or describe it), recorded for the checks and the settings view.
-const FILE_PRAGMAS: &[&str] = &["journal_mode", "auto_vacuum", "page_size", "page_count", "freelist_count", "encoding"];
+const FILE_PRAGMAS: &[&str] = crate::native::FILE_PRAGMAS;
 
 /// The largest file read whole for sizes and row counts. `dbstat` visits every page inside one read transaction: in
 /// WAL mode the application's writers carry on beside it, but with a rollback journal it holds the lock a writer needs
@@ -216,6 +216,7 @@ pub fn server_info(
     }
 }
 
+#[cfg(test)]
 pub fn snapshot(
     conn: &mut Connection,
     path: &Path,
@@ -223,6 +224,31 @@ pub fn snapshot(
     environment: Environment,
     started: Instant,
 ) -> Result<Snapshot> {
+    let guard = culprit_core::limits::OperationGuard::new(culprit_core::limits::OBSERVE_TIMEOUT)?;
+    let result = snapshot_with_handle(conn, path, connection, environment, started, guard.handle());
+    conn.progress_handler(0, None::<fn() -> bool>).map_err(|error| map_error(&error))?;
+    result
+}
+pub(crate) fn snapshot_with_handle(
+    conn: &mut Connection,
+    path: &Path,
+    connection: &str,
+    environment: Environment,
+    started: Instant,
+    operation: culprit_core::limits::OperationHandle,
+) -> Result<Snapshot> {
+    let file = conn
+        .path()
+        .filter(|path| !path.is_empty())
+        .map(|_| {
+            crate::file::FileIdentity::read(path).and_then(|identity| {
+                identity.bound_to(conn, path)?;
+                Ok(identity)
+            })
+        })
+        .transpose()?;
+    let progress = operation.clone();
+    conn.progress_handler(100, Some(move || progress.stopped())).map_err(|error| map_error(&error))?;
     let taken_at = conn
         .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |r| r.get::<_, String>(0))
         .map_err(|e| map_error(&e))?;
@@ -234,9 +260,9 @@ pub fn snapshot(
     let without_rowid: HashSet<&str> =
         schema.tables.iter().filter(|t| t.without_rowid).map(|t| t.name.as_str()).collect();
     // Counted rows where the file was read whole; the planner's statistics otherwise.
-    let (sizes, counted, whole) = match whole_file_read(conn)
-        .and_then(|budget| object_sizes(conn, &without_rowid, budget).map_err(|error| reading_stopped(&error)))
-    {
+    let (sizes, counted, whole) = match whole_file_read(conn).and_then(|budget| {
+        object_sizes(conn, &without_rowid, budget, &operation).map_err(|error| reading_stopped(&error))
+    }) {
         Ok(ObjectSizes { bytes, rows }) => {
             coverage.completed(&crate::sources::SIZES, bytes.len());
             (bytes, rows, Ok(()))
@@ -347,13 +373,7 @@ pub fn snapshot(
     let server = server_info(conn, path, have, missing);
     let mut operations = culprit_core::operations::OperationalStats::default();
     if pragma(conn, "journal_mode").is_some_and(|m| m.eq_ignore_ascii_case("wal")) {
-        let mut wal = path.as_os_str().to_os_string();
-        wal.push("-wal");
-        let size = match std::fs::metadata(std::path::PathBuf::from(wal)) {
-            Ok(metadata) => Ok(metadata.len() as f64),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0.0),
-            Err(_) => Err(culprit_core::Error::internal(wal_unreadable())),
-        };
+        let size = crate::native::wal_bytes(path).map(|bytes| bytes as f64);
         let wal_bytes = coverage.read(&crate::sources::WAL_FILE, size);
         operations.sqlite = Some(culprit_core::operations::SqliteFileHealth { wal_bytes, before: None });
     } else if settings.iter().any(|s| s.name == "journal_mode") {
@@ -397,29 +417,18 @@ pub fn snapshot(
         operations,
     };
     coverage.append_to(&mut snapshot);
-    let identity = match std::fs::canonicalize(path) {
-        Ok(path) => {
-            let identity =
-                culprit_core::DatabaseIdentity::file(&snapshot.server.database, path.to_string_lossy().into_owned());
-            #[cfg(unix)]
-            let identity = {
-                use std::os::unix::fs::MetadataExt;
-                let mut identity = identity;
-                if let Ok(metadata) = std::fs::metadata(&path) {
-                    identity.incarnation = Some(format!("{}:{}", metadata.dev(), metadata.ino()));
-                }
-                identity
-            };
-            identity
-        }
-        // A file whose path can't be resolved is still this database, at a location nobody can say: its scans
-        // compare with none.
-        Err(_) => culprit_core::DatabaseIdentity {
-            engine: culprit_core::Engine::Sqlite,
+    let identity = if let Some(file) = file {
+        file.bound_to(conn, path)?;
+        let mut identity = file.database;
+        identity.database = snapshot.server.database.clone();
+        identity
+    } else {
+        culprit_core::DatabaseIdentity {
+            engine: Engine::Sqlite,
             database: snapshot.server.database.clone(),
             location: culprit_core::DatabaseLocation::Unknown,
             incarnation: None,
-        },
+        }
     };
     snapshot.bind_identity(identity);
     Ok(snapshot)
@@ -439,14 +448,7 @@ struct Schema {
 }
 
 fn read_schema(conn: &Connection) -> rusqlite::Result<Schema> {
-    let mut stmt = conn.prepare(
-        "/* culprit */ SELECT s.type, s.name, s.sql, t.type, t.wr
-           FROM main.sqlite_schema AS s
-           LEFT JOIN pragma_table_list AS t ON t.schema = 'main' AND t.name = s.name AND s.type = 'table'
-          WHERE s.type IN ('table', 'index') AND s.name NOT LIKE 'sqlite\\_%' ESCAPE '\\'
-            AND coalesce(t.type, '') <> 'shadow'
-          ORDER BY s.name",
-    )?;
+    let mut stmt = conn.prepare(crate::native::SCHEMA)?;
     let mut tables = Vec::new();
     let mut index_sql = HashMap::new();
     let rows = stmt.query_map([], |r| {
@@ -469,7 +471,9 @@ fn read_schema(conn: &Connection) -> rusqlite::Result<Schema> {
                 kind: table_kind.unwrap_or_else(|| "table".into()),
                 definition: sql,
             });
-        } else if let Some(sql) = sql {
+        } else if kind == "index"
+            && let Some(sql) = sql
+        {
             index_sql.insert(name, sql);
         }
     }
@@ -562,9 +566,11 @@ fn object_sizes(
     conn: &mut Connection,
     without_rowid: &HashSet<&str>,
     budget: Duration,
+    operation: &culprit_core::limits::OperationHandle,
 ) -> rusqlite::Result<ObjectSizes> {
     let started = Instant::now();
-    conn.progress_handler(1_000, Some(move || started.elapsed() > budget))?;
+    let handle = operation.clone();
+    conn.progress_handler(100, Some(move || handle.stopped() || started.elapsed() >= budget))?;
     let read = (|| {
         let mut stmt = conn.prepare(
             "SELECT name, sum(pgsize),
@@ -577,7 +583,9 @@ fn object_sizes(
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
     })();
-    conn.progress_handler(0, None::<fn() -> bool>)?;
+
+    let handle = operation.clone();
+    conn.progress_handler(100, Some(move || handle.stopped()))?;
     let mut sizes = HashMap::new();
     let mut counted = HashMap::new();
     for (name, bytes, leaf_cells, cells) in read? {
@@ -633,8 +641,7 @@ struct Column {
 }
 
 fn read_columns(conn: &Connection, table: &str) -> rusqlite::Result<Vec<Column>> {
-    let mut stmt =
-        conn.prepare("SELECT cid, name, type, \"notnull\", dflt_value, pk, hidden FROM pragma_table_xinfo(?1)")?;
+    let mut stmt = conn.prepare(crate::native::COLUMNS)?;
     let rows = stmt.query_map([table], |r| {
         Ok(Column {
             ordinal: r.get::<_, i64>(0)? as u32 + 1,
@@ -656,7 +663,7 @@ fn read_indexes(
     index_sql: &HashMap<String, String>,
     sizes: &HashMap<String, f64>,
 ) -> rusqlite::Result<Vec<IndexStat>> {
-    let mut list = conn.prepare("SELECT name, \"unique\", origin, partial FROM pragma_index_list(?1)")?;
+    let mut list = conn.prepare(crate::native::INDEXES)?;
     let indexes: Vec<(String, bool, String, bool)> = list
         .query_map([table], |r| {
             Ok((r.get(0)?, r.get::<_, i64>(1)? != 0, r.get::<_, String>(2)?, r.get::<_, i64>(3)? != 0))
@@ -670,8 +677,7 @@ fn read_indexes(
         // never matches another's. A key compared by a collation other than BINARY says so (NOCASE serves different
         // queries than the column's own order).
         let terms = sql.as_deref().map(index_terms).unwrap_or_default();
-        let mut info = conn
-            .prepare("SELECT seqno, name, \"desc\", coll FROM pragma_index_xinfo(?1) WHERE key = 1 ORDER BY seqno")?;
+        let mut info = conn.prepare(crate::native::INDEX_KEYS)?;
         let keys: Vec<(String, String)> = info
             .query_map([&name], |r| {
                 let seqno: i64 = r.get(0)?;
@@ -798,9 +804,7 @@ fn partial_filter(sql: &str) -> Option<String> {
 type KeyParts = (String, Vec<String>, Vec<Option<String>>, Option<String>);
 
 fn read_foreign_keys(conn: &Connection, table: &str) -> rusqlite::Result<Vec<ForeignKey>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, seq, \"table\", \"from\", \"to\", on_delete FROM pragma_foreign_key_list(?1) ORDER BY id, seq",
-    )?;
+    let mut stmt = conn.prepare(crate::native::FOREIGN_KEYS)?;
     let mut grouped: BTreeMap<i64, KeyParts> = BTreeMap::new();
     let rows = stmt.query_map([table], |r| {
         Ok((

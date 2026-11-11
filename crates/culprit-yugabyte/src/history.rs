@@ -1,13 +1,23 @@
 //! QPM's independent, evictable plan cache. These are not pg_stat_statements lifetime totals or measured operators.
+use crate::read::{NoticeRead, query_bounded};
 use crate::{probe::Probe, sources};
 use culprit_core::{Coverage, Error, Plan, PlanHistory, PlanHistoryKind, PlanKind, PlanVariant, Result, Workload};
-use culprit_postgres::wire::{ObservedSession, query_bounded};
 use std::collections::BTreeMap;
 
-fn relation(probe: &Probe) -> &'static str {
-    if probe.global { "pg_catalog.\"gv$yb_pg_stat_plans\"" } else { "pg_catalog.yb_pg_stat_plans" }
+fn relation(probe: &Probe) -> String {
+    let native = if probe.global { "pg_catalog.\"gv$yb_pg_stat_plans\"" } else { "pg_catalog.yb_pg_stat_plans" };
+    guarded_relation(native)
 }
-fn authorize(probe: &Probe) -> Result<()> {
+pub(crate) fn guarded_relation(native: &str) -> String {
+    // Keep the permission check in the same command as the materializing native view. OFFSET 0 preserves
+    // the lateral dependency: a revoked role must fail the one-time filter before the view is evaluated.
+    format!(
+        "(SELECT safe.* FROM (SELECT {} AS allowed OFFSET 0) permission CROSS JOIN LATERAL
+        (SELECT native.* FROM {native} native WHERE permission.allowed OFFSET 0) safe) guarded_plans",
+        crate::probe::ALL_STATS
+    )
+}
+pub(crate) fn authorize(probe: &Probe) -> Result<()> {
     // The view materializes all entries before SQL filters apply. On verified 2026.1.2, its
     // foreign-role redaction path segfaults even for a count(*) filtered to the caller's userid.
     // pg_read_all_stats avoids that path without requiring a superuser or changing server settings.
@@ -22,7 +32,7 @@ fn authorize(probe: &Probe) -> Result<()> {
 }
 
 pub(crate) async fn collect(
-    session: &ObservedSession,
+    session: &mut impl NoticeRead,
     probe: &Probe,
     workload: &mut Workload,
     coverage: &mut Coverage,
@@ -79,8 +89,8 @@ pub(crate) async fn collect(
     let result = match authorize(probe) {
         Ok(()) => {
             async {
-                let rows = query_bounded(&session.client, &sql, 1000).await?;
-                crate::probe::require_all_stats(&session.client).await?;
+                let rows = query_bounded(session, &sql, 1000).await?;
+                crate::probe::require_all_stats_from(session).await?;
                 Ok(rows)
             }
             .await
@@ -147,7 +157,7 @@ pub(crate) async fn collect(
 }
 
 pub(crate) async fn capture(
-    session: &ObservedSession,
+    session: &mut impl NoticeRead,
     probe: &Probe,
     workload: &mut Workload,
     requested: usize,
@@ -182,8 +192,8 @@ pub(crate) async fn capture(
         crate::probe::ALL_STATS
     );
     let result: Result<_> = async {
-        let rows = query_bounded(&session.client, &sql, requested).await?;
-        crate::probe::require_all_stats(&session.client).await?;
+        let rows = query_bounded(session, &sql, requested).await?;
+        crate::probe::require_all_stats_from(session).await?;
         Ok(rows)
     }
     .await;
@@ -245,7 +255,12 @@ fn decode_stored(raw: &str) -> Result<Plan> {
     Ok(plan)
 }
 
-pub(crate) async fn stored(session: &ObservedSession, probe: &Probe, query: &str, id: &str) -> Result<Option<Plan>> {
+pub(crate) async fn stored(
+    session: &mut impl NoticeRead,
+    probe: &Probe,
+    query: &str,
+    id: &str,
+) -> Result<Option<Plan>> {
     authorize(probe)?;
     let query =
         query.parse::<i64>().map_err(|_| Error::invalid(culprit_core::message!("provider.yugabyte.error.query_id")))?;
@@ -258,8 +273,8 @@ pub(crate) async fn stored(session: &ObservedSession, probe: &Probe, query: &str
         probe.oid,
         crate::probe::ALL_STATS
     );
-    let (rows, truncated) = query_bounded(&session.client, &sql, 1).await?;
-    crate::probe::require_all_stats(&session.client).await?;
+    let (rows, truncated) = query_bounded(session, &sql, 1).await?;
+    crate::probe::require_all_stats_from(session).await?;
     if truncated {
         return Err(Error::invalid(culprit_core::message!("provider.yugabyte.error.stored_plan_too_big")));
     }

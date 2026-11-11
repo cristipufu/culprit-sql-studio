@@ -328,11 +328,17 @@ fn bloat_estimates(rows: &[Row]) -> HashMap<(String, String), f64> {
 /// planner reads CHECK constraints by default (constraint exclusion), and only validated ones.
 async fn constraints(client: &Client, _version_num: u32) -> culprit_core::Result<Vec<ConstraintIssue>> {
     let kind = crate::native::catalog::Kind::UnvalidatedChecks;
-    let readings = query(client, &crate::native::catalog::query(kind, false, 100_001))
+    let readings = query(client, &crate::native::catalog::query(kind, 0, false, 100_001))
         .await?
         .into_iter()
         .map(|row| {
-            crate::native::catalog::decode(kind, row, None, culprit_core::telemetry::MAX_CATALOG_EXPRESSION_BYTES)
+            crate::native::catalog::decode(
+                kind,
+                row,
+                None,
+                culprit_core::telemetry::MAX_CATALOG_EXPRESSION_BYTES,
+                culprit_core::Engine::Postgres,
+            )
         })
         .collect::<culprit_core::Result<Vec<_>>>()?;
     Ok(readings.into_iter().filter_map(crate::native::catalog::constraint).collect())

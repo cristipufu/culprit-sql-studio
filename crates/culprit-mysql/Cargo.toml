@@ -12,9 +12,13 @@ doctest = false
 
 [dependencies]
 culprit-core.workspace = true
+culprit-read.workspace = true
 async-trait.workspace = true
 mysql_async.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

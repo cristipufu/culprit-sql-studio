@@ -213,7 +213,7 @@ fn definition(stream: TelemetryStream) -> TelemetryRecord {
         TelemetryRecord::PlanDefinition(PlanDefinition {
             identity: identity.clone(),
             id: identity.definition_id(&source).unwrap(),
-            query_definition_id: query_id,
+            query_definition_id: Some(query_id),
             source_text_bytes: Some("200".into()),
             plan: DefinitionPayload::plan(
                 "<ShowPlanXML><StmtSimple StatementText=\"SELECT 'secret-value'\" /></ShowPlanXML>",
@@ -1140,6 +1140,7 @@ async fn equivalent_resource_timestamps_cannot_create_duplicate_measurements() {
 fn activity_row() -> culprit_core::telemetry::ActivityObservation {
     use culprit_core::telemetry::*;
     ActivityObservation {
+        blocking_status: culprit_core::telemetry::ActivityBlockingStatus::Known,
         key: ActivityKey {
             session: NativeActivityIdentity { id: "42".into(), generation: "login-1".into() },
             request: Some(NativeActivityIdentity { id: "0".into(), generation: "request-1".into() }),
@@ -1192,10 +1193,12 @@ fn activity_description(scenario: Scenario, step: usize) -> CollectionDescriptio
         observation: SourceObservation::Activity(ActivitySnapshotDescription {
             epoch: "native-epoch-1".into(),
             at: format!("2020-01-01T06:{step:02}:00Z"),
-            database_wide: !matches!(scenario, Scenario::ActivityRestricted),
+            scope: culprit_core::MeasurementScope::Database,
+            complete_scope: !matches!(scenario, Scenario::ActivityRestricted),
             policy: ActivityPolicy::default(),
             native_rows: count,
             qualifying: count,
+            uncertain: 0,
             observations: count,
             blocking_edges: if matches!(scenario, Scenario::ActivityWrongEdges) { 1 } else { 0 },
             details: ActivityDetailStatus::Collected,
@@ -1407,6 +1410,7 @@ fn operational_rows(scenario: Scenario) -> Vec<TelemetryRecord> {
     use culprit_core::telemetry::*;
     if matches!(scenario, Scenario::CumulativeStatements) {
         let sample = StatementCounterSample {
+            scope: culprit_core::MeasurementScope::Database,
             distributions: vec![],
             identity: NativeQueryIdentity {
                 query_id: "opaque-query".into(),

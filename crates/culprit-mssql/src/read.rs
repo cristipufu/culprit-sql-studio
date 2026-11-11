@@ -349,6 +349,7 @@ async fn finish_or_interrupt(
     work: impl std::future::Future<Output = ReadResult<Vec<Rec>>>,
     timeout: Duration,
     cancelled: tokio::sync::oneshot::Receiver<()>,
+    retention: culprit_read::RetentionControl,
 ) -> ReadOutcome {
     use std::sync::atomic::{AtomicBool, Ordering};
     let started = AtomicBool::new(false);
@@ -370,6 +371,7 @@ async fn finish_or_interrupt(
     if !started.load(Ordering::Relaxed) {
         return ReadOutcome::QuiescentStop(reason);
     }
+    retention.discard();
     // Keep the existing decoder alive briefly: dropping it mid-token can desynchronize the driver and prevent
     // Attention acknowledgement. No new request starts, and cancelled rows are never accepted as a page.
     match tokio::time::timeout(CANCELLATION_DRAIN_GRACE, &mut tracked).await {
@@ -391,7 +393,8 @@ async fn read_owned(
     let _transport = transport;
     let started = std::time::Instant::now();
     let progress = Arc::new(crate::read_metrics::Progress::default());
-    let outcome = finish_or_interrupt(read(&mut client, query, progress.clone()), timeout, cancelled).await;
+    let retention = query.output.retention_control();
+    let outcome = finish_or_interrupt(read(&mut client, query, progress.clone()), timeout, cancelled, retention).await;
     let mut accounting = crate::read_metrics::requested(&outcome);
     let result = match outcome {
         ReadOutcome::Completed(rows) => Ok((client, rows)),
@@ -699,6 +702,7 @@ mod tests {
             async { panic!("a cancelled request must never start") },
             Duration::from_secs(5),
             cancelled,
+            culprit_read::RetentionControl::default(),
         )
         .await;
         assert!(matches!(outcome, ReadOutcome::QuiescentStop(CollectionStop::Cancelled)));
@@ -718,7 +722,9 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
             drop(owner);
         });
-        let outcome = finish_or_interrupt(work, Duration::from_secs(5), cancelled).await;
+        let outcome =
+            finish_or_interrupt(work, Duration::from_secs(5), cancelled, culprit_read::RetentionControl::default())
+                .await;
         assert!(completed.load(std::sync::atomic::Ordering::SeqCst));
         assert!(matches!(outcome, ReadOutcome::QuiescentStop(CollectionStop::Cancelled)));
     }
@@ -731,7 +737,13 @@ mod tests {
             drop(owner);
         });
         let started = Instant::now();
-        let outcome = finish_or_interrupt(std::future::pending(), Duration::from_secs(5), cancelled).await;
+        let outcome = finish_or_interrupt(
+            std::future::pending(),
+            Duration::from_secs(5),
+            cancelled,
+            culprit_read::RetentionControl::default(),
+        )
+        .await;
         assert!(matches!(outcome, ReadOutcome::NeedsAttention(ReadError::Stopped(CollectionStop::Cancelled))));
         assert_eq!(started.elapsed(), Duration::from_millis(10) + CANCELLATION_DRAIN_GRACE);
     }

@@ -130,11 +130,12 @@ impl NativeCatalogCounters {
     }
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", content = "data", rename_all = "kebab-case")]
 #[ts(export)]
 pub enum ObjectDefinitionFact {
     Statement(Box<QueryDefinition>),
+    RetainedPlan(Box<NativeRetainedPlan>),
     NativeCatalog(Box<NativeCatalogDefinition>),
     MssqlForeignKey(Box<MssqlForeignKey>),
     MssqlColumn(Box<MssqlColumnDefinition>),
@@ -149,6 +150,7 @@ impl ObjectDefinitionFact {
     pub fn key(&self) -> Result<String> {
         match self {
             Self::NativeCatalog(catalog) => catalog.key(),
+            Self::RetainedPlan(plan) => Ok(plan.definition.id.clone()),
             Self::Statement(statement) => serde_json::to_vec(&statement.identity)
                 .map(|bytes| digest(&bytes))
                 .map_err(|_| CollectionStop::InvalidPage.error()),
@@ -165,6 +167,7 @@ impl ObjectDefinitionFact {
     pub fn is_valid(&self) -> bool {
         match self {
             Self::NativeCatalog(catalog) => catalog.is_valid(),
+            Self::RetainedPlan(plan) => plan.is_valid(),
             Self::Statement(statement) => statement.is_valid(),
             Self::MssqlForeignKey(key) => key.is_valid(),
             Self::MssqlColumn(column) => column.is_valid(),
@@ -179,6 +182,7 @@ impl ObjectDefinitionFact {
     fn redact(&mut self, engine: crate::Engine) {
         match self {
             Self::NativeCatalog(catalog) => catalog.redact(engine),
+            Self::RetainedPlan(plan) => plan.redact(engine),
             Self::Statement(statement) => {
                 if let DefinitionPayload::Available { text, .. } = &statement.sql {
                     statement.sql = DefinitionPayload::sql(text, engine);
@@ -202,7 +206,7 @@ impl ObjectDefinitionFact {
     }
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct ObjectDefinitionRecord {
     pub source: String,

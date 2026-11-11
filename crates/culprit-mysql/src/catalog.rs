@@ -6,21 +6,11 @@ use crate::{
     vars,
 };
 use culprit_core::{ColumnInfo, ForeignKey, IndexStat, Result, Setting, TableStat, t};
-use mysql_async::{Conn, Value};
+use mysql_async::Value;
 use std::collections::{BTreeMap, HashMap};
 
-pub(crate) async fn tables(conn: &mut Conn, db: &str) -> Result<Vec<TableStat>> {
-    let rows = query_with(
-        conn,
-        "SELECT t.TABLE_NAME AS name, t.TABLE_ROWS AS row_estimate, t.DATA_LENGTH AS data_bytes, t.INDEX_LENGTH AS index_bytes,
-                EXISTS (SELECT 1 FROM information_schema.TABLE_CONSTRAINTS c
-                         WHERE c.TABLE_SCHEMA = t.TABLE_SCHEMA AND c.TABLE_NAME = t.TABLE_NAME
-                           AND c.CONSTRAINT_TYPE = 'PRIMARY KEY') AS has_pk
-           FROM information_schema.TABLES t
-          WHERE t.TABLE_SCHEMA = ? AND t.TABLE_TYPE = 'BASE TABLE'",
-        vec![Value::from(db)],
-    )
-    .await?;
+pub(crate) async fn tables(conn: &mut impl crate::read::QueryRead, db: &str) -> Result<Vec<TableStat>> {
+    let rows = query_with(conn, &crate::native::catalog::tables_query(), vec![Value::from(db)]).await?;
     let io: HashMap<String, Rec> = query_with(
         conn,
         "SELECT OBJECT_NAME AS name, COUNT_INSERT AS inserts, COUNT_UPDATE AS updates, COUNT_DELETE AS deletes
@@ -101,19 +91,8 @@ pub(crate) async fn tables(conn: &mut Conn, db: &str) -> Result<Vec<TableStat>> 
         .collect())
 }
 
-pub(crate) async fn columns(conn: &mut Conn, db: &str) -> Result<Vec<ColumnInfo>> {
-    let with_collation = "SELECT TABLE_NAME AS table_name, COLUMN_NAME AS name, COLUMN_TYPE AS data_type,
-                IS_NULLABLE AS nullable, COLUMN_DEFAULT AS default_value, EXTRA AS extra,
-                ORDINAL_POSITION AS ordinal, COLLATION_NAME AS collation_name
-           FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION";
-    let without_collation = "SELECT TABLE_NAME AS table_name, COLUMN_NAME AS name, COLUMN_TYPE AS data_type,
-                IS_NULLABLE AS nullable, COLUMN_DEFAULT AS default_value, EXTRA AS extra,
-                ORDINAL_POSITION AS ordinal
-           FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION";
-    let rows = match query_with(conn, with_collation, vec![Value::from(db)]).await {
-        Ok(rows) => rows,
-        Err(_) => query_with(conn, without_collation, vec![Value::from(db)]).await?,
-    };
+pub(crate) async fn columns(conn: &mut impl crate::read::QueryRead, db: &str) -> Result<Vec<ColumnInfo>> {
+    let rows = query_with(conn, &crate::native::catalog::columns_query(true), vec![Value::from(db)]).await?;
     let mut collation_counts: HashMap<String, usize> = HashMap::new();
     for r in &rows {
         if let Some(coll) = r.text("collation_name").filter(|s| !s.is_empty()) {
@@ -147,18 +126,16 @@ pub(crate) async fn columns(conn: &mut Conn, db: &str) -> Result<Vec<ColumnInfo>
 }
 
 /// Indexes with their key columns, size and usage since the server started. The note explains missing usage counters.
-pub(crate) async fn indexes(conn: &mut Conn, db: &str, probe: &Probe) -> Result<(Vec<IndexStat>, Option<String>)> {
-    let with_visibility = "SELECT TABLE_NAME AS table_name, INDEX_NAME AS index_name, NON_UNIQUE AS non_unique,
-                SEQ_IN_INDEX AS seq, COLUMN_NAME AS column_name, COLLATION AS collation, SUB_PART AS sub_part,
-                INDEX_TYPE AS index_type, EXPRESSION AS expression, IS_VISIBLE AS visible
-           FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX";
-    let without_visibility = "SELECT TABLE_NAME AS table_name, INDEX_NAME AS index_name, NON_UNIQUE AS non_unique,
-                SEQ_IN_INDEX AS seq, COLUMN_NAME AS column_name, COLLATION AS collation, SUB_PART AS sub_part,
-                INDEX_TYPE AS index_type
-           FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX";
-    let rows = match query_with(conn, with_visibility, vec![Value::from(db)]).await {
+pub(crate) async fn indexes(
+    conn: &mut impl crate::read::QueryRead,
+    db: &str,
+    probe: &Probe,
+) -> Result<(Vec<IndexStat>, Option<String>)> {
+    let with_visibility = crate::native::catalog::indexes_query(true, true);
+    let without_visibility = crate::native::catalog::indexes_query(false, false);
+    let rows = match query_with(conn, &with_visibility, vec![Value::from(db)]).await {
         Ok(rows) => rows,
-        Err(_) => query_with(conn, without_visibility, vec![Value::from(db)]).await?,
+        Err(_) => query_with(conn, &without_visibility, vec![Value::from(db)]).await?,
     };
     let engines: HashMap<String, String> = query_with(
         conn,
@@ -306,7 +283,7 @@ pub(crate) async fn indexes(conn: &mut Conn, db: &str, probe: &Probe) -> Result<
 /// Index reads from MariaDB's userstat counters (since `userstat` was turned on or last flushed). An index missing from
 /// INDEX_STATISTICS on a table that has been read was not used; on a table nobody has touched, usage is unknown.
 async fn userstat_usage(
-    conn: &mut Conn,
+    conn: &mut impl crate::read::QueryRead,
     db: &str,
     statistics: &[Rec],
 ) -> Result<HashMap<(String, String), (Option<f64>, Option<f64>)>> {
@@ -338,32 +315,8 @@ async fn userstat_usage(
     Ok(out)
 }
 
-pub(crate) async fn foreign_keys(conn: &mut Conn, db: &str) -> Result<Vec<ForeignKey>> {
-    let with_rules = "SELECT k.CONSTRAINT_NAME AS name, k.TABLE_NAME AS table_name, k.COLUMN_NAME AS column_name,
-                             k.REFERENCED_TABLE_SCHEMA AS ref_schema, k.REFERENCED_TABLE_NAME AS ref_table,
-                             k.REFERENCED_COLUMN_NAME AS ref_column, rc.DELETE_RULE AS delete_rule
-                        FROM information_schema.KEY_COLUMN_USAGE k
-                        LEFT JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
-                          ON rc.CONSTRAINT_SCHEMA = k.TABLE_SCHEMA
-                         AND rc.TABLE_NAME = k.TABLE_NAME
-                         AND rc.CONSTRAINT_NAME = k.CONSTRAINT_NAME
-                       WHERE k.TABLE_SCHEMA = ? AND k.REFERENCED_TABLE_NAME IS NOT NULL
-                       ORDER BY k.TABLE_NAME, k.CONSTRAINT_NAME, k.ORDINAL_POSITION";
-    let rows = match query_with(conn, with_rules, vec![Value::from(db)]).await {
-        Ok(rows) => rows,
-        Err(_) => {
-            query_with(
-                conn,
-                "SELECT CONSTRAINT_NAME AS name, TABLE_NAME AS table_name, COLUMN_NAME AS column_name,
-                        REFERENCED_TABLE_SCHEMA AS ref_schema, REFERENCED_TABLE_NAME AS ref_table, REFERENCED_COLUMN_NAME AS ref_column
-                   FROM information_schema.KEY_COLUMN_USAGE
-                  WHERE TABLE_SCHEMA = ? AND REFERENCED_TABLE_NAME IS NOT NULL
-                  ORDER BY TABLE_NAME, CONSTRAINT_NAME, ORDINAL_POSITION",
-                vec![Value::from(db)],
-            )
-            .await?
-        }
-    };
+pub(crate) async fn foreign_keys(conn: &mut impl crate::read::QueryRead, db: &str) -> Result<Vec<ForeignKey>> {
+    let rows = query_with(conn, &crate::native::catalog::foreign_keys_query(), vec![Value::from(db)]).await?;
     let mut out: Vec<ForeignKey> = Vec::new();
     for r in &rows {
         let (name, table) = (r.string("name"), r.string("table_name"));
@@ -427,7 +380,7 @@ const SETTINGS: [(&str, Option<&str>, Option<&str>); 23] = [
 /// "replica" when this server replicates from another: its replication status has a row, or, where this login can't
 /// read that status, it is read-only (how replicas and Aurora's readers run). Its usage counters count the reads run on
 /// it (and the replication applier's), not the primary's workload.
-pub(crate) async fn replica_role(conn: &mut Conn, probe: &Probe) -> Option<&'static str> {
+pub(crate) async fn replica_role(conn: &mut impl crate::read::QueryRead, probe: &Probe) -> Option<&'static str> {
     let status = match query(
         conn,
         if probe.flavor == Flavor::Mariadb { "SHOW ALL REPLICAS STATUS" } else { "SHOW REPLICA STATUS" },
@@ -447,19 +400,22 @@ pub(crate) async fn replica_role(conn: &mut Conn, probe: &Probe) -> Option<&'sta
     }
 }
 
-pub(crate) async fn settings(conn: &mut Conn, flavor: Flavor) -> Result<Vec<Setting>> {
-    let default_of = |name: &str| {
-        SETTINGS.iter().find(|(n, _, _)| *n == name).and_then(|(_, mysql, maria)| match flavor {
-            Flavor::Mysql => *mysql,
-            Flavor::Mariadb => *maria,
-        })
-    };
-    let names: Vec<&str> = SETTINGS.iter().filter(|(n, _, _)| default_of(n).is_some()).map(|(n, _, _)| *n).collect();
+fn setting_default(name: &str, flavor: Flavor) -> Option<&'static str> {
+    SETTINGS.iter().find(|(n, _, _)| *n == name).and_then(|(_, mysql, maria)| match flavor {
+        Flavor::Mysql => *mysql,
+        Flavor::Mariadb => *maria,
+    })
+}
+pub(crate) fn settings_names(flavor: Flavor) -> Vec<&'static str> {
+    SETTINGS.iter().filter(|(name, _, _)| setting_default(name, flavor).is_some()).map(|(name, _, _)| *name).collect()
+}
+pub(crate) async fn settings(conn: &mut impl crate::read::QueryRead, flavor: Flavor) -> Result<Vec<Setting>> {
+    let names = settings_names(flavor);
     let rows = vars::variables(conn, &names).await?;
     Ok(rows
         .into_iter()
         .map(|(name, value)| {
-            let default = default_of(&name).filter(|d| !d.is_empty()).map(str::to_string);
+            let default = setting_default(&name, flavor).filter(|d| !d.is_empty()).map(str::to_string);
             Setting { name, value, default_value: default, scope: "server".into() }
         })
         .chain(statement_status(conn).await)
@@ -468,7 +424,7 @@ pub(crate) async fn settings(conn: &mut Conn, flavor: Flavor) -> Result<Vec<Sett
 
 /// Whether performance_schema keeps up with the workload: digests it had no room for, statements lumped into the
 /// overflow row, and the consumer that has to be on for digests at all. Best effort; each part may be unreadable.
-async fn statement_status(conn: &mut Conn) -> Vec<Setting> {
+async fn statement_status(conn: &mut impl crate::read::QueryRead) -> Vec<Setting> {
     let mut out = Vec::new();
     let status =
         |name: &str, value: String| Setting { name: name.into(), value, default_value: None, scope: "status".into() };

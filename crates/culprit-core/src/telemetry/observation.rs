@@ -246,7 +246,7 @@ impl SourceObservation {
             Self::RetainedSamples(history) => history.covers_request(),
             // This proves a complete retained-source read; historical completeness is a separate explicit fact.
             Self::RetainedEvents(_) => true,
-            Self::Activity(snapshot) => snapshot.database_wide,
+            Self::Activity(snapshot) => snapshot.complete_scope,
             Self::Snapshot(snapshot) => snapshot.is_valid(),
             Self::PagedSnapshot(_) => false,
         }

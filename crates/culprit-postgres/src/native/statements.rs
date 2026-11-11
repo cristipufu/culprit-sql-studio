@@ -259,6 +259,7 @@ pub(crate) fn counters(row: &Row, meta: &Metadata) -> Result<StatementCounterSam
         }
     }
     let sample = StatementCounterSample {
+        scope: culprit_core::MeasurementScope::Database,
         identity: identity(row, meta)?,
         observed_at: text(row, "observed_at")?,
         reset,
@@ -279,7 +280,7 @@ pub(crate) fn definition(
     let identity = identity(row, meta)?;
     let source_text_bytes = row.text("source_text_bytes");
     let text = row.text("query");
-    let (origin, monitoring_template_id) = provenance(text.as_deref());
+    let (origin, monitoring_template_id) = StatementOrigin::from_sql(text.as_deref(), Engine::Postgres);
     let sql = match &text {
         Some(text) => DefinitionPayload::sql(text, Engine::Postgres),
         None => DefinitionPayload::Unavailable {
@@ -304,31 +305,6 @@ pub(crate) fn definition(
         source_text_bytes,
         sql,
     })
-}
-fn provenance(text: Option<&str>) -> (StatementOrigin, Option<String>) {
-    let Some(text) = text else { return (StatementOrigin::Unknown, None) };
-    let Ok(Some(comments)) = culprit_core::sql::block_comments(text, Engine::Postgres) else {
-        return (StatementOrigin::Unknown, None);
-    };
-    let origin = if comments.contains(&"/* culprit:monitor */") {
-        StatementOrigin::CulpritMonitoring
-    } else if comments.contains(&crate::rows::TAG) {
-        StatementOrigin::Culprit
-    } else {
-        StatementOrigin::Application
-    };
-    let template = (origin == StatementOrigin::CulpritMonitoring)
-        .then(|| {
-            comments.iter().find_map(|comment| {
-                comment
-                    .strip_prefix("/* culprit:template:")
-                    .and_then(|value| value.strip_suffix(" */"))
-                    .filter(|value| valid_digest(value))
-                    .map(str::to_owned)
-            })
-        })
-        .flatten();
-    (origin, template)
 }
 
 pub(crate) fn aggregated_base(relation: &str, c: &Layout) -> String {

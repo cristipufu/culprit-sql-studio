@@ -62,7 +62,8 @@ data (`MAX_RESULT_ROWS`, `MAX_RESULT_BYTES`). The numbers live on those constant
 them so it stays true when one is tuned. The same goes for the discovery, subprocess and SSH limits below. `execution.rs` bounds
 the provider future, including database connection setup and server validation, with one deadline per operation;
 human credential sign-in happens before that deadline. Wait samples have their requested duration plus bounded
-overhead. Dropping a caller drops its driver future and session. Native workers keep an `OperationGuard` in the async
+overhead. Dropping a caller signals cancellation; owned native workers retain their sessions until protocol completion
+or file close is established. Unconfirmed shutdown closes further admission for that owner. Native workers keep an `OperationGuard` in the async
 caller and observe its handle before starting work and in SQLite's VM progress handler, including time spent queued.
 Providers use `ResultBudget` before allocating display values and drain network results through completion even after
 retention stops, so a late failure cannot become a successful write. Runtime providers follow the same cancellation
@@ -76,10 +77,13 @@ uses the same read-only checks as the editor, and dispatches `Provider::preview`
 own budget (`PREVIEW_TIMEOUT`): PostgreSQL/YSQL statement timeouts, MySQL/MariaDB session timeouts, SQLite's VM progress guard,
 and a SQL Server worker that retains its client to send Attention on timeout or caller cancellation. MySQL/MariaDB
 also retain a control session to send KILL QUERY for the owned request; a unique leading comment guards against
-server-local IDs behind proxies. Unsupported timeout settings remain optional, and worker slots include cancellation
-and bounded disconnects. The client query clock starts after setup and allows a grace period for the native
-timeout reply (`REPLY_GRACE` in `culprit-mysql/src/preview.rs`). During cancellation, Culprit accepts either the original statement's protocol completion or an acknowledged
-KILL QUERY as confirmation; a broken socket alone does not qualify. An unconfirmed cancellation is reported explicitly. See [MySQL KILL](https://dev.mysql.com/doc/refman/8.0/en/kill.html).
+server-local IDs behind proxies. Background reads require the native timeout policy; explicitly requested previews
+also have client cancellation when the server cannot apply an optional timeout. Worker slots include cancellation
+and bounded disconnects. The client query clock starts after setup. Cancellation requires the original statement's
+protocol completion and settlement of every dispatched control command. KILL acceptance only proves that the
+control command completed; it does not prove the target stopped. A broken socket leaves shutdown unconfirmed and
+fences further provider reads. Shared `culprit-read::ReadWork` guards preserve that fence if a native worker panics
+or is abandoned. See [MySQL KILL](https://dev.mysql.com/doc/refman/8.4/en/kill.html).
 Limits protect
 returned data and query lifetime; a server-side sort or selective-looking predicate can still need a scan.
 

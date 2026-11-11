@@ -6,18 +6,6 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_postgres::SimpleQueryMessage;
 
 const CANCELLATION_ACK_TIMEOUT: Duration = Duration::from_secs(5);
-struct TaskLifetime {
-    fence: culprit_read::ReadFence,
-    settled: bool,
-}
-impl Drop for TaskLifetime {
-    fn drop(&mut self) {
-        if !self.settled {
-            self.fence.mark_uncertain();
-        }
-    }
-}
-
 pub(super) struct ReadRequest {
     pub sql: String,
     pub row_limit: usize,
@@ -46,12 +34,15 @@ struct TaskResult {
 impl ReadTask {
     // Kept outside the source future: cleanup continues when the controller retires that future.
     pub(super) async fn run(self, output: RowOutput<Row>, cancellation: oneshot::Receiver<()>) -> CompletedRead {
-        let mut lifetime = TaskLifetime { fence: self.fence.clone(), settled: false };
+        let lifetime = match self.fence.start_work() {
+            Ok(lifetime) => lifetime,
+            Err(error) => return CompletedRead { client: None, result: Err(error), confirmed: false },
+        };
         let progress = QueryProgress::default();
         let started = std::time::Instant::now();
         let settled = self.settle(output, &progress, cancellation).await;
         self.metrics.finish(self.template.as_deref(), started.elapsed(), &progress.counters, &settled.outcome);
-        lifetime.settled = settled.confirmed;
+        lifetime.complete(if settled.confirmed { SourceShutdown::Quiescent } else { SourceShutdown::Unconfirmed });
         // A delayed CancelRequest must never race a later statement on a reused session.
         let client = (!settled.interrupted && settled.confirmed).then_some(self.client);
         CompletedRead { client, result: settled.result, confirmed: settled.confirmed }
@@ -62,6 +53,7 @@ impl ReadTask {
         progress: &QueryProgress,
         cancellation: oneshot::Receiver<()>,
     ) -> TaskResult {
+        let retention = output.retention_control();
         let (limits, mut limit_reached) = mpsc::channel(1);
         let query = drain(&self.client, &self.request, progress, limits, output);
         tokio::pin!(query);
@@ -77,6 +69,7 @@ impl ReadTask {
                 return TaskResult { result, confirmed, interrupted: false, outcome };
             }
         };
+        retention.discard();
         let confirmed = if !progress.started.load(Ordering::Acquire) {
             true
         } else {

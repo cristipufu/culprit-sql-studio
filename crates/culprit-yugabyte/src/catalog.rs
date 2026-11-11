@@ -1,14 +1,14 @@
+use crate::read::{QueryRead, Row, query};
 use crate::{probe::Probe, sources};
 use culprit_core::{
-    ColumnInfo, ConstraintIssue, ConstraintKind, Coverage, ForeignKey, IndexStat, Result, Setting, Snapshot, TableStat,
+    ColumnInfo, ConstraintIssue, Coverage, ForeignKey, IndexStat, Result, Setting, Snapshot, TableStat,
     signals::{DocdbIndex, DocdbTable, TableStorage},
 };
-use culprit_postgres::wire::{Row, query, query_bounded};
 use serde_json::json;
 use std::collections::BTreeMap;
-use tokio_postgres::Client;
 
-const USER_RELATIONS: &str = "n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp_%'";
+use culprit_postgres::wire::catalog::{self as native_catalog, USER_SCHEMA as USER_RELATIONS};
+
 fn decode<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> Result<T> {
     serde_json::from_value(value)
         .map_err(|_| culprit_core::Error::invalid(culprit_core::t!("provider.yugabyte.error.incomplete_catalog")))
@@ -16,7 +16,7 @@ fn decode<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> Result<T>
 fn array(row: &Row, key: &str) -> Vec<String> {
     row.text(key).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
 }
-pub(crate) async fn tables(client: &Client) -> Result<Vec<TableStat>> {
+pub(crate) async fn tables(client: &mut impl QueryRead) -> Result<Vec<TableStat>> {
     let rows = query(
         client,
         &format!(
@@ -33,7 +33,7 @@ pub(crate) async fn tables(client: &Client) -> Result<Vec<TableStat>> {
     rows.iter().map(|r|decode(json!({"schema":r.string("schema"),"name":r.string("name"),"rows":r.number("rows"),
         "has_primary_key":r.flag("pk"),"kind":if r.string("kind")=="p" {"partitioned"} else {"docdb"},"partition_of":r.text("parent")}))).collect()
 }
-pub(crate) async fn indexes(client: &Client, _probe: &Probe) -> Result<Vec<IndexStat>> {
+pub(crate) async fn indexes(client: &mut impl QueryRead, _probe: &Probe) -> Result<Vec<IndexStat>> {
     let rows = query(client,&format!("SELECT n.nspname AS schema,t.relname AS table,i.relname AS name,am.amname AS kind,
         x.indisprimary AS pk,x.indisunique AS unique,x.indisready AS ready,x.indisvalid AS usable,
         pg_get_indexdef(i.oid) AS definition,pg_get_expr(x.indpred,x.indrelid) AS filter,
@@ -56,7 +56,7 @@ pub(crate) async fn indexes(client: &Client, _probe: &Probe) -> Result<Vec<Index
         "columns":array(r,"keys"),"opclasses":array(r,"opclasses"),"include":array(r,"included"),"filter":r.text("filter"),"is_primary_key":r.flag("pk"),
         "is_unique":r.flag("unique"),"is_clustered":r.flag("pk"),"is_disabled":!r.flag("usable"),"maintained":r.flag("ready"),"definition":r.text("definition"),"partition_of":r.text("partition_of")}))).collect()
 }
-pub(crate) async fn details(client: &Client, snapshot: &mut Snapshot, coverage: &mut Coverage) {
+pub(crate) async fn details(client: &mut impl QueryRead, snapshot: &mut Snapshot, coverage: &mut Coverage) {
     let props = query(
         client,
         &format!(
@@ -141,82 +141,55 @@ pub(crate) async fn details(client: &Client, snapshot: &mut Snapshot, coverage: 
         }
     }
 }
-pub(crate) async fn columns(client: &Client, probe: &Probe) -> Result<Vec<ColumnInfo>> {
-    let generated = if probe.compatibility >= 120000 { "a.attgenerated <> ''" } else { "false" };
-    let rows=query(client,&format!("SELECT n.nspname AS schema,c.relname AS table,a.attname AS name,a.attnum AS ordinal,
-        format_type(a.atttypid,a.atttypmod) AS type, NOT a.attnotnull AS nullable,pg_get_expr(d.adbin,d.adrelid) AS default,
-        (a.attidentity <> '' OR {generated}) AS generated FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
-        JOIN pg_namespace n ON n.oid=c.relnamespace LEFT JOIN pg_attrdef d ON d.adrelid=c.oid AND d.adnum=a.attnum
-        WHERE c.relkind IN ('r','p','m') AND a.attnum>0 AND NOT a.attisdropped AND {USER_RELATIONS} ORDER BY 1,2,a.attnum")).await?;
-    Ok(rows
-        .iter()
-        .map(|r| ColumnInfo {
-            schema: r.string("schema"),
-            table: r.string("table"),
-            name: r.string("name"),
-            data_type: r.string("type"),
-            nullable: r.flag("nullable"),
-            default: r.text("default"),
-            generated: r.flag("generated"),
-            ordinal: r.string("ordinal").parse().unwrap_or(0),
+async fn readings(
+    reader: &mut impl QueryRead,
+    probe: &Probe,
+    kind: native_catalog::Kind,
+    deparse: bool,
+) -> Result<Vec<native_catalog::CatalogReading>> {
+    query(reader, &native_catalog::query(kind, probe.compatibility, deparse, 10_001))
+        .await?
+        .into_iter()
+        .map(|row| {
+            native_catalog::decode(
+                kind,
+                row,
+                None,
+                culprit_core::telemetry::MAX_CATALOG_EXPRESSION_BYTES,
+                culprit_core::Engine::Yugabyte,
+            )
         })
-        .collect())
+        .collect()
 }
-pub(crate) async fn foreign_keys(client: &Client) -> Result<Vec<ForeignKey>> {
-    let rows=query(client,&format!("SELECT n.nspname AS schema,t.relname AS table,c.conname AS name,rn.nspname AS ref_schema,rt.relname AS ref_table,
-        array_to_json(ARRAY(SELECT a.attname FROM unnest(c.conkey) WITH ORDINALITY k(num,ord) JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=k.num ORDER BY k.ord))::text AS columns,
-        array_to_json(ARRAY(SELECT a.attname FROM unnest(c.confkey) WITH ORDINALITY k(num,ord) JOIN pg_attribute a ON a.attrelid=rt.oid AND a.attnum=k.num ORDER BY k.ord))::text AS ref_columns,
-        c.confdeltype::text AS delete_rule FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace
-        JOIN pg_class rt ON rt.oid=c.confrelid JOIN pg_namespace rn ON rn.oid=rt.relnamespace WHERE c.contype='f' AND c.conparentid=0 AND {USER_RELATIONS}")).await?;
-    Ok(rows
-        .iter()
-        .map(|r| ForeignKey {
-            schema: r.string("schema"),
-            table: r.string("table"),
-            name: r.string("name"),
-            columns: array(r, "columns"),
-            ref_schema: r.string("ref_schema"),
-            ref_table: r.string("ref_table"),
-            ref_columns: array(r, "ref_columns"),
-            delete_rule: match r.string("delete_rule").as_str() {
-                "c" => Some("CASCADE".into()),
-                "n" => Some("SET NULL".into()),
-                "r" => Some("RESTRICT".into()),
-                "d" => Some("SET DEFAULT".into()),
-                _ => None,
-            },
-        })
-        .collect())
+pub(crate) async fn columns(reader: &mut impl QueryRead, probe: &Probe) -> Result<Vec<ColumnInfo>> {
+    readings(reader, probe, native_catalog::Kind::Columns, true)
+        .await?
+        .into_iter()
+        .map(native_catalog::column)
+        .collect()
 }
-pub(crate) async fn settings(client: &Client) -> Result<Vec<Setting>> {
+pub(crate) async fn foreign_keys(reader: &mut impl QueryRead, probe: &Probe) -> Result<Vec<ForeignKey>> {
+    readings(reader, probe, native_catalog::Kind::ForeignKeys, false)
+        .await?
+        .into_iter()
+        .map(native_catalog::foreign_key)
+        .collect()
+}
+pub(crate) async fn settings(client: &mut impl QueryRead) -> Result<Vec<Setting>> {
     Ok(query(client,"SELECT name,setting,boot_val FROM pg_settings WHERE name LIKE 'yb_%' OR name IN ('work_mem','statement_timeout','lock_timeout','default_statistics_target','idle_in_transaction_session_timeout','plan_cache_mode','pg_stat_statements.track_planning')").await?.iter()
         .map(|r|Setting{name:r.string("name"),value:r.string("setting"),default_value:r.text("boot_val"),scope:"YSQL node".into()}).collect())
 }
 
-pub(crate) async fn constraints(client: &Client) -> Result<(Vec<ConstraintIssue>, bool)> {
-    let (rows, truncated) = query_bounded(
-        client,
-        &format!(
-            "SELECT n.nspname AS schema,t.relname AS table,c.conname AS name,c.contype::text AS kind
-             FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid
-             JOIN pg_namespace n ON n.oid=t.relnamespace
-             WHERE c.contype IN ('c','f') AND NOT c.convalidated AND c.conparentid=0
-               AND {USER_RELATIONS} ORDER BY 1,2,3 LIMIT 10001"
-        ),
-        10_000,
-    )
-    .await?;
-    let constraints = rows
-        .iter()
-        .map(|r| ConstraintIssue {
-            schema: r.string("schema"),
-            table: r.string("table"),
-            name: r.string("name"),
-            kind: if r.string("kind") == "f" { ConstraintKind::ForeignKey } else { ConstraintKind::Check },
-            disabled: false,
-            // Native validation evidence does not establish PostgreSQL constraint-exclusion behavior.
-            inheritance_child: false,
+pub(crate) async fn constraints(reader: &mut impl QueryRead, probe: &Probe) -> Result<(Vec<ConstraintIssue>, bool)> {
+    let constraints = readings(reader, probe, native_catalog::Kind::UnvalidatedConstraints, false)
+        .await?
+        .into_iter()
+        .filter_map(native_catalog::constraint)
+        .map(|mut constraint| {
+            // YSQL native validation says nothing about PostgreSQL heap inheritance/constraint-exclusion behavior.
+            constraint.inheritance_child = false;
+            constraint
         })
         .collect();
-    Ok((constraints, truncated))
+    Ok((constraints, false))
 }

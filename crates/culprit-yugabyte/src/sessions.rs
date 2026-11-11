@@ -1,6 +1,7 @@
 use crate::probe::{self, node_id};
+use crate::read::query;
 use culprit_core::{Engine, Environment, Error, ErrorCode, LiveState, LockWait, Result, Session, SessionAction, t};
-use culprit_postgres::wire::{Connector, INTERACTIVE, SessionLimits, query, query_one, tagged};
+use culprit_postgres::wire::{Connector, INTERACTIVE, NativeRead, ReadSession};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -16,11 +17,19 @@ pub(crate) fn literal(s: &str) -> String {
 }
 
 pub(crate) async fn live(connector: &Connector, environment: Environment) -> Result<LiveState> {
-    let observed = connector.connect_observed(SessionLimits { catalog_path: true, ..INTERACTIVE }).await?;
-    let p = probe::read(&observed.client).await?;
+    let mut observed = crate::read::application(connector.clone(), std::time::Duration::ZERO);
+    let result = read_live(&mut observed, environment).await;
+    observed.close().await;
+    result
+}
+async fn read_live(observed: &mut ReadSession, environment: Environment) -> Result<LiveState> {
+    let p = probe::read_from(observed).await?;
+    if p.global {
+        crate::global::nodes_from(observed).await?;
+    }
     let relation = if p.global { "pg_catalog.\"gv$pg_stat_activity\"" } else { "pg_catalog.pg_stat_activity" };
     let count = observed.notices();
-    let rows=query(&observed.client,&format!("SELECT to_jsonb(a)::text AS sample FROM {relation} a WHERE datname={}
+    let rows=query(observed,&format!("SELECT to_jsonb(a)::text AS sample FROM {relation} a WHERE datname={}
         AND backend_type IN ('client backend','yb-conn-mgr worker connection') AND COALESCE(application_name,'') <> 'culprit' LIMIT 1001",literal(&p.database))).await?;
     let mut notes = vec![];
     if !p.global {
@@ -95,22 +104,12 @@ pub(crate) async fn live(connector: &Connector, environment: Environment) -> Res
     }
     // This session's metadata filter may include young waiters without changing application or cluster settings.
     // Native lock collection still has transaction/per-tablet caps; an empty result cannot establish absence.
-    if observed.client.batch_execute(&tagged("SET yb_locks_min_txn_age=0")).await.is_err() {
+    if query(observed, "SET yb_locks_min_txn_age=0").await.is_err() {
         notes.push(t!("provider.yugabyte.sessions.young_locks"));
     }
     notes.push(t!("provider.yugabyte.sessions.lock_limits"));
     let count = observed.notices();
-    let locks = query(
-        &observed.client,
-        &format!(
-            "SELECT l.node,l.pid::text AS pid,l.transaction_id::text AS transaction,l.blocked_by::text,
-        l.mode::text,l.granted,l.locktype,n.nspname || '.' || c.relname AS object
-        FROM yb_lock_status(NULL,NULL) l LEFT JOIN pg_class c ON c.oid=l.relation
-        LEFT JOIN pg_namespace n ON n.oid=c.relnamespace WHERE l.database={} AND NOT l.granted LIMIT 2001",
-            p.oid
-        ),
-    )
-    .await;
+    let locks = query(observed, &lock_query(p.oid, None, 2001)?).await;
     let mut waits = Vec::<LockWait>::new();
     match locks {
         Ok(rows) => {
@@ -175,7 +174,7 @@ pub(crate) async fn interrupt(connector: &Connector, id: &str, action: SessionAc
         SessionAction::Terminate => "pg_terminate_backend",
     };
     let client = connector.connect(INTERACTIVE).await?;
-    let row=query_one(&client,&format!("SELECT pg_catalog.{function}(a.pid) AS stopped FROM pg_catalog.pg_stat_activity a
+    let row=culprit_postgres::wire::query_one(&client,&format!("SELECT pg_catalog.{function}(a.pid) AS stopped FROM pg_catalog.pg_stat_activity a
         WHERE a.pid={pid} AND a.datname=pg_catalog.current_database() AND a.backend_type='client backend'
         AND a.pid <> pg_catalog.pg_backend_pid() AND COALESCE(a.application_name,'') <> 'culprit'
         AND a.backend_start={}::timestamptz AND pg_catalog.replace(pg_catalog.yb_get_local_tserver_uuid()::text,'-','')={}",literal(&started),literal(&node))).await?;
@@ -185,4 +184,16 @@ pub(crate) async fn interrupt(connector: &Connector, id: &str, action: SessionAc
         Err(Error::new(ErrorCode::NotFound, t!("provider.yugabyte.error.session_gone"))
             .with_hint(t!("provider.yugabyte.error.session_gone_hint")))
     }
+}
+
+/// Native DocDB lock projection shared by Live and targeted persistent-issue capture. No key bytes or SQL bodies.
+pub(crate) fn lock_query(database: u32, transaction: Option<&str>, limit: usize) -> Result<String> {
+    let transaction = match transaction {
+        None => "NULL".into(),
+        Some(value) if value.len() == 32 && value.bytes().all(|b| b.is_ascii_hexdigit()) => format!("'{value}'::uuid"),
+        _ => return Err(culprit_core::telemetry::CollectionStop::InvalidPage.error()),
+    };
+    Ok(format!(
+        "SELECT l.node,l.pid::text AS pid,l.transaction_id::text AS transaction,l.blocked_by::text,l.mode::text,l.granted,l.locktype,n.nspname||'.'||c.relname AS object,CASE WHEN l.waitstart IS NOT NULL AND clock_timestamp()>=l.waitstart THEN floor(extract(epoch FROM clock_timestamp()-l.waitstart)*1000)::text END AS wait_ms FROM pg_catalog.yb_lock_status(NULL,{transaction}) l LEFT JOIN pg_catalog.pg_class c ON c.oid=l.relation LEFT JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE l.database={database} AND NOT l.granted LIMIT {limit}"
+    ))
 }

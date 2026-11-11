@@ -5,7 +5,7 @@
 use culprit_core::changes::epoch;
 use culprit_core::i18n::Message;
 use culprit_core::{ChangeEvent, EventAction, EventKind, EventSource, Result, message};
-use mysql_async::{Conn, Value};
+use mysql_async::Value;
 
 use crate::rows::{query, query_with};
 
@@ -17,7 +17,7 @@ fn utc(column: &str) -> String {
 
 /// Changes to `database` since `since`. The session has no default database, so these reads never count as the
 /// application's workload where the server keeps no statement text to tell them apart (MySQL 5.7, MariaDB).
-pub async fn changes(conn: &mut Conn, database: &str, since: &str) -> Result<Vec<ChangeEvent>> {
+pub async fn changes(conn: &mut impl crate::read::QueryRead, database: &str, since: &str) -> Result<Vec<ChangeEvent>> {
     // The session runs in UTC, so TIMESTAMP columns compare and print in UTC.
     let Some(since) = culprit_core::changes::sql_timestamp(since) else { return Ok(Vec::new()) };
     let schema = || vec![Value::from(database)];

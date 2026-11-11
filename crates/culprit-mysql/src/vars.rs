@@ -1,54 +1,58 @@
-//! Server variables and status counters. MySQL 8 serves them from performance_schema; MariaDB has no
-//! `performance_schema.global_variables`, and with performance_schema off neither has the status table, so every read
-//! falls back to `SHOW GLOBAL …`, which all of them answer.
+//! Portable, allowlisted native variable/status reads. SHOW does not depend on performance_schema being enabled.
 
 use std::collections::HashMap;
 
+use crate::{read::QueryRead, rows::Rec};
 use culprit_core::Result;
-use mysql_async::Conn;
 
-use crate::rows::query;
+#[derive(Clone, Copy)]
+pub(crate) enum VariableSet {
+    Configuration,
+    Status,
+}
+impl VariableSet {
+    pub(crate) fn source(self) -> &'static str {
+        match self {
+            Self::Configuration => "global-variables",
+            Self::Status => "global-status",
+        }
+    }
+    pub(crate) fn query(self, names: &[&str]) -> String {
+        let kind = match self {
+            Self::Configuration => "VARIABLES",
+            Self::Status => "STATUS",
+        };
+        format!("SHOW GLOBAL {kind} WHERE Variable_name IN ({})", names_list(names))
+    }
+}
 
 fn names_list(names: &[&str]) -> String {
     names.iter().map(|n| format!("'{n}'")).collect::<Vec<_>>().join(", ")
 }
 
 /// `(name, value)` with lower-case names; names the server doesn't know are absent.
-async fn read(conn: &mut Conn, table: &str, show: &str, names: &[&str]) -> Result<Vec<(String, String)>> {
-    let list = names_list(names);
-    let from_table = query(
-        conn,
-        &format!("SELECT VARIABLE_NAME AS name, VARIABLE_VALUE AS value FROM performance_schema.{table} WHERE VARIABLE_NAME IN ({list})"),
-    )
-    .await;
-    let rows = match from_table {
-        Ok(rows) if !rows.is_empty() => rows,
-        Ok(_) | Err(_) => match query(conn, &format!("SHOW GLOBAL {show} WHERE Variable_name IN ({list})")).await {
-            Ok(rows) => rows,
-            Err(e) => return Err(e),
-        },
-    };
-    Ok(rows
-        .into_iter()
-        .map(|r| {
-            let name = r.text("name").or_else(|| r.text("variable_name")).unwrap_or_default().to_ascii_lowercase();
-            let value = r.text("value").unwrap_or_default();
-            (name, value)
-        })
-        .filter(|(name, _)| !name.is_empty())
-        .collect())
+pub(crate) async fn records<R: QueryRead>(reader: &mut R, set: VariableSet, names: &[&str]) -> Result<Vec<Rec>> {
+    reader.read(&set.query(names), vec![], names.len() + 1).await
 }
 
-pub async fn variables(conn: &mut Conn, names: &[&str]) -> Result<Vec<(String, String)>> {
-    read(conn, "global_variables", "VARIABLES", names).await
+pub(crate) async fn variables<R: QueryRead>(reader: &mut R, names: &[&str]) -> Result<Vec<(String, String)>> {
+    let mut values = Vec::new();
+    for row in records(reader, VariableSet::Configuration, names).await? {
+        if let (Some(name), Some(value)) = (row.native_text("variable_name")?, row.native_text("value")?) {
+            values.push((name.to_ascii_lowercase(), value));
+        }
+    }
+    Ok(values)
 }
 
 /// Numeric status counters by their documented (capitalized) names.
-pub async fn status(conn: &mut Conn, names: &[&str]) -> Result<HashMap<String, f64>> {
-    let rows = read(conn, "global_status", "STATUS", names).await?;
+pub(crate) async fn status<R: QueryRead>(reader: &mut R, names: &[&str]) -> Result<HashMap<String, f64>> {
+    let rows = records(reader, VariableSet::Status, names).await?;
     Ok(rows
         .into_iter()
-        .filter_map(|(name, value)| {
+        .filter_map(|row| {
+            let name = row.text("variable_name")?;
+            let value = row.text("value")?;
             let canonical = names.iter().find(|n| n.eq_ignore_ascii_case(&name))?;
             Some((canonical.to_string(), value.trim().parse::<f64>().ok()?))
         })

@@ -1087,6 +1087,7 @@ version = "0.5.6"
 dependencies = [
  "async-trait",
  "culprit-core",
+ "culprit-read",
  "mysql_async",
  "rustls",
  "serde",
@@ -1138,7 +1139,9 @@ version = "0.5.6"
 dependencies = [
  "async-trait",
  "culprit-core",
+ "culprit-read",
  "rusqlite",
+ "same-file",
  "serde_json",
  "tokio",
 ]
@@ -1150,6 +1153,7 @@ dependencies = [
  "async-trait",
  "culprit-core",
  "culprit-postgres",
+ "culprit-read",
  "futures-util",
  "serde",
  "serde_json",

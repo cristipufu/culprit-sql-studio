@@ -7,12 +7,15 @@ mod collect;
 mod global;
 mod history;
 mod index_usage;
+mod native;
 pub mod plan;
 mod probe;
 mod progress;
+mod read;
 mod resources;
 mod sessions;
 pub mod sources;
+mod telemetry;
 mod terminations;
 #[cfg(test)]
 mod tests;
@@ -25,7 +28,8 @@ use culprit_core::{
     AuthKind, ConnectionSpec, Engine, Error, ExplainMode, LiveState, Plan, Provider, Result, ResultSet, ServerInfo,
     Snapshot, SnapshotOptions, t,
 };
-use culprit_postgres::wire::{COLLECTOR, Connector, SqlExecutor};
+use culprit_postgres::wire::NativeRead;
+use culprit_postgres::wire::{Connector, SqlExecutor};
 
 pub fn component_version() -> culprit_core::ComponentVersion {
     culprit_core::ComponentVersion::package(
@@ -57,7 +61,8 @@ impl YugabyteProvider {
         if spec.database.is_none() {
             spec.database = Some("yugabyte".into());
         }
-        Ok(Self { connector: Connector::new(&spec)?, execution: SqlExecutor::new(&spec)?, spec })
+        let connector = Connector::new(&spec)?;
+        Ok(Self { execution: SqlExecutor::with_connector(&spec, connector.clone()), connector, spec })
     }
 }
 
@@ -69,10 +74,21 @@ impl Provider for YugabyteProvider {
     fn collector_version(&self) -> culprit_core::ComponentVersion {
         component_version()
     }
+    fn source_shutdown(&self) -> culprit_core::telemetry::SourceShutdown {
+        self.connector.source_shutdown()
+    }
+    fn telemetry_source(
+        &self,
+        request: &culprit_core::telemetry::CollectionRequest,
+    ) -> Result<Box<dyn culprit_core::telemetry::TelemetrySource>> {
+        telemetry::source(self.connector.clone(), request)
+    }
     async fn probe(&self) -> Result<ServerInfo> {
         deadline(OBSERVE_TIMEOUT, async {
-            let session = self.connector.connect_observed(COLLECTOR).await?;
-            Ok(probe::read(&session.client).await?.server())
+            let mut io = read::application(self.connector.clone(), std::time::Duration::ZERO);
+            let result = probe::read_from(&mut io).await.map(|probe| probe.server());
+            io.close().await;
+            result
         })
         .await
     }
@@ -103,16 +119,25 @@ impl Provider for YugabyteProvider {
     }
     async fn explain_recorded(&self, sql: &str, id: Option<&str>) -> Result<Plan> {
         deadline(OBSERVE_TIMEOUT, async {
-            let session = self.connector.connect_observed(COLLECTOR).await?;
-            let probe = probe::read(&session.client).await?;
-            let text = if culprit_postgres::wire::elevated_login(&session.client).await? {
-                let id = id.ok_or_else(culprit_postgres::wire::foreign_statement)?;
-                culprit_postgres::wire::own_ysql_text(&session.client, id, probe.cluster)
-                    .await?
-                    .ok_or_else(culprit_postgres::wire::foreign_statement)?
-            } else {
-                sql.into()
-            };
+            let mut session = read::application(self.connector.clone(), std::time::Duration::ZERO);
+            let result: Result<String> = async {
+                let probe = probe::read_from(&mut session).await?;
+                let text = if culprit_postgres::wire::elevated_read(&mut session).await? {
+                    let id = id.ok_or_else(culprit_postgres::wire::foreign_statement)?;
+                    if probe.cluster {
+                        global::nodes_from(&mut session).await?;
+                    }
+                    culprit_postgres::wire::own_ysql_text_from(&mut session, id, probe.cluster)
+                        .await?
+                        .ok_or_else(culprit_postgres::wire::foreign_statement)?
+                } else {
+                    sql.into()
+                };
+                Ok(text)
+            }
+            .await;
+            session.close().await;
+            let text = result?;
             self.explain(&text, ExplainMode::Estimated).await
         })
         .await
@@ -123,9 +148,14 @@ impl Provider for YugabyteProvider {
             return Err(Error::invalid(t!("provider.yugabyte.error.plan_ids")));
         }
         deadline(OBSERVE_TIMEOUT, async {
-            let session = self.connector.connect_observed(COLLECTOR).await?;
-            let probe = probe::read(&session.client).await?;
-            history::stored(&session, &probe, query_id, plan_id).await
+            let mut session = read::application(self.connector.clone(), std::time::Duration::ZERO);
+            let result = async {
+                let probe = probe::read_from(&mut session).await?;
+                history::stored(&mut session, &probe, query_id, plan_id).await
+            }
+            .await;
+            session.close().await;
+            result
         })
         .await
     }

@@ -59,17 +59,17 @@ pub async fn load_activity_checkpoint(
     let snapshot = source
         .observation
         .activity()
-        .filter(|snapshot| snapshot.is_valid() && snapshot.database_wide)
+        .filter(|snapshot| snapshot.is_valid() && snapshot.complete_scope)
         .ok_or_else(invalid)?;
     let batch = manifest
         .batches
         .iter()
         .find(|batch| batch.stream == TelemetryStream::ActivityCheckpoints && !batch.delivery_required)
         .ok_or_else(invalid)?;
-    if batch.bytes > budget.max_bytes || snapshot.qualifying > budget.max_states {
+    if batch.bytes > budget.max_bytes || batch.rows.len() > budget.max_states as usize {
         return Err(DeliveryProblem::Capacity.error());
     }
-    if batch.rows.len() != snapshot.qualifying as usize {
+    if batch.rows.len() < snapshot.qualifying as usize {
         return Err(invalid());
     }
     let mut records = RecoveryRecords::open(store, batch).await?;
@@ -87,8 +87,7 @@ pub async fn load_activity_checkpoint(
         let TelemetryRecord::ActivityCheckpoint(state) = row.record else {
             return Err(invalid());
         };
-        if !state.is_valid()
-            || state.last_seen_at != snapshot.at
+        if !state.is_valid_at(&snapshot.at)
             || !ids.insert(state.id.clone())
             || !keys.insert(state.observation.key.clone())
         {

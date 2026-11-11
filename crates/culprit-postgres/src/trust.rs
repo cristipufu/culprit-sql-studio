@@ -136,13 +136,39 @@ pub async fn own_text(client: &Client, query_id: &str) -> Result<Option<String>>
     .await?
     .and_then(|r| r.try_get::<_, String>("schema").ok());
     let Some(schema) = schema else { return Ok(None) };
-    let sql = format!(
-        "SELECT query FROM {}.pg_stat_statements
-          WHERE queryid = $1 AND dbid = (SELECT oid FROM pg_catalog.pg_database WHERE datname = pg_catalog.current_database())
-            AND pg_catalog.pg_get_userbyid(userid) = session_user AND current_user = session_user LIMIT 1",
-        crate::rows::quote_ident(&schema)
-    );
+    let sql = own_statement_sql(&format!("{}.pg_stat_statements", crate::rows::quote_ident(&schema)), "$1");
     Ok(on_catalog(client, &sql, &[&id]).await?.and_then(|r| r.try_get::<_, String>("query").ok()))
+}
+
+fn own_statement_sql(relation: &str, id: &str) -> String {
+    format!(
+        "SELECT query FROM {relation} WHERE queryid={id} AND dbid=(SELECT oid FROM pg_catalog.pg_database WHERE datname=pg_catalog.current_database()) AND pg_catalog.pg_get_userbyid(userid)=session_user AND current_user=session_user LIMIT 1"
+    )
+}
+/// Catalog-only privilege observation over an owned native reader whose session policy is already established.
+pub async fn elevated_read(reader: &mut impl crate::read::QueryRead) -> Result<bool> {
+    let rows = reader.query(&format!("SELECT {} AS elevated", elevated_sql()), 2).await?;
+    Ok(rows.first().is_none_or(|row| row.text("elevated").as_deref() != Some("f")))
+}
+/// Generation-independent statement ownership, using the authenticated role's own native statistics row.
+pub async fn own_ysql_text_from(
+    reader: &mut impl crate::read::QueryRead,
+    query_id: &str,
+    cluster: bool,
+) -> Result<Option<String>> {
+    let Ok(id) = query_id.trim().parse::<i64>() else {
+        return Ok(None);
+    };
+    let relation = if cluster {
+        "pg_catalog.\"gv$pg_stat_statements\"".to_string()
+    } else {
+        let rows=reader.query("SELECT n.nspname::text AS schema FROM pg_catalog.pg_extension e JOIN pg_catalog.pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='pg_stat_statements'",2).await?;
+        let Some(schema) = rows.first().and_then(|row| row.text("schema")) else {
+            return Ok(None);
+        };
+        format!("{}.pg_stat_statements", crate::rows::quote_ident(&schema))
+    };
+    Ok(reader.query(&own_statement_sql(&relation, &id.to_string()), 1).await?.first().and_then(|row| row.text("query")))
 }
 
 /// YSQL's global statistics can prove ownership of this login's own copy on another node. Never plan the
@@ -153,9 +179,7 @@ pub async fn own_ysql_text(client: &Client, query_id: &str, cluster: bool) -> Re
     }
     let Ok(id) = query_id.trim().parse::<i64>() else { return Ok(None) };
     let relation = "pg_catalog.\"gv$pg_stat_statements\"";
-    let sql = format!("SELECT query FROM {relation}
-        WHERE queryid = $1 AND dbid = (SELECT oid FROM pg_catalog.pg_database WHERE datname = pg_catalog.current_database())
-          AND pg_catalog.pg_get_userbyid(userid) = session_user AND current_user = session_user LIMIT 1");
+    let sql = own_statement_sql(relation, "$1");
     Ok(on_catalog(client, &sql, &[&id]).await?.and_then(|r| r.try_get::<_, String>("query").ok()))
 }
 

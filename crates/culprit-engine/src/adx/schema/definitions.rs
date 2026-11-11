@@ -21,7 +21,7 @@ const PLAN: &[Field] = &[
     Field::required("NativePlanId", "/record/data/identity/plan_id", String),
     Field::required("NativeQueryId", "/record/data/identity/query/query_id", String),
     Field::required("NativeIdentity", "/record/data/identity", JsonContainer),
-    Field::required("QueryDefinitionId", "/record/data/query_definition_id", String),
+    Field::optional("QueryDefinitionId", "/record/data/query_definition_id", String),
     Field::optional("EngineVersion", "/record/data/engine_version", String),
     Field::required("NativeProperties", "/record/data/native_properties", JsonContainer),
     Field::optional("NativeSourceTextBytes", "/record/data/source_text_bytes", ExactCounter),
