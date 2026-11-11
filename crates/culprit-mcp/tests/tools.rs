@@ -19,7 +19,9 @@ fn report() -> Report {
 }
 
 /// Replays the demo report; `run` echoes the batch it was given so tests can see exactly what would execute.
-struct Replay;
+struct Replay {
+    report: Arc<Report>,
+}
 
 #[async_trait]
 impl Provider for Replay {
@@ -28,17 +30,16 @@ impl Provider for Replay {
     }
 
     async fn probe(&self) -> Result<ServerInfo> {
-        Ok(report().snapshot.server)
+        Ok(self.report.snapshot.server.clone())
     }
 
     async fn snapshot(&self, _: &str, _: &SnapshotOptions) -> Result<Snapshot> {
-        Ok(report().snapshot)
+        Ok(self.report.snapshot.clone())
     }
 
     async fn explain(&self, _: &str, mode: ExplainMode) -> Result<Plan> {
         assert_eq!(mode, ExplainMode::Estimated, "agents only ever get estimated plans");
-        let report = report();
-        Ok(report.snapshot.workload.unwrap().queries.into_iter().find_map(|q| q.plan).unwrap())
+        Ok(self.report.snapshot.workload.as_ref().unwrap().queries.iter().find_map(|q| q.plan.clone()).unwrap())
     }
 
     async fn live(&self) -> Result<LiveState> {
@@ -82,7 +83,9 @@ impl Drop for Fixture {
 fn fixture(tag: &str) -> Fixture {
     let dir = std::env::temp_dir().join(format!("culprit-mcp-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let ws = Workspace::open_in(&dir).with_provider(Engine::Mssql, Arc::new(|_| Ok(Box::new(Replay))));
+    let replay = Arc::new(report());
+    let ws = Workspace::open_in(&dir)
+        .with_provider(Engine::Mssql, Arc::new(move |_| Ok(Box::new(Replay { report: replay.clone() }))));
     // No secret of any kind: `AuthKind::None` keeps every code path away from the OS keychain, and the names can't
     // collide with a real saved connection's keychain entry.
     for name in ["replay-demo", "replay-hidden"] {
@@ -300,9 +303,26 @@ async fn audit_records_every_call_and_sql_only_where_sent() {
     assert!(log.iter().all(|e| e.connection.as_deref() == Some("replay-demo")));
 }
 
-#[tokio::test]
-async fn verify_and_export_close_the_loop() {
-    let f = fixture("verify");
+#[test]
+fn verify_and_export_close_the_loop() {
+    let fixture = fixture("verify");
+    // The source fixture is prepared separately; exercise request construction and polling on a bounded stack.
+    std::thread::Builder::new()
+        .name("mcp-verification".into())
+        .stack_size(1024 * 1024)
+        .spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(verify_and_export(fixture))
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+async fn verify_and_export(f: Fixture) {
     let s = server(&f, Options::default());
     let (err, body) = call(&s, "findings", json!({ "connection": "replay-demo" })).await;
     assert!(!err, "{body}");
