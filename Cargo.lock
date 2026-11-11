@@ -972,6 +972,7 @@ name = "culprit-cli"
 version = "0.5.5"
 dependencies = [
  "clap",
+ "culprit-collector",
  "culprit-core",
  "culprit-engine",
  "culprit-mcp",
@@ -981,6 +982,22 @@ dependencies = [
  "tokio",
  "ureq",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "culprit-collector"
+version = "0.5.5"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "culprit-core",
+ "ring",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -1006,6 +1023,7 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "culprit-checks",
+ "culprit-collector",
  "culprit-core",
  "culprit-mssql",
  "culprit-mysql",
@@ -1022,6 +1040,8 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
  "tokio",
  "toml 1.2.0+spec-1.1.0",
  "ts-rs",
@@ -1053,6 +1073,7 @@ dependencies = [
  "culprit-core",
  "futures-util",
  "roxmltree",
+ "serde",
  "serde_json",
  "tiberius",
  "tokio",
@@ -3996,9 +4017,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "3.8.0"
+version = "3.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8be15815186873ea063bf005011d16c356804973489e40c39116ae3a2878d1f"
+checksum = "d24a7e92f4bcaa36b97fa93c4fa7ca8f3e669eced949345b3462dba333c7f909"
 dependencies = [
  "chrono",
  "futures",
@@ -4010,6 +4031,7 @@ dependencies = [
  "schemars 1.2.3",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",

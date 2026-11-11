@@ -8,7 +8,9 @@ use culprit_core::{
 };
 use roxmltree::{Document, Node};
 
-use crate::conn::{MsClient, query, query_one};
+use crate::read::rows as query;
+use crate::read::{NativeRead, ReadError, integer, invalid_data, text};
+pub(crate) mod native;
 
 /// The lock each waiting task asked for. Objects in other databases are named only for whole-object locks; row and
 /// page locks resolve through this database's partitions.
@@ -33,7 +35,7 @@ LEFT JOIN sys.indexes i ON i.object_id = p.object_id AND i.index_id = p.index_id
 WHERE wt.session_id IS NOT NULL AND wt.session_id <> @@SPID
 "#;
 
-pub(crate) async fn lock_waits(client: &mut MsClient) -> tiberius::Result<Vec<LockWait>> {
+pub(crate) async fn lock_waits(client: &mut impl NativeRead) -> Result<Vec<LockWait>> {
     let rows = query(client, LOCK_WAITS_SQL).await?;
     let mut out: Vec<LockWait> = Vec::new();
     for r in rows {
@@ -54,32 +56,6 @@ pub(crate) async fn lock_waits(client: &mut MsClient) -> tiberius::Result<Vec<Lo
 }
 
 const READ_LIMIT: usize = 50;
-
-fn file_sql(hours: u32) -> String {
-    format!(
-        "SELECT TOP ({READ_LIMIT}) CONVERT(varchar(33), x.timestamp_utc, 127) AS at, CAST(x.event_data AS nvarchar(max)) AS event_xml
-           FROM sys.fn_xe_file_target_read_file(N'system_health*.xel', NULL, NULL, NULL) x
-          WHERE x.object_name = N'xml_deadlock_report' AND x.timestamp_utc >= DATEADD(hour, -{hours}, SYSUTCDATETIME())
-          ORDER BY x.timestamp_utc DESC"
-    )
-}
-
-const RING_SQL: &str = "SELECT CAST(t.target_data AS nvarchar(max)) AS target_xml
-  FROM sys.dm_xe_session_targets t
-  JOIN sys.dm_xe_sessions s ON s.address = t.event_session_address
- WHERE s.name = N'system_health' AND t.target_name = N'ring_buffer'";
-
-/// Azure SQL Database's deadlock telemetry, which a database user can read (system_health it can't).
-fn telemetry_sql(hours: u32) -> String {
-    format!(
-        "SELECT TOP ({READ_LIMIT}) CONVERT(varchar(33), x.timestamp_utc, 127) AS at, CAST(x.event_data AS nvarchar(max)) AS event_xml
-           FROM sys.fn_xe_telemetry_blob_target_read_file('dl', NULL, NULL, NULL) x
-          WHERE x.object_name = N'database_xml_deadlock_report' AND x.timestamp_utc >= DATEADD(hour, -{hours}, SYSUTCDATETIME())
-          ORDER BY x.timestamp_utc DESC"
-    )
-}
-
-const AZURE_SQL_DB: f64 = 5.0;
 
 /// Where Azure SQL Database's deadlocks come from, as a person reads it.
 pub(crate) fn telemetry() -> String {
@@ -111,64 +87,55 @@ pub(crate) fn origin(files: bool, ring: bool) -> (String, Option<String>) {
 /// Deadlocks in the last `since_hours`. On SQL Server from system_health: its event files first (they keep days), the
 /// in-memory ring buffer when files can't be read. On Azure SQL Database from its deadlock telemetry. Permission
 /// problems come back as a note, not an error.
-pub(crate) async fn recent(client: &mut MsClient, since_hours: f64) -> tiberius::Result<DeadlockReport> {
+pub(crate) async fn recent<R: NativeRead>(io: &mut R, since_hours: f64) -> Result<DeadlockReport> {
     let hours = since_hours.clamp(1.0, 24.0 * 30.0).round() as u32;
     let mut report = DeadlockReport { since_hours: hours as f64, ..Default::default() };
-    let server =
-        query_one(client, "SELECT CAST(SERVERPROPERTY('EngineEdition') AS int) AS edition, DB_NAME() AS db").await?;
-    let database = server.string("db");
-    if server.f64("edition") == Some(AZURE_SQL_DB) {
+    let server = io.query(native::SERVER, vec![], 1).await.map_err(ReadError::into_error)?;
+    let server = server.first().ok_or_else(invalid_data)?;
+    let database = text(server, "db")?;
+    let until = culprit_core::telemetry::canonical_time(&text(server, "observed_at")?)?;
+    let now = chrono::DateTime::parse_from_rfc3339(&until).map_err(|_| invalid_data())?;
+    let cutoff = now - chrono::Duration::hours(i64::from(hours));
+    let from = cutoff.to_rfc3339();
+    if integer(server, "edition")? == 5 {
         report.source = telemetry();
-        match query(client, &telemetry_sql(hours)).await {
-            Ok(rows) => {
-                for row in rows {
-                    let Some(xml) = row.str("event_xml") else { continue };
-                    let at = row.str("at").map(|t| normalize_time(&t));
-                    report.deadlocks.extend(telemetry_deadlocks(&xml, &database, at));
-                }
-                report.deadlocks.sort_by(|a, b| b.at.cmp(&a.at));
-            }
-            Err(e) => {
+        match native::read(io, native::Origin::AzureTelemetry, &database, &from, &until, READ_LIMIT, true).await {
+            Ok(events) => report.deadlocks.extend(events.into_iter().flat_map(|event| event.graphs)),
+            Err(error) => {
                 report.source = "Azure SQL Database".into();
-                report.note = Some(telemetry_unreadable(&e));
+                report.note = Some(telemetry_unreadable(&error));
             }
         }
+        report.deadlocks.sort_by(|a, b| b.at.cmp(&a.at));
+        report.recent_only = true;
         return Ok(report);
     }
-    // Files keep days of history but are written with a delay; the ring buffer holds the latest events in memory.
-    // Read both and merge, so a deadlock from a minute ago shows up too.
-    let cutoff = chrono::Utc::now() - chrono::Duration::hours(hours as i64);
     let (mut files, mut ring) = (false, false);
-    if let Ok(rows) = query(client, &file_sql(hours)).await {
+    if let Ok(events) = native::read(io, native::Origin::SystemHealth, &database, &from, &until, READ_LIMIT, true).await
+    {
         files = true;
-        for row in rows {
-            let at = row.str("at").map(|t| normalize_time(&t));
-            if let Some(xml) = row.str("event_xml") {
-                report.deadlocks.extend(parse_with_time(&xml, "system_health", at).unwrap_or_default());
-            }
-        }
+        report.deadlocks.extend(events.into_iter().flat_map(|event| event.graphs));
     }
-    if let Ok(rows) = query(client, RING_SQL).await {
+    if let Ok(rows) = io.query(native::RING, vec![], 1).await {
         ring = true;
         for row in rows {
             let Some(xml) = row.str("target_xml") else { continue };
-            for d in parse_deadlock_xml(&xml, "system_health").unwrap_or_default() {
-                let recent =
-                    d.at.as_deref()
-                        .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-                        .is_none_or(|t| t >= cutoff);
-                if recent && !report.deadlocks.iter().any(|known| known.id == d.id) {
-                    report.deadlocks.push(d);
+            for graph in parse_deadlock_xml(&xml, "system_health").unwrap_or_default() {
+                let recent = graph
+                    .at
+                    .as_deref()
+                    .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
+                    .is_none_or(|time| time >= cutoff);
+                if recent && !report.deadlocks.iter().any(|known| known.id == graph.id) {
+                    report.deadlocks.push(graph);
                 }
             }
         }
     }
-    // system_health is the instance's: other databases' deadlocks are theirs, not this database's.
-    report.deadlocks.retain(|d| involves(d, &database));
+    report.deadlocks.retain(|graph| involves(graph, &database));
     report.deadlocks.sort_by(|a, b| b.at.cmp(&a.at));
     report.deadlocks.truncate(READ_LIMIT);
     (report.source, report.note) = origin(files, ring);
-    // The in-memory buffer alone keeps only the latest events.
     report.recent_only = !files && ring;
     Ok(report)
 }
@@ -189,26 +156,32 @@ fn normalize_time(text: &str) -> String {
 
 /// The deadlocks in one telemetry event, unless it names another database: the telemetry may be the logical server's,
 /// and deadlock graphs there name databases by their physical name, so the event's `database_name` is what tells.
-fn telemetry_deadlocks(xml: &str, database: &str, at: Option<String>) -> Vec<Deadlock> {
-    culprit_core::xml::read(xml, |doc| doc.map(|doc| telemetry_event(&doc, xml, database, at)).unwrap_or_default())
+fn telemetry_deadlocks(xml: &str, database: &str, at: Option<String>) -> Result<Vec<Deadlock>> {
+    culprit_core::xml::read(xml, |doc| {
+        let doc = doc.map_err(|_| invalid_data())?;
+        telemetry_event(&doc, xml, database, at)
+    })
 }
 
-fn telemetry_event(doc: &Document, xml: &str, database: &str, at: Option<String>) -> Vec<Deadlock> {
-    let other = doc
+fn telemetry_event(doc: &Document, xml: &str, database: &str, at: Option<String>) -> Result<Vec<Deadlock>> {
+    let event_database = doc
         .descendants()
-        .find(|n| n.has_tag_name("data") && n.attribute("name") == Some("database_name"))
-        .and_then(|d| child(d, "value"))
+        .find(|node| node.has_tag_name("data") && node.attribute("name") == Some("database_name"))
+        .and_then(|data| child(data, "value"))
         .and_then(text_of)
-        .is_some_and(|name| !name.eq_ignore_ascii_case(database));
-    if other {
-        return Vec::new();
+        .ok_or_else(invalid_data)?;
+    if !event_database.eq_ignore_ascii_case(database) {
+        return Ok(Vec::new());
     }
-    let mut found = parse_with_time(xml, &telemetry(), at).unwrap_or_default();
+    let mut found = parse_with_time(xml, &telemetry(), at)?;
+    if found.is_empty() {
+        return Err(invalid_data());
+    }
     // A fix that names the database (ALTER DATABASE) needs the name people use.
     for p in found.iter_mut().flat_map(|d| d.processes.iter_mut()) {
         p.database = Some(database.to_string());
     }
-    found
+    Ok(found)
 }
 
 fn parse_with_time(xml: &str, source: &str, at: Option<String>) -> Result<Vec<Deadlock>> {
@@ -430,7 +403,7 @@ mod tests {
 
     #[test]
     fn azure_sql_telemetry_events_are_read_for_this_database_only() {
-        let found = telemetry_deadlocks(&telemetry_event("shop"), "Shop", Some("2026-10-11T12:05:01Z".into()));
+        let found = telemetry_deadlocks(&telemetry_event("shop"), "Shop", Some("2026-10-11T12:05:01Z".into())).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].pattern, DeadlockPattern::KeyLookup);
         assert_eq!(found[0].at.as_deref(), Some("2026-10-11T12:05:01Z"));
@@ -438,7 +411,10 @@ mod tests {
         assert_eq!(found[0].objects, vec!["shop.customers".to_string()]);
         assert!(found[0].processes.iter().all(|p| p.database.as_deref() == Some("Shop")));
         // Another database on the same logical server.
-        assert!(telemetry_deadlocks(&telemetry_event("billing"), "shop", None).is_empty());
-        assert!(telemetry_deadlocks("not xml", "shop", None).is_empty());
+        assert!(telemetry_deadlocks(&telemetry_event("billing"), "shop", None).unwrap().is_empty());
+        assert!(telemetry_deadlocks("not xml", "shop", None).is_err());
     }
 }
+
+#[cfg(test)]
+mod native_tests;

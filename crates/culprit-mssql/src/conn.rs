@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Duration;
 
 use culprit_core::{
@@ -10,9 +13,12 @@ use tiberius::{AuthMethod, Client, Config, EncryptionLevel};
 use tokio::net::TcpStream;
 use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 
+#[cfg(test)]
 use crate::value::Rec;
 
 pub(crate) type MsClient = Client<Compat<TcpStream>>;
+#[cfg(test)]
+mod native_tests;
 
 pub(crate) const DEFAULT_PORT: u16 = 1433;
 const TCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -20,7 +26,8 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_IDLE: usize = 4;
 
-/// Applied to every statistics session: never wait long on locks, always lose a deadlock, never take shared locks.
+/// Bound lock waits and prefer this session as a deadlock victim. Read-uncommitted avoids shared data locks;
+/// schema and catalog locks are still possible, and these settings do not limit CPU or logical reads.
 const STATS_SESSION_SETUP: &str =
     "SET LOCK_TIMEOUT 2000; SET DEADLOCK_PRIORITY LOW; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;";
 /// Applied to sessions that run user statements: same protections, default isolation.
@@ -128,13 +135,39 @@ async fn endpoint_for(
     transport.endpoint(host, port).await.map(Some)
 }
 
-async fn open_tcp(config: Config, endpoint: Option<&ConnectionEndpoint>) -> tiberius::Result<MsClient> {
+/// Login can execute server logon triggers; session setup also sends SQL. Losing either response is native uncertainty.
+struct ConnectionWork<'a> {
+    pool: &'a Pool,
+    started: bool,
+}
+impl ConnectionWork<'_> {
+    fn begin_login(&mut self) {
+        self.started = true;
+    }
+    fn confirmed(&mut self) {
+        self.started = false;
+    }
+}
+impl Drop for ConnectionWork<'_> {
+    fn drop(&mut self) {
+        if self.started {
+            self.pool.mark_uncertain();
+        }
+    }
+}
+
+async fn open_tcp(
+    config: Config,
+    endpoint: Option<&ConnectionEndpoint>,
+    work: &mut ConnectionWork<'_>,
+) -> tiberius::Result<MsClient> {
     let addr = config.get_addr();
     let dial = endpoint.map_or_else(|| addr.clone(), |endpoint| endpoint.address.to_string());
     let tcp = tokio::time::timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(&dial)).await.map_err(|_| {
         tiberius::error::Error::Io { kind: std::io::ErrorKind::TimedOut, message: connect_timed_out(&addr) }
     })??;
     tcp.set_nodelay(true)?;
+    work.begin_login();
     Client::connect(config, tcp.compat_write()).await
 }
 
@@ -149,14 +182,17 @@ pub(crate) fn redirect_refused(host: &str) -> Error {
 }
 
 /// Connect, following one Azure SQL gateway redirect, and prepare the session.
-pub(crate) async fn connect(
+async fn connect(
     config: &Config,
     transport: Option<&dyn ConnectionTransport>,
     kind: SessionKind,
+    work: &mut ConnectionWork<'_>,
 ) -> Result<MsClient> {
     let mut endpoint = endpoint_for(config, transport).await?;
-    let attempt = match open_tcp(config.clone(), endpoint.as_ref()).await {
+    let attempt = match open_tcp(config.clone(), endpoint.as_ref(), work).await {
         Err(tiberius::error::Error::Routing { host, port }) => {
+            // A typed routing response completed at the gateway before a database session was admitted.
+            work.confirmed();
             if !redirect_allowed(&config.get_addr(), &host) {
                 return Err(redirect_refused(&host));
             }
@@ -164,7 +200,7 @@ pub(crate) async fn connect(
             routed.host(&host);
             routed.port(port);
             endpoint = endpoint_for(&routed, transport).await?;
-            open_tcp(routed, endpoint.as_ref()).await
+            open_tcp(routed, endpoint.as_ref(), work).await
         }
         other => other,
     };
@@ -174,27 +210,23 @@ pub(crate) async fn connect(
         SessionKind::User => USER_SESSION_SETUP,
     };
     execute(&mut client, setup).await.map_err(map_error)?;
+    work.confirmed();
     Ok(client)
 }
 
 pub(crate) async fn execute(client: &mut MsClient, sql: &str) -> tiberius::Result<()> {
-    client.simple_query(sql).await?.into_results().await?;
+    client.simple_query(crate::statement_origin::requested_batch(sql)).await?.into_results().await?;
     Ok(())
 }
 
 /// Marks Culprit's own statements so workload collection can leave them out of the application's history.
-pub(crate) const OWN_QUERY_MARKER: &str = "/* culprit */";
-
-/// Inserts the marker after each statement keyword, which puts it inside every statement text Query Store records.
-fn mark(sql: &str) -> String {
-    culprit_core::sql::mark_mssql_statements(sql, OWN_QUERY_MARKER)
-}
-
+#[cfg(test)]
 pub(crate) async fn query(client: &mut MsClient, sql: &str) -> tiberius::Result<Vec<Rec>> {
-    let rows = client.simple_query(mark(sql)).await?.into_first_result().await?;
+    let rows = client.simple_query(crate::statement_origin::monitoring_batch(sql)).await?.into_first_result().await?;
     Ok(rows.iter().map(Rec::from_row).collect())
 }
 
+#[cfg(test)]
 pub(crate) async fn query_one(client: &mut MsClient, sql: &str) -> tiberius::Result<Rec> {
     Ok(query(client, sql).await?.into_iter().next().unwrap_or_default())
 }
@@ -204,17 +236,36 @@ pub(crate) struct Pool {
     config: Config,
     transport: Option<Arc<dyn ConnectionTransport>>,
     idle: Mutex<Vec<MsClient>>,
+    uncertain: AtomicBool,
 }
 
 impl Pool {
     pub(crate) fn new(config: Config, transport: Option<Arc<dyn ConnectionTransport>>) -> Self {
-        Pool { config, transport, idle: Mutex::new(Vec::new()) }
+        Pool { config, transport, idle: Mutex::new(Vec::new()), uncertain: AtomicBool::new(false) }
     }
 
     pub(crate) async fn connect(&self, kind: SessionKind) -> Result<MsClient> {
-        connect(&self.config, self.transport.as_deref(), kind).await
+        self.ensure_available()?;
+        let mut work = ConnectionWork { pool: self, started: false };
+        connect(&self.config, self.transport.as_deref(), kind, &mut work).await
     }
 
+    pub(crate) fn mark_uncertain(&self) {
+        self.uncertain.store(true, Ordering::Release);
+    }
+    pub(crate) fn ensure_available(&self) -> Result<()> {
+        if self.uncertain.load(Ordering::Acquire) {
+            return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
+        }
+        Ok(())
+    }
+    pub(crate) fn source_shutdown(&self) -> culprit_core::telemetry::SourceShutdown {
+        if self.ensure_available().is_ok() {
+            culprit_core::telemetry::SourceShutdown::Quiescent
+        } else {
+            culprit_core::telemetry::SourceShutdown::Unconfirmed
+        }
+    }
     pub(crate) fn transport_owner(&self) -> Option<Arc<dyn ConnectionTransport>> {
         self.transport.clone()
     }
@@ -224,6 +275,7 @@ impl Pool {
     }
 
     pub(crate) async fn get(&self) -> Result<MsClient> {
+        self.ensure_available()?;
         if let Some(client) = self.take_idle() {
             return Ok(client);
         }
@@ -231,16 +283,29 @@ impl Pool {
     }
 
     pub(crate) fn put(&self, client: MsClient) {
+        if self.ensure_available().is_err() {
+            return;
+        }
         let Ok(mut idle) = self.idle.lock() else { return };
         if idle.len() < MAX_IDLE {
             idle.push(client);
         }
     }
 
-    /// Run `f` on a pooled session. A session that died while idle is replaced once.
+    /// All statistical callbacks use owned native cancellation and retain shutdown uncertainty in the pool.
+    pub(crate) async fn observe<T, F>(self: &Arc<Self>, f: F) -> Result<T>
+    where
+        F: for<'a> FnOnce(&'a mut crate::read::ReadSession) -> BoxFuture<'a, Result<T>>,
+    {
+        let mut reader = crate::read::ReadSession::application(self.clone());
+        let result = f(&mut reader).await;
+        reader.finish(result).await
+    }
+
+    /// Run exactly once. A transport error cannot prove that submitted work stopped, so it must not trigger replay.
     pub(crate) async fn with<T, F>(&self, f: F) -> Result<T>
     where
-        F: for<'c> Fn(&'c mut MsClient) -> BoxFuture<'c, tiberius::Result<T>>,
+        F: for<'c> FnOnce(&'c mut MsClient) -> BoxFuture<'c, tiberius::Result<T>>,
     {
         let mut client = self.get().await?;
         match f(&mut client).await {
@@ -248,28 +313,9 @@ impl Pool {
                 self.put(client);
                 Ok(value)
             }
-            Err(err) if is_broken_connection(&err) => {
-                drop(client);
-                let mut fresh = self.connect(SessionKind::Stats).await?;
-                let value = f(&mut fresh).await.map_err(map_error)?;
-                self.put(fresh);
-                Ok(value)
-            }
             Err(err) => Err(map_error(err)),
         }
     }
-}
-
-fn is_broken_connection(err: &tiberius::error::Error) -> bool {
-    matches!(err, tiberius::error::Error::Io { kind, .. } if *kind != std::io::ErrorKind::TimedOut)
-}
-
-pub(crate) fn server_code(err: &tiberius::error::Error) -> Option<u32> {
-    err.code()
-}
-
-pub(crate) fn is_permission_error(err: &tiberius::error::Error) -> bool {
-    matches!(server_code(err), Some(229 | 230 | 262 | 297 | 300 | 15151 | 15247))
 }
 
 /// What a login without the monitoring permission is told to ask for.
@@ -329,6 +375,7 @@ pub(crate) fn map_error(err: tiberius::error::Error) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::statement_origin::{MONITORING_QUERY_MARKER, OWN_QUERY_MARKER};
 
     struct Route(Mutex<Vec<(String, u16)>>);
     #[async_trait::async_trait]
@@ -369,17 +416,24 @@ mod tests {
     }
 
     #[test]
-    fn marks_every_select() {
-        assert_eq!(mark("DECLARE @x int = 1;\nSELECT a FROM t"), "DECLARE @x int = 1;\nSELECT /* culprit */ a FROM t");
-        assert_eq!(
-            mark("WITH s AS (SELECT 1 AS a) SELECT a FROM s"),
-            "WITH s AS (SELECT /* culprit */ 1 AS a) SELECT /* culprit */ a FROM s"
-        );
-        assert_eq!(mark("SELECTED"), "SELECTED");
-        assert_eq!(
-            mark("SELECT 1 FROM t WHERE name LIKE N'%select%'"),
-            "SELECT /* culprit */ 1 FROM t WHERE name LIKE N'%select%'"
-        );
+    fn monitoring_marks_identify_every_recorded_statement_without_changing_literal_text() {
+        for (sql, count) in [
+            ("DECLARE @x int=1;SELECT a FROM t", 1),
+            ("WITH s AS(SELECT 1 AS a)SELECT a FROM s", 2),
+            ("SELECT 1 FROM t WHERE name LIKE N'%select%'", 1),
+            ("SET LOCK_TIMEOUT 2000", 1),
+            ("DBCC SHOW_STATISTICS(N't',N'i') WITH HISTOGRAM", 1),
+            ("SELECTED", 1),
+        ] {
+            let marked = crate::statement_origin::monitoring_batch(sql);
+            let comments = culprit_core::sql::block_comments(&marked, Engine::Mssql).unwrap().unwrap();
+            assert_eq!(comments.iter().filter(|comment| **comment == OWN_QUERY_MARKER).count(), count);
+            assert_eq!(comments.iter().filter(|comment| **comment == MONITORING_QUERY_MARKER).count(), count);
+            let template = format!("/* culprit:template:{} */", crate::statement_origin::template_id(sql));
+            assert_eq!(comments.iter().filter(|comment| **comment == template).count(), count);
+        }
+        let sql = "SELECT 1 FROM t WHERE name LIKE N'%select%'";
+        assert!(crate::statement_origin::monitoring_batch(sql).contains("N'%select%'"));
     }
 
     #[test]

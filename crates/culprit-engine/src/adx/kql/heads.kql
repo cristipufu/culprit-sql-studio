@@ -1,0 +1,14 @@
+.create function $FUNCTION(contract:string,store:string,database:string,captured_from:datetime,asof:datetime) {
+let Observations=materialize(
+    CulpritPublishedV1(contract,store,database,captured_from,asof)
+    | where RangeKind == "current" and $SELECTION
+    $COMPLETE
+);
+let Epochs=Observations | summarize HeadEpoch=max(OwnerEpoch) by $GROUP_KEYS;
+let Owned=materialize(Observations | join kind=inner Epochs on $GROUP_KEYS | where OwnerEpoch == HeadEpoch);
+let Sequences=Owned | summarize HeadSequence=max(CaptureSequence) by $GROUP_KEYS;
+Owned
+| join kind=inner Sequences on $GROUP_KEYS
+| where CaptureSequence == HeadSequence
+| project-away HeadEpoch, HeadSequence
+}

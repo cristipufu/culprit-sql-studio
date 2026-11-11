@@ -907,3 +907,20 @@ Enter a WHERE expression, without query clauses or statements | For example: sta
 A quoted string or name is never closed"#
     );
 }
+
+#[test]
+fn native_prefix_comments_survive_cut_tokens_without_turning_quoted_markers_into_comments() {
+    for tail in ["'cut", "[cut", "/* cut"] {
+        let prefix = format!("SELECT /* culprit */ {tail}");
+        assert_eq!(block_comments_in_prefix(&prefix, Engine::Mssql).unwrap().unwrap(), ["/* culprit */"]);
+    }
+    for prefix in [
+        "SELECT N'/* culprit */'",
+        "SELECT [/* culprit */]",
+        "SELECT /* outer /* culprit */",
+        "SELECT 1 -- /* culprit */",
+    ] {
+        assert!(block_comments_in_prefix(prefix, Engine::Mssql).unwrap().unwrap().is_empty());
+    }
+    assert!(block_comments_in_prefix("SELECT /*! executable */ 1", Engine::Mysql).is_err());
+}

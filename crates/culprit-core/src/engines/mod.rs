@@ -45,6 +45,17 @@ pub struct SettingChange {
     pub sql: Option<String>,
 }
 
+/// Whether a finite last boundary establishes a finite overall partition range.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum PartitionTail {
+    FromCatalog,
+    Unbounded,
+    Unsupported,
+    Unknown,
+}
+
 /// One engine, as checks and every surface see it.
 pub trait EngineSpec: Send + Sync {
     /// TLS policy and native option names; file engines have no network security settings.
@@ -52,6 +63,8 @@ pub trait EngineSpec: Send + Sync {
         None
     }
 
+    /// Whether a finite last catalog boundary can establish that inserts will run out of range partitions.
+    fn partition_tail(&self) -> PartitionTail;
     /// The provider's default product followed by any independently identified products it also serves.
     fn products(&self) -> &'static [ProductSpec];
 
@@ -118,6 +131,10 @@ pub trait EngineSpec: Send + Sync {
 
     /// How to set `name` to `value` on a server Culprit reaches with SQL.
     fn change_setting(&self, server: &ServerInfo, name: &str, value: &str) -> SettingChange;
+    /// A known fresh-install default. Equality with it does not establish the administrator's intent.
+    fn default_setting_value(&self, _name: &str) -> Option<&'static str> {
+        None
+    }
 
     /// How to set `name` to `value` for the scanned database alone, where the engine keeps settings per database and
     /// its owner may set this one without being a superuser (PostgreSQL's `ALTER DATABASE … SET` for a setting of
@@ -395,6 +412,7 @@ impl Connect {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct EngineFacts {
+    pub partition_tail: PartitionTail,
     pub label: String,
     pub products: Vec<ProductFacts>,
     pub abilities: EngineAbilities,
@@ -460,6 +478,7 @@ impl Engine {
         let abilities = spec.abilities();
         EngineFacts {
             connection_security: spec.connection_security(),
+            partition_tail: spec.partition_tail(),
             products: spec.products().iter().map(|product| product.facts()).collect(),
             statement_metrics: spec.statement_metrics(),
             wait_sampling: spec.wait_sampling(),

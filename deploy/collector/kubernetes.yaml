@@ -1,0 +1,134 @@
+# One StatefulSet per static shard. Fill the identity/image/storage placeholders before use.
+# Keep replicas at zero until source ownership, native query budgets and the cloud route are qualified.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: culprit-pilot
+  annotations:
+    azure.workload.identity/client-id: REPLACE_CLIENT_ID
+    azure.workload.identity/tenant-id: REPLACE_TENANT_ID
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: culprit-pilot
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: culprit-collector
+    shard: pilot
+  ports:
+    - name: health
+      port: 9098
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: culprit-pilot
+spec:
+  serviceName: culprit-pilot
+  replicas: 0
+  updateStrategy:
+    type: OnDelete
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app: culprit-collector
+      shard: pilot
+  template:
+    metadata:
+      labels:
+        app: culprit-collector
+        shard: pilot
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: culprit-pilot
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 360
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: connection-metadata
+          image: REPLACE_IMAGE_BY_DIGEST
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              umask 077
+              mkdir -p /var/lib/culprit/workspace
+              cp /config/connections.toml /var/lib/culprit/workspace/connections.toml.new
+              mv /var/lib/culprit/workspace/connections.toml.new /var/lib/culprit/workspace/connections.toml
+              culprit collect service validate --config /config/collector.json
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - { name: state, mountPath: /var/lib/culprit }
+            - { name: configuration, mountPath: /config, readOnly: true }
+      containers:
+        - name: collector
+          image: REPLACE_IMAGE_BY_DIGEST
+          # This assertion applies to this activation. Never use it to clear uncertain native work,
+          # force a replacement owner, or resume after volume loss without independent SQL quiescence proof.
+          args: [collect, service, run, --config, /config/collector.json, --source-quiescent]
+          env:
+            - { name: CULPRIT_KEYCHAIN, value: "off" }
+          resources:
+            requests: { cpu: "1", memory: 512Mi }
+            limits: { cpu: "2", memory: 2Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - { name: health, containerPort: 9098 }
+          startupProbe:
+            httpGet: { path: /live, port: health }
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet: { path: /live, port: health }
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /ready, port: health }
+            periodSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            - { name: state, mountPath: /var/lib/culprit }
+            - { name: configuration, mountPath: /config, readOnly: true }
+            - { name: direct-identity, mountPath: /var/run/secrets/culprit, readOnly: true }
+      volumes:
+        - name: configuration
+          configMap:
+            name: culprit-pilot
+        # Explicit direct-federation token; this path is owned by this manifest, not the AKS webhook.
+        - name: direct-identity
+          projected:
+            defaultMode: 0440
+            sources:
+              - serviceAccountToken:
+                  audience: api://AzureADTokenExchange
+                  expirationSeconds: 3600
+                  path: token
+  volumeClaimTemplates:
+    - metadata:
+        name: state
+      spec:
+        accessModes: [ReadWriteOncePod]
+        storageClassName: REPLACE_CSI_STORAGE_CLASS
+        resources:
+          requests:
+            storage: 10Gi

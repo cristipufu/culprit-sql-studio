@@ -1,6 +1,29 @@
 use super::predicates::is_value;
 use super::*;
 
+#[test]
+fn a_counter_rate_requires_its_own_valid_epoch_and_enough_observation_time() {
+    use culprit_core::ResetMarker;
+    let mut snapshot = crate::waits::snapshot_with(Engine::Mssql);
+    snapshot.taken_at = "2026-10-11T12:00:00Z".into();
+    snapshot.server.started_at = Some("2026-10-01T00:00:00Z".into());
+    for reset in [
+        ResetMarker::Unknown,
+        ResetMarker::Generation("epoch-1".into()),
+        ResetMarker::At("invalid".into()),
+        ResetMarker::At("2026-10-11T13:00:00Z".into()),
+        ResetMarker::At(snapshot.taken_at.clone()),
+        ResetMarker::At("2026-10-11T11:30:00Z".into()),
+    ] {
+        assert_eq!(counter_rate_per_day_since(&snapshot, 12.0, &reset), None, "{reset:?}");
+    }
+    let reset = ResetMarker::At("2026-10-11T00:00:00Z".into());
+    assert_eq!(counter_rate_per_day_since(&snapshot, 12.0, &reset), Some(24.0));
+    for total in [-1.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(counter_rate_per_day_since(&snapshot, total, &reset), None);
+    }
+}
+
 /// A name a database allows (a quoted identifier with a line break in it) can't end a comment of fix SQL and run the
 /// rest of itself as a statement.
 #[test]
@@ -174,11 +197,6 @@ fn postgres_counters_that_outlived_a_restart_say_so() {
     // Counters as old as the server: a restart, as before.
     s.pressure = Some(culprit_core::Pressure { uptime_hours: Some(5.0), ..Default::default() });
     assert_eq!(since_phrase(&s), "in the 5 hours since the server last restarted");
-    // How long they have counted is a phrase of its own in each language, not the sentence's with a word cut off.
-    assert_eq!(counted_span(&s), "the 5 hours since the server last restarted");
-    culprit_core::i18n::scope("fr", || {
-        assert_eq!(counted_span(&s), format!("les 5 heures écoulées {}", culprit_core::t!("support.since.restart")));
-    });
 }
 
 #[test]

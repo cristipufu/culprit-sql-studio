@@ -59,7 +59,8 @@ impl Events<'_> {
         let windowed = context.windowed.unwrap_or(info.engine == Engine::Mssql);
         if windowed {
             let (baseline, recent) = changes::resolve(request, (context.since.unwrap_or(now - 86_400.0), now))?;
-            let provider = self.connections.provider(name).await?;
+            let observed = self.connections.observed_provider(name).await?;
+            let provider = observed.provider();
             let compared = crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
                 if let Some(data) =
                     self.connections.forget_rejected(name, provider.period_stats(&baseline, &recent).await)?
@@ -71,12 +72,13 @@ impl Events<'_> {
                         Ok(culprit_core::changes::compare(&compare_name, engine, data, &compare_options))
                     })
                     .await?;
-                    changes::describe_switches(&mut out, provider.as_ref(), 5).await;
+                    changes::describe_switches(&mut out, provider, 5).await;
                     // Query Store periods run up to now; what the database dated since the last scan isn't saved yet.
                     let last_scan = context.taken_at.clone().unwrap_or_else(|| recent.start.clone());
                     let live = match self.connections.forget_rejected(name, provider.recorded_changes(&last_scan).await)
                     {
                         Ok(events) => events,
+                        Err(error) if crate::source_operation::native_shutdown_uncertain(&error) => return Err(error),
                         Err(error) => {
                             out.notes.push(t!("engine.events.database_events_unavailable", error = &error.message));
                             Vec::new()
@@ -86,7 +88,8 @@ impl Events<'_> {
                 }
                 Ok(None)
             })
-            .await?;
+            .await;
+            let compared = observed.finish(compared).await?;
             if let Some((mut out, live)) = compared {
                 self.add_context(&info, &mut out, request.cloud, live).await;
                 return Ok(out);

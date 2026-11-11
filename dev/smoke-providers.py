@@ -196,7 +196,8 @@ class Database:
         if fixture.engine == "mssql":
             return ({"ACCEPT_EULA": "Y", "MSSQL_PID": "Developer", "MSSQL_SA_PASSWORD": self.password}, [])
         return ({}, ["bin/yugabyted", "start", "--background=false", "--callhome=false", "--ui=false",
-                     "--tserver_flags=memory_limit_hard_bytes=2147483648",
+                     # Bound native backfill speed so progress tests observe work, even on fast CI hosts.
+                     "--tserver_flags=memory_limit_hard_bytes=2147483648,backfill_index_rate_rows_per_sec=1000",
                      "--master_flags=memory_limit_hard_bytes=536870912"])
 
     def admin_database(self):
@@ -284,7 +285,8 @@ class Database:
                 "CULPRIT_TIMESCALE_TEST_PASSWORD": self.password,
                 "CULPRIT_YSQL_TEST_PORT": self.port, "CULPRIT_MYSQL_TEST_PORT": self.port,
                 "CULPRIT_MYSQL_TEST_PASSWORD": self.password,
-                "CULPRIT_PREVIEW_MSSQL_PORT": self.port, "CULPRIT_PREVIEW_MSSQL_PASSWORD": self.password}
+                "CULPRIT_PREVIEW_MSSQL_PORT": self.port, "CULPRIT_PREVIEW_MSSQL_PASSWORD": self.password,
+                "CULPRIT_MSSQL_SOURCE_TEST_PORT": self.port, "CULPRIT_MSSQL_SOURCE_TEST_PASSWORD": self.password}
 
     def test(self, crate, selection, *, library=True, skip=None):
         run_tests(self.commands, crate, selection, self.test_environment(), library=library, skip=skip)
@@ -307,6 +309,7 @@ class Database:
             self.test("culprit-mysql", "preview::tests::live_")
         elif fixture.engine == "mssql":
             self.test("culprit-mssql", "statement::tests::live_")
+            self.test("culprit-mssql", "native_tests::")
         else:
             self.test("culprit-yugabyte", "tests::live_", skip="cluster_tests::")
             self.test("culprit-postgres", "wire::tests::live_ysql_")

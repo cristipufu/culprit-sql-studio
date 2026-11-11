@@ -141,6 +141,7 @@ say in English (Query Store, autovacuum, tempdb, buffer pool, DocDB, tablet, tab
 | I/O | E/S (f. pl.) | Microsoft Learn |
 | disk | disque (m.) | |
 | worker (thread) | worker (m.) | parallel workers |
+| task (SQL Server) | tâche (f.) | Native task, distinct from a request; parallel requests may have several. |
 | parallelism | parallélisme (m.) | |
 | compile / compilation | compilation (f.) | |
 | thread scheduling | ordonnancement | attribution du CPU aux workers prêts à s’exécuter |
@@ -158,6 +159,7 @@ say in English (Query Store, autovacuum, tempdb, buffer pool, DocDB, tablet, tab
 | tab | onglet (m.) | |
 | live | en direct | |
 | schema | schéma (m.) | |
+| telemetry, collection, collector, manifest | télémétrie, collecte, collecteur, manifeste | `collect` et `manifest.json` restent inchangés |
 | source | source (f.) | |
 | capability | capacité (f.) | locked: indisponible |
 | mark (a finding) | marquer | dismissed: écarté ; resolved: résolu ; fixed: corrigé |
@@ -205,3 +207,4 @@ say in English (Query Store, autovacuum, tempdb, buffer pool, DocDB, tablet, tab
 | page life expectancy, batch requests | espérance de vie des pages, demandes de lots | |
 | gap / insert-intention lock, intent lock | verrou d’intervalle / d’intention d’insertion, verrou intentionnel | |
 | the Queries, Live views | Requêtes, En direct | |
+| telemetry outbox, capture revision, journal, replay | tampon de sortie de télémétrie, révision de capture, journal transactionnel, relire | captures locales durables ; pas de messagerie |

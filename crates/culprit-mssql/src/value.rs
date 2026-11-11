@@ -1,9 +1,6 @@
 use tiberius::time::{Date, DateTime, DateTime2, DateTimeOffset, SmallDateTime, Time};
 use tiberius::{ColumnData, Row};
 
-/// Separator used by `STRING_AGG` for identifier lists; it cannot appear in a SQL Server identifier in practice.
-pub(crate) const LIST_SEPARATOR: char = '\u{1f}';
-
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Val {
     Null,
@@ -74,12 +71,6 @@ impl Rec {
             Some(Val::Text(v)) => matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "on" | "yes"),
             _ => false,
         }
-    }
-
-    pub(crate) fn list(&self, name: &str) -> Vec<String> {
-        self.str(name)
-            .map(|s| s.split(LIST_SEPARATOR).filter(|p| !p.is_empty()).map(str::to_string).collect())
-            .unwrap_or_default()
     }
 
     pub(crate) fn columns(&self) -> impl Iterator<Item = (&str, &Val)> {
@@ -179,7 +170,9 @@ fn time_seconds(v: Time) -> u64 {
 }
 
 fn time_iso(v: Time) -> String {
-    hms(time_seconds(v))
+    let whole = hms(time_seconds(v));
+    let fraction = v.increments() % 10u64.pow(v.scale().into());
+    if fraction == 0 { whole } else { format!("{whole}.{fraction:0width$}", width = v.scale().into()) }
 }
 
 fn datetime2_iso(v: DateTime2) -> String {
@@ -201,6 +194,18 @@ mod tests {
         assert_eq!(datetime_iso(DateTime::new(45_000, 300 * 3_661)), "2023-03-17T01:01:01");
         assert_eq!(date_iso(Date::new(738_000)), "2021-07-30");
         assert_eq!(time_iso(Time::new(36_610_000_000, 7)), "01:01:01");
+    }
+
+    #[test]
+    fn native_time_and_datetime2_keep_fractional_precision_before_any_display_projection() {
+        for (increments, scale, expected) in
+            [(36_611_234_567, 7, "01:01:01.1234567"), (3_661_123, 3, "01:01:01.123"), (1, 7, "00:00:00.0000001")]
+        {
+            let time = Time::new(increments, scale);
+            assert_eq!(time_iso(time), expected);
+            let native = DateTime2::new(Date::new(738_000), time);
+            assert_eq!(to_val(&ColumnData::DateTime2(Some(native))), Val::Text(format!("2021-07-30T{expected}")));
+        }
     }
 
     #[test]

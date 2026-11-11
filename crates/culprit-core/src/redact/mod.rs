@@ -371,7 +371,7 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
 /// Redact literal values in a partition bound expression (`FOR VALUES IN ('tenant_a', 'tenant_b')`) while keeping
 /// `DEFAULT`, `MAXVALUE`, and ISO date/timestamp range bounds (`'2026-10-01'`) so partition expiry checks still work
 /// on shared snapshots.
-fn redact_partition_bound(bound: &str, engine: Engine) -> String {
+pub(crate) fn redact_partition_bound(bound: &str, engine: Engine) -> String {
     if bound.eq_ignore_ascii_case("default") || bound.eq_ignore_ascii_case("maxvalue") {
         return bound.to_string();
     }

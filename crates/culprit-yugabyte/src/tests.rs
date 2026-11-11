@@ -219,9 +219,12 @@ async fn live_copy_progress_keeps_native_counters_and_rejects_retained_results_a
 #[tokio::test]
 #[ignore = "requires dev/yugabyte and CULPRIT_YSQL_TEST_PORT"]
 async fn live_index_progress_reports_backfill_rows_without_a_guessed_percentage() {
+    const OBSERVATION_BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
+    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
     let _fixture = LIVE.lock().await;
     let provider = YugabyteProvider::new(&local_spec()).unwrap();
-    let active = provider.connector.connect(INTERACTIVE).await.unwrap();
+    let limits = culprit_postgres::wire::SessionLimits { statement_timeout: OBSERVATION_BUDGET, ..INTERACTIVE };
+    let active = provider.connector.connect(limits).await.unwrap();
     active.batch_execute(&tagged("SET default_transaction_read_only=off")).await.unwrap();
     let identity = query_one(&active, &format!(
         "SELECT replace(yb_get_local_tserver_uuid()::text,'-','') AS node,pg_backend_pid()::text AS pid,{} AS started FROM pg_stat_activity WHERE pid=pg_backend_pid()",
@@ -230,14 +233,17 @@ async fn live_index_progress_reports_backfill_rows_without_a_guessed_percentage(
     let pid = identity.string("pid");
     let id = format!("{}/{pid}/{}", identity.string("node"), identity.string("started"));
     let table = format!("public.culprit_progress_index_{pid}");
-    active.batch_execute(&tagged(&format!("CREATE TABLE {table} (id int PRIMARY KEY, value int); INSERT INTO {table} SELECT n,n%10 FROM generate_series(1,20000) n; ANALYZE {table}"))).await.unwrap();
+    // One tablet keeps the fixture's native per-tablet rate limit independent of the host's CPU count.
+    active.batch_execute(&tagged(&format!("CREATE TABLE {table} (id int PRIMARY KEY, value int) SPLIT INTO 1 TABLETS; INSERT INTO {table} SELECT n,n%10 FROM generate_series(1,20000) n; ANALYZE {table}"))).await.unwrap();
     let sql = tagged(&format!(
         "/* application comment */ CREATE INDEX culprit_progress_idx_{pid} ON {table}(value) WHERE value=1"
     ));
     let poll = async {
         let mut seen = Vec::new();
-        for _ in 0..100 {
+        let deadline = tokio::time::Instant::now() + OBSERVATION_BUDGET;
+        while tokio::time::Instant::now() < deadline {
             let progress = provider.query_progress(&id, false).await.unwrap();
+            let running = progress.running;
             if progress.phase.is_some() {
                 assert!(progress.percent.is_none() && progress.phase_percent.is_none() && progress.nodes.is_empty());
                 let backfilling = progress.phase.as_deref().unwrap().contains("table rows processed");
@@ -246,7 +252,10 @@ async fn live_index_progress_reports_backfill_rows_without_a_guessed_percentage(
                     break;
                 }
             }
-            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+            if !running && !seen.is_empty() {
+                break;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
         }
         seen
     };

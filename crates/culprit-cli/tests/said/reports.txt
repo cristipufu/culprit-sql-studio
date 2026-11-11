@@ -1,52 +1,52 @@
 $ culprit --format text findings x --report <repo>/fixtures/mssql-demo.report.json
-22 opportunities. The top ones touch 2 min of database time over the last 5 hours (28%).
+20 opportunities. The top ones touch 5 min of database time over the last 5 hours (83%).
 
   1  ●  A read from order_items times out on every run, at about 15 s  · 100% of runs fail
        failing-query:263
   2  ●  A read from orders fails 25% of the time  · 25% of runs fail
        failing-query:246
-  3  ●  Row locks on support_tickets escalated to a table lock 5 times since SQL Server started (Oct 11)  · 5 table locks
-       lock-escalations:shop.support_tickets
-  4  ●  Inserts into hot queue for the last page of pk_hot  · 53.6 s latch waits
-       last-page-insert:archive.hot.pk_hot
-  5  ●  Queries on orders recorded lock waits in the last 5 hours  · 3 min waiting on locks
+  3  ●  Queries on orders recorded lock waits in the last 5 hours  · 3 min waiting on locks
        hot-rows:shop.orders
-  6  ●  Compares each of 1.5M rows of order_items with 999 rows the Table Spool replays (1.5B pairs)  · 27% of DB time
+  4  ●  Compares each of 1.5M rows of order_items with 999 rows the Table Spool replays (1.5B pairs)  · 27% of DB time
        plan-insights:nested-loops:query-263
-  7  ●  This plan runs on one CPU because its statement says OPTION (MAXDOP 1)  · 27% of DB time
+  5  ●  This plan runs on one CPU because its statement says OPTION (MAXDOP 1)  · 27% of DB time
        plan-insights:parallelism-blocked:query-263
-  8  ●  A read from products runs 60K times in 5 hours, one key at a time  · 822 ms of database time over the last 5 hours (<1%)
+  6  ●  A read from products runs 60K times in 5 hours, one key at a time  · 822 ms of database time over the last 5 hours (<1%)
        chatty-query:6
-  9  ●  A type mismatch on customers.email stops a read from customers from seeking an index  · 7% of DB time
+  7  ●  A type mismatch on customers.email stops a read from customers from seeking an index  · 7% of DB time
        plan-warnings:implicit-conversion:customers.email
- 10  ●  order_items is searched by order_id without a supporting index  · 20.3 s of database time over the last 5 hours (6%)
+  8  ●  order_items is searched by order_id without a supporting index  · 20.3 s of database time over the last 5 hours (6%)
        missing-index:shop.order_items(order_id)
- 11  ●  Readers and writers block each other (READ_COMMITTED_SNAPSHOT is off)  · Setting
+  9  ●  Readers and writers block each other (READ_COMMITTED_SNAPSHOT is off)  · Setting
        config:read-committed-snapshot
- 12  ●  A read from orders got 3.4× slower on Oct 11 at 10:45 UTC, when its plan changed  · 3.4× slower
+ 10  ●  A read from orders got 3.4× slower on Oct 11 at 10:45 UTC, when its plan changed  · 3.4× slower
        regression:8
- 13  ●  ticket_events has no index on ticket_id, its foreign key to support_tickets  · 800K rows unindexed
+ 11  ●  ticket_events has no index on ticket_id, its foreign key to support_tickets  · 800K rows unindexed
        unindexed-fk:shop.ticket_events(ticket_id)
- 14  ●  orders is searched by shipped_at without a supporting index  · 5.0 s of database time over the last 5 hours (1%)
+ 12  ●  orders is searched by shipped_at without a supporting index  · 5.0 s of database time over the last 5 hours (1%)
        missing-index:shop.orders(shipped_at)
- 15  ●  Two queries deadlocked once in the last 6 hours (key-lookup deadlock on shop.customers)  · 1 deadlock
+ 13  ●  Two queries deadlocked once in the last 6 hours (key-lookup deadlock on shop.customers)  · 1 deadlock
        deadlocks:key-lookup:shop.customers
- 16  ●  ix_orders_status is covered by the wider ix_orders_status_created on orders  · 26.5 MB redundant
+ 14  ●  ix_orders_status is covered by the wider ix_orders_status_created on orders  · 26.5 MB redundant
        duplicate-index:shop.orders.ix_orders_status
- 17  ●  ix_products_sku duplicates uq_products_sku on products  · 648 KB redundant
+ 15  ●  ix_products_sku duplicates uq_products_sku on products  · 648 KB redundant
        duplicate-index:shop.products.ix_products_sku
- 18  ●  A read from order_items returns 20K rows per run  · 20K rows per run
+ 16  ●  A read from order_items returns 20K rows per run  · 20K rows per run
        big-result:264
- 19  ●  SQL Server doesn't trust 2 constraints on child  · 2 untrusted
+ 17  ●  SQL Server doesn't trust 2 constraints on child  · 2 untrusted
        untrusted-constraint:archive.child
- 20  ●  Cost threshold for parallelism is still the 1990s default of 5  · Setting
+ 18  ●  Cost threshold for parallelism is still the 1990s default of 5  · Setting
        config:cost-threshold-for-parallelism
- 21  ●  Query Store records every statement, including one-off ones  · Setting
+ 19  ●  Query Store records every statement, including one-off ones  · Setting
        config:query-store-capture
- 22  ●  LAST_QUERY_PLAN_STATS is off for this database  · Diagnostics
+ 20  ●  LAST_QUERY_PLAN_STATS is off for this database  · Diagnostics
        last-actual-plans:last-query-plan-stats
 
-Information and history (1)
+Information and history (3)
+ 21  ○  Row locks on support_tickets escalated to a table lock 5 times since its indexes were loaded into memory
+       lock-escalations:shop.support_tickets
+ 22  ○  Inserts into hot queue for the last page of pk_hot
+       last-page-insert:archive.hot.pk_hot
  23  ○  An update of wide writes 7.9 KB of transaction log per row it changes
        log-volume:255
 
@@ -109,17 +109,17 @@ $ culprit --format text dashboard <repo>/fixtures/mssql-demo.report.json
 mssql-demo · SQL Server 2022 · culprit_demo
 Query Store, the last 5 hours · local · scanned <age>
 
-Needs a look: 22 opportunities; the top ones touch 2 min of database time over the last 5 hours (28%).
+Needs a look: 20 opportunities; the top ones touch 5 min of database time over the last 5 hours (83%).
 
 ● Database time     Database time is steady: 6 min over the last 5 hours.
                     Database time 6 min · Runs 71K · On CPU 27% · Covers 5 hours
                     → culprit changes mssql-demo
 
-● Findings          22 opportunities; the top ones touch 2 min of database time over the last 5 hours (28%).
-                    High 4 · Medium 7 · Low 11 · Information and history 1
+● Findings          20 opportunities; the top ones touch 5 min of database time over the last 5 hours (83%).
+                    High 2 · Medium 7 · Low 11 · Information and history 3
                     ● A read from order_items times out on every run, at about 15 s  100% of runs fail
                     ● A read from orders fails 25% of the time  25% of runs fail
-                    ● Row locks on support_tickets escalated to a table lock 5 times since SQL Server started (Oct 11)  5 table locks
+                    ● Queries on orders recorded lock waits in the last 5 hours  3 min waiting on locks
                     → culprit findings mssql-demo
 
 ○ Top queries       One query is 34% of database time: an update of orders.
@@ -234,7 +234,7 @@ Health ("since start" covers 1 h 7 min)
     Scheduling share of recorded waits (whole server)      1.76%  since start The share of recorded waiting spent ready to run, before a worker was scheduled. This is not CPU utilization and alone does not establish CPU pressure.
     Waiting for workers since start (whole instance)      1.1 s  since start
     Waiting for workers, per hour (whole server)     973 ms  since start Average worker wait time over the counters' history; this does not establish a worker shortage now. The worker finding checks the amount and the database's own evidence.
-    Version store                               0 B  when scanned Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.
+    Version store (tempdb)                      0 B  when scanned Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.
     New connections (whole server)          3.0/min  since start The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
 
 Storage (average per operation, since start)
@@ -963,37 +963,37 @@ $ culprit --format md findings x --report <repo>/fixtures/mssql-demo.report.json
 
 SQL Server 2022 · database `culprit_demo` · Sun Oct 11 12:13 UTC
 
-**22 opportunities. The top ones touch 2 min of database time over the last 5 hours (28%).**
+**20 opportunities. The top ones touch 5 min of database time over the last 5 hours (83%).**
 
 | # | Status | Finding | Impact | Id |
 |---|---|---|---|---|
 | 1 | Needs attention | A read from order_items times out on every run, at about 15 s | 100% of runs fail | `failing-query:263` |
 | 2 | Needs attention | A read from orders fails 25% of the time | 25% of runs fail | `failing-query:246` |
-| 3 | Needs attention | Row locks on support_tickets escalated to a table lock 5 times since SQL Server started (Oct 11) | 5 table locks | `lock-escalations:shop.support_tickets` |
-| 4 | Needs attention | Inserts into hot queue for the last page of pk_hot | 53.6 s latch waits | `last-page-insert:archive.hot.pk_hot` |
-| 5 | Needs attention | Queries on orders recorded lock waits in the last 5 hours | 3 min waiting on locks | `hot-rows:shop.orders` |
-| 6 | Needs attention | Compares each of 1.5M rows of order_items with 999 rows the Table Spool replays (1.5B pairs) | 27% of DB time | `plan-insights:nested-loops:query-263` |
-| 7 | Needs attention | This plan runs on one CPU because its statement says OPTION (MAXDOP 1) | 27% of DB time | `plan-insights:parallelism-blocked:query-263` |
-| 8 | Needs attention | A read from products runs 60K times in 5 hours, one key at a time | 822 ms of database time over the last 5 hours (&lt;1%) | `chatty-query:6` |
-| 9 | Needs attention | A type mismatch on customers.email stops a read from customers from seeking an index | 7% of DB time | `plan-warnings:implicit-conversion:customers.email` |
-| 10 | Needs attention | order_items is searched by order_id without a supporting index | 20.3 s of database time over the last 5 hours (6%) | `missing-index:shop.order_items(order_id)` |
-| 11 | Needs attention | Readers and writers block each other (READ_COMMITTED_SNAPSHOT is off) | Setting | `config:read-committed-snapshot` |
-| 12 | Optional improvement | A read from orders got 3.4× slower on Oct 11 at 10:45 UTC, when its plan changed | 3.4× slower | `regression:8` |
-| 13 | Optional improvement | ticket_events has no index on ticket_id, its foreign key to support_tickets | 800K rows unindexed | `unindexed-fk:shop.ticket_events(ticket_id)` |
-| 14 | Optional improvement | orders is searched by shipped_at without a supporting index | 5.0 s of database time over the last 5 hours (1%) | `missing-index:shop.orders(shipped_at)` |
-| 15 | Optional improvement | Two queries deadlocked once in the last 6 hours (key-lookup deadlock on shop.customers) | 1 deadlock | `deadlocks:key-lookup:shop.customers` |
-| 16 | Optional improvement | ix_orders_status is covered by the wider ix_orders_status_created on orders | 26.5 MB redundant | `duplicate-index:shop.orders.ix_orders_status` |
-| 17 | Optional improvement | ix_products_sku duplicates uq_products_sku on products | 648 KB redundant | `duplicate-index:shop.products.ix_products_sku` |
-| 18 | Optional improvement | A read from order_items returns 20K rows per run | 20K rows per run | `big-result:264` |
-| 19 | Optional improvement | SQL Server doesn't trust 2 constraints on child | 2 untrusted | `untrusted-constraint:archive.child` |
-| 20 | Optional improvement | Cost threshold for parallelism is still the 1990s default of 5 | Setting | `config:cost-threshold-for-parallelism` |
-| 21 | Optional improvement | Query Store records every statement, including one-off ones | Setting | `config:query-store-capture` |
-| 22 | Optional improvement | LAST_QUERY_PLAN_STATS is off for this database | Diagnostics | `last-actual-plans:last-query-plan-stats` |
+| 3 | Needs attention | Queries on orders recorded lock waits in the last 5 hours | 3 min waiting on locks | `hot-rows:shop.orders` |
+| 4 | Needs attention | Compares each of 1.5M rows of order_items with 999 rows the Table Spool replays (1.5B pairs) | 27% of DB time | `plan-insights:nested-loops:query-263` |
+| 5 | Needs attention | This plan runs on one CPU because its statement says OPTION (MAXDOP 1) | 27% of DB time | `plan-insights:parallelism-blocked:query-263` |
+| 6 | Needs attention | A read from products runs 60K times in 5 hours, one key at a time | 822 ms of database time over the last 5 hours (&lt;1%) | `chatty-query:6` |
+| 7 | Needs attention | A type mismatch on customers.email stops a read from customers from seeking an index | 7% of DB time | `plan-warnings:implicit-conversion:customers.email` |
+| 8 | Needs attention | order_items is searched by order_id without a supporting index | 20.3 s of database time over the last 5 hours (6%) | `missing-index:shop.order_items(order_id)` |
+| 9 | Needs attention | Readers and writers block each other (READ_COMMITTED_SNAPSHOT is off) | Setting | `config:read-committed-snapshot` |
+| 10 | Optional improvement | A read from orders got 3.4× slower on Oct 11 at 10:45 UTC, when its plan changed | 3.4× slower | `regression:8` |
+| 11 | Optional improvement | ticket_events has no index on ticket_id, its foreign key to support_tickets | 800K rows unindexed | `unindexed-fk:shop.ticket_events(ticket_id)` |
+| 12 | Optional improvement | orders is searched by shipped_at without a supporting index | 5.0 s of database time over the last 5 hours (1%) | `missing-index:shop.orders(shipped_at)` |
+| 13 | Optional improvement | Two queries deadlocked once in the last 6 hours (key-lookup deadlock on shop.customers) | 1 deadlock | `deadlocks:key-lookup:shop.customers` |
+| 14 | Optional improvement | ix_orders_status is covered by the wider ix_orders_status_created on orders | 26.5 MB redundant | `duplicate-index:shop.orders.ix_orders_status` |
+| 15 | Optional improvement | ix_products_sku duplicates uq_products_sku on products | 648 KB redundant | `duplicate-index:shop.products.ix_products_sku` |
+| 16 | Optional improvement | A read from order_items returns 20K rows per run | 20K rows per run | `big-result:264` |
+| 17 | Optional improvement | SQL Server doesn't trust 2 constraints on child | 2 untrusted | `untrusted-constraint:archive.child` |
+| 18 | Optional improvement | Cost threshold for parallelism is still the 1990s default of 5 | Setting | `config:cost-threshold-for-parallelism` |
+| 19 | Optional improvement | Query Store records every statement, including one-off ones | Setting | `config:query-store-capture` |
+| 20 | Optional improvement | LAST_QUERY_PLAN_STATS is off for this database | Diagnostics | `last-actual-plans:last-query-plan-stats` |
 
-## Information and history (1)
+## Information and history (3)
 
 | # | Status | Finding | Impact | Id |
 |---|---|---|---|---|
+| 21 | Information | Row locks on support_tickets escalated to a table lock 5 times since its indexes were loaded into memory | 5 table locks | `lock-escalations:shop.support_tickets` |
+| 22 | Information | Inserts into hot queue for the last page of pk_hot | 53.6 s latch waits | `last-page-insert:archive.hot.pk_hot` |
 | 23 | History | An update of wide writes 7.9 KB of transaction log per row it changes | 232 MB of transaction log | `log-volume:255` |
 $ culprit --format md analyze <repo>/fixtures/pg-demo.report.json
 # Culprit report: pg-demo

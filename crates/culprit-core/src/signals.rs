@@ -386,6 +386,8 @@ impl Replica {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
 pub struct IndexContention {
+    /// The native metadata-cache reset epoch. Server uptime does not establish this window.
+    pub reset: crate::ResetMarker,
     pub row_lock_waits: f64,
     pub row_lock_wait_ms: f64,
     pub page_lock_waits: f64,
@@ -399,9 +401,10 @@ pub struct IndexContention {
     /// conflicting lock on the table, and the statement keeps its row locks.
     pub lock_escalation_attempts: f64,
     pub leaf_inserts: Option<f64>,
-    /// The leading key column only grows (identity or sequence), so every insert lands on the last page.
+    /// The leading key has a native identity or direct sequence, sequential GUID or clock default.
+    /// This is append-oriented evidence; explicit values and concurrent inserts need not be ordered.
     pub sequential_key: bool,
-    /// SQL Server 2019+ OPTIMIZE_FOR_SEQUENTIAL_KEY; `None` on older versions.
+    /// SQL Server 2019+ OPTIMIZE_FOR_SEQUENTIAL_KEY; `None` when unavailable or unknown.
     pub optimize_for_sequential_key: Option<bool>,
 }
 
@@ -419,6 +422,7 @@ impl IndexContention {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
 pub struct IndexLockCounts {
+    pub reset: crate::ResetMarker,
     pub waits: f64,
     pub wait_ms: f64,
 }
@@ -452,7 +456,10 @@ impl ContentionBaseline {
             .iter()
             .filter_map(|i| {
                 let c = i.contention.as_ref()?;
-                Some((Self::key(i), IndexLockCounts { waits: c.lock_waits(), wait_ms: c.lock_wait_ms() }))
+                Some((
+                    Self::key(i),
+                    IndexLockCounts { reset: c.reset.clone(), waits: c.lock_waits(), wait_ms: c.lock_wait_ms() },
+                ))
             })
             .collect();
         (!indexes.is_empty()).then(|| Self {
@@ -465,9 +472,12 @@ impl ContentionBaseline {
     pub fn since(&self, index: &crate::IndexStat) -> Option<IndexLockCounts> {
         let then = self.indexes.get(&Self::key(index))?;
         let now = index.contention.as_ref()?;
-        (now.lock_waits() >= then.waits && now.lock_wait_ms() >= then.wait_ms).then(|| IndexLockCounts {
-            waits: now.lock_waits() - then.waits,
-            wait_ms: now.lock_wait_ms() - then.wait_ms,
+        (now.reset == then.reset && now.lock_waits() >= then.waits && now.lock_wait_ms() >= then.wait_ms).then(|| {
+            IndexLockCounts {
+                reset: now.reset.clone(),
+                waits: now.lock_waits() - then.waits,
+                wait_ms: now.lock_wait_ms() - then.wait_ms,
+            }
         })
     }
 }
@@ -478,7 +488,7 @@ impl ContentionBaseline {
 pub struct EscalationBaseline {
     /// When the earlier scan was taken (UTC, ISO 8601).
     pub taken_at: String,
-    /// Escalations it counted per table (`schema.table`); a table missing here had none. Empty when the server
+    /// Escalations it counted per table (`schema.table`); a missing table has no comparable baseline. Empty when the server
     /// restarted after it: every escalation counted now came later.
     pub tables: BTreeMap<String, f64>,
     /// The server restarted between the earlier scan and this one, which started the counts again from zero.
@@ -685,12 +695,12 @@ impl EscalationBaseline {
         self.reference.as_ref().is_some_and(|r| r.id.is_none())
     }
 
-    /// Escalations on `table` (`schema.table`) since the earlier scan, out of `now` counted since the server started.
+    /// Observed increase on `table` (`schema.table`) since the earlier scan.
     /// `None` for a count lower than then without a restart: the table's indexes were reloaded into memory, or one of
     /// them (or a partition) was rebuilt or dropped and took its own count with it. The rest may all be old, so it
     /// can't say how many are new.
     pub fn since(&self, table: &str, now: f64) -> Option<f64> {
-        let then = self.tables.get(table).copied().unwrap_or(0.0);
+        let then = if self.restarted { 0.0 } else { *self.tables.get(table)? };
         (now >= then).then_some(now - then)
     }
 }
@@ -701,11 +711,11 @@ fn restarted(before: &str, after: &str) -> Option<bool> {
     Some((after - before).abs() > SAME_START_SECONDS)
 }
 
-/// Lock escalations per table (`schema.table`) a scan counted, its tables without any left out.
+/// Lock escalations per table (`schema.table`) a scan counted, including measured zeros.
 pub fn escalations_by_table(snapshot: &Snapshot) -> BTreeMap<String, f64> {
     let mut out = BTreeMap::new();
     for i in &snapshot.indexes {
-        if let Some(c) = i.contention.as_ref().filter(|c| c.lock_escalations > 0.0) {
+        if let Some(c) = i.contention.as_ref() {
             *out.entry(format!("{}.{}", i.schema, i.table)).or_insert(0.0) += c.lock_escalations;
         }
     }
@@ -867,7 +877,7 @@ impl TableStorage {
             .iter()
             .filter_map(|o| {
                 let rest = o.strip_prefix("trigger=")?;
-                Some(rest.split_once(':').unwrap_or((rest, "")))
+                rest.rsplit_once(':')
             })
             .collect()
     }
@@ -886,6 +896,14 @@ impl TableStorage {
 #[cfg(test)]
 mod merge_tests {
     use super::*;
+    #[test]
+    fn trigger_names_may_contain_the_event_separator_and_malformed_entries_are_not_facts() {
+        let storage = TableStorage {
+            options: vec!["trigger=tenant:audit:IDU".into(), "trigger=unknown:".into(), "trigger=malformed".into()],
+            ..Default::default()
+        };
+        assert_eq!(storage.triggers(), [("tenant:audit", "IDU"), ("unknown", "")]);
+    }
 
     #[test]
     fn a_count_that_shrank_or_whose_statistics_were_reset_started_over() {

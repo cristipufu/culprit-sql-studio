@@ -1,0 +1,297 @@
+//! Export identity excludes delivery attempts, redaction, endpoint aliases and observation timestamps.
+use super::{CaptureIdentity, CollectionDescription, TelemetryRecord, TelemetryStream};
+use crate::{DatabaseIdentity, Result};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use ts_rs::TS;
+
+pub const EXPORT_FORMAT_VERSION: u32 = 7;
+pub const REPRESENTATION_VERSION: u32 = 2;
+
+impl DatabaseIdentity {
+    /// Stable resource identity for telemetry destinations; endpoints remain evidence when native identity is absent.
+    pub fn telemetry_id(&self) -> Result<String> {
+        scoped_id("database-resource-v1", self, "", &())
+    }
+}
+
+pub fn digest(bytes: &[u8]) -> String {
+    Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect()
+}
+/// Canonical lowercase SHA-256 identifiers used by native export and delivery contracts.
+pub fn valid_digest(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+impl CollectionDescription {
+    /// Stable grouping for the latest complete observation set. Captured scopes retain native generations.
+    pub fn logical_source_id(&self) -> Result<String> {
+        scoped_id("logical-source-v1", &self.database, &self.source, &())
+    }
+    pub fn scoped_id(&self, domain: &str, identity: &impl Serialize) -> Result<String> {
+        match self.observation.activity() {
+            Some(snapshot) => scoped_id(domain, &self.database, &self.source, &(&snapshot.epoch, identity)),
+            None => scoped_id(domain, &self.database, &self.source, identity),
+        }
+    }
+    pub fn captured_range(&self) -> Result<super::CapturedRange> {
+        Ok(super::CapturedRange {
+            scope_id: self.scoped_id("outbox-source-v1", &())?,
+            range: self.observation.range().canonical()?,
+        })
+    }
+}
+impl super::CapturedRange {
+    /// Native interval discovery and capture must use the same database/source namespace.
+    pub fn native_interval(
+        database: &DatabaseIdentity,
+        source: &str,
+        interval: &super::TelemetryInterval,
+    ) -> Result<Self> {
+        Ok(Self {
+            scope_id: scoped_id("outbox-source-v1", database, source, &())?,
+            range: super::TelemetryRange::NativeInterval { interval: interval.clone() }.canonical()?,
+        })
+    }
+}
+fn scoped_id(domain: &str, database: &DatabaseIdentity, source: &str, identity: &impl Serialize) -> Result<String> {
+    // A native database incarnation survives endpoint/alias changes. Without it the observed endpoint remains
+    // part of the namespace; uncertainty is retained rather than guessed away.
+    #[derive(Serialize)]
+    #[serde(untagged)]
+    enum DatabaseScope<'a> {
+        Native { engine: crate::Engine, incarnation: &'a str },
+        Endpoint(&'a DatabaseIdentity),
+    }
+    let database = match database.incarnation.as_deref().filter(|value| !value.is_empty()) {
+        Some(incarnation) => DatabaseScope::Native { engine: database.engine, incarnation },
+        None => DatabaseScope::Endpoint(database),
+    };
+    let bytes = serde_json::to_vec(&(domain, database, source, identity))
+        .map_err(|_| crate::Error::internal(crate::t!("collection.invalid_source")))?;
+    Ok(digest(&bytes))
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct ExportedRecord {
+    pub format_version: u32,
+    pub representation_version: u32,
+    pub capture: CaptureIdentity,
+    pub batch_id: String,
+    /// Absent when the source could not resolve the native definition. Such rows cannot enter trusted totals.
+    pub record_id: Option<String>,
+    pub record: TelemetryRecord,
+}
+
+impl ExportedRecord {
+    pub fn new(source: &CollectionDescription, capture: &CaptureIdentity, record: TelemetryRecord) -> Result<Self> {
+        let record = record.for_export(source)?;
+        let interval = source
+            .query_history()
+            .map(|history| {
+                Ok::<_, crate::Error>((
+                    history.interval.native_id.clone(),
+                    canonical_time(&history.interval.from)?,
+                    canonical_time(&history.interval.until)?,
+                ))
+            })
+            .transpose()?;
+        let record_id = match &record {
+            TelemetryRecord::QueryDefinition(definition) => Some(definition.id.clone()),
+            TelemetryRecord::PlanDefinition(definition) => Some(definition.id.clone()),
+            TelemetryRecord::QueryRuntime(row) if row.key.plan_definition_id.is_some() => Some(source.scoped_id(
+                "runtime-native-row-v1",
+                &(interval.as_ref().ok_or_else(|| super::CollectionStop::InvalidPage.error())?, &row.key),
+            )?),
+            TelemetryRecord::QueryWaits(row) if row.key.plan_definition_id.is_some() => Some(source.scoped_id(
+                "wait-native-row-v1",
+                &(interval.as_ref().ok_or_else(|| super::CollectionStop::InvalidPage.error())?, &row.key, row.category),
+            )?),
+            TelemetryRecord::ResourceSample(row) => {
+                Some(source.scoped_id("resource-sample-v1", &(&row.at, &row.replica_id))?)
+            }
+            TelemetryRecord::Activity(row) => {
+                Some(source.scoped_id("activity-observation-v1", &(&capture.observation_id, &row.key))?)
+            }
+            TelemetryRecord::Blocking(row) => {
+                Some(source.scoped_id("blocking-observation-v1", &(&capture.observation_id, &row.waiter, &row.owner))?)
+            }
+            TelemetryRecord::Deadlock(row) => {
+                Some(source.scoped_id("deadlock-event-v1", &(&row.position, row.graph_ordinal))?)
+            }
+            TelemetryRecord::Incident(row) => Some(row.id.clone()),
+            TelemetryRecord::ActivityCheckpoint(row) => {
+                Some(source.scoped_id("activity-checkpoint-v1", &(&capture.observation_id, &row.id))?)
+            }
+            TelemetryRecord::Operational(row) => {
+                Some(source.scoped_id("state-observation-v1", &(&capture.observation_id, &row.source, &row.key))?)
+            }
+            TelemetryRecord::WaitCounter(row) => {
+                Some(source.scoped_id(
+                    "wait-counter-observation-v1",
+                    &(&capture.observation_id, &row.source, &row.wait_type),
+                )?)
+            }
+            TelemetryRecord::Replication(row) => Some(
+                source
+                    .scoped_id("replication-observation-v1", &(&capture.observation_id, &row.source, row.fact.key()))?,
+            ),
+            TelemetryRecord::Setting(row) => Some(source.scoped_id(
+                "setting-observation-v1",
+                &(&capture.observation_id, &row.source, &row.namespace, &row.name),
+            )?),
+            TelemetryRecord::Tuning(row) => Some(
+                source.scoped_id("tuning-observation-v1", &(&capture.observation_id, &row.source, row.fact.key()))?,
+            ),
+            TelemetryRecord::ObjectDefinition(row) => {
+                Some(source.scoped_id("object-definition-v1", &(&row.source, &row.key, &row.version))?)
+            }
+            TelemetryRecord::QueryRuntime(_) | TelemetryRecord::QueryWaits(_) => None,
+        };
+        Ok(Self {
+            format_version: EXPORT_FORMAT_VERSION,
+            representation_version: REPRESENTATION_VERSION,
+            capture: capture.clone(),
+            batch_id: batch_id(&capture.observation_id, record.stream())?,
+            record_id,
+            record,
+        })
+    }
+}
+
+pub fn batch_id(observation_id: &str, stream: TelemetryStream) -> Result<String> {
+    let bytes = serde_json::to_vec(&("capture-batch-v1", observation_id, stream))
+        .map_err(|_| crate::Error::internal(crate::t!("collection.invalid_source")))?;
+    Ok(digest(&bytes))
+}
+
+pub fn canonical_time(value: &str) -> Result<String> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|time| time.with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Nanos, true))
+        .map_err(|_| crate::Error::invalid(crate::t!("collection.invalid_source")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn database_resource_id_uses_native_incarnation_and_preserves_endpoint_uncertainty() {
+        let mut original = DatabaseIdentity::server(crate::Engine::Mssql, "db", "old.invalid", 1433, None);
+        let mut alias = DatabaseIdentity::server(crate::Engine::Mssql, "renamed", "new.invalid", 1433, None);
+        assert_ne!(original.telemetry_id().unwrap(), alias.telemetry_id().unwrap());
+        original.incarnation = Some("native-guid".into());
+        alias.incarnation = original.incarnation.clone();
+        assert_eq!(original.telemetry_id().unwrap(), alias.telemetry_id().unwrap());
+        alias.incarnation = Some("recreated-guid".into());
+        assert_ne!(original.telemetry_id().unwrap(), alias.telemetry_id().unwrap());
+    }
+    use crate::telemetry::{
+        NativeMeasurementKey, NativePlanIdentity, NativeQueryIdentity, SourceContinuity, TelemetryInterval,
+        WaitMeasurement,
+    };
+
+    fn source() -> CollectionDescription {
+        let mut database = DatabaseIdentity::server(crate::Engine::Mssql, "sample", "original.invalid", 1433, None);
+        database.incarnation = Some("native-database-guid".into());
+        CollectionDescription {
+            database,
+            source: "query_store".into(),
+            observation: crate::telemetry::SourceObservation::QueryHistory(crate::telemetry::QueryHistoryDescription {
+                interval: TelemetryInterval {
+                    native_id: "7".into(),
+                    from: "2020-01-01T06:00:00Z".into(),
+                    until: "2020-01-01T07:00:00Z".into(),
+                },
+                replica_group_ids: vec!["1".into()],
+                capture_mode: "AUTO".into(),
+                waits_capture_enabled: true,
+            }),
+            continuity: SourceContinuity::Unverified,
+        }
+    }
+    fn plan() -> NativePlanIdentity {
+        NativePlanIdentity {
+            plan_id: "3".into(),
+            query: NativeQueryIdentity {
+                query_id: "2".into(),
+                context_settings_id: "1".into(),
+                object_id: "0".into(),
+                query_hash: "0123456789ABCDEF".into(),
+                initial_compile_at: "2020-01-01T05:00:00Z".into(),
+            },
+            plan_hash: "FEDCBA9876543210".into(),
+            initial_compile_at: "2020-01-01T05:00:01Z".into(),
+        }
+    }
+    fn wait(source: &CollectionDescription) -> TelemetryRecord {
+        TelemetryRecord::QueryWaits(WaitMeasurement {
+            key: NativeMeasurementKey {
+                row_id: "1".into(),
+                plan_id: "3".into(),
+                replica_group_id: "1".into(),
+                execution_type: 0,
+                plan_definition_id: Some(plan().definition_id(source).unwrap()),
+            },
+            category: 1,
+            total_wait_ms: "2".into(),
+            avg_wait_ms: 2.0,
+            min_wait_ms: "2".into(),
+            max_wait_ms: "2".into(),
+        })
+    }
+    #[test]
+    fn replay_and_an_endpoint_rename_preserve_ids_with_native_database_identity() {
+        let source = source();
+        let first = ExportedRecord::new(
+            &source,
+            &CaptureIdentity { observation_id: "first-capture".into(), revision: None },
+            wait(&source),
+        )
+        .unwrap();
+        let mut renamed = source.clone();
+        renamed.database.database = "renamed".into();
+        renamed.database.location =
+            crate::DatabaseLocation::Server { host: "renamed.invalid".into(), port: 1433, instance: None };
+        if let super::super::SourceObservation::QueryHistory(history) = &mut renamed.observation {
+            history.interval.from = "2020-01-01T08:00:00+02:00".into();
+        }
+        let replay = ExportedRecord::new(
+            &renamed,
+            &CaptureIdentity { observation_id: "another-capture".into(), revision: None },
+            wait(&renamed),
+        )
+        .unwrap();
+        assert_eq!(first.record_id, replay.record_id);
+        assert_ne!(first.capture.observation_id, replay.capture.observation_id);
+        assert!(first.record_id.is_some());
+    }
+    #[test]
+    fn reused_native_ids_cannot_hide_a_new_database_or_definition() {
+        let source = source();
+        let old = plan().definition_id(&source).unwrap();
+        let mut changed = plan();
+        changed.initial_compile_at = "2020-01-02T05:00:01Z".into();
+        assert_ne!(old, changed.definition_id(&source).unwrap());
+        let mut recreated = source.clone();
+        recreated.database.incarnation = Some("different-guid".into());
+        assert_ne!(old, plan().definition_id(&recreated).unwrap());
+        changed = plan();
+        changed.initial_compile_at = "2020-01-01T07:00:01+02:00".into();
+        assert_eq!(old, changed.definition_id(&source).unwrap());
+    }
+    #[test]
+    fn unresolved_measurements_do_not_receive_a_trusted_record_id() {
+        let source = source();
+        let mut record = wait(&source);
+        if let TelemetryRecord::QueryWaits(row) = &mut record {
+            row.key.plan_definition_id = None;
+        }
+        assert!(
+            ExportedRecord::new(&source, &CaptureIdentity { observation_id: "capture".into(), revision: None }, record)
+                .unwrap()
+                .record_id
+                .is_none()
+        );
+    }
+}

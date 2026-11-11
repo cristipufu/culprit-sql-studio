@@ -22,8 +22,10 @@ pub(crate) struct Connections<'a> {
     pub store: &'a Store,
     pub secrets: &'a dyn SecretStore,
     pub entra: &'a entra::EntraAuth,
+    pub azure_credential: Option<&'a crate::azure_identity::AzureCredential>,
     pub providers: &'a [(Engine, ProviderFactory)],
     pub ssh: &'a crate::ssh::Manager,
+    pub source_gate: &'a culprit_collector::admission::SourceGate,
 }
 
 impl Connections<'_> {
@@ -541,11 +543,12 @@ impl Connections<'_> {
     }
 
     pub(crate) async fn probe(&self, name: &str) -> Result<ServerInfo> {
-        let provider = self.provider(name).await?;
-        self.forget_rejected(
+        let observed = self.observed_provider(name).await?;
+        let result = self.forget_rejected(
             name,
-            crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, provider.probe()).await,
-        )
+            crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, observed.provider().probe()).await,
+        );
+        observed.finish(result).await
     }
 
     pub(crate) async fn test_connection(&self, new: &NewConnection) -> Result<ServerInfo> {
@@ -568,7 +571,10 @@ impl Connections<'_> {
         match spec.auth {
             AuthKind::Entra => {
                 let engine = engine()?;
-                let token = self.entra.token(engine, spec, self.secrets).await?;
+                let token = match self.azure_credential {
+                    Some(credential) => credential.database_token(engine, &spec.host).await?,
+                    None => self.entra.token(engine, spec, self.secrets).await?,
+                };
                 // PostgreSQL and MySQL sign in as the person the token names.
                 if engine != Engine::Mssql && spec.user.as_deref().is_none_or(str::is_empty) {
                     spec.user = entra::token_user(&token);

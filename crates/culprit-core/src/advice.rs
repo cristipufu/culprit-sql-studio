@@ -24,7 +24,8 @@ pub struct QueryFamily {
     pub query_ids: Vec<String>,
 }
 
-/// How the plan cache is used (SQL Server): plans compiled for one statement and never reused.
+/// Database plan-cache footprint. The single-use subset contains only Adhoc entries with usecounts=1.
+/// This is a cache lookup count, not an execution count; parameterized Prepared entries are excluded.
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
 pub struct PlanCacheUse {
@@ -112,10 +113,25 @@ pub struct ForcedPlan {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
 pub struct QueryHint {
+    pub hint_id: String,
     pub query_id: String,
+    pub scope: QueryStoreHintScope,
     pub hint: String,
     pub failures: f64,
     pub last_failure_reason: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+#[ts(export)]
+pub enum QueryStoreHintScope {
+    /// The known native layout predates replica-scoped hints.
+    Local,
+    ReplicaGroup {
+        id: String,
+    },
+    #[default]
+    Unknown,
 }
 
 /// The index advisor's plan for a database, built from one report: indexes to add, indexes to clean up, and tables

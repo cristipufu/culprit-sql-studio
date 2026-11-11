@@ -1,8 +1,8 @@
 use crate::i18n::Message;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-#[derive(Serialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum ErrorCode {
@@ -27,6 +27,9 @@ pub enum ErrorDetail {
     Statement(crate::sql::StatementProblem),
     ActualPlanStatisticsUnavailable,
     ConnectionSecurity,
+    CollectionStopped(crate::telemetry::CollectionStop),
+    Outbox(crate::telemetry::OutboxProblem),
+    Delivery(crate::telemetry::DeliveryProblem),
 }
 
 #[derive(Serialize, TS, Clone, Debug, thiserror::Error)]

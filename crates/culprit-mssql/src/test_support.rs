@@ -1,0 +1,61 @@
+//! Disposable loopback SQL Server fixture helpers; production endpoints are never accepted.
+use crate::conn::MsClient;
+use std::time::Duration;
+use tiberius::{AuthMethod, Config, EncryptionLevel};
+
+pub(crate) fn config(port: u16, database: &str, password: &str, application: &str) -> Config {
+    let mut config = Config::new();
+    config.host("127.0.0.1");
+    config.port(port);
+    config.database(database);
+    config.application_name(application);
+    config.authentication(AuthMethod::sql_server("sa", password));
+    config.encryption(EncryptionLevel::Off);
+    config.trust_cert();
+    config.command_timeout(Some(Duration::from_secs(40)));
+    config
+}
+pub(crate) async fn batch(client: &mut MsClient, sql: &str) {
+    client.simple_query(sql).await.unwrap().into_results().await.unwrap();
+}
+
+pub(crate) async fn session_id(client: &mut MsClient) -> String {
+    crate::conn::query_one(client, "SELECT /* culprit fixture */ CONVERT(varchar(16),@@SPID) AS id")
+        .await
+        .unwrap()
+        .string("id")
+}
+
+/// An independent fixture session. It never shares the production reader's uncertainty fence.
+pub(crate) async fn connect(config: &Config, kind: crate::conn::SessionKind) -> culprit_core::Result<MsClient> {
+    crate::conn::Pool::new(config.clone(), None).connect(kind).await
+}
+
+pub(crate) async fn query_store_ready(client: &mut crate::conn::MsClient) {
+    const READINESS_TIMEOUT: Duration = Duration::from_secs(10);
+    const READINESS_POLL: Duration = Duration::from_millis(50);
+    const WARMUP: &str = "SELECT COUNT_BIG(*) AS ready FROM dbo.query_store_readiness_fixture";
+    batch(client, "CREATE TABLE dbo.query_store_readiness_fixture(id int NOT NULL);INSERT dbo.query_store_readiness_fixture VALUES(1)").await;
+    let deadline = tokio::time::Instant::now() + READINESS_TIMEOUT;
+    loop {
+        let options =
+            crate::conn::query_one(client, "SELECT actual_state,readonly_reason FROM sys.database_query_store_options")
+                .await
+                .unwrap();
+        if options.f64("actual_state") == Some(2.0) {
+            batch(client, WARMUP).await;
+            batch(client, "EXEC sys.sp_query_store_flush_db").await;
+            let captured = crate::conn::query_one(client, &format!(
+                "SELECT COUNT_BIG(*) AS captured FROM sys.query_store_query_text qt JOIN sys.query_store_query q ON q.query_text_id=qt.query_text_id JOIN sys.query_store_plan p ON p.query_id=q.query_id JOIN sys.query_store_runtime_stats rs ON rs.plan_id=p.plan_id WHERE qt.query_sql_text=N'{}' AND rs.count_executions>0", WARMUP.replace('\'', "''")
+            )).await.unwrap();
+            if captured.f64("captured").is_some_and(|count| count > 0.0) {
+                return;
+            }
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "Query Store did not acknowledge fixture capture readiness: {options:?}"
+        );
+        tokio::time::sleep(READINESS_POLL).await;
+    }
+}

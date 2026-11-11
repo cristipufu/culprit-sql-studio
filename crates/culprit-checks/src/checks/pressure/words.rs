@@ -906,7 +906,7 @@ const HELD_CLEANUP: &[(&str, &str)] = &[
         "mssql-version-store",
         r#"held-cleanup:92 · High · High · OptionalImprovement · score 45.00
 title: Session 92 has kept a transaction open for 3 h; this database's version store holds 3.0 GB
-summary: It reads or makes row versions, and while it stays open SQL Server keeps every version this database made since it started in the version store; reads have to walk past them. It comes from billing-worker. Short transactions keep both small.
+summary: This transaction uses row versions. The database's version-store size does not measure bytes retained by this transaction. It comes from billing-worker. Keep transactions short.
 impact: open 3 h
 metric: Open for
 metric: Version store
@@ -920,7 +920,7 @@ verify: Re-scan: the oldest open transaction should be minutes old, not hours."#
         "mssql-big",
         r#"held-cleanup:93 · Medium · High · OptionalImprovement · score 22.00
 title: Session 93 has kept a transaction open for 10 min; this database's version store holds 1.5 GB
-summary: It reads or makes row versions, and while it stays open SQL Server keeps every version this database made since it started in the version store; reads have to walk past them. It comes from billing-worker. Short transactions keep both small.
+summary: This transaction uses row versions. The database's version-store size does not measure bytes retained by this transaction. It comes from billing-worker. Keep transactions short.
 impact: open 10 min
 metric: Open for
 metric: Version store
@@ -934,7 +934,7 @@ verify: Re-scan: the oldest open transaction should be minutes old, not hours."#
         "mssql-wrote",
         r#"held-cleanup:71 · Medium · High · OptionalImprovement · score 22.00
 title: Session 71 has kept a transaction with uncommitted changes open for 1 h
-summary: It changed data in this database and hasn't committed: SQL Server can't reuse the transaction log past its first change, so the log grows, and its locks stay held. It comes from billing-worker. Short transactions keep both small.
+summary: Work logged in this database remains uncommitted. Log growth also depends on SQL Server's reported reuse wait. It comes from billing-worker. Keep transactions short.
 impact: open 1 h
 metric: Open for
 fix: Find out what the application does in that session and make it commit or roll back promptly; transactions should never wait on a person or a slow call. After checking it is safe, a DBA can end the session, which rolls its transaction back.
@@ -947,7 +947,7 @@ verify: Re-scan: the oldest open transaction should be minutes old, not hours."#
         "mssql-snapshot-writer",
         r#"held-cleanup:72 · Medium · High · OptionalImprovement · score 22.00
 title: Session 72 has kept a transaction with uncommitted changes open for 1 h
-summary: It reads or makes row versions, and while it stays open SQL Server keeps every version this database made since it started in the version store; reads have to walk past them. It changed data in this database and hasn't committed: SQL Server can't reuse the transaction log past its first change, so the log grows, and its locks stay held. It comes from billing-worker. Short transactions keep both small.
+summary: This transaction uses row versions. The database's version-store size does not measure bytes retained by this transaction. Work logged in this database remains uncommitted. Log growth also depends on SQL Server's reported reuse wait. It comes from billing-worker. Keep transactions short.
 impact: open 1 h
 metric: Open for
 fix: Find out what the application does in that session and make it commit or roll back promptly; transactions should never wait on a person or a slow call. After checking it is safe, a DBA can end the session, which rolls its transaction back.
@@ -960,7 +960,7 @@ verify: Re-scan: the oldest open transaction should be minutes old, not hours."#
         "mssql-open",
         r#"held-cleanup:73 · Medium · High · OptionalImprovement · score 22.00
 title: Session 73 has kept a transaction open for 40 min
-summary: An open transaction keeps its locks, and the log can't be reused past its first change. Short transactions keep both small.
+summary: The transaction remains open; its age alone does not establish blocking or log growth. Keep transactions short.
 impact: open 40 min
 metric: Open for
 fix: Find out what the application does in that session and make it commit or roll back promptly; transactions should never wait on a person or a slow call. After checking it is safe, a DBA can end the session, which rolls its transaction back.

@@ -119,6 +119,7 @@ Baseline, Dashboard, Live, Cache, Latch, Flush, Query Store, JIT, HOT, Tablet, S
 | I/O | I/O | |
 | storage | Speicher (storage system: Speichersystem) | |
 | worker (thread) | Worker-Thread | |
+| task (SQL Server) | Task (der) | Native task, distinct from a request; parallel requests may have several. |
 | parallelism | Parallelität | |
 | cardinality estimate | Kardinalitätsschätzung | |
 | parameter sniffing | Parameter Sniffing | |
@@ -137,6 +138,7 @@ Baseline, Dashboard, Live, Cache, Latch, Flush, Query Store, JIT, HOT, Tablet, S
 | production | Produktion | „auf Produktion“ |
 | login | Anmeldung (the account: Login) | |
 | password | Passwort | |
+| telemetry, collection, collector, manifest | Telemetrie, Erfassung, Collector, Manifest | `collect` und `manifest.json` bleiben unverändert |
 | source | Quelle | |
 | capability locked | nicht verfügbar | never „gesperrt“: that is a lock |
 | provider | Provider | |
@@ -186,3 +188,4 @@ Speichern, Abbrechen, Schließen, Kopieren, Kopiert, Löschen, Entfernen, Ausble
 Aktualisieren (refresh), Vergleichen, Teilen, Exportieren, Importieren, Öffnen, Verbinden, Trennen, Ausführen,
 Messen, Markieren, Ignorieren, Suchen, Weiter, Zurück, Fertig, Leeren (clear), Bearbeiten, Umbenennen, Einfügen.
 Progress: „Wird gespeichert…“, „Wird gelesen…“, „Wird ausgeführt…“.
+| telemetry outbox, capture revision, journal, replay | Telemetrie-Ausgangspuffer, Erfassungsrevision, Transaktionsjournal, erneut ausgeben | dauerhaft gespeicherte lokale Telemetrie; keine E-Mail |

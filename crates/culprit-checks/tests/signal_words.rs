@@ -681,10 +681,15 @@ caveat: This Query Store entry's first compile falls within the selected period,
 
 // ── last-page-insert ───────────────────────────────────────────────────────────────────────────────
 
-/// The SQL Server demo with only its first index contended, `uptime_hours` of counters behind it.
-fn latched(uptime_hours: Option<f64>, c: culprit_core::IndexContention) -> Vec<Finding> {
+/// Synthetic native counters with an explicitly declared lifetime, independent of server uptime.
+fn latched(uptime_hours: Option<f64>, mut c: culprit_core::IndexContention) -> Vec<Finding> {
     let mut s = fixture("mssql-demo");
     s.indexes.iter_mut().for_each(|i| i.contention = None);
+    c.reset = uptime_hours.map_or(culprit_core::ResetMarker::Unknown, |hours| {
+        culprit_core::ResetMarker::At(culprit_core::format::iso_from_epoch(
+            culprit_core::format::epoch_seconds(&s.taken_at).unwrap() - hours * 3600.0,
+        ))
+    });
     s.indexes[0].contention = Some(c);
     s.pressure.get_or_insert_with(Default::default).uptime_hours = uptime_hours;
     if uptime_hours.is_none() {
@@ -734,7 +739,7 @@ metric: Time waiting
 metric: Inserts
 fix: Spread the hot rows (several counter rows summed when read, or a queue that hands out rows by key rather than from one end), and keep the transactions that change them short. OPTIMIZE_FOR_SEQUENTIAL_KEY paces inserts only, so it wouldn't help here.
 verify: Compare completed row changes per second and their time under comparable load before and after. Compare the increase in page-latch wait time over equal intervals for that work; cumulative wait totals need not stop growing.
-caveat: SQL Server has counted these latch waits only the 30 minutes since the server last restarted: too little time to make a rate, so the total doesn't raise it. A scan after an hour or more of counting can."#,
+caveat: SQL Server has counted these latch waits for 30 minutes. At least an hour is needed to assess a rate."#,
     );
 }
 
@@ -751,7 +756,7 @@ metric: Time waiting
 metric: Inserts
 fix: Before SQL Server 2019 the remedies change the key: lead the index with a value that spreads inserts (a hashed or partitioned key column), or batch inserts so fewer sessions compete.
 verify: Compare completed inserts per second and their time under comparable load before and after. Compare the increase in page-latch wait time over equal intervals for that work; cumulative wait totals need not stop growing.
-caveat: SQL Server counts latch waits from when it started, with no time for each, and this scan doesn't know when that was: they may come from one burst long ago. Culprit raises it only on a rate measured over an hour or more of counting."#,
+caveat: SQL Server keeps latch waits for the index metadata’s lifetime. Its starting time is unknown, so the total does not establish a rate."#,
     );
 }
 
@@ -1695,7 +1700,7 @@ metric: Historical time waiting
 metric: Historical average wait
 fix: These counters alone justify no change. If the application experiences blocking, capture the current blocked statement and its blocker under representative load before changing transactions or indexes.
 verify: Compare new lock waits and their time between scans under comparable load on customers. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
-caveat: Counted since the indexes' metadata was loaded into memory, usually since SQL Server started.
+caveat: These counters cover each index metadata entry’s lifetime, which can end without a server restart.
 
 id: hot-rows:shop.orders
 title: orders has 50 recorded historical lock waits
@@ -1704,10 +1709,10 @@ impact: 2 min waiting on locks
 metric: Historical lock waits
 metric: Historical time waiting
 metric: Historical average wait
-metric: Escalations since SQL Server started
+metric: Recorded lock escalations
 fix: These counters alone justify no change. If the application experiences blocking, capture the current blocked statement and its blocker under representative load before changing transactions or indexes.
 verify: Compare new lock waits and their time between scans under comparable load on orders. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
-caveat: Counted since the indexes' metadata was loaded into memory, usually since SQL Server started."#,
+caveat: These counters cover each index metadata entry’s lifetime, which can end without a server restart."#,
     );
 }
 
@@ -1735,7 +1740,7 @@ fix: Keep the transactions that change customers short and commit before slow wo
 sql: -- Readers stop waiting for writers; test first
 ALTER DATABASE CURRENT SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;
 verify: Compare new lock waits and their time between scans under comparable load on customers. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
-caveat: Counted since the indexes' metadata was loaded into memory, usually since SQL Server started.
+caveat: These counters cover each index metadata entry’s lifetime, which can end without a server restart.
 
 id: hot-rows:shop.customers
 title: One lock wait on customers took 5.0 s since Oct 10, 06:13 UTC
@@ -1748,10 +1753,10 @@ metric: Lock waits since earlier scan
 metric: Time waiting since earlier scan
 metric: Counter interval
 metric: Waiting a day
-metric: Escalations since SQL Server started
+metric: Recorded lock escalations
 fix: Keep the transactions that change customers short and commit before slow work; make their WHERE use an index so they lock only the rows they change.
 verify: Compare new lock waits and their time between scans under comparable load on customers. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
-caveat: Counted since the indexes' metadata was loaded into memory, usually since SQL Server started.
+caveat: These counters cover each index metadata entry’s lifetime, which can end without a server restart.
 
 id: hot-rows:shop.customers
 title: No new lock waits on customers since Oct 5, 06:13 UTC
@@ -1766,7 +1771,7 @@ metric: Counter interval
 metric: Waiting a day
 fix: These counters alone justify no change. If the application experiences blocking, capture the current blocked statement and its blocker under representative load before changing transactions or indexes.
 verify: Compare new lock waits and their time between scans under comparable load on customers. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
-caveat: Counted since the indexes' metadata was loaded into memory, usually since SQL Server started.
+caveat: These counters cover each index metadata entry’s lifetime, which can end without a server restart.
 
 id: hot-rows:shop.customers
 title: Recorded lock wait time on customers grew by 15.0 s since Oct 10, 06:13 UTC
@@ -1781,7 +1786,7 @@ metric: Counter interval
 metric: Waiting a day
 fix: Keep the transactions that change customers short and commit before slow work; make their WHERE use an index so they lock only the rows they change.
 verify: Compare new lock waits and their time between scans under comparable load on customers. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
-caveat: Counted since the indexes' metadata was loaded into memory, usually since SQL Server started.
+caveat: These counters cover each index metadata entry’s lifetime, which can end without a server restart.
 
 id: hot-rows:shop.customers
 title: 10 lock waits on customers averaged 2.0 s since Sep 29, 00:13 UTC
@@ -1795,7 +1800,7 @@ metric: Time waiting since earlier scan
 metric: Counter interval
 fix: These counters alone justify no change. If the application experiences blocking, capture the current blocked statement and its blocker under representative load before changing transactions or indexes.
 verify: Compare new lock waits and their time between scans under comparable load on customers. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
-caveat: Counted since the indexes' metadata was loaded into memory, usually since SQL Server started.
+caveat: These counters cover each index metadata entry’s lifetime, which can end without a server restart.
 
 id: hot-rows:shop.customers
 title: 10 lock waits on customers averaged 2.0 s since Oct 11, 11:43 UTC
@@ -1809,7 +1814,7 @@ metric: Time waiting since earlier scan
 metric: Counter interval
 fix: Keep the transactions that change customers short and commit before slow work; make their WHERE use an index so they lock only the rows they change.
 verify: Compare new lock waits and their time between scans under comparable load on customers. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
-caveat: Counted since the indexes' metadata was loaded into memory, usually since SQL Server started.
+caveat: These counters cover each index metadata entry’s lifetime, which can end without a server restart.
 caveat: The comparison covers less than an hour: only its measured total is graded, without extrapolating a daily rate."#,
     );
 }
@@ -3143,6 +3148,7 @@ fn escalated(table: &str, escalations: f64, lock_wait_ms: f64, started: Option<&
     s.indexes.iter_mut().for_each(|i| i.contention = None);
     let i = s.indexes.iter_mut().find(|i| i.table == table).expect("an index");
     i.contention = Some(culprit_core::IndexContention {
+        reset: started.map_or(culprit_core::ResetMarker::Unknown, |at| culprit_core::ResetMarker::At(at.into())),
         lock_escalations: escalations,
         row_lock_waits: if lock_wait_ms > 0.0 { 10.0 } else { 0.0 },
         row_lock_wait_ms: lock_wait_ms,
@@ -3212,10 +3218,10 @@ fn lock_escalations_on_a_first_scan() {
     says(
         &findings,
         r#"id: lock-escalations:shop.support_tickets
-title: Row locks on support_tickets escalated to a table lock 60 times since SQL Server started (Sep 11)
-summary: SQL Server replaced the row and page locks on support_tickets with one lock on the whole table 60 times since it started, on Sep 11 at 12:13 UTC. It keeps no time for each, and Culprit has no earlier scan to compare with, so they may be old: the next scan compares with this one and says whether any happened since. That is once a day or more on average over the counter history; it does not date individual events. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was; the likeliest is a delete from support_tickets, which changes about 5.0K rows a run.
+title: Row locks on support_tickets escalated to a table lock 60 times since these counters were reset (Sep 11)
+summary: SQL Server replaced the row and page locks on support_tickets with one lock on the whole table 60 times since these counters were reset, on Sep 11 at 12:13 UTC. It keeps no time for each, and Culprit has no earlier scan to compare with, so they may be old: the next scan compares with this one and says whether any happened since. That is once a day or more on average over the counter history; it does not date individual events. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was; the likeliest is a delete from support_tickets, which changes about 5.0K rows a run.
 impact: 60 table locks
-metric: Escalations since SQL Server started
+metric: Recorded lock escalations
 metric: Lock waits on its indexes
 metric: Time waiting
 note: Changes about 5.0K rows a run.
@@ -3254,13 +3260,13 @@ SELECT e.x.value('@timestamp', 'datetime2') AS at_utc,
 
 -- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;
 verify: Compare new escalations on support_tickets and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix.
-caveat: SQL Server counts escalations since the table's indexes were loaded into memory, usually since it started, and keeps no time for each.
+caveat: SQL Server counts escalations over each index metadata entry’s lifetime, which can end without a server restart. Individual escalations are not dated.
 
 id: lock-escalations:shop.orders
-title: Row locks on orders escalated to a table lock 6 times since SQL Server started (Sep 11)
-summary: SQL Server replaced the row and page locks on orders with one lock on the whole table 6 times since it started, on Sep 11 at 12:13 UTC. It keeps no time for each, and Culprit has no earlier scan to compare with, so they may be old: the next scan compares with this one and says whether any happened since. That is once a week or more on average over the counter history; it does not establish current recurrence. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was; the writes to it are listed below, and the one to look for changes thousands of rows in one run: a purge, a cascade, a backfill.
+title: Row locks on orders escalated to a table lock 6 times since these counters were reset (Sep 11)
+summary: SQL Server replaced the row and page locks on orders with one lock on the whole table 6 times since these counters were reset, on Sep 11 at 12:13 UTC. It keeps no time for each, and Culprit has no earlier scan to compare with, so they may be old: the next scan compares with this one and says whether any happened since. That is once a week or more on average over the counter history; it does not establish current recurrence. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was; the writes to it are listed below, and the one to look for changes thousands of rows in one run: a purge, a cascade, a backfill.
 impact: 6 table locks
-metric: Escalations since SQL Server started
+metric: Recorded lock escalations
 note: Changes about 5 rows a run.
 note: Changes about 0.4 rows a run.
 fix: None of the statements in the query history changes thousands of rows of orders at once, so the one that escalated is likely a job, a migration or maintenance. Once the event session below has caught it, change it into smaller batches, for example up to 1,000 changed rows per statement, after checking its access path and lock footprint. A row limit does not bound all locks acquired or prevent escalation under lock-memory pressure. Use smaller transactions only where partial commits preserve the application's required atomicity. An UPDATE loop's filter must leave out rows already changed. A single enclosing transaction can retain locks until commit, so batching is no guarantee against a table lock. Start the event session below (culprit_lock_escalation): it keeps each escalation with its statement, in memory, at almost no cost.
@@ -3291,13 +3297,13 @@ SELECT e.x.value('@timestamp', 'datetime2') AS at_utc,
 
 -- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;
 verify: Compare new escalations on orders and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix.
-caveat: SQL Server counts escalations since the table's indexes were loaded into memory, usually since it started, and keeps no time for each.
+caveat: SQL Server counts escalations over each index metadata entry’s lifetime, which can end without a server restart. Individual escalations are not dated.
 
 id: lock-escalations:shop.customers
-title: Row locks on customers escalated to a table lock 2 times since SQL Server started (Dec 15, 2025)
-summary: SQL Server replaced the row and page locks on customers with one lock on the whole table 2 times since it started, on Dec 15 at 12:13 UTC. It keeps no time for each, and Culprit has no earlier scan to compare with, so they may be old: the next scan compares with this one and says whether any happened since. That is less than once a week on average since then: they may all be old. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to customers. A read can escalate too: an ordinary read under read committed usually releases row locks as it advances, but prefetching key lookups can retain locks until the statement ends. Locking hints (HOLDLOCK, UPDLOCK), REPEATABLE READ and SERIALIZABLE can retain them until the transaction ends. Reading many rows can acquire enough locks for an escalation attempt. The likeliest is a read from customers, which returns about 3.0K rows a run on average: it asks for a locking hint, which can retain row locks until its transaction ends.
+title: Row locks on customers escalated to a table lock 2 times since these counters were reset (Dec 15, 2025)
+summary: SQL Server replaced the row and page locks on customers with one lock on the whole table 2 times since these counters were reset, on Dec 15 at 12:13 UTC. It keeps no time for each, and Culprit has no earlier scan to compare with, so they may be old: the next scan compares with this one and says whether any happened since. That is less than once a week on average since then: they may all be old. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to customers. A read can escalate too: an ordinary read under read committed usually releases row locks as it advances, but prefetching key lookups can retain locks until the statement ends. Locking hints (HOLDLOCK, UPDLOCK), REPEATABLE READ and SERIALIZABLE can retain them until the transaction ends. Reading many rows can acquire enough locks for an escalation attempt. The likeliest is a read from customers, which returns about 3.0K rows a run on average: it asks for a locking hint, which can retain row locks until its transaction ends.
 impact: 2 table locks
-metric: Escalations since SQL Server started
+metric: Recorded lock escalations
 note: Returns about 3.0K rows a run. It asks for a locking hint, which can retain row locks until its transaction ends.
 note: Returns about 1 row a run.
 note: Returns about 1 row a run.
@@ -3330,13 +3336,13 @@ SELECT e.x.value('@timestamp', 'datetime2') AS at_utc,
 -- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;
 verify: Compare new escalations on customers and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix.
 caveat: These totals do not establish a new increase or continuing blocking in the selected window. Capture dated events or compare counters wholly within that period before treating this as current pressure.
-caveat: SQL Server counts escalations since the table's indexes were loaded into memory, usually since it started, and keeps no time for each.
+caveat: SQL Server counts escalations over each index metadata entry’s lifetime, which can end without a server restart. Individual escalations are not dated.
 
 id: lock-escalations:shop.products
-title: Row locks on products escalated to a table lock once since SQL Server started (Oct 11)
-summary: SQL Server replaced the row and page locks on products with one lock on the whole table once since it started, on Oct 11 at 09:13 UTC, 3 hours before this scan, so none is older than that. The next scan compares with this one and says whether any happened since. That is once a day or more on average over the counter history; it does not date individual events. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to it: look at jobs, migrations and maintenance that change many rows at once.
+title: Row locks on products escalated to a table lock once since these counters were reset (Oct 11)
+summary: SQL Server replaced the row and page locks on products with one lock on the whole table once since these counters were reset, on Oct 11 at 09:13 UTC, 3 hours before this scan, so none is older than that. The next scan compares with this one and says whether any happened since. That is once a day or more on average over the counter history; it does not date individual events. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to it: look at jobs, migrations and maintenance that change many rows at once.
 impact: 1 table lock
-metric: Escalations since SQL Server started
+metric: Recorded lock escalations
 fix: None of the statements in the query history changes thousands of rows of products at once, so the one that escalated is likely a job, a migration or maintenance. Once the event session below has caught it, change it into smaller batches, for example up to 1,000 changed rows per statement, after checking its access path and lock footprint. A row limit does not bound all locks acquired or prevent escalation under lock-memory pressure. Use smaller transactions only where partial commits preserve the application's required atomicity. An UPDATE loop's filter must leave out rows already changed. A single enclosing transaction can retain locks until commit, so batching is no guarantee against a table lock. Start the event session below (culprit_lock_escalation): it keeps each escalation with its statement, in memory, at almost no cost.
 sql: -- SQL Server doesn't record which statement escalated: this session keeps the next ones with their statement.
 -- It catches them on every table, so another table's finding starts this same session: once is enough.
@@ -3365,49 +3371,13 @@ SELECT e.x.value('@timestamp', 'datetime2') AS at_utc,
 
 -- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;
 verify: Compare new escalations on products and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix.
-caveat: SQL Server counts escalations since the table's indexes were loaded into memory, usually since it started, and keeps no time for each.
+caveat: SQL Server counts escalations over each index metadata entry’s lifetime, which can end without a server restart. Individual escalations are not dated.
 
 id: lock-escalations:shop.products
-title: Row locks on products escalated to a table lock once since SQL Server started (Oct 11)
-summary: SQL Server replaced the row and page locks on products with one lock on the whole table once since it started, on Oct 11 at 11:53 UTC, 20 minutes before this scan, so none is older than that. The next scan compares with this one and says whether any happened since. SQL Server started too recently to tell how often it happens. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to it: look at jobs, migrations and maintenance that change many rows at once.
+title: Row locks on products escalated to a table lock once since these counters were reset (Oct 11)
+summary: SQL Server replaced the row and page locks on products with one lock on the whole table once since these counters were reset, on Oct 11 at 11:53 UTC, 20 minutes before this scan, so none is older than that. The next scan compares with this one and says whether any happened since. These counters cover too little time to assess a rate. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to it: look at jobs, migrations and maintenance that change many rows at once.
 impact: 1 table lock
-metric: Escalations since SQL Server started
-fix: None of the statements in the query history changes thousands of rows of products at once, so the one that escalated is likely a job, a migration or maintenance. Once the event session below has caught it, change it into smaller batches, for example up to 1,000 changed rows per statement, after checking its access path and lock footprint. A row limit does not bound all locks acquired or prevent escalation under lock-memory pressure. Use smaller transactions only where partial commits preserve the application's required atomicity. An UPDATE loop's filter must leave out rows already changed. A single enclosing transaction can retain locks until commit, so batching is no guarantee against a table lock. Start the event session below (culprit_lock_escalation): it keeps each escalation with its statement, in memory, at almost no cost.
-sql: -- SQL Server doesn't record which statement escalated: this session keeps the next ones with their statement.
--- It catches them on every table, so another table's finding starts this same session: once is enough.
-IF NOT EXISTS (SELECT 1 FROM sys.server_event_sessions WHERE name = N'culprit_lock_escalation')
-    CREATE EVENT SESSION culprit_lock_escalation ON SERVER
-    ADD EVENT sqlserver.lock_escalation (
-        SET collect_statement = 1
-        ACTION (sqlserver.sql_text, sqlserver.client_app_name)
-        WHERE sqlserver.database_name = N'culprit_demo')
-    ADD TARGET package0.ring_buffer
-    WITH (STARTUP_STATE = ON);
-IF NOT EXISTS (SELECT 1 FROM sys.dm_xe_sessions WHERE name = N'culprit_lock_escalation')
-    ALTER EVENT SESSION culprit_lock_escalation ON SERVER STATE = START;
-
--- Then read what it caught
-SELECT e.x.value('@timestamp', 'datetime2') AS at_utc,
-       OBJECT_NAME(e.x.value('(data[@name="object_id"]/value)[1]', 'int')) AS table_name,
-       e.x.value('(data[@name="escalated_lock_count"]/value)[1]', 'int') AS locks,
-       e.x.value('(data[@name="statement"]/value)[1]', 'nvarchar(max)') AS statement,
-       e.x.value('(action[@name="client_app_name"]/value)[1]', 'nvarchar(256)') AS app
-  FROM (SELECT CAST(t.target_data AS xml) AS d
-          FROM sys.dm_xe_session_targets t
-          JOIN sys.dm_xe_sessions s ON s.address = t.event_session_address
-         WHERE s.name = N'culprit_lock_escalation' AND t.target_name = N'ring_buffer') r
- CROSS APPLY r.d.nodes('RingBufferTarget/event') e(x);
-
--- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;
-verify: Compare new escalations on products and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix.
-caveat: These totals do not establish a new increase or continuing blocking in the selected window. Capture dated events or compare counters wholly within that period before treating this as current pressure.
-caveat: SQL Server counts escalations since the table's indexes were loaded into memory, usually since it started, and keeps no time for each.
-
-id: lock-escalations:shop.products
-title: Row locks on products escalated to a table lock once since SQL Server started (Oct 11)
-summary: SQL Server replaced the row and page locks on products with one lock on the whole table once since it started, on Oct 11 at 12:13 UTC, a minute before this scan, so none is older than that. The next scan compares with this one and says whether any happened since. SQL Server started too recently to tell how often it happens. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to it: look at jobs, migrations and maintenance that change many rows at once.
-impact: 1 table lock
-metric: Escalations since SQL Server started
+metric: Recorded lock escalations
 fix: None of the statements in the query history changes thousands of rows of products at once, so the one that escalated is likely a job, a migration or maintenance. Once the event session below has caught it, change it into smaller batches, for example up to 1,000 changed rows per statement, after checking its access path and lock footprint. A row limit does not bound all locks acquired or prevent escalation under lock-memory pressure. Use smaller transactions only where partial commits preserve the application's required atomicity. An UPDATE loop's filter must leave out rows already changed. A single enclosing transaction can retain locks until commit, so batching is no guarantee against a table lock. Start the event session below (culprit_lock_escalation): it keeps each escalation with its statement, in memory, at almost no cost.
 sql: -- SQL Server doesn't record which statement escalated: this session keeps the next ones with their statement.
 -- It catches them on every table, so another table's finding starts this same session: once is enough.
@@ -3437,13 +3407,49 @@ SELECT e.x.value('@timestamp', 'datetime2') AS at_utc,
 -- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;
 verify: Compare new escalations on products and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix.
 caveat: These totals do not establish a new increase or continuing blocking in the selected window. Capture dated events or compare counters wholly within that period before treating this as current pressure.
-caveat: SQL Server counts escalations since the table's indexes were loaded into memory, usually since it started, and keeps no time for each.
+caveat: SQL Server counts escalations over each index metadata entry’s lifetime, which can end without a server restart. Individual escalations are not dated.
+
+id: lock-escalations:shop.products
+title: Row locks on products escalated to a table lock once since these counters were reset (Oct 11)
+summary: SQL Server replaced the row and page locks on products with one lock on the whole table once since these counters were reset, on Oct 11 at 12:13 UTC, a minute before this scan, so none is older than that. The next scan compares with this one and says whether any happened since. These counters cover too little time to assess a rate. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to it: look at jobs, migrations and maintenance that change many rows at once.
+impact: 1 table lock
+metric: Recorded lock escalations
+fix: None of the statements in the query history changes thousands of rows of products at once, so the one that escalated is likely a job, a migration or maintenance. Once the event session below has caught it, change it into smaller batches, for example up to 1,000 changed rows per statement, after checking its access path and lock footprint. A row limit does not bound all locks acquired or prevent escalation under lock-memory pressure. Use smaller transactions only where partial commits preserve the application's required atomicity. An UPDATE loop's filter must leave out rows already changed. A single enclosing transaction can retain locks until commit, so batching is no guarantee against a table lock. Start the event session below (culprit_lock_escalation): it keeps each escalation with its statement, in memory, at almost no cost.
+sql: -- SQL Server doesn't record which statement escalated: this session keeps the next ones with their statement.
+-- It catches them on every table, so another table's finding starts this same session: once is enough.
+IF NOT EXISTS (SELECT 1 FROM sys.server_event_sessions WHERE name = N'culprit_lock_escalation')
+    CREATE EVENT SESSION culprit_lock_escalation ON SERVER
+    ADD EVENT sqlserver.lock_escalation (
+        SET collect_statement = 1
+        ACTION (sqlserver.sql_text, sqlserver.client_app_name)
+        WHERE sqlserver.database_name = N'culprit_demo')
+    ADD TARGET package0.ring_buffer
+    WITH (STARTUP_STATE = ON);
+IF NOT EXISTS (SELECT 1 FROM sys.dm_xe_sessions WHERE name = N'culprit_lock_escalation')
+    ALTER EVENT SESSION culprit_lock_escalation ON SERVER STATE = START;
+
+-- Then read what it caught
+SELECT e.x.value('@timestamp', 'datetime2') AS at_utc,
+       OBJECT_NAME(e.x.value('(data[@name="object_id"]/value)[1]', 'int')) AS table_name,
+       e.x.value('(data[@name="escalated_lock_count"]/value)[1]', 'int') AS locks,
+       e.x.value('(data[@name="statement"]/value)[1]', 'nvarchar(max)') AS statement,
+       e.x.value('(action[@name="client_app_name"]/value)[1]', 'nvarchar(256)') AS app
+  FROM (SELECT CAST(t.target_data AS xml) AS d
+          FROM sys.dm_xe_session_targets t
+          JOIN sys.dm_xe_sessions s ON s.address = t.event_session_address
+         WHERE s.name = N'culprit_lock_escalation' AND t.target_name = N'ring_buffer') r
+ CROSS APPLY r.d.nodes('RingBufferTarget/event') e(x);
+
+-- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;
+verify: Compare new escalations on products and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix.
+caveat: These totals do not establish a new increase or continuing blocking in the selected window. Capture dated events or compare counters wholly within that period before treating this as current pressure.
+caveat: SQL Server counts escalations over each index metadata entry’s lifetime, which can end without a server restart. Individual escalations are not dated.
 
 id: lock-escalations:shop.order_items
 title: Row locks on order_items escalated to a table lock 3 times since its indexes were loaded into memory
-summary: SQL Server replaced the row and page locks on order_items with one lock on the whole table 3 times since its indexes were loaded into memory. It keeps no time for each, and Culprit has no earlier scan to compare with, so they may be old: the next scan compares with this one and says whether any happened since. SQL Server started too recently to tell how often it happens. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to it: look at jobs, migrations and maintenance that change many rows at once.
+summary: SQL Server replaced the row and page locks on order_items with one lock on the whole table 3 times since its indexes were loaded into memory. It keeps no time for each, and Culprit has no earlier scan to compare with, so they may be old: the next scan compares with this one and says whether any happened since. The counters’ reset time is unknown, so the total does not establish a rate. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to it: look at jobs, migrations and maintenance that change many rows at once.
 impact: 3 table locks
-metric: Escalations since SQL Server started
+metric: Recorded lock escalations
 fix: None of the statements in the query history changes thousands of rows of order_items at once, so the one that escalated is likely a job, a migration or maintenance. Once the event session below has caught it, change it into smaller batches, for example up to 1,000 changed rows per statement, after checking its access path and lock footprint. A row limit does not bound all locks acquired or prevent escalation under lock-memory pressure. Use smaller transactions only where partial commits preserve the application's required atomicity. An UPDATE loop's filter must leave out rows already changed. A single enclosing transaction can retain locks until commit, so batching is no guarantee against a table lock. Start the event session below (culprit_lock_escalation): it keeps each escalation with its statement, in memory, at almost no cost.
 sql: -- SQL Server doesn't record which statement escalated: this session keeps the next ones with their statement.
 -- It catches them on every table, so another table's finding starts this same session: once is enough.
@@ -3473,7 +3479,7 @@ SELECT e.x.value('@timestamp', 'datetime2') AS at_utc,
 -- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;
 verify: Compare new escalations on order_items and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix.
 caveat: These totals do not establish a new increase or continuing blocking in the selected window. Capture dated events or compare counters wholly within that period before treating this as current pressure.
-caveat: SQL Server counts escalations since the table's indexes were loaded into memory, usually since it started, and keeps no time for each."#,
+caveat: SQL Server counts escalations over each index metadata entry’s lifetime, which can end without a server restart. Individual escalations are not dated."#,
     );
 }
 
@@ -3510,9 +3516,9 @@ fn lock_escalations_since_an_earlier_scan() {
         &findings,
         r#"id: lock-escalations:shop.support_tickets
 title: Row locks on support_tickets escalated to a table lock 3 times since Oct 11, 06:13 UTC
-summary: SQL Server replaced the row and page locks on support_tickets with one lock on the whole table 3 times since the previous scan, on Oct 11 at 06:13 UTC. It counted 5 in all since SQL Server started (Sep 11). SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was; the likeliest is an update of support_tickets, which changes about 4.0K rows a run.
+summary: SQL Server replaced the row and page locks on support_tickets with one lock on the whole table 3 times since the previous scan, on Oct 11 at 06:13 UTC. It counted 5 in all since these counters were reset (Sep 11). SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was; the likeliest is an update of support_tickets, which changes about 4.0K rows a run.
 impact: 3 new table locks
-metric: Escalations since SQL Server started
+metric: Recorded lock escalations
 metric: Escalations since the previous scan
 note: Changes about 4.0K rows a run.
 fix: Change the statement that touches thousands of rows of support_tickets into smaller batches, for example up to 1,000 changed rows per statement, after checking its access path and lock footprint. A row limit does not bound all locks acquired or prevent escalation under lock-memory pressure. Use smaller transactions only where partial commits preserve the application's required atomicity. An UPDATE loop's filter must leave out rows already changed. A single enclosing transaction can retain locks until commit, so batching is no guarantee against a table lock. To be sure it is the one, start the event session below (culprit_lock_escalation): it keeps each escalation with its statement, in memory, at almost no cost.
@@ -3550,13 +3556,13 @@ SELECT e.x.value('@timestamp', 'datetime2') AS at_utc,
 
 -- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;
 verify: Compare new escalations on support_tickets and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix.
-caveat: SQL Server counts escalations since the table's indexes were loaded into memory, usually since it started, and keeps no time for each.
+caveat: SQL Server counts escalations over each index metadata entry’s lifetime, which can end without a server restart. Individual escalations are not dated.
 
 id: lock-escalations:shop.orders
 title: Row locks on orders escalated to a table lock once since Oct 11, 06:13 UTC
-summary: SQL Server replaced the row and page locks on orders with one lock on the whole table once since the previous scan, on Oct 11 at 06:13 UTC. All 1 it counted since SQL Server started (Sep 11) came after that scan. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to it: look at jobs, migrations and maintenance that change many rows at once.
+summary: SQL Server replaced the row and page locks on orders with one lock on the whole table once since the previous scan, on Oct 11 at 06:13 UTC. All 1 it counted since these counters were reset (Sep 11) came after that scan. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to it: look at jobs, migrations and maintenance that change many rows at once.
 impact: 1 new table lock
-metric: Escalations since SQL Server started
+metric: Recorded lock escalations
 metric: Escalations since the previous scan
 fix: None of the statements in the query history changes thousands of rows of orders at once, so the one that escalated is likely a job, a migration or maintenance. Once the event session below has caught it, change it into smaller batches, for example up to 1,000 changed rows per statement, after checking its access path and lock footprint. A row limit does not bound all locks acquired or prevent escalation under lock-memory pressure. Use smaller transactions only where partial commits preserve the application's required atomicity. An UPDATE loop's filter must leave out rows already changed. A single enclosing transaction can retain locks until commit, so batching is no guarantee against a table lock. Start the event session below (culprit_lock_escalation): it keeps each escalation with its statement, in memory, at almost no cost.
 sql: -- SQL Server doesn't record which statement escalated: this session keeps the next ones with their statement.
@@ -3586,13 +3592,13 @@ SELECT e.x.value('@timestamp', 'datetime2') AS at_utc,
 
 -- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;
 verify: Compare new escalations on orders and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix.
-caveat: SQL Server counts escalations since the table's indexes were loaded into memory, usually since it started, and keeps no time for each.
+caveat: SQL Server counts escalations over each index metadata entry’s lifetime, which can end without a server restart. Individual escalations are not dated.
 
 id: lock-escalations:shop.orders
 title: Row locks on orders escalated to a table lock 4 times since Oct 11, 06:13 UTC
 summary: SQL Server replaced the row and page locks on orders with one lock on the whole table 4 times since the previous scan, on Oct 11 at 06:13 UTC. SQL Server restarted since then (on Oct 11 at 08:13 UTC), and these are all it counted since. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to it: look at jobs, migrations and maintenance that change many rows at once.
 impact: 4 new table locks
-metric: Escalations since SQL Server started
+metric: Recorded lock escalations
 metric: Escalations since the previous scan
 fix: None of the statements in the query history changes thousands of rows of orders at once, so the one that escalated is likely a job, a migration or maintenance. Once the event session below has caught it, change it into smaller batches, for example up to 1,000 changed rows per statement, after checking its access path and lock footprint. A row limit does not bound all locks acquired or prevent escalation under lock-memory pressure. Use smaller transactions only where partial commits preserve the application's required atomicity. An UPDATE loop's filter must leave out rows already changed. A single enclosing transaction can retain locks until commit, so batching is no guarantee against a table lock. Start the event session below (culprit_lock_escalation): it keeps each escalation with its statement, in memory, at almost no cost.
 sql: -- SQL Server doesn't record which statement escalated: this session keeps the next ones with their statement.
@@ -3622,13 +3628,13 @@ SELECT e.x.value('@timestamp', 'datetime2') AS at_utc,
 
 -- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;
 verify: Compare new escalations on orders and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix.
-caveat: SQL Server counts escalations since the table's indexes were loaded into memory, usually since it started, and keeps no time for each.
+caveat: SQL Server counts escalations over each index metadata entry’s lifetime, which can end without a server restart. Individual escalations are not dated.
 
 id: lock-escalations:shop.customers
-title: Row locks on customers escalated to a table lock 3 times since SQL Server started (Sep 11), none since Oct 5, 06:13 UTC
-summary: These escalations are history, not something happening now: SQL Server counts them from when it started, on Sep 11 at 12:13 UTC, and the count on customers hasn't grown since the previous scan, on Oct 5 at 06:13 UTC. It doesn't record when each one happened. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. The writes to it in the query history are listed below for reference; none of them has escalated since the previous scan.
+title: Row locks on customers escalated to a table lock 3 times since these counters were reset (Sep 11), no observed increase since Oct 5, 06:13 UTC
+summary: The counter on customers has not increased since the previous scan, on Oct 5 at 06:13 UTC. It was reset on Sep 11 at 12:13 UTC, and individual escalations are not dated. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. The writes to it in the query history are listed below for reference; the counter does not identify which statement escalated.
 impact: 3 table locks, none new
-metric: Escalations since SQL Server started
+metric: Recorded lock escalations
 metric: Escalations since the previous scan
 note: Changes about 1 row a run.
 fix: If a statement still changes thousands of rows of customers at once, change it into smaller batches, for example up to 1,000 changed rows per statement, after checking its access path and lock footprint. A row limit does not bound all locks acquired or prevent escalation under lock-memory pressure. Use smaller transactions only where partial commits preserve the application's required atomicity. An UPDATE loop's filter must leave out rows already changed. A single enclosing transaction can retain locks until commit, so batching is no guarantee against a table lock. To learn which statement it is, start the event session below (culprit_lock_escalation): it keeps each escalation with its statement, in memory, at almost no cost.
@@ -3659,13 +3665,13 @@ SELECT e.x.value('@timestamp', 'datetime2') AS at_utc,
 
 -- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;
 verify: Compare new escalations on customers and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix.
-caveat: SQL Server counts escalations since the table's indexes were loaded into memory, usually since it started, and keeps no time for each.
+caveat: SQL Server counts escalations over each index metadata entry’s lifetime, which can end without a server restart. Individual escalations are not dated.
 
 id: lock-escalations:shop.customers
-title: Row locks on customers escalated to a table lock 3 times since SQL Server started (Sep 11), none since Oct 5, 06:13 UTC
-summary: These escalations are history, not something happening now: SQL Server counts them from when it started, on Sep 11 at 12:13 UTC, and the count on customers hasn't grown since the previous scan, on Oct 5 at 06:13 UTC. It doesn't record when each one happened. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. None of the statements in the query history writes to it now.
+title: Row locks on customers escalated to a table lock 3 times since these counters were reset (Sep 11), no observed increase since Oct 5, 06:13 UTC
+summary: The counter on customers has not increased since the previous scan, on Oct 5 at 06:13 UTC. It was reset on Sep 11 at 12:13 UTC, and individual escalations are not dated. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. None of the statements in the query history writes to it now.
 impact: 3 table locks, none new
-metric: Escalations since SQL Server started
+metric: Recorded lock escalations
 metric: Escalations since the previous scan
 fix: If a statement still changes thousands of rows of customers at once, change it into smaller batches, for example up to 1,000 changed rows per statement, after checking its access path and lock footprint. A row limit does not bound all locks acquired or prevent escalation under lock-memory pressure. Use smaller transactions only where partial commits preserve the application's required atomicity. An UPDATE loop's filter must leave out rows already changed. A single enclosing transaction can retain locks until commit, so batching is no guarantee against a table lock. To learn which statement it is, start the event session below (culprit_lock_escalation): it keeps each escalation with its statement, in memory, at almost no cost.
 sql: -- SQL Server doesn't record which statement escalated: this session keeps the next ones with their statement.
@@ -3695,13 +3701,13 @@ SELECT e.x.value('@timestamp', 'datetime2') AS at_utc,
 
 -- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;
 verify: Compare new escalations on customers and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix.
-caveat: SQL Server counts escalations since the table's indexes were loaded into memory, usually since it started, and keeps no time for each.
+caveat: SQL Server counts escalations over each index metadata entry’s lifetime, which can end without a server restart. Individual escalations are not dated.
 
 id: lock-escalations:shop.products
 title: Row locks on products escalated to a table lock 3 times since Sep 29, 00:13 UTC
-summary: SQL Server replaced the row and page locks on products with one lock on the whole table 3 times since the previous scan, on Sep 29 at 00:13 UTC. It counted 4 in all since SQL Server started (Sep 11). SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to it: look at jobs, migrations and maintenance that change many rows at once.
+summary: SQL Server replaced the row and page locks on products with one lock on the whole table 3 times since the previous scan, on Sep 29 at 00:13 UTC. It counted 4 in all since these counters were reset (Sep 11). SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to it: look at jobs, migrations and maintenance that change many rows at once.
 impact: 3 new table locks
-metric: Escalations since SQL Server started
+metric: Recorded lock escalations
 metric: Escalations since the previous scan
 fix: None of the statements in the query history changes thousands of rows of products at once, so the one that escalated is likely a job, a migration or maintenance. Once the event session below has caught it, change it into smaller batches, for example up to 1,000 changed rows per statement, after checking its access path and lock footprint. A row limit does not bound all locks acquired or prevent escalation under lock-memory pressure. Use smaller transactions only where partial commits preserve the application's required atomicity. An UPDATE loop's filter must leave out rows already changed. A single enclosing transaction can retain locks until commit, so batching is no guarantee against a table lock. Start the event session below (culprit_lock_escalation): it keeps each escalation with its statement, in memory, at almost no cost.
 sql: -- SQL Server doesn't record which statement escalated: this session keeps the next ones with their statement.
@@ -3732,7 +3738,7 @@ SELECT e.x.value('@timestamp', 'datetime2') AS at_utc,
 -- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;
 verify: Compare new escalations on products and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix.
 caveat: These totals do not establish a new increase or continuing blocking in the selected window. Capture dated events or compare counters wholly within that period before treating this as current pressure.
-caveat: SQL Server counts escalations since the table's indexes were loaded into memory, usually since it started, and keeps no time for each."#,
+caveat: SQL Server counts escalations over each index metadata entry’s lifetime, which can end without a server restart. Individual escalations are not dated."#,
     );
 }
 
@@ -3744,10 +3750,10 @@ fn lock_escalations_of_reads_with_row_versioning_on() {
     says(
         &run("lock-escalations", &s),
         r#"id: lock-escalations:shop.customers
-title: Row locks on customers escalated to a table lock 2 times since SQL Server started (Sep 11)
-summary: SQL Server replaced the row and page locks on customers with one lock on the whole table 2 times since it started, on Sep 11 at 12:13 UTC. It keeps no time for each, and Culprit has no earlier scan to compare with, so they may be old: the next scan compares with this one and says whether any happened since. That is less than once a week on average since then: they may all be old. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to customers. With READ_COMMITTED_SNAPSHOT on, ordinary reads under read committed avoid row locks. Locking hints (HOLDLOCK, UPDLOCK) or stronger isolation can still retain row locks until the transaction ends. The reads of it are listed below, most rows a run first; the one to look for reads thousands of rows in one run while it keeps its locks.
+title: Row locks on customers escalated to a table lock 2 times since these counters were reset (Sep 11)
+summary: SQL Server replaced the row and page locks on customers with one lock on the whole table 2 times since these counters were reset, on Sep 11 at 12:13 UTC. It keeps no time for each, and Culprit has no earlier scan to compare with, so they may be old: the next scan compares with this one and says whether any happened since. That is less than once a week on average since then: they may all be old. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to customers. With READ_COMMITTED_SNAPSHOT on, ordinary reads under read committed avoid row locks. Locking hints (HOLDLOCK, UPDLOCK) or stronger isolation can still retain row locks until the transaction ends. The reads of it are listed below, most rows a run first; the one to look for reads thousands of rows in one run while it keeps its locks.
 impact: 2 table locks
-metric: Escalations since SQL Server started
+metric: Recorded lock escalations
 note: Returns about 3.0K rows a run.
 note: Returns about 1 row a run.
 fix: Start the event session below (culprit_lock_escalation) to learn which statement escalates: it keeps each escalation with its statement, in memory, at almost no cost. If it is a read, it escalates because it keeps its row locks until it ends: consider reading fewer rows per run after checking the access path; row counts do not bound all locks or prevent escalation under lock-memory pressure. If it is a statement outside the query history that changes many rows at once (a job, a migration, maintenance), consider smaller batches. Use separate transactions only if partial commits preserve required atomicity; an enclosing transaction may retain locks.
@@ -3779,6 +3785,6 @@ SELECT e.x.value('@timestamp', 'datetime2') AS at_utc,
 -- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;
 verify: Compare new escalations on customers and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix.
 caveat: These totals do not establish a new increase or continuing blocking in the selected window. Capture dated events or compare counters wholly within that period before treating this as current pressure.
-caveat: SQL Server counts escalations since the table's indexes were loaded into memory, usually since it started, and keeps no time for each."#,
+caveat: SQL Server counts escalations over each index metadata entry’s lifetime, which can end without a server restart. Individual escalations are not dated."#,
     );
 }

@@ -1,0 +1,8 @@
+# Connection metadata only. Entra tokens are obtained in memory from the configured workload identity.
+[connections.pilot]
+engine = "mssql"
+environment = "production"
+host = "REPLACE_SERVER.database.windows.net"
+port = 1433
+database = "REPLACE_DATABASE"
+auth = "entra"

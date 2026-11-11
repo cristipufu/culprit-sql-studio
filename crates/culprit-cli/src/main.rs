@@ -1,11 +1,18 @@
+mod activity_cmd;
+mod admission_cmd;
 mod agents;
+mod collect_cmd;
+mod collection_shutdown;
 mod commands;
 mod conn_cmd;
 mod dashboard_cmd;
+mod fleet_cmd;
 mod lint_cmd;
 mod locks;
+mod outbox_cmd;
 mod output;
 mod plan_cmd;
+mod service_cmd;
 mod share_cmd;
 mod ssh;
 mod timeline_cmd;
@@ -123,6 +130,8 @@ enum Command {
     Doctor { connection: String },
     /// Take a snapshot, run every check, save the report and print the findings.
     Scan(ScanArgs),
+    #[command(subcommand, about = culprit_core::t!("collection.cli.about"))]
+    Collect(collect_cmd::CollectCommand),
     /// Findings from the latest saved report (no database access).
     Findings(FindingsArgs),
     /// One finding in full, with the agent brief.
@@ -457,9 +466,18 @@ async fn run(command: Command, out: &Out) -> culprit_core::Result<u8> {
     if let Command::Update(args) = command {
         return update_cmd::run(args, out).await;
     }
+    if let Command::Collect(collect_cmd::CollectCommand::Outbox(command)) = command {
+        return outbox_cmd::run(command, out).await;
+    }
+    if let Command::Collect(collect_cmd::CollectCommand::Schema) = command {
+        return collect_cmd::schema(out);
+    }
+    if let Command::Collect(collect_cmd::CollectCommand::Service(command)) = command {
+        return service_cmd::run(command, out).await;
+    }
     let mut ws = Workspace::open()?;
     // A device-code sign-in needs a person to read the code; scripts and agents get an error with a hint instead.
-    if std::io::stderr().is_terminal() {
+    if std::io::stderr().is_terminal() && !matches!(&command, Command::Collect(_)) {
         ws = ws.with_sign_in_handler(std::sync::Arc::new(|event| match event {
             SignInEvent::Code { prompt } => {
                 eprintln!("{}", t!("cli.sign_in.code", uri = &prompt.verification_uri, code = &prompt.user_code))
@@ -485,6 +503,7 @@ fn dispatch<'a>(command: Command, ws: Workspace, out: &'a Out) -> CommandTask<'a
         Command::Dashboard(args) => Box::pin(async move { dashboard_cmd::run(&ws, args, out).await }),
         Command::Doctor { connection } => Box::pin(async move { commands::doctor(&ws, &connection, out).await }),
         Command::Scan(args) => Box::pin(async move { commands::scan(&ws, args, out).await }),
+        Command::Collect(command) => Box::pin(async move { collect_cmd::run(ws, command, out).await }),
         Command::Findings(args) => Box::pin(async move { commands::findings(&ws, args, out) }),
         Command::Show { connection, finding, report } => {
             Box::pin(async move { commands::show(&ws, connection, finding, report, out) })

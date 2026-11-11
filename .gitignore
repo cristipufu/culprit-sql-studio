@@ -1,5 +1,6 @@
 /target
 node_modules
+__pycache__/
 /app/dist
 .DS_Store
 *.local

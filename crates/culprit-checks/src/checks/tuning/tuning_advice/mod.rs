@@ -373,12 +373,13 @@ fn forcing_fails_finding(_snapshot: &Snapshot, failing: ForcingFails<'_>) -> Fin
 }
 
 fn hint_fails_finding(h: &QueryHint) -> Finding {
-    let mut f = finding(
-        "tuning-advice",
-        &format!("hint-failing:{}", h.query_id),
-        Category::Queries,
-        subject(SubjectKind::Query, h.query_id.to_string()),
-    );
+    let subject_id = match &h.scope {
+        culprit_core::QueryStoreHintScope::ReplicaGroup { id } => format!("hint-failing:{}:replica:{id}", h.query_id),
+        culprit_core::QueryStoreHintScope::Local => format!("hint-failing:{}", h.query_id),
+        culprit_core::QueryStoreHintScope::Unknown => format!("hint-failing:{}:unknown:{}", h.query_id, h.hint_id),
+    };
+    let mut f =
+        finding("tuning-advice", &subject_id, Category::Queries, subject(SubjectKind::Query, h.query_id.to_string()));
     let reason = h.last_failure_reason.clone().unwrap_or_else(|| t!("check.tuning_advice.unknown_reason"));
     let count = format::count(h.failures);
     f.title = t!(
@@ -401,10 +402,28 @@ fn hint_fails_finding(h: &QueryHint) -> Finding {
     f.confidence = Confidence::High;
     f.fix = Some(Fix {
         summary: t!("check.tuning_advice.hint_fails.fix"),
-        sql: Some(format!("EXEC sys.sp_query_store_clear_hints @query_id = {};", h.query_id)),
+        sql: match &h.scope {
+            culprit_core::QueryStoreHintScope::ReplicaGroup { id } => Some(format!(
+                "EXEC sys.sp_query_store_clear_hints @query_id = {}, @replica_group_id = {id};",
+                h.query_id
+            )),
+            culprit_core::QueryStoreHintScope::Local => {
+                Some(format!("EXEC sys.sp_query_store_clear_hints @query_id = {};", h.query_id))
+            }
+            culprit_core::QueryStoreHintScope::Unknown => None,
+        },
         cost: None,
     });
     f.verify = vec![t!("check.tuning_advice.hint_fails.verify")];
+    match &h.scope {
+        culprit_core::QueryStoreHintScope::ReplicaGroup { id } => {
+            f.caveats.push(t!("check.tuning_advice.hint_fails.replica", group = id))
+        }
+        culprit_core::QueryStoreHintScope::Unknown => {
+            f.caveats.push(t!("check.tuning_advice.hint_fails.unknown_scope"))
+        }
+        culprit_core::QueryStoreHintScope::Local => {}
+    }
     f
 }
 

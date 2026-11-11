@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+mod defaults;
 mod inspect;
 mod lexer;
 mod preview;
@@ -13,14 +14,15 @@ mod safety;
 #[cfg(test)]
 mod tests;
 
+pub use defaults::{DefaultGenerator, mssql_default_generator};
 pub use inspect::{
     creates_index, creates_unfiltered_index, cte_write_target, extract_call_site, has_limit, has_mssql_recompile_hint,
     isolated_counter_update, limit_count, mssql_statistics_target, offset_count, resolve_write_targets, table_aliases,
     tables_in,
 };
 pub use lexer::{
-    LexError, block_comment_end, clean_identifier, dollar_quoted_end, dollar_tag, identifier_parts, line_end,
-    quoted_end, skip_quoted_bytes, unquote_identifier,
+    LexError, block_comment_end, block_comments, block_comments_in_prefix, clean_identifier, dollar_quoted_end,
+    dollar_tag, identifier_parts, line_end, quoted_end, skip_quoted_bytes, unquote_identifier,
 };
 pub(crate) use lexer::{balanced_parens, split_top_level_and, strip_outer_parens};
 pub use preview::{ColumnSort, SortDirection, TablePreview, TablePreviewOptions, table_preview_sql};

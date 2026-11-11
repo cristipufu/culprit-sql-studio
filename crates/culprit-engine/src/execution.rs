@@ -186,12 +186,14 @@ impl Execution<'_> {
         let report_id = report_id.map(str::to_owned);
         let report =
             self.reports.background(move |reports| reports.plan_report(&report_name, report_id.as_deref())).await?;
-        let provider = self.connections.provider(name).await?;
-        crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
+        let observed = self.connections.observed_provider(name).await?;
+        let provider = observed.provider();
+        let result = crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
             let plan = self.connections.forget_rejected(name, provider.last_actual_plan(query_id, plan_id).await)?;
             Ok(Self::contextual_plan(plan, report.as_ref().map(|r| &r.snapshot), query_id, plan_id))
         })
-        .await
+        .await;
+        observed.finish(result).await
     }
 
     /// How far along a session's running statement is: per-operator progress on SQL Server, the estimated plan with
@@ -203,8 +205,9 @@ impl Execution<'_> {
         with_plan: bool,
     ) -> Result<culprit_core::QueryProgress> {
         self.connections.connection(name)?.engine.spec().validate_session_id(session)?;
-        let provider = self.connections.provider(name).await?;
-        crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
+        let observed = self.connections.observed_provider(name).await?;
+        let provider = observed.provider();
+        let result = crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
             let mut progress =
                 self.connections.forget_rejected(name, provider.query_progress(session, with_plan).await)?;
             if let Some(plan) = &mut progress.plan {
@@ -212,7 +215,8 @@ impl Execution<'_> {
             }
             Ok(progress)
         })
-        .await
+        .await;
+        observed.finish(result).await
     }
 
     /// A plan for a query from the latest report: the stored plan when the engine keeps them (Query Store), otherwise an
@@ -309,8 +313,9 @@ impl Execution<'_> {
         {
             return Ok(plan.clone());
         }
-        let provider = self.connections.provider(name).await?;
-        crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
+        let observed = self.connections.observed_provider(name).await?;
+        let provider = observed.provider();
+        let result = crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
             if let Some(plan_id) = plan_id {
                 return provider.stored_plan(query_id, plan_id).await?.ok_or_else(|| {
                     Error::not_found(t!("engine.execution.no_stored_plan", plan = plan_id, query = query_id))
@@ -332,7 +337,11 @@ impl Execution<'_> {
             match (provider.explain_recorded(&query.text, Some(query_id)).await, &query.plan) {
                 (Ok(plan), _) => Ok(plan),
                 // Normalized text (`WHERE id = ?`) can't be planned again; the scan planned a real sample of it.
-                (Err(e), Some(captured)) if e.code != ErrorCode::AuthFailed => Ok(captured.clone()),
+                (Err(e), Some(captured))
+                    if e.code != ErrorCode::AuthFailed && !crate::source_operation::native_shutdown_uncertain(&e) =>
+                {
+                    Ok(captured.clone())
+                }
                 (Err(e), _) => {
                     let hint =
                         e.hint_source().unwrap_or_else(|| culprit_core::message!("engine.execution.needs_values"));
@@ -340,29 +349,34 @@ impl Execution<'_> {
                 }
             }
         })
-        .await
+        .await;
+        observed.finish(result).await
     }
 
     /// What the server waits on right now: a sample `seconds` long (capped at 60). Reads statistics views only.
     pub(crate) async fn wait_sample(&self, name: &str, seconds: u32) -> Result<culprit_core::WaitSample> {
         let seconds = seconds.clamp(1, 60);
-        let provider = self.connections.provider(name).await?;
-        crate::operation::within(std::time::Duration::from_secs(u64::from(seconds) + 15), async {
+        let observed = self.connections.observed_provider(name).await?;
+        let provider = observed.provider();
+        let result = crate::operation::within(std::time::Duration::from_secs(u64::from(seconds) + 15), async {
             self.connections.forget_rejected(name, provider.wait_sample(seconds).await)
         })
-        .await
+        .await;
+        observed.finish(result).await
     }
 
     /// Sessions, blocking and waits, plus what Live may do to other sessions here (nothing on production).
     pub(crate) async fn live(&self, name: &str) -> Result<LiveState> {
         let info = self.connections.connection(name)?;
-        let provider = self.connections.provider(name).await?;
-        crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
+        let observed = self.connections.observed_provider(name).await?;
+        let provider = observed.provider();
+        let result = crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
             let mut live = self.connections.forget_rejected(name, provider.live().await)?;
             // Lock details are read only when someone waits, so a quiet server costs one query per refresh.
             if live.blocking.is_none() && live.sessions.iter().any(|s| s.blocked_by.is_some()) {
                 let locks = match self.connections.forget_rejected(name, provider.lock_waits().await) {
                     Ok(locks) => locks,
+                    Err(error) if crate::source_operation::native_shutdown_uncertain(&error) => return Err(error),
                     Err(error) => {
                         live.notes.push(t!("engine.execution.no_lock_details", why = &error.message));
                         Vec::new()
@@ -378,13 +392,15 @@ impl Execution<'_> {
             }
             Ok(live)
         })
-        .await
+        .await;
+        observed.finish(result).await
     }
 
     /// Recent deadlocks on `name` (newest first, explained), with fixes linked to the latest report's findings.
     pub(crate) async fn deadlocks(&self, name: &str, since_hours: f64) -> Result<DeadlockReport> {
-        let provider = self.connections.provider(name).await?;
-        crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
+        let observed = self.connections.observed_provider(name).await?;
+        let provider = observed.provider();
+        let result = crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
             let mut report = self
                 .connections
                 .forget_rejected(name, provider.deadlocks(since_hours.clamp(1.0, 24.0 * 30.0)).await)?;
@@ -394,7 +410,8 @@ impl Execution<'_> {
             deadlocks::link_findings(&mut report, latest.as_ref());
             Ok(report)
         })
-        .await
+        .await;
+        observed.finish(result).await
     }
 
     /// Cancel another session's statement or end the session. Refused on production connections, whatever the caller says.
@@ -525,17 +542,22 @@ impl Execution<'_> {
     /// Databases, tables, views and columns for editor completion, read live through the read-only run path.
     pub(crate) async fn catalog(&self, name: &str) -> Result<catalog::Catalog> {
         let info = self.connections.connection(name)?;
-        let provider = self.connections.provider(name).await?;
-        crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
-            let columns =
-                self.connections.forget_rejected(name, catalog::columns(provider.as_ref(), info.engine).await)?;
-            let databases = self
+        let observed = self.connections.observed_provider(name).await?;
+        let provider = observed.provider();
+        let result = crate::operation::within(culprit_core::limits::OBSERVE_TIMEOUT, async {
+            let columns = self.connections.forget_rejected(name, catalog::columns(provider, info.engine).await)?;
+            let databases = match self
                 .connections
                 .forget_rejected(name, provider.run(catalog::databases_sql(info.engine), 500).await)
-                .ok();
+            {
+                Ok(databases) => Some(databases),
+                Err(error) if crate::source_operation::native_shutdown_uncertain(&error) => return Err(error),
+                Err(_) => None,
+            };
             Ok(catalog::fold(columns, databases))
         })
-        .await
+        .await;
+        observed.finish(result).await
     }
 }
 

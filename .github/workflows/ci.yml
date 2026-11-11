@@ -113,6 +113,25 @@ jobs:
       - name: Collect, restrict permissions and verify cancellation in a disposable database
         run: python3 -B dev/smoke-providers.py ${{ matrix.fixture }}
 
+  telemetry:
+    name: Telemetry protocol and Kusto correctness
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Blob conditional writes and recovery in an owned Azurite fixture
+        run: python3 -B dev/smoke-delivery.py
+      # Functional mappings, completion gates, duplicate handling and complete observation sets only.
+      # Kusto emulator does not support ARM and its license prohibits benchmarking.
+      - name: Execute the production schema, mappings and canonical functions in Kusto
+        run: python3 -B dev/smoke-adx.py
+
   dependencies:
     name: Dependencies
     runs-on: ubuntu-latest
@@ -136,6 +155,34 @@ jobs:
       - uses: ./.github/actions/install-cargo-about
       - name: Write the third-party notices
         run: python3 dev/licenses.py
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: third-party-notices
+          path: target/licenses/THIRD-PARTY-LICENSES.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  collector-image:
+    name: Collector container (offline)
+    runs-on: ubuntu-latest
+    needs: dependencies
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: third-party-notices
+          path: target/licenses
+      - name: Build the Linux collector executable
+        run: cargo build --locked --release -p culprit-cli
+      - name: Package and verify non-root offline entry points
+        run: python3 -B dev/smoke-container.py --binary target/release/culprit
 
   e2e:
     name: Interface (browser)

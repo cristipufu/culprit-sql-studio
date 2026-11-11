@@ -11,3 +11,11 @@ dev/mssql/setup.sh down            # remove it
 ```
 
 The SA password is a throwaway for this local container; override it with `MSSQL_SA_PASSWORD`. On Apple silicon the image runs under emulation.
+
+Run the native collection checks in a separate owned fixture with generated credentials and automatic cleanup:
+
+```sh
+python3 -B dev/smoke-providers.py mssql --test culprit-mssql native_tests::
+```
+
+These cases compare Query Store fragments with interactive projections, validate native operational units, exercise cancellation and work accounting, and inspect session setup tags and safety settings on the server. The default SQL Server smoke run includes them in CI.

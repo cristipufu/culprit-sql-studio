@@ -121,10 +121,12 @@ last-actual-plans  Actual plans without re-running queries
                   SQL Server · SQL Server 2019+ can keep each query's last actual plan (LAST_QUERY_PLAN_STATS) and report live per-operator progress (LIGHTWEIGHT_QUERY_PROFILING).
 $ culprit --format text sources
 SQL Server
+  replication               availability replicas and geo-replication links · adds detail
   log_capacity              database log space and log reuse reason · adds detail
   file_capacity             data file space and growth limits · adds detail
   temp_capacity             tempdb shared space · adds detail
   sequence_capacity         sequence and identity allocation limits · adds detail
+  suspect_pages             retained suspect-page records · adds detail
   query_store               Query Store · Query Store
   query_waits               Query Store statement waits · adds detail
   plan_cache                plan cache statistics · Plan cache statistics
@@ -133,6 +135,11 @@ SQL Server
   columns                   columns · adds detail
   foreign_keys              foreign keys · adds detail
   statistics                statistics · Optimizer statistics
+  check_constraints         CHECK constraint definitions · adds detail
+  objects                   Object change metadata · adds detail
+  triggers                  user-defined DML trigger metadata · adds detail
+  partitions                partition layout and boundary metadata · adds detail
+  retained_plans            retained last-known query plans · adds detail
   missing_indexes           missing-index requests · Missing-index suggestions
   waits                     wait statistics · Wait statistics
   resources                 resource statistics · Resource usage
@@ -140,16 +147,29 @@ SQL Server
   query_families            query families · adds detail
   plan cache use            plan cache use · adds detail
   tuning                    automatic tuning · adds detail
+  automatic tuning options  automatic tuning options · adds detail
+  tuning recommendations    tuning recommendations · adds detail
+  forced plans              forced Query Store plans · adds detail
+  query hints               Query Store hints · adds detail
   settings                  settings · adds detail
+  database settings         database configuration and status · adds detail
+  database scoped settings  database scoped configurations · adds detail
+  server settings           configured and active server settings · adds detail
+  query store settings      Query Store configuration and status · adds detail
+  processor topology        host processors and online SQL scheduler topology · adds detail
   performance counters      performance counters · adds detail
   resource use              resource use · adds detail
   memory grants             pending memory grants · adds detail
+  worker queue              work queued for worker threads · adds detail
+  version store             tempdb version-store space for this database · adds detail
+  persistent version store  ADR persistent version-store statistics · adds detail
   wait totals               wait totals · adds detail
   memory grants per query   memory grants per query · adds detail
   open transactions         open transactions · adds detail
   query costs               statement costs · adds detail
   query compilation         Query Store compilation statistics · adds detail
   index contention          index contention · adds detail
+  index operations          index operations per partition · adds detail
   constraints               constraints · adds detail
   file latency              file latency · adds detail
   logins                    login counters · adds detail

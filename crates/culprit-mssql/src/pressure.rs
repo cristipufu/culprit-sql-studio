@@ -4,180 +4,17 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use culprit_core::{
-    CleanupHolder, Coverage, Engine, GrantStat, OpenTransaction, Pressure, Signal, SignalScope, SignalUnit,
-    TransactionActivity, WaitSample, WaitStat, format, t,
-};
+use culprit_core::{Coverage, Engine, Pressure, Signal, SignalScope, SignalUnit, WaitSample, WaitStat, format, t};
 
-use crate::conn::{MsClient, OWN_QUERY_MARKER, query};
 use crate::probe::Probe;
-use crate::schema::{BENIGN_WAITS, wait_type_category};
+use crate::read::{NativeRead, ReadError, ReadSession};
 use crate::sources;
+use crate::waits::{self, WaitTotals};
 
-const COUNTERS_SQL: &str = r#"
-SELECT RTRIM(counter_name) AS counter, cntr_value AS value
-FROM sys.dm_os_performance_counters
-WHERE (object_name LIKE N'%SQL Statistics%'
-       AND counter_name IN (N'Batch Requests/sec', N'SQL Compilations/sec', N'SQL Re-Compilations/sec'))
-   OR (object_name LIKE N'%Buffer Manager%' AND counter_name = N'Page life expectancy')
-"#;
-
-/// Azure SQL Database's own figures for this database: 15-second samples of the share of its tier's limits it used,
-/// kept for about an hour. The performance counters describe the server process behind the database, shared with every
-/// database in its elastic pool, so on Azure these say whether this database is short of storage I/O or memory.
-const RESOURCE_STATS_SQL: &str = "SELECT COUNT(*) AS samples, AVG(avg_data_io_percent) AS data_io,
-  MAX(avg_data_io_percent) AS data_io_peak, AVG(avg_memory_usage_percent) AS memory FROM sys.dm_db_resource_stats";
-
-/// Requests in this database waiting for a memory grant right now. The view lists the whole instance's grants; other
-/// databases' requests, and Culprit's own sessions, aren't this database's queue.
-const PENDING_GRANTS_SQL: &str = "SELECT COUNT(*) AS pending, MAX(g.wait_time_ms) AS longest_ms
-FROM sys.dm_exec_query_memory_grants g
-JOIN sys.dm_exec_sessions s ON s.session_id = g.session_id
-LEFT JOIN sys.dm_exec_requests r ON r.session_id = g.session_id AND r.request_id = g.request_id
-WHERE g.grant_time IS NULL AND g.session_id <> @@SPID AND ISNULL(s.program_name, N'') <> N'culprit'
-  AND COALESCE(r.database_id, s.database_id) = DB_ID()";
-
-/// The processors SQL Server schedules on, and how many NUMA nodes they are split into: what MAXDOP is sized against.
-const CPUS_SQL: &str = "SELECT i.cpu_count,
-  (SELECT COUNT(DISTINCT parent_node_id) FROM sys.dm_os_schedulers WHERE status = N'VISIBLE ONLINE') AS numa_nodes
-FROM sys.dm_os_sys_info i";
-
-/// Requests queued for a worker right now. System tasks (no session) wait on THREADPOOL briefly all the time, and in
-/// Azure SQL Database the view shows the whole instance, so only sessions' requests waiting a measurable time count.
-const THREADPOOL_NOW_SQL: &str = "SELECT COUNT(*) AS waiting FROM sys.dm_os_waiting_tasks w
-JOIN sys.dm_exec_sessions s ON s.session_id = w.session_id
-LEFT JOIN sys.dm_exec_requests r ON r.session_id = w.session_id
-WHERE w.wait_type = N'THREADPOOL' AND w.wait_duration_ms >= 100
-  AND COALESCE(r.database_id, s.database_id) = DB_ID()
-  AND s.session_id <> @@SPID AND ISNULL(s.program_name, N'') <> N'culprit'";
-
-const GRANTS_SELECT: &str = r#"
-SELECT {limit} CONVERT(varchar(20), qs.query_hash, 1) AS query_hash,
-  SUM(qs.execution_count) AS executions,
-  SUM(qs.total_grant_kb) * 1.0 / NULLIF(SUM(qs.execution_count), 0) AS avg_granted_kb,
-  SUM(qs.total_used_grant_kb) * 1.0 / NULLIF(SUM(qs.execution_count), 0) AS avg_used_kb,
-  MAX(qs.max_grant_kb) AS max_granted_kb,
-  SUM(qs.last_grant_kb) * 1.0 / COUNT(*) AS last_granted_kb,
-  SUM(qs.last_used_grant_kb) * 1.0 / COUNT(*) AS last_used_kb
-FROM sys.dm_exec_query_stats qs
-CROSS APPLY sys.dm_exec_plan_attributes(qs.plan_handle) pa
-CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
-WHERE pa.attribute = 'dbid' AND CAST(pa.value AS int) = DB_ID() AND {predicate}
-  AND st.text NOT LIKE N'%{marker}%'
-GROUP BY qs.query_hash
-ORDER BY SUM(qs.total_grant_kb) - SUM(qs.total_used_grant_kb) DESC
-"#;
-
-/// Empty hashes select the worst thirty grants. Selected workload hashes are read separately, without
-/// a positive-grant filter or ranking cutoff, so a measured zero remains distinguishable from cache eviction.
-fn grants_sql(hashes: &[String]) -> Option<String> {
-    let (limit, predicate) = if hashes.is_empty() {
-        ("TOP (30)", "qs.total_grant_kb > 0".to_string())
-    } else {
-        let valid: Vec<_> = hashes
-            .iter()
-            .filter(|hash| {
-                hash.strip_prefix("0x").is_some_and(|hex| hex.len() == 16 && hex.bytes().all(|c| c.is_ascii_hexdigit()))
-            })
-            .take(200)
-            .map(String::as_str)
-            .collect();
-        if valid.is_empty() {
-            return None;
-        }
-        ("", format!("qs.query_hash IN ({})", valid.join(",")))
-    };
-    Some(
-        GRANTS_SELECT
-            .replace("{limit}", limit)
-            .replace("{predicate}", &predicate)
-            .replace("{marker}", OWN_QUERY_MARKER),
-    )
-}
-
-pub(crate) async fn grants(client: &mut MsClient, hashes: &[String]) -> tiberius::Result<Vec<GrantStat>> {
-    let Some(sql) = grants_sql(hashes) else { return Ok(Vec::new()) };
-    Ok(query(client, &sql)
-        .await?
-        .iter()
-        .filter_map(|r| {
-            Some(GrantStat {
-                query_hash: r.string("query_hash"),
-                executions: r.f64("executions")?,
-                avg_granted_kb: r.f64("avg_granted_kb")?,
-                avg_used_kb: r.f64("avg_used_kb")?,
-                max_granted_kb: r.f64("max_granted_kb")?,
-                last_granted_kb: r.f64("last_granted_kb"),
-                last_used_kb: r.f64("last_used_kb"),
-            })
-        })
-        .collect())
-}
-
-const VERSION_STORE_SQL: &str =
-    "SELECT SUM(reserved_space_kb) AS kb FROM sys.dm_tran_version_store_space_usage WHERE database_id = DB_ID()";
-
-/// The oldest transaction that holds this database's cleanup: one that changed data here (it has a first log record,
-/// so the log can't be reused past it and its locks stay held) or one that reads or makes row versions (the version
-/// store keeps every version since it started). A read-only transaction without versions, or one in another database,
-/// holds nothing here.
-const OLDEST_TRANSACTION_SQL: &str = r#"
-SELECT TOP (1) CAST(s.session_id AS varchar(10)) AS session_id,
-  DATEDIFF(second, at.transaction_begin_time, GETDATE()) AS seconds,
-  s.program_name, s.status,
-  CASE WHEN snap.transaction_id IS NULL THEN 0 ELSE 1 END AS is_snapshot,
-  CASE WHEN dt.database_transaction_begin_lsn IS NULL THEN 0 ELSE 1 END AS wrote
-FROM sys.dm_tran_database_transactions dt
-JOIN sys.dm_tran_session_transactions st ON st.transaction_id = dt.transaction_id
-JOIN sys.dm_tran_active_transactions at ON at.transaction_id = dt.transaction_id
-JOIN sys.dm_exec_sessions s ON s.session_id = st.session_id
-LEFT JOIN sys.dm_tran_active_snapshot_database_transactions snap ON snap.transaction_id = dt.transaction_id
-WHERE dt.database_id = DB_ID() AND s.is_user_process = 1 AND s.session_id <> @@SPID
-  AND ISNULL(s.program_name, N'') <> N'culprit'
-  AND (dt.database_transaction_begin_lsn IS NOT NULL OR snap.transaction_id IS NOT NULL)
-ORDER BY at.transaction_begin_time
-"#;
-
-fn waits_sql(azure_sql_database: bool, only: Option<&[&str]>) -> String {
-    let view = if azure_sql_database { "sys.dm_db_wait_stats" } else { "sys.dm_os_wait_stats" };
-    let filter = match only {
-        Some(types) => {
-            let list: Vec<String> = types.iter().map(|w| format!("N'{w}'")).collect();
-            format!("wait_type IN ({})", list.join(", "))
-        }
-        None => {
-            let excluded: Vec<String> = BENIGN_WAITS.iter().map(|w| format!("N'{w}'")).collect();
-            format!(
-                "wait_time_ms > 0 AND wait_type NOT IN ({}) AND wait_type NOT LIKE N'SLEEP[_]%'",
-                excluded.join(", ")
-            )
-        }
-    };
-    format!("SELECT wait_type, wait_time_ms, signal_wait_time_ms, waiting_tasks_count FROM {view} WHERE {filter}")
-}
-
-/// Wait type → (wait ms, signal wait ms, tasks).
-type WaitTotals = HashMap<String, (f64, f64, f64)>;
-
-async fn wait_totals(client: &mut MsClient, azure: bool, only: Option<&[&str]>) -> tiberius::Result<WaitTotals> {
-    Ok(query(client, &waits_sql(azure, only))
-        .await?
-        .iter()
-        .map(|r| {
-            (
-                r.string("wait_type"),
-                (
-                    r.f64_or_zero("wait_time_ms"),
-                    r.f64_or_zero("signal_wait_time_ms"),
-                    r.f64_or_zero("waiting_tasks_count"),
-                ),
-            )
-        })
-        .collect())
-}
-
-async fn counters(client: &mut MsClient) -> tiberius::Result<HashMap<String, f64>> {
-    Ok(query(client, COUNTERS_SQL).await?.iter().map(|r| (r.string("counter"), r.f64_or_zero("value"))).collect())
+async fn counters<R: NativeRead>(reader: &mut R) -> culprit_core::Result<HashMap<String, f64>> {
+    crate::performance::read(reader, crate::performance::MAX_COUNTERS)
+        .await
+        .map(|rows| crate::performance::application(&rows))
 }
 
 fn uptime_hours(probe: &Probe) -> Option<f64> {
@@ -194,11 +31,12 @@ pub(crate) fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azu
     let whole = if azure { "server" } else { "other" };
     let mut signals = Vec::new();
     let batches = c.get("Batch Requests/sec").copied().unwrap_or(0.0);
-    let compilations = c.get("SQL Compilations/sec").copied().unwrap_or(0.0);
+    let compilations = c.get("SQL Compilations/sec").copied();
     // SQL Compilations/sec counts recompiles too; they have other causes (changed statistics or schema, temporary
     // tables, OPTION (RECOMPILE)) and parameters don't remove them.
-    let recompiles = c.get("SQL Re-Compilations/sec").copied().unwrap_or(0.0).min(compilations);
-    let compiles = compilations - recompiles;
+    let recompiles =
+        c.get("SQL Re-Compilations/sec").copied().map(|value| compilations.map_or(value, |total| value.min(total)));
+    let compiles = compilations.zip(recompiles).map(|(total, repeated)| total - repeated);
     if let Some(hours) = uptime.filter(|_| batches > 0.0) {
         let rate = Signal::new(
             culprit_core::signal_id::BATCH_REQUESTS,
@@ -210,30 +48,34 @@ pub(crate) fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azu
         signals.push(if azure { Signal { healthy: shared(), ..rate } } else { rate });
     }
     if batches > 0.0 {
-        let ratio = Signal::new(
-            culprit_core::signal_id::COMPILES_PER_BATCH,
-            culprit_core::message!("provider.mssql.signal.plans_compiled", whole = whole),
-            compiles / batches * 100.0,
-            SignalUnit::Percent,
-            SignalScope::SinceStartup,
-        );
-        // A handful of batches compiling says nothing about plan reuse; grade the ratio only under real load.
-        let busy = uptime.is_none_or(|h| batches / (h * 3600.0) >= 1.0);
-        signals.push(if azure {
-            Signal { healthy: shared(), ..ratio }
-        } else if busy {
-            ratio.graded(&t!("provider.mssql.signal.plans_compiled.healthy"), 10.0, 25.0, true)
-        } else {
-            Signal { healthy: Some(t!("provider.mssql.signal.plans_compiled.too_few")), ..ratio }
-        });
-        let recompiled = Signal::new(
-            culprit_core::signal_id::RECOMPILES_PER_BATCH,
-            culprit_core::message!("provider.mssql.signal.plans_recompiled", whole = whole),
-            recompiles / batches * 100.0,
-            SignalUnit::Percent,
-            SignalScope::SinceStartup,
-        );
-        signals.push(if azure { Signal { healthy: shared(), ..recompiled } } else { recompiled });
+        if let Some(compiles) = compiles {
+            let ratio = Signal::new(
+                culprit_core::signal_id::COMPILES_PER_BATCH,
+                culprit_core::message!("provider.mssql.signal.plans_compiled", whole = whole),
+                compiles / batches * 100.0,
+                SignalUnit::Percent,
+                SignalScope::SinceStartup,
+            );
+            // A handful of batches compiling says nothing about plan reuse; grade the ratio only under real load.
+            let busy = uptime.is_none_or(|h| batches / (h * 3600.0) >= 1.0);
+            signals.push(if azure {
+                Signal { healthy: shared(), ..ratio }
+            } else if busy {
+                ratio.graded(&t!("provider.mssql.signal.plans_compiled.healthy"), 10.0, 25.0, true)
+            } else {
+                Signal { healthy: Some(t!("provider.mssql.signal.plans_compiled.too_few")), ..ratio }
+            });
+        }
+        if let Some(recompiles) = recompiles {
+            let recompiled = Signal::new(
+                culprit_core::signal_id::RECOMPILES_PER_BATCH,
+                culprit_core::message!("provider.mssql.signal.plans_recompiled", whole = whole),
+                recompiles / batches * 100.0,
+                SignalUnit::Percent,
+                SignalScope::SinceStartup,
+            );
+            signals.push(if azure { Signal { healthy: shared(), ..recompiled } } else { recompiled });
+        }
     }
     if let Some(ple) = c.get("Page life expectancy") {
         let life = Signal::new(
@@ -253,13 +95,14 @@ pub(crate) fn counter_signals(c: &HashMap<String, f64>, uptime: Option<f64>, azu
 }
 
 /// Azure SQL Database's own figures for this database over the last hour: storage I/O against its tier's limit,
-/// graded, and memory in use, for context (a full cache is normal).
-pub(crate) fn resource_signals(data_io: f64, data_io_peak: f64, memory: f64) -> Vec<Signal> {
-    vec![
-        Signal {
+/// plus memory in use, for context. Individual samples establish pressure; a full cache is normal.
+pub(crate) fn resource_signals(summary: &crate::resources::Summary) -> Vec<Signal> {
+    let mut signals = Vec::new();
+    if let (Some(data_io), Some(peak)) = (summary.data_io, summary.data_io_peak) {
+        signals.push(Signal {
             healthy: Some(t!(
                 "provider.mssql.signal.data_io.healthy",
-                peak = format::digits(std::format!("{data_io_peak:.1}"))
+                peak = format::digits(std::format!("{peak:.1}"))
             )),
             ..Signal::new(
                 culprit_core::signal_id::DATA_IO,
@@ -268,8 +111,10 @@ pub(crate) fn resource_signals(data_io: f64, data_io_peak: f64, memory: f64) -> 
                 SignalUnit::Percent,
                 SignalScope::LastHour,
             )
-        },
-        Signal {
+        });
+    }
+    if let Some(memory) = summary.memory {
+        signals.push(Signal {
             healthy: Some(t!("provider.mssql.signal.memory_use.healthy")),
             ..Signal::new(
                 culprit_core::signal_id::MEMORY_USE,
@@ -278,100 +123,95 @@ pub(crate) fn resource_signals(data_io: f64, data_io_peak: f64, memory: f64) -> 
                 SignalUnit::Percent,
                 SignalScope::LastHour,
             )
-        },
-    ]
+        });
+    }
+    signals
 }
 
 /// Signals, grants and the oldest open transaction. Each read is independent, through `sources::read`: a failure is a
 /// note in the coverage returned.
-pub(crate) async fn collect(client: &mut MsClient, probe: &Probe) -> (Pressure, Coverage) {
+pub(crate) async fn collect(
+    pool: std::sync::Arc<crate::conn::Pool>,
+    probe: &Probe,
+) -> (Pressure, Vec<WaitStat>, Coverage) {
     let azure = probe.is_azure_sql_database();
     let uptime = uptime_hours(probe);
     let mut p = Pressure { uptime_hours: uptime, ..Pressure::default() };
     let mut coverage = Coverage::default();
-
-    if let Some(c) =
-        sources::read(&mut coverage, &sources::PERFORMANCE_COUNTERS, counters(client).await, || probe.grant_hint())
-    {
-        p.signals.extend(counter_signals(&c, uptime, azure));
-    }
-    if azure
-        && let Some(rows) =
-            sources::read(&mut coverage, &sources::RESOURCE_USE, query(client, RESOURCE_STATS_SQL).await, || {
-                probe.grant_hint()
-            })
-        && let Some(r) = rows.first().filter(|r| r.f64_or_zero("samples") > 0.0)
-    {
-        p.signals.extend(resource_signals(
-            r.f64_or_zero("data_io"),
-            r.f64_or_zero("data_io_peak"),
-            r.f64_or_zero("memory"),
+    let (native_waits, native_counters) = history(pool.clone(), azure).await;
+    let permission = |error: culprit_core::Error| {
+        if error.code == culprit_core::ErrorCode::PermissionDenied {
+            error.with_hint(probe.grant_hint())
+        } else {
+            error
+        }
+    };
+    let native_waits = native_waits.map_err(permission);
+    let native_counters = native_counters.map_err(permission);
+    if let Some(counters) = coverage.read(&sources::LOGINS, native_counters.clone()) {
+        p.signals.extend(crate::signals::login_signals(
+            counters.get("Logins/sec").copied(),
+            counters.get("Connection Reset/sec").copied(),
+            uptime.map(|hours| hours * 3600.0),
+            azure,
         ));
     }
-    if let Some(rows) =
-        sources::read(&mut coverage, &sources::PENDING_GRANTS, query(client, PENDING_GRANTS_SQL).await, || {
-            probe.grant_hint()
-        })
-    {
-        let pending = rows.first().map(|r| r.f64_or_zero("pending")).unwrap_or(0.0);
-        p.signals.push(pending_grants_signal(pending));
+    if let Some(counters) = coverage.read(&sources::PERFORMANCE_COUNTERS, native_counters) {
+        coverage.completed(&sources::PERFORMANCE_COUNTERS, counters.len());
+        p.signals.extend(counter_signals(&counters, uptime, azure));
     }
-    if let Some(totals) =
-        sources::read(&mut coverage, &sources::WAIT_TOTALS, wait_totals(client, azure, None).await, || {
-            probe.grant_hint()
-        })
-    {
-        p.signals.extend(wait_total_signals(&totals, azure, uptime));
+    let categories = if let Some(rows) = coverage.read_rows(&sources::WAITS, native_waits.clone()) {
+        coverage.delivered(culprit_core::Capability::WaitStats);
+        waits::categories(&waits::totals(&rows))
+    } else {
+        Vec::new()
+    };
+    if let Some(rows) = coverage.read_rows(&sources::WAIT_TOTALS, native_waits) {
+        p.signals.extend(wait_total_signals(&waits::totals(&rows), azure, uptime));
     }
-    if let Ok(rows) = query(client, THREADPOOL_NOW_SQL).await {
-        let waiting = rows.first().map(|r| r.f64_or_zero("waiting")).unwrap_or(0.0);
-        p.signals.push(threadpool_now_signal(waiting));
+    p.signals.extend(crate::queues::application(pool.clone(), probe, &mut coverage).await);
+    if let Some(topology) = crate::processors::collect(pool.clone(), probe, &mut coverage).await {
+        (p.cpus, p.numa_nodes) = topology.application();
     }
-    if let Ok(rows) = query(client, CPUS_SQL).await
-        && let Some(r) = rows.first()
-    {
-        p.cpus = r.f64("cpu_count").filter(|n| *n > 0.0);
-        p.numa_nodes = r.f64("numa_nodes").filter(|n| *n > 0.0);
-    }
-    if let Some(grants) =
-        sources::read(&mut coverage, &sources::GRANTS, grants(client, &[]).await, || probe.grant_hint())
+    if let Some(grants) = crate::grants::collect_application(
+        pool.clone(),
+        probe,
+        &mut coverage,
+        crate::grants::ApplicationSelection::Largest,
+    )
+    .await
     {
         p.grants = grants;
     }
-    let version_store = match query(client, VERSION_STORE_SQL).await {
-        Ok(rows) => rows.first().and_then(|r| r.f64("kb")).map(|kb| kb * 1024.0),
-        Err(_) => None,
-    };
-    if let Some(bytes) = version_store {
+    let version_store = crate::version_store::application(pool.clone(), probe, &mut coverage).await;
+    if let Some(bytes) = version_store.tempdb_bytes {
         p.signals.push(version_store_signal(bytes));
     }
-    if let Some(rows) =
-        sources::read(&mut coverage, &sources::OPEN_TRANSACTIONS, query(client, OLDEST_TRANSACTION_SQL).await, || {
-            probe.grant_hint()
-        })
-    {
-        p.oldest_transaction = rows.first().map(|r| OpenTransaction {
-            catalog_only: false,
-            session: r.string("session_id"),
-            seconds: r.f64_or_zero("seconds"),
-            program: r.str("program_name").filter(|s| !s.trim().is_empty()),
-            activity: match (r.str("status").as_deref(), r.f64_or_zero("is_snapshot") > 0.0) {
-                (Some("sleeping"), _) => TransactionActivity::IdleInTransaction,
-                (_, true) => TransactionActivity::Snapshot,
-                _ => TransactionActivity::Running,
-            },
-            state: None,
-            held_bytes: version_store.filter(|_| r.f64_or_zero("is_snapshot") > 0.0),
-            holder: CleanupHolder::Session,
-            xid_age: None,
-            wrote: Some(r.f64_or_zero("wrote") > 0.0),
-            database: None,
-        });
-        if let Some(t) = &p.oldest_transaction {
-            p.signals.push(oldest_transaction_signal(t.seconds));
-        }
+    p.signals.extend(version_store.persistent.as_ref().and_then(crate::version_store::persistent::signal));
+    p.oldest_transaction =
+        crate::open_transactions::collect(pool, probe, &mut coverage, version_store.tempdb_cleanup_context()).await;
+    if let Some(transaction) = &p.oldest_transaction {
+        p.signals.push(oldest_transaction_signal(transaction.seconds));
     }
-    (p, coverage)
+    (p, categories, coverage)
+}
+
+/// Both consumers use one native wait snapshot; no second reading can silently describe a different instant.
+async fn history(
+    pool: std::sync::Arc<crate::conn::Pool>,
+    azure: bool,
+) -> (
+    culprit_core::Result<Vec<culprit_core::telemetry::WaitCounterObservation>>,
+    culprit_core::Result<HashMap<String, f64>>,
+) {
+    let mut reader = ReadSession::new(pool, culprit_core::telemetry::CollectionBudget::default());
+    let waits = waits::read(&mut reader, azure, crate::waits::MAX_WAIT_TYPES).await.map_err(ReadError::into_error);
+    let counters = counters(&mut reader).await;
+    if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
+        let error = culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error();
+        return (Err(error.clone()), Err(error));
+    }
+    (waits, counters)
 }
 
 /// Queries waiting for a memory grant at the scan's instant.
@@ -476,49 +316,27 @@ pub(crate) fn oldest_transaction_signal(seconds: f64) -> Signal {
 }
 
 /// Two readings of wait totals and counters `seconds` apart; the difference is what happened in between.
-pub(crate) async fn sample(client: &mut MsClient, azure: bool, seconds: u32) -> tiberius::Result<WaitSample> {
+pub(crate) async fn sample<R: NativeRead>(
+    reader: &mut R,
+    azure: bool,
+    seconds: u32,
+) -> culprit_core::Result<WaitSample> {
     let started = Instant::now();
     let taken_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let first = wait_totals(client, azure, None).await?;
-    let counters_before = counters(client).await.unwrap_or_default();
+    let first = waits::read(reader, azure, crate::waits::MAX_WAIT_TYPES).await.map_err(ReadError::into_error)?;
+    let counters_before = crate::performance::read(reader, crate::performance::MAX_COUNTERS).await?;
     tokio::time::sleep(Duration::from_secs(u64::from(seconds))).await;
-    let second = wait_totals(client, azure, None).await?;
-    let counters_after = counters(client).await.unwrap_or_default();
+    let second = waits::read(reader, azure, crate::waits::MAX_WAIT_TYPES).await.map_err(ReadError::into_error)?;
+    let counters_after = crate::performance::read(reader, crate::performance::MAX_COUNTERS).await?;
     let elapsed = started.elapsed().as_secs_f64().max(1.0);
 
-    let mut by_category: HashMap<&'static str, (f64, f64, String, f64)> = HashMap::new();
-    let (mut wait_total, mut signal_total) = (0.0, 0.0);
-    for (wait_type, (ms, signal, tasks)) in &second {
-        let (ms0, signal0, tasks0) = first.get(wait_type).copied().unwrap_or((0.0, 0.0, 0.0));
-        let delta = ms - ms0;
-        if delta <= 0.0 {
-            continue;
-        }
-        wait_total += delta;
-        signal_total += (signal - signal0).max(0.0);
-        let entry = by_category.entry(wait_type_category(wait_type)).or_default();
-        entry.0 += delta;
-        entry.1 += (tasks - tasks0).max(0.0);
-        if delta > entry.3 {
-            entry.2 = wait_type.clone();
-            entry.3 = delta;
-        }
-    }
-    let mut categories: Vec<WaitStat> = by_category
-        .into_iter()
-        .map(|(category, (ms, tasks, top, _))| WaitStat {
-            category: category.into(),
-            wait_type: Some(top),
-            wait_ms: ms,
-            tasks: Some(tasks),
-        })
-        .collect();
-    categories.sort_by(|a, b| b.wait_ms.total_cmp(&a.wait_ms));
+    let deltas = waits::deltas(&first, &second)?;
+    let (wait_total, signal_total) =
+        deltas.values().fold((0.0, 0.0), |(wait, signal), (ms, signal_ms, _)| (wait + ms, signal + signal_ms));
+    let categories = waits::categories(&deltas);
 
-    let rate = |name: &str| {
-        let (a, b) = (counters_before.get(name)?, counters_after.get(name)?);
-        (b >= a).then_some((b - a) / elapsed)
-    };
+    let rates = crate::performance::sampled_rates(&counters_before, &counters_after, elapsed);
+    let rate = |name: &str| rates.get(name).copied();
     let signals = sampled_signals(rate, signal_total, wait_total, azure);
     let view = if azure { "sys.dm_db_wait_stats" } else { "sys.dm_os_wait_stats" };
     Ok(WaitSample {
@@ -561,9 +379,10 @@ pub(crate) fn sampled_signals(
             SignalScope::Sampled,
         ));
         // Recompiles are counted in compilations too; plan reuse is about the first compile.
-        let recompiles = rate("SQL Re-Compilations/sec").unwrap_or(0.0);
-        if let Some(compiles) =
-            rate("SQL Compilations/sec").map(|c| (c - recompiles).max(0.0)).filter(|_| batches > 0.0)
+        if let Some(compiles) = rate("SQL Compilations/sec")
+            .zip(rate("SQL Re-Compilations/sec"))
+            .map(|(total, repeated)| (total - repeated).max(0.0))
+            .filter(|_| batches > 0.0)
         {
             signals.push(Signal::new(
                 "compiles-per-batch",
@@ -608,22 +427,6 @@ fn scheduling_share(signal: f64, wait: f64, scope: SignalScope) -> Signal {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn selected_grants_include_zeroes_without_a_ranking_cutoff_and_validate_hashes() {
-        let sample = super::grants_sql(&[]).unwrap();
-        assert!(sample.contains("TOP (30)"));
-        let selected = super::grants_sql(&["0x0123456789ABCDEF".into(), "0x0);DROP TABLE x;--".into()]).unwrap();
-        assert!(!selected.contains("TOP ("));
-        assert!(!selected.contains("total_grant_kb > 0"));
-        assert!(selected.contains("qs.query_hash IN (0x0123456789ABCDEF)"));
-        assert!(selected.contains("CAST(pa.value AS int) = DB_ID()"));
-        assert!(selected.contains("st.text NOT LIKE N'%/* culprit */%'"));
-        assert!(!selected.contains("DROP"));
-        assert!(super::grants_sql(&["not-a-hash".into()]).is_none());
-        let many = vec!["0x0123456789ABCDEF".into(); 201];
-        assert_eq!(super::grants_sql(&many).unwrap().matches("0x0123456789ABCDEF").count(), 200);
-    }
-
     use culprit_core::SignalStatus;
 
     use super::*;
@@ -632,6 +435,7 @@ mod tests {
         HashMap::from([
             ("Batch Requests/sec".to_string(), 7_200_000.0),
             ("SQL Compilations/sec".to_string(), 3_600_000.0),
+            ("SQL Re-Compilations/sec".to_string(), 0.0),
             ("Page life expectancy".to_string(), ple),
         ])
     }
@@ -671,14 +475,40 @@ mod tests {
         assert_eq!(signal(&signals, "compiles-per-batch").value, 25.0);
         assert_eq!(signal(&signals, "recompiles-per-batch").value, 25.0);
     }
+    #[test]
+    fn unknown_recompile_counts_cannot_be_substituted_with_zero_for_compile_ratios() {
+        let mut counts = counters(400.0);
+        counts.remove("SQL Re-Compilations/sec");
+        let signals = counter_signals(&counts, Some(100.0), false);
+        assert!(
+            !signals.iter().any(|signal| matches!(signal.key.as_str(), "compiles-per-batch" | "recompiles-per-batch"))
+        );
+        let signals = sampled_signals(|name| counts.get(name).copied(), 0.0, 0.0, false);
+        assert!(!signals.iter().any(|signal| signal.key == "compiles-per-batch"));
+    }
 
     #[test]
     fn aggregate_resource_counters_need_individual_samples_before_a_pressure_verdict() {
-        let calm = resource_signals(0.0, 3.0, 0.4);
+        let calm = resource_signals(&crate::resources::Summary {
+            data_io: Some(0.0),
+            data_io_peak: Some(3.0),
+            memory: Some(0.4),
+        });
         assert_eq!(signal(&calm, "data-io").status, SignalStatus::Info);
         assert!(signal(&calm, "data-io").healthy.as_deref().unwrap().contains("peak 3.0%"));
         assert_eq!(signal(&calm, "memory-use").status, SignalStatus::Info);
-        assert_eq!(signal(&resource_signals(85.0, 100.0, 90.0), "data-io").status, SignalStatus::Info);
+        assert_eq!(
+            signal(
+                &resource_signals(&crate::resources::Summary {
+                    data_io: Some(85.0),
+                    data_io_peak: Some(100.0),
+                    memory: Some(90.0)
+                }),
+                "data-io"
+            )
+            .status,
+            SignalStatus::Info
+        );
     }
 
     #[test]
@@ -686,5 +516,33 @@ mod tests {
         for scope in [SignalScope::SinceStartup, SignalScope::Sampled] {
             assert_eq!(scheduling_share(99.0, 100.0, scope).status, SignalStatus::Info);
         }
+    }
+    #[tokio::test]
+    async fn a_failed_counter_read_stops_sampling_without_waiting_or_sending_more_queries() {
+        use crate::{read::ReadError, resources::test_support::FakeRead};
+        use culprit_core::telemetry::CollectionStop;
+        for reason in [CollectionStop::TimedOut, CollectionStop::Cancelled, CollectionStop::CancellationUnconfirmed] {
+            let mut reader = FakeRead::new(vec![
+                Ok(vec![crate::waits::tests::row("WRITELOG", 10)]),
+                Err(ReadError::Stopped(reason)),
+            ]);
+            let result = tokio::time::timeout(Duration::from_millis(50), sample(&mut reader, true, 60)).await.unwrap();
+            assert_eq!(CollectionStop::from_error(&result.err().unwrap()), reason);
+            assert_eq!(reader.calls.len(), 2);
+        }
+    }
+    #[tokio::test]
+    async fn a_failed_second_counter_read_cannot_publish_a_complete_wait_sample() {
+        use crate::{read::ReadError, resources::test_support::FakeRead};
+        use culprit_core::telemetry::CollectionStop;
+        let mut reader = FakeRead::new(vec![
+            Ok(vec![crate::waits::tests::row("WRITELOG", 10)]),
+            Ok(vec![crate::performance::tests::row()]),
+            Ok(vec![crate::waits::tests::row("WRITELOG", 20)]),
+            Err(ReadError::Stopped(CollectionStop::TimedOut)),
+        ]);
+        let error = sample(&mut reader, true, 0).await.err().unwrap();
+        assert_eq!(CollectionStop::from_error(&error), CollectionStop::TimedOut);
+        assert_eq!(reader.calls.len(), 4);
     }
 }

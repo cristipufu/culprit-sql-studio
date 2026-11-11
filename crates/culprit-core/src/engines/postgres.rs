@@ -47,6 +47,9 @@ impl EngineSpec for Postgres {
         Some(connection_security())
     }
 
+    fn partition_tail(&self) -> PartitionTail {
+        PartitionTail::FromCatalog
+    }
     fn products(&self) -> &'static [ProductSpec] {
         const PRODUCTS: &[ProductSpec] = &[
             ProductSpec::primary(DatabaseProduct::Postgres, "PostgreSQL", key!("core.engines.postgres.plan_format")),

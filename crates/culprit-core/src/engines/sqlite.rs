@@ -7,6 +7,9 @@ use crate::dialect::{NewIndex, keys, unique};
 pub(super) struct Sqlite;
 
 impl EngineSpec for Sqlite {
+    fn partition_tail(&self) -> PartitionTail {
+        PartitionTail::Unsupported
+    }
     fn products(&self) -> &'static [ProductSpec] {
         const PRODUCTS: &[ProductSpec] =
             &[ProductSpec::primary(DatabaseProduct::Sqlite, "SQLite", key!("core.engines.sqlite.plan_format"))];

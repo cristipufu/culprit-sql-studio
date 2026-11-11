@@ -13,6 +13,7 @@ repository = "https://github.com/cristipufu/culprit-sql-studio"
 
 [workspace.dependencies]
 culprit-core = { path = "crates/culprit-core" }
+culprit-collector = { path = "crates/culprit-collector" }
 culprit-checks = { path = "crates/culprit-checks" }
 culprit-mssql = { path = "crates/culprit-mssql" }
 culprit-postgres = { path = "crates/culprit-postgres" }

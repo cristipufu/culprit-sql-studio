@@ -509,114 +509,7 @@
       "actionability": "needs-attention",
       "category": "indexes",
       "caveats": [
-        "SQL Server counts escalations since the table's indexes were loaded into memory, usually since it started, and keeps no time for each."
-      ],
-      "check": "lock-escalations",
-      "confidence": "high",
-      "fix": {
-        "cost": null,
-        "sql": "-- SQL Server doesn't record which statement escalated: this session keeps the next ones with their statement.\n-- It catches them on every table, so another table's finding starts this same session: once is enough.\nIF NOT EXISTS (SELECT 1 FROM sys.server_event_sessions WHERE name = N'culprit_lock_escalation')\n    CREATE EVENT SESSION culprit_lock_escalation ON SERVER\n    ADD EVENT sqlserver.lock_escalation (\n        SET collect_statement = 1\n        ACTION (sqlserver.sql_text, sqlserver.client_app_name)\n        WHERE sqlserver.database_name = N'culprit_demo')\n    ADD TARGET package0.ring_buffer\n    WITH (STARTUP_STATE = ON);\nIF NOT EXISTS (SELECT 1 FROM sys.dm_xe_sessions WHERE name = N'culprit_lock_escalation')\n    ALTER EVENT SESSION culprit_lock_escalation ON SERVER STATE = START;\n\n-- Then read what it caught\nSELECT e.x.value('@timestamp', 'datetime2') AS at_utc,\n       OBJECT_NAME(e.x.value('(data[@name=\"object_id\"]/value)[1]', 'int')) AS table_name,\n       e.x.value('(data[@name=\"escalated_lock_count\"]/value)[1]', 'int') AS locks,\n       e.x.value('(data[@name=\"statement\"]/value)[1]', 'nvarchar(max)') AS statement,\n       e.x.value('(action[@name=\"client_app_name\"]/value)[1]', 'nvarchar(256)') AS app\n  FROM (SELECT CAST(t.target_data AS xml) AS d\n          FROM sys.dm_xe_session_targets t\n          JOIN sys.dm_xe_sessions s ON s.address = t.event_session_address\n         WHERE s.name = N'culprit_lock_escalation' AND t.target_name = N'ring_buffer') r\n CROSS APPLY r.d.nodes('RingBufferTarget/event') e(x);\n\n-- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;",
-        "summary": "Start the event session below (culprit_lock_escalation) to learn which statement escalates: it keeps each escalation with its statement, in memory, at almost no cost. If it is a read, it escalates because it keeps its row locks until it ends: Without locking hints, READ_COMMITTED_SNAPSHOT lets ordinary reads under read committed avoid row locks (it changes what readers see and uses tempdb, so test it first); or consider reading fewer rows per run after checking the access path; row counts do not bound all locks or prevent escalation under lock-memory pressure. If it is a statement outside the query history that changes many rows at once (a job, a migration, maintenance), consider smaller batches. Use separate transactions only if partial commits preserve required atomicity; an enclosing transaction may retain locks."
-      },
-      "id": "lock-escalations:shop.support_tickets",
-      "impact": {
-        "db_time_share": null,
-        "label": "5 table locks",
-        "score": 45.0,
-        "time_ms_per_day": null
-      },
-      "inactive": false,
-      "last_seen": "2026-10-11T12:13:47Z",
-      "metrics": [
-        {
-          "key": "check.lock_escalations.metric.escalations",
-          "label": "Escalations since SQL Server started",
-          "text": null,
-          "unit": "count",
-          "value": 5.0
-        }
-      ],
-      "queries": [
-        {
-          "id": "10",
-          "note": "Returns about 973 rows a run. Its plan prefetches its key lookups, which keeps their row locks until the statement ends.",
-          "plan_node": null
-        }
-      ],
-      "severity": "high",
-      "subject": {
-        "kind": "table",
-        "name": "shop.support_tickets"
-      },
-      "summary": "SQL Server replaced the row and page locks on support_tickets with one lock on the whole table 5 times since it started, on Oct 11 at 11:06 UTC, 67 minutes before this scan, so none is older than that. The next scan compares with this one and says whether any happened since. That is once a day or more on average over the counter history; it does not date individual events. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to support_tickets. A read can escalate too: an ordinary read under read committed usually releases row locks as it advances, but prefetching key lookups can retain locks until the statement ends. Locking hints (HOLDLOCK, UPDLOCK), REPEATABLE READ and SERIALIZABLE can retain them until the transaction ends. Reading many rows can acquire enough locks for an escalation attempt. The likeliest is a read from support_tickets, which returns about 973 rows a run on average: its plan prefetches its key lookups, which keeps their row locks until the statement ends.",
-      "title": "Row locks on support_tickets escalated to a table lock 5 times since SQL Server started (Oct 11)",
-      "verification_basis": "counter-change",
-      "verify": [
-        "Compare new escalations on support_tickets and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix."
-      ]
-    },
-    {
-      "actionability": "needs-attention",
-      "category": "indexes",
-      "caveats": [],
-      "check": "last-page-insert",
-      "confidence": "medium",
-      "fix": {
-        "cost": null,
-        "sql": "ALTER INDEX [pk_hot] ON [archive].[hot] SET (OPTIMIZE_FOR_SEQUENTIAL_KEY = ON);",
-        "summary": "SQL Server 2019 can pace concurrent inserts into a sequential key to help sustain throughput when many writers compete for the last page: try OPTIMIZE_FOR_SEQUENTIAL_KEY on this index and compare throughput. It's a metadata change and takes effect at once."
-      },
-      "id": "last-page-insert:archive.hot.pk_hot",
-      "impact": {
-        "db_time_share": null,
-        "label": "53.6 s latch waits",
-        "score": 45.0,
-        "time_ms_per_day": null
-      },
-      "inactive": false,
-      "last_seen": null,
-      "metrics": [
-        {
-          "key": "check.last_page_insert.metric.waits",
-          "label": "Page latch waits",
-          "text": null,
-          "unit": "count",
-          "value": 105601.0
-        },
-        {
-          "key": "check.last_page_insert.metric.time",
-          "label": "Time waiting",
-          "text": null,
-          "unit": "ms",
-          "value": 53595.0
-        },
-        {
-          "key": "check.last_page_insert.metric.inserts",
-          "label": "Inserts",
-          "text": null,
-          "unit": "count",
-          "value": 128000.0
-        }
-      ],
-      "queries": [],
-      "severity": "high",
-      "subject": {
-        "kind": "index",
-        "name": "archive.hot.pk_hot"
-      },
-      "summary": "pk_hot starts with a value that only grows (id), so every insert goes to the same last page. Concurrent inserts wait for each other's latch on it (PAGELATCH_EX): 106K waits, 53.6 s in all since the index was loaded. It gets worse with more concurrent writers.",
-      "title": "Inserts into hot queue for the last page of pk_hot",
-      "verification_basis": "rescan",
-      "verify": [
-        "Re-scan to confirm OPTIMIZE_FOR_SEQUENTIAL_KEY is ON. Compare completed inserts per second and the time to insert the same batch before and after, under comparable writer concurrency: the goal is better insert throughput under contention.",
-        "Page-latch waits can continue, and BTREE_INSERT_FLOW_CONTROL waits may appear. Compare measurements over equal intervals; cumulative wait totals need not stop growing."
-      ]
-    },
-    {
-      "actionability": "needs-attention",
-      "category": "indexes",
-      "caveats": [
-        "Counted since the indexes' metadata was loaded into memory, usually since SQL Server started."
+        "These counters cover each index metadata entry’s lifetime, which can end without a server restart."
       ],
       "check": "hot-rows",
       "confidence": "high",
@@ -1647,6 +1540,116 @@
       "verification_basis": "rescan",
       "verify": [
         "Let the workload run, re-scan, then open a complex or resource-intensive query in Queries and pick \"Last run\" when available: the diagram shows the rows and timings SQL Server retained. A simple query may have only a root operator, and an uncached or evicted plan has no last-run data."
+      ]
+    },
+    {
+      "actionability": "information",
+      "category": "indexes",
+      "caveats": [
+        "These totals do not establish a new increase or continuing blocking in the selected window. Capture dated events or compare counters wholly within that period before treating this as current pressure.",
+        "SQL Server counts escalations over each index metadata entry’s lifetime, which can end without a server restart. Individual escalations are not dated."
+      ],
+      "check": "lock-escalations",
+      "confidence": "high",
+      "fix": {
+        "cost": null,
+        "sql": "-- SQL Server doesn't record which statement escalated: this session keeps the next ones with their statement.\n-- It catches them on every table, so another table's finding starts this same session: once is enough.\nIF NOT EXISTS (SELECT 1 FROM sys.server_event_sessions WHERE name = N'culprit_lock_escalation')\n    CREATE EVENT SESSION culprit_lock_escalation ON SERVER\n    ADD EVENT sqlserver.lock_escalation (\n        SET collect_statement = 1\n        ACTION (sqlserver.sql_text, sqlserver.client_app_name)\n        WHERE sqlserver.database_name = N'culprit_demo')\n    ADD TARGET package0.ring_buffer\n    WITH (STARTUP_STATE = ON);\nIF NOT EXISTS (SELECT 1 FROM sys.dm_xe_sessions WHERE name = N'culprit_lock_escalation')\n    ALTER EVENT SESSION culprit_lock_escalation ON SERVER STATE = START;\n\n-- Then read what it caught\nSELECT e.x.value('@timestamp', 'datetime2') AS at_utc,\n       OBJECT_NAME(e.x.value('(data[@name=\"object_id\"]/value)[1]', 'int')) AS table_name,\n       e.x.value('(data[@name=\"escalated_lock_count\"]/value)[1]', 'int') AS locks,\n       e.x.value('(data[@name=\"statement\"]/value)[1]', 'nvarchar(max)') AS statement,\n       e.x.value('(action[@name=\"client_app_name\"]/value)[1]', 'nvarchar(256)') AS app\n  FROM (SELECT CAST(t.target_data AS xml) AS d\n          FROM sys.dm_xe_session_targets t\n          JOIN sys.dm_xe_sessions s ON s.address = t.event_session_address\n         WHERE s.name = N'culprit_lock_escalation' AND t.target_name = N'ring_buffer') r\n CROSS APPLY r.d.nodes('RingBufferTarget/event') e(x);\n\n-- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;",
+        "summary": "Start the event session below (culprit_lock_escalation) to learn which statement escalates: it keeps each escalation with its statement, in memory, at almost no cost. If it is a read, it escalates because it keeps its row locks until it ends: Without locking hints, READ_COMMITTED_SNAPSHOT lets ordinary reads under read committed avoid row locks (it changes what readers see and uses tempdb, so test it first); or consider reading fewer rows per run after checking the access path; row counts do not bound all locks or prevent escalation under lock-memory pressure. If it is a statement outside the query history that changes many rows at once (a job, a migration, maintenance), consider smaller batches. Use separate transactions only if partial commits preserve required atomicity; an enclosing transaction may retain locks."
+      },
+      "id": "lock-escalations:shop.support_tickets",
+      "impact": {
+        "db_time_share": null,
+        "label": "5 table locks",
+        "score": 8.0,
+        "time_ms_per_day": null
+      },
+      "inactive": false,
+      "last_seen": "2026-10-11T12:13:47Z",
+      "metrics": [
+        {
+          "key": "check.lock_escalations.metric.escalations",
+          "label": "Recorded lock escalations",
+          "text": null,
+          "unit": "count",
+          "value": 5.0
+        }
+      ],
+      "queries": [
+        {
+          "id": "10",
+          "note": "Returns about 973 rows a run. Its plan prefetches its key lookups, which keeps their row locks until the statement ends.",
+          "plan_node": null
+        }
+      ],
+      "severity": "low",
+      "subject": {
+        "kind": "table",
+        "name": "shop.support_tickets"
+      },
+      "summary": "SQL Server replaced the row and page locks on support_tickets with one lock on the whole table 5 times since its indexes were loaded into memory. It keeps no time for each, and Culprit has no earlier scan to compare with, so they may be old: the next scan compares with this one and says whether any happened since. The counters’ reset time is unknown, so the total does not establish a rate. SQL Server can attempt escalation around 5,000 locks on one table reference, or under lock-memory pressure. A successful table lock can block incompatible lock requests until the transaction ends; the escalation counter alone does not establish that other sessions were blocked. SQL Server doesn't record which statement it was, and none of the statements in the query history writes to support_tickets. A read can escalate too: an ordinary read under read committed usually releases row locks as it advances, but prefetching key lookups can retain locks until the statement ends. Locking hints (HOLDLOCK, UPDLOCK), REPEATABLE READ and SERIALIZABLE can retain them until the transaction ends. Reading many rows can acquire enough locks for an escalation attempt. The likeliest is a read from support_tickets, which returns about 973 rows a run on average: its plan prefetches its key lookups, which keeps their row locks until the statement ends.",
+      "title": "Row locks on support_tickets escalated to a table lock 5 times since its indexes were loaded into memory",
+      "verification_basis": "counter-change",
+      "verify": [
+        "Compare new escalations on support_tickets and observed blocking under comparable workload before and after a justified change. No new events means none were recorded in that interval; an idle interval alone does not verify a fix."
+      ]
+    },
+    {
+      "actionability": "information",
+      "category": "indexes",
+      "caveats": [
+        "SQL Server keeps latch waits for the index metadata’s lifetime. Its starting time is unknown, so the total does not establish a rate."
+      ],
+      "check": "last-page-insert",
+      "confidence": "medium",
+      "fix": {
+        "cost": null,
+        "sql": "ALTER INDEX [pk_hot] ON [archive].[hot] SET (OPTIMIZE_FOR_SEQUENTIAL_KEY = ON);",
+        "summary": "SQL Server 2019 can pace concurrent inserts into a sequential key to help sustain throughput when many writers compete for the last page: try OPTIMIZE_FOR_SEQUENTIAL_KEY on this index and compare throughput. It's a metadata change and takes effect at once."
+      },
+      "id": "last-page-insert:archive.hot.pk_hot",
+      "impact": {
+        "db_time_share": null,
+        "label": "53.6 s latch waits",
+        "score": 8.0,
+        "time_ms_per_day": null
+      },
+      "inactive": false,
+      "last_seen": null,
+      "metrics": [
+        {
+          "key": "check.last_page_insert.metric.waits",
+          "label": "Page latch waits",
+          "text": null,
+          "unit": "count",
+          "value": 105601.0
+        },
+        {
+          "key": "check.last_page_insert.metric.time",
+          "label": "Time waiting",
+          "text": null,
+          "unit": "ms",
+          "value": 53595.0
+        },
+        {
+          "key": "check.last_page_insert.metric.inserts",
+          "label": "Inserts",
+          "text": null,
+          "unit": "count",
+          "value": 128000.0
+        }
+      ],
+      "queries": [],
+      "severity": "low",
+      "subject": {
+        "kind": "index",
+        "name": "archive.hot.pk_hot"
+      },
+      "summary": "pk_hot starts with a value that only grows (id), so every insert goes to the same last page. Concurrent inserts wait for each other's latch on it (PAGELATCH_EX): 106K waits, 53.6 s in all since the index was loaded. It gets worse with more concurrent writers.",
+      "title": "Inserts into hot queue for the last page of pk_hot",
+      "verification_basis": "rescan",
+      "verify": [
+        "Re-scan to confirm OPTIMIZE_FOR_SEQUENTIAL_KEY is ON. Compare completed inserts per second and the time to insert the same batch before and after, under comparable writer concurrency: the goal is better insert throughput under contention.",
+        "Page-latch waits can continue, and BTREE_INSERT_FLOW_CONTROL waits may appear. Compare measurements over equal intervals; cumulative wait totals need not stop growing."
       ]
     },
     {
@@ -2953,6 +2956,9 @@
           "page_latch_waits": 0.0,
           "page_lock_wait_ms": 0.0,
           "page_lock_waits": 0.0,
+          "reset": {
+            "kind": "unknown"
+          },
           "row_lock_wait_ms": 2704.0,
           "row_lock_waits": 1.0,
           "sequential_key": true
@@ -3120,6 +3126,9 @@
           "page_latch_waits": 1.0,
           "page_lock_wait_ms": 0.0,
           "page_lock_waits": 0.0,
+          "reset": {
+            "kind": "unknown"
+          },
           "row_lock_wait_ms": 186660.0,
           "row_lock_waits": 5.0,
           "sequential_key": true
@@ -3413,6 +3422,9 @@
           "page_latch_waits": 0.0,
           "page_lock_wait_ms": 0.0,
           "page_lock_waits": 0.0,
+          "reset": {
+            "kind": "unknown"
+          },
           "row_lock_wait_ms": 0.0,
           "row_lock_waits": 0.0,
           "sequential_key": false
@@ -3518,6 +3530,9 @@
           "page_latch_waits": 105601.0,
           "page_lock_wait_ms": 0.0,
           "page_lock_waits": 0.0,
+          "reset": {
+            "kind": "unknown"
+          },
           "row_lock_wait_ms": 0.0,
           "row_lock_waits": 0.0,
           "sequential_key": true
@@ -4166,7 +4181,7 @@
         {
           "healthy": "Space occupied by row versions now. Keeping versions is normal; the amount alone does not establish a problem. Long transactions and storage pressure need their own evidence.",
           "key": "version-store",
-          "label": "Version store",
+          "label": "Version store (tempdb)",
           "label_message": {
             "arguments": {},
             "key": "provider.mssql.version_store",
@@ -12101,7 +12116,7 @@
     "by_category": [
       {
         "category": "indexes",
-        "count": 8
+        "count": 6
       },
       {
         "category": "queries",
@@ -12118,7 +12133,7 @@
     ],
     "by_severity": [
       {
-        "count": 4,
+        "count": 2,
         "severity": "high"
       },
       {
@@ -12162,7 +12177,7 @@
         "table": "ticket_events"
       }
     ],
-    "headline": "22 opportunities. The top ones touch 2 min of database time over the last 5 hours (28%).",
+    "headline": "20 opportunities. The top ones touch 5 min of database time over the last 5 hours (83%).",
     "headline_message": {
       "kind": "sequence",
       "messages": [
@@ -12170,11 +12185,11 @@
           "arguments": {
             "count": {
               "kind": "digits",
-              "value": "22"
+              "value": "20"
             },
             "n": {
               "kind": "number",
-              "value": 22.0
+              "value": 20.0
             }
           },
           "key": "summary.headline.opportunities",
@@ -12192,7 +12207,7 @@
                   },
                   "share": {
                     "kind": "percent",
-                    "value": 0.2846163023196287
+                    "value": 0.8285132103468869
                   },
                   "span": {
                     "kind": "message",
@@ -12213,7 +12228,7 @@
                   },
                   "time": {
                     "kind": "duration",
-                    "value": 95904.66500000001
+                    "value": 279176.847
                   }
                 },
                 "key": "support.cost.time_over",
@@ -12279,7 +12294,7 @@
       }
     ],
     "no_workload": null,
-    "opportunities": 22,
+    "opportunities": 20,
     "over_scans": [],
     "runs_said": [
       {
@@ -12287,7 +12302,7 @@
         "runs": "2 runs on Oct 11, 11:54–12:13 UTC"
       }
     ],
-    "takeaway": "The top ones touch 2 min of database time over the last 5 hours (28%).",
+    "takeaway": "The top ones touch 5 min of database time over the last 5 hours (83%).",
     "takeaway_message": {
       "kind": "sequence",
       "messages": [
@@ -12303,7 +12318,7 @@
                   },
                   "share": {
                     "kind": "percent",
-                    "value": 0.2846163023196287
+                    "value": 0.8285132103468869
                   },
                   "span": {
                     "kind": "message",
@@ -12324,7 +12339,7 @@
                   },
                   "time": {
                     "kind": "duration",
-                    "value": 95904.66500000001
+                    "value": 279176.847
                   }
                 },
                 "key": "support.cost.time_over",
@@ -12338,6 +12353,6 @@
       ],
       "separator": " "
     },
-    "top_share": 0.2846163023196287
+    "top_share": 0.8285132103468869
   }
 }

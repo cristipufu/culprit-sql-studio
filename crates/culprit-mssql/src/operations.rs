@@ -1,51 +1,12 @@
-//! Capacity and allocation limits from catalog/DMV metadata only. No DBCC, file reads or workload execution.
-use crate::{
-    conn::{MsClient, query},
-    probe::Probe,
-    sources,
+//! Native operational reads and their application projection share facts, not rendered labels.
+pub(crate) mod native;
+use crate::{conn::Pool, probe::Probe, read::ReadSession};
+use culprit_core::{
+    Coverage, FileKind, FileScope, Snapshot,
+    operations::{OperationalCounter, OperationalCounterKind, SpacePart, SpaceUsage},
+    telemetry::{CollectionBudget, SourceShutdown},
 };
-use culprit_core::operations::{OperationalCounter, OperationalCounterKind, SequenceCapacity, SpacePart, SpaceUsage};
-use culprit_core::{Coverage, FileKind, FileScope, Snapshot};
-
-const SUSPECT_PAGES_SQL: &str = "SELECT CAST(COUNT(*) AS float) AS count,
- CONVERT(varchar(30), MAX(last_update_date), 127) + 'Z' AS last_at
- FROM msdb.dbo.suspect_pages
- WHERE database_id = DB_ID() AND event_type IN (1, 2, 3)";
-
-const LOG_SQL: &str = "SELECT total_log_size_in_bytes AS total, used_log_space_in_bytes AS used,
- (SELECT log_reuse_wait_desc FROM sys.databases WHERE database_id = DB_ID()) AS reuse_wait,
- (SELECT MAX(CASE WHEN growth > 0 AND (max_size = -1 OR size < max_size) THEN 1 ELSE 0 END) FROM sys.database_files WHERE type = 1) AS can_grow,
- (SELECT CASE WHEN MAX(CASE WHEN growth > 0 AND max_size = -1 THEN 1 ELSE 0 END) = 1 THEN NULL ELSE SUM(CAST(CASE WHEN growth = 0 OR max_size < size THEN size ELSE max_size END AS bigint)) * 8192.0 END FROM sys.database_files WHERE type = 1) AS max_bytes
- FROM sys.dm_db_log_space_usage";
-
-const FILES_SQL: &str = "SELECT fg.name, SUM(CAST(df.size AS bigint)) * 8192.0 AS total,
- CASE WHEN COUNT(FILEPROPERTY(df.name, 'SpaceUsed')) = COUNT(*) THEN SUM(CAST(FILEPROPERTY(df.name, 'SpaceUsed') AS bigint)) * 8192.0 END AS used,
- MAX(CASE WHEN df.growth > 0 AND (df.max_size = -1 OR df.size < df.max_size) THEN 1 ELSE 0 END) AS can_grow,
- CASE WHEN MAX(CASE WHEN df.growth > 0 AND df.max_size = -1 THEN 1 ELSE 0 END) = 1 THEN NULL ELSE SUM(CAST(CASE WHEN df.growth = 0 OR df.max_size < df.size THEN df.size ELSE df.max_size END AS bigint)) * 8192.0 END AS max_bytes
- FROM sys.database_files df JOIN sys.filegroups fg ON fg.data_space_id = df.data_space_id
- WHERE df.type = 0 AND df.state = 0 AND fg.is_read_only = 0 GROUP BY fg.name";
-
-const TEMP_SQL: &str = "SELECT SUM(total_page_count) * 8192.0 AS total,
- SUM(total_page_count - unallocated_extent_page_count) * 8192.0 AS used,
- SUM(user_object_reserved_page_count) * 8192.0 AS users,
- SUM(internal_object_reserved_page_count) * 8192.0 AS internals,
- SUM(version_store_reserved_page_count) * 8192.0 AS versions
- FROM tempdb.sys.dm_db_file_space_usage";
-
-const SEQUENCES_SQL: &str = "SELECT s.name + '.' + q.name AS name, CAST(NULL AS nvarchar(512)) AS table_name,
- CONVERT(nvarchar(40), q.current_value) AS current_value, CONVERT(nvarchar(40), q.increment) AS step,
- CONVERT(nvarchar(40), q.minimum_value) AS min_value, CONVERT(nvarchar(40), q.maximum_value) AS max_value,
- CAST(q.is_cycling AS int) AS cycles, 1 AS allocated
- FROM sys.sequences q JOIN sys.schemas s ON s.schema_id = q.schema_id
- WHERE q.current_value IS NOT NULL
- UNION ALL
- SELECT s.name + '.' + t.name + '.' + c.name, s.name + '.' + t.name,
- CONVERT(nvarchar(40), c.last_value), CONVERT(nvarchar(40), c.increment_value),
- CASE TYPE_NAME(c.system_type_id) WHEN 'tinyint' THEN '0' WHEN 'smallint' THEN '-32768' WHEN 'int' THEN '-2147483648' WHEN 'bigint' THEN '-9223372036854775808' WHEN 'numeric' THEN '-' + REPLICATE('9', c.precision) WHEN 'decimal' THEN '-' + REPLICATE('9', c.precision) END,
- CASE TYPE_NAME(c.system_type_id) WHEN 'tinyint' THEN '255' WHEN 'smallint' THEN '32767' WHEN 'int' THEN '2147483647' WHEN 'bigint' THEN '9223372036854775807' WHEN 'numeric' THEN REPLICATE('9', c.precision) WHEN 'decimal' THEN REPLICATE('9', c.precision) END,
- 0, 1 FROM sys.identity_columns c JOIN sys.tables t ON t.object_id = c.object_id
- JOIN sys.schemas s ON s.schema_id = t.schema_id WHERE t.is_ms_shipped = 0 AND c.last_value IS NOT NULL";
-
+use std::sync::Arc;
 /// This database's transaction log, as a space.
 pub(crate) fn log_name(database: &str) -> String {
     culprit_core::t!("provider.mssql.space.log", database = database)
@@ -61,116 +22,82 @@ pub(crate) fn tempdb_name() -> String {
     culprit_core::t!("provider.mssql.space.tempdb")
 }
 
-/// What tempdb's space holds: user objects, internal objects and the version store, where the row says.
-pub(crate) fn tempdb_parts(r: &crate::value::Rec) -> Vec<SpacePart> {
-    [
-        (culprit_core::key!("provider.mssql.space.user_objects"), "users"),
-        (culprit_core::key!("provider.mssql.space.internal_objects"), "internals"),
-        (culprit_core::key!("provider.mssql.version_store"), "versions"),
-    ]
-    .into_iter()
-    .filter_map(|(name, col)| r.f64(col).map(|bytes| SpacePart { name: culprit_core::i18n::t(name, &[]), bytes }))
-    .collect()
-}
-
-pub async fn collect(client: &mut MsClient, probe: &Probe, snapshot: &mut Snapshot) {
-    let mut coverage = Coverage::default();
-    if let Some(rows) =
-        sources::read_rows(&mut coverage, &sources::LOG_CAPACITY, query(client, LOG_SQL).await, || probe.grant_hint())
-    {
-        for r in rows {
-            if let (Some(total), Some(used)) = (r.f64("total"), r.f64("used")) {
-                snapshot.operations.spaces.push(SpaceUsage {
-                    parts: vec![],
-                    name: log_name(&snapshot.server.database),
-                    kind: FileKind::Log,
-                    scope: FileScope::Database,
-                    total_bytes: total,
-                    used_bytes: used,
-                    growth_enabled: r.f64("can_grow").map(|v| v > 0.0),
-                    limit_bytes: r.f64("max_bytes"),
-                    reuse_wait: r.str("reuse_wait"),
-                });
-            }
-        }
-    }
-    if let Some(rows) =
-        sources::read_rows(&mut coverage, &sources::FILE_CAPACITY, query(client, FILES_SQL).await, || {
-            probe.grant_hint()
-        })
-    {
-        for r in rows {
-            if let (Some(total), Some(used)) = (r.f64("total"), r.f64("used")) {
-                snapshot.operations.spaces.push(SpaceUsage {
-                    parts: vec![],
-                    name: filegroup_name(&snapshot.server.database, &r.string("name")),
-                    kind: FileKind::Data,
-                    scope: FileScope::Database,
-                    total_bytes: total,
-                    used_bytes: used,
-                    growth_enabled: r.f64("can_grow").map(|v| v > 0.0),
-                    limit_bytes: r.f64("max_bytes"),
-                    reuse_wait: None,
-                });
-            }
-        }
-    }
-    if let Some(rows) =
-        sources::read_rows(&mut coverage, &sources::TEMP_CAPACITY, query(client, TEMP_SQL).await, || probe.grant_hint())
-    {
-        for r in rows {
-            if let (Some(total), Some(used)) = (r.f64("total"), r.f64("used")) {
-                snapshot.operations.spaces.push(SpaceUsage {
-                    parts: tempdb_parts(&r),
-                    name: tempdb_name(),
-                    kind: FileKind::Temp,
-                    scope: FileScope::Server,
-                    total_bytes: total,
-                    used_bytes: used,
-                    growth_enabled: None,
-                    limit_bytes: None,
-                    reuse_wait: None,
-                });
-            }
-        }
-    }
-    if let Some(rows) =
-        sources::read_rows(&mut coverage, &sources::SEQUENCE_CAPACITY, query(client, SEQUENCES_SQL).await, || {
-            probe.grant_hint()
-        })
-    {
-        for r in rows {
-            let (Some(current), Some(increment), Some(minimum), Some(maximum)) =
-                (r.str("current_value"), r.str("step"), r.str("min_value"), r.str("max_value"))
-            else {
-                continue;
+pub(crate) fn tempdb_parts(parts: &[native::SpacePart]) -> Vec<SpacePart> {
+    parts
+        .iter()
+        .filter_map(|part| {
+            let key = match part.kind {
+                native::SpacePartKind::Users => culprit_core::key!("provider.mssql.space.user_objects"),
+                native::SpacePartKind::Internals => culprit_core::key!("provider.mssql.space.internal_objects"),
+                native::SpacePartKind::Versions => culprit_core::key!("provider.mssql.version_store"),
             };
-            snapshot.operations.sequences.push(SequenceCapacity {
-                name: r.string("name"),
-                table: r.str("table_name"),
-                current,
-                increment,
-                minimum,
-                maximum,
-                cycles: r.f64("cycles").is_some_and(|v| v > 0.0),
-                allocated: true,
-            });
+            part.bytes.map(|bytes| SpacePart { name: culprit_core::i18n::t(key, &[]), bytes })
+        })
+        .collect()
+}
+fn space(database: &str, fact: native::SpaceFact) -> Option<SpaceUsage> {
+    let name = match fact.kind {
+        FileKind::Log => log_name(database),
+        FileKind::Temp => tempdb_name(),
+        _ => filegroup_name(database, fact.native_name.as_deref()?),
+    };
+    Some(SpaceUsage {
+        name,
+        kind: fact.kind,
+        scope: fact.scope,
+        total_bytes: fact.total_bytes?,
+        used_bytes: fact.used_bytes?,
+        parts: tempdb_parts(&fact.parts),
+        growth_enabled: fact.growth_enabled,
+        limit_bytes: fact.limit_bytes,
+        reuse_wait: fact.reuse_wait,
+    })
+}
+fn attach(snapshot: &mut Snapshot, facts: native::Facts) {
+    match facts {
+        native::Facts::Spaces(facts) => snapshot
+            .operations
+            .spaces
+            .extend(facts.into_iter().filter_map(|fact| space(&snapshot.server.database, fact))),
+        native::Facts::Sequences(sequences) => {
+            snapshot.operations.sequences.extend(sequences.into_iter().map(|fact| fact.capacity))
+        }
+        native::Facts::SuspectPages(fact) if fact.count > 0 => snapshot.operations.counters.push(OperationalCounter {
+            kind: OperationalCounterKind::ChecksumFailures,
+            subject: snapshot.server.database.clone(),
+            scope: FileScope::Database,
+            count: fact.count as f64,
+            since: None,
+            last_event_at: None,
+            before: None,
+        }),
+        native::Facts::SuspectPages(_) => {}
+    }
+}
+pub(crate) async fn collect(pool: Arc<Pool>, probe: &Probe, snapshot: &mut Snapshot) {
+    let mut coverage = Coverage::default();
+    let budget = CollectionBudget { page_bytes: 8 * 1024 * 1024, total_timeout_ms: 120_000, ..Default::default() };
+    let mut reader = ReadSession::new(pool, budget);
+    for kind in native::Kind::ALL {
+        if kind == native::Kind::SuspectPages && probe.is_azure_sql_database() {
+            coverage
+                .not_applicable(kind.source(), culprit_core::message!("provider.mssql.suspect_pages.not_applicable"));
+            continue;
+        }
+        let result = native::read(&mut reader, kind, 10_000).await.map_err(|error| {
+            if error.code == culprit_core::ErrorCode::PermissionDenied {
+                error.with_hint(probe.grant_hint())
+            } else {
+                error
+            }
+        });
+        if let Some(facts) = coverage.read(kind.source(), result) {
+            coverage.completed(kind.source(), facts.len());
+            attach(snapshot, facts);
         }
     }
-    if let Ok(rows) = query(client, SUSPECT_PAGES_SQL).await {
-        for r in rows {
-            if let Some(count) = r.f64("count").filter(|c| *c > 0.0) {
-                snapshot.operations.counters.push(OperationalCounter {
-                    kind: OperationalCounterKind::ChecksumFailures,
-                    subject: snapshot.server.database.clone(),
-                    scope: FileScope::Database,
-                    count,
-                    since: snapshot.server.started_at.clone(),
-                    last_event_at: r.str("last_at"),
-                    before: None,
-                });
-            }
-        }
+    if reader.close().await == SourceShutdown::Unconfirmed {
+        coverage.note("operations", culprit_core::message!("collection.cancellation_unconfirmed"));
     }
     coverage.append_to(snapshot);
 }

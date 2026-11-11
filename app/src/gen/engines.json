@@ -1,5 +1,6 @@
 {
   "mssql": {
+    "partition_tail": "unbounded",
     "label": "SQL Server",
     "products": [
       {
@@ -117,6 +118,7 @@
     }
   },
   "postgres": {
+    "partition_tail": "from-catalog",
     "label": "PostgreSQL",
     "products": [
       {
@@ -267,6 +269,7 @@
     }
   },
   "yugabyte": {
+    "partition_tail": "from-catalog",
     "label": "YugabyteDB",
     "products": [
       {
@@ -416,6 +419,7 @@
     }
   },
   "mysql": {
+    "partition_tail": "from-catalog",
     "label": "MySQL",
     "products": [
       {
@@ -579,6 +583,7 @@
     }
   },
   "sqlite": {
+    "partition_tail": "unsupported",
     "label": "SQLite",
     "products": [
       {

@@ -1,5 +1,5 @@
-//! SQL Server counts lock escalations from when it started and keeps no time for each. A scan tells new ones from old
-//! ones by comparing with the scan before it, and a scheduled digest, which keeps no scans, with the digest before it.
+//! SQL Server counts lock escalations over metadata-cache lifetime and keeps no time for each. Scans compare
+//! observed increases with earlier scans; scheduled digests compare with earlier digests.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -24,7 +24,7 @@ fn demo(escalations: u32) -> Snapshot {
     let mut s: Snapshot = serde_json::from_slice(&std::fs::read(path).expect("fixture")).expect("snapshot");
     let orders = s.indexes.iter_mut().find(|i| i.schema == "shop" && i.table == "orders").expect("an orders index");
     orders.contention = Some(IndexContention { lock_escalations: f64::from(escalations), ..Default::default() });
-    // Started twelve hours before the scan: without an earlier scan, the count is graded on its rate since the start.
+    // Server uptime does not establish the metadata counters' epoch.
     let started = chrono::Utc::now() - chrono::Duration::hours(12);
     s.server.started_at = Some(started.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
     s
@@ -84,21 +84,20 @@ async fn each_scan_compares_escalations_with_the_scan_before() {
     .expect("save connection");
     let scan = || async { ws.scan("shop", &SnapshotOptions::default()).await.expect("scan") };
 
-    // The first scan has nothing to compare with: it can't tell whether the two are recent, only that two in the 12
-    // hours since the start is more than one a day.
+    // Without an earlier reading or native reset time, the first scan reports a total as information.
     let first = scan().await;
     assert!(first.snapshot.escalations_before.is_none());
-    assert_eq!(escalation(&first).severity, Severity::High);
-    assert_eq!(escalation(&first).actionability, culprit_core::Actionability::NeedsAttention);
-    assert!(escalation(&first).title.contains("2 times since SQL Server started"), "{}", escalation(&first).title);
+    assert_eq!(escalation(&first).severity, Severity::Low);
+    assert_eq!(escalation(&first).actionability, culprit_core::Actionability::Information);
+    assert!(escalation(&first).title.contains("2 times since its indexes were loaded"), "{}", escalation(&first).title);
 
     // A second scan 5ms later does not cover the 7d window, so zero delta over 5ms does not silence the finding.
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     let second = scan().await;
     assert_eq!(second.snapshot.escalations_before.as_ref().map(|b| &b.taken_at), Some(&first.snapshot.taken_at));
-    assert_eq!(escalation(&second).severity, Severity::High);
-    assert_eq!(escalation(&second).actionability, culprit_core::Actionability::NeedsAttention);
-    assert!(!escalation(&second).title.contains(", none since "), "{}", escalation(&second).title);
+    assert_eq!(escalation(&second).severity, Severity::Low);
+    assert_eq!(escalation(&second).actionability, culprit_core::Actionability::Information);
+    assert!(!escalation(&second).title.contains(", no observed increase since "), "{}", escalation(&second).title);
 
     // One more since the earlier scan.
     count.store(3, Ordering::SeqCst);
@@ -128,19 +127,22 @@ fn a_scheduled_digest_compares_escalations_with_the_previous_digest() {
     let started = "2026-10-11T12:13:03Z";
     let finding = |d: &Digest| d.findings.iter().find(|f| f.id == ID).cloned().expect("the escalation in the digest");
 
-    // A job keeps no scans: the first digest grades by the rate since server start and includes it in `top`, and the
-    // next digests compare with the digest before.
+    // A job keeps no scans: the first digest cannot grade an unknown native epoch; subsequent digests compare counts.
     let first = ws.digest(None, Some(&report("a.json", "2026-10-12T06:00:00Z", 2, started)), None, 10, 5).unwrap();
     assert_eq!(first.server_started_at.as_deref(), Some(started));
-    assert_eq!(finding(&first).severity, Severity::High);
-    assert_eq!(finding(&first).actionability, culprit_core::Actionability::NeedsAttention);
-    assert!(first.top.iter().any(|f| f.id == ID), "first digest must surface high-rate escalations in top");
+    assert_eq!(finding(&first).severity, Severity::Low);
+    assert_eq!(finding(&first).actionability, culprit_core::Actionability::Information);
+    assert!(first.top.iter().all(|f| f.id != ID), "an unknown reset time cannot establish a high rate");
     let first_path = write("first.json", serde_json::to_vec(&first).unwrap());
 
     let same =
         ws.digest(None, Some(&report("b.json", "2026-10-12T12:00:00Z", 2, started)), Some(&first_path), 10, 5).unwrap();
     assert_eq!(finding(&same).severity, Severity::Low);
-    assert!(finding(&same).title.ends_with(", none since Oct 12, 06:00 UTC"), "{}", finding(&same).title);
+    assert!(
+        finding(&same).title.ends_with(", no observed increase since Oct 12, 06:00 UTC"),
+        "{}",
+        finding(&same).title
+    );
     assert!(same.since.as_ref().unwrap().again.is_empty());
     let same_path = write("same.json", serde_json::to_vec(&same).unwrap());
 
@@ -197,16 +199,16 @@ fn selecting_any_timespan_window_after_a_recent_scan_keeps_escalations_in_that_w
         std::fs::write(&path, serde_json::to_vec(&selected).unwrap()).unwrap();
         let loaded = ws.analyze_file(&path).unwrap();
         let f = escalation(&loaded);
-        assert_eq!(f.severity, Severity::High, "window {window_minutes}m");
-        assert_eq!(f.actionability, culprit_core::Actionability::NeedsAttention, "window {window_minutes}m");
-        assert!(!f.title.contains(", none since "), "window {window_minutes}m: {}", f.title);
+        assert_eq!(f.severity, Severity::Low, "window {window_minutes}m");
+        assert_eq!(f.actionability, culprit_core::Actionability::Information, "window {window_minutes}m");
+        assert!(!f.title.contains(", no observed increase since "), "window {window_minutes}m: {}", f.title);
         let _ = std::fs::remove_file(&path);
     }
 
     // Case 2: The user also scanned 10 hours ago (2026-10-22T20:00:00Z) when the count was already 6 (escalations
     // happened 11 hours ago). Now at 06:06 UTC:
     // - For 1h and 6h, the 10h-old scan proves 0 escalations happened in the last 1h or 6h -> History.
-    // - For 24h, 7d and 30d, the 10h-old scan does not cover the window -> stays High / NeedsAttention.
+    // - For 24h, 7d and 30d, the 10h-old scan does not cover the window -> Information, not a proven empty window.
     let mut scan_10h_ago = demo(6);
     scan_10h_ago.id = "20261022T200000.000Z".into();
     scan_10h_ago.taken_at = "2026-10-22T20:00:00Z".into();
@@ -215,9 +217,7 @@ fn selecting_any_timespan_window_after_a_recent_scan_keeps_escalations_in_that_w
     let r_10h_ago = culprit_checks::analyze(scan_10h_ago);
     std::fs::write(reports_dir.join("20261022T200000.000Z.json"), serde_json::to_vec(&r_10h_ago).unwrap()).unwrap();
 
-    for (window_minutes, expect_active) in
-        [(60_u32, false), (360, false), (1440, true), (7 * 1440, true), (30 * 1440, true)]
-    {
+    for window_minutes in [60_u32, 360, 1440, 7 * 1440, 30 * 1440] {
         let mut selected = demo(6);
         selected.id = format!("20261023T060600.{window_minutes:05}Z");
         selected.taken_at = "2026-10-23T06:06:00Z".into();
@@ -227,7 +227,12 @@ fn selecting_any_timespan_window_after_a_recent_scan_keeps_escalations_in_that_w
         std::fs::write(&path, serde_json::to_vec(&selected).unwrap()).unwrap();
         let loaded = ws.analyze_file(&path).unwrap();
         let f = escalation(&loaded);
-        assert_eq!(f.is_actionable(), expect_active, "window {window_minutes}m: {}", f.title);
+        let expected = if window_minutes <= 360 {
+            culprit_core::Actionability::History
+        } else {
+            culprit_core::Actionability::Information
+        };
+        assert_eq!(f.actionability, expected, "window {window_minutes}m: {}", f.title);
         let _ = std::fs::remove_file(&path);
     }
 
@@ -370,7 +375,11 @@ fn a_digest_of_a_real_server_compares_escalations_with_the_redacted_digest_befor
     let same = ws.digest(None, Some(&scan("b.json", "2026-10-22T06:00:00Z", 2)), Some(&first_path), 10, 5).unwrap();
     assert_eq!(finding(&same).severity, Severity::Low);
     assert_eq!(finding(&same).actionability, culprit_core::Actionability::History);
-    assert!(finding(&same).title.ends_with(", none since Oct 21, 06:00 UTC"), "{}", finding(&same).title);
+    assert!(
+        finding(&same).title.ends_with(", no observed increase since Oct 21, 06:00 UTC"),
+        "{}",
+        finding(&same).title
+    );
     assert!(same.since.as_ref().unwrap().again.is_empty());
     assert!(same.top.iter().all(|f| f.id != ID));
     assert_eq!(finding(&same).count, Some(2.0));

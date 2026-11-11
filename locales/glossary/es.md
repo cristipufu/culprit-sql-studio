@@ -127,6 +127,7 @@ the choice and the reason are given.
 | version store | almacén de versiones | Microsoft |
 | CPU, memory, I/O | CPU, memoria, E/S | Microsoft writes *E/S* |
 | worker thread | subproceso de trabajo | Microsoft; *subproceso* for short |
+| task (SQL Server) | tarea | Native task, distinct from a request; parallel requests may have several. |
 | compile, compilation | compilar, compilación | |
 | thread scheduling | programación de subprocesos | asignación de CPU a subprocesos listos para ejecutarse |
 | log (transaction log, application log) | registro (m) | *registro de transacciones*; an application's log: *el registro de Rails* |
@@ -167,6 +168,7 @@ the choice and the reason are given.
 | insert, update, delete, merge (a write) | inserción, actualización, eliminación, MERGE | *una lectura de {table}*, *una eliminación en {table}* |
 | backfill | relleno de datos | |
 | hot pages, hot rows | páginas muy disputadas, filas muy disputadas | |
+| telemetry, collection, collector, manifest | telemetría, recopilación, recopilador, manifiesto | `collect` and `manifest.json` stay unchanged |
 | provider, source, capability | proveedor, origen, capacidad | a source that couldn't be read: *no se pudo leer el origen* |
 | discovery, tenant, listener | detección, inquilino, agente de escucha | |
 | port forwarding, host key, fingerprint | reenvío de puertos, clave de host, huella digital | |
@@ -192,3 +194,4 @@ the choice and the reason are given.
 | standby, fail over | servidor en espera, conmutar por error | |
 | cleanup holder, timed checkpoint | retenedor de limpieza, (producido) por tiempo | |
 | plan stub, lane, vCores | código auxiliar, franja, núcleos virtuales | Azure tiers (General Purpose, Hyperscale, Business Critical) stay in English |
+| telemetry outbox, capture revision, journal, replay | búfer de salida de telemetría, revisión de captura, registro transaccional, reproducir | capturas locales duraderas; no correo electrónico |

@@ -1,0 +1,22 @@
+{
+  "identity": { "database_id": 5, "object_id": 101, "created_without_offset": "2026-11-10T07:01:00.123" },
+  "schema": "dbo",
+  "name": "FK_child_parent",
+  "modified_without_offset": "2026-11-10T07:02:00.123",
+  "parent": { "database_id": 5, "object_id": 100, "created_without_offset": "2026-11-10T07:00:00.123" },
+  "parent_schema": "dbo",
+  "parent_table": "Child",
+  "referenced": { "database_id": 5, "object_id": 99, "created_without_offset": "2026-11-10T06:59:00.123" },
+  "referenced_schema": "dbo",
+  "referenced_table": "Parent",
+  "columns": [
+    { "ordinal": 1, "parent_column_id": 2, "parent_column": "parent\u001fkey", "referenced_column_id": 1, "referenced_column": "first" },
+    { "ordinal": 2, "parent_column_id": 1, "parent_column": "second", "referenced_column_id": 2, "referenced_column": "other" }
+  ],
+  "delete_action": "cascade",
+  "update_action": "no-action",
+  "disabled": true,
+  "trusted": false,
+  "not_for_replication": false,
+  "system_named": false
+}

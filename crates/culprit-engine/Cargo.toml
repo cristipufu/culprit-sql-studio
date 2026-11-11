@@ -29,6 +29,7 @@ path = "tests/all.rs"
 async-trait.workspace = true
 zeroize = "1.9.1"
 culprit-core.workspace = true
+culprit-collector.workspace = true
 culprit-checks.workspace = true
 culprit-mssql = { workspace = true, optional = true }
 culprit-postgres = { workspace = true, optional = true }
@@ -43,8 +44,11 @@ keyring.workspace = true
 process-wrap.workspace = true
 ring.workspace = true
 roxmltree.workspace = true
+rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+tempfile = "3.27"
 tokio = { workspace = true, features = ["io-util"] }
 toml.workspace = true
 ts-rs.workspace = true
@@ -53,5 +57,4 @@ ureq.workspace = true
 [dev-dependencies]
 culprit-checks.workspace = true
 proptest.workspace = true
-rusqlite.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

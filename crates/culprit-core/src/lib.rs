@@ -42,6 +42,7 @@ pub mod redact;
 pub mod refinement;
 pub mod signals;
 pub mod sql;
+pub mod telemetry;
 pub mod verification;
 pub mod waits;
 pub mod window;

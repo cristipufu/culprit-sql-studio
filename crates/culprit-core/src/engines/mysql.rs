@@ -25,6 +25,9 @@ impl EngineSpec for Mysql {
         Some(connection_security())
     }
 
+    fn partition_tail(&self) -> PartitionTail {
+        PartitionTail::FromCatalog
+    }
     fn products(&self) -> &'static [ProductSpec] {
         const PRODUCTS: &[ProductSpec] = &[
             ProductSpec::primary(DatabaseProduct::Mysql, "MySQL", key!("core.engines.mysql.plan_format")),

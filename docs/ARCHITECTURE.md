@@ -25,7 +25,8 @@ with a fixture.
 | `culprit-mssql`, `culprit-postgres`, `culprit-yugabyte`, `culprit-mysql`, `culprit-sqlite` | Providers: the sources for one engine, and explain, live sessions, deadlocks where supported. YugabyteDB owns DocDB measurements and shares PostgreSQL wire transport, not its heap collectors. SQLite reads a file, read-only: schema, statistics, settings and plans, no sessions or waits. |
 | `culprit-querylog` | Logs an application's framework already writes (Rails, Django, EF Core, Phoenix/Ecto, JSON lines), read into a `Workload` for an engine that keeps no statement history: one module per format behind a `Format` trait, statements grouped by `culprit_core::fingerprint`. The log's own timestamps are its period (`Workload.log`), never "the last N hours". |
 | `culprit-checks` | The analysis pipeline, every check, the refine rules, and the views built on a report. |
-| `culprit-engine` | Connections and secrets, the provider registry, scans, saved reports and the history between scans. |
+| `culprit-engine` | Connections and secrets, the provider registry, scans, saved reports, history and remote collection adapters. |
+| `culprit-collector` | Source-independent capture, local outbox, fleet scheduling, recovery/delivery contracts and service lifecycles. |
 | `culprit-cli`, `culprit-mcp`, `app/` | Surfaces: the same report, worded for a terminal, a coding agent, a window. |
 
 ### Workspace services
@@ -144,6 +145,199 @@ Pagination contracts: [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide
 [Azure Resource Graph](https://learn.microsoft.com/en-us/azure/governance/resource-graph/concepts/work-with-data).
 
 ## 1. Sources: what a provider reads
+
+Native telemetry capture is separate from snapshot analysis. `Provider::telemetry_source` is an opt-in, owned source
+adapter for a logical `TelemetryCollection`. An engine's provider supplies collection adapters for query
+history, resource history and activity; an embedding application can supply the same contract through the existing runtime
+provider factory. Unsupported collections fail explicitly. Source adapters own native identity, units, time semantics,
+paging and driver completion, with no filesystem, scheduling or destination responsibilities.
+
+Schedulers ask `Provider::telemetry_intervals` for bounded pages of closed native history intervals. SQL Server capture
+and discovery share `query_store::intervals`, including the boundary projection and decoder. Discovery fixes its server
+timestamp on the first page and binds continuation to the requested window and logical/physical database identity.
+Native interval metadata does not establish that all runtime or wait data was retained. `Workspace::discover_intervals`
+uses the same durable source admission and native shutdown checks as scans and captures; a dropped discovery cannot
+release uncertain database work to a replacement operation.
+
+Interactive and background consumers share provider-owned native readers for equivalent evidence. SQL Server
+activity uses `culprit-mssql::activity`: one metadata projection and decoder, with explicit visibility, database
+identity, detail selectors and read budgets. Live projects these facts into sessions and can request idle sessions'
+previous batches. Background capture selects persistent trouble and blocker context, then redacts current SQL
+before export. Current SQL enrichment verifies the session and request generations, database, native SQL handle
+and statement offsets; a previous batch never becomes a current statement. Native local datetime values remain
+opaque identity tokens, while observation times are UTC. A joined request takes precedence over a later absence
+probe: DMV reads are not atomic, and ended statements remain unavailable through the enrichment guard.
+Query Store uses `culprit-mssql::query_store`: shared native runtime/wait relations, strict decoders, definition
+identities and complete bounded payload reads. Interactive summaries, timelines, period comparisons and plan variants
+remain database-side projections; background capture preserves native interval/outcome/replica fragments. Native
+layout detection handles optional statistics without treating timeouts as schema fallback. Both consumers keep
+native unknowns, units and fractional timestamps. SQL text stays private for interactive use and is redacted for export.
+
+Deadlock history uses one bounded native event reader and the existing graph parser. Native file/buffer positions,
+event digests and fractional timestamps identify exported events independently of redaction or retry. Interactive
+system_health reads can merge the ring buffer for freshness; Azure export reads retained database telemetry and
+rechecks exact event membership before completing a capture. Unknown retention remains explicit; a complete bounded
+read never proves that no earlier events were lost.
+
+SQL Server resource evidence lives in `culprit-mssql::resources`. Retained history, selected timestamp windows and
+latest-sample reads share a native field projection and decoder, retaining units, replica role, scope, unknowns
+and fractional timestamps. The scan projects the same samples into its resource timeline and pressure summary,
+without a separate aggregate query. Its resource read has its own bounded owner and coverage, so another collector's
+failure cannot erase readable resource evidence. Collection adapters own export pagination, verification and the
+primary-replica capture policy; native reads preserve secondary replica identities. Workload admission consumes the
+same latest-sample facts and treats stale, future or unavailable pressure as unknown.
+
+`culprit-mssql::read::ReadSession` owns bounded native work, cancellation acknowledgement and transport lifetime.
+Only fully drained, confirmed quiescent statistics clients return to the provider's existing connection pool.
+Optional detail failures preserve metadata with explicit unavailability; incomplete metadata, exhausted budgets
+and unconfirmed cancellation cannot publish a fresh observation.
+
+`culprit-collector` owns source-independent capture, private artifacts, reference closure, the local outbox and
+delivery. It depends on the core model and infrastructure libraries, with no Workspace, credential or native-provider
+dependency. Its injected `SourceFactory` supplies authenticated sources; `Workspace` composes that interface with its
+existing connection service. The shared collection controller owns budgets,
+cancellation, selected-stream validation, reference closure and artifact completion; the outbox owns local revision
+allocation, reservations, crash recovery and transactional receipts. Stream sets come from the requested collection,
+not a universal list of files. Native intervals, timestamp windows and current activity have distinct typed range identities. Resource
+metrics carry stable keys, scope, units, aggregation, native period and limit basis instead of engine-specific display
+fields. A sample is not a cumulative counter or an event; a future adapter needs the corresponding evidence contract.
+
+Authentication remains in `culprit-engine`. `AzureCredential` supplies explicit projected workload identity or
+VM/VMSS IMDS identity to the existing Workspace connection service. It never invokes Azure CLI, device-code sign-in
+or the keychain. A credential owner fixes the tenant/identity and keeps bounded per-audience caches with single-flight
+refresh; refresh reopens projected token files. Token requests have fixed identity endpoints, complete bounded replies,
+no redirects and no raw response/error logging. SQL host validation precedes acquisition. Pipeline jobs may continue
+using their existing authenticated Azure CLI session; that credential path is separate from direct pod authentication.
+
+Activity adapters produce one bounded metadata observation and an optional detail read. The shared core selects
+qualifying requests and their blocker closure, retaining native session/request generations, transaction identity,
+wait ownership, exact counters and database scope. It derives incident transitions only after a complete source
+observation; neither incomplete reads nor restricted visibility can clear state. `ActivityBaseline` loads the latest
+verified local or remotely recovered checkpoint by native source identity and policy, then checks its native epoch
+before reuse. Alias changes alone cannot discard recovered state; an empty complete checkpoint is authoritative.
+Events and the next active checkpoint commit in the same outbox transaction. Source replacement starts a separate
+namespace rather than resolving old incidents as if the database had been observed quiet.
+
+`Workspace::monitor_activity` owns a single-target loop, cancellation and bounded failure backoff. It schedules the
+next poll after completion, at least one minute later, and reports coverage independently of incident changes.
+Outbox admission still precedes native work. This loop does not implement fleet fairness, shared-pool budgets,
+pressure suppression or remote delivery. The source has no knowledge of polling cadence or incident persistence.
+
+Capture and outbox code have no ADX or Blob dependencies. Destinations consume immutable validated evidence and keep
+their registration, authentication and delivery state separate from database providers. Adding a destination must not
+add branches to native readers or change logical measurement IDs. RecoveryStore and TelemetrySink contracts separate durable commit from analytical acknowledgement. Dispatch accepts a
+CommittedRange issued after a fenced recovery-store commit. Exact distinct row keys, payload digests and critical-field
+validity establish a VerifiedRange before publication; publication visibility is checked separately. A persistent
+delivery journal records physical attempt identities before effects, atomically applies delivery hints with poll
+cursors and bounds reconciliation after status expiry. Retrying preserves source observation, batch and record IDs.
+Local file recovery and analytical destinations exercise this protocol, including process exits around commit,
+dispatch and publication. They do not establish Blob durability, cloud authorization or managed ADX ingestion.
+
+`BlobRecoveryStore` implements recovery over an injected object transport. The engine's `AzureBlobTransport` owns
+Storage-audience credentials and bounded HTTP workers. An ETag-conditional root update commits the immutable
+manifest and stream checkpoints together. Range and sequence indexes follow that commit; a later commit repairs
+the preceding head's indexes first. Recovery freezes its traversal boundary and verifies object lengths and SHA-256
+at EOF. Namespace creation and ownership acquisition are explicit; an expired timer never authorizes takeover.
+Azurite and scripted failures exercise conditional writes, interrupted acknowledgements, stale owners and truncated
+downloads. Effective Azure RBAC, networking, storage guarantees and managed ingestion require separate live validation.
+
+`OutboxDelivery` shares the capture owner's journal and filesystem lock without borrowing its mutable source
+interface. `DeliveryWorker` advances bounded pages independently of source work. Recovery commit precedes analytical
+destination validation, so an analytical outage can accumulate remotely while collection continues. Exact committed
+capabilities authorize local eviction; a durable deletion intent survives an interruption. The latest activity
+checkpoint stays local until its successor is sealed. Completed delivery metadata is compacted only after publication
+and local eviction. Failed, incomplete and quarantined captures retain their local quota and cannot be deleted by
+this path. Exact remote native-range receipts prevent eviction from causing historical SQL recollection.
+
+A remote outbox binds its namespace to its recovery store. Before reserving new captures, an owner activates a
+strictly newer remote epoch and restores the sequence high-water mark; reopening or replacing the volume cannot
+silently restart local allocation. This storage fence never proves that earlier database work stopped. Existing
+unconfirmed source work still blocks activation, and total volume loss requires an independent source-quiescence
+check before collection resumes. Recovery can rebuild delivery metadata and publish committed captures without
+their original local files or another database read.
+
+Paged snapshot sources declare their dataset, source names and native observation start before streaming. Their
+`finish` operation supplies final counts, observation end and source coverage after native identity checks. It cannot
+change the database namespace, dataset, declared sources or start time. Sealed pages remain unpublished until this
+completion matches the actual per-source rows and request budget. Missing closure, count mismatches and cancellation
+keep the observation incomplete. Snapshot row and page admission precedes the next native page request; byte and row
+checks also reject oversized responses. This protocol avoids requiring whole-source counts or materialization before
+paging; each native reader still owns pagination consistency and any limits on proving absence.
+
+Point snapshots carry typed operational facts and per-source coverage. Native operational readers own space units,
+sequence precision, scope and source availability; the application projects localized names afterward. Exported
+facts contain no rendered space labels. Source-level row counts participate in reference closure, so matching total
+rows cannot hide misattributed source coverage. Complete empty sources can establish current absence within their
+declared scope; unavailable or restricted sources preserve earlier evidence. Azure primary selection is an export
+policy over native updateability facts; the shared activity reader still exposes those facts to interactive consumers.
+
+`culprit-mssql::waits` owns native cumulative wait reads, classification and application projections. A scan's category
+mix and pressure totals use one native snapshot. Export preserves nonzero idle and unknown types, exact integer
+counts/times, native scope and unknown reset evidence. Short samples subtract integers before converting for display
+and reject visible resets. Maximum wait duration is a maximum, not an additive counter or a derived interval cost.
+
+`culprit-mssql::storage_io` owns bounded file I/O facts and their application projection. Native function arguments
+select only the target database and optional shared tempdb, never an all-database enumeration followed by a filter.
+Left catalog joins preserve file IDs and counters when names/types are unavailable. Point exports retain exact totals,
+zero-I/O files, units, unknown reset evidence and per-source closure; display ranking cannot truncate raw completeness.
+
+`culprit-mssql::performance` reads shared native counter facts once for pressure and connection churn. Typed units and
+counter nature come from the native counter format, not its display name. Unknown formats keep raw values and have
+no derived meaning. Global projections never combine instance rows, missing counters never become zeroes and short
+samples subtract integers before conversion. Empty native results are unavailable counters, not a clean measurement.
+
+`culprit-mssql::replication` owns bounded availability-replica and geo-link reads. Native identities, nullable roles,
+state/mode codes, queues and primary-only geo lag are typed facts shared by app projection and telemetry. Catalog
+metadata chooses optional columns; a failed statement never triggers a schema retry. Source coverage distinguishes
+unavailable reads, unknown direction and successful emptiness, including when independently read parts disagree.
+
+`culprit-mssql::settings` owns database, scoped and server configuration decoding and projects the same typed observations into app settings and current telemetry. Query Store options reuse its existing native source and the app probe's result. Configured and active values, secondary values, NULLs, scope and native/default-spec provenance stay separate. Configuration, state, measurements and unclassified future options are distinct; only comparable configuration facts can establish a configuration change. Per-source failures remain visible even when other settings succeed. Known fresh-install server defaults belong to `EngineSpec`; replica scope comes from the already-read native replication facts.
+
+`culprit-mssql::queues` owns current memory-grant and worker-task gauges. Counts use native request-level database
+attribution; a session's default database cannot establish it. Unattributed members of shared queues remain coverage
+metadata and cannot become this database's queue or a healthy zero. Worker-task joins retain native request IDs to
+avoid multiplying MARS rows. App and export share units, selection thresholds, strict decoding and bounded ownership.
+
+`culprit-mssql::processors` reads host logical processors, visible online user schedulers and their NUMA nodes through one bounded native operation. The app uses online SQL schedulers for its parallelism context. Export retains all three as separate exact server-scoped gauges; these measurements do not establish an Azure database's CPU quota or a cross-database resource identity. Unreadable topology stays unavailable, and zero visible schedulers does not become a usable zero-processor configuration.
+
+`culprit-mssql::cache_summary` owns the database-filtered plan-cache aggregate. App and export share exact entry counts
+and byte totals. Ad hoc and prepared entries with one cache lookup stay separate: parameterized reuse does not
+increment this native counter, so prepared entries cannot establish wasted cache or execution frequency. The app's
+cache advice uses only ad hoc entries. This operation scans cache metadata and has its own slow collection profile;
+it is excluded from the fast operational profile and requires source-cost qualification before fleet scheduling.
+
+`culprit-mssql::index_operations` owns one database-scoped native relation, column detection and exact decoder.
+The scan reads it once for heap forwarding and index contention; export retains the supported native counters
+per object, index, partition and internal columnstore rowset. The application selects the counters it needs and
+sums integers before display conversion. Hidden metadata and missing partition counters make the assessment
+partial; they never become zero. A direct default generator is classified by the shared SQL lexer, with no
+substring inference from literals or compound expressions. The metadata-cache reset epoch remains unknown.
+`telemetry::streamed` owns the shared grants/index snapshot lifecycle, including pressure admission, one native
+stream, cursor ownership, final EOF, identity verification and shutdown. Concrete recipes own layout, query and
+decoding only; cancellation retires the lifecycle before another native read can start.
+
+`culprit-mssql::query_store::tuning` owns automatic options, recommendations, forced-plan counters and query hints.
+Scans and `--collection tuning` share native layout detection and strict decoding. Each source has independent
+coverage; hidden metadata and failed reads cannot become unsupported features or empty success. Recommendation-time
+CPU statistics and exact aborted/execution counts are distinct from current runtime statistics. Native local dates
+are retained separately from the app's UTC estimate. Configured forcing and hints remain collectible when Query
+Store is OFF; the app uses them only with a readable workload. Hint IDs and replica scopes remain distinct, and
+replica-specific fixes target the observed group. SQL is redacted at the export boundary, while native application
+display retains it. Native query/plan IDs in this profile are observation-scoped references, with no resolved
+definition or continuity claim. Per-replica plan-forcing locations require their separate native source.
+
+`culprit-mssql::version_store` reads database-attributable tempdb version-store space from aggregated metadata,
+preserving exact native kibibytes. Only a successful, fully known empty aggregate becomes zero. Native failures enter
+coverage; the app converts a known gauge to bytes. Tempdb allocation stays separate from ADR's persistent store.
+`version_store::persistent` owns the latter's metadata probe, ADR state and bounded native statistics. Disabled ADR
+and known unsupported versions are not applicable; hidden metadata, failures and missing enabled-store data stay
+unavailable. Exact off-row/online-index kibibytes, aborted counts, native transaction watermarks and cleaner times
+remain typed facts. Native column availability distinguishes omitted fields from NULL. Cleaner datetimes retain
+fractions without inventing a UTC offset. The app reports off-row PVS size as information, with no universal alarm
+threshold; the same reader supplies its raw export. Tempdb bytes cannot supply cleanup-size context while ADR is
+enabled or its state is unknown.
+
+`culprit-mssql::open_transactions` owns the current transaction horizon for the app and operational export. One bounded metadata read selects the oldest transaction with logged work or an explicit snapshot in this database, plus the oldest candidate whose instance-wide row-version membership cannot be attributed here. Unattributed candidates remain raw evidence and make source coverage partial; they never become a healthy zero or an attributed cleanup warning. Native session/transaction generations retain local datetime ticks, exact counters and LSNs; transaction age and time since XSN assignment remain separate. Clock anomalies leave age unknown. The export retains other Culprit sessions for overhead investigation; the app selects application sessions. This is a current statistic, not a transaction-event history, and disappearing from its selected maximum does not establish transaction completion. Version-store bytes describe the database; logged work alone does not establish log growth under ADR.
 
 A provider (`culprit_core::Provider`, one per engine, chosen in `culprit-engine/src/registry.rs`) collects a snapshot
 from its engine's sources: Query Store and the plan cache on SQL Server, `pg_stat_statements` on PostgreSQL,
@@ -650,7 +844,7 @@ anyone should be able to add a check.
 | Rules as configuration (thresholds in YAML, a rule DSL) | Thresholds change without code | The rules that keep findings true (rates only over an hour of data, the engine's verdict over a plan's shape, shared counters not graded) are logic, not thresholds; a DSL that can say them becomes a programming language without a compiler or tests. |
 | Checks loaded at run time (dynamic libraries, WASM) | Extend an installed binary | Rust has no stable plugin ABI, and code loaded into a tool that reads production is a risk. An embedding application plugs in checks, sources and rules through the same traits at compile time (`Workspace::with_check`, `with_provider`, `Pipeline::with_*`); a WASM host could sit behind `Check` later without changing the shape. |
 | Checks that register themselves (link-time lists, macros) | No list to edit | Which checks run, and in what order, is hidden. Explicit per-area lists are one line each, and `tests/registry.rs` fails when a check is written but not listed, so the safety is the same and nothing is magic. |
-| A collector agent streaming metrics (exporter + time series) | Continuous history | It needs an agent on every server. The engines already keep the history that matters (Query Store, pg_stat_statements, performance_schema); Culprit reads it on demand and compares its own scans for the rest. |
+| Requiring an agent on every database server | Continuous history | Interactive scans remain agentless. The optional background CLI archives provider observations from a network with database access; it does not install a server agent. Its recovery and analytical delivery are described in [Background collection](collector.md). |
 
 Measured on this code in October 2026:
 

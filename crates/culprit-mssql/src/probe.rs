@@ -1,6 +1,6 @@
 use culprit_core::{Capability, Engine, MissingCapability, ServerInfo, t};
 
-use crate::conn::{MsClient, query, query_one};
+use crate::read::{NativeRead, one as query_one, rows as query};
 
 /// A principal name as a bracketed T-SQL identifier. Names come from the server and end up in fixes an administrator runs.
 fn bracket(name: &str) -> String {
@@ -23,6 +23,7 @@ SELECT
   HAS_PERMS_BY_NAME(NULL, 'DATABASE', 'VIEW DATABASE STATE') AS can_view_database_state,
   HAS_PERMS_BY_NAME(NULL, NULL, 'VIEW SERVER STATE') AS can_view_server_state,
   HAS_PERMS_BY_NAME(NULL, 'DATABASE', 'SHOWPLAN') AS can_showplan,
+  HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'VIEW DEFINITION') AS can_view_definition,
   SUSER_SNAME() AS login_name,
   USER_NAME() AS user_name,
   CASE WHEN DB_ID(N'rdsadmin') IS NOT NULL THEN 1 ELSE 0 END AS rds
@@ -30,7 +31,7 @@ SELECT
 
 const START_TIME_SQL: &str = "SELECT CONVERT(varchar(19), DATEADD(minute, DATEDIFF(minute, GETDATE(), GETUTCDATE()), sqlserver_start_time), 126) + 'Z' AS started_at FROM sys.dm_os_sys_info";
 
-const QUERY_STORE_SQL: &str = "SELECT * FROM sys.database_query_store_options";
+const QUERY_STORE_SQL: &str = crate::query_store::catalog_sql::OPTIONS;
 
 /// Query Store states in which its views can be read.
 const QUERY_STORE_READABLE: &[&str] = &["READ_WRITE", "READ_ONLY"];
@@ -71,6 +72,7 @@ pub(crate) struct Probe {
     pub(crate) can_view_database_state: bool,
     pub(crate) can_view_server_state: bool,
     pub(crate) can_showplan: bool,
+    pub(crate) can_view_definition: bool,
     pub(crate) login: String,
     pub(crate) user: String,
     pub(crate) started_at: Option<String>,
@@ -121,13 +123,7 @@ impl Probe {
 
     /// The exact statement an administrator should run to unlock the monitoring views.
     pub(crate) fn grant_hint(&self) -> String {
-        if self.is_azure_sql_database() {
-            return format!("GRANT VIEW DATABASE STATE TO {};", bracket(&self.user));
-        }
-        if self.major >= 16 {
-            return format!("GRANT VIEW SERVER PERFORMANCE STATE TO {};", bracket(&self.login));
-        }
-        format!("GRANT VIEW SERVER STATE TO {};", bracket(&self.login))
+        monitoring_grant(self.engine_edition, self.major, &self.login, &self.user)
     }
 
     pub(crate) fn query_store_readable(&self) -> bool {
@@ -135,7 +131,17 @@ impl Probe {
     }
 }
 
-pub(crate) async fn run(client: &mut MsClient) -> tiberius::Result<Probe> {
+pub(crate) fn monitoring_grant(edition: i64, major: u32, login: &str, user: &str) -> String {
+    if edition == ENGINE_EDITION_AZURE_SQL_DATABASE {
+        return format!("GRANT VIEW DATABASE STATE TO {};", bracket(user));
+    }
+    if major >= 16 {
+        return format!("GRANT VIEW SERVER PERFORMANCE STATE TO {};", bracket(login));
+    }
+    format!("GRANT VIEW SERVER STATE TO {};", bracket(login))
+}
+
+pub(crate) async fn run(client: &mut impl NativeRead) -> culprit_core::Result<Probe> {
     let r = query_one(client, PROBE_SQL).await?;
     let started_at = query(client, START_TIME_SQL)
         .await
@@ -157,6 +163,7 @@ pub(crate) async fn run(client: &mut MsClient) -> tiberius::Result<Probe> {
         can_view_database_state: r.bool("can_view_database_state"),
         can_view_server_state: r.bool("can_view_server_state"),
         can_showplan: r.bool("can_showplan"),
+        can_view_definition: r.bool("can_view_definition"),
         login: r.string("login_name"),
         user: r.string("user_name"),
         started_at,
@@ -263,6 +270,7 @@ mod tests {
             can_view_database_state: true,
             can_view_server_state: false,
             can_showplan: true,
+            can_view_definition: true,
             login: "admin".into(),
             user: "dbo".into(),
             started_at: None,

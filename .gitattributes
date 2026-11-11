@@ -8,3 +8,6 @@
 
 # Language catalogs merge key by key (docs/localization.md, "Merging catalogs").
 locales/*.json merge=catalog
+
+# ts-rs emits spaces before field documentation; preserve its generated output verbatim.
+app/src/gen/*.ts whitespace=-blank-at-eol linguist-generated=true

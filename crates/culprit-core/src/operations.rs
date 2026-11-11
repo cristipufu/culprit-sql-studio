@@ -301,7 +301,7 @@ pub struct FreezeAge {
     pub freeze_max_age: Option<f64>,
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct SequenceCapacity {
     pub name: String,

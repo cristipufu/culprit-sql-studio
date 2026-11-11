@@ -644,7 +644,7 @@ fn selects_into_a_table_or_variable_and_exports_are_not_big_results() {
 
 #[test]
 fn counts_since_the_start_rise_only_on_a_measured_rate() {
-    // The demo's server started 44 seconds before the scan: no rate, whatever the totals.
+    // The native metadata counter epoch is unknown, independently of the server's start time.
     let mut s = fixture("mssql-demo");
     s.indexes.iter_mut().for_each(|i| i.contention = None);
     let i = s.indexes.iter_mut().find(|i| i.table == "orders").unwrap();
@@ -661,22 +661,20 @@ fn counts_since_the_start_rise_only_on_a_measured_rate() {
     for check in ["hot-rows", "last-page-insert"] {
         let f = of(&r, check)[0];
         assert_eq!(f.severity, Severity::Low, "{check}");
-        assert!(
-            if check == "hot-rows" {
-                f.actionability == culprit_core::Actionability::Information
-            } else {
-                f.caveats.iter().any(|c| {
-                    c.contains("only the minute since the server last restarted: too little time to make a rate")
-                })
-            },
-            "{check}: {:?}",
-            f.caveats
-        );
+        assert_eq!(f.actionability, culprit_core::Actionability::Information, "{check}");
     }
     // Twelve hours of counting: 15 minutes of waiting is 30 a day.
     s.server.started_at = Some("2026-10-11T00:13:03Z".into());
-    let r = analyze(s);
+    let r = analyze(s.clone());
     assert_eq!(of(&r, "hot-rows")[0].actionability, culprit_core::Actionability::Information);
+    assert_eq!(of(&r, "last-page-insert")[0].actionability, culprit_core::Actionability::Information);
+    // Only explicitly observed native reset evidence establishes twelve hours of counting.
+    for index in &mut s.indexes {
+        if let Some(counts) = &mut index.contention {
+            counts.reset = culprit_core::ResetMarker::At("2026-10-11T00:13:03Z".into());
+        }
+    }
+    let r = analyze(s);
     assert_eq!(of(&r, "last-page-insert")[0].severity, Severity::High);
 }
 
@@ -1163,7 +1161,7 @@ fn an_escalation_lists_the_writes_to_its_own_table() {
 }
 
 // The fresh SQL Server reading: escalations on support_tickets, which no statement in the query history writes, were
-// blamed on "jobs, migrations and maintenance", and "may be old" three minutes after a restart. The demo's lookup of
+// blamed on "jobs, migrations and maintenance". Its metadata reset is unknown. The demo's lookup of
 // tickets by priority returns hundreds of rows a run through key lookups its plan prefetches, which keeps their row
 // locks until the statement ends: the read is the likely one.
 #[test]
@@ -1178,9 +1176,8 @@ fn an_escalation_with_no_write_names_the_read_that_keeps_its_locks() {
         .find(|f| f.id == "lock-escalations:shop.support_tickets")
         .expect("finding");
     assert!(
-        f.summary.contains(
-            "5 times since it started, on Oct 11 at 12:13 UTC, a minute before this scan, so none is older than that."
-        ) && !f.summary.contains("may be old"),
+        f.summary.contains("5 times since its indexes were loaded into memory")
+            && f.summary.contains("reset time is unknown"),
         "{}",
         f.summary
     );

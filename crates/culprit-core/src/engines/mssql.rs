@@ -11,6 +11,9 @@ impl EngineSpec for Mssql {
         Some(connection_security())
     }
 
+    fn partition_tail(&self) -> PartitionTail {
+        PartitionTail::Unbounded
+    }
     fn products(&self) -> &'static [ProductSpec] {
         const PRODUCTS: &[ProductSpec] =
             &[ProductSpec::primary(DatabaseProduct::Mssql, "SQL Server", key!("core.engines.mssql.plan_format"))];
@@ -119,6 +122,14 @@ impl EngineSpec for Mssql {
         SettingChange {
             how: t!("core.engines.mssql.change_setting", name = name, value = value),
             sql: Some(format!("EXEC sp_configure '{name}', {};\nRECONFIGURE;", literal(value))),
+        }
+    }
+    fn default_setting_value(&self, name: &str) -> Option<&'static str> {
+        match name {
+            "cost threshold for parallelism" => Some("5"),
+            "max degree of parallelism" | "optimize for ad hoc workloads" => Some("0"),
+            "max server memory (MB)" => Some("2147483647"),
+            _ => None,
         }
     }
 

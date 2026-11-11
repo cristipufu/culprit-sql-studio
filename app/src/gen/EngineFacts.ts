@@ -2,6 +2,7 @@
 import type { Connect } from "./Connect";
 import type { ConnectionSecuritySpec } from "./ConnectionSecuritySpec";
 import type { EngineAbilities } from "./EngineAbilities";
+import type { PartitionTail } from "./PartitionTail";
 import type { ProductFacts } from "./ProductFacts";
 import type { Refusal } from "./Refusal";
 import type { SessionAction } from "./SessionAction";
@@ -12,7 +13,7 @@ import type { WaitSampling } from "./WaitSampling";
 /**
  * Everything the app needs to know about an engine without a connection: written to `app/src/gen/engines.json`.
  */
-export type EngineFacts = { label: string, products: Array<ProductFacts>, abilities: EngineAbilities, session_actions: Array<SessionAction>, waiting_state: string, connect: Connect, 
+export type EngineFacts = { partition_tail: PartitionTail, label: string, products: Array<ProductFacts>, abilities: EngineAbilities, session_actions: Array<SessionAction>, waiting_state: string, connect: Connect, 
 /**
  * Message keys: what a scan of it can't establish.
  */

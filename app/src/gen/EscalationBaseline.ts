@@ -10,7 +10,7 @@ export type EscalationBaseline = {
  */
 taken_at: string, 
 /**
- * Escalations it counted per table (`schema.table`); a table missing here had none. Empty when the server
+ * Escalations it counted per table (`schema.table`); a missing table has no comparable baseline. Empty when the server
  * restarted after it: every escalation counted now came later.
  */
 tables: { [key in string]: number }, 

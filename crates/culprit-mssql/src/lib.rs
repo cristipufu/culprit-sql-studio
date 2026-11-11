@@ -1,26 +1,65 @@
 //! SQL Server provider: reads Query Store, the plan cache and catalog/DMV statistics into a Culprit snapshot.
 //! Every statistics query is read-only and runs with a short lock timeout and low deadlock priority.
 
+mod activity;
 mod actual;
 mod ado;
 mod advice;
+mod cache_summary;
+mod cached_definitions;
+mod cached_payload;
+mod cached_runtime;
+mod cached_statements;
+mod catalog_expression;
+mod catalog_visibility;
+mod check_constraints;
 mod collect;
+mod columns;
 mod conn;
+mod constraints;
 pub mod deadlocks;
+mod foreign_keys;
+mod grants;
+mod index_operations;
+mod indexes;
 mod live;
+mod missing_indexes;
+mod open_transactions;
 mod operations;
+mod partition_storage;
+mod partitions;
+mod performance;
 mod periods;
 pub mod plan_xml;
 mod pressure;
 mod probe;
+mod processors;
+mod query_store;
+mod queues;
+mod read;
+mod read_metrics;
 mod recorded;
-mod schema;
+mod replication;
+mod resources;
+mod retained_definitions;
+mod settings;
 mod signals;
 pub mod sources;
 mod spread;
+mod sql_time;
 mod statement;
+mod statement_origin;
+mod statistics;
+mod storage_io;
+mod tables;
+mod telemetry;
+#[cfg(test)]
+mod test_support;
 mod timeline;
+mod triggers;
 mod value;
+mod version_store;
+mod waits;
 #[cfg(test)]
 mod words;
 mod workload;
@@ -47,14 +86,14 @@ pub struct MssqlProvider {
     endpoint_host: String,
     endpoint_port: u16,
     environment: Environment,
-    pool: Pool,
+    pool: std::sync::Arc<Pool>,
 }
 
 impl MssqlProvider {
     pub fn new(spec: &ConnectionSpec) -> Result<Self> {
         Ok(MssqlProvider {
             environment: spec.environment,
-            pool: Pool::new(conn::build_config(spec)?, spec.transport.clone()),
+            pool: std::sync::Arc::new(Pool::new(conn::build_config(spec)?, spec.transport.clone())),
             endpoint_host: spec.host.trim().into(),
             endpoint_port: spec.port.unwrap_or(conn::DEFAULT_PORT),
         })
@@ -67,6 +106,22 @@ impl MssqlProvider {
 
 #[async_trait]
 impl Provider for MssqlProvider {
+    fn telemetry_source(
+        &self,
+        request: &culprit_core::telemetry::CollectionRequest,
+    ) -> Result<Box<dyn culprit_core::telemetry::TelemetrySource>> {
+        telemetry::source(self.pool.clone(), request, self.endpoint_host.clone(), self.endpoint_port)
+    }
+    async fn telemetry_intervals(
+        &self,
+        request: &culprit_core::telemetry::IntervalDiscoveryRequest,
+    ) -> Result<culprit_core::telemetry::IntervalDiscoveryPage> {
+        telemetry::discover(self.pool.clone(), &self.endpoint_host, self.endpoint_port, request).await
+    }
+    fn source_shutdown(&self) -> culprit_core::telemetry::SourceShutdown {
+        self.pool.source_shutdown()
+    }
+
     fn collector_version(&self) -> culprit_core::ComponentVersion {
         component_version()
     }
@@ -76,7 +131,7 @@ impl Provider for MssqlProvider {
     }
 
     async fn probe(&self) -> Result<ServerInfo> {
-        let probe = self.pool.with(|c| Box::pin(probe::run(c))).await?;
+        let probe = self.pool.observe(|c| Box::pin(probe::run(c))).await?;
         let (have, missing) = probe::expected_capabilities(&probe);
         Ok(probe::server_info(&probe, have, missing))
     }
@@ -95,21 +150,27 @@ impl Provider for MssqlProvider {
     }
 
     async fn live(&self) -> Result<LiveState> {
-        self.pool.with(|c| Box::pin(live::collect(c))).await
+        live::collect(self.pool.clone(), self.endpoint_host.clone(), self.endpoint_port).await
     }
 
     async fn lock_waits(&self) -> Result<Vec<culprit_core::LockWait>> {
-        self.pool.with(|c| Box::pin(deadlocks::lock_waits(c))).await
+        self.pool.observe(|c| Box::pin(deadlocks::lock_waits(c))).await
     }
 
     async fn deadlocks(&self, since_hours: f64) -> Result<culprit_core::DeadlockReport> {
-        self.pool.with(move |c| Box::pin(deadlocks::recent(c, since_hours))).await
+        let budget = culprit_core::telemetry::CollectionBudget { page_bytes: 8 * 1024 * 1024, ..Default::default() };
+        let mut reader = read::ReadSession::new(self.pool.clone(), budget);
+        let result = deadlocks::recent(&mut reader, since_hours).await;
+        if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
+            return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
+        }
+        result
     }
 
     async fn recorded_changes(&self, since: &str) -> Result<Vec<culprit_core::ChangeEvent>> {
         let since = since.to_string();
         self.pool
-            .with(move |c| {
+            .observe(move |c| {
                 let since = since.clone();
                 Box::pin(async move { recorded::changes(c, &since).await })
             })
@@ -117,12 +178,21 @@ impl Provider for MssqlProvider {
     }
 
     async fn wait_sample(&self, seconds: u32) -> Result<culprit_core::WaitSample> {
-        let probe = self.pool.with(|c| Box::pin(probe::run(c))).await?;
+        let probe = self.pool.observe(|c| Box::pin(probe::run(c))).await?;
         if !probe.can_read_dmvs() {
             return Err(waits_unreadable(probe.grant_hint()));
         }
         let azure = probe.is_azure_sql_database();
-        self.pool.with(move |c| Box::pin(pressure::sample(c, azure, seconds))).await
+        let budget = culprit_core::telemetry::CollectionBudget {
+            total_timeout_ms: seconds.saturating_mul(1000).saturating_add(60_000).min(900_000),
+            ..Default::default()
+        };
+        let mut reader = read::ReadSession::new(self.pool.clone(), budget);
+        let result = pressure::sample(&mut reader, azure, seconds).await;
+        if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
+            return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
+        }
+        result
     }
 
     async fn interrupt_session(&self, session: &str, action: SessionAction) -> Result<()> {
@@ -134,12 +204,12 @@ impl Provider for MssqlProvider {
         baseline: &culprit_core::changes::Period,
         recent: &culprit_core::changes::Period,
     ) -> Result<Option<culprit_core::changes::PeriodData>> {
-        self.pool
-            .with(|c| {
-                let (baseline, recent) = (baseline.clone(), recent.clone());
-                Box::pin(async move { periods::collect(c, &baseline, &recent).await })
-            })
-            .await
+        let mut reader = query_store::Reader::open(self.pool.clone());
+        let result = periods::collect(&mut reader, baseline, recent).await;
+        if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
+            return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
+        }
+        result
     }
 
     async fn stored_plan(&self, query_id: &str, plan_id: &str) -> Result<Option<Plan>> {
@@ -147,20 +217,20 @@ impl Provider for MssqlProvider {
         if !numeric(query_id) || !numeric(plan_id) {
             return Err(actual::ids_are_numbers());
         }
-        let sql = format!(
-            "SELECT query_plan FROM sys.query_store_plan WHERE plan_id = {plan_id} AND query_id = {query_id} /* culprit */"
-        );
-        let xml = self
-            .pool
-            .with(|c| {
-                let sql = sql.clone();
-                Box::pin(async move { conn::query(c, &sql).await })
-            })
-            .await?
+        let mut reader = query_store::Reader::open(self.pool.clone());
+        let result =
+            reader.definitions(&[plan_id.to_owned()], query_store::definitions::Kind::Plan, 2 * 1024 * 1024).await;
+        if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
+            return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
+        }
+        let definitions = result?;
+        let Some(definition) = definitions
             .into_iter()
-            .next()
-            .and_then(|r| r.str("query_plan"));
-        xml.map(|x| plan_xml::parse(&x)).transpose()
+            .find(|definition| definition.plan.as_ref().is_some_and(|plan| plan.query.query_id == query_id))
+        else {
+            return Ok(None);
+        };
+        definition.payload.text().map(plan_xml::parse).transpose()
     }
 
     async fn last_actual_plan(&self, query_id: &str, plan_id: Option<&str>) -> Result<Plan> {

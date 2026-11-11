@@ -33,6 +33,9 @@ impl EngineSpec for Yugabyte {
         Some(super::postgres::connection_security())
     }
 
+    fn partition_tail(&self) -> PartitionTail {
+        PartitionTail::FromCatalog
+    }
     fn products(&self) -> &'static [ProductSpec] {
         const PRODUCTS: &[ProductSpec] =
             &[ProductSpec::primary(DatabaseProduct::Yugabyte, "YugabyteDB", key!("core.engines.yugabyte.plan_format"))];

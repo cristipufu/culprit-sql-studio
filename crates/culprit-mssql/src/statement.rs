@@ -4,8 +4,9 @@ use culprit_core::{Error, ErrorCode, Plan, Result, ResultSet, format, t};
 use futures_util::TryStreamExt;
 use tiberius::QueryItem;
 
-use crate::conn::{MsClient, OWN_QUERY_MARKER, execute, map_error};
+use crate::conn::{MsClient, execute, map_error};
 use crate::plan_xml;
+use crate::statement_origin::OWN_QUERY_MARKER;
 use crate::value::to_json;
 
 /// Column name SQL Server gives the XML plan returned by SET SHOWPLAN_XML / SET STATISTICS XML.

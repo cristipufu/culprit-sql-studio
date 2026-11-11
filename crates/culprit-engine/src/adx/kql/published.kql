@@ -1,0 +1,13 @@
+.create function CulpritPublishedV1(contract:string,store:string,database:string,captured_from:datetime,asof:datetime) {
+let Observations=materialize(
+    CulpritPublishedRangesV1
+    | where ContractId == contract and RecoveryStoreId == store and DatabaseId == database
+    | where SchemaDigest == "$SCHEMA" and CollectedUntil >= captured_from and CollectedUntil <= asof
+    | project $PROJECTION
+    | distinct $COLUMNS
+);
+let Conflicts=Observations | summarize Variants=count() by RangeId | where Variants != 1 | project RangeId;
+Observations
+| join kind=leftanti Conflicts on RangeId
+$RESTORE
+}

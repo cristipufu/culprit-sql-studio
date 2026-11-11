@@ -2,26 +2,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use culprit_core::{Coverage, PlanVariant, QueryStat, SnapshotOptions, WaitStat, Workload};
 
-use crate::conn::{MsClient, OWN_QUERY_MARKER, query};
 use crate::plan_xml;
-use crate::value::Rec;
-
-/// Converts a datetimeoffset expression to second-precision UTC ISO 8601 that every JS engine parses.
-pub(crate) fn utc_offset_iso(expr: &str) -> String {
-    format!("CONVERT(varchar(19), {}, 126) + 'Z'", utc_second(expr))
-}
-
-/// A datetimeoffset expression in UTC, rounded to the second (as a cast to `datetime2(0)` rounds).
-fn utc_second(expr: &str) -> String {
-    format!("CAST(SWITCHOFFSET({expr}, '+00:00') AS datetime2(0))")
-}
-
-/// Converts a server-local datetime expression to second-precision UTC ISO 8601.
-pub(crate) fn utc_local_iso(expr: &str) -> String {
-    format!(
-        "CONVERT(varchar(19), CAST(DATEADD(minute, DATEDIFF(minute, GETDATE(), GETUTCDATE()), {expr}) AS datetime2(0)), 126) + 'Z'"
-    )
-}
+use crate::read::NativeRead;
 
 /// The heaviest queries get a trend line; the rest would only grow the report.
 const TREND_QUERIES: usize = 40;
@@ -56,7 +38,7 @@ struct PlanAgg {
     reads: f64,
     physical_reads: f64,
     rows: f64,
-    tempdb_pages: f64,
+    tempdb_pages: Option<f64>,
     /// Σ executions × (stdev² + mean²) in µs², so the pooled variance across intervals and plans can be recovered.
     sum_sq_us: f64,
     first_seen: Option<String>,
@@ -65,22 +47,44 @@ struct PlanAgg {
 }
 
 impl PlanAgg {
-    fn from_rec(r: &Rec) -> PlanAgg {
-        PlanAgg {
-            plan_id: r.string("plan_id"),
-            executions: r.f64_or_zero("executions"),
-            total_ms: r.f64_or_zero("total_ms"),
-            max_ms: r.f64_or_zero("max_ms"),
-            min_ms: r.f64("min_ms"),
-            cpu_ms: r.f64_or_zero("cpu_ms"),
-            reads: r.f64_or_zero("logical_reads"),
-            physical_reads: r.f64_or_zero("physical_reads"),
-            rows: r.f64_or_zero("row_total"),
-            tempdb_pages: r.f64_or_zero("tempdb_pages"),
-            sum_sq_us: r.f64_or_zero("sum_sq_us"),
-            first_seen: r.str("first_seen"),
-            last_seen: r.str("last_seen"),
-            forced: r.bool("is_forced"),
+    fn from_cache_summary(
+        summary: &crate::cached_runtime::Summary,
+        counts: &crate::cached_runtime::SummaryCounts,
+    ) -> Self {
+        Self {
+            plan_id: summary.query_hash.clone(),
+            executions: counts.executions as f64,
+            total_ms: counts.duration_us as f64 / 1000.0,
+            max_ms: counts.maximum_us as f64 / 1000.0,
+            min_ms: Some(counts.minimum_us as f64 / 1000.0),
+            cpu_ms: counts.worker_us as f64 / 1000.0,
+            reads: counts.logical_reads as f64,
+            physical_reads: counts.physical_reads as f64,
+            rows: counts.rows as f64,
+            first_seen: Some(summary.first_seen_utc_estimate.clone()),
+            last_seen: Some(summary.last_seen_utc_estimate.clone()),
+            ..Self::default()
+        }
+    }
+
+    fn from_query_store(value: crate::query_store::runtime::PlanSummary) -> Self {
+        use crate::query_store::runtime::milliseconds;
+        let stats = value.moments;
+        Self {
+            plan_id: value.plan_id,
+            executions: stats.executions as f64,
+            total_ms: milliseconds(stats.duration_us),
+            max_ms: milliseconds(stats.max_us),
+            min_ms: Some(milliseconds(stats.min_us)),
+            cpu_ms: milliseconds(stats.cpu_us),
+            reads: stats.logical_reads,
+            physical_reads: stats.physical_reads,
+            rows: stats.rows,
+            tempdb_pages: stats.tempdb_pages,
+            sum_sq_us: stats.sum_sq_us,
+            first_seen: value.first_seen,
+            last_seen: value.last_seen,
+            forced: value.forced,
         }
     }
 
@@ -159,63 +163,12 @@ impl QueryAgg {
     }
 }
 
-fn runtime_sql(window_minutes: u32, with_tempdb: bool) -> String {
-    let tempdb = if with_tempdb { "SUM(rs.avg_tempdb_space_used * rs.count_executions)" } else { "CAST(0 AS float)" };
-    format!(
-        r#"
-DECLARE @since datetimeoffset = DATEADD(minute, -{window_minutes}, SYSDATETIMEOFFSET());
-SELECT
-  p.query_id,
-  rs.plan_id,
-  SUM(rs.count_executions) AS executions,
-  SUM(rs.avg_duration * rs.count_executions) / 1000.0 AS total_ms,
-  MAX(rs.max_duration) / 1000.0 AS max_ms,
-  MIN(rs.min_duration) / 1000.0 AS min_ms,
-  SUM(rs.avg_cpu_time * rs.count_executions) / 1000.0 AS cpu_ms,
-  SUM(rs.avg_logical_io_reads * rs.count_executions) AS logical_reads,
-  SUM(rs.avg_physical_io_reads * rs.count_executions) AS physical_reads,
-  SUM(rs.avg_rowcount * rs.count_executions) AS row_total,
-  {tempdb} AS tempdb_pages,
-  SUM(rs.count_executions * (SQUARE(rs.stdev_duration) + SQUARE(rs.avg_duration))) AS sum_sq_us,
-  {first} AS first_seen,
-  {last} AS last_seen,
-  MAX(CAST(p.is_forced_plan AS int)) AS is_forced
-FROM sys.query_store_runtime_stats rs
-JOIN sys.query_store_runtime_stats_interval i ON i.runtime_stats_interval_id = rs.runtime_stats_interval_id
-JOIN sys.query_store_plan p ON p.plan_id = rs.plan_id
-JOIN sys.query_store_query q ON q.query_id = p.query_id
-JOIN sys.query_store_query_text t ON t.query_text_id = q.query_text_id
-WHERE i.end_time >= @since AND t.query_sql_text NOT LIKE N'%{marker}%'
-GROUP BY p.query_id, rs.plan_id
-"#,
-        marker = OWN_QUERY_MARKER,
-        first = utc_offset_iso("MIN(rs.first_execution_time)"),
-        last = utc_offset_iso("MAX(rs.last_execution_time)"),
-    )
-}
-
-/// The window's end: the open interval's scheduled end is in the future, so it ends now.
-const CAPPED_END: &str =
-    "CASE WHEN MAX(end_time) > SYSDATETIMEOFFSET() THEN SYSDATETIMEOFFSET() ELSE MAX(end_time) END";
-
-/// The window's bounds, and its length measured between those same bounds: DATEDIFF counts the second boundaries
-/// crossed while the bounds round to the second, so a length taken from the unrounded end can be a second short of
-/// them, and a length its bounds contradict is read as unknown.
-fn window_sql(window_minutes: u32) -> String {
-    format!(
-        r#"
-DECLARE @since datetimeoffset = DATEADD(minute, -{window_minutes}, SYSDATETIMEOFFSET());
-SELECT {start} AS window_start, {end} AS window_end,
-  DATEDIFF(second, {start_second}, {end_second}) / 3600.0 AS window_hours
-FROM sys.query_store_runtime_stats_interval
-WHERE end_time >= @since
-"#,
-        start = utc_offset_iso("MIN(start_time)"),
-        end = utc_offset_iso(CAPPED_END),
-        start_second = utc_second("MIN(start_time)"),
-        end_second = utc_second(CAPPED_END),
-    )
-}
+use crate::query_store::window_sql::window_sql;
+#[cfg(test)]
+use crate::{
+    query_store::window_sql::CAPPED_END,
+    sql_time::{utc_offset_iso, utc_second},
+};
 
 pub(crate) fn id_list(ids: &[String]) -> String {
     let numeric: Vec<&str> =
@@ -234,17 +187,6 @@ pub(crate) struct WorkloadResult {
     pub(crate) coverage: Coverage,
 }
 
-/// Query Store's queries behind the database's missing-index requests: the optimizer's request groups name the
-/// query_hash of each query that asked (SQL Server 2019+, Azure SQL). DMVs and Query Store's catalog only.
-const MISSING_INDEX_ASKERS_SQL: &str = r#"
-SELECT DISTINCT TOP (200) qsq.query_id
-FROM sys.dm_db_missing_index_group_stats_query m
-JOIN sys.dm_db_missing_index_groups g ON g.index_group_handle = m.group_handle
-JOIN sys.dm_db_missing_index_details d ON d.index_handle = g.index_handle
-JOIN sys.query_store_query qsq ON qsq.query_hash = m.query_hash
-WHERE d.database_id = DB_ID()
-"#;
-
 /// At most this many of them join the workload beyond its top queries, the most run first.
 const MAX_ASKERS: usize = 20;
 
@@ -260,22 +202,18 @@ pub(crate) fn waits_not_captured() -> String {
 
 /// Workload from Query Store over the scan's window. Query Store keeps runtime stats per interval (often an
 /// hour), so the window reaches back to the start of the interval its edge falls in.
-pub(crate) async fn from_query_store(
-    client: &mut MsClient,
+pub(crate) async fn from_query_store<R: crate::read::NativeRead>(
+    reader: &mut crate::query_store::Reader<R>,
     options: &SnapshotOptions,
-) -> tiberius::Result<WorkloadResult> {
+) -> culprit_core::Result<WorkloadResult> {
     let window_minutes = options.window_in_minutes();
-    let rows = match query(client, &runtime_sql(window_minutes, true)).await {
-        Ok(rows) => rows,
-        Err(_) => query(client, &runtime_sql(window_minutes, false)).await?,
-    };
-    let window = query(client, &window_sql(window_minutes)).await?.into_iter().next().unwrap_or_default();
-
+    let rows = reader.summary(window_minutes).await?;
+    let window = reader.read_rows(&window_sql(window_minutes)).await?.into_iter().next().unwrap_or_default();
     let mut by_query: BTreeMap<String, QueryAgg> = BTreeMap::new();
-    for r in &rows {
-        let query_id = r.string("query_id");
+    for row in rows {
+        let query_id = row.query_id.clone();
         let entry = by_query.entry(query_id.clone()).or_insert_with(|| QueryAgg { query_id, plans: Vec::new() });
-        entry.plans.push(PlanAgg::from_rec(r));
+        entry.plans.push(PlanAgg::from_query_store(row));
     }
     let all: Vec<QueryAgg> = by_query.into_values().collect();
     let total_time_ms: f64 = all.iter().map(QueryAgg::total_ms).sum();
@@ -285,7 +223,7 @@ pub(crate) async fn from_query_store(
     let mut selected = select_top(&all, options.top_queries as usize);
     // The queries the optimizer asked for a missing index for, when SQL Server says which (2019+, Azure SQL), join the
     // top ones, so the missing-index finding can name them. A failure here leaves the finding without them.
-    if let Ok(rows) = query(client, MISSING_INDEX_ASKERS_SQL).await {
+    if let Ok(rows) = reader.read_rows(crate::query_store::catalog_sql::MISSING_INDEX_ASKERS_SQL).await {
         let askers: HashSet<String> = rows.iter().map(|r| r.string("query_id")).collect();
         let mut extra: Vec<&QueryAgg> = all
             .iter()
@@ -296,58 +234,37 @@ pub(crate) async fn from_query_store(
     }
     let ids: Vec<String> = selected.iter().map(|q| q.query_id.clone()).collect();
 
-    let text_sql = format!(
-        r#"
-SELECT q.query_id, CONVERT(varchar(20), q.query_hash, 1) AS query_hash,
-  OBJECT_SCHEMA_NAME(q.object_id) + '.' + OBJECT_NAME(q.object_id) AS object_name,
-  t.query_sql_text
-FROM sys.query_store_query q
-JOIN sys.query_store_query_text t ON t.query_text_id = q.query_text_id
-WHERE q.query_id IN ({})
-"#,
-        id_list(&ids)
-    );
-    let texts: HashMap<String, Rec> =
-        query(client, &text_sql).await?.into_iter().map(|r| (r.string("query_id"), r)).collect();
-
+    let texts = reader
+        .definitions(&ids, crate::query_store::definitions::Kind::Query, 256 * 1024)
+        .await?
+        .into_iter()
+        .map(|row| (row.id.clone(), row))
+        .collect::<HashMap<_, _>>();
     let plan_ids: Vec<String> = selected
         .iter()
         .take(options.plans as usize)
-        .filter_map(|q| q.current_plan().map(|p| p.plan_id.clone()))
+        .filter_map(|query| query.current_plan().map(|plan| plan.plan_id.clone()))
         .collect();
-    let plan_sql =
-        format!("SELECT plan_id, query_plan FROM sys.query_store_plan WHERE plan_id IN ({})", id_list(&plan_ids));
-    let mut plans_xml: HashMap<String, String> = HashMap::new();
-    if !plan_ids.is_empty() {
-        for r in query(client, &plan_sql).await? {
-            if let Some(xml) = r.str("query_plan") {
-                plans_xml.insert(r.string("plan_id"), xml);
-            }
-        }
-    }
+    let plans_xml = reader
+        .definitions(&plan_ids, crate::query_store::definitions::Kind::Plan, 2 * 1024 * 1024)
+        .await?
+        .into_iter()
+        .filter_map(|row| row.payload.text().map(|text| (row.id.clone(), text.to_owned())))
+        .collect::<HashMap<_, _>>();
 
-    let since = format!("DATEADD(minute, -{window_minutes}, SYSDATETIMEOFFSET())");
-    let all_plan_ids: Vec<String> = selected.iter().flat_map(|q| q.plans.iter().map(|p| p.plan_id.clone())).collect();
-    let plan_waits_sql = format!(
-        r#"
-SELECT ws.plan_id, ws.wait_category_desc, SUM(ws.total_query_wait_time_ms) AS wait_ms
-FROM sys.query_store_wait_stats ws
-JOIN sys.query_store_runtime_stats_interval i ON i.runtime_stats_interval_id = ws.runtime_stats_interval_id
-WHERE i.end_time >= {since} AND ws.plan_id IN ({ids})
-GROUP BY ws.plan_id, ws.wait_category_desc
-"#,
-        ids = id_list(&all_plan_ids)
-    );
+    let all_plan_ids: Vec<String> =
+        selected.iter().flat_map(|query| query.plans.iter().map(|plan| plan.plan_id.clone())).collect();
     let mut coverage = Coverage::default();
-    let wait_rows = crate::sources::read_rows(
-        &mut coverage,
+    let wait_rows = coverage.read(
         &crate::sources::QUERY_WAITS,
-        query(client, &plan_waits_sql).await,
-        waits_grant,
+        reader.waits(window_minutes, Some(&all_plan_ids)).await.map_err(|error| {
+            if error.code == culprit_core::ErrorCode::PermissionDenied { error.with_hint(waits_grant()) } else { error }
+        }),
     );
     // An empty category is zero only when the read succeeded and Query Store is capturing waits.
     // Older servers, disabled capture and failed reads must not manufacture zeroes.
-    let capture_on = query(client, "SELECT wait_stats_capture_mode FROM sys.database_query_store_options")
+    let capture_on = reader
+        .read_rows("SELECT wait_stats_capture_mode FROM sys.database_query_store_options")
         .await
         .ok()
         .and_then(|rows| rows.first().and_then(|r| r.f64("wait_stats_capture_mode")))
@@ -357,28 +274,13 @@ GROUP BY ws.plan_id, ws.wait_category_desc
         coverage.partial(&crate::sources::QUERY_WAITS, waits_not_captured());
     }
     let mut plan_waits: HashMap<String, Vec<(String, f64)>> = HashMap::new();
-    for r in wait_rows.into_iter().flatten() {
-        if let Some(ms) = r.f64("wait_ms") {
-            plan_waits.entry(r.string("plan_id")).or_default().push((r.string("wait_category_desc"), ms));
+    for row in wait_rows.into_iter().flatten() {
+        if let Some(plan_id) = row.plan_id {
+            plan_waits.entry(plan_id).or_default().push((row.category, row.total_ms as f64));
         }
     }
-
-    // Culprit's own statements are left out, as they are from the workload: the waits describe the application.
-    let db_waits_sql = format!(
-        r#"
-SELECT ws.wait_category_desc, SUM(ws.total_query_wait_time_ms) AS wait_ms
-FROM sys.query_store_wait_stats ws
-JOIN sys.query_store_runtime_stats_interval i ON i.runtime_stats_interval_id = ws.runtime_stats_interval_id
-JOIN sys.query_store_plan p ON p.plan_id = ws.plan_id
-JOIN sys.query_store_query q ON q.query_id = p.query_id
-JOIN sys.query_store_query_text t ON t.query_text_id = q.query_text_id
-WHERE i.end_time >= {since} AND t.query_sql_text NOT LIKE N'%{marker}%'
-GROUP BY ws.wait_category_desc
-"#,
-        marker = OWN_QUERY_MARKER,
-    );
-    let waits = match query(client, &db_waits_sql).await {
-        Ok(rows) => fold_waits(rows.iter().map(|r| (r.string("wait_category_desc"), r.f64_or_zero("wait_ms")))),
+    let waits = match reader.waits(window_minutes, None).await {
+        Ok(rows) => fold_waits(rows.into_iter().map(|row| (row.category, row.total_ms as f64))),
         Err(_) => Vec::new(),
     };
 
@@ -387,7 +289,7 @@ GROUP BY ws.wait_category_desc
     let trend_ids: Vec<String> = selected.iter().take(TREND_QUERIES).map(|q| q.query_id.clone()).collect();
     // Trends are a bonus: a failure here must not cost the scan its workload.
     let (timeline, mut trends) =
-        match crate::timeline::collect(client, window_minutes, window_hours, window_end.as_deref(), &trend_ids).await {
+        match crate::timeline::collect(reader, window_minutes, window_hours, window_end.as_deref(), &trend_ids).await {
             Ok(Some((timeline, trends))) => (Some(timeline), trends),
             _ => (None, HashMap::new()),
         };
@@ -396,6 +298,7 @@ GROUP BY ws.wait_category_desc
     let mut plan_errors = 0;
     let mut queries: Vec<QueryStat> = selected
         .iter()
+        .filter(|query| texts.get(&query.query_id).is_none_or(|definition| !definition.origin.is_culprit()))
         .map(|q| {
             let current = q.current_plan();
             let plan = current.and_then(|p| plans_xml.get(&p.plan_id)).and_then(|xml| match plan_xml::parse(xml) {
@@ -421,7 +324,7 @@ GROUP BY ws.wait_category_desc
         })
         .collect();
     // Compiled values and SQL Server 2022 variants are a bonus as well.
-    crate::spread::attach(client, window_minutes, &mut queries).await;
+    crate::spread::attach(reader, window_minutes, &mut queries).await;
 
     let workload = Workload {
         source_label: None,
@@ -450,7 +353,7 @@ GROUP BY ws.wait_category_desc
 
 fn to_query_stat(
     q: &QueryAgg,
-    text: Option<&Rec>,
+    text: Option<&crate::query_store::definitions::Definition>,
     plan: Option<culprit_core::Plan>,
     waits: Vec<WaitStat>,
 ) -> QueryStat {
@@ -477,16 +380,17 @@ fn to_query_stat(
         })
         .collect();
     variants.sort_by(|a, b| b.total_time_ms.total_cmp(&a.total_time_ms));
-    let (parameters, sql) = split_parameters(&text.map(|t| t.string("query_sql_text")).unwrap_or_default());
+    let (parameters, sql) = split_parameters(text.and_then(|definition| definition.payload.text()).unwrap_or_default());
     QueryStat {
         plan_history: None,
         resolved_write_target: None,
         requests: None,
         id: q.query_id.clone(),
-        query_hash: text.and_then(|t| t.str("query_hash")),
+        query_hash: text
+            .and_then(|definition| definition.query.as_ref().map(|query| format!("0x{}", query.query_hash))),
         text: sql,
         parameters,
-        object_name: text.and_then(|t| t.str("object_name")),
+        object_name: text.and_then(|definition| definition.object_name.clone()),
         executions,
         total_time_ms: total_ms,
         mean_time_ms: if executions > 0.0 { total_ms / executions } else { 0.0 },
@@ -496,7 +400,7 @@ fn to_query_stat(
         rows: Some(q.sum(|p| p.rows)),
         logical_reads: Some(q.sum(|p| p.reads)),
         physical_reads: Some(q.sum(|p| p.physical_reads)),
-        temp_writes: Some(q.sum(|p| p.tempdb_pages)),
+        temp_writes: q.plans.iter().map(|plan| plan.tempdb_pages).sum(),
         first_seen: q.first_seen(),
         last_seen: q.last_seen(),
         plans: variants,
@@ -610,101 +514,54 @@ pub(crate) fn fold_waits(items: impl IntoIterator<Item = (String, f64)>) -> Vec<
     waits
 }
 
-const PLAN_CACHE_SQL: &str = r#"
-WITH db_stats AS (
-  SELECT qs.*
-  FROM sys.dm_exec_query_stats qs
-  CROSS APPLY sys.dm_exec_plan_attributes(qs.plan_handle) pa
-  CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
-  WHERE pa.attribute = 'dbid' AND CAST(pa.value AS int) = DB_ID() AND st.text NOT LIKE N'%__MARKER__%'
-)
-SELECT
-  CONVERT(varchar(20), query_hash, 1) AS query_hash,
-  SUM(execution_count) AS executions,
-  SUM(total_elapsed_time) / 1000.0 AS total_ms,
-  MAX(max_elapsed_time) / 1000.0 AS max_ms,
-  MIN(min_elapsed_time) / 1000.0 AS min_ms,
-  SUM(total_worker_time) / 1000.0 AS cpu_ms,
-  SUM(total_logical_reads) AS logical_reads,
-  SUM(total_physical_reads) AS physical_reads,
-  SUM(total_rows) AS row_total,
-  COUNT(DISTINCT query_plan_hash) AS plan_count,
-  __FIRST__ AS first_seen,
-  __LAST__ AS last_seen,
-  DATEDIFF(second, MIN(creation_time), GETDATE()) / 3600.0 AS age_hours
-FROM db_stats
-GROUP BY query_hash
-"#;
-
-/// The statement text and plan behind each of `hashes`: this database's (the plan attribute `dbid`, as the workload
-/// itself is read), never another database's statement that happens to share a query_hash, and the one that ran last,
-/// so the plan shown is the one in use.
-fn plan_cache_detail_sql(hashes: &[String]) -> String {
-    let list: Vec<&str> = hashes
-        .iter()
-        .map(String::as_str)
-        .filter(|h| h.starts_with("0x") && h[2..].chars().all(|c| c.is_ascii_hexdigit()))
-        .collect();
-    let list = if list.is_empty() { "NULL".to_string() } else { list.join(",") };
-    format!(
-        r#"
-WITH ranked AS (
-  SELECT qs.query_hash, qs.sql_handle, qs.plan_handle, qs.statement_start_offset, qs.statement_end_offset,
-    ROW_NUMBER() OVER (PARTITION BY qs.query_hash ORDER BY qs.last_execution_time DESC, qs.total_elapsed_time DESC) AS rn
-  FROM sys.dm_exec_query_stats qs
-  CROSS APPLY sys.dm_exec_plan_attributes(qs.plan_handle) pa
-  CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) qt
-  WHERE qs.query_hash IN ({list}) AND pa.attribute = 'dbid' AND CAST(pa.value AS int) = DB_ID()
-    AND qt.text NOT LIKE N'%{marker}%'
-)
-SELECT CONVERT(varchar(20), r.query_hash, 1) AS query_hash,
-  SUBSTRING(st.text, r.statement_start_offset / 2 + 1,
-    (CASE r.statement_end_offset WHEN -1 THEN DATALENGTH(st.text) ELSE r.statement_end_offset END - r.statement_start_offset) / 2 + 1) AS statement_text,
-  OBJECT_SCHEMA_NAME(st.objectid, st.dbid) + '.' + OBJECT_NAME(st.objectid, st.dbid) AS object_name,
-  qp.query_plan
-FROM ranked r
-CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) st
-OUTER APPLY sys.dm_exec_text_query_plan(r.plan_handle, r.statement_start_offset, r.statement_end_offset) qp
-WHERE r.rn = 1
-"#,
-        marker = OWN_QUERY_MARKER,
-    )
-}
-
 /// Workload from the plan cache, for databases without Query Store. Covers only what is still cached.
 pub(crate) async fn from_plan_cache(
-    client: &mut MsClient,
+    client: &mut impl NativeRead,
     options: &SnapshotOptions,
-) -> tiberius::Result<WorkloadResult> {
-    let sql = PLAN_CACHE_SQL
-        .replace("__MARKER__", OWN_QUERY_MARKER)
-        .replace("__FIRST__", &utc_local_iso("MIN(creation_time)"))
-        .replace("__LAST__", &utc_local_iso("MAX(last_execution_time)"));
-    let rows = query(client, &sql).await?;
+) -> culprit_core::Result<WorkloadResult> {
+    let rows = crate::cached_runtime::summary(client).await?;
+    let mut coverage = Coverage::default();
+    if rows.iter().any(|summary| summary.counts.is_none()) {
+        coverage.partial(
+            &crate::sources::PLAN_CACHE,
+            culprit_core::message!("provider.mssql.plan_cache.partial_statistics"),
+        );
+    }
+    let rows: Vec<_> =
+        rows.iter().filter_map(|summary| summary.counts.as_ref().map(|counts| (summary, counts))).collect();
     let all: Vec<QueryAgg> = rows
         .iter()
-        .map(|r| {
-            let mut plan = PlanAgg::from_rec(r);
-            plan.plan_id = r.string("query_hash");
-            plan.sum_sq_us = 0.0;
-            QueryAgg { query_id: r.string("query_hash"), plans: vec![plan] }
+        .map(|(summary, counts)| QueryAgg {
+            query_id: summary.query_hash.clone(),
+            plans: vec![PlanAgg::from_cache_summary(summary, counts)],
         })
         .collect();
-    let window_hours = rows.iter().filter_map(|r| r.f64("age_hours")).fold(0.0, f64::max);
+    let window_hours =
+        rows.iter().map(|(summary, _)| summary.oldest_entry_age_seconds as f64 / 3600.0).fold(0.0, f64::max);
     let total_time_ms: f64 = all.iter().map(QueryAgg::total_ms).sum();
     let total_cpu_ms: f64 = all.iter().map(|q| q.sum(|p| p.cpu_ms)).sum();
     let total_executions: f64 = all.iter().map(QueryAgg::executions).sum();
     let plan_counts: HashMap<String, f64> =
-        rows.iter().map(|r| (r.string("query_hash"), r.f64_or_zero("plan_count"))).collect();
+        rows.iter().map(|(summary, counts)| (summary.query_hash.clone(), f64::from(counts.plans))).collect();
 
     let selected = select_top(&all, options.top_queries as usize);
     let hashes: Vec<String> = selected.iter().map(|q| q.query_id.clone()).collect();
-    let details: HashMap<String, Rec> = if hashes.is_empty() {
-        HashMap::new()
-    } else {
-        query(client, &plan_cache_detail_sql(&hashes)).await?.into_iter().map(|r| (r.string("query_hash"), r)).collect()
-    };
+    let details = crate::cached_statements::details(
+        client,
+        &hashes,
+        options.plans as usize,
+        &crate::read::ReadSession::application_budget(),
+    )
+    .await?;
 
+    if hashes.iter().enumerate().any(|(rank, hash)| {
+        details.get(hash).is_none_or(|detail| {
+            detail.statement.text().is_none() || (rank < options.plans as usize && detail.plan.text().is_none())
+        })
+    }) {
+        coverage
+            .partial(&crate::sources::PLAN_CACHE, culprit_core::message!("provider.mssql.plan_cache.partial_payloads"));
+    }
     let mut plans_parsed = 0;
     let mut plan_errors = 0;
     let queries = selected
@@ -713,12 +570,12 @@ pub(crate) async fn from_plan_cache(
         .map(|(rank, q)| {
             let detail = details.get(&q.query_id);
             let plan = if rank < options.plans as usize {
-                detail.and_then(|d| d.str("query_plan")).and_then(|xml| match plan_xml::parse(&xml) {
+                detail.and_then(|d| d.plan.text()).and_then(|xml| match plan_xml::parse(xml) {
                     Ok(p) => {
                         plans_parsed += 1;
                         Some(p)
                     }
-                    Err(_) if plan_xml::is_empty(&xml) => None,
+                    Err(_) if plan_xml::is_empty(xml) => None,
                     Err(_) => {
                         plan_errors += 1;
                         None
@@ -728,11 +585,11 @@ pub(crate) async fn from_plan_cache(
                 None
             };
             let mut stat = to_query_stat(q, None, plan, Vec::new());
-            let (parameters, sql) = split_parameters(&detail.map(|d| d.string("statement_text")).unwrap_or_default());
+            let (parameters, sql) = split_parameters(detail.and_then(|d| d.statement.text()).unwrap_or_default());
             stat.query_hash = Some(q.query_id.clone());
             stat.parameters = parameters;
             stat.text = sql;
-            stat.object_name = detail.and_then(|d| d.str("object_name"));
+            stat.object_name = detail.and_then(|d| d.object_name.clone());
             stat.stddev_time_ms = None;
             stat.temp_writes = None;
             if plan_counts.get(&q.query_id).copied().unwrap_or(1.0) <= 1.0 {
@@ -743,14 +600,14 @@ pub(crate) async fn from_plan_cache(
         .collect();
 
     // Each plan counts from its own compile: the time an hour of every entry's life, to weigh shares by (`share_of`).
-    let window_end = rows.iter().filter_map(|r| r.str("last_seen")).max();
+    let window_end = rows.iter().map(|(summary, _)| summary.last_seen_utc_estimate.clone()).max();
     let end = window_end.as_deref().and_then(culprit_core::format::epoch_seconds);
     let hourly_time_ms: f64 = rows
         .iter()
-        .filter_map(|r| {
-            let first = r.str("first_seen").as_deref().and_then(culprit_core::format::epoch_seconds)?;
+        .filter_map(|(summary, counts)| {
+            let first = culprit_core::format::epoch_seconds(&summary.first_seen_utc_estimate)?;
             let hours = ((end? - first) / 3600.0).max(1.0 / 60.0);
-            Some(r.f64_or_zero("total_ms") / hours)
+            Some(counts.duration_us as f64 / 1000.0 / hours)
         })
         .sum();
     let workload = Workload {
@@ -761,7 +618,7 @@ pub(crate) async fn from_plan_cache(
         source: "Plan cache".into(),
         kind: Some(culprit_core::WorkloadKind::PlanCache),
         windowed: false,
-        window_start: rows.iter().filter_map(|r| r.str("first_seen")).min(),
+        window_start: rows.iter().map(|(summary, _)| summary.first_seen_utc_estimate.clone()).min(),
         window_end,
         window_hours,
         total_time_ms,
@@ -775,26 +632,12 @@ pub(crate) async fn from_plan_cache(
         min_logged_ms: None,
         log: None,
     };
-    Ok(WorkloadResult { workload, waits: Vec::new(), plans_parsed, plan_errors, coverage: Coverage::default() })
+    Ok(WorkloadResult { workload, waits: Vec::new(), plans_parsed, plan_errors, coverage })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A 6-hour window reaches back 360 minutes, and keeps every interval that ended inside it: the one its edge falls
-    /// in included, so the window starts at that interval's start.
-    #[test]
-    fn an_hours_window_reads_back_in_minutes() {
-        let options = SnapshotOptions::default().with_window_minutes(360);
-        for sql in [runtime_sql(options.window_in_minutes(), true), window_sql(options.window_in_minutes())] {
-            assert!(sql.contains("DATEADD(minute, -360, SYSDATETIMEOFFSET())"), "{sql}");
-            assert!(sql.contains("end_time >= @since"), "{sql}");
-        }
-        // A window in days reads the same history it always did.
-        let week = SnapshotOptions::default();
-        assert!(window_sql(week.window_in_minutes()).contains("DATEADD(minute, -10080, SYSDATETIMEOFFSET())"));
-    }
 
     #[test]
     fn zero_waits_require_successful_collection_and_enabled_capture() {
@@ -870,11 +713,7 @@ mod tests {
 
     #[test]
     fn the_plan_cache_answers_for_this_database_only() {
-        let sql = plan_cache_detail_sql(&["0x1A2B".into()]);
-        assert!(sql.contains("pa.attribute = 'dbid' AND CAST(pa.value AS int) = DB_ID()"), "{sql}");
-        assert!(sql.contains(OWN_QUERY_MARKER));
-        assert!(sql.contains("ORDER BY qs.last_execution_time DESC"), "the plan in use, not the heaviest");
-        assert!(PLAN_CACHE_SQL.contains("CAST(pa.value AS int) = DB_ID()"));
+        assert!(crate::cached_runtime::summary_sql().contains(crate::cached_statements::DATABASE_PREDICATE));
     }
 
     #[test]

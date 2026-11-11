@@ -1,0 +1,30 @@
+{
+  "table": {
+    "database_id": 5,
+    "object_id": 100,
+    "created_without_offset": "2026-11-10T07:00:00.123"
+  },
+  "schema": "dbo",
+  "table_name": "Child",
+  "column_id": 3,
+  "name": "owner",
+  "table_modified_without_offset": "2026-11-10T07:01:00.123",
+  "user_type_id": 231,
+  "system_type_id": 231,
+  "type_schema": "sys",
+  "type_name": "nvarchar",
+  "max_length": 80,
+  "precision": 0,
+  "scale": 0,
+  "nullable": false,
+  "identity": false,
+  "computed": null,
+  "default": {
+    "native_sha256": null,
+    "payload": {
+      "state": "unavailable",
+      "reason": "oversized"
+    }
+  },
+  "collation": "Latin1_General_100_CI_AS"
+}

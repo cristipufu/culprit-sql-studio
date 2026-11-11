@@ -29,12 +29,7 @@ const MAX_INTERVAL_SECS: u64 = 30;
 
 /// Token audience per engine: Azure SQL and Azure Database for PostgreSQL / MySQL use different resources.
 fn resource(engine: Engine) -> &'static str {
-    match engine {
-        Engine::Mssql => "https://database.windows.net/",
-        Engine::Postgres | Engine::Mysql => "https://ossrdbms-aad.database.windows.net",
-        // A file has no server to sign in to.
-        Engine::Yugabyte | Engine::Sqlite => "",
-    }
+    crate::azure_identity::database_resource(engine).unwrap_or("")
 }
 
 fn scope(engine: Engine) -> String {
@@ -128,7 +123,7 @@ impl Authority {
     }
 }
 
-fn is_guid(text: &str) -> bool {
+pub(crate) fn is_guid(text: &str) -> bool {
     let parts: Vec<&str> = text.split('-').collect();
     parts.len() == 5
         && [8, 4, 4, 4, 12].iter().zip(&parts).all(|(n, p)| p.len() == *n && p.chars().all(|c| c.is_ascii_hexdigit()))

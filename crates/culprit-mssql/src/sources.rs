@@ -4,6 +4,11 @@
 //! detail some checks use; without it those checks say less, never something wrong.
 
 use culprit_core::{Capability, Coverage, ErrorCode, Source, source_id};
+pub const SUSPECT_PAGES: Source = Source {
+    name: source_id::SUSPECT_PAGES,
+    reads: culprit_core::key!("provider.mssql.source.suspect_pages"),
+    delivers: &[],
+};
 pub const LOG_CAPACITY: Source = Source {
     name: source_id::LOG_CAPACITY,
     reads: culprit_core::key!("provider.mssql.source.log_capacity"),
@@ -25,8 +30,6 @@ pub const SEQUENCE_CAPACITY: Source = Source {
     delivers: &[],
 };
 
-use crate::conn::{is_permission_error, map_error};
-
 /// Query Store's runtime statistics, plans and waits per query, by interval.
 pub const QUERY_STORE: Source = Source {
     name: source_id::QUERY_STORE,
@@ -44,6 +47,21 @@ pub const PLAN_CACHE: Source = Source {
     name: source_id::PLAN_CACHE,
     reads: culprit_core::key!("provider.mssql.source.plan_cache"),
     delivers: &[Capability::PlanCache],
+};
+/// Object generations and native creation/alteration dates; no removal history is inferred.
+pub const OBJECTS: Source =
+    Source { name: source_id::OBJECTS, reads: culprit_core::key!("provider.mssql.source.objects"), delivers: &[] };
+pub const TRIGGERS: Source =
+    Source { name: source_id::TRIGGERS, reads: culprit_core::key!("provider.mssql.source.triggers"), delivers: &[] };
+pub const PARTITIONS: Source = Source {
+    name: source_id::PARTITIONS,
+    reads: culprit_core::key!("provider.mssql.source.partitions"),
+    delivers: &[],
+};
+pub const RETAINED_PLANS: Source = Source {
+    name: source_id::RETAINED_PLANS,
+    reads: culprit_core::key!("provider.mssql.source.retained_plans"),
+    delivers: &[],
 };
 /// Row counts, sizes and heap or clustered storage per table.
 pub const TABLES: Source = Source {
@@ -112,6 +130,31 @@ pub const TUNING: Source =
 /// Database, scoped and server settings.
 pub const SETTINGS: Source =
     Source { name: source_id::SETTINGS, reads: culprit_core::key!("provider.mssql.source.settings"), delivers: &[] };
+pub const DATABASE_SETTINGS: Source = Source {
+    name: source_id::DATABASE_SETTINGS,
+    reads: culprit_core::key!("provider.mssql.source.database_settings"),
+    delivers: &[],
+};
+pub const SCOPED_SETTINGS: Source = Source {
+    name: source_id::SCOPED_SETTINGS,
+    reads: culprit_core::key!("provider.mssql.source.scoped_settings"),
+    delivers: &[],
+};
+pub const SERVER_SETTINGS: Source = Source {
+    name: source_id::SERVER_SETTINGS,
+    reads: culprit_core::key!("provider.mssql.source.server_settings"),
+    delivers: &[],
+};
+pub const QUERY_STORE_SETTINGS: Source = Source {
+    name: source_id::QUERY_STORE_SETTINGS,
+    reads: culprit_core::key!("provider.mssql.source.query_store_settings"),
+    delivers: &[],
+};
+pub const PROCESSOR_TOPOLOGY: Source = Source {
+    name: source_id::PROCESSOR_TOPOLOGY,
+    reads: culprit_core::key!("provider.mssql.source.processor_topology"),
+    delivers: &[],
+};
 /// Performance counters: batches, compiles, page life.
 pub const PERFORMANCE_COUNTERS: Source = Source {
     name: source_id::PERFORMANCE_COUNTERS,
@@ -130,10 +173,46 @@ pub const PENDING_GRANTS: Source = Source {
     reads: culprit_core::key!("provider.mssql.source.pending_grants"),
     delivers: &[],
 };
+pub const WORKER_QUEUE: Source = Source {
+    name: source_id::WORKER_QUEUE,
+    reads: culprit_core::key!("provider.mssql.source.worker_queue"),
+    delivers: &[],
+};
+pub const VERSION_STORE: Source = Source {
+    name: source_id::VERSION_STORE,
+    reads: culprit_core::key!("provider.mssql.source.version_store"),
+    delivers: &[],
+};
+pub const PERSISTENT_VERSION_STORE: Source = Source {
+    name: source_id::PERSISTENT_VERSION_STORE,
+    reads: culprit_core::key!("provider.mssql.source.persistent_version_store"),
+    delivers: &[],
+};
+
 /// Signal, thread pool and memory waits, for the health signals.
 pub const WAIT_TOTALS: Source = Source {
     name: source_id::WAIT_TOTALS,
     reads: culprit_core::key!("provider.mssql.source.wait_totals"),
+    delivers: &[],
+};
+pub const TUNING_OPTIONS: Source = Source {
+    name: source_id::TUNING_OPTIONS,
+    reads: culprit_core::key!("provider.mssql.source.tuning_options"),
+    delivers: &[],
+};
+pub const TUNING_RECOMMENDATIONS: Source = Source {
+    name: source_id::TUNING_RECOMMENDATIONS,
+    reads: culprit_core::key!("provider.mssql.source.tuning_recommendations"),
+    delivers: &[],
+};
+pub const FORCED_PLANS: Source = Source {
+    name: source_id::FORCED_PLANS,
+    reads: culprit_core::key!("provider.mssql.source.forced_plans"),
+    delivers: &[],
+};
+pub const QUERY_HINTS: Source = Source {
+    name: source_id::QUERY_HINTS,
+    reads: culprit_core::key!("provider.mssql.source.query_hints"),
     delivers: &[],
 };
 /// Memory granted and used per cached query.
@@ -159,6 +238,12 @@ pub const QUERY_COMPILATION: Source = Source {
     delivers: &[],
 };
 /// Row and page lock waits, latch waits and escalations per index.
+pub const INDEX_OPERATIONS: Source = Source {
+    name: source_id::INDEX_OPERATIONS,
+    reads: culprit_core::key!("provider.mssql.source.index_operations"),
+    delivers: &[],
+};
+
 pub const INDEX_CONTENTION: Source = Source {
     name: source_id::INDEX_CONTENTION,
     reads: culprit_core::key!("provider.mssql.source.index_contention"),
@@ -170,6 +255,11 @@ pub const CONSTRAINTS: Source = Source {
     reads: culprit_core::key!("provider.mssql.source.constraints"),
     delivers: &[],
 };
+pub const CHECK_CONSTRAINTS: Source = Source {
+    name: source_id::CHECK_CONSTRAINTS,
+    reads: culprit_core::key!("provider.mssql.source.check_constraints"),
+    delivers: &[],
+};
 /// sys.dm_io_virtual_file_stats: read and write latency per file.
 pub const FILE_LATENCY: Source = Source {
     name: source_id::FILE_LATENCY,
@@ -179,44 +269,61 @@ pub const FILE_LATENCY: Source = Source {
 /// Logins and connection resets, for connection churn.
 pub const LOGINS: Source =
     Source { name: source_id::LOGINS, reads: culprit_core::key!("provider.mssql.source.logins"), delivers: &[] };
+pub const REPLICATION: Source = Source {
+    name: source_id::REPLICATION,
+    reads: culprit_core::key!("provider.mssql.source.replication"),
+    delivers: &[],
+};
 
-pub const SCHEMA: &[Source] = &[TABLES, INDEXES, COLUMNS, FOREIGN_KEYS, STATISTICS];
+pub const SCHEMA: &[Source] = &[TABLES, INDEXES, COLUMNS, FOREIGN_KEYS, STATISTICS, CONSTRAINTS, MISSING_INDEXES];
 pub const WORKLOAD: &[Source] = &[QUERY_STORE, QUERY_WAITS, PLAN_CACHE];
 pub const MISC: &[Source] = &[
     SETTINGS,
-    MISSING_INDEXES,
+    DATABASE_SETTINGS,
+    SCOPED_SETTINGS,
+    SERVER_SETTINGS,
+    QUERY_STORE_SETTINGS,
     WAITS,
-    RESOURCES,
-    FORWARDED_FETCHES,
     QUERY_FAMILIES,
     PLAN_CACHE_USE,
     TUNING,
+    TUNING_OPTIONS,
+    TUNING_RECOMMENDATIONS,
+    FORCED_PLANS,
+    QUERY_HINTS,
+    PROCESSOR_TOPOLOGY,
     PERFORMANCE_COUNTERS,
-    RESOURCE_USE,
+    LOGINS,
     PENDING_GRANTS,
+    WORKER_QUEUE,
+    VERSION_STORE,
+    PERSISTENT_VERSION_STORE,
     WAIT_TOTALS,
     GRANTS,
     OPEN_TRANSACTIONS,
 ];
 pub const SIGNAL_READS: &[Source] = &[
+    REPLICATION,
     QUERY_COSTS,
     QUERY_COMPILATION,
     INDEX_CONTENTION,
-    CONSTRAINTS,
+    FORWARDED_FETCHES,
     FILE_LATENCY,
-    LOGINS,
     LOG_CAPACITY,
     FILE_CAPACITY,
     TEMP_CAPACITY,
     SEQUENCE_CAPACITY,
+    SUSPECT_PAGES,
 ];
 
 /// Every source above, for listings (`culprit sources`).
 pub const ALL: &[Source] = &[
+    REPLICATION,
     LOG_CAPACITY,
     FILE_CAPACITY,
     TEMP_CAPACITY,
     SEQUENCE_CAPACITY,
+    SUSPECT_PAGES,
     QUERY_STORE,
     QUERY_WAITS,
     PLAN_CACHE,
@@ -225,6 +332,11 @@ pub const ALL: &[Source] = &[
     COLUMNS,
     FOREIGN_KEYS,
     STATISTICS,
+    CHECK_CONSTRAINTS,
+    OBJECTS,
+    TRIGGERS,
+    PARTITIONS,
+    RETAINED_PLANS,
     MISSING_INDEXES,
     WAITS,
     RESOURCES,
@@ -232,38 +344,49 @@ pub const ALL: &[Source] = &[
     QUERY_FAMILIES,
     PLAN_CACHE_USE,
     TUNING,
+    TUNING_OPTIONS,
+    TUNING_RECOMMENDATIONS,
+    FORCED_PLANS,
+    QUERY_HINTS,
     SETTINGS,
+    DATABASE_SETTINGS,
+    SCOPED_SETTINGS,
+    SERVER_SETTINGS,
+    QUERY_STORE_SETTINGS,
+    PROCESSOR_TOPOLOGY,
     PERFORMANCE_COUNTERS,
     RESOURCE_USE,
     PENDING_GRANTS,
+    WORKER_QUEUE,
+    VERSION_STORE,
+    PERSISTENT_VERSION_STORE,
     WAIT_TOTALS,
     GRANTS,
     OPEN_TRANSACTIONS,
     QUERY_COSTS,
     QUERY_COMPILATION,
     INDEX_CONTENTION,
+    INDEX_OPERATIONS,
     CONSTRAINTS,
     FILE_LATENCY,
     LOGINS,
 ];
 
-/// `Coverage::read` for tiberius errors: a permission error is one, with `grant` (what this login needs) as its fix.
+/// Record a bounded native read, adding this database's permission hint when applicable.
 pub(crate) fn read<T>(
     coverage: &mut Coverage,
     source: &Source,
-    result: tiberius::Result<T>,
+    result: culprit_core::Result<T>,
     grant: impl FnOnce() -> String,
 ) -> Option<T> {
     coverage.read(
         source,
-        result.map_err(|err| {
-            let denied = is_permission_error(&err);
-            let mut error = map_error(err);
-            if denied {
-                error.code = ErrorCode::PermissionDenied;
-                error.hint = Some(grant());
+        result.map_err(|error| {
+            if error.code == ErrorCode::PermissionDenied && error.hint.is_none() {
+                error.with_hint(grant())
+            } else {
+                error
             }
-            error
         }),
     )
 }
@@ -272,7 +395,7 @@ pub(crate) fn read<T>(
 pub(crate) fn read_rows<T>(
     coverage: &mut Coverage,
     source: &Source,
-    result: tiberius::Result<Vec<T>>,
+    result: culprit_core::Result<Vec<T>>,
     grant: impl FnOnce() -> String,
 ) -> Option<Vec<T>> {
     let rows = read(coverage, source, result, grant)?;

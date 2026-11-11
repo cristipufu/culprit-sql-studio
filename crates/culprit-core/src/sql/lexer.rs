@@ -70,7 +70,7 @@ pub(crate) enum Token<'a> {
 /// Top-level tokens, with literals and comments skipped. Errors on text it can't lex safely.
 pub(crate) fn lex(text: &str, engine: Engine, mode: Mode) -> std::result::Result<Vec<Token<'_>>, LexError> {
     let mut tokens = Vec::new();
-    lex_into(text, engine, mode, &mut tokens).map(|()| tokens)
+    lex_into(text, engine, mode, &mut tokens, &mut |_| {}, &mut false).map(|()| tokens)
 }
 
 /// Why text can't be lexed with confidence.
@@ -116,20 +116,68 @@ impl From<LexError> for crate::Error {
 /// a `;` before it keeps the error. Every other error (comments, executable comments, invisible characters) refuses the
 /// text in any reading, and at least one reading must succeed.
 pub(crate) fn readings(text: &str, engine: Engine) -> std::result::Result<Vec<Vec<Token<'_>>>, LexError> {
+    scan_readings(text, engine).map(|readings| readings.into_iter().map(|reading| reading.tokens).collect())
+}
+struct Reading<'a> {
+    tokens: Vec<Token<'a>>,
+    comments: Vec<&'a str>,
+    has_literals: bool,
+}
+
+/// Expression classifiers need to reject literal arguments rather than lose them in the statement token view.
+pub(crate) fn literal_free_readings(text: &str, engine: Engine) -> Option<Vec<Vec<Token<'_>>>> {
+    let readings = scan_readings(text, engine).ok()?;
+    if readings.iter().any(|reading| reading.has_literals) {
+        return None;
+    }
+    Some(readings.into_iter().map(|reading| reading.tokens).collect())
+}
+fn scan_readings(text: &str, engine: Engine) -> std::result::Result<Vec<Reading<'_>>, LexError> {
     let mut out = Vec::new();
     for &mode in modes(engine) {
         let mut tokens = Vec::new();
-        match lex_into(text, engine, mode, &mut tokens) {
-            Ok(()) => out.push(tokens),
-            Err(e) => {
-                let ran_before = engine == Engine::Mysql && tokens.iter().any(|t| matches!(t, Token::Semicolon(_)));
-                if e != LexError::UnclosedQuote || ran_before {
-                    return Err(e);
+        let mut comments = Vec::new();
+        let mut has_literals = false;
+        match lex_into(text, engine, mode, &mut tokens, &mut |comment| comments.push(comment), &mut has_literals) {
+            Ok(()) => out.push(Reading { tokens, comments, has_literals }),
+            Err(error) => {
+                let ran_before =
+                    engine == Engine::Mysql && tokens.iter().any(|token| matches!(token, Token::Semicolon(_)));
+                if error != LexError::UnclosedQuote || ran_before {
+                    return Err(error);
                 }
             }
         }
     }
     if out.is_empty() { Err(LexError::UnclosedQuote) } else { Ok(out) }
+}
+/// Actual block comments, excluding strings and quoted identifiers. Ambiguous server modes return None.
+pub fn block_comments(text: &str, engine: Engine) -> std::result::Result<Option<Vec<&str>>, LexError> {
+    let readings = scan_readings(text, engine)?;
+    let Some(first) = readings.first() else { return Ok(None) };
+    if readings.iter().any(|reading| reading.comments != first.comments) {
+        return Ok(None);
+    }
+    Ok(Some(first.comments.clone()))
+}
+
+/// Completed comments in a native SQL prefix, which can end inside a string or comment.
+/// A marker is established only when every supported lexical mode agrees on those comments.
+pub fn block_comments_in_prefix(text: &str, engine: Engine) -> std::result::Result<Option<Vec<&str>>, LexError> {
+    let mut agreed = None;
+    for &mode in modes(engine) {
+        let mut comments = Vec::new();
+        let result = lex_into(text, engine, mode, &mut Vec::new(), &mut |comment| comments.push(comment), &mut false);
+        match result {
+            Ok(()) | Err(LexError::UnclosedQuote | LexError::UnclosedComment | LexError::UnclosedDollarQuote) => {}
+            Err(error) => return Err(error),
+        }
+        if agreed.as_ref().is_some_and(|before| before != &comments) {
+            return Ok(None);
+        }
+        agreed = Some(comments);
+    }
+    Ok(agreed)
 }
 
 fn lex_into<'a>(
@@ -137,6 +185,8 @@ fn lex_into<'a>(
     engine: Engine,
     mode: Mode,
     tokens: &mut Vec<Token<'a>>,
+    comment: &mut impl FnMut(&'a str),
+    has_literals: &mut bool,
 ) -> std::result::Result<(), LexError> {
     let engine = engine.sql_syntax();
     let backslash = mode.backslash;
@@ -166,13 +216,19 @@ fn lex_into<'a>(
                         return Err(LexError::ExecutableComment);
                     }
                 }
-                i = block_comment_end(bytes, i, engine != SqlSyntax::Mysql)?;
+                let end = block_comment_end(bytes, i, engine != SqlSyntax::Mysql)?;
+                comment(&text[i..end]);
+                i = end;
             }
-            b'\'' => i = quoted_end(bytes, i, b'\'', backslash == Backslash::Escapes)?,
+            b'\'' => {
+                *has_literals = true;
+                i = quoted_end(bytes, i, b'\'', backslash == Backslash::Escapes)?;
+            }
             b'"' => {
                 // A string (MySQL by default, SQL Server with QUOTED_IDENTIFIER OFF) or a name (ANSI_QUOTES, Postgres,
                 // QUOTED_IDENTIFIER ON). Backslashes escape only inside a string, and only where the server says so.
                 let string = mode.double_quote == DoubleQuote::String;
+                *has_literals |= string;
                 let end = quoted_end(bytes, i, b'"', string && backslash == Backslash::Escapes)?;
                 if !string {
                     tokens.push(Token::Quoted(&text[i + 1..end - 1], b'"'));
@@ -190,7 +246,10 @@ fn lex_into<'a>(
                 i = end;
             }
             b'$' if engine == SqlSyntax::Postgres => match dollar_tag(bytes, i) {
-                Some(tag) => i = dollar_quoted_end(bytes, i, tag)?,
+                Some(tag) => {
+                    *has_literals = true;
+                    i = dollar_quoted_end(bytes, i, tag)?;
+                }
                 None => {
                     tokens.push(Token::Punct('$'));
                     i += 1;
@@ -214,6 +273,7 @@ fn lex_into<'a>(
                 }
                 // Postgres E'…' strings always treat backslashes as escapes.
                 if engine == SqlSyntax::Postgres && word.eq_ignore_ascii_case("e") && bytes.get(i) == Some(&b'\'') {
+                    *has_literals = true;
                     i = quoted_end(bytes, i, b'\'', true)?;
                 } else {
                     tokens.push(Token::Word(word));

@@ -6,9 +6,16 @@ use culprit_core::{
     Engine, Error, ErrorCode, NodeProgress, NodeState, Plan, PlanKind, QueryProgress, Result, session_number, t,
 };
 
-use crate::conn::{Pool, is_permission_error, permission_hint, query};
+mod layout;
+#[cfg(test)]
+mod native_tests;
+pub(crate) mod retained;
+use crate::conn::{Pool, permission_hint};
 use crate::plan_xml;
+use crate::read::{NativeRead, rows as query};
 use crate::value::Rec;
+pub(crate) use layout::{Availability, Layout};
+use std::sync::Arc;
 
 const SETTING_SQL: &str =
     "SELECT CAST(value AS int) AS value FROM sys.database_scoped_configurations WHERE name = 'LAST_QUERY_PLAN_STATS'";
@@ -46,71 +53,41 @@ pub(crate) fn not_kept() -> Error {
         .with_detail(culprit_core::ErrorDetail::ActualPlanStatisticsUnavailable)
 }
 
-/// The query's plan left the cache, and its last actual plan with it.
-pub(crate) fn not_cached() -> Error {
-    Error::not_found(t!("provider.mssql.actual.not_cached")).with_hint(t!("provider.mssql.actual.not_cached.hint"))
+/// No retained plan can be linked to this Query Store identity; absence alone cannot establish eviction.
+pub(crate) fn no_matching_plan() -> Error {
+    Error::not_found(t!("provider.mssql.actual.no_matching_plan"))
+        .with_hint(t!("provider.mssql.actual.no_matching_plan.hint"))
 }
 
 /// The cached plan of a Query Store query, with the runtime counters of its last execution.
-pub(crate) async fn last_actual_plan(pool: &Pool, query_id: &str, plan_id: Option<&str>) -> Result<Plan> {
-    let query_id = numeric(query_id)?;
-    let plan_filter = match plan_id {
-        Some(id) => format!(" AND p.plan_id = {}", numeric(id)?),
-        None => String::new(),
-    };
-    let sql = format!(
-        "SELECT TOP (1) CONVERT(nvarchar(max), ps.query_plan) AS query_plan, CONVERT(varchar(20), q.query_hash, 1) AS query_hash,
-                CONVERT(varchar(33), DATEADD(minute, DATEDIFF(minute, GETDATE(), GETUTCDATE()), qs.last_execution_time), 126) AS last_run,
-                qs.execution_count
-           FROM sys.query_store_query q
-           JOIN sys.query_store_plan p ON p.query_id = q.query_id{plan_filter}
-           JOIN sys.dm_exec_query_stats qs ON qs.query_hash = q.query_hash AND qs.query_plan_hash = p.query_plan_hash
-          CROSS APPLY sys.dm_exec_query_plan_stats(qs.plan_handle) ps
-          WHERE q.query_id = {query_id}
-          ORDER BY qs.last_execution_time DESC"
-    );
-    let rows = pool
-        .with(|c| {
-            let sql = sql.clone();
-            Box::pin(async move {
-                let setting = query(c, SETTING_SQL).await.ok().and_then(|r| r.first().and_then(|r| r.f64("value")));
-                let rows = query(c, &sql).await;
-                Ok((setting, rows))
-            })
-        })
+pub(crate) async fn last_actual_plan(pool: &Arc<Pool>, query_id: &str, plan_id: Option<&str>) -> Result<Plan> {
+    let query_id = numeric(query_id)?.parse::<i64>().map_err(|_| ids_are_numbers())?;
+    let plan_id = plan_id.map(|id| numeric(id)?.parse::<i64>().map_err(|_| ids_are_numbers())).transpose()?;
+    let maximum = crate::read::ReadSession::application_budget().max_plan_bytes as usize;
+    let read = pool
+        .observe(|reader| Box::pin(async move { retained::read(reader, query_id, plan_id, maximum).await }))
         .await?;
-    let (setting, rows) = rows;
-    let rows = rows.map_err(|err| {
-        if is_permission_error(&err) {
-            cache_unreadable()
-        } else if err.to_string().contains("dm_exec_query_plan_stats") {
-            needs_2019()
-        } else {
-            crate::conn::map_error(err)
-        }
-    })?;
-    let off = setting == Some(0.0);
-    let Some(row) = rows.into_iter().next() else {
-        if off {
-            return Err(not_kept());
-        }
-        return Err(not_cached());
+    let Some(row) = read.plan else {
+        return Err(if read.setting_on == Some(false) { not_kept() } else { no_matching_plan() });
     };
-    let xml = row.str("query_plan").ok_or_else(not_kept)?;
-    let mut plan = plan_xml::parse_statement(&xml, row.str("query_hash").as_deref())?;
+    let xml = match row.payload {
+        crate::query_store::payload::Payload::Text(xml) => xml,
+        crate::query_store::payload::Payload::Unavailable(culprit_core::telemetry::PayloadUnavailable::Oversized) => {
+            return Err(culprit_core::telemetry::CollectionStop::ByteLimit.error());
+        }
+        crate::query_store::payload::Payload::Unavailable(_) => return Err(not_kept()),
+    };
+    let mut plan = plan_xml::parse_statement(&xml, row.context.query_hash.as_deref())?;
     if plan.kind != PlanKind::Actual {
         return Err(not_kept());
     }
     plan.raw = None;
-    if let Some(at) = row.str("last_run") {
-        let formatted = format!("{at}Z");
-        plan.facts_mut().last_run_at = Some(formatted.clone());
-        plan.props.insert("LastRunAt".into(), formatted);
+    if let Some(at) = row.last_start_utc_estimate {
+        plan.facts_mut().last_run_at = Some(at.clone());
+        plan.props.insert("LastRunAt".into(), at);
     }
     clear_unrecorded_times(&mut plan);
-    if let Some(n) = row.f64("execution_count") {
-        plan.props.insert("CachedExecutions".into(), n.to_string());
-    }
+    plan.props.insert("CachedExecutions".into(), row.executions);
     Ok(plan)
 }
 
@@ -179,21 +156,26 @@ pub(crate) fn own_estimate(command: &str) -> String {
     t!("provider.mssql.progress.own_estimate", command = command)
 }
 
-pub(crate) async fn query_progress(pool: &Pool, session: &str) -> Result<QueryProgress> {
+fn metadata_unavailable() -> Error {
+    Error::new(ErrorCode::PermissionDenied, t!("provider.mssql.actual.metadata_unavailable"))
+        .with_hint("GRANT VIEW DEFINITION TO [<user>];")
+}
+async fn progress_rows<R: NativeRead>(reader: &mut R, id: u64) -> Result<(Vec<Rec>, Vec<Rec>)> {
+    let layout = Layout::read(reader).await?;
+    let sql = if layout.live_xml == Availability::Available { REQUEST_SQL } else { REQUEST_BASIC_SQL };
+    let request = query(reader, &sql.replace("{id}", &id.to_string())).await?;
+    let profiles = if layout.profiles == Availability::Available {
+        query(reader, &PROFILES_SQL.replace("{id}", &id.to_string())).await?
+    } else {
+        vec![]
+    };
+    Ok((request, profiles))
+}
+
+pub(crate) async fn query_progress(pool: &Arc<Pool>, session: &str) -> Result<QueryProgress> {
     let id = session_number(session)?;
     let taken_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-    let (request, profiles) = pool
-        .with(|c| {
-            Box::pin(async move {
-                let request = match query(c, &REQUEST_SQL.replace("{id}", &id.to_string())).await {
-                    Ok(rows) => rows,
-                    Err(_) => query(c, &REQUEST_BASIC_SQL.replace("{id}", &id.to_string())).await?,
-                };
-                let profiles = query(c, &PROFILES_SQL.replace("{id}", &id.to_string())).await.unwrap_or_default();
-                Ok((request, profiles))
-            })
-        })
-        .await?;
+    let (request, profiles) = pool.observe(|reader| Box::pin(async move { progress_rows(reader, id).await })).await?;
     let mut progress = QueryProgress::idle(session, Engine::Mssql, taken_at);
     let Some(r) = request.into_iter().next() else {
         return Ok(progress);
@@ -373,5 +355,38 @@ mod tests {
         assert!(!finished(&counters(9_000.0, 200_000.0, 0.0, 1.0, 22_000.0), 200_000.0, false));
         assert!(producing(&counters(0.0, 1.0, 0.0, 0.0, 5.0)));
         assert!(!producing(&Counters { elapsed: None, ..counters(0.0, 1.0, 0.0, 0.0, 0.0) }));
+    }
+}
+
+#[cfg(test)]
+mod reader_tests {
+    use super::*;
+    use crate::{
+        read::{ReadError, invalid_data},
+        resources::test_support::FakeRead,
+        value::Val,
+    };
+    fn metadata(live: bool, profiles: bool) -> Rec {
+        Rec::of(&[
+            ("metadata_visibility", Val::Int(1)),
+            ("last_actual", Val::Int(1)),
+            ("live_xml", Val::Int(i64::from(live))),
+            ("profiles", Val::Int(i64::from(profiles))),
+        ])
+    }
+    #[tokio::test]
+    async fn a_known_old_layout_selects_the_basic_query_before_any_request_and_native_failures_never_retry() {
+        let mut old = FakeRead::new(vec![Ok(vec![metadata(false, false)]), Ok(vec![])]);
+        let (request, profiles) = progress_rows(&mut old, 42).await.unwrap();
+        assert!(request.is_empty() && profiles.is_empty());
+        assert_eq!(old.calls.len(), 2);
+        assert!(!old.calls[1].sql.contains("dm_exec_query_statistics_xml"));
+        let mut failed = FakeRead::new(vec![Ok(vec![metadata(true, true)]), Err(ReadError::Source(invalid_data()))]);
+        assert!(progress_rows(&mut failed, 42).await.is_err());
+        assert_eq!(failed.calls.len(), 2);
+        let mut profiles =
+            FakeRead::new(vec![Ok(vec![metadata(true, true)]), Ok(vec![]), Err(ReadError::Source(invalid_data()))]);
+        assert!(progress_rows(&mut profiles, 42).await.is_err());
+        assert_eq!(profiles.calls.len(), 3);
     }
 }

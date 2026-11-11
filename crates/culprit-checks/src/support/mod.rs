@@ -543,17 +543,6 @@ pub fn since_phrase(snapshot: &Snapshot) -> String {
     }
 }
 
-/// [`since_phrase`] as the time itself, for a sentence about how long they have counted ("only {since}"): "the 3 days
-/// since the server last restarted".
-pub fn counted_span(snapshot: &Snapshot) -> String {
-    match counted_since(snapshot) {
-        Counted::Since(since) => since,
-        Counted::Days { days, since } => t!("support.counted.days", days = days, since = since),
-        Counted::Hours { n, since } => t!("support.counted.hours", n = n, since = since),
-        Counted::Minutes { n, since } => t!("support.counted.minutes", n = n, since = since),
-    }
-}
-
 /// Days counted, never more than were: a tenth under 10 (9.51 days are "9.5", not "10"), whole days from 10 on. One
 /// implementation for prose, metrics (`format::days`) and the app's `format.ts`.
 pub use culprit_core::format::days_counted;
@@ -879,6 +868,19 @@ pub fn counter_days_for_rate(snapshot: &Snapshot) -> Option<f64> {
 /// with a threshold (see [`counter_days_for_rate`]).
 pub fn counter_rate_per_day(snapshot: &Snapshot, total: f64) -> Option<f64> {
     counter_days_for_rate(snapshot).map(|d| total / d)
+}
+
+/// A counter's own declared reset, without borrowing the server or workload clock.
+pub fn counter_days_since(snapshot: &Snapshot, reset: &culprit_core::ResetMarker) -> Option<f64> {
+    days_between(reset.at()?, &snapshot.taken_at).filter(|days| *days >= 0.0)
+}
+pub fn counter_rate_per_day_since(snapshot: &Snapshot, total: f64, reset: &culprit_core::ResetMarker) -> Option<f64> {
+    if !total.is_finite() || total < 0.0 {
+        return None;
+    }
+    counter_days_since(snapshot, reset)
+        .filter(|days| days * 24.0 >= culprit_core::RATE_MIN_HOURS)
+        .map(|days| total / days)
 }
 
 pub fn lower_set(items: &[String]) -> Vec<String> {

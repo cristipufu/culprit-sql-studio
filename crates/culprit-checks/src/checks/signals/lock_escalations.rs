@@ -8,7 +8,7 @@ use culprit_core::signals::EscalationBaseline;
 /// SQL Server considers escalating once one statement holds about this many locks on one index.
 pub(super) const ESCALATION_THRESHOLD: f64 = 5_000.0;
 
-/// Escalations a day since SQL Server started that make a first scan's finding High (one a day: something recurring)
+/// Escalations a day over a declared native reset window that make a first scan's finding High (one a day: something recurring)
 /// or Medium (one a week). Fewer may all be old.
 pub(super) const ESCALATIONS_HIGH_PER_DAY: f64 = 1.0;
 const ESCALATIONS_MEDIUM_PER_DAY: f64 = 1.0 / 7.0;
@@ -37,6 +37,7 @@ pub(super) struct TableEscalations {
     escalations: f64,
     lock_waits: f64,
     lock_wait_ms: f64,
+    reset: Option<culprit_core::ResetMarker>,
 }
 
 /// The Extended Events session the lock-escalations fix starts, so the next escalation is kept with its statement.
@@ -134,7 +135,7 @@ pub struct EscalatedTable<'s> {
     new: Option<(&'s EscalationBaseline, f64)>,
     /// None since the earlier scan: history.
     historical: bool,
-    /// Without an earlier scan, the escalations a day since SQL Server started, over an hour or more of counting.
+    /// Without an earlier scan, the escalations a day over a declared reset window, over an hour or more of counting.
     first_scan_rate: Option<f64>,
     /// Counting for less than a day.
     counted_for: Option<CountedFor>,
@@ -172,25 +173,33 @@ fn escalated_tables(snapshot: &Snapshot) -> Vec<EscalatedTable<'_>> {
             continue;
         }
         let t = by_table.entry((i.schema.clone(), i.table.clone())).or_default();
+        t.reset = Some(match t.reset.take() {
+            None => c.reset.clone(),
+            Some(reset) if reset == c.reset => reset,
+            _ => culprit_core::ResetMarker::Unknown,
+        });
         t.escalations += c.lock_escalations;
         t.lock_waits += c.lock_waits();
         t.lock_wait_ms += c.lock_wait_ms();
     }
-    // SQL Server counts escalations from when it started and keeps no time for each: only an earlier scan tells the
+    // SQL Server keeps escalation totals over metadata-cache lifetime and no time for each: only an earlier scan tells the
     // recent ones from old ones.
     let before = snapshot.escalations_before.as_ref();
     let rcsi = snapshot.setting("is_read_committed_snapshot_on").is_some_and(|s| crate::config::is_on(&s.value));
-    // Counting for less than a day: every escalation counted is that recent ("3 minutes", "5 hours").
-    let counted_for = counter_days(snapshot).filter(|d| *d < 1.0).map(|d| match d * 24.0 {
-        h if h >= 1.5 => CountedFor::Hours(h.round()),
-        h => match (h * 60.0).round().max(1.0) {
-            1.0 => CountedFor::Minute,
-            m => CountedFor::Minutes(m),
-        },
-    });
     let mut cases: Vec<EscalatedTable<'_>> = by_table
         .into_iter()
         .map(|((schema, table), counts)| {
+            // Counting for less than a day: every escalation counted is that recent ("3 minutes", "5 hours").
+            let counted_for =
+                counts.reset.as_ref().and_then(|reset| counter_days_since(snapshot, reset)).filter(|d| *d < 1.0).map(
+                    |d| match d * 24.0 {
+                        h if h >= 1.5 => CountedFor::Hours(h.round()),
+                        h => match (h * 60.0).round().max(1.0) {
+                            1.0 => CountedFor::Minute,
+                            m => CountedFor::Minutes(m),
+                        },
+                    },
+                );
             let name = format!("{schema}.{table}");
             // How many since the earlier scan, when there is one to compare with and the counts compare.
             // A zero delta over only a fraction of the selected window (for example, a scan taken a minute or a few
@@ -209,8 +218,12 @@ fn escalated_tables(snapshot: &Snapshot) -> Vec<EscalatedTable<'_>> {
                 Some((b, n))
             });
             let historical = new.is_some_and(|(_, n)| n == 0.0);
-            // Without one, how many a day since SQL Server started, over an hour or more of counting.
-            let first_scan_rate = if new.is_none() { counter_rate_per_day(snapshot, counts.escalations) } else { None };
+            // Without one, use only an explicit native reset epoch covering an hour or more.
+            let first_scan_rate = if new.is_none() {
+                counts.reset.as_ref().and_then(|reset| counter_rate_per_day_since(snapshot, counts.escalations, reset))
+            } else {
+                None
+            };
             // SQL Server doesn't record which statement escalated: the writes to the table that change the most rows
             // per run are the likely ones. Writes to it, not statements that only read it (an INSERT elsewhere that
             // checks it in an EXISTS takes no locks on it to escalate).
@@ -310,7 +323,8 @@ fn lock_escalations_finding(snapshot: &Snapshot, e: EscalatedTable<'_>) -> Findi
     let EscalatedTable { schema, table, counts: t, new, historical, .. } = e;
     let name = format!("{schema}.{table}");
     let mut f = finding("lock-escalations", &name, Category::Indexes, subject(SubjectKind::Table, &name));
-    let started = snapshot.server.started_at.as_deref();
+    let started = t.reset.as_ref().and_then(|reset| reset.at());
+    let server_started_on = snapshot.server.started_at.as_deref().map(crate::queries::when_phrase);
     let azure = snapshot.server.on(culprit_core::Platform::AzureSqlDatabase);
     let since_start = match started {
         Some(at) => t!("check.lock_escalations.since_started", date = format::friendly_date(at, &snapshot.taken_at)),
@@ -340,7 +354,7 @@ fn lock_escalations_finding(snapshot: &Snapshot, e: EscalatedTable<'_>) -> Findi
                 when = crate::queries::when_phrase(&b.taken_at)
             ));
             summary.push(if b.restarted {
-                match started_on.as_deref() {
+                match server_started_on.as_deref() {
                     Some(on) => t!("check.lock_escalations.summary.restarted_on", on = on),
                     None => t!("check.lock_escalations.summary.restarted"),
                 }
@@ -410,7 +424,8 @@ fn lock_escalations_finding(snapshot: &Snapshot, e: EscalatedTable<'_>) -> Findi
                 Some(r) if r >= ESCALATIONS_HIGH_PER_DAY => t!("check.lock_escalations.summary.daily"),
                 Some(r) if r >= ESCALATIONS_MEDIUM_PER_DAY => t!("check.lock_escalations.summary.weekly"),
                 Some(_) => t!("check.lock_escalations.summary.rarely"),
-                None => t!("check.lock_escalations.summary.too_recent"),
+                None if e.counted_for.is_some() => t!("check.lock_escalations.summary.too_recent"),
+                None => t!("check.lock_escalations.summary.unknown_window"),
             });
         }
     }

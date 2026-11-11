@@ -181,6 +181,9 @@ fn bloated_finding(b: Bloated<'_>) -> Finding {
 /// The range-partitioned tables whose last partition ends, or ended, within a week. sequence-capacity reports them on
 /// engines table-bloat doesn't run on.
 pub(crate) fn expiring_partitions(snapshot: &Snapshot) -> Vec<ExpiringPartition> {
+    if snapshot.server.engine.spec().partition_tail() != culprit_core::engines::PartitionTail::FromCatalog {
+        return Vec::new();
+    }
     let Some(now_epoch) = parse_epoch_seconds(&snapshot.taken_at) else {
         return Vec::new();
     };

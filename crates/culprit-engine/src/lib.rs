@@ -1,10 +1,16 @@
+pub mod activity_monitor;
+pub mod adx;
 pub mod agent;
 mod analysis;
 pub mod aws;
+pub mod azure_blob;
+pub mod azure_identity;
 pub mod catalog;
 pub mod changes;
 pub mod cloud;
 mod cloud_process;
+mod collection;
+pub mod collector_service;
 mod connection;
 pub mod connstr;
 pub mod deadlocks;
@@ -14,8 +20,11 @@ mod event_context;
 mod execution;
 pub mod export;
 pub mod files;
+mod fleet;
 pub mod history;
 mod http;
+#[cfg(test)]
+mod http_fixture;
 pub mod import;
 pub mod marks;
 mod operation;
@@ -32,6 +41,7 @@ pub mod saved;
 mod scan;
 pub mod secrets;
 mod share;
+mod source_operation;
 mod ssh;
 pub mod store;
 pub mod trends;
@@ -71,10 +81,12 @@ pub struct Workspace {
     saved: saved::SavedQueries,
     secrets: Arc<dyn SecretStore>,
     entra: entra::EntraAuth,
+    azure_credential: Option<Arc<azure_identity::AzureCredential>>,
     extra_checks: Vec<Arc<dyn Check>>,
     providers: Vec<(Engine, ProviderFactory)>,
     ssh: ssh::Manager,
     previews: tokio::sync::Semaphore,
+    source_gate: culprit_collector::admission::SourceGate,
 }
 
 impl Workspace {
@@ -110,10 +122,12 @@ impl Workspace {
             saved,
             secrets,
             entra: entra::EntraAuth::default(),
+            azure_credential: None,
             extra_checks: Vec::new(),
             providers: Vec::new(),
             ssh: ssh::Manager::default(),
             previews: tokio::sync::Semaphore::new(1),
+            source_gate: culprit_collector::admission::SourceGate::default(),
         }
     }
 
@@ -123,8 +137,10 @@ impl Workspace {
             store: &self.store,
             secrets: self.secrets.as_ref(),
             entra: &self.entra,
+            azure_credential: self.azure_credential.as_deref(),
             providers: &self.providers,
             ssh: &self.ssh,
+            source_gate: &self.source_gate,
         }
     }
 
@@ -165,6 +181,11 @@ impl Workspace {
     /// Keep passwords and sign-in tokens somewhere else (a vault, a test double).
     pub fn with_secrets(mut self, secrets: Arc<dyn SecretStore>) -> Workspace {
         self.secrets = secrets;
+        self
+    }
+    /// Unattended Entra connections use this explicit identity and never try Azure CLI or device-code sign-in.
+    pub fn with_azure_credential(mut self, credential: Arc<azure_identity::AzureCredential>) -> Workspace {
+        self.azure_credential = Some(credential);
         self
     }
 
@@ -337,14 +358,32 @@ impl Workspace {
         options: &SnapshotOptions,
         query_log: Option<&std::path::Path>,
     ) -> Result<Report> {
+        // The owned observation retains provider, snapshot and analysis state. Keep that state off callers'
+        // async frames so nested consumers (verification, MCP and desktop tasks) retain decoding stack space.
+        Box::pin(self.scan_observation(name, options, query_log)).await
+    }
+
+    async fn scan_observation(
+        &self,
+        name: &str,
+        options: &SnapshotOptions,
+        query_log: Option<&std::path::Path>,
+    ) -> Result<Report> {
         let saved = self.store.get(name)?.query_log.map(std::path::PathBuf::from);
         let found = if query_log.is_none() && saved.is_none() { self.discover_query_log(name) } else { None };
         let query_log = query_log.or(saved.as_deref()).or(found.as_deref());
         let scan = scan::Scan::begin(self.paths.reports_dir(name), &self.extra_checks);
-        let provider = self.provider(name).await?;
-        let snapshot = self.connection_service().forget_rejected(name, provider.snapshot(name, options).await)?;
-        let log = query_log.map(|path| scan::QueryLog { path, discovered: found.is_some() });
-        scan.finish(provider.as_ref(), snapshot, name, options, log).await
+        let observed = self.connection_service().observed_provider(name).await?;
+        let provider = observed.provider();
+        let result = async {
+            let snapshot = self.connection_service().forget_rejected(name, provider.snapshot(name, options).await)?;
+            ensure_source_quiet(provider)?;
+            let log = query_log.map(|path| scan::QueryLog { path, discovered: found.is_some() });
+            scan.collect_inputs(provider, snapshot, name, options, log).await
+        }
+        .await;
+        let collected = observed.finish(result).await?;
+        collected.finish().await
     }
 
     /// The newest saved report, or the newest one scanned with a window of `window_minutes` when given, read the way a
@@ -660,3 +699,10 @@ pub fn parse_connection_with_ssh(input: &str, engine: Option<Engine>) -> Result<
 
 #[cfg(test)]
 mod tests;
+
+fn ensure_source_quiet(provider: &dyn culprit_core::Provider) -> culprit_core::Result<()> {
+    if provider.source_shutdown() == culprit_core::telemetry::SourceShutdown::Unconfirmed {
+        return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
+    }
+    Ok(())
+}

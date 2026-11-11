@@ -242,6 +242,7 @@ pub mod signal_id {
     pub const THREADPOOL_WAITS: &str = "threadpool-waits";
     pub const OLDEST_TRANSACTION: &str = "oldest-transaction";
     pub const VERSION_STORE: &str = "version-store";
+    pub const PERSISTENT_VERSION_STORE: &str = "persistent-version-store";
     pub const HISTORY_LENGTH: &str = "history-length";
     pub const CACHE_HIT: &str = "cache-hit";
     pub const BUFFER_POOL_HIT: &str = "buffer-pool-hit";

@@ -234,10 +234,10 @@ fn single_use_plans_say_where_the_setting_is_kept() {
         "query_family_plan_cache",
         &all,
         r#"id: query-family:plan-cache · Medium · High · score 28.666666666666664 · share None
-title: Plans used once fill 67% of the plan cache (2.0 GB)
-summary: 40K plans in the cache were compiled for a statement that ran exactly once. They take memory that could hold data pages and reusable plans, and every one cost a compilation. 'Optimize for ad hoc workloads' is off, so each keeps a full plan instead of a small stub.
-impact: 2.0 GB single-use
-metric: Single-use plans: 40000 Count
+title: Ad hoc plans with one lookup fill 67% of the cache (2.0 GB)
+summary: 40K ad hoc cache entries have one recorded lookup and occupy memory that could hold data pages or reusable plans. 'Optimize for ad hoc workloads' is off. Enabling it stores a small stub on a plan's first use.
+impact: 2.0 GB in ad hoc entries
+metric: Ad hoc entries with one lookup: 40000 Count
 metric: Their memory: 2147483648 Bytes
 metric: Share of the cache: 0.6666666666666666 Ratio
 fix: Keep only a stub for a plan's first use, and parameterize the statements behind it.
@@ -245,38 +245,38 @@ sql: EXEC sp_configure 'show advanced options', 1;
 RECONFIGURE;
 EXEC sp_configure 'optimize for ad hoc workloads', 1;
 RECONFIGURE;
-verify: Re-scan after a day: single-use plans take a much smaller share of the cache.
+verify: Re-scan after a day: ad hoc entries with one lookup take a smaller share of the cache.
 
 id: query-family:plan-cache · Low · High · score 11.333333333333332 · share None
-title: Plans used once fill 33% of the plan cache (1.0 GB)
-summary: 40K plans in the cache were compiled for a statement that ran exactly once. They take memory that could hold data pages and reusable plans, and every one cost a compilation. 'Optimize for ad hoc workloads' is off, so each keeps a full plan instead of a small stub.
-impact: 1.0 GB single-use
-metric: Single-use plans: 40000 Count
+title: Ad hoc plans with one lookup fill 33% of the cache (1.0 GB)
+summary: 40K ad hoc cache entries have one recorded lookup and occupy memory that could hold data pages or reusable plans. 'Optimize for ad hoc workloads' is off. Enabling it stores a small stub on a plan's first use.
+impact: 1.0 GB in ad hoc entries
+metric: Ad hoc entries with one lookup: 40000 Count
 metric: Their memory: 1073741824 Bytes
 metric: Share of the cache: 0.3333333333333333 Ratio
 fix: Keep only a stub for a plan's first use, and parameterize the statements behind it.
 sql: ALTER DATABASE SCOPED CONFIGURATION SET OPTIMIZE_FOR_AD_HOC_WORKLOADS = ON;
-verify: Re-scan after a day: single-use plans take a much smaller share of the cache.
+verify: Re-scan after a day: ad hoc entries with one lookup take a smaller share of the cache.
 
 id: query-family:plan-cache · Medium · High · score 28.666666666666664 · share None
-title: Plans used once fill 67% of the plan cache (2.0 GB)
-summary: 40K plans in the cache were compiled for a statement that ran exactly once. They take memory that could hold data pages and reusable plans, and every one cost a compilation. 'Optimize for ad hoc workloads' is off, so each keeps a full plan instead of a small stub.
-impact: 2.0 GB single-use
-metric: Single-use plans: 40000 Count
+title: Ad hoc plans with one lookup fill 67% of the cache (2.0 GB)
+summary: 40K ad hoc cache entries have one recorded lookup and occupy memory that could hold data pages or reusable plans. 'Optimize for ad hoc workloads' is off. Enabling it stores a small stub on a plan's first use.
+impact: 2.0 GB in ad hoc entries
+metric: Ad hoc entries with one lookup: 40000 Count
 metric: Their memory: 2147483648 Bytes
 metric: Share of the cache: 0.6666666666666666 Ratio
 fix: Keep only a stub for a plan's first use, and parameterize the statements behind it. Set optimize for ad hoc workloads to 1 in the instance's DB parameter group.
-verify: Re-scan after a day: single-use plans take a much smaller share of the cache.
+verify: Re-scan after a day: ad hoc entries with one lookup take a smaller share of the cache.
 
 id: query-family:plan-cache · Low · High · score 11.333333333333332 · share None
-title: Plans used once fill 33% of the plan cache (1.0 GB)
-summary: 40K plans in the cache were compiled for a statement that ran exactly once. They take memory that could hold data pages and reusable plans, and every one cost a compilation.
-impact: 1.0 GB single-use
-metric: Single-use plans: 40000 Count
+title: Ad hoc plans with one lookup fill 33% of the cache (1.0 GB)
+summary: 40K ad hoc cache entries have one recorded lookup and occupy memory that could hold data pages or reusable plans.
+impact: 1.0 GB in ad hoc entries
+metric: Ad hoc entries with one lookup: 40000 Count
 metric: Their memory: 1073741824 Bytes
 metric: Share of the cache: 0.3333333333333333 Ratio
 fix: Parameterize the statements behind it (see the families above).
-verify: Re-scan after a day: single-use plans take a much smaller share of the cache."#,
+verify: Re-scan after a day: ad hoc entries with one lookup take a smaller share of the cache."#,
     );
 }
 
@@ -315,6 +315,53 @@ fn tuned(advice: TuningAdvice) -> Snapshot {
 
 fn advice(s: &Snapshot) -> Vec<culprit_core::Finding> {
     run("tuning-advice", s)
+}
+
+#[test]
+fn query_hint_failures_keep_replica_scopes_and_clear_the_observed_replica() {
+    let hints = ["1", "2"]
+        .into_iter()
+        .map(|group| QueryHint {
+            query_id: "7".into(),
+            hint_id: group.into(),
+            scope: culprit_core::QueryStoreHintScope::ReplicaGroup { id: group.into() },
+            hint: "OPTION(MAXDOP 1)".into(),
+            failures: 3.0,
+            last_failure_reason: None,
+        })
+        .collect();
+    let findings = advice(&tuned(TuningAdvice { hints, ..Default::default() }));
+    let hints: Vec<_> = findings.iter().filter(|finding| finding.id.contains("hint-failing:")).collect();
+    assert_eq!(hints.len(), 2);
+    assert_ne!(hints[0].id, hints[1].id);
+    for group in ["1", "2"] {
+        let finding = hints.iter().find(|finding| finding.id.ends_with(&format!("replica:{group}"))).unwrap();
+        assert!(
+            finding
+                .fix
+                .as_ref()
+                .and_then(|fix| fix.sql.as_ref())
+                .unwrap()
+                .contains(&format!("@replica_group_id = {group};"))
+        );
+        assert_eq!(finding.caveats.len(), 1);
+    }
+}
+
+#[test]
+fn unknown_hint_scope_preserves_the_failure_without_issuing_a_fix_against_the_local_replica() {
+    let hints = vec![QueryHint {
+        hint_id: "3".into(),
+        query_id: "7".into(),
+        scope: culprit_core::QueryStoreHintScope::Unknown,
+        hint: "OPTION(MAXDOP 1)".into(),
+        failures: 3.0,
+        last_failure_reason: None,
+    }];
+    let findings = advice(&tuned(TuningAdvice { hints, ..Default::default() }));
+    let hint = findings.iter().find(|finding| finding.id.contains("hint-failing:")).unwrap();
+    assert!(hint.fix.as_ref().unwrap().sql.is_none());
+    assert_eq!(hint.caveats.len(), 1);
 }
 
 #[test]
@@ -456,12 +503,16 @@ fn forced_plans_and_hints_that_stopped_applying_say_why() {
         hints: vec![
             QueryHint {
                 query_id: "7".into(),
+                hint_id: "7".into(),
+                scope: culprit_core::QueryStoreHintScope::Local,
                 hint: " OPTION (MAXDOP 1) ".into(),
                 failures: 3.0,
                 last_failure_reason: Some("QUERY_HINT_ERROR".into()),
             },
             QueryHint {
                 query_id: "9".into(),
+                hint_id: "9".into(),
+                scope: culprit_core::QueryStoreHintScope::Local,
                 hint: "OPTION (RECOMPILE)".into(),
                 failures: 1.0,
                 last_failure_reason: None,

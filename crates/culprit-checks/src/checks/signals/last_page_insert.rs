@@ -36,12 +36,12 @@ pub struct LastPageLatch<'s> {
     history: Option<CounterAge>,
 }
 
-/// How long counters kept since the server started have counted, when that is too little to grade them by.
+/// How long the native counters have counted, when that is too little to grade them by.
 #[derive(Clone, Copy)]
 pub enum CounterAge {
     /// Less than an hour.
     Short,
-    /// The scan doesn't know when the server started.
+    /// The scan doesn't know the native reset epoch.
     Unknown,
 }
 
@@ -64,8 +64,8 @@ fn last_page_latches(snapshot: &Snapshot) -> Vec<LastPageLatch<'_>> {
             let inserts = c.leaf_inserts.is_none_or(|n| n >= c.page_latch_waits);
             // Counted since the index was loaded, with no time for each wait: graded on a rate measured over an hour or
             // more (ten minutes a day High, one Medium), never on the total.
-            let rate = counter_rate_per_day(snapshot, c.page_latch_wait_ms);
-            let history = rate.is_none().then(|| match counter_days(snapshot) {
+            let rate = counter_rate_per_day_since(snapshot, c.page_latch_wait_ms, &c.reset);
+            let history = rate.is_none().then(|| match counter_days_since(snapshot, &c.reset) {
                 Some(_) => CounterAge::Short,
                 None => CounterAge::Unknown,
             });
@@ -110,11 +110,14 @@ fn last_page_insert_finding(snapshot: &Snapshot, latch: LastPageLatch<'_>) -> Fi
         );
     }
     f.severity = latch.severity;
+    if latch.history.is_some() {
+        f.actionability = culprit_core::Actionability::Information;
+    }
     match latch.history {
         Some(CounterAge::Short) => f.caveats.push(t!(
             "check.last_page_insert.caveat.short",
             engine = engine_name(snapshot),
-            since = crate::support::counted_span(snapshot)
+            since = culprit_core::span_words(counter_days_since(snapshot, &c.reset).unwrap_or(0.0) * 24.0)
         )),
         Some(CounterAge::Unknown) => {
             f.caveats.push(t!("check.last_page_insert.caveat.unknown", engine = engine_name(snapshot)))

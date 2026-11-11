@@ -29,16 +29,15 @@ impl<'a> Scan<'a> {
         Self { dir, checks, started: Instant::now(), taken_at: chrono::Utc::now() }
     }
 
-    /// Complete an already collected primary snapshot. Consuming the operation keeps its clock and history inputs
-    /// tied to this one scan; resolving a provider or rejecting its primary read remains with the connection service.
-    pub async fn finish(
+    /// Finish native enrichment and return only facts. Analysis and persistence receive no provider.
+    pub async fn collect_inputs(
         self,
         provider: &dyn Provider,
         mut snapshot: Snapshot,
         name: &str,
         options: &SnapshotOptions,
         log: Option<QueryLog<'_>>,
-    ) -> Result<Report> {
+    ) -> Result<CollectedScan> {
         // What was asked for, recorded once for every provider: the saved report is found by its window.
         if snapshot.options.is_none() {
             snapshot.options = Some(options.clone());
@@ -68,6 +67,9 @@ impl<'a> Scan<'a> {
         match deadlocks {
             Ok(found) => snapshot.deadlocks = Some(found),
             Err(e) if e.code == ErrorCode::Unsupported => {}
+            Err(e) if crate::source_operation::native_shutdown_uncertain(&e) => {
+                return Err(e);
+            }
             Err(e) => snapshot.notes.push(CollectorNote {
                 message_source: None,
                 collector: "deadlocks".into(),
@@ -75,9 +77,13 @@ impl<'a> Scan<'a> {
                 table: None,
             }),
         }
+        crate::ensure_source_quiet(provider)?;
         let recorded = match recorded {
             Ok(found) => found,
             Err(e) if e.code == ErrorCode::Unsupported => Vec::new(),
+            Err(e) if crate::source_operation::native_shutdown_uncertain(&e) => {
+                return Err(e);
+            }
             Err(e) => {
                 snapshot.notes.push(CollectorNote {
                     message_source: None,
@@ -93,7 +99,22 @@ impl<'a> Scan<'a> {
             started_at: snapshot.taken_at.clone(),
             completed_at: Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
         };
-        let checks = self.checks.to_vec();
+        Ok(CollectedScan { dir, checks: self.checks.to_vec(), snapshot, recorded, previous, collection })
+    }
+}
+
+/// All native work has ended. Analysis and persistence cannot reopen a provider.
+pub(crate) struct CollectedScan {
+    dir: PathBuf,
+    checks: Vec<Arc<dyn Check>>,
+    snapshot: Snapshot,
+    recorded: Vec<culprit_core::ChangeEvent>,
+    previous: Option<reports::ReportSummary>,
+    collection: culprit_core::CollectionProvenance,
+}
+impl CollectedScan {
+    pub async fn finish(self) -> Result<Report> {
+        let Self { dir, checks, mut snapshot, recorded, previous, collection } = self;
         crate::run_blocking(move || {
             let collected = snapshot.clone();
             let recorded_evidence = recorded.clone();
@@ -138,5 +159,23 @@ impl<'a> Scan<'a> {
             Ok(report)
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use super::*;
+
+    #[test]
+    fn public_scan_futures_leave_stack_space_for_native_decoding_and_nested_consumers() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = crate::Workspace::open_in(root.path());
+        let options = SnapshotOptions::default();
+        let scan = workspace.scan("unused", &options);
+        let with_log = workspace.scan_with_log("unused", &options, None);
+        for bytes in [std::mem::size_of_val(&scan), std::mem::size_of_val(&with_log)] {
+            assert!(bytes <= 4096, "scan retains {bytes} inline bytes; observation state belongs on the heap");
+        }
+        assert!(!root.path().join("source-admission").exists());
     }
 }

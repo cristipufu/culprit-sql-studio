@@ -1,0 +1,601 @@
+{
+  "pipeline": "database-telemetry",
+  "shard": "pilot",
+  "workspace": "/var/lib/culprit/workspace",
+  "state": "/var/lib/culprit/state",
+  "health_listen": "0.0.0.0:9098",
+  "inventory": {
+    "targets": [
+      {
+        "connection": "pilot",
+        "shard": "pilot",
+        "admission_group": "REPLACE_PHYSICAL_RESOURCE_GROUP",
+        "schedules": [
+          {
+            "id": "activity",
+            "every_seconds": 180,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "activity",
+              "policy": {
+                "blocked_after_ms": 30000,
+                "running_after_ms": 60000,
+                "update_every_ms": 300000
+              }
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "query-history",
+            "every_seconds": 900,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "query-history",
+              "lookback_seconds": 86400,
+              "reconcile_seconds": 3600
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "resource-history",
+            "every_seconds": 900,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "resource-history",
+              "window_seconds": 900,
+              "overlap_seconds": 60
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "deadlock-history",
+            "every_seconds": 900,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "deadlock-history",
+              "window_seconds": 900,
+              "overlap_seconds": 60
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "operational",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "operational"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "wait-counters",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "wait-counters"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "replication",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "replication"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "settings",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "settings"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "plan-cache-summary",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "plan-cache-summary"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "tuning",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "tuning"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "statement-grants",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "statement-grants"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "index-operations",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "index-operations"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "tables",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "tables"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "foreign-keys",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "foreign-keys"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "columns",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "columns"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "statistics",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "statistics"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "indexes",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "indexes"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "check-constraints",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "check-constraints"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "missing-indexes",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "missing-indexes"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "query-compilation",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "query-compilation"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "cached-runtime",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "cached-runtime"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "objects",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "objects"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "triggers",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "triggers"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "partitions",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "partitions"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "cached-definitions",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "cached-definitions"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          },
+          {
+            "id": "retained-plans",
+            "every_seconds": 7200,
+            "jitter_seconds": 30,
+            "collection": {
+              "kind": "snapshot",
+              "dataset": "retained-plans"
+            },
+            "budget": {
+              "page_rows": 250,
+              "max_snapshot_rows": 500,
+              "page_bytes": 4194304,
+              "total_bytes": 67108864,
+              "max_sql_bytes": 262144,
+              "max_plan_bytes": 2097152,
+              "max_pages": 32,
+              "max_queries": 128,
+              "statement_timeout_ms": 3000,
+              "total_timeout_ms": 15000
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "identity": {
+    "kind": "workload-identity",
+    "tenant_id": "REPLACE_TENANT_ID",
+    "client_id": "REPLACE_CLIENT_ID",
+    "token_file": "/var/run/secrets/culprit/token"
+  },
+  "recovery": {
+    "kind": "azure-blob",
+    "storage": {
+      "account": "REPLACE_STORAGE_ACCOUNT",
+      "container": "culprit-native",
+      "prefix": "database-telemetry/pilot"
+    }
+  },
+  "target": {
+    "kind": "adx",
+    "query": {
+      "endpoint": "https://REPLACE_CLUSTER.REGION.kusto.windows.net",
+      "database": "REPLACE_ADX_DATABASE"
+    },
+    "ready": {
+      "account": "REPLACE_STORAGE_ACCOUNT",
+      "container": "culprit-ready",
+      "prefix": "database-telemetry/pilot"
+    }
+  },
+  "limits": {
+    "max_bytes": 1073741824,
+    "max_captures": 256
+  }
+}

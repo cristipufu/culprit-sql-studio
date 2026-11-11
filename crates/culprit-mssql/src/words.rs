@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use culprit_core::{AuthKind, ConnectionSpec, Coverage, Error, EventAction, Signal};
 
 use crate::probe::{Probe, QueryStoreState};
-use crate::value::{Rec, Val};
+use crate::value::Rec;
 
 fn said(error: &Error) -> String {
     match &error.hint {
@@ -199,9 +199,8 @@ fn actual_plans_progress_and_sessions() {
          SCOPED CONFIGURATION SET LAST_QUERY_PLAN_STATS = ON;), let the query run once, then look again."
     );
     assert_eq!(
-        said(&not_cached()),
-        "This query's plan isn't in the plan cache right now | SQL Server keeps the last actual plan only while the \
-         plan is cached. It comes back the next time the query runs."
+        said(&no_matching_plan()),
+        "No matching retained actual plan is available for this query right now | The plan may have left the cache, or SQL Server may not expose a reliable link to this Query Store entry."
     );
     assert_eq!(own_estimate("BACKUP DATABASE"), "SQL Server's own estimate for BACKUP DATABASE");
     assert_eq!(
@@ -237,6 +236,7 @@ fn probe() -> Probe {
         can_view_database_state: false,
         can_view_server_state: false,
         can_showplan: false,
+        can_view_definition: false,
         login: "reader".into(),
         user: "reader".into(),
         started_at: None,
@@ -271,6 +271,7 @@ Showplan: This login cannot request estimated plans. | GRANT SHOWPLAN TO [reader
         query_store: Some(QueryStoreState { actual: "READ_ONLY_REQUESTED".into(), options: Rec::default() }),
         can_view_database_state: true,
         can_showplan: true,
+        can_view_definition: true,
         ..probe()
     };
     assert_eq!(
@@ -410,14 +411,14 @@ Trigger audit on sales.orders was altered"
     assert_eq!(log_name("shop"), "shop transaction log");
     assert_eq!(filegroup_name("shop", "PRIMARY"), "shop data filegroup PRIMARY");
     assert_eq!(tempdb_name(), "tempdb data files (whole instance)");
-    let parts = tempdb_parts(&Rec::of(&[
-        ("users", Val::Float(1.0)),
-        ("internals", Val::Float(2.0)),
-        ("versions", Val::Float(3.0)),
-    ]));
+    let parts = tempdb_parts(&[
+        native::SpacePart { kind: native::SpacePartKind::Users, bytes: Some(1.0) },
+        native::SpacePart { kind: native::SpacePartKind::Internals, bytes: Some(2.0) },
+        native::SpacePart { kind: native::SpacePartKind::Versions, bytes: Some(3.0) },
+    ]);
     assert_eq!(
         parts.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
-        ["User objects", "Internal objects", "Version store"]
+        ["User objects", "Internal objects", "Version store (tempdb)"]
     );
 }
 
@@ -455,7 +456,7 @@ Page life expectancy (whole server): {shared}"
         )
     );
     assert_eq!(
-        signals(&resource_signals(40.0, 86.43, 70.0)),
+        signals(&resource_signals(&crate::resources::Summary {data_io:Some(40.0),data_io_peak:Some(86.43),memory:Some(70.0)})),
         "Storage I/O of its limit: Average use of this database's I/O limit; peak 86.4%. The individual resource samples establish whether pressure was sustained.
 Memory in use: of its memory limit; a full cache is normal, so it isn't graded"
     );
@@ -490,8 +491,8 @@ Waiting for workers since start: under a second an hour is healthy"
             oldest_transaction_signal(30.0),
         ]),
         "Waiting for memory: 0 is healthy
-Requests in this database without a worker: One observation; sample again to establish whether the queue persists
-Version store: small, and shrinking when transactions end
+Tasks in this database without a worker: One observation; sample again to establish whether the queue persists
+Version store (tempdb): small, and shrinking when transactions end
 Oldest open transaction: seconds or minutes, not hours"
     );
     let rates: HashMap<&str, f64> =

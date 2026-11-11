@@ -157,6 +157,40 @@ fn timed_lock_counters_distinguish_current_history_missing_and_reset() {
 }
 
 #[test]
+fn a_known_index_reset_prevents_comparison_even_when_its_counts_grew() {
+    let mut current = snapshot(Engine::Mssql);
+    let reset = culprit_core::ResetMarker::At("2026-10-18T10:00:00Z".into());
+    current.indexes[0].contention =
+        Some(IndexContention { reset, row_lock_waits: 100.0, row_lock_wait_ms: 100_000.0, ..Default::default() });
+    let mut previous = current.clone();
+    previous.taken_at = "2026-10-18T10:30:00Z".into();
+    let counters = previous.indexes[0].contention.as_mut().unwrap();
+    counters.row_lock_waits = 0.0;
+    counters.row_lock_wait_ms = 0.0;
+    let baseline = culprit_core::ContentionBaseline::from_scan(&previous, &current).unwrap();
+    let increase = baseline.since(&current.indexes[0]).unwrap();
+    assert_eq!(increase.waits, 100.0);
+    current.indexes[0].contention.as_mut().unwrap().reset =
+        culprit_core::ResetMarker::At("2026-10-18T11:00:00Z".into());
+    assert!(baseline.since(&current.indexes[0]).is_none());
+}
+
+#[test]
+fn missing_escalation_counters_are_unknown_and_measured_zero_is_comparable() {
+    let mut current = snapshot(Engine::Mssql);
+    for index in &mut current.indexes {
+        index.contention = None;
+    }
+    current.indexes[0].contention = Some(IndexContention::default());
+    let mut previous = current.clone();
+    previous.taken_at = "2026-10-18T10:00:00Z".into();
+    let baseline = culprit_core::EscalationBaseline::from_scan(&previous, &current).unwrap();
+    let index = &current.indexes[0];
+    assert_eq!(baseline.since(&format!("{}.{}", index.schema, index.table), 2.0), Some(2.0));
+    assert_eq!(baseline.since("missing.table", 2.0), None);
+}
+
+#[test]
 fn selected_window_changes_the_amount_behind_index_advice() {
     for engine in [Engine::Mssql, Engine::Postgres, Engine::Mysql, Engine::Sqlite] {
         for (hours, actionable) in [(1.0, true), (24.0, true), (168.0, false), (720.0, false)] {

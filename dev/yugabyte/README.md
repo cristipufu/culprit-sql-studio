@@ -7,7 +7,7 @@ docker run --rm -d --name culprit-yugabyte-provider --cpus 3 --memory 6g \
   -p 127.0.0.1:55434:5433 \
   yugabytedb/yugabyte@sha256:e604d9e273a1fc3fccaf6ecbfe6ac6e3b93d2b4f06a075c461e3d73676d183fc \
   bin/yugabyted start --background=false --callhome=false \
-  --tserver_flags=memory_limit_hard_bytes=2147483648 \
+  --tserver_flags=memory_limit_hard_bytes=2147483648,backfill_index_rate_rows_per_sec=1000 \
   --master_flags=memory_limit_hard_bytes=536870912
 docker exec culprit-yugabyte-provider bin/ysqlsh -h culprit-yugabyte-provider -X -c 'CREATE DATABASE culprit_yugabyte;'
 docker exec -i culprit-yugabyte-provider bin/ysqlsh -h culprit-yugabyte-provider -d culprit_yugabyte -X < dev/yugabyte/seed.sql
@@ -79,6 +79,9 @@ CULPRIT_YSQL_TEST_PORT=55434 cargo test --locked -p culprit-yugabyte --lib progr
 ```
 
 These cases build a partial index over a bounded synthetic DocDB table and hold a streamed, batched COPY open.
+The disposable server limits native backfill to 1,000 rows per second per tablet so its progress can be observed
+reliably. The index fixture uses one tablet and a bounded observation deadline; it does not depend on catching
+an unthrottled build between two polls. This setting is for the test server only.
 They check native counts without a guessed percentage, successful/failed COPY retention, leading SQL comments,
 stale/wrong-node session refusal, hidden-role visibility and a one-node global read. Owned test tables and the
 temporary login are removed afterward. Temporary PostgreSQL-local tables cannot verify DocDB batch counters.

@@ -178,7 +178,7 @@ pub enum MeasurementSource {
     Named(String),
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
 pub enum MeasurementScope {
@@ -235,13 +235,20 @@ impl MeasurementPeriod {
     }
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(tag = "kind", content = "value", rename_all = "kebab-case")]
 #[ts(export)]
 pub enum ResetMarker {
     At(String),
     Generation(String),
+    #[default]
     Unknown,
+}
+
+impl ResetMarker {
+    pub fn at(&self) -> Option<&str> {
+        if let Self::At(at) = self { Some(at) } else { None }
+    }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]

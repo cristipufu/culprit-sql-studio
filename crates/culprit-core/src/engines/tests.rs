@@ -2,6 +2,19 @@
 //! advice, settings, fixes, notes and refusals the checks and surfaces ask it for.
 
 use super::*;
+
+#[test]
+fn partition_tail_semantics_are_explicit_for_every_engine_and_shared_with_frontend_facts() {
+    for engine in Engine::ALL {
+        let expected = match engine {
+            Engine::Mssql => PartitionTail::Unbounded,
+            Engine::Postgres | Engine::Mysql | Engine::Yugabyte => PartitionTail::FromCatalog,
+            Engine::Sqlite => PartitionTail::Unsupported,
+        };
+        assert_eq!(engine.spec().partition_tail(), expected);
+        assert_eq!(engine.facts().partition_tail, expected);
+    }
+}
 use crate::i18n::{Arg, t};
 
 fn server(engine: Engine, product: &str, version: &str, capabilities: Vec<Capability>) -> ServerInfo {
@@ -552,3 +565,18 @@ Sqlite.index_advice_sources.0.true: Some("SQLite doesn't record missing-index re
 Sqlite.index_advice_sources.0.false: Some("SQLite keeps no history of the statements it ran, so candidates come from foreign keys only. With the application's query log on the connection, the indexes SQLite builds for itself on every run join them.")
 Sqlite.refresh_statistics: Run ANALYZE, so the planner knows each table's size and how selective each index is. | Some("ANALYZE public.orders;") | Some("ANALYZE reads the indexes and briefly takes the write lock to store what it found.")
 Yugabyte.session_target: Select a node-qualified YSQL session from Live"#;
+
+#[test]
+fn setting_defaults_are_explicit_engine_facts() {
+    for engine in Engine::ALL {
+        for (name, default) in [
+            ("cost threshold for parallelism", "5"),
+            ("max degree of parallelism", "0"),
+            ("optimize for ad hoc workloads", "0"),
+            ("max server memory (MB)", "2147483647"),
+        ] {
+            assert_eq!(engine.spec().default_setting_value(name), (engine == Engine::Mssql).then_some(default));
+        }
+        assert_eq!(engine.spec().default_setting_value("unrecognized setting"), None);
+    }
+}

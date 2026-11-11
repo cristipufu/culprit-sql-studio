@@ -303,11 +303,13 @@ fn escalating(escalations: f64, attempts: f64, lock_wait_ms: f64) -> IndexConten
 }
 
 /// The demo with no contention anywhere but on `dbo.<table>`'s two indexes.
-/// The demo's server started 44 seconds before its scan: too little counting for any rate. These tests start it 12
-/// hours earlier, at 00:13 UTC on the day of the scan.
-fn escalations_on(table: &str, first: IndexContention, second: IndexContention) -> Snapshot {
+/// These synthetic counters explicitly declare a reset 12 hours before the scan. Real SQL Server metadata-cache
+/// counters have an unknown epoch; server uptime never establishes their lifetime.
+fn escalations_on(table: &str, mut first: IndexContention, mut second: IndexContention) -> Snapshot {
     let mut s = snapshot_with(Engine::Mssql);
     s.server.started_at = Some("2026-10-11T00:13:03Z".into());
+    first.reset = culprit_core::ResetMarker::At("2026-10-11T00:13:03Z".into());
+    second.reset = first.reset.clone();
     s.indexes.iter_mut().for_each(|i| i.contention = None);
     let mut a = s.indexes[0].clone();
     a.schema = "dbo".into();
@@ -319,6 +321,43 @@ fn escalations_on(table: &str, first: IndexContention, second: IndexContention) 
     b.contention = Some(second);
     s.indexes.extend([a, b]);
     s
+}
+
+fn reset_contention_at(s: &mut Snapshot, at: &str) {
+    for c in s.indexes.iter_mut().filter_map(|index| index.contention.as_mut()) {
+        c.reset = culprit_core::ResetMarker::At(at.into());
+    }
+}
+
+#[test]
+fn index_contention_never_borrows_server_or_workload_uptime() {
+    let mut s = escalations_on("orders", escalating(50_000.0, 0.0, 0.0), IndexContention::default());
+    s.server.started_at = Some("2026-10-11T11:13:03Z".into());
+    for c in s.indexes.iter_mut().filter_map(|i| i.contention.as_mut()) {
+        c.reset = culprit_core::ResetMarker::Unknown;
+        c.sequential_key = true;
+        c.page_latch_waits = 50_000.0;
+        c.page_latch_wait_ms = 900_000.0;
+    }
+    for check in [&LockEscalationsCheck as &dyn culprit_core::Check, &LastPageInsertCheck] {
+        let findings = check.run(&s);
+        assert!(!findings.is_empty());
+        assert!(findings.iter().all(|f| f.severity == Severity::Low && !f.is_actionable()));
+    }
+    let finding = &LockEscalationsCheck.run(&s)[0];
+    assert!(finding.summary.contains("reset time is unknown"), "{}", finding.summary);
+    assert!(!finding.summary.contains("too little time"));
+}
+
+#[test]
+fn aggregating_indexes_with_different_reset_epochs_establishes_no_rate() {
+    let mut s = escalations_on("orders", escalating(20.0, 0.0, 0.0), escalating(20.0, 0.0, 0.0));
+    s.indexes.last_mut().unwrap().contention.as_mut().unwrap().reset =
+        culprit_core::ResetMarker::At("2026-10-11T06:00:00Z".into());
+    let finding = &LockEscalationsCheck.run(&s)[0];
+    assert_eq!(finding.severity, Severity::Low);
+    assert!(!finding.is_actionable());
+    assert!(finding.summary.contains("reset time is unknown"), "{}", finding.summary);
 }
 
 #[test]
@@ -333,7 +372,10 @@ fn lock_escalations_add_up_per_table_and_name_the_write_that_changes_the_most_ro
     let f = LockEscalationsCheck.run(&s);
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].id, "lock-escalations:dbo.orders");
-    assert_eq!(f[0].title, "Row locks on orders escalated to a table lock 5 times since SQL Server started (Oct 11)");
+    assert_eq!(
+        f[0].title,
+        "Row locks on orders escalated to a table lock 5 times since these counters were reset (Oct 11)"
+    );
     // Attempts aren't reported: the counter moves without any statement behind it.
     assert!(!f[0].summary.contains("tried"), "{}", f[0].summary);
     assert!(
@@ -345,7 +387,7 @@ fn lock_escalations_add_up_per_table_and_name_the_write_that_changes_the_most_ro
     assert_eq!(f[0].severity, Severity::High);
     assert_eq!(
         (f[0].metrics[0].key.as_str(), f[0].metrics[0].label.as_str()),
-        (ESCALATIONS_METRIC, "Escalations since SQL Server started")
+        (ESCALATIONS_METRIC, "Recorded lock escalations")
     );
     assert_eq!(f[0].metrics[0].value, 5.0);
     assert!(f[0].fix.as_ref().unwrap().sql.as_ref().unwrap().contains("DELETE TOP (1000) FROM [dbo].[orders]"));
@@ -367,7 +409,7 @@ fn a_table_with_no_statement_writing_to_it_says_where_to_look() {
     let f = LockEscalationsCheck.run(&s);
     assert_eq!(
         f[0].title,
-        "Row locks on audit_archive escalated to a table lock 2 times since SQL Server started (Oct 11)"
+        "Row locks on audit_archive escalated to a table lock 2 times since these counters were reset (Oct 11)"
     );
     assert!(f[0].summary.contains("none of the statements in the query history writes to it"), "{}", f[0].summary);
     assert!(f[0].queries.is_empty());
@@ -378,7 +420,10 @@ fn a_table_with_no_statement_writing_to_it_says_where_to_look() {
 fn a_single_lock_escalation_is_high() {
     let s = escalations_on("orders", escalating(1.0, 1.0, 0.0), IndexContention::default());
     let f = LockEscalationsCheck.run(&s);
-    assert_eq!(f[0].title, "Row locks on orders escalated to a table lock once since SQL Server started (Oct 11)");
+    assert_eq!(
+        f[0].title,
+        "Row locks on orders escalated to a table lock once since these counters were reset (Oct 11)"
+    );
     assert_eq!(f[0].severity, Severity::High);
 }
 
@@ -400,11 +445,9 @@ fn with_earlier_scan(mut s: Snapshot, counts: &[(&str, f64)], started_at: Option
     s
 }
 
-// SQL Server counts escalations since it started, with no time for each: without an earlier scan, Culprit can't
-// tell whether they're recent. The finding says when the count began, and only a rate measured since then raises
-// it: two in the 12 hours since the start is High.
+// A known native reset establishes a rate. Server uptime alone does not.
 #[test]
-fn escalations_without_an_earlier_scan_are_graded_on_their_rate_since_the_start() {
+fn escalations_without_an_earlier_scan_require_their_own_reset_epoch_for_a_rate() {
     let mut s = escalations_on("orders", escalating(2.0, 0.0, 0.0), IndexContention::default());
     let f = &LockEscalationsCheck.run(&s)[0];
     assert_eq!(f.severity, Severity::High);
@@ -413,7 +456,7 @@ fn escalations_without_an_earlier_scan_are_graded_on_their_rate_since_the_start(
     // minutes after a restart).
     assert!(
         f.summary.starts_with(
-            "SQL Server replaced the row and page locks on orders with one lock on the whole table 2 times since it started, on Oct 11 at 00:13 UTC, \
+            "SQL Server replaced the row and page locks on orders with one lock on the whole table 2 times since these counters were reset, on Oct 11 at 00:13 UTC, \
              12 hours before this scan, so none is older than that."
         ),
         "{}",
@@ -422,13 +465,13 @@ fn escalations_without_an_earlier_scan_are_graded_on_their_rate_since_the_start(
     assert!(f.summary.contains("once a day or more on average over the counter history"), "{}", f.summary);
     assert_eq!(f.metrics.len(), 1);
     // Counted for days, they may be old.
-    s.server.started_at = Some("2026-10-08T00:13:03Z".into());
+    reset_contention_at(&mut s, "2026-10-08T00:13:03Z");
     let f = &LockEscalationsCheck.run(&s)[0];
     assert_eq!(f.severity, Severity::Medium);
     assert!(f.is_actionable());
     assert!(
         f.summary.contains(
-            "2 times since it started, on Oct 8 at 00:13 UTC. It keeps no time for each, and Culprit has no earlier scan to compare with, so they may be old"
+            "2 times since these counters were reset, on Oct 8 at 00:13 UTC. It keeps no time for each, and Culprit has no earlier scan to compare with, so they may be old"
         ),
         "{}",
         f.summary
@@ -440,22 +483,22 @@ fn escalations_without_an_earlier_scan_are_graded_on_their_rate_since_the_start(
 #[test]
 fn one_escalation_in_six_months_is_low_history_on_a_first_scan() {
     let mut s = escalations_on("orders", escalating(1.0, 0.0, 0.0), IndexContention::default());
-    s.server.started_at = Some("2026-04-11T12:00:00Z".into());
+    reset_contention_at(&mut s, "2026-04-11T12:00:00Z");
     let f = &LockEscalationsCheck.run(&s)[0];
     assert_eq!(f.severity, Severity::Low);
     assert_eq!(f.actionability, culprit_core::Actionability::Information);
     assert!(f.summary.contains("less than once a week on average since then: they may all be old"), "{}", f.summary);
     // A few a week since the start is Medium: likely to happen again.
-    s.server.started_at = Some("2026-10-01T12:00:00Z".into());
+    reset_contention_at(&mut s, "2026-10-01T12:00:00Z");
     s.indexes.iter_mut().filter_map(|i| i.contention.as_mut()).for_each(|c| c.lock_escalations = 3.0);
     assert_eq!(LockEscalationsCheck.run(&s)[0].severity, Severity::Medium);
     assert!(LockEscalationsCheck.run(&s)[0].is_actionable());
     // Minutes of counting make no rate: the demo's server started 44 seconds before the scan.
-    s.server.started_at = Some("2026-10-11T12:13:03Z".into());
+    reset_contention_at(&mut s, "2026-10-11T12:13:03Z");
     let f = &LockEscalationsCheck.run(&s)[0];
     assert_eq!(f.severity, Severity::Low);
     assert_eq!(f.actionability, culprit_core::Actionability::Information);
-    assert!(f.summary.contains("started too recently to tell how often"), "{}", f.summary);
+    assert!(f.summary.contains("cover too little time to assess a rate"), "{}", f.summary);
 }
 
 #[test]
@@ -467,7 +510,7 @@ fn escalations_since_the_previous_scan_are_high_and_counted() {
     assert!(
         f.summary.starts_with(
             "SQL Server replaced the row and page locks on orders with one lock on the whole table once since the previous scan, \
-             on Oct 11 at 06:00 UTC. It counted 5 in all since SQL Server started (Oct 11)."
+             on Oct 11 at 06:00 UTC. It counted 5 in all since these counters were reset (Oct 11)."
         ),
         "{}",
         f.summary
@@ -485,7 +528,7 @@ fn a_count_that_fell_without_a_restart_is_not_new_escalations() {
     let s = with_earlier_scan(s, &[("orders", 5.0)], None);
     let f = &LockEscalationsCheck.run(&s)[0];
     assert!(!f.title.contains("since Oct 11, 06:00"), "{}", f.title);
-    assert!(f.summary.contains("since it started"), "{}", f.summary);
+    assert!(f.summary.contains("since these counters were reset"), "{}", f.summary);
 }
 
 // The case that looked recent: the count is old, and the writes listed are only the table's writes now.
@@ -501,17 +544,17 @@ fn escalations_with_none_since_the_previous_scan_are_low_history() {
     assert_eq!(f.severity, Severity::Low);
     assert_eq!(
         f.title,
-        "Row locks on orders escalated to a table lock 2 times since SQL Server started (Oct 11), none since Oct 11, 06:00 UTC"
+        "Row locks on orders escalated to a table lock 2 times since these counters were reset (Oct 11), no observed increase since Oct 11, 06:00 UTC"
     );
     assert!(
         f.summary.starts_with(
-            "These escalations are history, not something happening now: SQL Server counts them from when it started, \
-             on Oct 11 at 00:13 UTC, and the count on orders hasn't grown since the previous scan, on Oct 11 at 06:00 UTC."
+            "The counter on orders has not increased since the previous scan, on Oct 11 at 06:00 UTC. \
+             It was reset on Oct 11 at 00:13 UTC, and individual escalations are not dated."
         ),
         "{}",
         f.summary
     );
-    assert!(f.summary.ends_with("none of them has escalated since the previous scan."), "{}", f.summary);
+    assert!(f.summary.ends_with("the counter does not identify which statement escalated."), "{}", f.summary);
     assert!(!f.summary.contains("likeliest"), "{}", f.summary);
     assert_eq!(f.queries.len(), 1);
     assert_eq!(f.impact.label, "2 table locks, none new");
@@ -524,6 +567,7 @@ fn all_timespan_windows_require_baseline_to_cover_the_window_before_silencing_es
     let mut base = escalations_on("orders", escalating(40.0, 0.0, 0.0), IndexContention::default());
     base.taken_at = "2026-10-31T12:00:00Z".into();
     base.server.started_at = Some("2026-10-01T00:00:00Z".into());
+    reset_contention_at(&mut base, "2026-10-01T00:00:00Z");
 
     for (window_minutes, partial_at, full_at) in [
         (60_u32, "2026-10-31T11:54:00Z", "2026-10-31T11:00:00Z"),
@@ -540,14 +584,14 @@ fn all_timespan_windows_require_baseline_to_cover_the_window_before_silencing_es
         let f = &LockEscalationsCheck.run(&s)[0];
         assert_eq!(f.severity, Severity::High, "window {window_minutes}m should keep active escalations High");
         assert!(f.is_actionable(), "window {window_minutes}m");
-        assert!(!f.title.contains(", none since "), "window {window_minutes}m: {}", f.title);
+        assert!(!f.title.contains(", no observed increase since "), "window {window_minutes}m: {}", f.title);
 
         // When the baseline covers the full selected window with zero delta, it is History.
         s.escalations_before.as_mut().unwrap().taken_at = full_at.into();
         let f = &LockEscalationsCheck.run(&s)[0];
         assert_eq!(f.severity, Severity::Low, "window {window_minutes}m with full baseline should be Low");
         assert_eq!(f.actionability, culprit_core::Actionability::History, "window {window_minutes}m");
-        assert!(f.title.contains(", none since "), "window {window_minutes}m: {}", f.title);
+        assert!(f.title.contains(", no observed increase since "), "window {window_minutes}m: {}", f.title);
     }
 }
 
@@ -1057,7 +1101,7 @@ fn expiring_range_partition_is_flagged_unless_default_exists() {
     s.tables.push(def);
     assert!(!TableBloatCheck.run(&s).iter().any(|f| f.id == "table-bloat:expiring-partition:public.events"));
 
-    // MySQL and SQL Server parent-level VALUES LESS THAN range partitions are also checked via sequence_capacity.
+    // MySQL's explicitly bounded last partition is also checked via sequence_capacity.
     let mut mysql = snapshot_with(Engine::Mysql);
     mysql.taken_at = "2026-10-30T12:00:00Z".into();
     mysql.tables[0].storage = Some(TableStorage {
@@ -1072,7 +1116,17 @@ fn expiring_range_partition_is_flagged_unless_default_exists() {
         .expect("mysql expiring partition");
     assert!(f.title.contains("(p202610) ends on 2026-11-01"), "{}", f.title);
 
-    // Adding a MAXVALUE catch-all partition suppresses the warning on MySQL/MSSQL.
+    // SQL Server always retains an unbounded final range, even without an explicit MAXVALUE catalog row.
+    let mut mssql = mysql.clone();
+    mssql.server.engine = Engine::Mssql;
+    assert!(
+        !sequence_capacity::SequenceCapacityCheck
+            .run(&mssql)
+            .iter()
+            .any(|finding| finding.id.starts_with("table-bloat:expiring-partition:"))
+    );
+
+    // Adding an explicit MAXVALUE catch-all partition suppresses the warning on MySQL.
     mysql.tables[0].storage.as_mut().unwrap().options.push("partition_bound=VALUES LESS THAN (MAXVALUE):pmax".into());
     assert!(
         !sequence_capacity::SequenceCapacityCheck

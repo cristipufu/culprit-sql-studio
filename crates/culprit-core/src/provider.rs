@@ -55,6 +55,33 @@ pub enum ExplainMode {
 pub trait Provider: Send + Sync {
     fn engine(&self) -> Engine;
 
+    /// Native work across this provider's sessions must be settled before another observation starts.
+    /// Implementations that retain workers override this state; an uncertain cancellation must never be hidden in
+    /// a successful snapshot or collector note. A closed socket alone does not prove native shutdown.
+    fn source_shutdown(&self) -> crate::telemetry::SourceShutdown {
+        crate::telemetry::SourceShutdown::Quiescent
+    }
+
+    /// Open an independent, bounded telemetry observation. This opt-in source is separate from report scans.
+    /// Construction must not start database work. Async source methods own their native work until `close` settles it.
+    /// The request selects a logical collection, independently of this provider's engine and any export destination.
+    /// Unsupported collections must return an explicit error; they must not manufacture successful empty streams.
+    fn telemetry_source(
+        &self,
+        _request: &crate::telemetry::CollectionRequest,
+    ) -> Result<Box<dyn crate::telemetry::TelemetrySource>> {
+        Err(Error::new(ErrorCode::Unsupported, crate::t!("collection.unsupported")))
+    }
+
+    /// Discover bounded native closed intervals for scheduling. Keep native boundaries, identity and reset evidence;
+    /// an unavailable history source is an error. Owned native work must settle before returning a successful page.
+    async fn telemetry_intervals(
+        &self,
+        _request: &crate::telemetry::IntervalDiscoveryRequest,
+    ) -> Result<crate::telemetry::IntervalDiscoveryPage> {
+        Err(Error::new(ErrorCode::Unsupported, crate::t!("collection.unsupported")))
+    }
+
     /// The collector that actually supplied this snapshot. Runtime wrappers need not claim a builtin's version.
     fn collector_version(&self) -> crate::ComponentVersion {
         crate::ComponentVersion::unknown("external provider")

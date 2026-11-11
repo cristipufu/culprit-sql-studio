@@ -2,6 +2,7 @@
 //! binary) for all of them, where a binary per file relinks every one after each change. A new file in `tests/` is
 //! listed here, or `every_test_file_is_listed` fails.
 
+mod collection;
 mod connection_security;
 mod dashboard;
 mod demo_sidecars;

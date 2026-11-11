@@ -1,6 +1,5 @@
 //! Snapshot orchestration: collect independent sources concurrently and account for their coverage once.
 
-use std::collections::HashMap;
 use std::future::Future;
 use std::time::Instant;
 
@@ -10,11 +9,10 @@ use culprit_core::{
 };
 
 use crate::{
-    MssqlProvider, advice,
-    conn::{self, MsClient},
-    operations, pressure,
+    MssqlProvider, advice, operations, pressure,
     probe::{self, Probe},
-    schema, signals, sources, workload,
+    read::{NativeRead, ReadSession},
+    resources, signals, sources, workload,
 };
 
 /// What a part of the scan's sources could read: the shared account every provider keeps (`culprit_core::Coverage`).
@@ -34,21 +32,51 @@ struct SchemaPart {
     columns: Vec<ColumnInfo>,
     foreign_keys: Vec<ForeignKey>,
     statistics: Vec<StatisticsInfo>,
+    missing_indexes: Vec<MissingIndex>,
+    constraints: Vec<culprit_core::ConstraintIssue>,
     outcome: Outcome,
 }
 
 #[derive(Default)]
 struct MiscPart {
     pressure: Option<culprit_core::Pressure>,
-    missing_indexes: Vec<MissingIndex>,
-    forwarded: HashMap<(String, String), f64>,
     query_families: Vec<culprit_core::QueryFamily>,
     plan_cache: Option<culprit_core::PlanCacheUse>,
     tuning: Option<culprit_core::TuningAdvice>,
     waits: Vec<WaitStat>,
-    resources: Vec<ResourceSample>,
     settings: Vec<Setting>,
     outcome: Outcome,
+}
+
+#[derive(Default)]
+struct ResourcePart {
+    samples: Vec<ResourceSample>,
+    signals: Vec<culprit_core::Signal>,
+    outcome: Outcome,
+}
+fn resource_part(result: Result<Vec<resources::Sample>>, include_pressure: bool, grant: &str) -> ResourcePart {
+    let mut part = ResourcePart::default();
+    let result = result.map_err(|error| {
+        if error.code == culprit_core::ErrorCode::PermissionDenied { error.with_hint(grant.to_owned()) } else { error }
+    });
+    if include_pressure {
+        part.outcome.read(&sources::RESOURCE_USE, result.as_ref().map(|_| ()).map_err(Clone::clone));
+    }
+    if let Some(samples) = part.outcome.read(&sources::RESOURCES, result) {
+        part.outcome.completed(&sources::RESOURCES, samples.len());
+        part.outcome.delivered(Capability::ResourceUsage);
+        if include_pressure {
+            part.signals = pressure::resource_signals(&resources::Summary::from_samples(&samples));
+        }
+        part.samples = samples.iter().map(resources::Sample::snapshot).collect();
+    }
+    part
+}
+async fn collect_resources(provider: &MssqlProvider, probe: &Probe) -> ResourcePart {
+    if !probe.is_azure_sql_database() {
+        return ResourcePart::default();
+    }
+    resource_part(resources::snapshot(provider.pool.clone()).await, probe.can_read_dmvs(), &probe.grant_hint())
 }
 
 /// What the probe already knows about Query Store: none here (an older server, a system database), or one that is off.
@@ -116,18 +144,33 @@ pub(crate) fn server_state_unreadable(outcome: &mut Outcome, probe: &Probe) {
     }
 }
 
-async fn collect_workload(client: &mut MsClient, probe: &Probe, options: &SnapshotOptions) -> WorkloadPart {
+async fn collect_workload(provider: &MssqlProvider, probe: &Probe, options: &SnapshotOptions) -> WorkloadPart {
     let mut part = WorkloadPart::default();
     let dmv = probe.can_read_dmvs();
     query_store_account(&mut part.outcome, probe);
 
     if probe.query_store_readable() {
         let grant = || probe.grant_hint();
-        if let Some(result) = sources::read(
-            &mut part.outcome,
+        let mut reader = crate::query_store::Reader::open(provider.pool.clone());
+        let result = workload::from_query_store(&mut reader, options).await;
+        let result = if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
+            Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error())
+        } else {
+            result
+        };
+        let uncertain = result.as_ref().err().is_some_and(|error| {
+            matches!(
+                error.detail,
+                Some(culprit_core::ErrorDetail::CollectionStopped(
+                    culprit_core::telemetry::CollectionStop::CancellationUnconfirmed
+                ))
+            )
+        });
+        if let Some(result) = part.outcome.read(
             &sources::QUERY_STORE,
-            workload::from_query_store(client, options).await,
-            grant,
+            result.map_err(|error| {
+                if error.code == culprit_core::ErrorCode::PermissionDenied { error.with_hint(grant()) } else { error }
+            }),
         ) {
             part.outcome.merge(result.coverage);
             part.outcome.completed(&sources::QUERY_STORE, result.workload.queries.len());
@@ -145,14 +188,28 @@ async fn collect_workload(client: &mut MsClient, probe: &Probe, options: &Snapsh
             part.workload = Some(result.workload);
             return part;
         }
+        if uncertain {
+            return part;
+        }
     }
 
     if !dmv {
         plan_cache_unreadable(&mut part.outcome, probe);
         return part;
     }
-    let plan_cache = workload::from_plan_cache(client, options).await;
-    if let Some(result) = sources::read(&mut part.outcome, &sources::PLAN_CACHE, plan_cache, || probe.grant_hint()) {
+    let mut client = ReadSession::application(provider.pool.clone());
+    let plan_cache = workload::from_plan_cache(&mut client, options).await;
+    let plan_cache = client.finish(plan_cache).await;
+    if let Some(result) = part.outcome.read(
+        &sources::PLAN_CACHE,
+        plan_cache.map_err(|error| {
+            if error.code == culprit_core::ErrorCode::PermissionDenied {
+                error.with_hint(probe.grant_hint())
+            } else {
+                error
+            }
+        }),
+    ) {
         part.outcome.completed(&sources::PLAN_CACHE, result.workload.queries.len());
         part.outcome.delivered(Capability::PlanCache);
         if result.plans_parsed > 0 {
@@ -176,8 +233,8 @@ fn created_since_server_start(started_at: Option<&str>, created: String) -> Opti
 /// The latest this database's index usage counters may have started, when later than the server's start (the age every
 /// counter has otherwise): a database restored or created since then starts its counters with it (sys.databases'
 /// create_date), and one with AUTO_CLOSE on starts them again each time it opens, so as far as anyone knows, now.
-async fn usage_counted_since(client: &mut MsClient, probe: &Probe) -> Option<String> {
-    let r = conn::query_one(
+async fn usage_counted_since(client: &mut impl NativeRead, probe: &Probe) -> Option<String> {
+    let r = crate::read::one(
         client,
         "SELECT is_auto_close_on AS auto_close, CONVERT(varchar(19), DATEADD(minute, DATEDIFF(minute, GETDATE(), GETUTCDATE()), create_date), 126) + 'Z' AS created FROM sys.databases WHERE database_id = DB_ID()",
     )
@@ -190,17 +247,20 @@ async fn usage_counted_since(client: &mut MsClient, probe: &Probe) -> Option<Str
     created_since_server_start(probe.started_at.as_deref(), created)
 }
 
-async fn collect_schema(client: &mut MsClient, probe: &Probe) -> SchemaPart {
+async fn collect_schema(client: &mut impl NativeRead, probe: &Probe) -> SchemaPart {
     let mut part = SchemaPart::default();
     let dmv = probe.can_read_dmvs();
     let grant = || probe.grant_hint();
     let out = &mut part.outcome;
-    if let Some(tables) = sources::read_rows(out, &sources::TABLES, schema::tables(client, dmv).await, grant) {
-        part.tables = tables;
+    let mut catalog_complete = probe.can_view_definition;
+    if let Some(read) = sources::read(out, &sources::TABLES, crate::tables::application(client, dmv).await, grant) {
+        out.completed(&sources::TABLES, read.tables.len());
+        catalog_complete &= read.complete_scope;
+        part.tables = read.tables;
         out.delivered(Capability::TableStats);
     }
     if let Some((indexes, with_usage)) =
-        sources::read(out, &sources::INDEXES, schema::indexes(client, dmv).await, grant)
+        sources::read(out, &sources::INDEXES, crate::indexes::application(client, dmv).await, grant)
     {
         out.completed(&sources::INDEXES, indexes.len());
         part.indexes = indexes;
@@ -213,82 +273,121 @@ async fn collect_schema(client: &mut MsClient, probe: &Probe) -> SchemaPart {
             index_usage_unreadable(out, probe);
         }
     }
-    part.columns = sources::read_rows(out, &sources::COLUMNS, schema::columns(client).await, grant).unwrap_or_default();
+    part.columns = sources::read_rows(out, &sources::COLUMNS, crate::columns::application(client).await, grant)
+        .unwrap_or_default();
     part.foreign_keys =
-        sources::read_rows(out, &sources::FOREIGN_KEYS, schema::foreign_keys(client).await, grant).unwrap_or_default();
-    if let Some(stats) = sources::read_rows(out, &sources::STATISTICS, schema::statistics(client).await, grant) {
-        part.statistics = stats;
+        sources::read_rows(out, &sources::FOREIGN_KEYS, crate::foreign_keys::application(client).await, grant)
+            .unwrap_or_default();
+    part.constraints = sources::read_rows(out, &sources::CONSTRAINTS, crate::constraints::read(client).await, grant)
+        .unwrap_or_default();
+    if let Some(read) = sources::read(out, &sources::STATISTICS, crate::statistics::application(client).await, grant) {
+        out.completed(&sources::STATISTICS, read.statistics.len());
+        if !read.properties_complete {
+            out.partial(&sources::STATISTICS, culprit_core::message!("provider.mssql.statistics.partial_properties"));
+        }
+        part.statistics = read.statistics;
         out.delivered(Capability::Statistics);
+    }
+    if dmv {
+        let missing = crate::missing_indexes::application(client).await;
+        if let Some(read) = sources::read(out, &sources::MISSING_INDEXES, missing, grant) {
+            out.completed(&sources::MISSING_INDEXES, read.indexes.len());
+            if let Some(error) = read.query_link_failure {
+                out.source_failed(&sources::MISSING_INDEXES, &error);
+            }
+            part.missing_indexes = read.indexes;
+            out.delivered(Capability::MissingIndexes);
+        }
+    }
+    match crate::catalog_visibility::complete(client).await {
+        Ok(complete) => catalog_complete &= complete,
+        Err(error) => out.sources_failed(sources::SCHEMA, &error),
+    }
+    if !catalog_complete {
+        restrict_catalog_scope(out);
     }
     part
 }
 
-async fn collect_misc(client: &mut MsClient, probe: &Probe, options: &SnapshotOptions) -> MiscPart {
+fn restrict_catalog_scope(outcome: &mut Outcome) {
+    let collected = outcome.outcomes();
+    let reason = culprit_core::message!("provider.mssql.catalog.partial_metadata");
+    let mut restricted = false;
+    for source in sources::SCHEMA {
+        if collected.iter().any(|result| {
+            result.source == source.name
+                && matches!(result.state, culprit_core::SourceState::Collected | culprit_core::SourceState::Empty)
+        }) {
+            outcome.recorded_message(source, culprit_core::SourceState::Partial, reason.clone());
+            restricted = true;
+        }
+    }
+    if restricted {
+        outcome.note(culprit_core::source_id::CATALOG, reason);
+    }
+}
+
+async fn collect_misc(
+    client: &mut impl NativeRead,
+    provider: &MssqlProvider,
+    probe: &Probe,
+    options: &SnapshotOptions,
+) -> MiscPart {
     let mut part = MiscPart::default();
     let dmv = probe.can_read_dmvs();
     let grant = || probe.grant_hint();
     if dmv {
-        let missing = schema::missing_indexes(client).await;
-        if let Some(missing) = sources::read_rows(&mut part.outcome, &sources::MISSING_INDEXES, missing, grant) {
-            part.missing_indexes = missing;
-            part.outcome.delivered(Capability::MissingIndexes);
-        }
-        let waits = schema::waits(client, probe.is_azure_sql_database()).await;
-        if let Some(waits) = sources::read_rows(&mut part.outcome, &sources::WAITS, waits, grant) {
-            part.waits = waits;
-            part.outcome.delivered(Capability::WaitStats);
-        }
-        let (pressure, read) = pressure::collect(client, probe).await;
+        let (pressure, waits, read) = pressure::collect(provider.pool.clone(), probe).await;
         part.outcome.merge(read);
+        part.waits = waits;
         part.pressure = Some(pressure);
     } else {
         server_state_unreadable(&mut part.outcome, probe);
     }
-    if probe.is_azure_sql_database() {
-        let resources = schema::resources(client).await;
-        if let Some(resources) = sources::read_rows(&mut part.outcome, &sources::RESOURCES, resources, grant) {
-            part.resources = resources;
-            part.outcome.delivered(Capability::ResourceUsage);
-        }
-    }
     if dmv {
         // The index advisor and tuning checks: each adds detail, and a failure is a note.
         let out = &mut part.outcome;
-        part.forwarded =
-            sources::read(out, &sources::FORWARDED_FETCHES, advice::forwarded_fetches(client).await, grant)
-                .unwrap_or_default();
         let query_store = probe.query_store_readable();
-        let families = advice::query_families(client, options.window_in_minutes(), query_store).await;
-        part.query_families = sources::read_rows(out, &sources::QUERY_FAMILIES, families, grant).unwrap_or_default();
-        part.plan_cache =
-            sources::read(out, &sources::PLAN_CACHE_USE, advice::plan_cache(client).await, grant).flatten();
-        part.tuning = sources::read(out, &sources::TUNING, advice::tuning(client, query_store).await, grant);
+        let mut reader = crate::query_store::Reader::open(provider.pool.clone());
+        let families =
+            advice::query_families(client, options.window_in_minutes(), query_store.then_some(&mut reader)).await;
+        if let Some(read) = out.read(&sources::QUERY_FAMILIES, families) {
+            out.completed(&sources::QUERY_FAMILIES, read.families.len());
+            if let Some(error) = read.cache_failure {
+                out.partial(&sources::QUERY_FAMILIES, error.message_source());
+            }
+            part.query_families = read.families;
+        }
+        part.plan_cache = crate::cache_summary::collect(provider.pool.clone(), probe, out).await;
+        let tuning = crate::query_store::tuning::read(&mut reader).await;
+        let shutdown = reader.close().await;
+        part.tuning = tuning.finish(out, &probe.grant_hint(), shutdown, query_store);
     }
     let query_store_options = probe.query_store.as_ref().map(|qs| &qs.options);
-    let settings = schema::settings(client, probe.is_azure_sql_database(), query_store_options).await;
-    part.settings = sources::read_rows(&mut part.outcome, &sources::SETTINGS, settings, grant).unwrap_or_default();
+    part.settings = crate::settings::collect(
+        provider.pool.clone(),
+        probe.is_azure_sql_database(),
+        query_store_options,
+        &mut part.outcome,
+        &grant(),
+    )
+    .await;
     part
 }
 
 impl MssqlProvider {
     /// Runs `f` on its own pooled session so collector groups proceed concurrently.
-    async fn on_session<T: Default, F, Fut>(&self, f: F) -> (T, Option<culprit_core::Error>)
+    async fn on_session<T, F, Fut>(&self, f: F) -> Result<T>
     where
-        F: FnOnce(MsClient) -> Fut,
-        Fut: Future<Output = (T, MsClient)>,
+        F: FnOnce(ReadSession) -> Fut,
+        Fut: Future<Output = (T, ReadSession)>,
     {
-        match self.pool.get().await {
-            Ok(client) => {
-                let (value, client) = f(client).await;
-                self.pool.put(client);
-                (value, None)
-            }
-            Err(err) => (T::default(), Some(err)),
-        }
+        let (value, mut reader) = f(ReadSession::application(self.pool.clone())).await;
+        reader.finish(Ok(value)).await
     }
 }
 
-/// Collect a full SQL Server snapshot. Each collector that fails becomes a note; only an unreachable server is an error.
+/// Independent source failures become coverage; unconfirmed native shutdown fails the scan.
 pub(crate) async fn snapshot(
     provider: &MssqlProvider,
     connection: &str,
@@ -296,23 +395,24 @@ pub(crate) async fn snapshot(
 ) -> Result<Snapshot> {
     let started = Instant::now();
     let taken_at = chrono::Utc::now();
-    let probe = provider.pool.with(|c| Box::pin(probe::run(c))).await?;
+    let probe = provider.pool.observe(|c| Box::pin(probe::run(c))).await?;
     let probe_ref = &probe;
 
-    let ((workload_part, workload_error), (schema_part, schema_error), (misc_part, misc_error)) = tokio::join!(
-        provider.on_session(move |mut c| async move {
-            let part = collect_workload(&mut c, probe_ref, options).await;
-            (part, c)
-        }),
+    let (workload_part, schema_part, misc_part, resource_part) = tokio::join!(
+        collect_workload(provider, probe_ref, options),
         provider.on_session(move |mut c| async move {
             let part = collect_schema(&mut c, probe_ref).await;
             (part, c)
         }),
         provider.on_session(move |mut c| async move {
-            let part = collect_misc(&mut c, probe_ref, options).await;
+            let part = collect_misc(&mut c, provider, probe_ref, options).await;
             (part, c)
         }),
+        collect_resources(provider, probe_ref),
     );
+    let schema_part = schema_part?;
+    let mut misc_part = misc_part?;
+    provider.pool.ensure_available()?;
 
     let mut outcome = Outcome::default();
     let (expected_have, expected_missing) = probe::expected_capabilities(&probe);
@@ -327,25 +427,17 @@ pub(crate) async fn snapshot(
         }
     }
     outcome.merge(workload_part.outcome);
-    if let Some(error) = workload_error {
-        outcome.sources_failed(sources::WORKLOAD, &error);
-    }
     outcome.merge(schema_part.outcome);
     outcome.merge(misc_part.outcome);
-    if let Some(error) = schema_error {
-        outcome.sources_failed(sources::SCHEMA, &error);
-    }
-    if let Some(error) = misc_error {
-        outcome.sources_failed(sources::MISC, &error);
+    outcome.merge(resource_part.outcome);
+    if !resource_part.signals.is_empty() {
+        misc_part.pressure.get_or_insert_with(Default::default).signals.extend(resource_part.signals);
     }
     let sources = outcome.outcomes();
     let (have, missing, notes) = outcome.finish();
 
     let waits = if workload_part.waits.is_empty() { misc_part.waits } else { workload_part.waits };
-    let mut tables = schema_part.tables;
-    for t in &mut tables {
-        t.forwarded_fetches = misc_part.forwarded.get(&(t.schema.to_lowercase(), t.name.to_lowercase())).copied();
-    }
+    let tables = schema_part.tables;
     let mut snapshot = Snapshot {
         identity: None,
         sources,
@@ -361,10 +453,10 @@ pub(crate) async fn snapshot(
         indexes: schema_part.indexes,
         columns: schema_part.columns,
         foreign_keys: schema_part.foreign_keys,
-        missing_indexes: misc_part.missing_indexes,
+        missing_indexes: schema_part.missing_indexes,
         statistics: schema_part.statistics,
         waits,
-        resources: misc_part.resources,
+        resources: resource_part.samples,
         settings: misc_part.settings,
         pressure: misc_part.pressure,
         notes,
@@ -373,7 +465,7 @@ pub(crate) async fn snapshot(
         plan_cache: misc_part.plan_cache,
         tuning: misc_part.tuning,
         deadlocks: None,
-        constraints: Vec::new(),
+        constraints: schema_part.constraints,
         histograms: None,
         escalations_before: None,
         contention_before: None,
@@ -381,18 +473,13 @@ pub(crate) async fn snapshot(
         sizes_before: None,
         operations: Default::default(),
     };
-    match provider.pool.get().await {
-        Ok(mut client) => {
-            signals::collect(&mut client, &probe, options, &mut snapshot).await;
-            operations::collect(&mut client, &probe, &mut snapshot).await;
-            provider.pool.put(client);
-        }
-        Err(error) => {
-            let mut coverage = Coverage::default();
-            coverage.sources_failed(sources::SIGNAL_READS, &error);
-            coverage.append_to(&mut snapshot);
-        }
+    let mut client = ReadSession::application(provider.pool.clone());
+    signals::collect(&mut client, provider.pool.clone(), &probe, options, &mut snapshot).await;
+    if client.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
+        return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
     }
+    operations::collect(provider.pool.clone(), &probe, &mut snapshot).await;
+    provider.pool.ensure_available()?;
     snapshot.bind_identity(culprit_core::DatabaseIdentity::server(
         Engine::Mssql,
         &snapshot.server.database,
@@ -407,6 +494,29 @@ pub(crate) async fn snapshot(
 #[cfg(test)]
 mod tests {
     use super::created_since_server_start;
+
+    #[test]
+    fn limited_catalog_visibility_cannot_turn_empty_sources_into_proven_absence_or_hide_a_failure() {
+        let mut coverage = culprit_core::Coverage::default();
+        for source in crate::sources::SCHEMA {
+            coverage.read(source, Ok(()));
+            coverage.completed(source, 0);
+        }
+        coverage.source_failed(&crate::sources::INDEXES, &crate::catalog_visibility::unavailable());
+        let failed_reason = coverage
+            .outcomes()
+            .into_iter()
+            .find(|outcome| outcome.source == crate::sources::INDEXES.name)
+            .unwrap()
+            .reason;
+        super::restrict_catalog_scope(&mut coverage);
+        for outcome in coverage.outcomes() {
+            assert_eq!(outcome.state, culprit_core::SourceState::Partial, "{}", outcome.source);
+            if outcome.source == crate::sources::INDEXES.name {
+                assert_eq!(outcome.reason, failed_reason, "limited visibility cannot replace a recorded failure");
+            }
+        }
+    }
 
     #[test]
     fn created_since_server_start_only_reports_databases_created_after_server_boot() {
@@ -426,4 +536,44 @@ mod tests {
             Some("2026-01-01T00:00:00Z".into())
         );
     }
+    #[tokio::test]
+    async fn a_shared_resource_read_populates_both_snapshot_consumers_and_coverage() {
+        use crate::resources::{
+            self,
+            test_support::{FakeRead, row},
+        };
+        let mut io = FakeRead::new(vec![Ok(vec![row("2020-01-01T06:00:15Z")])]);
+        let samples = resources::retained(&mut io).await.map_err(crate::read::ReadError::into_error).unwrap();
+        let part = super::resource_part(Ok(samples), true, "GRANT VIEW DATABASE STATE TO [monitor];");
+        assert_eq!(part.samples.len(), 1);
+        assert_eq!(part.samples[0].memory_pct, None);
+        assert_eq!(part.signals.len(), 1);
+        assert_eq!(part.signals[0].key, culprit_core::signal_id::DATA_IO);
+        assert!(part.outcome.has(culprit_core::Capability::ResourceUsage));
+        let outcomes = part.outcome.outcomes();
+        assert_eq!(outcomes.len(), 2);
+        assert!(outcomes.iter().all(|outcome| outcome.state == culprit_core::SourceState::Collected));
+        assert_eq!(io.calls.len(), 1);
+    }
+    #[test]
+    fn failed_resource_reads_lock_only_resource_capabilities_and_retain_the_exact_grant() {
+        let grant = "GRANT VIEW DATABASE STATE TO [monitor];";
+        let part = super::resource_part(
+            Err(culprit_core::Error::new(culprit_core::ErrorCode::PermissionDenied, "fixture denied")),
+            true,
+            grant,
+        );
+        assert!(part.samples.is_empty());
+        assert!(part.signals.is_empty());
+        assert!(part.outcome.outcomes().iter().all(|outcome| outcome.state == culprit_core::SourceState::Unavailable));
+        let (have, missing, notes) = part.outcome.finish();
+        assert!(have.is_empty());
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].capability, culprit_core::Capability::ResourceUsage);
+        assert_eq!(missing[0].fix.as_deref(), Some(grant));
+        assert_eq!(notes.len(), 2);
+    }
 }
+
+#[cfg(test)]
+mod native_tests;

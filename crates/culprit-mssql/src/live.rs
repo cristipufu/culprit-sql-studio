@@ -2,74 +2,60 @@ use std::collections::BTreeMap;
 
 use culprit_core::{Error, ErrorCode, LiveState, Result, Session, SessionAction, WaitStat, session_number};
 
-use crate::conn::{MsClient, Pool, execute, query};
-use crate::schema::{BENIGN_WAITS, wait_type_category};
-use crate::value::Rec;
+use crate::conn::{Pool, execute};
+use crate::read::rows as query;
+use crate::waits::{BENIGN_WAITS, wait_type_category};
 
-/// Running requests, plus idle sessions that hold a transaction open or block someone: the usual culprits in a blocking chain.
-const SESSIONS_SQL: &str = r#"
-SELECT
-  CAST(s.session_id AS varchar(10)) AS id,
-  s.login_name, s.program_name, s.host_name,
-  DB_NAME(COALESCE(r.database_id, s.database_id)) AS database_name,
-  COALESCE(r.status, s.status) AS state,
-  r.command, r.wait_type, r.wait_time,
-  CAST(NULLIF(r.blocking_session_id, 0) AS varchar(10)) AS blocked_by,
-  COALESCE(r.total_elapsed_time, DATEDIFF_BIG(millisecond, s.last_request_start_time, GETDATE())) AS elapsed_ms,
-  (SELECT DATEDIFF_BIG(millisecond, MIN(at.transaction_begin_time), GETDATE())
-     FROM sys.dm_tran_session_transactions st
-     JOIN sys.dm_tran_active_transactions at ON at.transaction_id = st.transaction_id
-     WHERE st.session_id = s.session_id) AS transaction_ms,
-  COALESCE(r.cpu_time, s.cpu_time) AS cpu_ms,
-  COALESCE(r.logical_reads, s.logical_reads) AS reads,
-  CASE WHEN r.sql_handle IS NOT NULL THEN
-    SUBSTRING(t.text, r.statement_start_offset / 2 + 1,
-      (CASE r.statement_end_offset WHEN -1 THEN DATALENGTH(t.text) ELSE r.statement_end_offset END - r.statement_start_offset) / 2 + 1)
-  ELSE lt.text END AS sql_text
-FROM sys.dm_exec_sessions s
-LEFT JOIN sys.dm_exec_requests r ON r.session_id = s.session_id
-OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) t
-LEFT JOIN sys.dm_exec_connections c ON c.session_id = s.session_id AND c.parent_connection_id IS NULL
-OUTER APPLY sys.dm_exec_sql_text(c.most_recent_sql_handle) lt
-WHERE s.is_user_process = 1
-  AND s.session_id <> @@SPID
-  AND (r.session_id IS NOT NULL
-       OR s.open_transaction_count > 0
-       OR s.session_id IN (SELECT blocking_session_id FROM sys.dm_exec_requests WHERE blocking_session_id <> 0))
-ORDER BY elapsed_ms DESC
-"#;
+const LIVE_ACTIVITY_ROWS: u32 = 10_000;
+const LIVE_ACTIVITY_PAGE_BYTES: u32 = 8 * 1024 * 1024;
+const LIVE_STATEMENT_TIMEOUT_MS: u32 = 10_000;
 
-/// Fallback for servers where the connection DMV is not visible: no last statement for idle sessions.
-const SESSIONS_BASIC_SQL: &str = r#"
-SELECT
-  CAST(s.session_id AS varchar(10)) AS id,
-  s.login_name, s.program_name, s.host_name,
-  DB_NAME(COALESCE(r.database_id, s.database_id)) AS database_name,
-  COALESCE(r.status, s.status) AS state,
-  r.command, r.wait_type, r.wait_time,
-  CAST(NULLIF(r.blocking_session_id, 0) AS varchar(10)) AS blocked_by,
-  r.total_elapsed_time AS elapsed_ms,
-  COALESCE(r.cpu_time, s.cpu_time) AS cpu_ms,
-  COALESCE(r.logical_reads, s.logical_reads) AS reads,
-  SUBSTRING(t.text, r.statement_start_offset / 2 + 1,
-    (CASE r.statement_end_offset WHEN -1 THEN DATALENGTH(t.text) ELSE r.statement_end_offset END - r.statement_start_offset) / 2 + 1) AS sql_text
-FROM sys.dm_exec_sessions s
-LEFT JOIN sys.dm_exec_requests r ON r.session_id = s.session_id
-OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) t
-WHERE s.is_user_process = 1
-  AND s.session_id <> @@SPID
-  AND (r.session_id IS NOT NULL OR s.open_transaction_count > 0)
-"#;
-
-pub(crate) async fn collect(client: &mut MsClient) -> tiberius::Result<LiveState> {
-    let rows = match query(client, SESSIONS_SQL).await {
-        Ok(rows) => rows,
-        Err(_) => query(client, SESSIONS_BASIC_SQL).await?,
+pub(crate) async fn collect(pool: std::sync::Arc<Pool>, host: String, port: u16) -> Result<LiveState> {
+    use crate::activity::{ActivityReader, ActivityScope, IdentityDetail, ReadOptions};
+    use culprit_core::telemetry::CollectionBudget;
+    let options = ReadOptions {
+        budget: CollectionBudget {
+            max_snapshot_rows: LIVE_ACTIVITY_ROWS,
+            page_bytes: LIVE_ACTIVITY_PAGE_BYTES,
+            statement_timeout_ms: LIVE_STATEMENT_TIMEOUT_MS,
+            ..CollectionBudget::default()
+        },
+        scope: ActivityScope::Visible,
+        identity: IdentityDetail::Endpoint,
     };
-    let sessions: Vec<Session> = rows.iter().map(session_of).collect();
+    let mut reader = ActivityReader::open(pool, options, host, port)?;
+    collect_from(&mut reader).await
+}
+
+pub(crate) async fn collect_from<R: crate::read::NativeRead>(
+    reader: &mut crate::activity::ActivityReader<R>,
+) -> Result<LiveState> {
+    use culprit_core::telemetry::{CollectionStop, SourceShutdown};
+    let result = read(reader).await;
+    if reader.close().await == SourceShutdown::Unconfirmed {
+        return Err(CollectionStop::CancellationUnconfirmed.error());
+    }
+    result
+}
+
+pub(crate) async fn read<R: crate::read::NativeRead>(
+    reader: &mut crate::activity::ActivityReader<R>,
+) -> Result<LiveState> {
+    use culprit_core::telemetry::ActivityDetailStatus;
+    let mut frame = reader.observe().await?;
+    let keys = frame.keys();
+    let limit = reader.sql_limit();
+    let details = reader.enrich(&mut frame, &keys, true, limit).await?;
+    let mut sessions: Vec<_> = frame.records.iter().map(session_of).collect();
+    sessions.sort_by(|a, b| b.elapsed_ms.partial_cmp(&a.elapsed_ms).unwrap_or(std::cmp::Ordering::Equal));
+    let notes = if matches!(details, ActivityDetailStatus::Unavailable { .. }) {
+        vec![culprit_core::t!("provider.mssql.activity.details_unavailable")]
+    } else {
+        Vec::new()
+    };
     Ok(LiveState {
-        notes: Vec::new(),
-        taken_at: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+        notes,
+        taken_at: frame.context.at,
         waits: current_waits(&sessions),
         sessions,
         session_actions: Vec::new(),
@@ -80,7 +66,7 @@ pub(crate) async fn collect(client: &mut MsClient) -> tiberius::Result<LiveState
 
 /// SQL Server has no way to stop another session's statement short of `KILL`, which ends the session and rolls back its
 /// transaction. Culprit's own sessions and system sessions are refused.
-pub(crate) async fn interrupt(pool: &Pool, session: &str, action: SessionAction) -> Result<()> {
+pub(crate) async fn interrupt(pool: &std::sync::Arc<Pool>, session: &str, action: SessionAction) -> Result<()> {
     let id = session_number(session)?;
     if action == SessionAction::Cancel {
         return Err(cancel_unsupported());
@@ -90,7 +76,7 @@ pub(crate) async fn interrupt(pool: &Pool, session: &str, action: SessionAction)
          FROM sys.dm_exec_sessions WHERE session_id = {id}"
     );
     let rows = pool
-        .with(|c| {
+        .observe(|c| {
             let sql = target.clone();
             Box::pin(async move { query(c, &sql).await })
         })
@@ -125,24 +111,45 @@ pub(crate) fn system_session(id: u64) -> Error {
     Error::invalid(culprit_core::t!("provider.mssql.session.system", id = id.to_string()))
 }
 
-fn session_of(r: &Rec) -> Session {
+fn number(value: Option<&str>) -> Option<f64> {
+    value.and_then(|value| value.parse().ok())
+}
+fn session_of(record: &crate::activity::ActivityRecord) -> Session {
+    use culprit_core::telemetry::ActivityWaitOwner;
+    let facts = &record.facts;
+    let counters = facts.counters();
+    let client = facts.client.as_ref();
+    let wait = facts.wait.as_ref();
+    let wait_type = wait.and_then(|wait| wait.native_type.clone());
+    let blocked_by = wait.and_then(|wait| {
+        wait.owners.iter().find_map(|owner| match owner {
+            ActivityWaitOwner::Session { id, .. } => Some(id.clone()),
+            ActivityWaitOwner::Transaction { native_id, .. } => Some(native_id.clone()),
+            ActivityWaitOwner::Unknown { .. } => None,
+        })
+    });
+    let sql = if facts.key.request.is_some() { &record.current_sql } else { &record.previous_sql };
     Session {
-        id: r.string("id"),
-        user: r.str("login_name"),
-        application: r.str("program_name").filter(|s| !s.is_empty()),
-        host: r.str("host_name").filter(|s| !s.is_empty()),
-        database: r.str("database_name"),
-        state: r.string("state"),
-        command: r.str("command"),
-        wait: r.str("wait_type"),
-        waiting_on_lock: r.str("wait_type").map(|wait| wait_type_category(&wait) == "Lock"),
-        wait_ms: r.f64("wait_time").filter(|_| r.str("wait_type").is_some()),
-        blocked_by: r.str("blocked_by"),
-        elapsed_ms: r.f64("elapsed_ms"),
-        transaction_ms: r.f64("transaction_ms"),
-        cpu_ms: r.f64("cpu_ms"),
-        reads: r.f64("reads"),
-        sql: r.str("sql_text").map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+        id: facts.key.session.id.clone(),
+        user: client.and_then(|client| client.user.clone()),
+        application: client.and_then(|client| client.application.clone()).filter(|value| !value.is_empty()),
+        host: client.and_then(|client| client.host.clone()),
+        database: facts.database.clone(),
+        state: facts.state.clone(),
+        command: facts.command.clone(),
+        waiting_on_lock: wait_type.as_deref().map(|wait| wait_type_category(wait) == "Lock"),
+        wait: wait_type,
+        wait_ms: number(wait.and_then(|wait| wait.elapsed_ms.as_deref())),
+        blocked_by,
+        elapsed_ms: number(if facts.key.request.is_some() {
+            facts.elapsed_ms.as_deref()
+        } else {
+            facts.last_request_age_ms.as_deref()
+        }),
+        transaction_ms: number(facts.transaction_age_ms.as_deref()),
+        cpu_ms: number(counters.cpu_ms.as_deref()),
+        reads: number(counters.logical_reads.as_deref()),
+        sql: sql.text().map(str::trim).filter(|sql| !sql.is_empty()).map(String::from),
     }
 }
 
@@ -153,8 +160,9 @@ fn current_waits(sessions: &[Session]) -> Vec<WaitStat> {
         if BENIGN_WAITS.contains(&wait) {
             continue;
         }
+        let Some(wait_ms) = s.wait_ms else { continue };
         let entry = by.entry(wait_type_category(wait)).or_default();
-        entry.0 += s.wait_ms.unwrap_or(0.0);
+        entry.0 += wait_ms;
         entry.1 += 1.0;
         if entry.2.is_empty() {
             entry.2 = wait.to_string();

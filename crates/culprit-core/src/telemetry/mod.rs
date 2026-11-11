@@ -1,0 +1,795 @@
+//! Bounded source observations. Export completeness describes reads, never atomicity or proven source continuity.
+
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+use crate::{DatabaseIdentity, Error, ErrorCode, Result, t};
+
+mod activity;
+mod admission;
+mod cached_definitions;
+mod cached_statements;
+mod catalog;
+mod check_constraints;
+mod columns;
+mod compilation;
+mod counters;
+mod definitions;
+mod delivery;
+mod discovery;
+mod events;
+mod fleet;
+mod foreign_keys;
+mod grants;
+mod identity;
+mod incidents;
+mod index_operations;
+mod indexes;
+mod io;
+mod missing_indexes;
+mod monitor;
+mod objects;
+mod observation;
+mod outbox;
+mod partitions;
+mod payloads;
+mod persistent_versions;
+mod queues;
+mod read_metrics;
+mod replication;
+mod resources;
+mod settings;
+mod state;
+mod statistics;
+mod tables;
+mod transactions;
+mod triggers;
+mod tuning;
+pub use activity::*;
+pub use admission::*;
+pub use cached_definitions::*;
+pub use cached_statements::*;
+pub use catalog::*;
+pub use check_constraints::*;
+pub use columns::*;
+pub use compilation::*;
+pub use counters::*;
+pub use definitions::*;
+pub use delivery::*;
+pub use discovery::*;
+pub use events::*;
+pub use fleet::*;
+pub use foreign_keys::*;
+pub use grants::*;
+pub use identity::*;
+pub use incidents::*;
+pub use index_operations::*;
+pub use indexes::*;
+pub use io::*;
+pub use missing_indexes::*;
+pub use monitor::*;
+pub use objects::*;
+pub use observation::*;
+pub use outbox::*;
+pub use partitions::*;
+pub use payloads::*;
+pub use persistent_versions::*;
+pub use queues::*;
+pub use read_metrics::*;
+pub use replication::*;
+pub use resources::*;
+pub use settings::*;
+pub use state::*;
+pub use statistics::*;
+pub use tables::*;
+pub use transactions::*;
+pub use triggers::*;
+pub use tuning::*;
+
+pub const MAX_CURSOR_BYTES: usize = 16 * 1024;
+
+fn valid_counter(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 20
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+        && value.parse::<u64>().is_ok()
+}
+fn valid_key(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 512 && !value.chars().any(char::is_control)
+}
+fn valid_reset(reset: &crate::ResetMarker) -> bool {
+    match reset {
+        crate::ResetMarker::Unknown => true,
+        crate::ResetMarker::At(at) => at.len() <= 64 && DateTime::parse_from_rfc3339(at).is_ok(),
+        crate::ResetMarker::Generation(id) => valid_key(id),
+    }
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct CollectionBudget {
+    pub page_rows: u32,
+    pub max_snapshot_rows: u32,
+    pub page_bytes: u32,
+    pub total_bytes: u32,
+    pub max_sql_bytes: u32,
+    pub max_plan_bytes: u32,
+    pub max_pages: u32,
+    pub max_queries: u32,
+    pub statement_timeout_ms: u32,
+    pub total_timeout_ms: u32,
+}
+
+impl Default for CollectionBudget {
+    fn default() -> Self {
+        Self {
+            page_rows: 500,
+            max_snapshot_rows: 500,
+            page_bytes: 4 * 1024 * 1024,
+            total_bytes: 64 * 1024 * 1024,
+            max_sql_bytes: 256 * 1024,
+            max_plan_bytes: 2 * 1024 * 1024,
+            max_pages: 32,
+            max_queries: 128,
+            statement_timeout_ms: 5_000,
+            total_timeout_ms: 60_000,
+        }
+    }
+}
+
+impl CollectionBudget {
+    pub fn validate(&self) -> Result<()> {
+        if !(1..=100_000).contains(&self.max_snapshot_rows)
+            || !(1..=10_000).contains(&self.page_rows)
+            || !(1024..=8 * 1024 * 1024).contains(&self.page_bytes)
+            || self.total_bytes < self.page_bytes
+            || self.total_bytes > 1024 * 1024 * 1024
+            || !(1024..=4 * 1024 * 1024).contains(&self.max_sql_bytes)
+            || !(1024..=4 * 1024 * 1024).contains(&self.max_plan_bytes)
+            || !(1..=10_000).contains(&self.max_pages)
+            || !(1..=100_000).contains(&self.max_queries)
+            || !(1..=60_000).contains(&self.statement_timeout_ms)
+            || self.total_timeout_ms < self.statement_timeout_ms
+            || self.total_timeout_ms > 900_000
+        {
+            return Err(Error::invalid(t!("collection.invalid_budget")));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct CollectionRequest {
+    pub selection: CollectionSelection,
+    pub budget: CollectionBudget,
+}
+
+impl CollectionRequest {
+    pub fn collection(&self) -> TelemetryCollection {
+        self.selection.collection()
+    }
+    pub fn activity_policy(&self) -> Option<&ActivityPolicy> {
+        match &self.selection {
+            CollectionSelection::Activity { policy } => Some(policy),
+            _ => None,
+        }
+    }
+    pub fn bounds(&self) -> Result<(DateTime<Utc>, DateTime<Utc>)> {
+        let (from, until) = match &self.selection {
+            CollectionSelection::QueryHistory { from, until }
+            | CollectionSelection::ResourceHistory { from, until }
+            | CollectionSelection::DeadlockHistory { from, until } => (from, until),
+            _ => return Err(Error::invalid(t!("collection.invalid_interval"))),
+        };
+        history_bounds(from, until)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        self.budget.validate()?;
+        if let Some(policy) = self.activity_policy() {
+            policy.validate()?;
+        } else if !matches!(self.selection, CollectionSelection::Snapshot { .. }) {
+            self.bounds()?;
+        }
+        Ok(())
+    }
+}
+
+pub const MAX_HISTORY_WINDOW_SECONDS: u32 = 86_400;
+fn history_bounds(from: &str, until: &str) -> Result<(DateTime<Utc>, DateTime<Utc>)> {
+    bounded_history_bounds(from, until, MAX_HISTORY_WINDOW_SECONDS, || {
+        Error::invalid(t!("collection.invalid_interval"))
+    })
+}
+fn bounded_history_bounds(
+    from: &str,
+    until: &str,
+    maximum_seconds: u32,
+    invalid: fn() -> Error,
+) -> Result<(DateTime<Utc>, DateTime<Utc>)> {
+    let parse = |value: &str| {
+        if value.len() > 64 {
+            return Err(invalid());
+        }
+        DateTime::parse_from_rfc3339(value).map(|time| time.with_timezone(&Utc)).map_err(|_| invalid())
+    };
+    let (from, until) = (parse(from)?, parse(until)?);
+    if from >= until || until - from > chrono::Duration::seconds(i64::from(maximum_seconds)) {
+        return Err(invalid());
+    }
+    Ok((from, until))
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum TelemetryStream {
+    QueryRuntime,
+    QueryWaits,
+    QueryDefinitions,
+    PlanDefinitions,
+    ResourceSamples,
+    ActivityObservations,
+    BlockingEdges,
+    ActivityIncidents,
+    ActivityCheckpoints,
+    DeadlockEvents,
+    OperationalSamples,
+    WaitCounterSamples,
+    ReplicationSamples,
+    SettingObservations,
+    TuningObservations,
+    ObjectDefinitions,
+}
+
+impl TelemetryStream {
+    pub const ALL: [Self; 16] = [
+        Self::QueryRuntime,
+        Self::QueryWaits,
+        Self::QueryDefinitions,
+        Self::PlanDefinitions,
+        Self::ResourceSamples,
+        Self::ActivityObservations,
+        Self::BlockingEdges,
+        Self::ActivityIncidents,
+        Self::ActivityCheckpoints,
+        Self::DeadlockEvents,
+        Self::OperationalSamples,
+        Self::WaitCounterSamples,
+        Self::ReplicationSamples,
+        Self::SettingObservations,
+        Self::TuningObservations,
+        Self::ObjectDefinitions,
+    ];
+
+    pub fn file_name(self) -> &'static str {
+        match self {
+            Self::QueryRuntime => "runtime.ndjson",
+            Self::QueryWaits => "waits.ndjson",
+            Self::QueryDefinitions => "queries.ndjson",
+            Self::PlanDefinitions => "plans.ndjson",
+            Self::ResourceSamples => "resources.ndjson",
+            Self::ActivityObservations => "activity.ndjson",
+            Self::BlockingEdges => "blocking.ndjson",
+            Self::ActivityIncidents => "incidents.ndjson",
+            Self::ActivityCheckpoints => "activity-state.ndjson",
+            Self::DeadlockEvents => "deadlocks.ndjson",
+            Self::OperationalSamples => "operations.ndjson",
+            Self::WaitCounterSamples => "wait-counters.ndjson",
+            Self::ReplicationSamples => "replication.ndjson",
+            Self::SettingObservations => "settings.ndjson",
+            Self::TuningObservations => "tuning.ndjson",
+            Self::ObjectDefinitions => "objects.ndjson",
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct TelemetryInterval {
+    pub native_id: String,
+    pub from: String,
+    pub until: String,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum SourceContinuity {
+    Unverified,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq, Hash)]
+#[ts(export)]
+pub struct NativeMeasurementKey {
+    pub row_id: String,
+    pub plan_id: String,
+    pub replica_group_id: String,
+    pub execution_type: u8,
+    /// A source definition discriminator, independent of redacted payload bytes. Absent when unresolved.
+    pub plan_definition_id: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct RuntimeMeasurement {
+    pub key: NativeMeasurementKey,
+    /// Decimal strings retain integer precision through JSON readers, including JavaScript.
+    pub executions: String,
+    pub avg_duration_us: f64,
+    pub stdev_duration_us: f64,
+    pub min_duration_us: f64,
+    pub max_duration_us: f64,
+    pub avg_cpu_us: f64,
+    pub avg_logical_reads_8kb_pages: f64,
+    pub avg_physical_reads_8kb_pages: f64,
+    pub avg_logical_writes_8kb_pages: Option<f64>,
+    pub avg_rows: Option<f64>,
+    pub avg_dop: Option<f64>,
+    pub avg_max_used_memory_8kb_pages: Option<f64>,
+    pub avg_clr_us: Option<f64>,
+    pub avg_log_bytes: Option<f64>,
+    pub avg_tempdb_8kb_pages: Option<f64>,
+    pub first_execution_at: String,
+    pub last_execution_at: String,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct WaitMeasurement {
+    pub key: NativeMeasurementKey,
+    pub category: u8,
+    pub total_wait_ms: String,
+    pub avg_wait_ms: f64,
+    pub min_wait_ms: String,
+    pub max_wait_ms: String,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[serde(tag = "stream", content = "data", rename_all = "kebab-case")]
+#[ts(export)]
+pub enum TelemetryRecord {
+    QueryRuntime(RuntimeMeasurement),
+    QueryWaits(WaitMeasurement),
+    #[serde(rename = "query-definitions")]
+    QueryDefinition(QueryDefinition),
+    #[serde(rename = "plan-definitions")]
+    PlanDefinition(PlanDefinition),
+    #[serde(rename = "resource-samples")]
+    ResourceSample(ResourceMeasurement),
+    #[serde(rename = "activity-observations")]
+    Activity(ActivityObservation),
+    #[serde(rename = "blocking-edges")]
+    Blocking(BlockingObservation),
+    #[serde(rename = "activity-incidents")]
+    Incident(ActivityIncidentChange),
+    #[serde(rename = "activity-checkpoints")]
+    ActivityCheckpoint(ActivityIncidentState),
+    #[serde(rename = "deadlock-events")]
+    Deadlock(DeadlockEvent),
+    #[serde(rename = "operational-samples")]
+    Operational(OperationalObservation),
+    #[serde(rename = "wait-counter-samples")]
+    WaitCounter(WaitCounterObservation),
+    #[serde(rename = "replication-samples")]
+    Replication(ReplicationObservation),
+    #[serde(rename = "setting-observations")]
+    Setting(SettingObservation),
+    #[serde(rename = "tuning-observations")]
+    Tuning(TuningObservation),
+    #[serde(rename = "object-definitions")]
+    ObjectDefinition(ObjectDefinitionRecord),
+}
+
+/// Identity within one source interval and observation; it does not prove continuity across source resets.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum NativeRecordIdentity {
+    Runtime(NativeMeasurementKey),
+    Waits { key: NativeMeasurementKey, category: u8 },
+    QueryDefinition(String),
+    PlanDefinition(String),
+    ResourceSample { at: String, replica_id: String },
+    Activity(ActivityKey),
+    Blocking(ActivityKey, ActivityWaitOwner),
+    Incident(String),
+    Checkpoint(String),
+    Deadlock { position: String, ordinal: u32 },
+    Operational { source: String, key: String },
+    WaitCounter { source: String, wait_type: String },
+    Replication { source: String, key: String },
+    Setting { source: String, namespace: String, name: String },
+    Tuning { source: String, key: String },
+    ObjectDefinition { source: String, key: String },
+}
+
+impl TelemetryRecord {
+    fn for_export(&self, source: &CollectionDescription) -> Result<Self> {
+        if !source.observation.collection().streams().contains(&self.stream()) {
+            return Err(CollectionStop::InvalidPage.error());
+        }
+        let mut record = self.clone();
+        let valid_identity = match &mut record {
+            Self::QueryDefinition(row) => {
+                if let DefinitionPayload::Available { text, .. } = &row.sql {
+                    row.sql = DefinitionPayload::sql(text, source.database.engine);
+                }
+                row.id == row.identity.definition_id(source)?
+            }
+            Self::PlanDefinition(row) => {
+                if let DefinitionPayload::Available { text, .. } = &row.plan {
+                    row.plan = DefinitionPayload::plan(text, source.database.engine);
+                }
+                row.id == row.identity.definition_id(source)?
+                    && row.query_definition_id == row.identity.query.definition_id(source)?
+            }
+            Self::ResourceSample(row) => {
+                row.at = canonical_time(&row.at)?;
+                source.observation.accepts_sample(&row.at)
+            }
+            Self::Activity(row) => {
+                row.redact(source.database.engine);
+                source.observation.activity().is_some()
+            }
+            Self::Incident(row) => {
+                row.state.observation.redact(source.database.engine);
+                source.observation.activity().is_some()
+            }
+            Self::ActivityCheckpoint(row) => {
+                row.observation.redact(source.database.engine);
+                source.observation.activity().is_some()
+            }
+            Self::Deadlock(row) => {
+                row.at = canonical_time(&row.at)?;
+                row.redact(source.database.engine);
+                source.observation.events().is_some_and(|history| history.accepts(&row.at))
+            }
+            Self::Blocking(_) => source.observation.activity().is_some(),
+            Self::Operational(row) => {
+                row.fact.redact(source.database.engine);
+                source.observation.accepts_snapshot_record(row.stream(), &row.source)
+            }
+            Self::ObjectDefinition(row) => {
+                *row = row.for_export(source.database.engine)?;
+                source.observation.accepts_snapshot_record(TelemetryStream::ObjectDefinitions, &row.source)
+            }
+            Self::WaitCounter(row) => {
+                source.observation.accepts_snapshot_record(TelemetryStream::WaitCounterSamples, &row.source)
+            }
+            Self::Replication(row) => {
+                source.observation.accepts_snapshot_record(TelemetryStream::ReplicationSamples, &row.source)
+            }
+            Self::Setting(row) => {
+                source.observation.accepts_snapshot_record(TelemetryStream::SettingObservations, &row.source)
+            }
+            Self::Tuning(row) => {
+                row.fact.redact(source.database.engine);
+                source.observation.accepts_snapshot_record(TelemetryStream::TuningObservations, &row.source)
+            }
+            Self::QueryRuntime(_) | Self::QueryWaits(_) => source.query_history().is_some(),
+        };
+        if !valid_identity || !record.is_valid() {
+            return Err(CollectionStop::InvalidPage.error());
+        }
+        Ok(record)
+    }
+    pub fn native_identity(&self) -> NativeRecordIdentity {
+        match self {
+            Self::QueryRuntime(record) => NativeRecordIdentity::Runtime(record.key.clone()),
+            Self::QueryWaits(record) => {
+                NativeRecordIdentity::Waits { key: record.key.clone(), category: record.category }
+            }
+            Self::QueryDefinition(record) => NativeRecordIdentity::QueryDefinition(record.id.clone()),
+            Self::PlanDefinition(record) => NativeRecordIdentity::PlanDefinition(record.id.clone()),
+            Self::ResourceSample(row) => {
+                NativeRecordIdentity::ResourceSample { at: row.at.clone(), replica_id: row.replica_id.clone() }
+            }
+            Self::Activity(row) => NativeRecordIdentity::Activity(row.key.clone()),
+            Self::Blocking(row) => NativeRecordIdentity::Blocking(row.waiter.clone(), row.owner.clone()),
+            Self::Incident(row) => NativeRecordIdentity::Incident(row.id.clone()),
+            Self::ActivityCheckpoint(row) => NativeRecordIdentity::Checkpoint(row.id.clone()),
+            Self::Deadlock(row) => {
+                NativeRecordIdentity::Deadlock { position: row.position.clone(), ordinal: row.graph_ordinal }
+            }
+            Self::Operational(row) => {
+                NativeRecordIdentity::Operational { source: row.source.clone(), key: row.key.clone() }
+            }
+            Self::WaitCounter(row) => {
+                NativeRecordIdentity::WaitCounter { source: row.source.clone(), wait_type: row.wait_type.clone() }
+            }
+            Self::Replication(row) => {
+                NativeRecordIdentity::Replication { source: row.source.clone(), key: row.fact.key() }
+            }
+            Self::Tuning(row) => NativeRecordIdentity::Tuning { source: row.source.clone(), key: row.fact.key() },
+            Self::ObjectDefinition(row) => {
+                NativeRecordIdentity::ObjectDefinition { source: row.source.clone(), key: row.key.clone() }
+            }
+            Self::Setting(row) => NativeRecordIdentity::Setting {
+                source: row.source.clone(),
+                namespace: row.namespace.clone(),
+                name: row.name.clone(),
+            },
+        }
+    }
+
+    pub fn is_valid(&self) -> bool {
+        if let Some(key) = self.measurement_key()
+            && ([&key.row_id, &key.plan_id, &key.replica_group_id].iter().any(|id| id.is_empty() || id.len() > 128)
+                || key.plan_definition_id.as_ref().is_some_and(|id| !valid_digest(id)))
+        {
+            return false;
+        }
+        let count = valid_counter;
+        let number = |value: f64| value.is_finite() && value >= 0.0;
+        match self {
+            Self::QueryRuntime(row) => {
+                count(&row.executions)
+                    && [
+                        row.avg_duration_us,
+                        row.stdev_duration_us,
+                        row.min_duration_us,
+                        row.max_duration_us,
+                        row.avg_cpu_us,
+                        row.avg_logical_reads_8kb_pages,
+                        row.avg_physical_reads_8kb_pages,
+                    ]
+                    .into_iter()
+                    .all(number)
+                    && [
+                        row.avg_logical_writes_8kb_pages,
+                        row.avg_rows,
+                        row.avg_dop,
+                        row.avg_max_used_memory_8kb_pages,
+                        row.avg_clr_us,
+                        row.avg_log_bytes,
+                        row.avg_tempdb_8kb_pages,
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .all(number)
+                    && [&row.first_execution_at, &row.last_execution_at]
+                        .into_iter()
+                        .all(|value| value.len() <= 64 && DateTime::parse_from_rfc3339(value).is_ok())
+            }
+            Self::QueryWaits(row) => {
+                [&row.total_wait_ms, &row.min_wait_ms, &row.max_wait_ms].into_iter().all(|value| count(value))
+                    && number(row.avg_wait_ms)
+            }
+            Self::QueryDefinition(row) => row.is_valid(),
+            Self::PlanDefinition(row) => row.is_valid(),
+            Self::ResourceSample(row) => row.is_valid(),
+            Self::Activity(row) => row.is_valid(),
+            Self::Blocking(row) => row.is_valid(),
+            Self::Incident(row) => row.is_valid(),
+            Self::ActivityCheckpoint(row) => row.is_valid(),
+            Self::Deadlock(row) => row.is_valid(),
+            Self::Operational(row) => row.is_valid(),
+            Self::WaitCounter(row) => row.is_valid(),
+            Self::Replication(row) => row.is_valid(),
+            Self::Setting(row) => row.is_valid(),
+            Self::Tuning(row) => row.is_valid(),
+            Self::ObjectDefinition(row) => row.is_valid(),
+        }
+    }
+
+    pub fn stream(&self) -> TelemetryStream {
+        match self {
+            Self::QueryRuntime(_) => TelemetryStream::QueryRuntime,
+            Self::QueryWaits(_) => TelemetryStream::QueryWaits,
+            Self::QueryDefinition(_) => TelemetryStream::QueryDefinitions,
+            Self::PlanDefinition(_) => TelemetryStream::PlanDefinitions,
+            Self::ResourceSample(_) => TelemetryStream::ResourceSamples,
+            Self::Activity(_) => TelemetryStream::ActivityObservations,
+            Self::Blocking(_) => TelemetryStream::BlockingEdges,
+            Self::Incident(_) => TelemetryStream::ActivityIncidents,
+            Self::ActivityCheckpoint(_) => TelemetryStream::ActivityCheckpoints,
+            Self::Deadlock(_) => TelemetryStream::DeadlockEvents,
+            Self::Operational(row) => row.stream(),
+            Self::WaitCounter(_) => TelemetryStream::WaitCounterSamples,
+            Self::Replication(_) => TelemetryStream::ReplicationSamples,
+            Self::Setting(_) => TelemetryStream::SettingObservations,
+            Self::Tuning(_) => TelemetryStream::TuningObservations,
+            Self::ObjectDefinition(_) => TelemetryStream::ObjectDefinitions,
+        }
+    }
+
+    pub fn measurement_key(&self) -> Option<&NativeMeasurementKey> {
+        match self {
+            Self::QueryRuntime(record) => Some(&record.key),
+            Self::QueryWaits(record) => Some(&record.key),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum CollectionStop {
+    Pending,
+    Cancelled,
+    CancellationUnconfirmed,
+    TimedOut,
+    PageLimit,
+    QueryLimit,
+    ByteLimit,
+    RowLimit,
+    Pressure,
+    PressureUnavailable,
+    SourceChanged,
+    SourceUnavailable,
+    StorageFailed,
+    InvalidPage,
+    MissingDefinitions,
+    RetentionGap,
+}
+
+impl CollectionStop {
+    pub fn error(self) -> Error {
+        let error = match self {
+            Self::TimedOut => crate::limits::timeout_error(),
+            Self::CancellationUnconfirmed => {
+                Error::new(ErrorCode::QueryFailed, t!("collection.cancellation_unconfirmed"))
+            }
+            _ => Error::new(ErrorCode::QueryFailed, t!("collection.source_stopped")),
+        };
+        error.with_detail(crate::ErrorDetail::CollectionStopped(self))
+    }
+
+    pub fn from_error(error: &Error) -> Self {
+        if let Some(crate::ErrorDetail::CollectionStopped(reason)) = error.detail {
+            return reason;
+        }
+        match error.code {
+            ErrorCode::Timeout => Self::TimedOut,
+            _ => Self::SourceUnavailable,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum CollectionRead {
+    Page { records: Vec<TelemetryRecord>, next_cursor: Option<String> },
+    Stopped(CollectionStop),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceShutdown {
+    Quiescent,
+    Unconfirmed,
+}
+
+/// A completed native read either verifies its advertised observation or closes a declared paged snapshot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SourceCompletion {
+    Verified,
+    Snapshot(StateSnapshotDescription),
+    Changed,
+}
+impl SourceCompletion {
+    pub fn verified_if(unchanged: bool) -> Self {
+        if unchanged { Self::Verified } else { Self::Changed }
+    }
+    pub fn is_verified(&self) -> bool {
+        !matches!(self, Self::Changed)
+    }
+}
+
+/// A collector owns one source session. A dropped caller must cancel/disconnect native work; never return an
+/// uncertain session to a pool. Paged snapshots may deliver provisional batches from one owned statement; `finish`
+/// must drain its completion and late errors before final coverage can authorize publication.
+/// `describe` reports the source-native observation and retention evidence for the selected logical collection.
+/// Sources do not schedule other databases, persist cursors or publish to destinations; the controller owns those steps.
+#[async_trait]
+pub trait TelemetrySource: Send {
+    async fn describe(&mut self) -> Result<CollectionDescription>;
+    fn query_count(&self) -> u32;
+    /// None when the provider cannot measure its native read tasks.
+    fn read_metrics(&self) -> Option<ReadWorkMetrics> {
+        None
+    }
+    async fn read_page(&mut self, stream: TelemetryStream, cursor: Option<&str>) -> Result<CollectionRead>;
+    /// Recheck native ownership/identity and finish coverage. Paged descriptors require a snapshot completion.
+    async fn finish(&mut self) -> Result<SourceCompletion>;
+    /// Finish cancellation/disconnect handling before a controller exits its runtime.
+    async fn close(&mut self) -> SourceShutdown;
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[serde(tag = "state", content = "reason", rename_all = "kebab-case")]
+#[ts(export)]
+pub enum CollectionStatus {
+    Complete,
+    Incomplete(CollectionStop),
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[ts(export)]
+pub struct CollectedFile {
+    pub batch_id: String,
+    pub stream: TelemetryStream,
+    pub semantics: TelemetrySemantics,
+    pub file: String,
+    pub status: CollectionStatus,
+    pub error_code: Option<ErrorCode>,
+    pub rows: u32,
+    pub bytes: u32,
+    pub pages: u32,
+    pub sha256: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug)]
+#[ts(export)]
+pub struct CollectionManifest {
+    pub format_version: u32,
+    pub capture: CaptureIdentity,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub request: CollectionRequest,
+    pub description: Option<CollectionDescription>,
+    /// Complete means the declared native streams finished. Reads are reconcilable observations, not an atomic
+    /// snapshot; unavailable definition payloads and unverified continuity still limit analytical use.
+    pub status: CollectionStatus,
+    pub source_queries: u32,
+    pub read_metrics: Option<ReadWorkMetrics>,
+    pub directory_synced: bool,
+    pub files: Vec<CollectedFile>,
+    pub references: ReferenceCoverage,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn budgets_and_time_bounds_fail_before_any_source_work() {
+        let mut request = CollectionRequest {
+            selection: crate::telemetry::CollectionSelection::QueryHistory {
+                from: "2026-11-09T06:00:00Z".into(),
+                until: "2026-11-09T07:00:00Z".into(),
+            },
+            budget: CollectionBudget::default(),
+        };
+        assert!(request.validate().is_ok());
+        request.budget.page_rows = 0;
+        assert!(request.validate().is_err());
+        request.budget = CollectionBudget::default();
+        request.selection = CollectionSelection::QueryHistory {
+            from: "2026-11-09T06:00:00Z".into(),
+            until: "2026-11-09T06:00:00Z".into(),
+        };
+        assert!(request.validate().is_err());
+        request.selection = CollectionSelection::QueryHistory {
+            from: "2026-11-09T06:00:00Z".into(),
+            until: "2026-11-11T07:00:00Z".into(),
+        };
+        assert!(request.validate().is_err());
+    }
+    #[test]
+    fn wait_categories_are_part_of_native_record_identity() {
+        let key = NativeMeasurementKey {
+            row_id: "1".into(),
+            plan_id: "2".into(),
+            replica_group_id: "3".into(),
+            execution_type: 0,
+            plan_definition_id: None,
+        };
+        let mut wait = WaitMeasurement {
+            key,
+            category: 1,
+            total_wait_ms: "9007199254740993".into(),
+            avg_wait_ms: 1.0,
+            min_wait_ms: "1".into(),
+            max_wait_ms: "2".into(),
+        };
+        let first = TelemetryRecord::QueryWaits(wait.clone());
+        wait.category = 2;
+        let second = TelemetryRecord::QueryWaits(wait);
+        assert!(first.is_valid() && second.is_valid());
+        assert_ne!(first.native_identity(), second.native_identity());
+        assert_eq!(serde_json::to_value(first).unwrap()["data"]["total_wait_ms"], "9007199254740993");
+    }
+}

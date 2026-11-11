@@ -1,12 +1,9 @@
 === mssql-demo.report.json
-**1 of 22 fixed; 21 still present. 1 new finding.**
+**1 of 20 fixed; 19 still present. 1 new finding.**
 
 - ✅ Fixed: A read from order\_items times out on every run, at about 15 s (was 100% of runs fail)
 - ⏳ Still present: A read from orders fails 25% of the time (25% of runs fail)
   It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
-- ⏳ Still present: Row locks on support\_tickets escalated to a table lock 5 times since SQL Server started (Oct 11) (5 table locks)
-  It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
-- ⏳ Still present: Inserts into hot queue for the last page of pk\_hot (53.6 s latch waits)
 - ⏳ Still present: Queries on orders recorded lock waits in the last 5 hours (3 min waiting on locks)
   It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
 - ⏳ Still present: Compares each of 1.5M rows of order\_items with 999 rows the Table Spool replays (1.5B pairs) (27% of DB time)

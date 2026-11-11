@@ -240,8 +240,8 @@ fn a_young_mysql_transaction_is_not_blamed_for_the_servers_history() {
     assert!(!f[0].title.contains("row versions for it"));
 }
 
-// C2: a SQL Server writer holds the log and its locks; the version store is named only for a transaction that
-// reads or makes row versions.
+// C2: logged uncommitted work is observed; log growth still needs the native reuse reason.
+// Name the version store only for a transaction that reads or makes row versions.
 #[test]
 fn sql_server_says_what_the_transaction_holds() {
     let mut s = with_signals(Engine::Mssql, vec![]);
@@ -252,7 +252,8 @@ fn sql_server_says_what_the_transaction_holds() {
     });
     let f = held_cleanup(&s);
     assert!(f[0].title.contains("uncommitted changes"), "{}", f[0].title);
-    assert!(f[0].summary.contains("can't reuse the transaction log"));
+    assert!(f[0].summary.contains("Work logged in this database remains uncommitted."));
+    assert!(f[0].summary.contains("SQL Server's reported reuse wait"));
     assert!(!f[0].summary.contains("version store"), "{}", f[0].summary);
 }
 

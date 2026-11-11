@@ -46,6 +46,11 @@ pub mod source_id {
     pub const SIZES: &str = "sizes";
     pub const TABLE_STORAGE: &str = "table storage";
     pub const CONSTRAINTS: &str = "constraints";
+    pub const CHECK_CONSTRAINTS: &str = "check_constraints";
+    pub const OBJECTS: &str = "objects";
+    pub const TRIGGERS: &str = "triggers";
+    pub const PARTITIONS: &str = "partitions";
+    pub const RETAINED_PLANS: &str = "retained_plans";
     pub const TIMESCALE_HYPERTABLES: &str = "timescale-hypertables";
     pub const TIMESCALE_CHUNKS: &str = "timescale-chunks";
     pub const TIMESCALE_INDEXES: &str = "timescale-indexes";
@@ -71,16 +76,22 @@ pub mod source_id {
     pub const MISSING_INDEXES: &str = "missing_indexes";
     pub const FORWARDED_FETCHES: &str = "forwarded_fetches";
     pub const TUNING: &str = "tuning";
+    pub const INDEX_OPERATIONS: &str = "index operations";
     pub const INDEX_CONTENTION: &str = "index contention";
     pub const LIVE_LOCKS: &str = "live_locks";
     pub const METADATA_LOCKS: &str = "metadata_locks";
 
     pub const SETTINGS: &str = "settings";
+    pub const DATABASE_SETTINGS: &str = "database settings";
+    pub const SCOPED_SETTINGS: &str = "database scoped settings";
+    pub const SERVER_SETTINGS: &str = "server settings";
+    pub const QUERY_STORE_SETTINGS: &str = "query store settings";
     pub const ADVICE_SETTINGS: &str = "advice settings";
     pub const SERVER_VARIABLES: &str = "server variables";
     pub const WAITS: &str = "waits";
     pub const WAIT_TOTALS: &str = "wait totals";
     pub const GLOBAL_STATUS: &str = "global status";
+    pub const PROCESSOR_TOPOLOGY: &str = "processor topology";
     pub const PERFORMANCE_COUNTERS: &str = "performance counters";
     pub const DATABASE_STATS: &str = "database statistics";
     pub const RESOURCES: &str = "resources";
@@ -90,6 +101,13 @@ pub mod source_id {
     pub const CLEANUP_SLOTS: &str = "cleanup slots";
     pub const CLEANUP_PREPARED: &str = "cleanup prepared";
     pub const PENDING_GRANTS: &str = "memory grants";
+    pub const WORKER_QUEUE: &str = "worker queue";
+    pub const VERSION_STORE: &str = "version store";
+    pub const PERSISTENT_VERSION_STORE: &str = "persistent version store";
+    pub const TUNING_OPTIONS: &str = "automatic tuning options";
+    pub const TUNING_RECOMMENDATIONS: &str = "tuning recommendations";
+    pub const FORCED_PLANS: &str = "forced plans";
+    pub const QUERY_HINTS: &str = "query hints";
     pub const GRANTS: &str = "memory grants per query";
     pub const FILE_LATENCY: &str = "file latency";
     pub const SESSIONS: &str = "sessions";
@@ -101,6 +119,7 @@ pub mod source_id {
     pub const LOG_CAPACITY: &str = "log_capacity";
     pub const FILE_CAPACITY: &str = "file_capacity";
     pub const TEMP_CAPACITY: &str = "temp_capacity";
+    pub const SUSPECT_PAGES: &str = "suspect_pages";
     pub const SEQUENCE_CAPACITY: &str = "sequence_capacity";
     pub const MULTIXACTS: &str = "multixacts";
     pub const ARCHIVER: &str = "archiver";
@@ -121,6 +140,11 @@ pub mod source_id {
         SIZES,
         TABLE_STORAGE,
         CONSTRAINTS,
+        CHECK_CONSTRAINTS,
+        OBJECTS,
+        TRIGGERS,
+        PARTITIONS,
+        RETAINED_PLANS,
         TIMESCALE_HYPERTABLES,
         TIMESCALE_CHUNKS,
         TIMESCALE_INDEXES,
@@ -145,14 +169,20 @@ pub mod source_id {
         FORWARDED_FETCHES,
         TUNING,
         INDEX_CONTENTION,
+        INDEX_OPERATIONS,
         LIVE_LOCKS,
         METADATA_LOCKS,
         SETTINGS,
+        DATABASE_SETTINGS,
+        SCOPED_SETTINGS,
+        SERVER_SETTINGS,
+        QUERY_STORE_SETTINGS,
         ADVICE_SETTINGS,
         SERVER_VARIABLES,
         WAITS,
         WAIT_TOTALS,
         GLOBAL_STATUS,
+        PROCESSOR_TOPOLOGY,
         PERFORMANCE_COUNTERS,
         DATABASE_STATS,
         RESOURCES,
@@ -162,6 +192,13 @@ pub mod source_id {
         CLEANUP_SLOTS,
         CLEANUP_PREPARED,
         PENDING_GRANTS,
+        WORKER_QUEUE,
+        VERSION_STORE,
+        PERSISTENT_VERSION_STORE,
+        TUNING_OPTIONS,
+        TUNING_RECOMMENDATIONS,
+        FORCED_PLANS,
+        QUERY_HINTS,
         GRANTS,
         FILE_LATENCY,
         SESSIONS,
@@ -173,6 +210,7 @@ pub mod source_id {
         FILE_CAPACITY,
         TEMP_CAPACITY,
         SEQUENCE_CAPACITY,
+        SUSPECT_PAGES,
         MULTIXACTS,
         ARCHIVER,
         SUBSCRIPTION_ERRORS,

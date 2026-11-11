@@ -321,114 +321,114 @@ const FINDINGS: &str = r#"Findings Good Findings: Nothing stands out over the la
   metric High: 0
   metric Medium: 0
   metric Low: 0
-  metric Information and history: 1
+  metric Information and history: 3
 Findings Good Findings: Nothing stands out.
   metric High: 0
   metric Medium: 0
   metric Low: 0
-  metric Information and history: 1
+  metric Information and history: 3
 Findings Bad Findings: 1 opportunity; the top ones touch 2 min of database time over the last 5 hours (27%).
   metric High: 1
   metric Medium: 0
   metric Low: 0
-  metric Information and history: 1
+  metric Information and history: 3
   item A read from order_items times out on every run, at about 15 s: 100% of runs fail
 Findings Bad Findings: 1 opportunity; the top ones touch 2 min of database time over the last 5 hours (27%).
   metric High: 1
   metric Medium: 0
   metric Low: 0
-  metric Information and history: 1
+  metric Information and history: 3
   item A read from order_items times out on every run, at about 15 s: 100% of runs fail
 Findings Bad Findings: 2 opportunities; the top ones touch 2 min of database time over the last 5 hours (27%).
   metric High: 2
   metric Medium: 0
   metric Low: 0
-  metric Information and history: 1
+  metric Information and history: 3
   item A read from order_items times out on every run, at about 15 s: 100% of runs fail
   item A read from orders fails 25% of the time: 25% of runs fail
 Findings Bad Findings: 2 opportunities; the top ones touch 2 min of database time over the last 5 hours (27%).
   metric High: 2
   metric Medium: 0
   metric Low: 0
-  metric Information and history: 1
+  metric Information and history: 3
   item A read from order_items times out on every run, at about 15 s: 100% of runs fail
   item A read from orders fails 25% of the time: 25% of runs fail
-Findings Bad Findings: 3 opportunities; the top ones touch 2 min of database time over the last 5 hours (28%).
-  metric High: 3
-  metric Medium: 0
+Findings Bad Findings: 3 opportunities; the top ones touch 5 min of database time over the last 5 hours (83%).
+  metric High: 2
+  metric Medium: 1
   metric Low: 0
-  metric Information and history: 1
+  metric Information and history: 3
   item A read from order_items times out on every run, at about 15 s: 100% of runs fail
   item A read from orders fails 25% of the time: 25% of runs fail
-  item Row locks on support_tickets escalated to a table lock 5 times since SQL Server started (Oct 11): 5 table locks
-Findings Bad Findings: 3 opportunities; the top ones touch 2 min of database time over the last 5 hours (28%).
-  metric High: 3
-  metric Medium: 0
+  item Queries on orders recorded lock waits in the last 5 hours: 3 min waiting on locks
+Findings Bad Findings: 3 opportunities; the top ones touch 5 min of database time over the last 5 hours (83%).
+  metric High: 2
+  metric Medium: 1
   metric Low: 0
-  metric Information and history: 1
+  metric Information and history: 3
   item A read from order_items times out on every run, at about 15 s: 100% of runs fail
   item A read from orders fails 25% of the time: 25% of runs fail
-  item Row locks on support_tickets escalated to a table lock 5 times since SQL Server started (Oct 11): 5 table locks
-Findings Bad Findings: 21 opportunities, 3 of them high.
+  item Queries on orders recorded lock waits in the last 5 hours: 3 min waiting on locks
+Findings Bad Findings: 19 opportunities; the top ones touch 5 min of database time over the last 5 hours (83%).
   detail: 1 more is about a query that stopped running: a deploy may have changed it.
-  metric High: 3
+  metric High: 1
   metric Medium: 7
   metric Low: 11
-  metric Information and history: 1
+  metric Information and history: 3
   metric Stopped running: 1
   item A read from orders fails 25% of the time: 25% of runs fail
-  item Row locks on support_tickets escalated to a table lock 5 times since SQL Server started (Oct 11): 5 table locks
-  item Inserts into hot queue for the last page of pk_hot: 53.6 s latch waits
-Findings Bad Findings: 21 opportunities, 3 of them high.
+  item Queries on orders recorded lock waits in the last 5 hours: 3 min waiting on locks
+  item Compares each of 1.5M rows of order_items with 999 rows the Table Spool replays (1.5B pairs): 27% of DB time
+Findings Bad Findings: 19 opportunities; the top ones touch 5 min of database time over the last 5 hours (83%).
   detail: 1 more is about a query that stopped running: a deploy may have changed it.
-  metric High: 3
+  metric High: 1
   metric Medium: 7
   metric Low: 11
-  metric Information and history: 1
+  metric Information and history: 3
   metric Stopped running: 1
   item A read from orders fails 25% of the time: 25% of runs fail
-  item Row locks on support_tickets escalated to a table lock 5 times since SQL Server started (Oct 11): 5 table locks
-  item Inserts into hot queue for the last page of pk_hot: 53.6 s latch waits
-Findings Bad Findings: 20 opportunities; the top ones touch 3 min of database time over the last 5 hours (58%).
-  detail: 2 more are about queries that stopped running: a deploy may have changed them.
-  metric High: 2
-  metric Medium: 7
-  metric Low: 11
-  metric Information and history: 1
-  metric Stopped running: 2
-  item Row locks on support_tickets escalated to a table lock 5 times since SQL Server started (Oct 11): 5 table locks
-  item Inserts into hot queue for the last page of pk_hot: 53.6 s latch waits
   item Queries on orders recorded lock waits in the last 5 hours: 3 min waiting on locks
-Findings Bad Findings: 20 opportunities; the top ones touch 3 min of database time over the last 5 hours (58%).
-  detail: 2 more are about queries that stopped running: a deploy may have changed them.
-  metric High: 2
-  metric Medium: 7
-  metric Low: 11
-  metric Information and history: 1
-  metric Stopped running: 2
-  item Row locks on support_tickets escalated to a table lock 5 times since SQL Server started (Oct 11): 5 table locks
-  item Inserts into hot queue for the last page of pk_hot: 53.6 s latch waits
-  item Queries on orders recorded lock waits in the last 5 hours: 3 min waiting on locks
+  item Compares each of 1.5M rows of order_items with 999 rows the Table Spool replays (1.5B pairs): 27% of DB time
 Findings Watch Findings: 18 opportunities; the top ones touch 5 min of database time over the last 5 hours (83%).
-  detail: 4 more are about queries that stopped running: a deploy may have changed them.
+  detail: 2 more are about queries that stopped running: a deploy may have changed them.
   metric High: 0
   metric Medium: 7
   metric Low: 11
-  metric Information and history: 1
-  metric Stopped running: 4
+  metric Information and history: 3
+  metric Stopped running: 2
   item Queries on orders recorded lock waits in the last 5 hours: 3 min waiting on locks
   item Compares each of 1.5M rows of order_items with 999 rows the Table Spool replays (1.5B pairs): 27% of DB time
   item This plan runs on one CPU because its statement says OPTION (MAXDOP 1): 27% of DB time
 Findings Watch Findings: 18 opportunities; the top ones touch 5 min of database time over the last 5 hours (83%).
-  detail: 4 more are about queries that stopped running: a deploy may have changed them.
+  detail: 2 more are about queries that stopped running: a deploy may have changed them.
   metric High: 0
   metric Medium: 7
   metric Low: 11
-  metric Information and history: 1
-  metric Stopped running: 4
+  metric Information and history: 3
+  metric Stopped running: 2
   item Queries on orders recorded lock waits in the last 5 hours: 3 min waiting on locks
   item Compares each of 1.5M rows of order_items with 999 rows the Table Spool replays (1.5B pairs): 27% of DB time
-  item This plan runs on one CPU because its statement says OPTION (MAXDOP 1): 27% of DB time"#;
+  item This plan runs on one CPU because its statement says OPTION (MAXDOP 1): 27% of DB time
+Findings Watch Findings: 16 opportunities; the top ones touch 2 min of database time over the last 5 hours (34%).
+  detail: 4 more are about queries that stopped running: a deploy may have changed them.
+  metric High: 0
+  metric Medium: 5
+  metric Low: 11
+  metric Information and history: 3
+  metric Stopped running: 4
+  item This plan runs on one CPU because its statement says OPTION (MAXDOP 1): 27% of DB time
+  item A read from products runs 60K times in 5 hours, one key at a time: 822 ms of database time over the last 5 hours (<1%)
+  item A type mismatch on customers.email stops a read from customers from seeking an index: 7% of DB time
+Findings Watch Findings: 16 opportunities; the top ones touch 2 min of database time over the last 5 hours (34%).
+  detail: 4 more are about queries that stopped running: a deploy may have changed them.
+  metric High: 0
+  metric Medium: 5
+  metric Low: 11
+  metric Information and history: 3
+  metric Stopped running: 4
+  item This plan runs on one CPU because its statement says OPTION (MAXDOP 1): 27% of DB time
+  item A read from products runs 60K times in 5 hours, one key at a time: 822 ms of database time over the last 5 hours (<1%)
+  item A type mismatch on customers.email stops a read from customers from seeking an index: 7% of DB time"#;
 
 #[test]
 fn health_says_what_it_said() {
