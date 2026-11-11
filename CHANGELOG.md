@@ -2,6 +2,28 @@
 
 Each release's notes are its section below: the release workflow publishes them on GitHub, and the desktop app shows them when it offers the update. A release without a section here isn't drafted.
 
+## 0.5.6
+
+### Added
+
+- **TLS settings for new and saved connections.** Choose encryption and certificate verification when adding a connection or editing an existing one. Test the draft settings before saving; available options follow the database provider, and token authentication requires verified TLS.
+- **Background collection (preview).** Collect PostgreSQL and Azure SQL Database telemetry through the CLI, with a durable local outbox, unattended Azure identity authentication, private Azure Blob recovery and ADX delivery adapters. Source collection and analytical delivery have independent progress and retry handling.
+
+### Improvements
+
+- **Broader telemetry coverage.** Archive statement statistics, persistent blocking activity, health, replication, settings and schema evidence through the same native readers used by scans and Live. PostgreSQL counter polling and SQL-definition collection have separate cadences.
+- **Shorter plan explanations.** Dashboard and query summaries stay concise, with assessment details available separately.
+- **More responsive coding-agent tools.** MCP tools handle requests independently, so a slow operation does not hold up unrelated requests.
+
+### Fixes
+
+- **Recovery and delivery.** Preserve progress through restarts and recovery-index outages; keep recent captures discoverable while historical delivery catches up.
+- **Measurement accuracy.** Preserve large counters, native JSON, units, reset information and measurement scope. Peak memory remains distinct from average memory.
+- **Collection safety.** Bound native reads and retain ownership through cancellation. Unconfirmed database work blocks replacement requests. Updated dependencies include the rustix memory-safety fix.
+- **Website publishing.** Fixed provider documentation headings that prevented the website from building.
+
+**Preview status:** Live ADX delivery and production-load qualification remain pending. Background collection is opt-in; deployment examples start with zero replicas.
+
 ## 0.5.5
 
 ### Improvements

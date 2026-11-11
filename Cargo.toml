@@ -4,7 +4,7 @@ members = ["crates/*", "app/src-tauri"]
 default-members = ["crates/*"]
 
 [workspace.package]
-version = "0.5.5"
+version = "0.5.6"
 edition = "2024"
 license = "MIT"
 # Built and released from this repository only: none of the crates goes to crates.io.
