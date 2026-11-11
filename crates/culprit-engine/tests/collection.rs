@@ -1174,6 +1174,7 @@ fn activity_rows(scenario: Scenario, step: usize) -> Vec<culprit_core::telemetry
     let mut row = activity_row();
     if matches!(scenario, Scenario::ActivityWrongEdges) {
         row.wait = Some(ActivityWait {
+            resources: None,
             native_type: Some("Lock".into()),
             elapsed_ms: Some("40000".into()),
             owners: vec![ActivityWaitOwner::Session { id: "unobserved".into(), generation: None }],
@@ -1406,6 +1407,7 @@ fn operational_rows(scenario: Scenario) -> Vec<TelemetryRecord> {
     use culprit_core::telemetry::*;
     if matches!(scenario, Scenario::CumulativeStatements) {
         let sample = StatementCounterSample {
+            distributions: vec![],
             identity: NativeQueryIdentity {
                 query_id: "opaque-query".into(),
                 qualifiers: [("userid".into(), "17".into()), ("dbid".into(), "42".into())].into(),

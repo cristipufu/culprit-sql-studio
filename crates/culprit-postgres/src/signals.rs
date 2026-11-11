@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 
 use culprit_core::{
-    ConstraintIssue, ConstraintKind, Coverage, FileIo, FileKind, Pressure, QueryStat, Replica, ReplicaCondition,
-    ReplicaRole, Setting, Signal, SignalScope, SignalUnit, Snapshot, TableStorage, t,
+    ConstraintIssue, Coverage, FileIo, FileKind, Pressure, QueryStat, Replica, Setting, Signal, SignalScope,
+    SignalUnit, Snapshot, TableStorage, t,
 };
 use tokio_postgres::Client;
 
@@ -326,51 +326,26 @@ fn bloat_estimates(rows: &[Row]) -> HashMap<(String, String), f64> {
 
 /// CHECK constraints added NOT VALID, and whether their table is a legacy inheritance child: the one place the
 /// planner reads CHECK constraints by default (constraint exclusion), and only validated ones.
-async fn constraints(client: &Client, version_num: u32) -> culprit_core::Result<Vec<ConstraintIssue>> {
-    // Declarative partitions (10+) are pruned by their bounds, not by CHECK constraints.
-    let not_partition = if version_num >= 100_000 { " AND NOT t.relispartition" } else { "" };
-    let sql = format!(
-        "SELECT n.nspname AS schema_name, t.relname AS table_name, c.conname,
-                EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhrelid = t.oid){not_partition} AS inheritance_child
-           FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace
-          WHERE c.contype = 'c' AND NOT c.convalidated
-            AND n.nspname NOT IN ('pg_catalog', 'information_schema')"
-    );
-    Ok(query(client, &sql)
+async fn constraints(client: &Client, _version_num: u32) -> culprit_core::Result<Vec<ConstraintIssue>> {
+    let kind = crate::native::catalog::Kind::UnvalidatedChecks;
+    let readings = query(client, &crate::native::catalog::query(kind, false, 100_001))
         .await?
-        .iter()
-        .map(|r| ConstraintIssue {
-            schema: r.string("schema_name"),
-            table: r.string("table_name"),
-            name: r.string("conname"),
-            kind: ConstraintKind::Check,
-            disabled: false,
-            inheritance_child: r.flag("inheritance_child"),
+        .into_iter()
+        .map(|row| {
+            crate::native::catalog::decode(kind, row, None, culprit_core::telemetry::MAX_CATALOG_EXPRESSION_BYTES)
         })
-        .collect())
+        .collect::<culprit_core::Result<Vec<_>>>()?;
+    Ok(readings.into_iter().filter_map(crate::native::catalog::constraint).collect())
 }
 
 /// Settings the signals' advice depends on, as pg_settings has them (absent on versions without them): whether WAL
 /// full-page images are already compressed, where the planner reads CHECK constraints, and what caps a slot's WAL.
 async fn advice_settings(client: &Client) -> culprit_core::Result<Vec<Setting>> {
-    let rows = query(
-        client,
-        "SELECT name, setting, unit, boot_val FROM pg_settings
-          WHERE name IN ('wal_compression', 'constraint_exclusion', 'max_slot_wal_keep_size')",
-    )
-    .await?;
-    Ok(rows
-        .iter()
-        .map(|r| {
-            let unit = r.text("unit");
-            Setting {
-                name: r.string("name"),
-                value: crate::catalog::pretty_setting(&r.string("setting"), unit.as_deref()),
-                default_value: r.text("boot_val").map(|v| crate::catalog::pretty_setting(&v, unit.as_deref())),
-                scope: "server".into(),
-            }
-        })
-        .collect())
+    let rows = query(client, &crate::native::settings::query(crate::native::settings::ADVICE, 1000)).await?;
+    rows.iter()
+        .map(crate::native::settings::decode)
+        .map(|result| result.map(crate::native::settings::project))
+        .collect()
 }
 
 // ── per server ─────────────────────────────────────────────────────────────────────────────────────
@@ -558,143 +533,24 @@ fn session_signals(
     out
 }
 
-/// What a standby reads about itself.
-struct Standby {
-    /// WAL received and not yet replayed; `None` when nothing streams to it (archive recovery).
-    behind: Option<f64>,
-    /// Seconds since the last replayed commit was committed on the primary.
-    since_replay: Option<f64>,
-    /// pg_stat_wal_receiver's status, when a receiver runs.
-    receiver: Option<String>,
-    /// Whether primary_conninfo is set: `None` when this login can't see it (it can hold a password) or the version
-    /// keeps it in recovery.conf.
-    streaming_configured: Option<bool>,
-    /// recovery_min_apply_delay, in seconds.
-    delay: Option<f64>,
-}
-
-/// This server's own lag as a standby. Seconds since the last replayed commit are lag only while there is WAL it
-/// received and hasn't replayed: on a quiet primary they grow with nothing to apply. A standby without a WAL receiver
-/// is stopped only when it is meant to stream (primary_conninfo set); without it, it restores WAL from an archive.
-fn standby_replica(s: Standby) -> Replica {
-    let delay = s.delay.filter(|d| *d > 0.0);
-    // The WAL receiver's own status is the engine's word; without a receiver, how it stands is a fact the catalog words.
-    let (condition, state) = match (s.receiver, s.streaming_configured) {
-        (Some(status), _) if status.eq_ignore_ascii_case("stopped") => (ReplicaCondition::Stopped, Some(status)),
-        (Some(status), _) => (ReplicaCondition::Reported, Some(status)),
-        (None, Some(true)) => (ReplicaCondition::NotReceiving, None),
-        (None, Some(false)) => (ReplicaCondition::RestoringFromArchive, None),
-        (None, None) => (ReplicaCondition::NotStreaming, None),
-    };
-    let lag_seconds = match s.behind {
-        Some(b) if b >= culprit_core::signals::STANDBY_BEHIND_BYTES => {
-            s.since_replay.map(|t| (t - delay.unwrap_or(0.0)).max(0.0))
-        }
-        Some(_) => Some(0.0),
-        None => None,
-    };
-    Replica {
-        condition,
-        state,
-        lag_seconds,
-        lag_bytes: s.behind,
-        delay_seconds: delay,
-        ..Replica::new("this server", ReplicaRole::ThisServer)
-    }
-}
-
-/// Replicas this server streams to and logical consumers it sends changes to, its own replay lag when it is a
-/// standby, and replication slots that keep WAL.
+/// Replication uses the same native relation and decoder as background capture.
 async fn replicas(
     client: &Client,
     version_num: u32,
     platform: Option<culprit_core::Platform>,
 ) -> culprit_core::Result<Vec<Replica>> {
-    let standby = query_one(client, "SELECT pg_is_in_recovery() AS standby").await?.is_some_and(|r| r.flag("standby"));
-    let mut out = Vec::new();
-    if standby {
-        // Aurora readers replicate through the shared storage, not WAL streaming: no receiver, nothing to measure here
-        // (Aurora reports their lag in aurora_replica_status() and CloudWatch).
-        if platform == Some(culprit_core::Platform::AmazonAurora) {
-            return Ok(out);
-        }
-        // primary_conninfo can hold a password: only whether it is set is read, and pg_settings hides it from logins
-        // that may not see it.
-        if let Some(r) = query_one(
-            client,
-            "SELECT pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn()) AS behind,
-                    extract(epoch FROM now() - pg_last_xact_replay_timestamp()) AS since_replay,
-                    (SELECT status FROM pg_stat_wal_receiver LIMIT 1) AS receiver,
-                    (SELECT setting <> '' FROM pg_settings WHERE name = 'primary_conninfo') AS streaming_configured,
-                    (SELECT setting::float8 / 1000 FROM pg_settings WHERE name = 'recovery_min_apply_delay') AS delay_s",
-        )
-        .await?
-        {
-            let configured = r.text("streaming_configured").map(|v| matches!(v.as_str(), "t" | "true"));
-            out.push(standby_replica(Standby {
-                behind: r.number("behind"),
-                since_replay: r.number("since_replay"),
-                receiver: r.text("receiver"),
-                streaming_configured: configured,
-                delay: r.number("delay_s"),
-            }));
-        }
-        return Ok(out);
+    let context=query_one(client,"SELECT pg_catalog.pg_is_in_recovery() AS standby,(SELECT oid::text FROM pg_catalog.pg_database WHERE datname=pg_catalog.current_database()) AS database_oid").await?.ok_or_else(crate::native::invalid)?;
+    let standby = crate::native::flag(&context, "standby")?;
+    if standby && platform == Some(culprit_core::Platform::AmazonAurora) {
+        return Ok(vec![]);
     }
-    // A walsender with a logical slot sends decoded changes to a consumer, not WAL to a copy of the server.
-    for r in query(
-        client,
-        "SELECT coalesce(nullif(r.application_name, ''), r.client_addr::text, r.pid::text) AS name, r.state, r.sync_state,
-                extract(epoch FROM r.replay_lag) AS lag_s, pg_wal_lsn_diff(pg_current_wal_lsn(), r.replay_lsn) AS behind,
-                coalesce(s.slot_type = 'logical', false) AS logical, s.database::text AS database
-           FROM pg_stat_replication r LEFT JOIN pg_replication_slots s ON s.active_pid = r.pid",
-    )
-    .await?
-    {
-        out.push(Replica {
-            state: r.text("state"),
-            sync: r.text("sync_state"),
-            lag_seconds: r.number("lag_s"),
-            lag_bytes: r.number("behind"),
-            logical: Some(r.flag("logical")),
-            database: r.text("database"),
-            ..Replica::new(r.string("name"), ReplicaRole::Replica)
-        });
-    }
-    for r in query(client, &slots_sql(version_num)).await? {
-        let slot_type = r.text("slot_type");
-        out.push(Replica {
-            condition: if r.flag("active") { ReplicaCondition::SlotActive } else { ReplicaCondition::SlotInactive },
-            lag_bytes: r.number("kept"),
-            logical: slot_type.as_deref().map(|t| t == "logical"),
-            sync: slot_type,
-            inactive_seconds: r.number("inactive_s"),
-            wal_status: r.text("wal_status"),
-            safe_wal_bytes: r.number("safe_wal_size"),
-            database: r.text("database"),
-            ..Replica::new(r.string("slot_name"), ReplicaRole::Slot)
-        });
-    }
-    Ok(out)
-}
-
-/// Replication slots and the WAL each keeps; from 13 whether that WAL is still guaranteed and what max_slot_wal_keep_size
-/// leaves before the slot is given up, from 17 since when it has had no consumer.
-fn slots_sql(version_num: u32) -> String {
-    let mut columns = vec![
-        "slot_name",
-        "slot_type",
-        "active",
-        "pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) AS kept",
-        "database::text AS database",
-    ];
-    if version_num >= 130_000 {
-        columns.extend(["wal_status", "safe_wal_size::float8 AS safe_wal_size"]);
-    }
-    if version_num >= 170_000 {
-        columns.push("extract(epoch FROM now() - inactive_since) AS inactive_s");
-    }
-    format!("SELECT {} FROM pg_replication_slots WHERE restart_lsn IS NOT NULL", columns.join(", "))
+    let database_oid = crate::native::text(&context, "database_oid")?;
+    let rows = query(client, &crate::native::replication::query(version_num, standby, &database_oid, 100_001)).await?;
+    let facts = rows
+        .iter()
+        .map(|row| crate::native::replication::decode(row, &database_oid))
+        .collect::<culprit_core::Result<Vec<_>>>()?;
+    Ok(facts.iter().filter_map(|row| crate::native::replication::project(&row.fact)).collect())
 }
 
 #[cfg(test)]
@@ -747,62 +603,6 @@ mod tests {
         assert!(costs_columns(170_000).iter().any(|c| c.contains("jit_deform_time")));
     }
 
-    fn standby(behind: Option<f64>, since_replay: f64) -> Standby {
-        Standby {
-            behind,
-            since_replay: Some(since_replay),
-            receiver: Some("streaming".into()),
-            streaming_configured: Some(true),
-            delay: None,
-        }
-    }
-
-    // On a quiet primary the last replayed commit gets older by the minute while there is nothing to replay: that is
-    // the primary's silence, not lag.
-    #[test]
-    fn a_standby_with_nothing_to_replay_is_not_behind() {
-        let idle = standby_replica(standby(Some(0.0), 3_600.0));
-        assert_eq!((idle.lag_seconds, idle.state.as_deref()), (Some(0.0), Some("streaming")));
-        let behind = standby_replica(standby(Some(64.0 * 1024.0 * 1024.0), 95.0));
-        assert_eq!(behind.lag_seconds, Some(95.0));
-        // The false flag: the primary ran one long CREATE INDEX for an hour without a commit, and the standby, current
-        // with its replay, was a few kilobytes behind when the scan ran. That hour is the primary's, not lag.
-        let current = standby_replica(standby(Some(8_192.0), 3_600.0));
-        assert_eq!(current.lag_seconds, Some(0.0));
-    }
-
-    // recovery_min_apply_delay holds replay back on purpose: only what is beyond it is lag.
-    #[test]
-    fn a_delayed_standby_counts_only_the_lag_beyond_its_delay() {
-        let delayed = standby_replica(Standby { delay: Some(3_600.0), ..standby(Some(1e9), 3_640.0) });
-        assert_eq!((delayed.lag_seconds, delayed.delay_seconds), (Some(40.0), Some(3_600.0)));
-    }
-
-    // Without a WAL receiver a standby is stopped only when it is meant to stream; log shipping restores from an
-    // archive and has no receiver at all.
-    #[test]
-    fn a_standby_without_a_receiver_is_stopped_only_when_it_should_stream() {
-        let none = |configured| Standby {
-            behind: None,
-            receiver: None,
-            streaming_configured: configured,
-            ..standby(None, 600.0)
-        };
-        let stopped = standby_replica(none(Some(true)));
-        assert_eq!(stopped.condition, ReplicaCondition::NotReceiving);
-        assert!(stopped.condition.is_stopped());
-        assert_eq!(stopped.state_words().as_deref(), Some("not receiving"));
-        let shipping = standby_replica(none(Some(false)));
-        assert_eq!((shipping.condition, shipping.lag_seconds), (ReplicaCondition::RestoringFromArchive, None));
-        assert!(!shipping.condition.is_stopped());
-        assert_eq!(shipping.state_words().as_deref(), Some("restoring from archive"));
-        assert_eq!(standby_replica(none(None)).state_words().as_deref(), Some("not streaming"));
-        // A receiver's own status is the engine's word: "stopped" is a stop, "streaming" isn't.
-        let receiving = |status: &str| Standby { receiver: Some(status.into()), ..none(Some(true)) };
-        assert_eq!(standby_replica(receiving("stopped")).condition, ReplicaCondition::Stopped);
-        assert_eq!(standby_replica(receiving("streaming")).state_words().as_deref(), Some("streaming"));
-    }
-
     // Without stats_reset (PostgreSQL 15+ until the first reset) how long the counts ran is unknown: no rate, but the
     // shares that need no time stay.
     #[test]
@@ -835,12 +635,5 @@ mod tests {
                 pair("Sessions the client abandoned", "under 1%: clients close their connections"),
             ]
         );
-    }
-
-    #[test]
-    fn slot_columns_follow_the_version() {
-        assert!(!slots_sql(120_000).contains("wal_status"));
-        assert!(slots_sql(130_000).contains("safe_wal_size") && !slots_sql(160_000).contains("inactive_since"));
-        assert!(slots_sql(170_000).contains("inactive_since"));
     }
 }

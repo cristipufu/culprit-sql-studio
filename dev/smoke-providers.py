@@ -297,9 +297,12 @@ class Database:
                 self.test(crate, selection, library=crate != "culprit-engine",
                           skip="cluster_tests::" if crate == "culprit-yugabyte" else None)
             return
-        self.test("culprit-engine", "live_providers::", library=False)
+        self.test("culprit-engine", "live_providers::live_registered_provider", library=False)
         fixture = self.fixture
         if fixture.engine == "postgres":
+            self.test("culprit-engine", "live_providers::postgres_telemetry_", library=False)
+            self.test("culprit-postgres", "read::native_tests::")
+            self.test("culprit-postgres", "telemetry::native_tests::")
             self.test("culprit-postgres", "wire::tests::live_table_preview")
             if fixture.name == "timescale":
                 self.test("culprit-postgres", "timescale::tests::live_")

@@ -13,6 +13,13 @@ pub enum MeasurementValue {
     Real(f64),
 }
 impl MeasurementValue {
+    pub fn integer(&self) -> Option<u64> {
+        match self {
+            Self::Integer(value) => value.parse().ok(),
+            Self::Real(_) => None,
+        }
+    }
+
     pub(super) fn is_valid(&self) -> bool {
         match self {
             Self::Integer(value) => valid_counter(value),

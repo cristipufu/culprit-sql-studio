@@ -12,6 +12,7 @@ doctest = false
 
 [dependencies]
 culprit-core.workspace = true
+culprit-read.workspace = true
 async-trait.workspace = true
 futures-util.workspace = true
 rustls.workspace = true
@@ -21,3 +22,7 @@ tokio.workspace = true
 tokio-postgres.workspace = true
 tokio-postgres-rustls.workspace = true
 webpki-roots.workspace = true
+
+[dev-dependencies]
+culprit-collector.workspace = true
+tempfile = "3.27.0"

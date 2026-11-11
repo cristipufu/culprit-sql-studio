@@ -87,3 +87,78 @@ async fn live_registered_provider_collects_and_degrades_without_changing_data() 
     assert!(degraded_from(&baseline, &restricted), "missing privileges must become explicit coverage gaps");
     assert_eq!(limited.run(&rows_sql, 101).await.unwrap().rows, before.rows);
 }
+
+/// No ADX account is involved: native data crosses the real journal, restart, replay and ADX wire projection.
+#[tokio::test]
+#[ignore = "requires the owned loopback PostgreSQL fixture from dev/smoke-providers.py"]
+async fn postgres_telemetry_survives_outbox_restart_and_adx_projection() {
+    use culprit_collector::{capture::CollectionCancellation, delivery::contract::Contract, outbox::Outbox};
+    use culprit_core::{AuthKind, telemetry::*};
+    use culprit_engine::{
+        NewConnection, Workspace,
+        adx::{catalog::SchemaCatalog, envelope::Envelope, projection},
+    };
+    use std::sync::Arc;
+
+    let spec = connection();
+    assert_eq!(spec.engine, Some(Engine::Postgres));
+    assert!(matches!(spec.database.as_deref(), Some("culprit_smoke" | "culprit_timescale")));
+    let root = tempfile::TempDir::with_prefix("culprit-native-pipeline-").unwrap();
+    let workspace = Workspace::open_in(root.path().join("workspace"))
+        .with_provider(Engine::Postgres, Arc::new(move |_| culprit_engine::registry::provider(&spec)));
+    workspace
+        .add_connection(NewConnection {
+            name: "native".into(),
+            input: "postgres://reader@fixture.invalid/sample".into(),
+            auth: Some(AuthKind::None),
+            ..Default::default()
+        })
+        .unwrap();
+    let path = root.path().join("outbox");
+    let mut outbox = Outbox::create(&path, Default::default()).unwrap();
+    let catalog = SchemaCatalog::new().unwrap();
+    let contract =
+        Contract::new("owned-test".into(), "shard-0".into(), "adx:fixture".into(), catalog.digest().into()).unwrap();
+    let mut projected = 0;
+    for dataset in [
+        SnapshotDataset::StatementCounters,
+        SnapshotDataset::StatementDefinitions,
+        SnapshotDataset::Operational,
+        SnapshotDataset::Settings,
+        SnapshotDataset::Tables,
+        SnapshotDataset::Columns,
+    ] {
+        let request = CollectionRequest {
+            selection: CollectionSelection::Snapshot { dataset },
+            budget: CollectionBudget { page_rows: 2, max_snapshot_rows: 10000, max_pages: 1000, ..Default::default() },
+        };
+        let manifest = workspace
+            .collect_into_outbox("native", request, &mut outbox, &CollectionCancellation::default())
+            .await
+            .unwrap();
+        assert_eq!(manifest.status, CollectionStatus::Complete, "{dataset:?}: {manifest:?}");
+        drop(outbox);
+        outbox = Outbox::open(&path).unwrap();
+        let replay_dir = root.path().join(format!("replay-{dataset:?}"));
+        let replay = Outbox::replay(&path, &manifest.capture.observation_id, &replay_dir).await.unwrap();
+        assert_eq!(replay.capture, manifest.capture);
+        let prepared =
+            outbox.delivery().prepare(&manifest.capture.observation_id, contract.clone(), vec![]).await.unwrap();
+        for file in &manifest.files {
+            let schema = catalog.get(file.stream).unwrap();
+            let envelope = Envelope::new(prepared.manifest(), &file.batch_id).unwrap();
+            let bytes = std::fs::read(replay_dir.join(&file.file)).unwrap();
+            for (index, line) in bytes.split(|byte| *byte == b'\n').filter(|line| !line.is_empty()).enumerate() {
+                let row: ExportedRecord = serde_json::from_slice(line).unwrap();
+                let input = envelope.input(index + 1, &row).unwrap();
+                let values = schema.project(&input).unwrap();
+                let encoded: serde_json::Value = serde_json::from_slice(&schema.encode(&values).unwrap()).unwrap();
+                let returned: Vec<_> = schema.columns().iter().map(|column| encoded[&column.name].clone()).collect();
+                assert_eq!(schema.returned_digest(&returned).unwrap(), projection::digest(&values).unwrap());
+                assert_eq!(encoded["Engine"], "postgres");
+                projected += 1;
+            }
+        }
+    }
+    assert!(projected > 10, "the native fixture must project actual rows, not only empty streams");
+}

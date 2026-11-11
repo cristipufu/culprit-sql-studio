@@ -136,6 +136,7 @@ fn geo_link(row: &Rec) -> Result<ReplicationFact> {
 
 pub(crate) fn application(fact: &ReplicationFact) -> Option<Replica> {
     match fact {
+        ReplicationFact::Native(_) => None,
         ReplicationFact::AvailabilityGroup(row) => {
             let (local, primary) = (row.is_local?, row.is_primary?);
             if local && primary {
@@ -186,6 +187,7 @@ fn bytes(value: &Option<String>) -> Option<f64> {
 }
 fn direction_known(fact: &ReplicationFact) -> bool {
     match fact {
+        ReplicationFact::Native(_) => false,
         ReplicationFact::AvailabilityGroup(row) => row.is_local.is_some() && row.is_primary.is_some(),
         ReplicationFact::GeoLink(row) => matches!(row.role, Some(0 | 1)),
     }
@@ -202,6 +204,7 @@ fn record_application_result(coverage: &mut Coverage, result: Result<Vec<Replica
 }
 fn record_local_role(settings: &mut Vec<culprit_core::Setting>, facts: &[ReplicationFact]) {
     let secondary = facts.iter().any(|fact| match fact {
+        ReplicationFact::Native(_) => false,
         ReplicationFact::AvailabilityGroup(row) => row.is_local == Some(true) && row.is_primary == Some(false),
         ReplicationFact::GeoLink(row) => row.role == Some(1),
     });

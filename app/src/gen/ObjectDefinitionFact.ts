@@ -7,5 +7,7 @@ import type { MssqlDmlTrigger } from "./MssqlDmlTrigger";
 import type { MssqlForeignKey } from "./MssqlForeignKey";
 import type { MssqlPartitionBoundary } from "./MssqlPartitionBoundary";
 import type { MssqlRetainedPlanDefinition } from "./MssqlRetainedPlanDefinition";
+import type { NativeCatalogDefinition } from "./NativeCatalogDefinition";
+import type { QueryDefinition } from "./QueryDefinition";
 
-export type ObjectDefinitionFact = { "kind": "mssql-foreign-key", "data": MssqlForeignKey } | { "kind": "mssql-column", "data": MssqlColumnDefinition } | { "kind": "mssql-check-constraint", "data": MssqlCheckConstraint } | { "kind": "mssql-object", "data": MssqlCatalogObject } | { "kind": "mssql-dml-trigger", "data": MssqlDmlTrigger } | { "kind": "mssql-partition-boundary", "data": MssqlPartitionBoundary } | { "kind": "mssql-cached-definition", "data": MssqlCachedDefinition } | { "kind": "mssql-retained-plan", "data": MssqlRetainedPlanDefinition };
+export type ObjectDefinitionFact = { "kind": "statement", "data": QueryDefinition } | { "kind": "native-catalog", "data": NativeCatalogDefinition } | { "kind": "mssql-foreign-key", "data": MssqlForeignKey } | { "kind": "mssql-column", "data": MssqlColumnDefinition } | { "kind": "mssql-check-constraint", "data": MssqlCheckConstraint } | { "kind": "mssql-object", "data": MssqlCatalogObject } | { "kind": "mssql-dml-trigger", "data": MssqlDmlTrigger } | { "kind": "mssql-partition-boundary", "data": MssqlPartitionBoundary } | { "kind": "mssql-cached-definition", "data": MssqlCachedDefinition } | { "kind": "mssql-retained-plan", "data": MssqlRetainedPlanDefinition };

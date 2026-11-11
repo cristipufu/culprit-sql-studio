@@ -2,9 +2,10 @@
 import type { CounterNature } from "./CounterNature";
 import type { CounterUnit } from "./CounterUnit";
 import type { MeasurementScope } from "./MeasurementScope";
+import type { MeasurementValue } from "./MeasurementValue";
 import type { ResetMarker } from "./ResetMarker";
 
-export type NativeCounterSample = { key: string, value: string, unit: CounterUnit, nature: CounterNature, scope: MeasurementScope, reset: ResetMarker, native_object: string, native_name: string, 
+export type NativeCounterSample = { key: string, value: MeasurementValue, unit: CounterUnit, nature: CounterNature, scope: MeasurementScope, reset: ResetMarker, native_object: string, native_name: string, 
 /**
  * None is a confirmed uninstanced counter; an unavailable identity cannot establish a row.
  */

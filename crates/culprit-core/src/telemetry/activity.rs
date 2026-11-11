@@ -60,6 +60,7 @@ impl ActivityKey {
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
 pub enum TransactionWaitOwner {
+    Prepared,
     Orphaned,
     Recovery,
 }
@@ -146,6 +147,8 @@ pub struct ActivityWait {
     pub native_type: Option<String>,
     pub elapsed_ms: Option<String>,
     pub owners: Vec<ActivityWaitOwner>,
+    /// None is uncollected lock detail, distinct from an observed empty set.
+    pub resources: Option<Vec<crate::LockWait>>,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -196,6 +199,20 @@ impl ActivityObservation {
                     && wait.elapsed_ms.as_deref().is_none_or(counter)
                     && wait.owners.len() <= 64
                     && wait.owners.iter().all(ActivityWaitOwner::is_valid)
+                    && wait.resources.as_ref().is_none_or(|resources| {
+                        resources.len() <= 64
+                            && resources.iter().all(|resource| {
+                                resource.session == self.key.session.id
+                                    && [&resource.mode, &resource.resource]
+                                        .into_iter()
+                                        .flatten()
+                                        .all(|value| identifier(value))
+                                    && [&resource.object, &resource.index]
+                                        .into_iter()
+                                        .flatten()
+                                        .all(|value| value.len() <= 2048)
+                            })
+                    })
             })
             && self.query_hash.as_deref().is_none_or(identifier)
             && self.client.as_ref().is_none_or(|client| {

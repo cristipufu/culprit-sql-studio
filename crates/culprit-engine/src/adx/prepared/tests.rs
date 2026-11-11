@@ -20,6 +20,7 @@ fn activity() -> ActivityObservation {
         session_counters: ActivityCounters { cpu_ms: Some("11".into()), ..Default::default() },
         request_counters: Some(ActivityCounters { cpu_ms: Some("0".into()), ..Default::default() }),
         wait: Some(ActivityWait {
+            resources: None,
             native_type: Some("LCK_M_X".into()),
             elapsed_ms: Some("40000".into()),
             owners: vec![ActivityWaitOwner::Session { id: "62".into(), generation: None }],
@@ -176,6 +177,7 @@ fn large_deadlock_graphs_keep_signal_fields_and_explicit_full_evidence_reference
 #[test]
 fn cumulative_query_facts_keep_exact_totals_units_and_resets_in_the_analytical_contract() {
     let sample = StatementCounterSample {
+        distributions: vec![],
         identity: NativeQueryIdentity {
             query_id: "fingerprint".into(),
             qualifiers: [("userid".into(), "17".into())].into(),

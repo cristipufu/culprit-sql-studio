@@ -68,6 +68,19 @@ Operational sources cover independent database/table MultiXact ages, shared arch
 
 Counters retain their own reset clocks. New event findings require a comparable interval inside the requested period. Catalog-only retention does not establish retained application rows. Generic plans do not identify the plan used by historical requests, or prove that every listed partition ran.
 
+## Background telemetry
+
+The CLI can archive 16 snapshot datasets and persistent activity through the shared collector service. See the
+[PostgreSQL collection table](../collector.md#postgresql-source-coverage) for selections, native sources and starting
+cadences. Scans and collection share the native readers; the collector uses bounded read-only sessions, catalog-only
+search paths, statement/lock timeouts, disabled parallel query and bounded working memory. A canceled connection is
+not reused, and an unconfirmed shutdown blocks subsequent native work.
+
+Counter polling omits query text. Definitions are collected separately and redacted for export. Catalog collection
+retains native attributes and expression fingerprints without deparsing user expressions or reading table contents.
+Size estimates remain labeled as estimates. Current blocking is an observation at poll time; short events between
+polls and deadlock graphs require other evidence. Background capture does not run EXPLAIN or measured queries.
+
 ## Verification
 
 Coverage has been exercised on PostgreSQL 15–18, including Amazon RDS; saved fixtures include PostgreSQL 18.6. The [PostgreSQL fixture](../../dev/postgres/README.md) reproduces workload and schema problems. Parser fixtures and provider/embedding tests cover captured plans, missing measurements and offline replay.

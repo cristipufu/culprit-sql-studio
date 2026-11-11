@@ -10,7 +10,7 @@ use crate::model::{Engine, Session};
 use crate::{format, t};
 
 /// The lock a waiting session asked for and didn't get.
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Default)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq, Default)]
 #[ts(export)]
 pub struct LockWait {
     /// The waiting session.

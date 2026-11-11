@@ -41,6 +41,19 @@ impl ObjectDefinitionFact {
     }
     fn definition_fields(&self) -> [Option<DefinitionReference<'_>>; 2] {
         let payload = match self {
+            Self::NativeCatalog(catalog) => {
+                return [
+                    catalog
+                        .definition
+                        .as_ref()
+                        .map(|value| reference("/record/data/fact/data/definition/payload", &value.payload)),
+                    catalog
+                        .predicate
+                        .as_ref()
+                        .map(|value| reference("/record/data/fact/data/predicate/payload", &value.payload)),
+                ];
+            }
+            Self::Statement(statement) => Some(reference("/record/data/fact/data/sql", &statement.sql)),
             Self::MssqlColumn(column) => {
                 return [
                     column
@@ -77,6 +90,20 @@ impl ObjectDefinitionFact {
 impl OperationalFact {
     fn definition_fields(&self) -> [Option<DefinitionReference<'_>>; 2] {
         let payload = match self {
+            Self::CatalogCounters(value) => {
+                return [
+                    value
+                        .catalog
+                        .definition
+                        .as_ref()
+                        .map(|value| reference("/record/data/fact/data/catalog/definition/payload", &value.payload)),
+                    value
+                        .catalog
+                        .predicate
+                        .as_ref()
+                        .map(|value| reference("/record/data/fact/data/catalog/predicate/payload", &value.payload)),
+                ];
+            }
             Self::MssqlIndex(value) => {
                 value.filter.as_ref().map(|value| reference("/record/data/fact/data/filter/payload", &value.payload))
             }
@@ -85,6 +112,7 @@ impl OperationalFact {
             | Self::FileIo(_)
             | Self::Counter(_)
             | Self::StatementCounters(_)
+            | Self::CounterSet(_)
             | Self::Queue(_)
             | Self::MssqlCleanupHorizon(_)
             | Self::MssqlPersistentVersionStore(_)

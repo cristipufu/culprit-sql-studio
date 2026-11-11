@@ -72,6 +72,15 @@ fn fixture_source(
     batches: Vec<ReadResult<ReadBatch>>,
     final_identity: Rec,
 ) -> StreamedSnapshot<Grants, StreamingRead> {
+    fixture_with_options(available, batches, final_identity, false, SourceShutdown::Quiescent)
+}
+fn fixture_with_options(
+    available: bool,
+    batches: Vec<ReadResult<ReadBatch>>,
+    final_identity: Rec,
+    pause_batches: bool,
+    shutdown: SourceShutdown,
+) -> StreamedSnapshot<Grants, StreamingRead> {
     let columns = if available {
         vec![
             "total_grant_kb",
@@ -97,7 +106,9 @@ fn fixture_source(
         replies.push(Ok(vec![pressure()]));
     }
     replies.extend([Ok(vec![final_identity]), Ok(vec![clock("2020-01-01T06:02:01Z")])]);
-    let io = StreamingRead { native: FakeRead::new(replies), batches: batches.into(), starts: 0, pause_batches: false };
+    let mut native = FakeRead::new(replies);
+    native.shutdown = shutdown;
+    let io = StreamingRead { native, batches: batches.into(), starts: 0, pause_batches };
     StreamedSnapshot::with_io(io, &request(), "fixture.invalid".into(), 1433, Grants).unwrap()
 }
 fn catalog_source<D: SnapshotRecipe>(
@@ -166,8 +177,13 @@ async fn native_rows_stream_once_and_only_drained_final_counts_can_complete_cove
     let TelemetryRecord::Operational(value) = &records[0] else { panic!("operational record") };
     let OperationalFact::MssqlStatementGrants(grants) = &value.fact else { panic!("grant record") };
     assert_eq!(grants.context.origin, StatementOrigin::Culprit, "raw overhead evidence remains present");
-    assert_eq!(source.io.starts, 1, "every page belongs to one native statement rather than a repeated DMV scan");
-    let stream_call = source.io.native.calls.iter().find(|call| call.sql.contains("qs.plan_handle")).unwrap();
+    assert_eq!(
+        source.inner.reader().io.starts,
+        1,
+        "every page belongs to one native statement rather than a repeated DMV scan"
+    );
+    let stream_call =
+        source.inner.reader().io.native.calls.iter().find(|call| call.sql.contains("qs.plan_handle")).unwrap();
     assert_eq!(stream_call.limit, 100_001);
     let completion = source.finish().await.unwrap();
     let completed = initial.completed(completion).unwrap().unwrap();
@@ -176,7 +192,7 @@ async fn native_rows_stream_once_and_only_drained_final_counts_can_complete_cove
     assert_eq!(snapshot.sources[0].records, 2);
     assert!(completed.observation.covers_request());
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
-    assert_eq!(source.io.native.closed, 1);
+    assert_eq!(source.inner.reader().io.native.closed, 1);
 }
 
 #[tokio::test]
@@ -190,7 +206,7 @@ async fn absent_native_columns_produce_not_applicable_coverage_without_running_a
     };
     assert!(records.is_empty());
     assert!(next_cursor.is_none());
-    assert_eq!(source.io.starts, 0);
+    assert_eq!(source.inner.reader().io.starts, 0);
     let completed = initial.completed(source.finish().await.unwrap()).unwrap().unwrap();
     let source = &completed.observation.snapshot().unwrap().sources[0];
     assert_eq!(source.state, culprit_core::SourceState::NotApplicable);
@@ -199,10 +215,12 @@ async fn absent_native_columns_produce_not_applicable_coverage_without_running_a
 
 #[tokio::test]
 async fn late_native_errors_and_invalid_cursors_prevent_completion_and_new_reads() {
-    let mut source = fixture_source(
+    let mut source = fixture_with_options(
         true,
         vec![batch(crate::grants::tests::row(), false), Err(ReadError::Source(invalid_data()))],
         identity(),
+        false,
+        SourceShutdown::Unconfirmed,
     );
     source.describe().await.unwrap();
     source.read_page(TelemetryStream::OperationalSamples, None).await.unwrap();
@@ -211,13 +229,12 @@ async fn late_native_errors_and_invalid_cursors_prevent_completion_and_new_reads
     assert!(source.finish().await.is_err());
     assert!(source.read_page(TelemetryStream::OperationalSamples, Some("1")).await.is_err());
     assert_eq!(source.query_count(), calls);
-    assert_eq!(source.io.starts, 1);
-    source.io.native.shutdown = SourceShutdown::Unconfirmed;
+    assert_eq!(source.inner.reader().io.starts, 1);
     assert_eq!(source.close().await, SourceShutdown::Unconfirmed);
     let mut invalid = fixture_source(true, vec![], identity());
     invalid.describe().await.unwrap();
     assert!(invalid.read_page(TelemetryStream::OperationalSamples, Some("1")).await.is_err());
-    assert_eq!(invalid.io.starts, 0);
+    assert_eq!(invalid.inner.reader().io.starts, 0);
 }
 
 #[tokio::test]
@@ -259,7 +276,7 @@ async fn index_recipe_uses_the_shared_stream_owner_and_final_coverage() {
         panic!("page")
     };
     assert!(next_cursor.is_none());
-    assert_eq!(source.io.starts, 1);
+    assert_eq!(source.inner.reader().io.starts, 1);
     let TelemetryRecord::Operational(observation) = &records[0] else { panic!("operational") };
     let OperationalFact::MssqlIndexOperations(index) = &observation.fact else { panic!("index") };
     assert!(index.is_valid());
@@ -279,7 +296,7 @@ async fn table_capture_shares_native_decoding_and_requires_full_metadata_visibil
         let mut source = catalog_source(Tables, crate::tables::tests::row(), visible, visible, Default::default());
         if !visible {
             assert_eq!(source.describe().await.err().unwrap().code, culprit_core::ErrorCode::PermissionDenied);
-            assert_eq!(source.io.starts, 0);
+            assert_eq!(source.inner.reader().io.starts, 0);
             assert!(source.finish().await.is_err());
             assert_eq!(source.close().await, SourceShutdown::Quiescent);
             continue;
@@ -310,7 +327,7 @@ async fn foreign_key_versions_require_complete_metadata_and_seal_the_definition_
             catalog_source(ForeignKeys, crate::foreign_keys::tests::row(), visible, visible, Default::default());
         if !visible {
             assert_eq!(source.describe().await.err().unwrap().code, culprit_core::ErrorCode::PermissionDenied);
-            assert_eq!(source.io.starts, 0);
+            assert_eq!(source.inner.reader().io.starts, 0);
             assert!(source.finish().await.is_err());
         } else {
             let initial = source.describe().await.unwrap();
@@ -326,7 +343,7 @@ async fn foreign_key_versions_require_complete_metadata_and_seal_the_definition_
             let snapshot = completed.observation.snapshot().unwrap();
             assert_eq!(snapshot.records, 1);
             assert_eq!(snapshot.sources[0].source, crate::sources::FOREIGN_KEYS.name);
-            assert_eq!(source.io.starts, 1);
+            assert_eq!(source.inner.reader().io.starts, 1);
         }
         assert_eq!(source.close().await, SourceShutdown::Quiescent);
     }
@@ -351,7 +368,9 @@ async fn catalog_sql_bodies_obey_the_capture_budget_and_the_export_boundary_reda
         column.default.as_ref().unwrap().payload,
         DefinitionPayload::Unavailable { reason: PayloadUnavailable::Oversized }
     ));
-    assert!(source.io.native.calls.iter().any(|call| call.sql.contains("DATALENGTH(dc.definition)<=1024")));
+    assert!(
+        source.inner.reader().io.native.calls.iter().any(|call| call.sql.contains("DATALENGTH(dc.definition)<=1024"))
+    );
     let mut fact = record.fact.clone();
     let ObjectDefinitionFact::MssqlColumn(column) = &mut fact else { unreachable!() };
     let raw = "(N'export-boundary-secret')";
@@ -477,8 +496,7 @@ async fn check_definitions_keep_native_trust_and_body_availability_in_the_defini
 
 #[tokio::test]
 async fn retiring_a_page_future_requires_native_close_before_any_more_work() {
-    let mut source = fixture_source(true, vec![], identity());
-    source.io.pause_batches = true;
+    let mut source = fixture_with_options(true, vec![], identity(), true, SourceShutdown::Unconfirmed);
     source.describe().await.unwrap();
     assert!(
         tokio::time::timeout(
@@ -488,14 +506,13 @@ async fn retiring_a_page_future_requires_native_close_before_any_more_work() {
         .await
         .is_err()
     );
-    assert_eq!(source.io.starts, 1);
+    assert_eq!(source.inner.reader().io.starts, 1);
     let reads = source.query_count();
     assert!(source.read_page(TelemetryStream::OperationalSamples, None).await.is_err());
     assert!(source.finish().await.is_err());
     assert_eq!(source.query_count(), reads);
-    source.io.native.shutdown = SourceShutdown::Unconfirmed;
     assert_eq!(source.close().await, SourceShutdown::Unconfirmed);
-    assert_eq!(source.io.native.closed, 1);
+    assert_eq!(source.inner.reader().io.native.closed, 1);
 }
 
 #[tokio::test]
@@ -521,7 +538,7 @@ async fn compilation_capture_streams_retained_lifetime_totals_through_the_shared
     )
     .unwrap();
     assert!(serde_json::to_string(&exported).unwrap().contains("9007199254740993"));
-    assert_eq!(source.io.starts, 1);
+    assert_eq!(source.inner.reader().io.starts, 1);
     let completed = initial.completed(source.finish().await.unwrap()).unwrap().unwrap();
     assert_eq!(completed.observation.snapshot().unwrap().sources[0].source, crate::sources::QUERY_COMPILATION.name);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
@@ -558,7 +575,7 @@ async fn cached_runtime_uses_the_shared_identity_and_exports_only_qualified_nati
         let coverage = &completed.observation.snapshot().unwrap().sources[0];
         assert_eq!(coverage.complete_scope, measured);
         assert_eq!(coverage.records, 1);
-        assert_eq!(source.io.starts, 1);
+        assert_eq!(source.inner.reader().io.starts, 1);
         assert_eq!(source.close().await, SourceShutdown::Quiescent);
     }
 }
@@ -678,7 +695,7 @@ async fn cached_definitions_export_two_bounded_payloads_without_duplicating_the_
     };
     assert!(next_cursor.is_none());
     assert_eq!(records.len(), 1);
-    assert_eq!(source.io.starts, 1);
+    assert_eq!(source.inner.reader().io.starts, 1);
     let exported = ExportedRecord::new(
         &initial,
         &CaptureIdentity { observation_id: "fixture".into(), revision: None },

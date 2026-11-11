@@ -2,9 +2,10 @@
 import type { NativeQueryIdentity } from "./NativeQueryIdentity";
 import type { ResetMarker } from "./ResetMarker";
 import type { StatementCounter } from "./StatementCounter";
+import type { StatementDistribution } from "./StatementDistribution";
 
 export type StatementCounterSample = { identity: NativeQueryIdentity, observed_at: string, 
 /**
  * Unknown remains unknown: two observations alone do not establish a safe delta.
  */
-reset: ResetMarker, totals: Array<StatementCounter>, };
+reset: ResetMarker, totals: Array<StatementCounter>, distributions: Array<StatementDistribution>, };

@@ -17,6 +17,19 @@ impl StatementCounter {
                 || matches!(self.total, MeasurementValue::Integer(_)))
     }
 }
+/// Some sources reset extrema independently from their cumulative mean and variance.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct StatementDistribution {
+    pub statistics: RuntimeMetric,
+    pub reset: crate::ResetMarker,
+    pub extrema_reset: crate::ResetMarker,
+}
+impl StatementDistribution {
+    fn is_valid(&self) -> bool {
+        self.statistics.is_valid() && valid_reset(&self.reset) && valid_reset(&self.extrema_reset)
+    }
+}
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[ts(export)]
@@ -26,6 +39,7 @@ pub struct StatementCounterSample {
     /// Unknown remains unknown: two observations alone do not establish a safe delta.
     pub reset: crate::ResetMarker,
     pub totals: Vec<StatementCounter>,
+    pub distributions: Vec<StatementDistribution>,
 }
 impl StatementCounterSample {
     pub fn key(&self) -> crate::Result<String> {
@@ -33,6 +47,7 @@ impl StatementCounterSample {
     }
     pub fn is_valid(&self) -> bool {
         let mut keys = std::collections::BTreeSet::new();
+        let mut distributions = std::collections::BTreeSet::new();
         self.identity.is_valid()
             && valid_reset(&self.reset)
             && self.observed_at.len() <= 64
@@ -40,5 +55,10 @@ impl StatementCounterSample {
             && !self.totals.is_empty()
             && self.totals.len() <= MAX_STATEMENT_METRICS
             && self.totals.iter().all(|metric| metric.is_valid() && keys.insert(&metric.key))
+            && self.distributions.len() <= MAX_STATEMENT_METRICS
+            && self
+                .distributions
+                .iter()
+                .all(|distribution| distribution.is_valid() && distributions.insert(&distribution.statistics.key))
     }
 }

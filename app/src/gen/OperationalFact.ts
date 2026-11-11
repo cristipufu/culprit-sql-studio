@@ -9,7 +9,9 @@ import type { MssqlPersistentVersionStore } from "./MssqlPersistentVersionStore"
 import type { MssqlQueryCompilation } from "./MssqlQueryCompilation";
 import type { MssqlStatisticsSnapshot } from "./MssqlStatisticsSnapshot";
 import type { MssqlTableSnapshot } from "./MssqlTableSnapshot";
+import type { NativeCatalogCounters } from "./NativeCatalogCounters";
 import type { NativeCounterSample } from "./NativeCounterSample";
+import type { NativeCounterSet } from "./NativeCounterSet";
 import type { OperationalSpace } from "./OperationalSpace";
 import type { QueueSample } from "./QueueSample";
 import type { ResetMarker } from "./ResetMarker";
@@ -17,7 +19,7 @@ import type { SequenceCapacity } from "./SequenceCapacity";
 import type { StatementCounterSample } from "./StatementCounterSample";
 import type { StatementGrantStatistics } from "./StatementGrantStatistics";
 
-export type OperationalFact = { "kind": "space", "data": OperationalSpace } | { "kind": "sequence", "data": SequenceCapacity } | { "kind": "file-io", "data": FileIoCounters } | { "kind": "counter", "data": NativeCounterSample } | { "kind": "statement-counters", "data": StatementCounterSample } | { "kind": "queue", "data": QueueSample } | { "kind": "mssql-cleanup-horizon", "data": MssqlCleanupHorizon } | { "kind": "mssql-persistent-version-store", "data": MssqlPersistentVersionStore } | { "kind": "mssql-statement-grants", "data": StatementGrantStatistics } | { "kind": "mssql-index-operations", "data": MssqlIndexOperations } | { "kind": "mssql-table", "data": MssqlTableSnapshot } | { "kind": "mssql-statistics", "data": MssqlStatisticsSnapshot } | { "kind": "mssql-index", "data": MssqlIndexSnapshot } | { "kind": "mssql-missing-index", "data": MssqlMissingIndexSnapshot } | { "kind": "mssql-query-compilation", "data": MssqlQueryCompilation } | { "kind": "mssql-cached-runtime", "data": CachedStatementRuntime } | { "kind": "suspect-pages", "data": { count: string, 
+export type OperationalFact = { "kind": "space", "data": OperationalSpace } | { "kind": "sequence", "data": SequenceCapacity } | { "kind": "file-io", "data": FileIoCounters } | { "kind": "counter", "data": NativeCounterSample } | { "kind": "counter-set", "data": NativeCounterSet } | { "kind": "catalog-counters", "data": NativeCatalogCounters } | { "kind": "statement-counters", "data": StatementCounterSample } | { "kind": "queue", "data": QueueSample } | { "kind": "mssql-cleanup-horizon", "data": MssqlCleanupHorizon } | { "kind": "mssql-persistent-version-store", "data": MssqlPersistentVersionStore } | { "kind": "mssql-statement-grants", "data": StatementGrantStatistics } | { "kind": "mssql-index-operations", "data": MssqlIndexOperations } | { "kind": "mssql-table", "data": MssqlTableSnapshot } | { "kind": "mssql-statistics", "data": MssqlStatisticsSnapshot } | { "kind": "mssql-index", "data": MssqlIndexSnapshot } | { "kind": "mssql-missing-index", "data": MssqlMissingIndexSnapshot } | { "kind": "mssql-query-compilation", "data": MssqlQueryCompilation } | { "kind": "mssql-cached-runtime", "data": CachedStatementRuntime } | { "kind": "suspect-pages", "data": { count: string, 
 /**
  * The native datetime has no offset; it does not establish a UTC event timestamp.
  */

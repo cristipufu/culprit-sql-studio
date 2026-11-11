@@ -130,6 +130,10 @@ impl ActivityTuning {
 
 #[derive(Clone, Copy, ValueEnum)]
 enum CollectionChoice {
+    StatementCounters,
+    StatementDefinitions,
+    Sequences,
+    Cleanup,
     QueryHistory,
     ResourceHistory,
     DeadlockHistory,
@@ -162,6 +166,10 @@ impl CollectionChoice {
     fn snapshot_dataset(self) -> Option<culprit_core::telemetry::SnapshotDataset> {
         use culprit_core::telemetry::SnapshotDataset;
         Some(match self {
+            Self::StatementCounters => SnapshotDataset::StatementCounters,
+            Self::StatementDefinitions => SnapshotDataset::StatementDefinitions,
+            Self::Sequences => SnapshotDataset::Sequences,
+            Self::Cleanup => SnapshotDataset::Cleanup,
             Self::Operational => SnapshotDataset::Operational,
             Self::WaitCounters => SnapshotDataset::WaitCounters,
             Self::Replication => SnapshotDataset::Replication,
@@ -317,6 +325,10 @@ mod tests {
         use clap::Parser;
         use culprit_core::telemetry::{SnapshotDataset, TelemetryCollection};
         for (name, dataset) in [
+            ("statement-counters", SnapshotDataset::StatementCounters),
+            ("statement-definitions", SnapshotDataset::StatementDefinitions),
+            ("sequences", SnapshotDataset::Sequences),
+            ("cleanup", SnapshotDataset::Cleanup),
             ("operational", SnapshotDataset::Operational),
             ("wait-counters", SnapshotDataset::WaitCounters),
             ("replication", SnapshotDataset::Replication),

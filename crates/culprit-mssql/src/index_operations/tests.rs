@@ -86,7 +86,7 @@ async fn decoding_preserves_exact_counters_nulls_hidden_names_and_only_direct_de
     assert!(decode(&replace(&row(), &[("leaf_insert_count", Val::Int(-1))]), &layout).is_err());
     assert_eq!(MssqlIndexCounter::RowLockWaitMs.unit(), CounterUnit::Milliseconds);
     assert_eq!(MssqlIndexCounter::LobFetchBytes.unit(), CounterUnit::Bytes);
-    assert_eq!(MssqlIndexCounter::LobFetchPages.unit(), CounterUnit::Pages);
+    assert_eq!(MssqlIndexCounter::LobFetchPages.unit(), CounterUnit::Pages { bytes_per_page: 8192 });
 }
 #[tokio::test]
 async fn partition_sums_are_exact_and_missing_partition_values_never_become_zero() {

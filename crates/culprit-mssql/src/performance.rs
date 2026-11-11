@@ -101,7 +101,7 @@ pub(crate) async fn read<R: NativeRead>(reader: &mut R, limit: usize) -> Result<
             let instance = optional_text(row, "native_instance")?.ok_or_else(invalid_data)?;
             let counter = NativeCounterSample {
                 key: spec.key.into(),
-                value: integer(row, "value")?.to_string(),
+                value: culprit_core::telemetry::MeasurementValue::Integer(integer(row, "value")?.to_string()),
                 unit: if supported { spec.unit } else { CounterUnit::Unknown },
                 nature: if supported { nature } else { CounterNature::Unknown },
                 scope: MeasurementScope::Server,
@@ -127,8 +127,8 @@ pub(crate) async fn read<R: NativeRead>(reader: &mut R, limit: usize) -> Result<
 pub(crate) fn application(rows: &[NativeCounterSample]) -> HashMap<String, f64> {
     let mut values = HashMap::new();
     for spec in SPECS {
-        if let Some(row) = global(rows, spec) {
-            values.insert(spec.name.into(), row.value.parse::<u64>().expect("validated native counter") as f64);
+        if let Some(value) = global(rows, spec).and_then(|row| row.value.integer()) {
+            values.insert(spec.name.into(), value as f64);
         }
     }
     values
@@ -161,8 +161,8 @@ pub(crate) fn sampled_rates(
             {
                 return None;
             }
-            let previous = previous.value.parse::<u64>().expect("validated native counter");
-            let current = current.value.parse::<u64>().expect("validated native counter");
+            let previous = previous.value.integer()?;
+            let current = current.value.integer()?;
             let delta = current.checked_sub(previous)?;
             Some((spec.name.into(), delta as f64 / elapsed_seconds))
         })

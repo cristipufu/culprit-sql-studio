@@ -20,9 +20,9 @@ async fn native_host_capacity_is_distinct_from_online_sql_user_schedulers() {
         let OperationalFact::Counter(value) = &observations[index].fact else { panic!("counter") };
         value
     };
-    assert_eq!(counter(0).value, "64");
-    assert_eq!(counter(1).value, "8");
-    assert_eq!(counter(2).value, "2");
+    assert_eq!(counter(0).value, culprit_core::telemetry::MeasurementValue::Integer("64".into()));
+    assert_eq!(counter(1).value, culprit_core::telemetry::MeasurementValue::Integer("8".into()));
+    assert_eq!(counter(2).value, culprit_core::telemetry::MeasurementValue::Integer("2".into()));
     assert!(observations.iter().all(|row|matches!(&row.fact,OperationalFact::Counter(value) if value.scope==MeasurementScope::Server && value.nature==CounterNature::Gauge && value.unit==CounterUnit::Count && value.reset==ResetMarker::Unknown)));
 }
 #[tokio::test]
@@ -36,7 +36,8 @@ async fn no_visible_schedulers_does_not_become_an_available_zero_processor_confi
     let counters = topology.observations();
     let OperationalFact::Counter(value) = &counters[1].fact else { panic!("counter") };
     assert_eq!(
-        value.value, "0",
+        value.value,
+        culprit_core::telemetry::MeasurementValue::Integer("0".into()),
         "the observed native visibility count stays exact; the app's processor capacity is unknown"
     );
 }

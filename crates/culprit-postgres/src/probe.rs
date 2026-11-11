@@ -169,14 +169,19 @@ impl Probe {
     }
 }
 
+pub(crate) fn ensure_postgres(build: &str) -> Result<()> {
+    if build.contains("-YB-") {
+        return Err(culprit_core::Error::invalid(t!("provider.postgres.error.yugabyte"))
+            .with_hint(t!("provider.postgres.error.yugabyte_hint")));
+    }
+    Ok(())
+}
+
 pub async fn probe(client: &Client, spec_host: &str) -> Result<Probe> {
     let build = query_one(client, "SELECT version() AS build")
         .await?
         .ok_or_else(|| culprit_core::Error::internal(t!("provider.postgres.error.probe_no_version")))?;
-    if build.string("build").contains("-YB-") {
-        return Err(culprit_core::Error::invalid(t!("provider.postgres.error.yugabyte"))
-            .with_hint(t!("provider.postgres.error.yugabyte_hint")));
-    }
+    ensure_postgres(&build.string("build"))?;
     let sql = format!(
         "SELECT current_setting('server_version_num') AS version_num,
                 current_setting('server_version') AS version,

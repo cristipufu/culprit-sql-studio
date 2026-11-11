@@ -11,4 +11,8 @@ value: string | null,
 /**
  * Separate native effective value, where the source exposes configured and active values.
  */
-value_in_use: string | null, value_for_secondary: string | null, native_is_default: boolean | null, default_value: string | null, default_source: SettingDefaultSource, };
+value_in_use: string | null, value_for_secondary: string | null, 
+/**
+ * Native unit and configuration provenance, independent of display formatting.
+ */
+unit: string | null, native_context: string | null, native_source: string | null, pending_restart: boolean | null, native_is_default: boolean | null, default_value: string | null, default_source: SettingDefaultSource, };

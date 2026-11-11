@@ -40,6 +40,7 @@ pub struct Connector {
     config: tokio_postgres::Config,
     tls: MakeRustlsConnect,
     transport: Option<Arc<dyn ConnectionTransport>>,
+    pub(crate) fence: culprit_read::ReadFence,
     pub host: String,
     pub port: u16,
 }
@@ -58,6 +59,14 @@ impl ObservedSession {
 }
 
 impl Connector {
+    pub(crate) fn source_shutdown(&self) -> culprit_core::telemetry::SourceShutdown {
+        if self.fence.is_uncertain() {
+            culprit_core::telemetry::SourceShutdown::Unconfirmed
+        } else {
+            culprit_core::telemetry::SourceShutdown::Quiescent
+        }
+    }
+
     pub fn new(spec: &ConnectionSpec) -> Result<Self> {
         spec.check_transport()?;
         if spec.host.trim().is_empty() {
@@ -102,10 +111,18 @@ impl Connector {
         }
         let (ssl_mode, tls) = tls_for(spec)?;
         config.ssl_mode(ssl_mode);
-        Ok(Connector { config, tls, transport: spec.transport.clone(), host: spec.host.trim().to_string(), port })
+        Ok(Connector {
+            fence: culprit_read::ReadFence::default(),
+            config,
+            tls,
+            transport: spec.transport.clone(),
+            host: spec.host.trim().to_string(),
+            port,
+        })
     }
 
     async fn dial_config(&self) -> Result<(tokio_postgres::Config, Option<ConnectionEndpoint>)> {
+        self.fence.ensure_available()?;
         let mut config = self.config.clone();
         let endpoint = match &self.transport {
             Some(transport) => {
@@ -119,12 +136,24 @@ impl Connector {
         Ok((config, endpoint))
     }
 
+    pub(crate) async fn cancel(&self, token: &tokio_postgres::CancelToken) -> Result<()> {
+        token.cancel_query(self.tls.clone()).await.map_err(map_error)
+    }
+
     /// Open a session with Culprit's safety settings applied: read-only by default, bounded statement and lock waits.
     pub async fn connect(&self, limits: SessionLimits) -> Result<Client> {
         Ok(self.connect_observed(limits).await?.client)
     }
 
     pub async fn connect_observed(&self, limits: SessionLimits) -> Result<ObservedSession> {
+        let session = self.connect_unconfigured().await?;
+        session.client.batch_execute(&session_setup(limits)).await.map_err(map_error)?;
+        Ok(session)
+    }
+
+    /// Only the owned native reader may defer setup; it runs these commands under the same cancellation owner
+    /// as every subsequent statistics query before returning any caller-requested data.
+    pub(crate) async fn connect_unconfigured(&self) -> Result<ObservedSession> {
         let (config, endpoint) = self.dial_config().await?;
         let (client, mut connection) = tokio::time::timeout(CONNECT_TIMEOUT, config.connect(self.tls.clone()))
             .await
@@ -138,6 +167,7 @@ impl Connector {
         let notices = Arc::new(AtomicU64::new(0));
         let observed = notices.clone();
         tokio::spawn(async move {
+            let _endpoint = endpoint;
             while let Some(message) = futures_util::future::poll_fn(|cx| connection.poll_message(cx)).await {
                 match message {
                     Ok(AsyncMessage::Notice(_)) => {
@@ -148,19 +178,21 @@ impl Connector {
                 }
             }
         });
-        let mut setup = vec![
-            "SET default_transaction_read_only = on".to_string(),
-            format!("SET statement_timeout = '{}ms'", limits.statement_timeout.as_millis()),
-            "SET lock_timeout = '2s'".to_string(),
-            "SET idle_in_transaction_session_timeout = '30s'".to_string(),
-        ];
-        if limits.catalog_path {
-            setup.push("SET search_path = pg_catalog, pg_temp".to_string());
-        }
-        let setup = setup.iter().map(|statement| crate::rows::tagged(statement)).collect::<Vec<_>>().join("; ");
-        client.batch_execute(&setup).await.map_err(map_error)?;
         Ok(ObservedSession { client, notices })
     }
+}
+
+pub(crate) fn session_setup(limits: SessionLimits) -> String {
+    let mut setup = vec![
+        "SET default_transaction_read_only = on".to_string(),
+        format!("SET statement_timeout = '{}ms'", limits.statement_timeout.as_millis()),
+        "SET lock_timeout = '2s'".to_string(),
+        "SET idle_in_transaction_session_timeout = '30s'".to_string(),
+    ];
+    if limits.catalog_path {
+        setup.push("SET search_path = pg_catalog, pg_temp".to_string());
+    }
+    setup.iter().map(|statement| crate::rows::tagged(statement)).collect::<Vec<_>>().join("; ")
 }
 
 fn tls_for(spec: &ConnectionSpec) -> Result<(SslMode, MakeRustlsConnect)> {

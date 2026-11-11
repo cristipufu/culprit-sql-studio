@@ -1,5 +1,5 @@
 //! Owns one streamed snapshot lifecycle. Recipes supply only native layout, query and decoding.
-use super::{admit_resources, description, progress::Progress, state};
+use super::{admit_resources, description, state};
 use crate::{
     conn::Pool,
     read::{NativeStreamRead, Parameter, ReadError, ReadSession, invalid_data},
@@ -24,18 +24,17 @@ pub(super) trait SnapshotRecipe: Send + Sync {
 
 use std::sync::Arc;
 
-pub(super) struct StreamedSnapshot<D: SnapshotRecipe, R = ReadSession> {
+pub(super) struct StreamedSnapshot<D: SnapshotRecipe, R: NativeStreamRead = ReadSession> {
+    inner: culprit_read::SnapshotSource<NativeSnapshotReader<D, R>>,
+}
+struct NativeSnapshotReader<D: SnapshotRecipe, R> {
     recipe: D,
     io: R,
-    request: CollectionRequest,
+    budget: CollectionBudget,
     host: String,
     port: u16,
-    description: Option<CollectionDescription>,
     physical: Option<String>,
     layout: Option<D::Layout>,
-    progress: Progress,
-    rows: u32,
-    complete_scope: bool,
 }
 impl<D: SnapshotRecipe> StreamedSnapshot<D> {
     pub fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16, recipe: D) -> Result<Self> {
@@ -44,66 +43,25 @@ impl<D: SnapshotRecipe> StreamedSnapshot<D> {
 }
 impl<D: SnapshotRecipe, R: NativeStreamRead> StreamedSnapshot<D, R> {
     fn with_io(io: R, request: &CollectionRequest, host: String, port: u16, recipe: D) -> Result<Self> {
-        request.validate()?;
         if request.selection != (CollectionSelection::Snapshot { dataset: D::DATASET }) {
             return Err(invalid_data());
         }
-        Ok(Self {
+        let reader = NativeSnapshotReader {
             recipe,
             io,
-            request: request.clone(),
+            budget: request.budget.clone(),
             host,
             port,
-            description: None,
             physical: None,
             layout: None,
-            progress: Progress::New,
-            rows: 0,
-            complete_scope: true,
-        })
-    }
-    async fn page(&mut self, stream: TelemetryStream, cursor: Option<&str>) -> Result<CollectionRead> {
-        if !matches!(self.progress, Progress::Ready | Progress::Reading) || stream != D::DATASET.stream() {
-            return Err(invalid_data());
-        }
-        let expected = (self.rows > 0).then(|| self.rows.to_string());
-        if cursor != expected.as_deref() {
-            return Err(invalid_data());
-        }
-        let starting = self.progress == Progress::Ready;
-        self.progress = Progress::Failed; // Dropping this future cannot authorize another native read.
-        if starting {
-            let Some(layout) = &self.layout else {
-                self.progress = Progress::Complete;
-                return Ok(CollectionRead::Page { records: vec![], next_cursor: None });
-            };
-            admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
-            let limit = self.request.budget.max_snapshot_rows as usize + 1;
-            self.io
-                .begin_stream(&self.recipe.query(layout), vec![Parameter::Integer(limit as i64)], limit)
-                .await
-                .map_err(ReadError::into_error)?;
-        }
-        let batch = self.io.next_batch().await.map_err(ReadError::into_error)?;
-        if batch.rows.is_empty() && !batch.complete {
-            return Err(invalid_data());
-        }
-        let layout = self.layout.as_ref().ok_or_else(invalid_data)?;
-        let records = batch.rows.iter().map(|row| self.recipe.decode(row, layout)).collect::<Result<Vec<_>>>()?;
-        self.complete_scope &= records.iter().all(|record| self.recipe.complete_record_scope(record));
-        self.rows =
-            self.rows.checked_add(records.len().try_into().map_err(|_| invalid_data())?).ok_or_else(invalid_data)?;
-        self.progress = if batch.complete { Progress::Complete } else { Progress::Reading };
-        Ok(CollectionRead::Page { records, next_cursor: (!batch.complete).then(|| self.rows.to_string()) })
+        };
+        Ok(Self { inner: culprit_read::SnapshotSource::new(reader, request)? })
     }
 }
 #[async_trait::async_trait]
-impl<D: SnapshotRecipe, R: NativeStreamRead> TelemetrySource for StreamedSnapshot<D, R> {
-    async fn describe(&mut self) -> Result<CollectionDescription> {
-        if self.progress != Progress::New {
-            return Err(invalid_data());
-        }
-        self.progress = Progress::Failed;
+impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for NativeSnapshotReader<D, R> {
+    type Row = Rec;
+    async fn describe(&mut self, _: &CollectionRequest) -> Result<CollectionDescription> {
         description::ensure_supported(&mut self.io).await?;
         let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
         let (observed_from, metadata_visible) = state::clock(&mut self.io).await?;
@@ -111,8 +69,9 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> TelemetrySource for StreamedSnapsho
             return Err(crate::catalog_visibility::unavailable());
         }
         admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
-        self.layout = self.recipe.layout(&mut self.io, &self.request.budget).await?;
-        let description = CollectionDescription {
+        self.layout = self.recipe.layout(&mut self.io, &self.budget).await?;
+        self.physical = Some(physical);
+        Ok(CollectionDescription {
             database,
             source: D::NAME.into(),
             continuity: SourceContinuity::Unverified,
@@ -121,14 +80,53 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> TelemetrySource for StreamedSnapsho
                 observed_from,
                 sources: vec![D::SOURCE.name.into()],
             }),
-        };
-        if !description.matches_request(&self.request) {
-            return Err(invalid_data());
+        })
+    }
+    async fn begin(&mut self, request: &CollectionRequest) -> Result<()> {
+        let Some(layout) = &self.layout else { return Ok(()) };
+        admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
+        let limit = request.budget.max_snapshot_rows as usize + 1;
+        self.io
+            .begin_stream(&self.recipe.query(layout), vec![Parameter::Integer(limit as i64)], limit)
+            .await
+            .map_err(ReadError::into_error)
+    }
+    async fn next_batch(&mut self) -> Result<culprit_read::ReadBatch<Rec>> {
+        if self.layout.is_none() {
+            return Ok(culprit_read::ReadBatch { rows: vec![], complete: true });
         }
-        self.description = Some(description.clone());
-        self.physical = Some(physical);
-        self.progress = Progress::Ready;
-        Ok(description)
+        self.io.next_batch().await.map_err(ReadError::into_error)
+    }
+    fn decode(&self, row: &Rec, _: &CollectionDescription) -> Result<culprit_read::SnapshotRecord> {
+        let layout = self.layout.as_ref().ok_or_else(invalid_data)?;
+        let record = self.recipe.decode(row, layout)?;
+        Ok(culprit_read::SnapshotRecord {
+            source: D::SOURCE.name.into(),
+            complete_scope: self.recipe.complete_record_scope(&record),
+            record,
+        })
+    }
+    async fn recheck(&mut self, initial: &CollectionDescription) -> Result<culprit_read::SnapshotRecheck> {
+        let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
+        if initial.database != database || self.physical.as_ref() != Some(&physical) {
+            return Ok(culprit_read::SnapshotRecheck {
+                unchanged: false,
+                observed_until: String::new(),
+                scopes: vec![],
+            });
+        }
+        let (observed_until, metadata_visible) = state::clock(&mut self.io).await?;
+        let scope = if self.layout.is_none() {
+            culprit_read::SnapshotScope::NotApplicable { source: D::SOURCE.name.into() }
+        } else {
+            let complete = !D::REQUIRES_FULL_METADATA || metadata_visible;
+            culprit_read::SnapshotScope::Available {
+                source: D::SOURCE.name.into(),
+                complete,
+                error_code: (!complete).then_some(culprit_core::ErrorCode::PermissionDenied),
+            }
+        };
+        Ok(culprit_read::SnapshotRecheck { unchanged: true, observed_until, scopes: vec![scope] })
     }
     fn query_count(&self) -> u32 {
         self.io.queries()
@@ -136,54 +134,30 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> TelemetrySource for StreamedSnapsho
     fn read_metrics(&self) -> Option<ReadWorkMetrics> {
         self.io.read_metrics()
     }
-    async fn read_page(&mut self, stream: TelemetryStream, cursor: Option<&str>) -> Result<CollectionRead> {
-        let result = self.page(stream, cursor).await;
-        if result.is_err() {
-            self.progress = Progress::Failed;
-        }
-        result
-    }
-    async fn finish(&mut self) -> Result<SourceCompletion> {
-        if self.progress != Progress::Complete {
-            return Err(invalid_data());
-        }
-        self.progress = Progress::Failed;
-        let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
-        let initial = self.description.as_ref().ok_or_else(invalid_data)?;
-        if initial.database != database || self.physical.as_ref() != Some(&physical) {
-            self.progress = Progress::Finished;
-            return Ok(SourceCompletion::Changed);
-        }
-        let SourceObservation::PagedSnapshot(declared) = &initial.observation else { return Err(invalid_data()) };
-        let (observed_until, metadata_visible) = state::clock(&mut self.io).await?;
-        let coverage = if self.layout.is_some() {
-            let metadata_complete = !D::REQUIRES_FULL_METADATA || metadata_visible;
-            let mut coverage = StateSourceCoverage::observed(
-                D::SOURCE.name.into(),
-                self.rows,
-                self.complete_scope && metadata_complete,
-            );
-            if !metadata_complete {
-                coverage.error_code = Some(culprit_core::ErrorCode::PermissionDenied);
-            }
-            coverage
-        } else {
-            StateSourceCoverage::not_applicable(D::SOURCE.name.into())
-        };
-        self.progress = Progress::Finished;
-        Ok(SourceCompletion::Snapshot(StateSnapshotDescription {
-            dataset: D::DATASET,
-            observed_from: declared.observed_from.clone(),
-            observed_until,
-            records: self.rows,
-            sources: vec![coverage],
-        }))
-    }
     async fn close(&mut self) -> SourceShutdown {
-        self.progress = Progress::Closed;
         self.io.close().await
     }
 }
-
+#[async_trait::async_trait]
+impl<D: SnapshotRecipe, R: NativeStreamRead> TelemetrySource for StreamedSnapshot<D, R> {
+    async fn describe(&mut self) -> Result<CollectionDescription> {
+        self.inner.describe().await
+    }
+    fn query_count(&self) -> u32 {
+        self.inner.query_count()
+    }
+    fn read_metrics(&self) -> Option<ReadWorkMetrics> {
+        self.inner.read_metrics()
+    }
+    async fn read_page(&mut self, stream: TelemetryStream, cursor: Option<&str>) -> Result<CollectionRead> {
+        self.inner.read_page(stream, cursor).await
+    }
+    async fn finish(&mut self) -> Result<SourceCompletion> {
+        self.inner.finish().await
+    }
+    async fn close(&mut self) -> SourceShutdown {
+        self.inner.close().await
+    }
+}
 #[cfg(test)]
 mod tests;

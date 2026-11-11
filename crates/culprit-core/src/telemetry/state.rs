@@ -6,6 +6,10 @@ use crate::{FileKind, FileScope, SourceState, operations::SequenceCapacity};
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
 pub enum SnapshotDataset {
+    StatementCounters,
+    StatementDefinitions,
+    Sequences,
+    Cleanup,
     Operational,
     WaitCounters,
     Replication,
@@ -35,7 +39,10 @@ impl SnapshotDataset {
     }
     pub fn streams(self) -> &'static [TelemetryStream] {
         match self {
-            Self::Operational
+            Self::StatementCounters
+            | Self::Sequences
+            | Self::Cleanup
+            | Self::Operational
             | Self::PlanCacheSummary
             | Self::StatementGrants
             | Self::IndexOperations
@@ -49,7 +56,8 @@ impl SnapshotDataset {
             Self::Replication => &[TelemetryStream::ReplicationSamples],
             Self::Settings => &[TelemetryStream::SettingObservations],
             Self::Tuning => &[TelemetryStream::TuningObservations],
-            Self::ForeignKeys
+            Self::StatementDefinitions
+            | Self::ForeignKeys
             | Self::Columns
             | Self::CheckConstraints
             | Self::Objects
@@ -277,6 +285,8 @@ pub enum OperationalFact {
     Sequence(SequenceCapacity),
     FileIo(FileIoCounters),
     Counter(NativeCounterSample),
+    CounterSet(Box<NativeCounterSet>),
+    CatalogCounters(Box<NativeCatalogCounters>),
     StatementCounters(Box<StatementCounterSample>),
     Queue(QueueSample),
     MssqlCleanupHorizon(MssqlCleanupHorizon),
@@ -299,6 +309,8 @@ pub enum OperationalFact {
 impl OperationalFact {
     fn matches_key(&self, key: &str) -> bool {
         let expected = match self {
+            Self::CounterSet(counters) => counters.key(),
+            Self::CatalogCounters(counters) => counters.catalog.key(),
             Self::StatementCounters(counters) => counters.key(),
             Self::MssqlStatementGrants(grants) => grants.context.identity.key(),
             Self::MssqlIndexOperations(index) => index.identity.key(),
@@ -322,11 +334,13 @@ impl OperationalFact {
     pub(super) fn redact(&mut self, engine: crate::Engine) {
         match self {
             Self::MssqlIndex(index) => index.redact(engine),
+            Self::CatalogCounters(counters) => counters.catalog.redact(engine),
             Self::Space(_)
             | Self::Sequence(_)
             | Self::FileIo(_)
             | Self::Counter(_)
             | Self::StatementCounters(_)
+            | Self::CounterSet(_)
             | Self::Queue(_)
             | Self::MssqlCleanupHorizon(_)
             | Self::MssqlPersistentVersionStore(_)
@@ -366,6 +380,8 @@ impl OperationalFact {
             Self::FileIo(counters) => counters.is_valid(),
             Self::Counter(counter) => counter.is_valid(),
             Self::StatementCounters(counters) => counters.is_valid(),
+            Self::CounterSet(counters) => counters.is_valid(),
+            Self::CatalogCounters(counters) => counters.is_valid(),
             Self::Queue(queue) => queue.is_valid(),
             Self::MssqlCleanupHorizon(horizon) => horizon.is_valid(),
             Self::MssqlPersistentVersionStore(store) => store.is_valid(),

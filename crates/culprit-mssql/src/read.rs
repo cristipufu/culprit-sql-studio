@@ -124,7 +124,7 @@ impl ReadSession {
             active: None,
             acquiring: false,
             cancellation_confirmed: true,
-            metrics: Default::default(),
+            metrics: crate::read_metrics::Metrics::new(culprit_core::Engine::Mssql),
             streaming: None,
         }
     }
@@ -392,7 +392,7 @@ async fn read_owned(
     let started = std::time::Instant::now();
     let progress = Arc::new(crate::read_metrics::Progress::default());
     let outcome = finish_or_interrupt(read(&mut client, query, progress.clone()), timeout, cancelled).await;
-    let mut accounting = crate::read_metrics::Outcome::requested(&outcome);
+    let mut accounting = crate::read_metrics::requested(&outcome);
     let result = match outcome {
         ReadOutcome::Completed(rows) => Ok((client, rows)),
         ReadOutcome::QuiescentStop(reason) => {
@@ -441,8 +441,7 @@ async fn read(
         }
     }
     let mut stream = query.query(client).await.map_err(map_error)?;
-    let mut row_count = 0usize;
-    let mut bytes = 0usize;
+    let mut budget = culprit_read::ReadBudget::new(row_limit, byte_limit);
     let mut sets = 0;
     while let Some(item) = stream.try_next().await.map_err(map_error)? {
         match item {
@@ -458,18 +457,14 @@ async fn read(
                 if output.discarding() {
                     continue;
                 }
-                if row_count >= row_limit {
-                    return Err(ReadError::Stopped(CollectionStop::RowLimit));
-                }
+                budget.row_started().map_err(|error| ReadError::Stopped(CollectionStop::from_error(&error)))?;
                 let row = Rec::from_row(&row);
                 progress.rows.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let row_bytes = output::value_bytes(&row);
-                bytes = bytes.saturating_add(row_bytes);
                 progress.bytes.fetch_add(row_bytes as u64, std::sync::atomic::Ordering::Relaxed);
-                if bytes > byte_limit {
-                    return Err(ReadError::Stopped(CollectionStop::ByteLimit));
-                }
-                row_count += 1;
+                budget
+                    .charge_values(row_bytes)
+                    .map_err(|error| ReadError::Stopped(CollectionStop::from_error(&error)))?;
                 output.push(row, row_bytes).await?;
             }
         }

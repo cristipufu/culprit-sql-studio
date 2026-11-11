@@ -48,6 +48,7 @@ pub(super) fn record(row: &Rec) -> Result<Option<ActivityRecord>> {
     let owner = owner(row)?;
     let wait = if native_type.is_some() || owner.is_some() {
         Some(ActivityWait {
+            resources: None,
             native_type,
             elapsed_ms: optional_counter(row, "wait_ms")?,
             owners: owner.into_iter().collect(),

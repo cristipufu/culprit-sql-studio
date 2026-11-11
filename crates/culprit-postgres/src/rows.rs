@@ -11,11 +11,29 @@ pub const TAG: &str = "/* culprit */";
 pub const LIST_SEPARATOR: char = '\u{1f}';
 
 /// A row from the simple-query protocol, where every value arrives as text.
-pub struct Row(SimpleQueryRow);
+#[derive(Clone, Debug)]
+pub struct Row {
+    columns: Vec<(String, Option<String>)>,
+}
 
 impl Row {
+    pub fn from_fields(columns: impl IntoIterator<Item = (String, Option<String>)>) -> Self {
+        Self { columns: columns.into_iter().collect() }
+    }
+    pub(crate) fn from_native(row: SimpleQueryRow) -> Self {
+        Self::from_fields(
+            row.columns()
+                .iter()
+                .enumerate()
+                .map(|(index, column)| (column.name().to_owned(), row.get(index).map(str::to_owned))),
+        )
+    }
+    pub(crate) fn value(&self, column: &str) -> Option<Option<&str>> {
+        self.columns.iter().find(|(name, _)| name == column).map(|(_, value)| value.as_deref())
+    }
+
     pub fn text(&self, column: &str) -> Option<String> {
-        self.0.try_get(column).ok().flatten().map(str::to_string)
+        self.value(column).flatten().map(str::to_owned)
     }
 
     pub fn string(&self, column: &str) -> String {
@@ -23,12 +41,12 @@ impl Row {
     }
 
     pub fn number(&self, column: &str) -> Option<f64> {
-        let value = self.0.try_get(column).ok().flatten()?;
+        let value = self.value(column).flatten()?;
         value.trim().parse::<f64>().ok().filter(|v| v.is_finite())
     }
 
     pub fn flag(&self, column: &str) -> bool {
-        matches!(self.0.try_get(column).ok().flatten(), Some("t" | "true" | "on" | "1"))
+        matches!(self.value(column).flatten(), Some("t" | "true" | "on" | "1"))
     }
 
     pub fn list(&self, column: &str) -> Vec<String> {
@@ -58,7 +76,7 @@ pub async fn query_bounded(client: &Client, sql: &str, limit: usize) -> Result<(
             }
             let bytes = (0..row.len()).fold(0usize, |total, i| total.saturating_add(row.get(i).map_or(0, str::len)));
             if budget.retain(bytes) {
-                rows.push(Row(row));
+                rows.push(Row::from_native(row));
             }
         }
     }
@@ -70,16 +88,22 @@ pub async fn query_one(client: &Client, sql: &str) -> Result<Option<Row>> {
 }
 
 pub fn tagged(sql: &str) -> String {
-    // YSQL's QPM has its own supported opt-out; comments are inert on PostgreSQL. Keep TAG unchanged so reads also
-    // exclude collector statements recorded by earlier Culprit versions.
-    format!("{sql}\n{TAG} /* __YB_STAT_PLANS_SKIP */")
+    // YSQL's QPM has its own supported opt-out; comments are inert on PostgreSQL. Keep TAG last so scans exclude Culprit's own statements.
+    format!("{sql}\n/* __YB_STAT_PLANS_SKIP */ {TAG}")
+}
+
+pub(crate) fn monitoring(sql: &str) -> String {
+    tagged(&format!(
+        "{sql}\n/* culprit:monitor */ /* culprit:template:{} */",
+        culprit_core::telemetry::digest(sql.as_bytes())
+    ))
 }
 
 pub fn rows_of(messages: Vec<SimpleQueryMessage>) -> Vec<Row> {
     messages
         .into_iter()
         .filter_map(|m| match m {
-            SimpleQueryMessage::Row(row) => Some(Row(row)),
+            SimpleQueryMessage::Row(row) => Some(Row::from_native(row)),
             _ => None,
         })
         .collect()
@@ -88,15 +112,6 @@ pub fn rows_of(messages: Vec<SimpleQueryMessage>) -> Vec<Row> {
 /// UTC ISO-8601 text for a timestamptz expression, matching the format other providers emit.
 pub fn iso(expression: &str) -> String {
     format!("to_char(({expression}) AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')")
-}
-
-/// Postgres array literal text (`{1,2,3}`) to its elements.
-pub fn parse_array(text: &str) -> Vec<String> {
-    let inner = text.trim().trim_start_matches('{').trim_end_matches('}');
-    if inner.is_empty() {
-        return Vec::new();
-    }
-    inner.split(',').map(|s| s.trim().trim_matches('"').to_string()).collect()
 }
 
 pub fn quote_ident(name: &str) -> String {
@@ -111,12 +126,6 @@ pub fn quote_ident(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn arrays_parse() {
-        assert_eq!(parse_array("{12,34}"), vec!["12", "34"]);
-        assert!(parse_array("{}").is_empty());
-    }
 
     #[test]
     fn identifiers_quote_only_when_needed() {

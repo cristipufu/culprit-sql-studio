@@ -92,7 +92,7 @@ impl MssqlIndexCounter {
             | Self::PageIoLatchWaitMs
             | Self::TreePageLatchWaitMs
             | Self::TreePageIoLatchWaitMs => CounterUnit::Milliseconds,
-            Self::LobFetchPages | Self::RowOverflowFetchPages => CounterUnit::Pages,
+            Self::LobFetchPages | Self::RowOverflowFetchPages => CounterUnit::Pages { bytes_per_page: 8192 },
             Self::LobFetchBytes | Self::RowOverflowFetchBytes => CounterUnit::Bytes,
             _ => CounterUnit::Count,
         }

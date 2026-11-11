@@ -24,7 +24,7 @@ async fn native_meaning_scope_and_precision_survive_application_projection_and_e
     );
     let mut reader = FakeRead::new(vec![Ok(vec![row(), gauge])]);
     let facts = read(&mut reader, 32).await.unwrap();
-    assert_eq!(facts[0].value, "9007199254740993");
+    assert_eq!(facts[0].value, culprit_core::telemetry::MeasurementValue::Integer("9007199254740993".into()));
     assert_eq!(facts[0].nature, CounterNature::Cumulative);
     assert_eq!(facts[1].nature, CounterNature::Gauge);
     assert_eq!(facts[1].unit, CounterUnit::Seconds);
@@ -41,7 +41,7 @@ async fn unknown_or_unexpected_counter_types_keep_raw_values_without_inventing_k
         let facts = read(&mut reader, 32).await.unwrap();
         assert_eq!(facts[0].nature, CounterNature::Unknown);
         assert_eq!(facts[0].unit, CounterUnit::Unknown);
-        assert_eq!(facts[0].value, "9007199254740993");
+        assert_eq!(facts[0].value, culprit_core::telemetry::MeasurementValue::Integer("9007199254740993".into()));
         assert!(application(&facts).is_empty());
     }
 }
@@ -72,11 +72,11 @@ async fn empty_disabled_counters_limits_duplicate_ids_and_malformed_values_are_n
 async fn sampled_rates_subtract_exact_values_and_skip_missing_reset_or_changed_counter_bases() {
     let before = read(&mut FakeRead::new(vec![Ok(vec![row()])]), 32).await.unwrap();
     let mut after = before.clone();
-    after[0].value = "9007199254740994".into();
+    after[0].value = culprit_core::telemetry::MeasurementValue::Integer("9007199254740994".into());
     assert_eq!(sampled_rates(&before, &after, 2.0)["Batch Requests/sec"], 0.5);
     assert!(sampled_rates(&[], &after, 2.0).is_empty());
     let mut reset = after.clone();
-    reset[0].value = "0".into();
+    reset[0].value = culprit_core::telemetry::MeasurementValue::Integer("0".into());
     assert!(sampled_rates(&before, &reset, 2.0).is_empty());
     let mut changed = after;
     changed[0].native_object = "another-instance:SQL Statistics".into();

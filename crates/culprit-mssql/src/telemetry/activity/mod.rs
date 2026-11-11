@@ -7,66 +7,71 @@ use crate::{
 use async_trait::async_trait;
 use culprit_core::{Result, telemetry::*};
 use std::{collections::BTreeSet, sync::Arc};
-const ENVELOPE_ALLOWANCE: usize = 1024;
 const MAX_ACTIVITY_SQL_BYTES: u32 = 16 * 1024;
-struct FrozenStream {
-    stream: TelemetryStream,
-    records: Vec<TelemetryRecord>,
-    position: usize,
-    finished: bool,
-}
-impl FrozenStream {
-    fn new(stream: TelemetryStream, records: Vec<TelemetryRecord>) -> Self {
-        Self { stream, records, position: 0, finished: false }
-    }
-    fn page(&mut self, cursor: Option<&str>, budget: &CollectionBudget) -> Result<CollectionRead> {
-        let expected = (self.position > 0).then(|| self.position.to_string());
-        if self.finished || cursor != expected.as_deref() {
-            return Err(decode::malformed());
-        }
-        let mut records = Vec::new();
-        let mut bytes = 0;
-        for record in self.records.iter().skip(self.position).take(budget.page_rows as usize) {
-            let size = serde_json::to_vec(record).map_err(|_| decode::malformed())?.len() + ENVELOPE_ALLOWANCE;
-            if bytes + size > budget.page_bytes as usize {
-                if records.is_empty() {
-                    return Ok(CollectionRead::Stopped(CollectionStop::ByteLimit));
-                }
-                break;
-            }
-            bytes += size;
-            records.push(record.clone());
-        }
-        self.position += records.len();
-        self.finished = self.position == self.records.len();
-        Ok(CollectionRead::Page { records, next_cursor: (!self.finished).then(|| self.position.to_string()) })
-    }
-}
-
 pub(super) struct ActivitySource {
-    request: CollectionRequest,
+    inner: culprit_read::FrozenSource<NativeActivityReader>,
+}
+struct NativeActivityReader {
     reader: ActivityReader,
-    description: Option<CollectionDescription>,
-    streams: Vec<FrozenStream>,
-    progress: super::progress::PagedProgress,
 }
 impl ActivitySource {
     pub(super) fn new(pool: Arc<Pool>, request: &CollectionRequest, host: String, port: u16) -> Result<Self> {
-        request.validate()?;
         let options = ReadOptions {
             budget: request.budget.clone(),
             scope: ActivityScope::CurrentDatabase,
             identity: IdentityDetail::AzureDatabase,
         };
-        Ok(Self {
-            request: request.clone(),
-            reader: ActivityReader::open(pool, options, host, port)?,
-            description: None,
-            streams: Vec::new(),
-            progress: super::progress::PagedProgress::new(request.collection()),
-        })
+        let reader = NativeActivityReader { reader: ActivityReader::open(pool, options, host, port)? };
+        Ok(Self { inner: culprit_read::FrozenSource::new(reader, request)? })
     }
 }
+#[async_trait]
+impl culprit_read::ObservationReader for NativeActivityReader {
+    async fn observe(&mut self, request: &CollectionRequest) -> Result<culprit_read::FrozenObservation> {
+        let policy = request.activity_policy().ok_or_else(decode::malformed)?;
+        let (description, observations, blocking) = capture(&mut self.reader, policy).await?;
+        let records = observations
+            .into_iter()
+            .map(TelemetryRecord::Activity)
+            .chain(blocking.into_iter().map(TelemetryRecord::Blocking))
+            .collect();
+        Ok(culprit_read::FrozenObservation { description, records })
+    }
+    async fn verify(&mut self, _: &CollectionDescription) -> Result<bool> {
+        Ok(true)
+    }
+    fn query_count(&self) -> u32 {
+        self.reader.query_count()
+    }
+    fn read_metrics(&self) -> Option<ReadWorkMetrics> {
+        self.reader.read_metrics()
+    }
+    async fn close(&mut self) -> SourceShutdown {
+        self.reader.close().await
+    }
+}
+#[async_trait]
+impl TelemetrySource for ActivitySource {
+    async fn describe(&mut self) -> Result<CollectionDescription> {
+        self.inner.describe().await
+    }
+    fn query_count(&self) -> u32 {
+        self.inner.query_count()
+    }
+    fn read_metrics(&self) -> Option<ReadWorkMetrics> {
+        self.inner.read_metrics()
+    }
+    async fn read_page(&mut self, stream: TelemetryStream, cursor: Option<&str>) -> Result<CollectionRead> {
+        self.inner.read_page(stream, cursor).await
+    }
+    async fn finish(&mut self) -> Result<SourceCompletion> {
+        self.inner.finish().await
+    }
+    async fn close(&mut self) -> SourceShutdown {
+        self.inner.close().await
+    }
+}
+
 pub(crate) async fn capture<R: crate::read::NativeRead>(
     reader: &mut ActivityReader<R>,
     policy: &ActivityPolicy,
@@ -114,56 +119,3 @@ pub(crate) fn export_observations(
     observations.sort_by(|a, b| a.key.cmp(&b.key));
     observations
 }
-#[async_trait]
-impl TelemetrySource for ActivitySource {
-    async fn describe(&mut self) -> Result<CollectionDescription> {
-        self.progress.describing()?;
-        let policy = self.request.activity_policy().ok_or_else(decode::malformed)?;
-        let (description, observations, blocking) = capture(&mut self.reader, policy).await?;
-        if !description.matches_request(&self.request) {
-            return Err(decode::malformed());
-        }
-        self.streams = vec![
-            FrozenStream::new(
-                TelemetryStream::ActivityObservations,
-                observations.into_iter().map(TelemetryRecord::Activity).collect(),
-            ),
-            FrozenStream::new(
-                TelemetryStream::BlockingEdges,
-                blocking.into_iter().map(TelemetryRecord::Blocking).collect(),
-            ),
-        ];
-        self.description = Some(description.clone());
-        self.progress.described();
-        Ok(description)
-    }
-    fn read_metrics(&self) -> Option<ReadWorkMetrics> {
-        self.reader.read_metrics()
-    }
-    fn query_count(&self) -> u32 {
-        self.reader.query_count()
-    }
-    async fn read_page(&mut self, stream: TelemetryStream, cursor: Option<&str>) -> Result<CollectionRead> {
-        self.progress.reading(stream, cursor)?;
-        let result = self
-            .streams
-            .iter_mut()
-            .find(|family| family.stream == stream)
-            .ok_or_else(decode::malformed)?
-            .page(cursor, &self.request.budget);
-        self.progress.read(stream, result)
-    }
-    async fn finish(&mut self) -> Result<culprit_core::telemetry::SourceCompletion> {
-        self.progress.verifying()?;
-        self.progress.verified();
-        Ok(culprit_core::telemetry::SourceCompletion::verified_if(
-            self.description.is_some() && self.streams.iter().all(|stream| stream.finished),
-        ))
-    }
-    async fn close(&mut self) -> SourceShutdown {
-        self.progress.close();
-        self.reader.close().await
-    }
-}
-#[cfg(test)]
-mod tests;

@@ -370,6 +370,7 @@ pub(super) fn cumulative_queries(catalog: &SchemaCatalog) -> Recovery {
         sources: vec![StateSourceCoverage::collected("native-query-counters".into(), 1)],
     });
     let sample = StatementCounterSample {
+        distributions: vec![],
         identity: NativeQueryIdentity {
             query_id: "fingerprint".into(),
             qualifiers: [("userid".into(), "17".into()), ("dbid".into(), "42".into())].into(),

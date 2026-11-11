@@ -126,6 +126,7 @@ fn query_only_records_get_stable_native_ids_but_unresolved_queries_do_not() {
 #[test]
 fn cumulative_statement_counters_preserve_exact_values_and_reset_uncertainty() {
     let sample = StatementCounterSample {
+        distributions: vec![],
         identity: NativeQueryIdentity {
             query_id: "fingerprint".into(),
             qualifiers: [("userid".into(), "17".into())].into(),

@@ -91,10 +91,51 @@ impl CatalogExpression {
     }
 }
 
+/// Exact native catalog attributes. SQL is retained only in the inventoried expression fields.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[ts(export)]
+pub struct NativeCatalogDefinition {
+    pub identity: NativeIdentity,
+    pub object_type: String,
+    pub properties: std::collections::BTreeMap<String, String>,
+    pub definition: Option<CatalogExpression>,
+    pub predicate: Option<CatalogExpression>,
+}
+impl NativeCatalogDefinition {
+    pub fn key(&self) -> Result<String> {
+        serde_json::to_vec(&self.identity).map(|bytes| digest(&bytes)).map_err(|_| CollectionStop::InvalidPage.error())
+    }
+    pub fn is_valid(&self) -> bool {
+        self.identity.is_valid()
+            && valid_key(&self.object_type)
+            && self.properties.len() <= 64
+            && self.properties.iter().all(|(key, value)| valid_key(key) && value.len() <= 16 * 1024)
+            && [&self.definition, &self.predicate].into_iter().flatten().all(|value| value.is_valid())
+    }
+    pub(super) fn redact(&mut self, engine: crate::Engine) {
+        for expression in [&mut self.definition, &mut self.predicate].into_iter().flatten() {
+            expression.redact(engine);
+        }
+    }
+}
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct NativeCatalogCounters {
+    pub catalog: NativeCatalogDefinition,
+    pub counters: NativeCounterSet,
+}
+impl NativeCatalogCounters {
+    pub fn is_valid(&self) -> bool {
+        self.catalog.is_valid() && self.counters.is_valid() && self.catalog.identity == self.counters.identity
+    }
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "kind", content = "data", rename_all = "kebab-case")]
 #[ts(export)]
 pub enum ObjectDefinitionFact {
+    Statement(Box<QueryDefinition>),
+    NativeCatalog(Box<NativeCatalogDefinition>),
     MssqlForeignKey(Box<MssqlForeignKey>),
     MssqlColumn(Box<MssqlColumnDefinition>),
     MssqlCheckConstraint(Box<MssqlCheckConstraint>),
@@ -107,6 +148,10 @@ pub enum ObjectDefinitionFact {
 impl ObjectDefinitionFact {
     pub fn key(&self) -> Result<String> {
         match self {
+            Self::NativeCatalog(catalog) => catalog.key(),
+            Self::Statement(statement) => serde_json::to_vec(&statement.identity)
+                .map(|bytes| digest(&bytes))
+                .map_err(|_| CollectionStop::InvalidPage.error()),
             Self::MssqlForeignKey(key) => key.identity.key(),
             Self::MssqlColumn(column) => column.key(),
             Self::MssqlCheckConstraint(constraint) => constraint.identity.key(),
@@ -119,6 +164,8 @@ impl ObjectDefinitionFact {
     }
     pub fn is_valid(&self) -> bool {
         match self {
+            Self::NativeCatalog(catalog) => catalog.is_valid(),
+            Self::Statement(statement) => statement.is_valid(),
             Self::MssqlForeignKey(key) => key.is_valid(),
             Self::MssqlColumn(column) => column.is_valid(),
             Self::MssqlCheckConstraint(constraint) => constraint.is_valid(),
@@ -131,6 +178,12 @@ impl ObjectDefinitionFact {
     }
     fn redact(&mut self, engine: crate::Engine) {
         match self {
+            Self::NativeCatalog(catalog) => catalog.redact(engine),
+            Self::Statement(statement) => {
+                if let DefinitionPayload::Available { text, .. } = &statement.sql {
+                    statement.sql = DefinitionPayload::sql(text, engine);
+                }
+            }
             Self::MssqlForeignKey(_) | Self::MssqlObject(_) | Self::MssqlDmlTrigger(_) => {}
             Self::MssqlCheckConstraint(constraint) => constraint.definition.redact(engine),
             Self::MssqlCachedDefinition(definition) => definition.redact(engine),

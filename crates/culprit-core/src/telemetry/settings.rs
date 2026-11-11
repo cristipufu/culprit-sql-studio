@@ -16,6 +16,7 @@ pub enum SettingNature {
 #[ts(export)]
 pub enum SettingDefaultSource {
     NativeFlag,
+    NativeValue,
     EngineSpec,
     Unknown,
 }
@@ -32,6 +33,11 @@ pub struct SettingObservation {
     /// Separate native effective value, where the source exposes configured and active values.
     pub value_in_use: Option<String>,
     pub value_for_secondary: Option<String>,
+    /// Native unit and configuration provenance, independent of display formatting.
+    pub unit: Option<String>,
+    pub native_context: Option<String>,
+    pub native_source: Option<String>,
+    pub pending_restart: Option<bool>,
     pub native_is_default: Option<bool>,
     pub default_value: Option<String>,
     pub default_source: SettingDefaultSource,
@@ -39,10 +45,18 @@ pub struct SettingObservation {
 impl SettingObservation {
     pub fn is_valid(&self) -> bool {
         [&self.source, &self.namespace, &self.name].into_iter().all(|value| valid_key(value))
-            && [&self.value, &self.value_in_use, &self.value_for_secondary, &self.default_value]
-                .into_iter()
-                .flatten()
-                .all(|value| value.len() <= MAX_SETTING_VALUE_BYTES)
+            && [
+                &self.value,
+                &self.value_in_use,
+                &self.value_for_secondary,
+                &self.default_value,
+                &self.unit,
+                &self.native_context,
+                &self.native_source,
+            ]
+            .into_iter()
+            .flatten()
+            .all(|value| value.len() <= MAX_SETTING_VALUE_BYTES)
             && match self.default_source {
                 SettingDefaultSource::Unknown => self.default_value.is_none(),
                 SettingDefaultSource::NativeFlag => {
@@ -50,7 +64,7 @@ impl SettingObservation {
                         && self.native_is_default == Some(true)
                         && self.default_value == self.value
                 }
-                SettingDefaultSource::EngineSpec => self.default_value.is_some(),
+                SettingDefaultSource::EngineSpec | SettingDefaultSource::NativeValue => self.default_value.is_some(),
             }
     }
 }
@@ -69,6 +83,10 @@ mod tests {
             value: None,
             value_in_use: None,
             value_for_secondary: None,
+            unit: None,
+            native_context: None,
+            native_source: None,
+            pending_restart: None,
             native_is_default: None,
             default_value: None,
             default_source: SettingDefaultSource::Unknown,

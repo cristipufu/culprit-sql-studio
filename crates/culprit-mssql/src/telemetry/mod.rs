@@ -36,6 +36,15 @@ pub(crate) fn source(
     port: u16,
 ) -> Result<Box<dyn TelemetrySource>> {
     match request.collection() {
+        culprit_core::telemetry::TelemetryCollection::Snapshot(
+            SnapshotDataset::StatementCounters
+            | SnapshotDataset::StatementDefinitions
+            | SnapshotDataset::Sequences
+            | SnapshotDataset::Cleanup,
+        ) => Err(culprit_core::Error::new(
+            culprit_core::ErrorCode::Unsupported,
+            culprit_core::t!("collection.unsupported"),
+        )),
         culprit_core::telemetry::TelemetryCollection::DeadlockHistory => {
             Ok(Box::new(events::EventSource::new(pool, request, host, port)?))
         }

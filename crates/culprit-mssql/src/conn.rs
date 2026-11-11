@@ -1,7 +1,4 @@
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use culprit_core::{
@@ -236,12 +233,12 @@ pub(crate) struct Pool {
     config: Config,
     transport: Option<Arc<dyn ConnectionTransport>>,
     idle: Mutex<Vec<MsClient>>,
-    uncertain: AtomicBool,
+    uncertain: culprit_read::ReadFence,
 }
 
 impl Pool {
     pub(crate) fn new(config: Config, transport: Option<Arc<dyn ConnectionTransport>>) -> Self {
-        Pool { config, transport, idle: Mutex::new(Vec::new()), uncertain: AtomicBool::new(false) }
+        Pool { config, transport, idle: Mutex::new(Vec::new()), uncertain: culprit_read::ReadFence::default() }
     }
 
     pub(crate) async fn connect(&self, kind: SessionKind) -> Result<MsClient> {
@@ -251,13 +248,10 @@ impl Pool {
     }
 
     pub(crate) fn mark_uncertain(&self) {
-        self.uncertain.store(true, Ordering::Release);
+        self.uncertain.mark_uncertain();
     }
     pub(crate) fn ensure_available(&self) -> Result<()> {
-        if self.uncertain.load(Ordering::Acquire) {
-            return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
-        }
-        Ok(())
+        self.uncertain.ensure_available()
     }
     pub(crate) fn source_shutdown(&self) -> culprit_core::telemetry::SourceShutdown {
         if self.ensure_available().is_ok() {

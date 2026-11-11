@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use culprit_core::{
-    CleanupHolder, Coverage, Engine, OpenTransaction, Pressure, Result, Signal, SignalScope, SignalUnit,
-    TransactionActivity, WaitSample, WaitStat, t,
+    CleanupHolder, Coverage, Engine, OpenTransaction, Pressure, Result, Signal, SignalScope, SignalUnit, WaitSample,
+    WaitStat, t,
 };
 use tokio_postgres::Client;
 
@@ -259,73 +259,17 @@ pub async fn collect(client: &Client, probe: &Probe) -> (Pressure, Coverage) {
 /// snapshot or transaction id holds VACUUM's horizon back. A session idle in a read-committed transaction has neither,
 /// and a session in another database doesn't hold this one's tables back, so neither is listed. Autovacuum's own
 /// workers are ignored by VACUUM.
-const HOLDING_SESSION_SQL: &str = "
-SELECT pid::text AS session, extract(epoch FROM now() - coalesce(xact_start, backend_start)) AS seconds,
-       application_name AS program, state, greatest(age(backend_xmin), age(backend_xid))::float8 AS xid_age
-  FROM pg_stat_activity
- WHERE (backend_xmin IS NOT NULL OR backend_xid IS NOT NULL)
-   AND (datname = current_database() OR (datname IS NULL AND backend_type = 'walsender'))
-   AND backend_type <> 'autovacuum worker' AND pid <> pg_backend_pid()
-   AND application_name IS DISTINCT FROM 'culprit'
- ORDER BY greatest(age(backend_xmin), age(backend_xid)) DESC LIMIT 1";
-
-/// A replication slot's xmin (a standby with hot_standby_feedback) holds the horizon for every database, active or not.
-const HOLDING_SLOT_SQL: &str = "
-SELECT slot_name AS session, active, greatest(age(xmin), age(catalog_xmin))::float8 AS xid_age,
-       (xmin IS NULL OR (catalog_xmin IS NOT NULL AND age(catalog_xmin) > age(xmin))) AS catalog_only
-  FROM pg_replication_slots WHERE xmin IS NOT NULL OR catalog_xmin IS NOT NULL
- ORDER BY greatest(age(xmin), age(catalog_xmin)) DESC LIMIT 1";
-
-/// A prepared transaction in this database holds the horizon until someone commits or rolls it back.
-const HOLDING_PREPARED_SQL: &str = "
-SELECT gid AS session, extract(epoch FROM now() - prepared) AS seconds, owner, age(transaction)::float8 AS xid_age
-  FROM pg_prepared_xacts WHERE database = current_database() ORDER BY age(transaction) DESC LIMIT 1";
-
-/// Whatever holds this database's VACUUM horizon furthest back: a session, a replication slot or a prepared
-/// transaction, by how many transactions it is behind.
 async fn cleanup_holder(client: &Client, coverage: &mut Coverage) -> Option<OpenTransaction> {
-    let mut found: Vec<OpenTransaction> = Vec::new();
-    if let Some(Some(r)) = coverage.read(&sources::OPEN_TRANSACTIONS, query_one(client, HOLDING_SESSION_SQL).await) {
-        found.push(OpenTransaction {
-            session: r.string("session"),
-            seconds: r.number("seconds").unwrap_or(0.0),
-            program: r.text("program").filter(|s| !s.is_empty()),
-            // pg_stat_activity's own state stays its word; idle in a transaction is a fact held-cleanup decides on.
-            activity: if r.text("state").is_some_and(|s| s.starts_with("idle")) {
-                TransactionActivity::IdleInTransaction
-            } else {
-                TransactionActivity::Reported
-            },
-            state: r.text("state"),
-            holder: CleanupHolder::Session,
-            xid_age: r.number("xid_age"),
-            ..OpenTransaction::default()
-        });
-    }
-    if let Some(Some(r)) = coverage.read(&sources::CLEANUP_SLOTS, query_one(client, HOLDING_SLOT_SQL).await) {
-        found.push(OpenTransaction {
-            catalog_only: r.flag("catalog_only"),
-            session: r.string("session"),
-            activity: if r.flag("active") {
-                TransactionActivity::SlotActive
-            } else {
-                TransactionActivity::SlotInactive
-            },
-            holder: CleanupHolder::ReplicationSlot,
-            xid_age: r.number("xid_age"),
-            ..OpenTransaction::default()
-        });
-    }
-    if let Some(Some(r)) = coverage.read(&sources::CLEANUP_PREPARED, query_one(client, HOLDING_PREPARED_SQL).await) {
-        found.push(OpenTransaction {
-            session: r.string("session"),
-            seconds: r.number("seconds").unwrap_or(0.0),
-            program: r.text("owner").filter(|s| !s.is_empty()),
-            activity: TransactionActivity::Prepared,
-            holder: CleanupHolder::PreparedTransaction,
-            xid_age: r.number("xid_age"),
-            ..OpenTransaction::default()
-        });
+    use crate::native::cleanup::{Kind, project, query as native_query};
+    let mut found = vec![];
+    for (kind, source) in [
+        (Kind::Session, &sources::OPEN_TRANSACTIONS),
+        (Kind::Slot, &sources::CLEANUP_SLOTS),
+        (Kind::Prepared, &sources::CLEANUP_PREPARED),
+    ] {
+        if let Some(Some(row)) = coverage.read(source, query_one(client, &native_query(kind, Some(1))).await) {
+            found.push(project(kind, &row));
+        }
     }
     oldest_holder(found)
 }

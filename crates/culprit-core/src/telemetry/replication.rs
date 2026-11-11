@@ -39,16 +39,36 @@ pub struct GeoReplicationSample {
     pub last_replication_at: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct NativeReplicationSample {
+    pub key: String,
+    pub measurements: NativeCounterSet,
+}
+impl NativeReplicationSample {
+    pub fn new(measurements: NativeCounterSet) -> Result<Self> {
+        if !measurements.is_valid() {
+            return Err(CollectionStop::InvalidPage.error());
+        }
+        Ok(Self { key: measurements.key()?, measurements })
+    }
+    pub fn is_valid(&self) -> bool {
+        self.measurements.is_valid() && self.measurements.key().is_ok_and(|key| key == self.key)
+    }
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", content = "data", rename_all = "kebab-case")]
 #[ts(export)]
 pub enum ReplicationFact {
+    Native(Box<NativeReplicationSample>),
     AvailabilityGroup(AvailabilityReplicaSample),
     GeoLink(GeoReplicationSample),
 }
 impl ReplicationFact {
     pub fn key(&self) -> String {
         match self {
+            Self::Native(row) => row.key.clone(),
             Self::AvailabilityGroup(row) => {
                 format!("ag:{}:{}:{}", row.group_id, row.group_database_id, row.replica_id)
             }
@@ -58,6 +78,7 @@ impl ReplicationFact {
     pub fn is_valid(&self) -> bool {
         let name = |value: &str| value.len() <= 2048;
         match self {
+            Self::Native(row) => row.is_valid(),
             Self::AvailabilityGroup(row) => {
                 [&row.group_id, &row.group_database_id, &row.replica_id].into_iter().all(|id| native_guid(id))
                     && [&row.native_name, &row.native_state, &row.native_mode]
@@ -96,7 +117,7 @@ fn native_guid(id: &str) -> bool {
             .all(|(index, byte)| if [8, 13, 18, 23].contains(&index) { byte == b'-' } else { byte.is_ascii_hexdigit() })
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct ReplicationObservation {
     pub source: String,

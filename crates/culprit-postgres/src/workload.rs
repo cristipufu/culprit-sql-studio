@@ -2,7 +2,7 @@
 use crate::{
     plan_json,
     probe::{Probe, StatementsAccess},
-    rows::{TAG, iso, query, query_one},
+    rows::{iso, query, query_one},
 };
 use culprit_core::i18n::{Message, MessageValue};
 use culprit_core::{
@@ -256,82 +256,7 @@ fn family_of(r: &crate::rows::Row) -> QueryFamily {
     }
 }
 
-/// What one pg_stat_statements version calls each column, per entry.
-struct EntryColumns {
-    total: &'static str,
-    mean: &'static str,
-    max: &'static str,
-    stddev: &'static str,
-    min: &'static str,
-    io: &'static str,
-    /// `stats_since` (17+): when the entry started counting.
-    since: Option<&'static str>,
-    toplevel: bool,
-}
-
-/// One row per statement: pg_stat_statements keeps an entry per (role, database, queryid), so a statement several roles
-/// run (an app's pool and its migrations, one login per tenant) is several entries splitting its time. Their counts and
-/// times add up; the slowest and fastest run are the extremes over the entries; the spread is pooled from each entry's
-/// mean and standard deviation (`Σn(σ²+μ²)/N − μ²`). The text and owner are the busiest entry's.
-fn aggregated_base(relation: &str, c: &EntryColumns) -> String {
-    let toplevel = if c.toplevel { " AND toplevel" } else { "" };
-    let first_seen = c.since.map(|since| iso(&format!("min({since})"))).unwrap_or_else(|| "NULL::text".to_string());
-    format!(
-        "SELECT queryid::text AS id, (array_agg(query ORDER BY {total} DESC))[1] AS query, sum(calls) AS calls,
-                sum({total}) AS total_ms, sum({total}) / nullif(sum(calls), 0)::float8 AS mean_ms,
-                max({max}) AS max_ms, min({min}) AS min_ms,
-                sqrt(greatest(sum(calls * ({stddev} ^ 2 + {mean} ^ 2)) / nullif(sum(calls), 0)::float8
-                              - (sum({total}) / nullif(sum(calls), 0)::float8) ^ 2, 0)) AS stddev_ms,
-                sum(rows) AS rows, sum(shared_blks_hit + shared_blks_read) AS reads, sum(shared_blks_read) AS phys,
-                sum(temp_blks_written) AS temp, sum({io}) AS io_ms, {first_seen} AS first_seen,
-                count(*) AS entries,
-                (array_agg(query ORDER BY {total} DESC)
-                   FILTER (WHERE pg_get_userbyid(userid) = session_user AND current_user = session_user))[1] AS own_query
-         FROM {relation}
-         WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database()){toplevel}
-           AND query NOT LIKE '%{TAG}'
-         GROUP BY queryid",
-        total = c.total,
-        mean = c.mean,
-        max = c.max,
-        stddev = c.stddev,
-        min = c.min,
-        io = c.io,
-    )
-}
-
-fn statements_base(relation: &str, version_num: u32) -> String {
-    let modern = version_num >= 130_000;
-    aggregated_base(
-        relation,
-        &EntryColumns {
-            total: if modern { "total_exec_time" } else { "total_time" },
-            mean: if modern { "mean_exec_time" } else { "mean_time" },
-            max: if modern { "max_exec_time" } else { "max_time" },
-            stddev: if modern { "stddev_exec_time" } else { "stddev_time" },
-            min: if modern { "min_exec_time" } else { "min_time" },
-            io: crate::pressure::statements_io_column(version_num),
-            since: (version_num >= 170_000).then_some("stats_since"),
-            toplevel: version_num >= 140_000,
-        },
-    )
-}
-
-fn statements_base_legacy(relation: &str) -> String {
-    aggregated_base(
-        relation,
-        &EntryColumns {
-            total: "total_time",
-            mean: "mean_time",
-            max: "max_time",
-            stddev: "stddev_time",
-            min: "min_time",
-            io: "(blk_read_time + blk_write_time)",
-            since: None,
-            toplevel: false,
-        },
-    )
-}
+use crate::native::statements::{statements_base, statements_base_legacy};
 
 /// Attach generic plans to the heaviest plannable statements. Returns a note when some could not be planned, or why
 /// this login plans none here.
@@ -506,6 +431,7 @@ pub fn leading_keyword(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rows::TAG;
 
     #[test]
     fn plannable_statements() {

@@ -21,6 +21,7 @@ with a fixture.
 
 | Crate | What it owns |
 |---|---|
+| `culprit-read` | Provider-independent response budgets, bounded row delivery, native admission fences and snapshot/frame paging. No SQL, connections, scheduling or destination state. |
 | `culprit-core` | The model (`Snapshot`, `Plan`, `Finding`), the `Check` and `Provider` traits, plan insights, `Coverage`. No I/O. |
 | `culprit-mssql`, `culprit-postgres`, `culprit-yugabyte`, `culprit-mysql`, `culprit-sqlite` | Providers: the sources for one engine, and explain, live sessions, deadlocks where supported. YugabyteDB owns DocDB measurements and shares PostgreSQL wire transport, not its heap collectors. SQLite reads a file, read-only: schema, statistics, settings and plans, no sessions or waits. |
 | `culprit-querylog` | Logs an application's framework already writes (Rails, Django, EF Core, Phoenix/Ecto, JSON lines), read into a `Workload` for an engine that keeps no statement history: one module per format behind a `Format` trait, statements grouped by `culprit_core::fingerprint`. The log's own timestamps are its period (`Workload.log`), never "the last N hours". |
@@ -321,9 +322,11 @@ per object, index, partition and internal columnstore rowset. The application se
 sums integers before display conversion. Hidden metadata and missing partition counters make the assessment
 partial; they never become zero. A direct default generator is classified by the shared SQL lexer, with no
 substring inference from literals or compound expressions. The metadata-cache reset epoch remains unknown.
-`telemetry::streamed` owns the shared grants/index snapshot lifecycle, including pressure admission, one native
-stream, cursor ownership, final EOF, identity verification and shutdown. Concrete recipes own layout, query and
-decoding only; cancellation retires the lifecycle before another native read can start.
+`culprit-read::SnapshotSource` owns the snapshot lifecycle shared by SQL Server and PostgreSQL: declared source
+membership, one native stream, cursor ownership, final EOF, coverage, identity verification and shutdown.
+`FrozenSource` pages a bounded activity frame for both providers. Native adapters own admission, SQL, layout, decoding
+and protocol completion; cancellation retires the lifecycle before another read can start. Neither shared source
+knows a database engine or analytical destination.
 
 `culprit-mssql::query_store::tuning` owns automatic options, recommendations, forced-plan counters and query hints.
 Scans and `--collection tuning` share native layout detection and strict decoding. Each source has independent
@@ -415,6 +418,18 @@ identity, capabilities and source availability. `catalog.rs` reads tables, index
 settings. `workload.rs` reads statement counters, families or digests, slow-log fallback and safe plan capture, returning
 an explicit `CollectedWorkload` to its caller. `collect.rs` owns concurrent source orchestration, coverage accounting
 and snapshot assembly. Individual source errors still become notes and unavailable capabilities in that one place.
+
+PostgreSQL's `native/` modules own the statement layout, relation/index/catalog readers, allowlisted settings,
+replication, sequence capacity, cleanup horizons and activity facts used by scans/Live and background collection.
+The app projects these facts into its existing model; telemetry keeps native identities, exact integer strings,
+fractional measurements, units, scope and reset evidence. Interactive aggregate statement queries share the same
+native layout, while counter polling omits query text and definition collection has a separate cadence.
+Catalog export avoids expression deparsing and physical relation-size functions; unavailable definitions remain
+explicit instead of invoking application-defined output functions. PostgreSQL's `ReadSession` owns the native client,
+driver and SSH route through completion or cancellation. CancelRequest is only a request: the original response must
+reach ReadyForQuery to prove completion. An interrupted client is discarded; missing proof fences the connector's
+future operations. Shared `RowOutput`, `ReadBudget`, read accounting and source lifecycle do not duplicate this
+protocol-specific responsibility.
 
 PostgreSQL's native parser owns generic-plan and normalized-statement annotations in `plan_json.rs`, so every plan it
 parses carries them, whichever path captured it. Shared identifier quoting stays with the SQL protocol helpers

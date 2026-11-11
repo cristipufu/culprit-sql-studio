@@ -48,7 +48,7 @@ Validation reads saved metadata, checks unattended authentication and configures
 opens no SQL/Blob/ADX connections and creates no runtime state. `collect schema` generates DDL, mappings, canonical
 functions and per-table ingestion routes without opening a workspace or applying anything to Azure.
 
-The example includes activity, Query Store history, resource history, deadlock history and all 22 point-observation
+The example includes activity, Query Store history, resource history, deadlock history and SQL Server point-observation
 families. Each has its own cadence and budget. A family being scheduled does not establish source availability:
 permissions, engine edition, enabled native features, retention and complete visibility still govern its coverage.
 Unavailable and truncated sources must remain distinguishable from complete empty results.
@@ -59,6 +59,49 @@ guard; pressure extends the delay. Cadences are minimum requested periods, not g
 missed-work metrics and qualify the combined workload before adding targets or shortening periods. The example's
 activity threshold is 30 seconds for blocking and 60 seconds for running requests, with a three-minute poll period.
 Transient activity between polls is not a complete event history.
+
+## PostgreSQL source coverage
+
+PostgreSQL uses the same capture, outbox, fleet and delivery path as SQL Server. Configure PostgreSQL connections
+with unattended saved credentials, then schedule only the collections the provider supports. SQL Server's example
+schedules must not be copied wholesale: PostgreSQL has cumulative counters rather than Query Store intervals.
+
+| Selection | Native observations | Suggested starting cadence |
+|---|---|---|
+| `snapshot: statement-counters` | `pg_stat_statements(false)`: calls, duration, rows, available buffers, WAL, I/O timings, planning, JIT and runtime distributions | 5 minutes |
+| `snapshot: operational` | Current-database health, conflicts, XID/MultiXact ages and subscription errors; explicitly shared WAL, I/O, writer/checkpointer, archive and statistics-eviction counters | 5 minutes |
+| `activity` | Persistent requests, lock waits, blocker closure, idle transaction context, lock resources and incident transitions | 3 minutes |
+| `snapshot: replication` | Senders, local standby state and physical/current-database logical slots; unknown lag stays unknown | 10 minutes |
+| `snapshot: settings` | Allowlisted effective settings, native unit/context/source, defaults and pending restart | 1 hour |
+| `snapshot: tables`, `indexes`, `statistics` | Catalog size estimates, native usage/maintenance counters and safe planner summaries | 1 hour |
+| `snapshot: statement-definitions` | Separately bounded, redacted normalized SQL text | 1 hour |
+| `snapshot: columns`, `foreign-keys`, `check-constraints`, `objects`, `triggers`, `partitions` | Native object identities, attributes, relationships and expression fingerprints | 6 hours |
+| `snapshot: sequences`, `cleanup` | Sequence bounds and current transaction/slot/prepared-transaction cleanup horizons | 1 hour |
+
+These cadences are starting policies, not measured production budgets. The fleet's shared resource gap still applies
+across profiles. The CLI uses `--collection statement-counters` for a point observation; JSON
+schedules use `{"kind":"snapshot","dataset":"statement-counters"}`. Keep definitions and catalog work out of the
+fast health profile. The collector does not run application statements, EXPLAIN, table scans or expression deparsing.
+It reads one bounded native response and streams provisional pages; limits, missing visibility and an identity change
+prevent complete publication. Activity reads lock resources only after an aged lock wait and bounds blocker traversal.
+
+Counter values are current native totals or gauges, not fabricated time buckets. Per-entry reset timestamps are used
+when PostgreSQL exposes them; a global reset does not prove each entry's lifetime. Unknown resets cannot establish
+rates, and minimum/maximum statistics retain their separate reset epoch. Disabled I/O or planning instrumentation
+may produce native zero totals; consult the captured settings before interpreting those totals as observed work.
+Server-scoped observations must not be summed as if each database owns them. Settings describe the collector's effective
+session, including its safety overrides; they do not reveal every application's settings or a pending configured value.
+
+Full statistics visibility is required for complete activity and restricted native sources. Planner statistics also
+need visibility of the selected relations. Activity capture requires PostgreSQL 14+ for native lock-wait start times;
+other version-dependent fields are detected explicitly. The complete native capture and cancellation tests run
+against an owned PostgreSQL 18.6 fixture. Managed-service permissions, TimescaleDB-specific storage and production
+source cost require their own qualification.
+
+PostgreSQL supplies a deadlock counter, not retained SQL-accessible deadlock graphs. The counter is included in
+operational observations. Graphs still require server logs, which the app's existing importer can parse; a scheduled
+PostgreSQL `deadlock-history` collection is explicitly unsupported. Query/runtime interval history, historical wait
+events, CPU utilization, application parameters and executed plans are not invented from current statistics.
 
 ## Recovery and activation
 

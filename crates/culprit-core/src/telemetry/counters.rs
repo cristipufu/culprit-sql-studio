@@ -10,12 +10,12 @@ pub enum CounterNature {
     Unknown,
 }
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 #[ts(export)]
 pub enum CounterUnit {
     Count,
     Bytes,
-    Pages,
+    Pages { bytes_per_page: u32 },
     Seconds,
     Milliseconds,
     Kibibytes,
@@ -25,7 +25,7 @@ pub enum CounterUnit {
 #[ts(export)]
 pub struct NativeCounterSample {
     pub key: String,
-    pub value: String,
+    pub value: MeasurementValue,
     pub unit: CounterUnit,
     pub nature: CounterNature,
     pub scope: crate::MeasurementScope,
@@ -47,7 +47,7 @@ impl NativeCounterSample {
     ) -> Self {
         Self {
             key: key.into(),
-            value: value.to_string(),
+            value: MeasurementValue::Integer(value.to_string()),
             unit,
             nature: CounterNature::Gauge,
             scope,
@@ -60,12 +60,41 @@ impl NativeCounterSample {
     }
     pub fn is_valid(&self) -> bool {
         valid_key(&self.key)
-            && valid_counter(&self.value)
+            && self.value.is_valid()
+            && !matches!(self.unit, CounterUnit::Pages { bytes_per_page: 0 })
             && valid_reset(&self.reset)
             && [&self.native_object, &self.native_name].into_iter().all(|value| valid_key(value))
             && [&self.native_instance, &self.native_type]
                 .into_iter()
                 .all(|value| value.as_deref().is_none_or(valid_key))
             && (self.nature != CounterNature::Unknown || self.unit == CounterUnit::Unknown)
+    }
+}
+
+/// One native object can expose many scalar measurements without multiplying observation identity or source rows.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct NativeCounterSet {
+    pub identity: NativeIdentity,
+    pub scope: crate::MeasurementScope,
+    pub counters: Vec<NativeCounterSample>,
+    /// Bounded native labels and state codes, never SQL text or connection secrets.
+    pub properties: std::collections::BTreeMap<String, String>,
+}
+impl NativeCounterSet {
+    pub fn key(&self) -> Result<String> {
+        serde_json::to_vec(&self.identity).map(|bytes| digest(&bytes)).map_err(|_| CollectionStop::InvalidPage.error())
+    }
+    pub fn is_valid(&self) -> bool {
+        let mut keys = std::collections::BTreeSet::new();
+        self.identity.is_valid()
+            && self.counters.len() <= 128
+            && self
+                .counters
+                .iter()
+                .all(|counter| counter.is_valid() && counter.scope == self.scope && keys.insert(&counter.key))
+            && self.properties.len() <= MAX_NATIVE_QUALIFIERS
+            && self.properties.iter().all(|(name, value)| valid_key(name) && value.len() <= 2048)
+            && (!self.counters.is_empty() || !self.properties.is_empty())
     }
 }

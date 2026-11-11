@@ -169,7 +169,11 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                 SnapshotDataset::PlanCacheSummary => "plan-cache-state",
                 SnapshotDataset::MissingIndexes => "missing-index-state",
                 SnapshotDataset::Tuning => "tuning-state",
-                SnapshotDataset::StatementGrants
+                SnapshotDataset::StatementCounters
+                | SnapshotDataset::StatementDefinitions
+                | SnapshotDataset::Sequences
+                | SnapshotDataset::Cleanup
+                | SnapshotDataset::StatementGrants
                 | SnapshotDataset::IndexOperations
                 | SnapshotDataset::Tables
                 | SnapshotDataset::ForeignKeys

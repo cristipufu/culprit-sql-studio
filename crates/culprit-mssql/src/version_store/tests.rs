@@ -12,7 +12,7 @@ async fn tempdb_store_keeps_native_integer_kibibytes_and_projects_bytes_only_for
     let mut reader =
         FakeRead::new(vec![Ok(vec![replace(&row(), &[("reserved_space_kb", Val::Int(9_007_199_254_740_993))])])]);
     let sample = read(&mut reader).await.unwrap();
-    assert_eq!(sample.value, "9007199254740993");
+    assert_eq!(sample.value, culprit_core::telemetry::MeasurementValue::Integer("9007199254740993".into()));
     assert_eq!(sample.unit, CounterUnit::Kibibytes);
     assert_eq!(sample.nature, CounterNature::Gauge);
     assert_eq!(sample.scope, MeasurementScope::Database);
@@ -27,7 +27,7 @@ async fn an_empty_visible_store_is_zero_but_unknown_contributors_or_missing_resu
     let empty =
         replace(&row(), &[("native_rows", Val::Int(0)), ("known_rows", Val::Int(0)), ("reserved_space_kb", Val::Null)]);
     let mut reader = FakeRead::new(vec![Ok(vec![empty])]);
-    assert_eq!(read(&mut reader).await.unwrap().value, "0");
+    assert_eq!(read(&mut reader).await.unwrap().value, culprit_core::telemetry::MeasurementValue::Integer("0".into()));
     for result in [
         Ok(vec![]),
         Ok(vec![row(), row()]),

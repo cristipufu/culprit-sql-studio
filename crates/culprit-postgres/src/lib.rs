@@ -5,11 +5,13 @@ mod collect;
 mod connect;
 pub mod deadlocks;
 mod generic;
+mod native;
 mod operations;
 pub mod plan_json;
 mod pressure;
 mod probe;
 mod progress;
+mod read;
 mod recorded;
 mod results;
 mod rows;
@@ -17,6 +19,7 @@ mod sessions;
 mod signals;
 pub mod sources;
 mod tables;
+mod telemetry;
 mod timescale;
 mod trust;
 pub mod wire;
@@ -34,7 +37,7 @@ use tokio_postgres::Client;
 use tokio_postgres::types::Type;
 
 use connect::{COLLECTOR, Connector, EXECUTION, INTERACTIVE, map_error, sql_state};
-use rows::{iso, parse_array, query, query_one, tagged};
+use rows::{query, query_one, tagged};
 pub use workload::{leading_keyword, plannable};
 
 const CURSOR: &str = "culprit_cursor";
@@ -243,6 +246,17 @@ impl PostgresProvider {
 
 #[async_trait]
 impl Provider for PostgresProvider {
+    fn source_shutdown(&self) -> culprit_core::telemetry::SourceShutdown {
+        self.connector.source_shutdown()
+    }
+
+    fn telemetry_source(
+        &self,
+        request: &culprit_core::telemetry::CollectionRequest,
+    ) -> Result<Box<dyn culprit_core::telemetry::TelemetrySource>> {
+        telemetry::source(self.connector.clone(), request)
+    }
+
     fn collector_version(&self) -> culprit_core::ComponentVersion {
         component_version()
     }
@@ -350,76 +364,63 @@ impl Provider for PostgresProvider {
     }
 
     async fn live(&self) -> Result<LiveState> {
-        let client = self.connector.connect(INTERACTIVE).await?;
-        let sql = "SELECT pid::text AS id, usename AS username, application_name,
-                    coalesce(client_hostname, host(client_addr)) AS host, datname,
-                    coalesce(state, backend_type) AS state, wait_event_type, wait_event,
-                    extract(epoch FROM now() - CASE WHEN state = 'active' THEN query_start ELSE state_change END) * 1000 AS elapsed_ms,
-                    extract(epoch FROM now() - xact_start) * 1000 AS xact_ms,
-                    pg_blocking_pids(pid)::text AS blockers, query
-             FROM pg_stat_activity
-             WHERE pid <> pg_backend_pid() AND backend_type = 'client backend'
-               AND application_name <> 'culprit'
-             ORDER BY (state = 'active') DESC NULLS LAST, query_start";
-        let rows = query(&client, sql).await?;
-        let now = query_one(&client, &format!("SELECT {} AS now", iso("now()")))
-            .await?
-            .map(|r| r.string("now"))
-            .unwrap_or_default();
-        let sessions: Vec<Session> = rows
-            .iter()
-            .map(|r| {
-                let state = r.string("state");
-                let sql = r.text("query").filter(|q| !q.is_empty());
-                let active = state == "active";
-                let wait = match (r.text("wait_event_type"), r.text("wait_event")) {
-                    (Some(kind), Some(event)) => Some(format!("{kind}: {event}")),
-                    (Some(kind), None) => Some(kind),
-                    _ => None,
-                };
-                Session {
-                    id: r.string("id"),
-                    user: r.text("username"),
-                    application: r.text("application_name").filter(|a| !a.is_empty()),
-                    host: r.text("host"),
-                    database: r.text("datname"),
-                    command: if active {
-                        sql.as_deref().and_then(leading_keyword).map(|k| k.to_uppercase())
-                    } else {
-                        None
-                    },
-                    wait: if active { wait } else { None },
-                    waiting_on_lock: Some(active && r.text("wait_event_type").as_deref() == Some("Lock")),
-                    wait_ms: None,
-                    blocked_by: r.text("blockers").and_then(|b| parse_array(&b).into_iter().next()),
-                    elapsed_ms: r.number("elapsed_ms"),
-                    transaction_ms: r.number("xact_ms"),
-                    cpu_ms: None,
-                    reads: None,
-                    sql,
-                    state,
+        use crate::read::NativeRead;
+        let budget = culprit_core::telemetry::CollectionBudget {
+            total_timeout_ms: culprit_core::limits::OBSERVE_TIMEOUT.as_millis() as u32,
+            ..Default::default()
+        };
+        let mut reader = crate::read::ReadSession::new(self.connector.clone(), budget.clone());
+        let result = async {
+            let meta = crate::native::metadata::read(&mut reader, &self.connector.host, self.connector.port).await?;
+            let mut frame = crate::native::activity::observe(&mut reader, &meta, &budget).await?;
+            crate::native::activity::blockers(
+                &mut reader,
+                &mut frame,
+                crate::native::activity::BlockingReadOptions {
+                    minimum_request_age_ms: 0,
+                    scope: crate::native::activity::ActivityScope::Visible,
+                    wait_start_available: meta.version >= 140_000,
+                },
+            )
+            .await?;
+            let keys = frame.observations().into_iter().map(|row| row.key).collect();
+            let cap = (budget.page_bytes as usize / frame.records.len().max(1))
+                .saturating_sub(1024)
+                .min(budget.max_sql_bytes as usize);
+            crate::native::activity::enrich(&mut reader, &mut frame, &keys, cap, true).await?;
+            let now = frame.at.clone();
+            let sessions: Vec<Session> = frame
+                .records
+                .iter()
+                .map(crate::native::activity::project)
+                .filter(|row| row.application.as_deref() != Some("culprit"))
+                .collect();
+            let mut waits: Vec<WaitStat> = Vec::new();
+            for session in sessions.iter().filter(|s| s.state == "active") {
+                let category = session.wait.as_deref().and_then(|w| w.split(':').next()).unwrap_or("CPU").to_string();
+                let wait_type = session.wait.as_deref().and_then(|w| w.split_once(": ")).map(|(_, e)| e.to_string());
+                match waits.iter_mut().find(|w| w.category == category && w.wait_type == wait_type) {
+                    Some(existing) => existing.tasks = Some(existing.tasks.unwrap_or(0.0) + 1.0),
+                    None => waits.push(WaitStat { category, wait_type, wait_ms: 0.0, tasks: Some(1.0) }),
                 }
-            })
-            .collect();
-        let mut waits: Vec<WaitStat> = Vec::new();
-        for session in sessions.iter().filter(|s| s.state == "active") {
-            let category = session.wait.as_deref().and_then(|w| w.split(':').next()).unwrap_or("CPU").to_string();
-            let wait_type = session.wait.as_deref().and_then(|w| w.split_once(": ")).map(|(_, e)| e.to_string());
-            match waits.iter_mut().find(|w| w.category == category && w.wait_type == wait_type) {
-                Some(existing) => existing.tasks = Some(existing.tasks.unwrap_or(0.0) + 1.0),
-                None => waits.push(WaitStat { category, wait_type, wait_ms: 0.0, tasks: Some(1.0) }),
             }
+            waits.sort_by(|a, b| b.tasks.unwrap_or(0.0).total_cmp(&a.tasks.unwrap_or(0.0)));
+            let blocking = culprit_core::blocking::analyze(Engine::Postgres, &sessions, &frame.locks);
+            Ok(LiveState {
+                notes: Vec::new(),
+                taken_at: now,
+                sessions,
+                waits,
+                session_actions: Vec::new(),
+                session_actions_note: None,
+                blocking,
+            })
         }
-        waits.sort_by(|a, b| b.tasks.unwrap_or(0.0).total_cmp(&a.tasks.unwrap_or(0.0)));
-        Ok(LiveState {
-            notes: Vec::new(),
-            taken_at: now,
-            sessions,
-            waits,
-            session_actions: Vec::new(),
-            session_actions_note: None,
-            blocking: None,
-        })
+        .await;
+        if reader.close().await == culprit_core::telemetry::SourceShutdown::Unconfirmed {
+            return Err(culprit_core::telemetry::CollectionStop::CancellationUnconfirmed.error());
+        }
+        result
     }
 
     async fn run(&self, sql: &str, limit: usize) -> Result<ResultSet> {

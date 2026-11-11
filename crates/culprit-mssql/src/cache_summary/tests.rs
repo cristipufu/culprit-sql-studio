@@ -27,7 +27,7 @@ async fn cache_entry_counts_and_bytes_keep_precision_scope_and_the_same_app_proj
     assert_eq!(facts.len(), 6);
     assert!(facts.iter().all(OperationalObservation::is_valid));
     let OperationalFact::Counter(bytes) = &facts[1].fact else { panic!("counter") };
-    assert_eq!(bytes.value, "9007199254740993");
+    assert_eq!(bytes.value, culprit_core::telemetry::MeasurementValue::Integer("9007199254740993".into()));
     assert_eq!(bytes.unit, CounterUnit::Bytes);
     assert_eq!(bytes.scope, MeasurementScope::Database);
     assert_eq!(bytes.nature, CounterNature::Gauge);

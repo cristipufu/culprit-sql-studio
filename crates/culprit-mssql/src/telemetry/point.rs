@@ -61,7 +61,11 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         SnapshotDataset::WaitCounters => vec![Family::WaitCounters],
         SnapshotDataset::Replication => vec![Family::Replication],
         SnapshotDataset::Settings => crate::settings::Kind::ALL.into_iter().map(Family::Settings).collect(),
-        SnapshotDataset::StatementGrants
+        SnapshotDataset::StatementCounters
+        | SnapshotDataset::StatementDefinitions
+        | SnapshotDataset::Sequences
+        | SnapshotDataset::Cleanup
+        | SnapshotDataset::StatementGrants
         | SnapshotDataset::IndexOperations
         | SnapshotDataset::Tables
         | SnapshotDataset::ForeignKeys

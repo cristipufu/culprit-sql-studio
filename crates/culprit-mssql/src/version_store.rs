@@ -47,7 +47,8 @@ pub(crate) fn bytes(sample: &NativeCounterSample) -> Option<f64> {
         && sample.unit == CounterUnit::Kibibytes
         && sample.nature == CounterNature::Gauge
         && sample.scope == MeasurementScope::Database)
-        .then(|| sample.value.parse::<u64>().expect("validated native scalar") as f64 * 1024.0)
+        .then(|| sample.value.integer().map(|value| value as f64 * 1024.0))
+        .flatten()
 }
 pub(crate) struct StoreContext {
     pub tempdb_bytes: Option<f64>,
