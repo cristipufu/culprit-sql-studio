@@ -1,4 +1,8 @@
 use super::*;
+use culprit_core::telemetry::{
+    MeasurementValue, NativeDefinitionReference, NativeIdentity, RuntimeMetric, RuntimeMetricKey, RuntimeMetricUnit,
+    StatementReferences,
+};
 
 #[test]
 fn one_schema_drives_column_types_mapping_and_exact_value_verification() {
@@ -82,46 +86,76 @@ fn runtime_projection_covers_the_native_contract_and_preserves_counts_units_and_
     use culprit_core::telemetry::{NativeMeasurementKey, RuntimeMeasurement};
     let native = RuntimeMeasurement {
         key: NativeMeasurementKey {
-            row_id: "1".into(),
-            plan_id: "2".into(),
-            replica_group_id: "3".into(),
-            execution_type: 4,
-            plan_definition_id: Some("a".repeat(64)),
+            native: NativeIdentity::new("1")
+                .qualified("plan_id", "2")
+                .qualified("replica_group_id", "3")
+                .qualified("execution_type", "4".to_string()),
+            references: StatementReferences {
+                query: Some(NativeDefinitionReference {
+                    native: NativeIdentity::new("q"),
+                    definition_id: Some("b".repeat(64)),
+                }),
+                plan: Some(NativeDefinitionReference {
+                    native: NativeIdentity::new("2"),
+                    definition_id: Some("a".repeat(64)),
+                }),
+            },
         },
         executions: "9007199254740993".into(),
-        avg_duration_us: 13.5,
-        stdev_duration_us: 3.5,
-        min_duration_us: 2.5,
-        max_duration_us: 24.5,
-        avg_cpu_us: 7.5,
-        avg_logical_reads_8kb_pages: 11.5,
-        avg_physical_reads_8kb_pages: 1.5,
-        avg_logical_writes_8kb_pages: None,
-        avg_rows: Some(17.5),
-        avg_dop: Some(4.5),
-        avg_max_used_memory_8kb_pages: Some(19.5),
-        avg_clr_us: Some(5.5),
-        avg_log_bytes: Some(23.5),
-        avg_tempdb_8kb_pages: Some(29.5),
-        first_execution_at: "2026-11-11T06:00:00Z".into(),
-        last_execution_at: "2026-11-11T06:01:00Z".into(),
+        metrics: vec![
+            RuntimeMetric {
+                minimum: Some(2.5),
+                maximum: Some(24.5),
+                standard_deviation: Some(3.5),
+                ..RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Microseconds, 13.5)
+            },
+            RuntimeMetric::average(RuntimeMetricKey::CpuTime, RuntimeMetricUnit::Microseconds, 7.5),
+            RuntimeMetric::average(
+                RuntimeMetricKey::LogicalReads,
+                RuntimeMetricUnit::Pages { bytes_per_page: 8192 },
+                11.5,
+            ),
+            RuntimeMetric::average(
+                RuntimeMetricKey::PhysicalReads,
+                RuntimeMetricUnit::Pages { bytes_per_page: 8192 },
+                1.5,
+            ),
+            RuntimeMetric::average(RuntimeMetricKey::Rows, RuntimeMetricUnit::Count, 17.5),
+            RuntimeMetric::average(RuntimeMetricKey::Parallelism, RuntimeMetricUnit::Ratio, 4.5),
+            RuntimeMetric::average(RuntimeMetricKey::Memory, RuntimeMetricUnit::Pages { bytes_per_page: 8192 }, 19.5),
+            RuntimeMetric::average(
+                RuntimeMetricKey::Native("mssql.clr-time".into()),
+                RuntimeMetricUnit::Microseconds,
+                5.5,
+            ),
+            RuntimeMetric::average(RuntimeMetricKey::LogBytes, RuntimeMetricUnit::Bytes, 23.5),
+            RuntimeMetric::average(
+                RuntimeMetricKey::TemporaryStorage,
+                RuntimeMetricUnit::Pages { bytes_per_page: 8192 },
+                29.5,
+            ),
+        ],
+        first_execution_at: Some("2026-11-11T06:00:00Z".into()),
+        last_execution_at: Some("2026-11-11T06:01:00Z".into()),
     };
     let schema = queries::runtime(&[]).unwrap();
     let input = json!({"record":{"data":native}});
     let projected = schema.project(&input).unwrap();
     let wire: Value = serde_json::from_slice(&schema.encode(&projected).unwrap()).unwrap();
     assert_eq!(wire["Executions"], "9007199254740993");
-    assert_eq!(wire["AvgDurationUs"], 13.5);
-    assert_eq!(wire["AvgCpuUs"], 7.5);
-    assert_eq!(wire["AvgLogicalReads8KbPages"], 11.5);
-    assert_eq!(wire["AvgLogBytes"], 23.5);
-    assert!(wire["AvgLogicalWrites8KbPages"].is_null());
+    let metrics: Value = serde_json::from_str(wire["Metrics"].as_str().unwrap()).unwrap();
+    let metric = |kind: &str| metrics.as_array().unwrap().iter().find(|metric| metric["key"]["kind"] == kind);
+    assert_eq!(metric("duration").unwrap()["average"], 13.5);
+    assert_eq!(metric("cpu-time").unwrap()["unit"]["kind"], "microseconds");
+    assert_eq!(metric("logical-reads").unwrap()["unit"]["bytes_per_page"], 8192);
+    assert_eq!(metric("log-bytes").unwrap()["average"], 23.5);
+    assert!(metric("logical-writes").is_none());
     let mapped = schema.fields.iter().map(|field| field.pointer).collect::<BTreeSet<_>>();
-    for (name, value) in input["record"]["data"].as_object().unwrap() {
+    for name in input["record"]["data"].as_object().unwrap().keys() {
         if name == "key" {
-            for key in value.as_object().unwrap().keys() {
-                assert!(mapped.contains(format!("/record/data/key/{key}").as_str()), "unmapped native key {key}");
-            }
+            assert!(mapped.contains("/record/data/key/native/id"));
+            assert!(mapped.contains("/record/data/key/native/qualifiers"));
+            assert!(mapped.contains("/record/data/key/references"));
         } else {
             assert!(mapped.contains(format!("/record/data/{name}").as_str()), "unmapped native field {name}");
         }
@@ -133,26 +167,40 @@ fn wait_totals_keep_exact_milliseconds_and_are_not_confused_with_average_waits()
     use culprit_core::telemetry::{NativeMeasurementKey, WaitMeasurement};
     let native = WaitMeasurement {
         key: NativeMeasurementKey {
-            row_id: "1".into(),
-            plan_id: "2".into(),
-            replica_group_id: "3".into(),
-            execution_type: 0,
-            plan_definition_id: Some("a".repeat(64)),
+            native: NativeIdentity::new("1")
+                .qualified("plan_id", "2")
+                .qualified("replica_group_id", "3")
+                .qualified("execution_type", "0".to_string()),
+            references: StatementReferences {
+                query: Some(NativeDefinitionReference {
+                    native: NativeIdentity::new("q"),
+                    definition_id: Some("b".repeat(64)),
+                }),
+                plan: Some(NativeDefinitionReference {
+                    native: NativeIdentity::new("2"),
+                    definition_id: Some("a".repeat(64)),
+                }),
+            },
         },
-        category: 7,
-        total_wait_ms: "9007199254740993".into(),
-        avg_wait_ms: 13.5,
-        min_wait_ms: "2".into(),
-        max_wait_ms: "23".into(),
+        category: "7".to_string(),
+        unit: RuntimeMetricUnit::Milliseconds,
+        total: MeasurementValue::Integer("9007199254740993".into()),
+        average: Some(13.5),
+        minimum: Some(MeasurementValue::Integer("2".into())),
+        maximum: Some(MeasurementValue::Integer("23".into())),
     };
     let schema = queries::waits(&[]).unwrap();
     let projected = schema.project(&json!({"record":{"data":native}})).unwrap();
     let wire: Value = serde_json::from_slice(&schema.encode(&projected).unwrap()).unwrap();
-    assert_eq!(wire["WaitCategory"], 7);
-    assert_eq!(wire["TotalWaitMs"], "9007199254740993");
-    assert_eq!(wire["AvgWaitMs"], 13.5);
-    assert_eq!(wire["MinWaitMs"], "2");
-    assert_eq!(wire["MaxWaitMs"], "23");
+    assert_eq!(wire["WaitCategory"], "7");
+    assert_eq!(
+        serde_json::from_str::<Value>(wire["TotalWait"].as_str().unwrap()).unwrap()["value"],
+        "9007199254740993"
+    );
+    assert_eq!(wire["TimeUnit"], "milliseconds");
+    assert_eq!(wire["AverageWait"], 13.5);
+    assert_eq!(serde_json::from_str::<Value>(wire["MinimumWait"].as_str().unwrap()).unwrap()["value"], "2");
+    assert_eq!(serde_json::from_str::<Value>(wire["MaximumWait"].as_str().unwrap()).unwrap()["value"], "23");
 }
 
 fn wire(schema: &Schema, data: impl serde::Serialize) -> Value {
@@ -167,10 +215,13 @@ fn definitions_keep_native_provenance_and_payload_references_without_copying_lar
     let sql_sha = digest(text.as_bytes());
     let identity = NativeQueryIdentity {
         query_id: "7".into(),
-        context_settings_id: "3".into(),
-        object_id: "0".into(),
-        query_hash: "0123456789ABCDEF".into(),
-        initial_compile_at: "2026-11-11T06:00:00Z".into(),
+        qualifiers: [
+            ("context_settings_id".into(), "3".into()),
+            ("object_id".into(), "0".into()),
+            ("query_hash".into(), "0123456789ABCDEF".into()),
+            ("initial_compile_at".into(), "2026-11-11T06:00:00Z".into()),
+        ]
+        .into(),
     };
     let query = QueryDefinition {
         id: digest(b"definition"),
@@ -194,14 +245,17 @@ fn definitions_keep_native_provenance_and_payload_references_without_copying_lar
         identity: NativePlanIdentity {
             plan_id: "9".into(),
             query: identity,
-            plan_hash: "FEDCBA9876543210".into(),
-            initial_compile_at: "2026-11-11T06:00:01Z".into(),
+            qualifiers: [
+                ("plan_hash".into(), "FEDCBA9876543210".into()),
+                ("initial_compile_at".into(), "2026-11-11T06:00:01Z".into()),
+            ]
+            .into(),
         },
         query_definition_id: query.id,
-        engine_version: "native-version".into(),
-        compatibility_level: 170,
         source_text_bytes: None,
         plan: DefinitionPayload::Unavailable { reason: PayloadUnavailable::Restricted },
+        engine_version: Some("native-version".into()),
+        native_properties: [("compatibility_level".into(), "170".to_string())].into(),
     };
     let projected = wire(&definitions::plans(&[]).unwrap(), plan);
     assert_eq!(projected["PlanPayloadState"], "unavailable");

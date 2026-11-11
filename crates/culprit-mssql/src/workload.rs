@@ -386,8 +386,13 @@ fn to_query_stat(
         resolved_write_target: None,
         requests: None,
         id: q.query_id.clone(),
-        query_hash: text
-            .and_then(|definition| definition.query.as_ref().map(|query| format!("0x{}", query.query_hash))),
+        query_hash: text.and_then(|definition| {
+            definition
+                .query
+                .as_ref()
+                .and_then(|query| query.qualifiers.get("query_hash"))
+                .map(|hash| format!("0x{hash}"))
+        }),
         text: sql,
         parameters,
         object_name: text.and_then(|definition| definition.object_name.clone()),

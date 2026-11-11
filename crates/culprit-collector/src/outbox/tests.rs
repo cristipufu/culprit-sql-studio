@@ -27,9 +27,12 @@ fn source() -> CollectionDescription {
                     from: request().bounds().unwrap().0.to_rfc3339(),
                     until: request().bounds().unwrap().1.to_rfc3339(),
                 },
-                replica_group_ids: vec!["1".into()],
-                capture_mode: "AUTO".into(),
-                waits_capture_enabled: true,
+                dimensions: [("replica_group_id".into(), vec!["1".into()])].into(),
+                native_properties: [
+                    ("capture_mode".into(), "AUTO".into()),
+                    ("waits_capture_enabled".into(), (true).to_string()),
+                ]
+                .into(),
             },
         ),
         continuity: SourceContinuity::Unverified,
@@ -40,13 +43,19 @@ fn plan() -> NativePlanIdentity {
         plan_id: "7".into(),
         query: NativeQueryIdentity {
             query_id: "2".into(),
-            context_settings_id: "3".into(),
-            object_id: "0".into(),
-            query_hash: "0123456789ABCDEF".into(),
-            initial_compile_at: "2020-01-01T05:00:00Z".into(),
+            qualifiers: [
+                ("context_settings_id".into(), "3".into()),
+                ("object_id".into(), "0".into()),
+                ("query_hash".into(), "0123456789ABCDEF".into()),
+                ("initial_compile_at".into(), "2020-01-01T05:00:00Z".into()),
+            ]
+            .into(),
         },
-        plan_hash: "FEDCBA9876543210".into(),
-        initial_compile_at: "2020-01-01T05:00:01Z".into(),
+        qualifiers: [
+            ("plan_hash".into(), "FEDCBA9876543210".into()),
+            ("initial_compile_at".into(), "2020-01-01T05:00:01Z".into()),
+        ]
+        .into(),
     }
 }
 fn records(stream: TelemetryStream) -> Vec<TelemetryRecord> {
@@ -55,29 +64,43 @@ fn records(stream: TelemetryStream) -> Vec<TelemetryRecord> {
     match stream {
         TelemetryStream::QueryRuntime => vec![TelemetryRecord::QueryRuntime(RuntimeMeasurement {
             key: NativeMeasurementKey {
-                row_id: "1".into(),
-                plan_id: identity.plan_id.clone(),
-                replica_group_id: "1".into(),
-                execution_type: 0,
-                plan_definition_id: Some(identity.definition_id(&source).unwrap()),
+                native: NativeIdentity::new("1")
+                    .qualified("plan_id", identity.plan_id.clone())
+                    .qualified("replica_group_id", "1")
+                    .qualified("execution_type", "0".to_string()),
+                references: StatementReferences {
+                    query: Some(NativeDefinitionReference {
+                        native: identity.query.native(),
+                        definition_id: Some(identity.query.definition_id(&source).unwrap()),
+                    }),
+                    plan: Some(NativeDefinitionReference {
+                        native: identity.native(),
+                        definition_id: Some(identity.definition_id(&source).unwrap()),
+                    }),
+                },
             },
             executions: "9007199254740993".into(),
-            avg_duration_us: 2.0,
-            stdev_duration_us: 1.0,
-            min_duration_us: 1.0,
-            max_duration_us: 3.0,
-            avg_cpu_us: 1.0,
-            avg_logical_reads_8kb_pages: 1.0,
-            avg_physical_reads_8kb_pages: 0.0,
-            avg_logical_writes_8kb_pages: None,
-            avg_rows: None,
-            avg_dop: None,
-            avg_max_used_memory_8kb_pages: None,
-            avg_clr_us: None,
-            avg_log_bytes: None,
-            avg_tempdb_8kb_pages: None,
-            first_execution_at: "2020-01-01T06:01:00Z".into(),
-            last_execution_at: "2020-01-01T06:59:00Z".into(),
+            metrics: vec![
+                RuntimeMetric {
+                    minimum: Some(1.0),
+                    maximum: Some(3.0),
+                    standard_deviation: Some(1.0),
+                    ..RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Microseconds, 2.0)
+                },
+                RuntimeMetric::average(RuntimeMetricKey::CpuTime, RuntimeMetricUnit::Microseconds, 1.0),
+                RuntimeMetric::average(
+                    RuntimeMetricKey::LogicalReads,
+                    RuntimeMetricUnit::Pages { bytes_per_page: 8192 },
+                    1.0,
+                ),
+                RuntimeMetric::average(
+                    RuntimeMetricKey::PhysicalReads,
+                    RuntimeMetricUnit::Pages { bytes_per_page: 8192 },
+                    0.0,
+                ),
+            ],
+            first_execution_at: Some("2020-01-01T06:01:00Z".into()),
+            last_execution_at: Some("2020-01-01T06:59:00Z".into()),
         })],
         TelemetryStream::QueryWaits => vec![],
         TelemetryStream::QueryDefinitions => vec![TelemetryRecord::QueryDefinition(QueryDefinition {
@@ -103,16 +126,16 @@ fn records(stream: TelemetryStream) -> Vec<TelemetryRecord> {
         | TelemetryStream::ActivityIncidents
         | TelemetryStream::ActivityCheckpoints => panic!("query-history fixture does not collect this stream"),
         TelemetryStream::PlanDefinitions => vec![TelemetryRecord::PlanDefinition(PlanDefinition {
+            identity: identity.clone(),
             id: identity.definition_id(&source).unwrap(),
             query_definition_id: identity.query.definition_id(&source).unwrap(),
-            identity,
-            engine_version: "16.0".into(),
-            compatibility_level: 160,
             source_text_bytes: Some("200".into()),
             plan: DefinitionPayload::plan(
                 "<ShowPlanXML><StmtSimple StatementText=\"SELECT 'private-value'\" /></ShowPlanXML>",
                 culprit_core::Engine::Mssql,
             ),
+            engine_version: Some("16.0".into()),
+            native_properties: [("compatibility_level".into(), "160".to_string())].into(),
         })],
     }
 }

@@ -30,6 +30,7 @@ mod indexes;
 mod io;
 mod missing_indexes;
 mod monitor;
+mod native_identity;
 mod objects;
 mod observation;
 mod outbox;
@@ -40,8 +41,10 @@ mod queues;
 mod read_metrics;
 mod replication;
 mod resources;
+mod runtime;
 mod settings;
 mod state;
+mod statement_counters;
 mod statistics;
 mod tables;
 mod transactions;
@@ -70,6 +73,7 @@ pub use indexes::*;
 pub use io::*;
 pub use missing_indexes::*;
 pub use monitor::*;
+pub use native_identity::*;
 pub use objects::*;
 pub use observation::*;
 pub use outbox::*;
@@ -80,8 +84,10 @@ pub use queues::*;
 pub use read_metrics::*;
 pub use replication::*;
 pub use resources::*;
+pub use runtime::*;
 pub use settings::*;
 pub use state::*;
+pub use statement_counters::*;
 pub use statistics::*;
 pub use tables::*;
 pub use transactions::*;
@@ -303,52 +309,6 @@ pub enum SourceContinuity {
     Unverified,
 }
 
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq, Hash)]
-#[ts(export)]
-pub struct NativeMeasurementKey {
-    pub row_id: String,
-    pub plan_id: String,
-    pub replica_group_id: String,
-    pub execution_type: u8,
-    /// A source definition discriminator, independent of redacted payload bytes. Absent when unresolved.
-    pub plan_definition_id: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
-#[ts(export)]
-pub struct RuntimeMeasurement {
-    pub key: NativeMeasurementKey,
-    /// Decimal strings retain integer precision through JSON readers, including JavaScript.
-    pub executions: String,
-    pub avg_duration_us: f64,
-    pub stdev_duration_us: f64,
-    pub min_duration_us: f64,
-    pub max_duration_us: f64,
-    pub avg_cpu_us: f64,
-    pub avg_logical_reads_8kb_pages: f64,
-    pub avg_physical_reads_8kb_pages: f64,
-    pub avg_logical_writes_8kb_pages: Option<f64>,
-    pub avg_rows: Option<f64>,
-    pub avg_dop: Option<f64>,
-    pub avg_max_used_memory_8kb_pages: Option<f64>,
-    pub avg_clr_us: Option<f64>,
-    pub avg_log_bytes: Option<f64>,
-    pub avg_tempdb_8kb_pages: Option<f64>,
-    pub first_execution_at: String,
-    pub last_execution_at: String,
-}
-
-#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
-#[ts(export)]
-pub struct WaitMeasurement {
-    pub key: NativeMeasurementKey,
-    pub category: u8,
-    pub total_wait_ms: String,
-    pub avg_wait_ms: f64,
-    pub min_wait_ms: String,
-    pub max_wait_ms: String,
-}
-
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[serde(tag = "stream", content = "data", rename_all = "kebab-case")]
 #[ts(export)]
@@ -388,8 +348,8 @@ pub enum TelemetryRecord {
 /// Identity within one source interval and observation; it does not prove continuity across source resets.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum NativeRecordIdentity {
-    Runtime(NativeMeasurementKey),
-    Waits { key: NativeMeasurementKey, category: u8 },
+    Runtime(NativeIdentity),
+    Waits { key: NativeIdentity, category: String },
     QueryDefinition(String),
     PlanDefinition(String),
     ResourceSample { at: String, replica_id: String },
@@ -469,7 +429,8 @@ impl TelemetryRecord {
                 row.fact.redact(source.database.engine);
                 source.observation.accepts_snapshot_record(TelemetryStream::TuningObservations, &row.source)
             }
-            Self::QueryRuntime(_) | Self::QueryWaits(_) => source.query_history().is_some(),
+            Self::QueryRuntime(row) => source.accepts_measurement(&row.key),
+            Self::QueryWaits(row) => source.accepts_measurement(&row.key),
         };
         if !valid_identity || !record.is_valid() {
             return Err(CollectionStop::InvalidPage.error());
@@ -478,9 +439,9 @@ impl TelemetryRecord {
     }
     pub fn native_identity(&self) -> NativeRecordIdentity {
         match self {
-            Self::QueryRuntime(record) => NativeRecordIdentity::Runtime(record.key.clone()),
+            Self::QueryRuntime(record) => NativeRecordIdentity::Runtime(record.key.native.clone()),
             Self::QueryWaits(record) => {
-                NativeRecordIdentity::Waits { key: record.key.clone(), category: record.category }
+                NativeRecordIdentity::Waits { key: record.key.native.clone(), category: record.category.clone() }
             }
             Self::QueryDefinition(record) => NativeRecordIdentity::QueryDefinition(record.id.clone()),
             Self::PlanDefinition(record) => NativeRecordIdentity::PlanDefinition(record.id.clone()),
@@ -516,48 +477,9 @@ impl TelemetryRecord {
     }
 
     pub fn is_valid(&self) -> bool {
-        if let Some(key) = self.measurement_key()
-            && ([&key.row_id, &key.plan_id, &key.replica_group_id].iter().any(|id| id.is_empty() || id.len() > 128)
-                || key.plan_definition_id.as_ref().is_some_and(|id| !valid_digest(id)))
-        {
-            return false;
-        }
-        let count = valid_counter;
-        let number = |value: f64| value.is_finite() && value >= 0.0;
         match self {
-            Self::QueryRuntime(row) => {
-                count(&row.executions)
-                    && [
-                        row.avg_duration_us,
-                        row.stdev_duration_us,
-                        row.min_duration_us,
-                        row.max_duration_us,
-                        row.avg_cpu_us,
-                        row.avg_logical_reads_8kb_pages,
-                        row.avg_physical_reads_8kb_pages,
-                    ]
-                    .into_iter()
-                    .all(number)
-                    && [
-                        row.avg_logical_writes_8kb_pages,
-                        row.avg_rows,
-                        row.avg_dop,
-                        row.avg_max_used_memory_8kb_pages,
-                        row.avg_clr_us,
-                        row.avg_log_bytes,
-                        row.avg_tempdb_8kb_pages,
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .all(number)
-                    && [&row.first_execution_at, &row.last_execution_at]
-                        .into_iter()
-                        .all(|value| value.len() <= 64 && DateTime::parse_from_rfc3339(value).is_ok())
-            }
-            Self::QueryWaits(row) => {
-                [&row.total_wait_ms, &row.min_wait_ms, &row.max_wait_ms].into_iter().all(|value| count(value))
-                    && number(row.avg_wait_ms)
-            }
+            Self::QueryRuntime(row) => row.is_valid(),
+            Self::QueryWaits(row) => row.is_valid(),
             Self::QueryDefinition(row) => row.is_valid(),
             Self::PlanDefinition(row) => row.is_valid(),
             Self::ResourceSample(row) => row.is_valid(),
@@ -771,25 +693,38 @@ mod tests {
     #[test]
     fn wait_categories_are_part_of_native_record_identity() {
         let key = NativeMeasurementKey {
-            row_id: "1".into(),
-            plan_id: "2".into(),
-            replica_group_id: "3".into(),
-            execution_type: 0,
-            plan_definition_id: None,
+            native: crate::telemetry::NativeIdentity::new("1")
+                .qualified("plan_id", "2")
+                .qualified("replica_group_id", "3")
+                .qualified("execution_type", (0).to_string()),
+            references: crate::telemetry::StatementReferences {
+                query: Some(crate::telemetry::NativeDefinitionReference {
+                    native: crate::telemetry::NativeIdentity::new("q"),
+                    definition_id: Some("b".repeat(64)),
+                }),
+                plan: Some(crate::telemetry::NativeDefinitionReference {
+                    native: crate::telemetry::NativeIdentity::new("2"),
+                    definition_id: None,
+                }),
+            },
         };
         let mut wait = WaitMeasurement {
             key,
-            category: 1,
-            total_wait_ms: "9007199254740993".into(),
-            avg_wait_ms: 1.0,
-            min_wait_ms: "1".into(),
-            max_wait_ms: "2".into(),
+            category: "1".into(),
+            unit: crate::telemetry::RuntimeMetricUnit::Milliseconds,
+            total: crate::telemetry::MeasurementValue::Integer("9007199254740993".into()),
+            average: Some(1.0),
+            minimum: Some(crate::telemetry::MeasurementValue::Integer("1".into())),
+            maximum: Some(crate::telemetry::MeasurementValue::Integer("2".into())),
         };
         let first = TelemetryRecord::QueryWaits(wait.clone());
-        wait.category = 2;
+        wait.category = "2".into();
         let second = TelemetryRecord::QueryWaits(wait);
         assert!(first.is_valid() && second.is_valid());
         assert_ne!(first.native_identity(), second.native_identity());
-        assert_eq!(serde_json::to_value(first).unwrap()["data"]["total_wait_ms"], "9007199254740993");
+        assert_eq!(serde_json::to_value(first).unwrap()["data"]["total"]["value"], "9007199254740993");
     }
 }
+
+#[cfg(test)]
+mod contracts_tests;

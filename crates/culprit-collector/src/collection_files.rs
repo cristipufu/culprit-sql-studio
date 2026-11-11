@@ -149,11 +149,6 @@ impl ObservationFiles {
                 || !record.is_valid()
                 || !page_ids.insert(record.native_identity())
                 || self.outputs[index].seen_rows.contains(&record.native_identity())
-                || record.measurement_key().is_some_and(|key| {
-                    !source
-                        .query_history()
-                        .is_some_and(|history| history.replica_group_ids.contains(&key.replica_group_id))
-                })
             {
                 return Err(CollectionStop::InvalidPage);
             }
@@ -548,9 +543,12 @@ mod tests {
                             from: request().bounds().unwrap().0.to_rfc3339(),
                             until: request().bounds().unwrap().1.to_rfc3339(),
                         },
-                        replica_group_ids: vec!["1".into()],
-                        capture_mode: "AUTO".into(),
-                        waits_capture_enabled: true,
+                        dimensions: [("replica_group_id".into(), vec!["1".into()])].into(),
+                        native_properties: [
+                            ("capture_mode".into(), "AUTO".into()),
+                            ("waits_capture_enabled".into(), (true).to_string()),
+                        ]
+                        .into(),
                     },
                 ),
                 continuity: culprit_core::telemetry::SourceContinuity::Unverified,

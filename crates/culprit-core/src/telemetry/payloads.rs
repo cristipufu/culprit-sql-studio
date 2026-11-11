@@ -84,6 +84,7 @@ impl OperationalFact {
             | Self::Sequence(_)
             | Self::FileIo(_)
             | Self::Counter(_)
+            | Self::StatementCounters(_)
             | Self::Queue(_)
             | Self::MssqlCleanupHorizon(_)
             | Self::MssqlPersistentVersionStore(_)

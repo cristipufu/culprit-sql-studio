@@ -152,6 +152,15 @@ history, resource history and activity; an embedding application can supply the 
 provider factory. Unsupported collections fail explicitly. Source adapters own native identity, units, time semantics,
 paging and driver completion, with no filesystem, scheduling or destination responsibilities.
 
+Shared telemetry identities are opaque native IDs with bounded, ordered qualifiers. Providers canonicalize their own
+native values before emitting them. Interval descriptions declare admissible dimensions; common capture and recovery
+validate those dimensions without knowing SQL Server replica groups. Measurements reference a query and optionally a
+plan. Reference closure proves both exact definitions and their parent relationship; an unresolved required reference
+cannot publish complete data. Missing CPU or other metrics remain absent. Metric values carry explicit units, including
+page size. Cumulative statement totals are current point facts with reset evidence, not native interval aggregates;
+unknown resets never authorize a delta. Destination schemas preserve these contracts without provider-specific field
+interpretation. Provider extensions that retain native engine structures remain explicitly named.
+
 Schedulers ask `Provider::telemetry_intervals` for bounded pages of closed native history intervals. SQL Server capture
 and discovery share `query_store::intervals`, including the boundary projection and decoder. Discovery fixes its server
 timestamp on the first page and binds continuation to the requested window and logical/physical database identity.

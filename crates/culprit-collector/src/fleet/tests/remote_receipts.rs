@@ -28,9 +28,12 @@ fn prepared_interval(root: &std::path::Path, backend: &Backend, contract: Contra
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::QueryHistory(QueryHistoryDescription {
             interval: interval(10),
-            replica_group_ids: vec!["0".into()],
-            capture_mode: "ALL".into(),
-            waits_capture_enabled: true,
+            dimensions: [("replica_group_id".into(), vec!["0".into()])].into(),
+            native_properties: [
+                ("capture_mode".into(), "ALL".into()),
+                ("waits_capture_enabled".into(), (true).to_string()),
+            ]
+            .into(),
         }),
     };
     let directory = root.join("original-capture");

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ts_rs::TS;
 
-pub const EXPORT_FORMAT_VERSION: u32 = 7;
+pub const EXPORT_FORMAT_VERSION: u32 = 8;
 pub const REPRESENTATION_VERSION: u32 = 2;
 
 impl DatabaseIdentity {
@@ -100,13 +100,17 @@ impl ExportedRecord {
         let record_id = match &record {
             TelemetryRecord::QueryDefinition(definition) => Some(definition.id.clone()),
             TelemetryRecord::PlanDefinition(definition) => Some(definition.id.clone()),
-            TelemetryRecord::QueryRuntime(row) if row.key.plan_definition_id.is_some() => Some(source.scoped_id(
-                "runtime-native-row-v1",
-                &(interval.as_ref().ok_or_else(|| super::CollectionStop::InvalidPage.error())?, &row.key),
+            TelemetryRecord::QueryRuntime(row) if row.key.references.is_resolved() => Some(source.scoped_id(
+                "runtime-native-row-v2",
+                &(interval.as_ref().ok_or_else(|| super::CollectionStop::InvalidPage.error())?, &row.key.native),
             )?),
-            TelemetryRecord::QueryWaits(row) if row.key.plan_definition_id.is_some() => Some(source.scoped_id(
-                "wait-native-row-v1",
-                &(interval.as_ref().ok_or_else(|| super::CollectionStop::InvalidPage.error())?, &row.key, row.category),
+            TelemetryRecord::QueryWaits(row) if row.key.references.is_resolved() => Some(source.scoped_id(
+                "wait-native-row-v2",
+                &(
+                    interval.as_ref().ok_or_else(|| super::CollectionStop::InvalidPage.error())?,
+                    &row.key.native,
+                    &row.category,
+                ),
             )?),
             TelemetryRecord::ResourceSample(row) => {
                 Some(source.scoped_id("resource-sample-v1", &(&row.at, &row.replica_id))?)
@@ -203,9 +207,12 @@ mod tests {
                     from: "2020-01-01T06:00:00Z".into(),
                     until: "2020-01-01T07:00:00Z".into(),
                 },
-                replica_group_ids: vec!["1".into()],
-                capture_mode: "AUTO".into(),
-                waits_capture_enabled: true,
+                dimensions: [("replica_group_id".into(), vec!["1".into()])].into(),
+                native_properties: [
+                    ("capture_mode".into(), "AUTO".into()),
+                    ("waits_capture_enabled".into(), (true).to_string()),
+                ]
+                .into(),
             }),
             continuity: SourceContinuity::Unverified,
         }
@@ -215,29 +222,45 @@ mod tests {
             plan_id: "3".into(),
             query: NativeQueryIdentity {
                 query_id: "2".into(),
-                context_settings_id: "1".into(),
-                object_id: "0".into(),
-                query_hash: "0123456789ABCDEF".into(),
-                initial_compile_at: "2020-01-01T05:00:00Z".into(),
+                qualifiers: [
+                    ("context_settings_id".into(), "1".into()),
+                    ("object_id".into(), "0".into()),
+                    ("query_hash".into(), "0123456789ABCDEF".into()),
+                    ("initial_compile_at".into(), "2020-01-01T05:00:00Z".into()),
+                ]
+                .into(),
             },
-            plan_hash: "FEDCBA9876543210".into(),
-            initial_compile_at: "2020-01-01T05:00:01Z".into(),
+            qualifiers: [
+                ("plan_hash".into(), "FEDCBA9876543210".into()),
+                ("initial_compile_at".into(), "2020-01-01T05:00:01Z".into()),
+            ]
+            .into(),
         }
     }
     fn wait(source: &CollectionDescription) -> TelemetryRecord {
         TelemetryRecord::QueryWaits(WaitMeasurement {
             key: NativeMeasurementKey {
-                row_id: "1".into(),
-                plan_id: "3".into(),
-                replica_group_id: "1".into(),
-                execution_type: 0,
-                plan_definition_id: Some(plan().definition_id(source).unwrap()),
+                native: crate::telemetry::NativeIdentity::new("1")
+                    .qualified("plan_id", "3")
+                    .qualified("replica_group_id", "1")
+                    .qualified("execution_type", (0).to_string()),
+                references: crate::telemetry::StatementReferences {
+                    query: Some(crate::telemetry::NativeDefinitionReference {
+                        native: plan().query.native(),
+                        definition_id: Some(plan().query.definition_id(source).unwrap()),
+                    }),
+                    plan: Some(crate::telemetry::NativeDefinitionReference {
+                        native: plan().native(),
+                        definition_id: Some(plan().definition_id(source).unwrap()),
+                    }),
+                },
             },
-            category: 1,
-            total_wait_ms: "2".into(),
-            avg_wait_ms: 2.0,
-            min_wait_ms: "2".into(),
-            max_wait_ms: "2".into(),
+            category: (1).to_string(),
+            unit: crate::telemetry::RuntimeMetricUnit::Milliseconds,
+            total: crate::telemetry::MeasurementValue::Integer("2".into()),
+            average: Some(2.0),
+            minimum: Some(crate::telemetry::MeasurementValue::Integer("2".into())),
+            maximum: Some(crate::telemetry::MeasurementValue::Integer("2".into())),
         })
     }
     #[test]
@@ -271,21 +294,22 @@ mod tests {
         let source = source();
         let old = plan().definition_id(&source).unwrap();
         let mut changed = plan();
-        changed.initial_compile_at = "2020-01-02T05:00:01Z".into();
+        changed.qualifiers.insert("initial_compile_at".into(), "2020-01-02T05:00:01Z".into());
         assert_ne!(old, changed.definition_id(&source).unwrap());
         let mut recreated = source.clone();
         recreated.database.incarnation = Some("different-guid".into());
         assert_ne!(old, plan().definition_id(&recreated).unwrap());
+        // Native qualifier meaning and canonicalization belong to the adapter.
         changed = plan();
-        changed.initial_compile_at = "2020-01-01T07:00:01+02:00".into();
-        assert_eq!(old, changed.definition_id(&source).unwrap());
+        changed.qualifiers.insert("initial_compile_at".into(), "2020-01-01T07:00:01+02:00".into());
+        assert_ne!(old, changed.definition_id(&source).unwrap());
     }
     #[test]
     fn unresolved_measurements_do_not_receive_a_trusted_record_id() {
         let source = source();
         let mut record = wait(&source);
         if let TelemetryRecord::QueryWaits(row) = &mut record {
-            row.key.plan_definition_id = None;
+            row.key.references.plan.as_mut().unwrap().definition_id = None;
         }
         assert!(
             ExportedRecord::new(&source, &CaptureIdentity { observation_id: "capture".into(), revision: None }, record)

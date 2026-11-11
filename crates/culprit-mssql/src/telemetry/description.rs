@@ -12,6 +12,8 @@ pub(super) struct Description {
     pub value: CollectionDescription,
     pub physical_incarnation: String,
     pub plan_upper_bound: i64,
+    pub replica_group_ids: Vec<String>,
+    pub waits_capture_enabled: bool,
 }
 
 pub(super) async fn ensure_supported<R: NativeRead>(session: &mut R) -> Result<()> {
@@ -40,15 +42,20 @@ pub(super) async fn read<R: NativeRead>(
             observation: culprit_core::telemetry::SourceObservation::QueryHistory(
                 culprit_core::telemetry::QueryHistoryDescription {
                     interval,
-                    replica_group_ids,
-                    capture_mode,
-                    waits_capture_enabled,
+                    dimensions: [("replica_group_id".into(), replica_group_ids.clone())].into(),
+                    native_properties: [
+                        ("capture_mode".into(), capture_mode),
+                        ("waits_capture_enabled".into(), waits_capture_enabled.to_string()),
+                    ]
+                    .into(),
                 },
             ),
             continuity: SourceContinuity::Unverified,
         },
         physical_incarnation,
         plan_upper_bound,
+        replica_group_ids,
+        waits_capture_enabled,
     })
 }
 

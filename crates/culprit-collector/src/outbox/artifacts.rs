@@ -167,9 +167,6 @@ fn verify_file(
             || row.record.stream() != file.stream
             || !row.record.is_valid()
             || !references.accepts_page(std::slice::from_ref(&row.record))
-            || row.record.measurement_key().is_some_and(|key| {
-                !source.query_history().is_some_and(|history| history.replica_group_ids.contains(&key.replica_group_id))
-            })
         {
             return Err(integrity());
         }

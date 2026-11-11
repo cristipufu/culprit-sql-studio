@@ -84,3 +84,46 @@ async fn scratch_ownership_survives_encoder_drop_until_the_encoded_batch_is_rele
     assert_eq!(scratch_files(temp.path()), 0);
     BatchEncoder::new(catalog, recovery, temp.path()).unwrap();
 }
+
+#[tokio::test]
+async fn provider_neutral_query_contracts_encode_through_verified_recovery_without_sql_server_fields() {
+    let catalog = Arc::new(SchemaCatalog::new().unwrap());
+    for recovery in
+        [crate::adx::test_support::interval_queries(&catalog), crate::adx::test_support::cumulative_queries(&catalog)]
+    {
+        let temp = tempfile::tempdir().unwrap();
+        let recovery = Arc::new(recovery);
+        let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
+        let blobs = Arc::new(Blobs::default());
+        let encoder = BatchEncoder::new(catalog.clone(), recovery, temp.path()).unwrap();
+        let dispatcher = ReadyDispatcher::new(encoder, Arc::new(ProjectionIndexes::new(blobs.clone())), blobs.clone());
+        for batch in &range.manifest().batches {
+            dispatcher.dispatch(&range, &DeliveryAttempt::new(1).unwrap(), &batch.batch_id).await.unwrap();
+        }
+        let objects = blobs.objects.lock().unwrap();
+        for (key, bytes) in objects.iter().filter(|(key, _)| key.starts_with("ready/")) {
+            for line in std::str::from_utf8(bytes).unwrap().lines() {
+                let row: serde_json::Value = serde_json::from_str(line).unwrap();
+                if key.contains("CulpritQueryRuntimeV1") {
+                    let metrics: serde_json::Value = serde_json::from_str(row["Metrics"].as_str().unwrap()).unwrap();
+                    assert_eq!(row["Executions"], "9007199254740993");
+                    assert_eq!(metrics[1]["unit"]["bytes_per_page"], 16384);
+                    assert_eq!(row["HasPlanDefinitionId"], false);
+                }
+                if key.contains("CulpritQueryWaitsV1") {
+                    assert_eq!(row["TimeUnit"], "microseconds");
+                    assert_eq!(
+                        serde_json::from_str::<serde_json::Value>(row["TotalWait"].as_str().unwrap()).unwrap()["value"],
+                        1.25
+                    );
+                }
+                if key.contains("CulpritOperationalV1") {
+                    let details: serde_json::Value = serde_json::from_str(row["Details"].as_str().unwrap()).unwrap();
+                    assert_eq!(row["RangeKind"], "current");
+                    assert_eq!(details["totals"][0]["total"]["value"], "9007199254740993");
+                    assert_eq!(details["reset"]["kind"], "unknown");
+                }
+            }
+        }
+    }
+}

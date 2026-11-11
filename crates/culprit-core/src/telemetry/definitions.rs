@@ -10,23 +10,17 @@ pub const REDACTION_VERSION: u32 = 1;
 #[ts(export)]
 pub struct NativeQueryIdentity {
     pub query_id: String,
-    pub context_settings_id: String,
-    pub object_id: String,
-    pub query_hash: String,
-    pub initial_compile_at: String,
+    pub qualifiers: std::collections::BTreeMap<String, String>,
 }
-
 impl NativeQueryIdentity {
+    pub fn native(&self) -> super::NativeIdentity {
+        super::NativeIdentity { id: self.query_id.clone(), qualifiers: self.qualifiers.clone() }
+    }
     pub fn definition_id(&self, source: &CollectionDescription) -> Result<String> {
-        let mut identity = self.clone();
-        identity.initial_compile_at = super::canonical_time(&identity.initial_compile_at)?;
-        source.scoped_id("query-definition-v1", &identity)
+        source.scoped_id("query-definition-v2", self)
     }
     pub fn is_valid(&self) -> bool {
-        [&self.query_id, &self.context_settings_id, &self.object_id, &self.query_hash]
-            .into_iter()
-            .all(|value| !value.is_empty() && value.len() <= 128)
-            && chrono::DateTime::parse_from_rfc3339(&self.initial_compile_at).is_ok()
+        super::valid_key(&self.query_id) && super::native_identity::native_properties_valid(&self.qualifiers)
     }
 }
 
@@ -35,21 +29,19 @@ impl NativeQueryIdentity {
 pub struct NativePlanIdentity {
     pub plan_id: String,
     pub query: NativeQueryIdentity,
-    pub plan_hash: String,
-    pub initial_compile_at: String,
+    pub qualifiers: std::collections::BTreeMap<String, String>,
 }
-
 impl NativePlanIdentity {
+    pub fn native(&self) -> super::NativeIdentity {
+        super::NativeIdentity { id: self.plan_id.clone(), qualifiers: self.qualifiers.clone() }
+    }
     pub fn definition_id(&self, source: &CollectionDescription) -> Result<String> {
-        let mut identity = self.clone();
-        identity.initial_compile_at = super::canonical_time(&identity.initial_compile_at)?;
-        identity.query.initial_compile_at = super::canonical_time(&identity.query.initial_compile_at)?;
-        source.scoped_id("plan-definition-v1", &identity)
+        source.scoped_id("plan-definition-v2", self)
     }
     pub fn is_valid(&self) -> bool {
-        self.query.is_valid()
-            && [&self.plan_id, &self.plan_hash].into_iter().all(|value| !value.is_empty() && value.len() <= 128)
-            && chrono::DateTime::parse_from_rfc3339(&self.initial_compile_at).is_ok()
+        super::valid_key(&self.plan_id)
+            && super::native_identity::native_properties_valid(&self.qualifiers)
+            && self.query.is_valid()
     }
 }
 
@@ -158,8 +150,8 @@ pub struct PlanDefinition {
     pub id: String,
     pub identity: NativePlanIdentity,
     pub query_definition_id: String,
-    pub engine_version: String,
-    pub compatibility_level: u16,
+    pub engine_version: Option<String>,
+    pub native_properties: std::collections::BTreeMap<String, String>,
     pub source_text_bytes: Option<String>,
     pub plan: DefinitionPayload,
 }
@@ -170,18 +162,31 @@ impl PlanDefinition {
             && valid_digest(&self.query_definition_id)
             && self.identity.is_valid()
             && self.plan.is_valid()
-            && !self.engine_version.is_empty()
-            && self.engine_version.len() <= 128
+            && self.engine_version.as_ref().is_none_or(|version| !version.is_empty() && version.len() <= 128)
+            && super::native_identity::native_properties_valid(&self.native_properties)
     }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq, Eq)]
 #[ts(export)]
 pub struct ReferenceCoverage {
-    pub required_plans: u32,
-    pub resolved_plans: u32,
-    pub unresolved_plans: u32,
+    pub queries: DefinitionCoverage,
+    pub plans: DefinitionCoverage,
     pub unavailable_payloads: u32,
     pub complete: bool,
     pub activity: Option<super::ActivityReferenceCoverage>,
+}
+
+/// Counts definition references; an unresolved query with no native identity is counted per native measurement.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq, Eq)]
+#[ts(export)]
+pub struct DefinitionCoverage {
+    pub required: u32,
+    pub resolved: u32,
+    pub unresolved: u32,
+}
+impl DefinitionCoverage {
+    pub fn complete(&self) -> bool {
+        self.required == self.resolved && self.unresolved == 0
+    }
 }

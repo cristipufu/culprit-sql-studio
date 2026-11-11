@@ -130,9 +130,28 @@ impl TelemetryRange {
 #[ts(export)]
 pub struct QueryHistoryDescription {
     pub interval: TelemetryInterval,
-    pub replica_group_ids: Vec<String>,
-    pub capture_mode: String,
-    pub waits_capture_enabled: bool,
+    /// Dimensions required on every native measurement, with the admissible values observed by the source.
+    pub dimensions: std::collections::BTreeMap<String, Vec<String>>,
+    /// Audit facts interpreted by the native adapter, never by common collection or delivery policy.
+    pub native_properties: std::collections::BTreeMap<String, String>,
+}
+
+const MAX_DIMENSION_VALUES: usize = 100;
+
+impl QueryHistoryDescription {
+    pub fn is_valid(&self) -> bool {
+        valid_key(&self.interval.native_id)
+            && self.dimensions.len() <= MAX_NATIVE_QUALIFIERS
+            && super::native_identity::native_properties_valid(&self.native_properties)
+            && self.dimensions.iter().all(|(name, values)| {
+                let unique = values.iter().collect::<std::collections::BTreeSet<_>>();
+                valid_key(name)
+                    && !values.is_empty()
+                    && values.len() <= MAX_DIMENSION_VALUES
+                    && unique.len() == values.len()
+                    && values.iter().all(|value| valid_key(value))
+            })
+    }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
@@ -284,6 +303,14 @@ pub struct CollectionDescription {
     pub continuity: SourceContinuity,
 }
 impl CollectionDescription {
+    pub fn accepts_measurement(&self, key: &NativeMeasurementKey) -> bool {
+        self.query_history().is_some_and(|history| {
+            history.dimensions.iter().all(|(dimension, allowed)| {
+                key.native.qualifiers.get(dimension).is_some_and(|value| allowed.contains(value))
+            })
+        })
+    }
+
     pub fn completed(&self, completion: SourceCompletion) -> Result<Option<Self>> {
         match completion {
             SourceCompletion::Changed => Ok(None),
@@ -338,14 +365,9 @@ impl CollectionDescription {
         };
         let expected = TelemetryRange::TimeWindow { from: from.to_rfc3339(), until: until.to_rfc3339() }.canonical();
         let (start, end, valid) = match (&self.observation, request.collection()) {
-            (SourceObservation::QueryHistory(history), TelemetryCollection::QueryHistory) => (
-                &history.interval.from,
-                &history.interval.until,
-                !history.interval.native_id.is_empty()
-                    && history.replica_group_ids.len() <= 100
-                    && !history.replica_group_ids.is_empty()
-                    && !history.capture_mode.is_empty(),
-            ),
+            (SourceObservation::QueryHistory(history), TelemetryCollection::QueryHistory) => {
+                (&history.interval.from, &history.interval.until, history.is_valid())
+            }
             (SourceObservation::RetainedSamples(history), TelemetryCollection::ResourceHistory) => {
                 (&history.from, &history.until, history.is_valid())
             }

@@ -172,3 +172,51 @@ fn large_deadlock_graphs_keep_signal_fields_and_explicit_full_evidence_reference
     assert_eq!(projected["VictimCount"], 1);
     assert_eq!(projected["FileOffset"], "18446744073709551615");
 }
+
+#[test]
+fn cumulative_query_facts_keep_exact_totals_units_and_resets_in_the_analytical_contract() {
+    let sample = StatementCounterSample {
+        identity: NativeQueryIdentity {
+            query_id: "fingerprint".into(),
+            qualifiers: [("userid".into(), "17".into())].into(),
+        },
+        observed_at: "2020-01-01T06:00:00Z".into(),
+        reset: culprit_core::ResetMarker::Unknown,
+        totals: vec![
+            StatementCounter {
+                key: RuntimeMetricKey::Executions,
+                unit: RuntimeMetricUnit::Count,
+                total: MeasurementValue::Integer("9007199254740993".into()),
+            },
+            StatementCounter {
+                key: RuntimeMetricKey::Duration,
+                unit: RuntimeMetricUnit::Milliseconds,
+                total: MeasurementValue::Real(1.25),
+            },
+            StatementCounter {
+                key: RuntimeMetricKey::LogicalReads,
+                unit: RuntimeMetricUnit::Pages { bytes_per_page: 16384 },
+                total: MeasurementValue::Integer("7".into()),
+            },
+        ],
+    };
+    let record = TelemetryRecord::Operational(OperationalObservation {
+        source: "native-statement-counters".into(),
+        key: sample.key().unwrap(),
+        fact: OperationalFact::StatementCounters(Box::new(sample.clone())),
+    });
+    assert!(record.is_valid());
+    let schema = schema::facts::operational(&[]).unwrap();
+    let prepared = input(&record);
+    let projected = wire(schema::facts::operational(&[]).unwrap(), &prepared);
+    let details: Value = serde_json::from_str(projected["Details"].as_str().unwrap()).unwrap();
+    assert_eq!(projected["FactKind"], "statement-counters");
+    assert_eq!(serde_json::from_value::<StatementCounterSample>(details.clone()).unwrap(), sample);
+    let before = schema.project(&prepared).unwrap();
+    let mut changed = prepared;
+    changed["_projection"]["details"]["totals"][2]["unit"]["bytes_per_page"] = json!(8192);
+    assert_ne!(schema.project(&changed).unwrap(), before, "readback must prove native units as well as totals");
+    changed["_projection"]["details"] = details;
+    changed["_projection"]["details"]["reset"] = json!({"kind":"generation","value":"new-epoch"});
+    assert_ne!(schema.project(&changed).unwrap(), before, "reset evidence is part of the exact publication proof");
+}

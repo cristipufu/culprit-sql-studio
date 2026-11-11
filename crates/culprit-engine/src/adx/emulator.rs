@@ -295,6 +295,40 @@ async fn functional_contract_and_canonical_sets() {
     cleared.dispatch(&emulator).await;
     cleared.publish(&emulator).await;
     assert_eq!(emulator.count("CulpritWaitCountersV1Current", &counter.range, true).await, 0);
+    let history = Scenario::new(test_support::interval_queries(&catalog), emulator.clone()).await;
+    history.dispatch(&emulator).await;
+    history.publish(&emulator).await;
+    assert_eq!(emulator.count("CulpritQueryRuntimeV1Rows", &history.range, false).await, 1);
+    let runtime_query = "declare query_parameters(c:string,s:string,d:string); CulpritQueryRuntimeV1Rows(c,s,d,datetime(2019),datetime(2021)) | project N=tostring(Executions), PageBytes=tolong(Metrics[1].unit.bytes_per_page), HasPlan=HasPlanDefinitionId";
+    let runtime_columns = [("N", "string"), ("PageBytes", "long"), ("HasPlan", "bool")]
+        .into_iter()
+        .map(|(name, kind)| Column { column_name: name.into(), column_type: kind.into() })
+        .collect();
+    assert_eq!(
+        emulator.values(runtime_query.into(), scope(&history.range), runtime_columns).await,
+        vec![vec![json!("9007199254740993"), json!(16384), json!(false)]]
+    );
+    let wait_query = "declare query_parameters(c:string,s:string,d:string); CulpritQueryWaitsV1Rows(c,s,d,datetime(2019),datetime(2021)) | project TimeUnit, Total=todouble(TotalWait.value), HasAverage=isnotnull(AverageWait)";
+    let wait_columns = [("TimeUnit", "string"), ("Total", "real"), ("HasAverage", "bool")]
+        .into_iter()
+        .map(|(name, kind)| Column { column_name: name.into(), column_type: kind.into() })
+        .collect();
+    assert_eq!(
+        emulator.values(wait_query.into(), scope(&history.range), wait_columns).await,
+        vec![vec![json!("microseconds"), json!(1.25), json!(false)]]
+    );
+    let cumulative = Scenario::new(test_support::cumulative_queries(&catalog), emulator.clone()).await;
+    cumulative.dispatch(&emulator).await;
+    cumulative.publish(&emulator).await;
+    let cumulative_query = "declare query_parameters(c:string,s:string,d:string); CulpritOperationalV1Current(c,s,d,datetime(2020-01-01T12:05:00Z),1h) | project RangeKind, N=tostring(Details.totals[0].total.value), Reset=tostring(Details.reset.kind)";
+    let cumulative_columns = ["RangeKind", "N", "Reset"]
+        .into_iter()
+        .map(|name| Column { column_name: name.into(), column_type: "string".into() })
+        .collect();
+    assert_eq!(
+        emulator.values(cumulative_query.into(), scope(&cumulative.range), cumulative_columns).await,
+        vec![vec![json!("current"), json!("9007199254740993"), json!("unknown")]]
+    );
     // Unexpected late landing members invalidate that capture rather than changing trusted totals.
     {
         let objects = later.blobs.objects.lock().unwrap();

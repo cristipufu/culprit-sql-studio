@@ -128,7 +128,7 @@ The generated contract has 15 analytical tables and one completion table:
 
 | Tables | Evidence |
 |---|---|
-| `CulpritQueryRuntimeV1`, `CulpritQueryWaitsV1` | Native interval, outcome and replica fragments; exact counts and documented units |
+| `CulpritQueryRuntimeV1`, `CulpritQueryWaitsV1` | Native intervals and source-declared dimensions; optional query/plan references, exact counts and explicit metric units |
 | `CulpritQueryDefinitionsV1`, `CulpritPlanDefinitionsV1` | Versioned native definitions and bounded payload references |
 | `CulpritResourceSamplesV1`, `CulpritWaitCountersV1` | Database/resource scope, aggregation, reset evidence and unknown values |
 | `CulpritActivityV1`, `CulpritBlockingV1`, `CulpritActivityIncidentsV1` | Native session/request generations, wait owners and incident transitions |
@@ -151,9 +151,18 @@ native measurement-time filters separately. Current activity and snapshot functi
 Native epoch changes replace the same logical activity source. Revisions use owner epoch and capture sequence,
 not ingestion arrival order. Raw tables include unpublished and duplicated physical attempts and are not totals.
 
-Preserve execution-weighted statistics (`sum(Executions * AvgDurationUs) / sum(Executions)`), native units, unknown
-values, scope and reset evidence. Do not average averages or invent deltas across an unknown reset. Full SQL/XML
-payloads stay in the private native recovery store; analytical rows carry bounded previews, checksums, redaction
+Runtime rows expose a `Metrics` array with a typed key, unit, average and optional distribution statistics.
+Filter the duration metric and its unit before calculating execution-weighted time
+(`sum(Executions * duration_average) / sum(Executions)`); convert units explicitly. Missing metrics stay absent.
+Wait rows retain their native time unit and exact integer or real totals; their native category is an opaque string.
+Definitions retain source-owned identity qualifiers; SQL Server's context, compile time, hashes and compatibility
+level remain native facts rather than mandatory columns for every engine.
+
+Cumulative query totals use `statement-counters` facts in `CulpritOperationalV1`, with query identity, observation
+time, unit-bearing totals and explicit reset evidence. Their enclosing observation is current state, with no
+invented native interval or plan. This contract is available to source adapters; it does not enable another built-in
+provider. Preserve native units, unknown values, scope and reset evidence. Do not average averages or invent
+deltas across an unknown reset. Full SQL/XML payloads stay in the private native recovery store; analytical rows carry bounded previews, checksums, redaction
 versions and native references. Large fact detail also becomes an explicit recovery reference.
 
 Configure managed ingestion only for each generated `ready/<table>/` prefix in the **ready container**, with its

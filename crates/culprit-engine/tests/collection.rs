@@ -1,5 +1,9 @@
 use async_trait::async_trait;
 use culprit_collector::capture::CollectionCancellation;
+use culprit_core::telemetry::{
+    MeasurementValue, NativeDefinitionReference, NativeIdentity, RuntimeMetric, RuntimeMetricKey, RuntimeMetricUnit,
+    StatementReferences,
+};
 use culprit_core::{
     AuthKind, DatabaseIdentity, Engine, Error, ErrorCode, ExplainMode, LiveState, Plan, Provider, Result, ResultSet,
     ServerInfo, Snapshot, SnapshotOptions,
@@ -35,6 +39,8 @@ enum Scenario {
     MetricsStillRunning,
     MalformedMetrics,
     OperationalState,
+    QueryOnly,
+    CumulativeStatements,
     PagedOperational,
     PagedWrongCounts,
     PagedMissingClosure,
@@ -153,9 +159,12 @@ fn description() -> CollectionDescription {
                     from: "2020-01-01T06:00:00Z".into(),
                     until: "2020-01-01T07:00:00Z".into(),
                 },
-                replica_group_ids: vec!["17".into(), "18".into()],
-                capture_mode: "ALL".into(),
-                waits_capture_enabled: true,
+                dimensions: [("replica_group_id".into(), vec!["17".into(), "18".into()])].into(),
+                native_properties: [
+                    ("capture_mode".into(), "ALL".into()),
+                    ("waits_capture_enabled".into(), (true).to_string()),
+                ]
+                .into(),
             },
         ),
         continuity: SourceContinuity::Unverified,
@@ -167,13 +176,19 @@ fn plan_identity() -> NativePlanIdentity {
         plan_id: "9007199254740993".into(),
         query: NativeQueryIdentity {
             query_id: "21".into(),
-            context_settings_id: "2".into(),
-            object_id: "0".into(),
-            query_hash: "0123456789ABCDEF".into(),
-            initial_compile_at: "2020-01-01T05:00:00Z".into(),
+            qualifiers: [
+                ("context_settings_id".into(), "2".into()),
+                ("object_id".into(), "0".into()),
+                ("query_hash".into(), "0123456789ABCDEF".into()),
+                ("initial_compile_at".into(), "2020-01-01T05:00:00Z".into()),
+            ]
+            .into(),
         },
-        plan_hash: "FEDCBA9876543210".into(),
-        initial_compile_at: "2020-01-01T05:00:01Z".into(),
+        qualifiers: [
+            ("plan_hash".into(), "FEDCBA9876543210".into()),
+            ("initial_compile_at".into(), "2020-01-01T05:00:01Z".into()),
+        ]
+        .into(),
     }
 }
 fn definition(stream: TelemetryStream) -> TelemetryRecord {
@@ -196,16 +211,16 @@ fn definition(stream: TelemetryStream) -> TelemetryRecord {
         })
     } else {
         TelemetryRecord::PlanDefinition(PlanDefinition {
+            identity: identity.clone(),
             id: identity.definition_id(&source).unwrap(),
             query_definition_id: query_id,
-            identity,
-            engine_version: "16.0".into(),
-            compatibility_level: 160,
             source_text_bytes: Some("200".into()),
             plan: DefinitionPayload::plan(
                 "<ShowPlanXML><StmtSimple StatementText=\"SELECT 'secret-value'\" /></ShowPlanXML>",
                 Engine::Mssql,
             ),
+            engine_version: Some("16.0".into()),
+            native_properties: [("compatibility_level".into(), "160".to_string())].into(),
         })
     }
 }
@@ -213,29 +228,43 @@ fn definition(stream: TelemetryStream) -> TelemetryRecord {
 fn measurement(id: usize) -> TelemetryRecord {
     TelemetryRecord::QueryRuntime(RuntimeMeasurement {
         key: NativeMeasurementKey {
-            row_id: id.to_string(),
-            plan_id: "9007199254740993".into(),
-            replica_group_id: "17".into(),
-            execution_type: 3,
-            plan_definition_id: Some(plan_identity().definition_id(&description()).unwrap()),
+            native: NativeIdentity::new(id.to_string())
+                .qualified("plan_id", "9007199254740993")
+                .qualified("replica_group_id", "17")
+                .qualified("execution_type", "3".to_string()),
+            references: StatementReferences {
+                query: Some(NativeDefinitionReference {
+                    native: plan_identity().query.native(),
+                    definition_id: Some(plan_identity().query.definition_id(&description()).unwrap()),
+                }),
+                plan: Some(NativeDefinitionReference {
+                    native: plan_identity().native(),
+                    definition_id: Some(plan_identity().definition_id(&description()).unwrap()),
+                }),
+            },
         },
         executions: "9007199254740993".into(),
-        avg_duration_us: 10.0,
-        stdev_duration_us: 2.0,
-        min_duration_us: 1.0,
-        max_duration_us: 20.0,
-        avg_cpu_us: 5.0,
-        avg_logical_reads_8kb_pages: 2.0,
-        avg_physical_reads_8kb_pages: 0.0,
-        avg_logical_writes_8kb_pages: None,
-        avg_rows: None,
-        avg_dop: None,
-        avg_max_used_memory_8kb_pages: None,
-        avg_clr_us: None,
-        avg_log_bytes: None,
-        avg_tempdb_8kb_pages: None,
-        first_execution_at: "2020-01-01T06:01:00Z".into(),
-        last_execution_at: "2020-01-01T06:59:00Z".into(),
+        metrics: vec![
+            RuntimeMetric {
+                minimum: Some(1.0),
+                maximum: Some(20.0),
+                standard_deviation: Some(2.0),
+                ..RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Microseconds, 10.0)
+            },
+            RuntimeMetric::average(RuntimeMetricKey::CpuTime, RuntimeMetricUnit::Microseconds, 5.0),
+            RuntimeMetric::average(
+                RuntimeMetricKey::LogicalReads,
+                RuntimeMetricUnit::Pages { bytes_per_page: 8192 },
+                2.0,
+            ),
+            RuntimeMetric::average(
+                RuntimeMetricKey::PhysicalReads,
+                RuntimeMetricUnit::Pages { bytes_per_page: 8192 },
+                0.0,
+            ),
+        ],
+        first_execution_at: Some("2020-01-01T06:01:00Z".into()),
+        last_execution_at: Some("2020-01-01T06:59:00Z".into()),
     })
 }
 #[async_trait]
@@ -268,7 +297,10 @@ impl TelemetrySource for TestSource {
         })
     }
     async fn describe(&mut self) -> Result<CollectionDescription> {
-        if matches!(self.0.scenario, Scenario::OperationalState | Scenario::OperationalSourceCountMismatch) {
+        if matches!(
+            self.0.scenario,
+            Scenario::OperationalState | Scenario::OperationalSourceCountMismatch | Scenario::CumulativeStatements
+        ) {
             return Ok(operational_description(self.0.scenario));
         }
         if matches!(
@@ -292,14 +324,25 @@ impl TelemetrySource for TestSource {
         ) {
             return Ok(resource_description(self.0.scenario));
         }
-        Ok(description())
+        let mut source = description();
+        if matches!(self.0.scenario, Scenario::QueryOnly) {
+            let culprit_core::telemetry::SourceObservation::QueryHistory(history) = &mut source.observation else {
+                unreachable!()
+            };
+            history.dimensions.clear();
+            history.native_properties.clear();
+        }
+        Ok(source)
     }
     fn query_count(&self) -> u32 {
         self.0.calls.load(Ordering::SeqCst) as u32
     }
     async fn read_page(&mut self, stream: TelemetryStream, cursor: Option<&str>) -> Result<CollectionRead> {
         self.0.calls.fetch_add(1, Ordering::SeqCst);
-        if matches!(self.0.scenario, Scenario::OperationalState | Scenario::OperationalSourceCountMismatch) {
+        if matches!(
+            self.0.scenario,
+            Scenario::OperationalState | Scenario::OperationalSourceCountMismatch | Scenario::CumulativeStatements
+        ) {
             assert_eq!(stream, TelemetryStream::OperationalSamples);
             assert!(cursor.is_none());
             return Ok(CollectionRead::Page { records: operational_rows(self.0.scenario), next_cursor: None });
@@ -359,6 +402,9 @@ impl TelemetrySource for TestSource {
             if matches!(self.0.scenario, Scenario::MissingDefinitions | Scenario::UnresolvedIdentity) {
                 return Ok(CollectionRead::Page { records: vec![], next_cursor: None });
             }
+            if matches!(self.0.scenario, Scenario::QueryOnly) && stream == TelemetryStream::PlanDefinitions {
+                return Ok(CollectionRead::Page { records: vec![], next_cursor: None });
+            }
             let mut record = definition(stream);
             if matches!(self.0.scenario, Scenario::UnredactedDefinitions) {
                 let raw = match &record {
@@ -386,19 +432,27 @@ impl TelemetrySource for TestSource {
             return Err(Error::new(ErrorCode::QueryFailed, "a late source failure"));
         }
         let mut rows = vec![measurement(if after && !matches!(self.0.scenario, Scenario::Duplicate) { 2 } else { 1 })];
+        if matches!(self.0.scenario, Scenario::QueryOnly) {
+            for record in &mut rows {
+                let TelemetryRecord::QueryRuntime(row) = record else { unreachable!() };
+                row.key.native.qualifiers.clear();
+                row.key.references.plan = None;
+                row.metrics.retain(|metric| metric.key == RuntimeMetricKey::Duration);
+            }
+        }
         if matches!(self.0.scenario, Scenario::UnresolvedIdentity)
             && let TelemetryRecord::QueryRuntime(row) = &mut rows[0]
         {
-            row.key.plan_definition_id = None;
+            row.key.references.plan.as_mut().unwrap().definition_id = None;
         }
         if matches!(self.0.scenario, Scenario::Dimensions) {
             let mut replica = measurement(1);
             let mut outcome = measurement(1);
             if let TelemetryRecord::QueryRuntime(row) = &mut replica {
-                row.key.replica_group_id = "18".into();
+                row.key.native.qualifiers.insert("replica_group_id".into(), "18".into());
             }
             if let TelemetryRecord::QueryRuntime(row) = &mut outcome {
-                row.key.execution_type = 4;
+                row.key.native.qualifiers.insert("execution_type".into(), "4".into());
             }
             return Ok(CollectionRead::Page { records: vec![measurement(1), replica, outcome], next_cursor: None });
         }
@@ -407,7 +461,7 @@ impl TelemetrySource for TestSource {
                 .map(|id| {
                     let mut row = measurement(id);
                     if let TelemetryRecord::QueryRuntime(row) = &mut row {
-                        row.key.plan_id = "x".repeat(128);
+                        row.key.native.qualifiers.insert("plan_id".into(), "x".repeat(128));
                     }
                     row
                 })
@@ -416,7 +470,7 @@ impl TelemetrySource for TestSource {
         if matches!(self.0.scenario, Scenario::NonFinite)
             && let TelemetryRecord::QueryRuntime(row) = &mut rows[0]
         {
-            row.avg_cpu_us = f64::NAN;
+            row.metrics.iter_mut().find(|metric| metric.key == RuntimeMetricKey::CpuTime).unwrap().average = f64::NAN;
         }
         Ok(CollectionRead::Page {
             records: rows,
@@ -598,14 +652,14 @@ async fn complete_artifacts_preserve_exact_counters_dimensions_and_empty_streams
         .map(|line| serde_json::from_str::<Value>(line).unwrap())
         .collect::<Vec<_>>();
     assert_eq!(rows[0]["record"]["data"]["executions"], "9007199254740993");
-    assert_eq!(rows[0]["record"]["data"]["key"]["plan_id"], "9007199254740993");
-    assert_eq!(rows[0]["record"]["data"]["key"]["execution_type"], 3);
+    assert_eq!(rows[0]["record"]["data"]["key"]["native"]["qualifiers"]["plan_id"], "9007199254740993");
+    assert_eq!(rows[0]["record"]["data"]["key"]["native"]["qualifiers"]["execution_type"], "3");
     let hash = Sha256::digest(&bytes).iter().map(|byte| format!("{byte:02x}")).collect::<String>();
     assert_eq!(result.files[0].sha256.as_deref(), Some(hash.as_str()));
     assert_eq!(std::fs::metadata(dir.output().join("waits.ndjson")).unwrap().len(), 0);
     assert!(!dir.output().join("runtime.ndjson.part").exists());
     assert!(result.references.complete);
-    assert_eq!(result.references.required_plans, 1);
+    assert_eq!(result.references.plans.required, 1);
     for file in ["queries.ndjson", "plans.ndjson"] {
         let text = std::fs::read_to_string(dir.output().join(file)).unwrap();
         assert!(!text.contains("secret-value") && !text.contains("secret-comment"));
@@ -826,7 +880,7 @@ async fn sealed_metrics_without_resolved_definitions_cannot_claim_complete_cover
             ws.collect_once("pilot", request(), &dir.output(), &CollectionCancellation::default()).await.unwrap();
         assert_eq!(result.files[0].status, CollectionStatus::Complete);
         assert_eq!(result.status, CollectionStatus::Incomplete(CollectionStop::MissingDefinitions));
-        assert_eq!(result.references.unresolved_plans, 1);
+        assert_eq!(result.references.plans.unresolved, 1);
         assert!(!result.references.complete);
         let text = std::fs::read_to_string(dir.output().join("runtime.ndjson")).unwrap();
         let first: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
@@ -1350,6 +1404,38 @@ fn operational_description(scenario: Scenario) -> CollectionDescription {
 }
 fn operational_rows(scenario: Scenario) -> Vec<TelemetryRecord> {
     use culprit_core::telemetry::*;
+    if matches!(scenario, Scenario::CumulativeStatements) {
+        let sample = StatementCounterSample {
+            identity: NativeQueryIdentity {
+                query_id: "opaque-query".into(),
+                qualifiers: [("userid".into(), "17".into()), ("dbid".into(), "42".into())].into(),
+            },
+            observed_at: "2020-01-01T06:00:00Z".into(),
+            reset: culprit_core::ResetMarker::Unknown,
+            totals: vec![
+                StatementCounter {
+                    key: RuntimeMetricKey::Executions,
+                    unit: RuntimeMetricUnit::Count,
+                    total: MeasurementValue::Integer("9007199254740993".into()),
+                },
+                StatementCounter {
+                    key: RuntimeMetricKey::Duration,
+                    unit: RuntimeMetricUnit::Milliseconds,
+                    total: MeasurementValue::Real(1.25),
+                },
+                StatementCounter {
+                    key: RuntimeMetricKey::LogicalReads,
+                    unit: RuntimeMetricUnit::Pages { bytes_per_page: 16384 },
+                    total: MeasurementValue::Integer("7".into()),
+                },
+            ],
+        };
+        return vec![TelemetryRecord::Operational(OperationalObservation {
+            source: "log".into(),
+            key: sample.key().unwrap(),
+            fact: OperationalFact::StatementCounters(Box::new(sample)),
+        })];
+    }
     let row = |key: &str| {
         TelemetryRecord::Operational(OperationalObservation {
             source: "log".into(),
@@ -1484,4 +1570,51 @@ async fn cancellation_during_native_completion_keeps_sealed_pages_unpublished_an
     assert_eq!(manifest.files[0].rows, 2);
     assert!(!manifest.references.complete);
     assert!(state.closed.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn native_query_counters_without_plans_or_replica_dimensions_complete() {
+    let dir = TestDirectory::new();
+    let workspace = dir.workspace(State::new(Scenario::QueryOnly));
+    let manifest =
+        workspace.collect_once("pilot", request(), &dir.output(), &CollectionCancellation::default()).await.unwrap();
+    assert_eq!(manifest.status, CollectionStatus::Complete);
+    assert!(manifest.references.complete);
+    assert_eq!(manifest.references.queries.required, 1);
+    assert_eq!(manifest.references.plans.required, 0);
+    let rows = std::fs::read_to_string(dir.output().join("runtime.ndjson")).unwrap();
+    let first: Value = serde_json::from_str(rows.lines().next().unwrap()).unwrap();
+    assert!(first["record_id"].is_string());
+    assert!(first["record"]["data"]["key"]["references"]["plan"].is_null());
+    assert_eq!(first["record"]["data"]["metrics"].as_array().unwrap().len(), 1);
+}
+#[tokio::test]
+async fn cumulative_statement_counters_survive_durable_outbox_restart_and_replay() {
+    use culprit_collector::outbox::Outbox;
+    let dir = TestDirectory::new();
+    let workspace = dir.workspace(State::new(Scenario::CumulativeStatements));
+    let path = dir.0.path().join("outbox");
+    let mut outbox = Outbox::create(&path, Default::default()).unwrap();
+    let manifest = workspace
+        .collect_into_outbox("pilot", operational_request(), &mut outbox, &CollectionCancellation::default())
+        .await
+        .unwrap();
+    assert_eq!(manifest.status, CollectionStatus::Complete);
+    assert!(matches!(
+        manifest.description.as_ref().unwrap().observation.range(),
+        culprit_core::telemetry::TelemetryRange::Current
+    ));
+    drop(outbox);
+    let reopened = Outbox::open(&path).unwrap();
+    assert_eq!(reopened.status(10, None).await.unwrap().ready, 1);
+    Outbox::replay(&path, &manifest.capture.observation_id, &dir.0.path().join("replay")).await.unwrap();
+    let rows = std::fs::read_to_string(dir.0.path().join("replay/operations.ndjson")).unwrap();
+    let record: culprit_core::telemetry::ExportedRecord = serde_json::from_str(rows.trim()).unwrap();
+    let culprit_core::telemetry::TelemetryRecord::Operational(row) = record.record else { panic!("operational") };
+    let culprit_core::telemetry::OperationalFact::StatementCounters(sample) = row.fact else {
+        panic!("statement counters")
+    };
+    assert_eq!(sample.reset, culprit_core::ResetMarker::Unknown);
+    assert_eq!(sample.totals[0].total, MeasurementValue::Integer("9007199254740993".into()));
+    assert_eq!(sample.totals.len(), 3, "unknown CPU measurements stay absent");
 }

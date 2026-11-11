@@ -6,8 +6,8 @@ use culprit_core::{
     Engine, Result,
     telemetry::{
         CollectionBudget, CollectionDescription, CollectionRead, CollectionStop, DefinitionPayload, MAX_CURSOR_BYTES,
-        NativePlanIdentity, NativeQueryIdentity, PayloadUnavailable, PlanDefinition, QueryDefinition, TelemetryRecord,
-        TelemetryStream,
+        NativeDefinitionReference, NativeIdentity, NativePlanIdentity, NativeQueryIdentity, PayloadUnavailable,
+        PlanDefinition, QueryDefinition, StatementReferences, TelemetryRecord, TelemetryStream,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -39,7 +39,7 @@ impl Definitions {
         self.frozen
     }
 
-    pub(super) fn reference(&mut self, row: &Rec, source: &CollectionDescription) -> Result<Option<String>> {
+    pub(super) fn reference(&mut self, row: &Rec, source: &CollectionDescription) -> Result<StatementReferences> {
         if self.frozen {
             return Err(CollectionStop::InvalidPage.error());
         }
@@ -55,7 +55,13 @@ impl Definitions {
                 return Err(CollectionStop::SourceChanged.error());
             }
             self.missing.insert(id);
-            return Ok(None);
+            return Ok(StatementReferences {
+                query: None,
+                plan: Some(NativeDefinitionReference {
+                    native: NativeIdentity::new(id.to_string()),
+                    definition_id: None,
+                }),
+            });
         };
         let query_id = identity.query.query_id.parse().map_err(|_| decode::malformed())?;
         if identity.plan_id != id.to_string()
@@ -65,10 +71,19 @@ impl Definitions {
         {
             return Err(CollectionStop::SourceChanged.error());
         }
-        let definition_id = identity.definition_id(source)?;
+        let references = StatementReferences {
+            query: Some(NativeDefinitionReference {
+                native: identity.query.native(),
+                definition_id: Some(identity.query.definition_id(source)?),
+            }),
+            plan: Some(NativeDefinitionReference {
+                native: identity.native(),
+                definition_id: Some(identity.definition_id(source)?),
+            }),
+        };
         self.queries.insert(query_id, identity.query.clone());
         self.plans.insert(id, identity);
-        Ok(Some(definition_id))
+        Ok(references)
     }
 
     pub(super) async fn page<R: NativeRead>(
@@ -191,10 +206,14 @@ impl Definitions {
                     id: identity.definition_id(source)?,
                     query_definition_id: identity.query.definition_id(source)?,
                     identity,
-                    engine_version: decode::text(row, "engine_version")?,
-                    compatibility_level: decode::integer(row, "compatibility_level")?
-                        .try_into()
-                        .map_err(|_| decode::malformed())?,
+                    engine_version: Some(decode::text(row, "engine_version")?),
+                    native_properties: [(
+                        "compatibility_level".into(),
+                        u16::try_from(decode::integer(row, "compatibility_level")?)
+                            .map_err(|_| decode::malformed())?
+                            .to_string(),
+                    )]
+                    .into(),
                     source_text_bytes: bytes.map(|bytes| bytes.to_string()),
                     plan: payload(native_payload(row, bytes, limit), stream),
                 }))

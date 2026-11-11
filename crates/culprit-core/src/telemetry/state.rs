@@ -277,6 +277,7 @@ pub enum OperationalFact {
     Sequence(SequenceCapacity),
     FileIo(FileIoCounters),
     Counter(NativeCounterSample),
+    StatementCounters(Box<StatementCounterSample>),
     Queue(QueueSample),
     MssqlCleanupHorizon(MssqlCleanupHorizon),
     MssqlPersistentVersionStore(Box<MssqlPersistentVersionStore>),
@@ -298,6 +299,7 @@ pub enum OperationalFact {
 impl OperationalFact {
     fn matches_key(&self, key: &str) -> bool {
         let expected = match self {
+            Self::StatementCounters(counters) => counters.key(),
             Self::MssqlStatementGrants(grants) => grants.context.identity.key(),
             Self::MssqlIndexOperations(index) => index.identity.key(),
             Self::MssqlTable(table) => table.identity.key(),
@@ -324,6 +326,7 @@ impl OperationalFact {
             | Self::Sequence(_)
             | Self::FileIo(_)
             | Self::Counter(_)
+            | Self::StatementCounters(_)
             | Self::Queue(_)
             | Self::MssqlCleanupHorizon(_)
             | Self::MssqlPersistentVersionStore(_)
@@ -362,6 +365,7 @@ impl OperationalFact {
             }
             Self::FileIo(counters) => counters.is_valid(),
             Self::Counter(counter) => counter.is_valid(),
+            Self::StatementCounters(counters) => counters.is_valid(),
             Self::Queue(queue) => queue.is_valid(),
             Self::MssqlCleanupHorizon(horizon) => horizon.is_valid(),
             Self::MssqlPersistentVersionStore(store) => store.is_valid(),

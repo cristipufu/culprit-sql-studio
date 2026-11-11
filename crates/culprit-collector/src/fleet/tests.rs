@@ -58,9 +58,12 @@ impl FleetBackend for Backend {
             CollectionSelection::QueryHistory { from, .. } => {
                 SourceObservation::QueryHistory(QueryHistoryDescription {
                     interval: if work::parse_time(from).unwrap().hour() == 10 { interval(10) } else { interval(11) },
-                    replica_group_ids: vec!["0".into()],
-                    capture_mode: "ALL".into(),
-                    waits_capture_enabled: true,
+                    dimensions: [("replica_group_id".into(), vec!["0".into()])].into(),
+                    native_properties: [
+                        ("capture_mode".into(), "ALL".into()),
+                        ("waits_capture_enabled".into(), (true).to_string()),
+                    ]
+                    .into(),
                 })
             }
             CollectionSelection::Snapshot { dataset } => SourceObservation::Snapshot(StateSnapshotDescription {

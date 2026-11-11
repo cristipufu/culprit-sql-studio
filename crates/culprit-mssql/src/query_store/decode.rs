@@ -2,7 +2,8 @@ use crate::value::Rec;
 use culprit_core::{
     Result,
     telemetry::{
-        NativeMeasurementKey, NativePlanIdentity, NativeQueryIdentity, RuntimeMeasurement, TelemetryRecord,
+        MeasurementValue, NativeIdentity, NativeMeasurementKey, NativePlanIdentity, NativeQueryIdentity,
+        RuntimeMeasurement, RuntimeMetric, RuntimeMetricKey, RuntimeMetricUnit, StatementReferences, TelemetryRecord,
         TelemetryStream, WaitMeasurement, canonical_time,
     },
 };
@@ -14,10 +15,13 @@ use crate::read::{optional_nonnegative_number as optional_number, required_nonne
 pub(crate) fn query_identity(row: &Rec) -> Result<NativeQueryIdentity> {
     Ok(NativeQueryIdentity {
         query_id: integer(row, "query_id")?.to_string(),
-        context_settings_id: integer(row, "context_settings_id")?.to_string(),
-        object_id: integer(row, "object_id")?.to_string(),
-        query_hash: text(row, "query_hash")?,
-        initial_compile_at: canonical_time(&text(row, "query_initial_compile_at")?)?,
+        qualifiers: [
+            ("context_settings_id".into(), integer(row, "context_settings_id")?.to_string()),
+            ("object_id".into(), integer(row, "object_id")?.to_string()),
+            ("query_hash".into(), text(row, "query_hash")?),
+            ("initial_compile_at".into(), canonical_time(&text(row, "query_initial_compile_at")?)?),
+        ]
+        .into(),
     })
 }
 
@@ -40,54 +44,73 @@ pub(crate) fn plan_identity(row: &Rec) -> Result<Option<NativePlanIdentity>> {
     Ok(Some(NativePlanIdentity {
         plan_id: integer(row, "definition_plan_id")?.to_string(),
         query: query_identity(row)?,
-        plan_hash: text(row, "plan_hash")?,
-        initial_compile_at: canonical_time(&text(row, "plan_initial_compile_at")?)?,
+        qualifiers: [
+            ("plan_hash".into(), text(row, "plan_hash")?),
+            ("initial_compile_at".into(), canonical_time(&text(row, "plan_initial_compile_at")?)?),
+        ]
+        .into(),
     }))
 }
 
-pub(crate) fn record(
-    row: &Rec,
-    stream: TelemetryStream,
-    plan_definition_id: Option<String>,
-) -> Result<TelemetryRecord> {
+const SQL_SERVER_PAGE_BYTES: u32 = 8192;
+
+pub(crate) fn record(row: &Rec, stream: TelemetryStream, references: StatementReferences) -> Result<TelemetryRecord> {
+    let outcome: u8 = integer(row, "execution_type")?.try_into().map_err(|_| malformed())?;
     let key = NativeMeasurementKey {
-        row_id: integer(row, "row_id")?.to_string(),
-        plan_id: integer(row, "plan_id")?.to_string(),
-        replica_group_id: integer(row, "replica_group_id")?.to_string(),
-        execution_type: integer(row, "execution_type")?.try_into().map_err(|_| malformed())?,
-        plan_definition_id,
+        native: NativeIdentity::new(integer(row, "row_id")?.to_string())
+            .qualified("plan_id", integer(row, "plan_id")?.to_string())
+            .qualified("replica_group_id", integer(row, "replica_group_id")?.to_string())
+            .qualified("execution_type", outcome.to_string()),
+        references,
     };
     Ok(match stream {
         TelemetryStream::QueryRuntime => TelemetryRecord::QueryRuntime(RuntimeMeasurement {
             key,
             executions: integer(row, "count_executions")?.to_string(),
-            avg_duration_us: number(row, "avg_duration")?,
-            stdev_duration_us: number(row, "stdev_duration")?,
-            min_duration_us: number(row, "min_duration")?,
-            max_duration_us: number(row, "max_duration")?,
-            avg_cpu_us: number(row, "avg_cpu_time")?,
-            avg_logical_reads_8kb_pages: number(row, "avg_logical_io_reads")?,
-            avg_physical_reads_8kb_pages: number(row, "avg_physical_io_reads")?,
-            avg_logical_writes_8kb_pages: optional_number(row, "avg_logical_io_writes")?,
-            avg_rows: optional_number(row, "avg_rowcount")?,
-            avg_dop: optional_number(row, "avg_dop")?,
-            avg_max_used_memory_8kb_pages: optional_number(row, "avg_query_max_used_memory")?,
-            avg_clr_us: optional_number(row, "avg_clr_time")?,
-            avg_log_bytes: optional_number(row, "avg_log_bytes_used")?,
-            avg_tempdb_8kb_pages: optional_number(row, "avg_tempdb_space_used")?,
-            first_execution_at: text(row, "first_execution_at")?,
-            last_execution_at: text(row, "last_execution_at")?,
+            metrics: runtime_metrics(row)?,
+            first_execution_at: Some(text(row, "first_execution_at")?),
+            last_execution_at: Some(text(row, "last_execution_at")?),
         }),
         TelemetryStream::QueryWaits => TelemetryRecord::QueryWaits(WaitMeasurement {
             key,
-            category: integer(row, "wait_category")?.try_into().map_err(|_| malformed())?,
-            total_wait_ms: integer(row, "total_query_wait_time_ms")?.to_string(),
-            avg_wait_ms: number(row, "avg_query_wait_time_ms")?,
-            min_wait_ms: integer(row, "min_query_wait_time_ms")?.to_string(),
-            max_wait_ms: integer(row, "max_query_wait_time_ms")?.to_string(),
+            category: u8::try_from(integer(row, "wait_category")?).map_err(|_| malformed())?.to_string(),
+            unit: RuntimeMetricUnit::Milliseconds,
+            total: MeasurementValue::Integer(integer(row, "total_query_wait_time_ms")?.to_string()),
+            average: Some(number(row, "avg_query_wait_time_ms")?),
+            minimum: Some(MeasurementValue::Integer(integer(row, "min_query_wait_time_ms")?.to_string())),
+            maximum: Some(MeasurementValue::Integer(integer(row, "max_query_wait_time_ms")?.to_string())),
         }),
         _ => return Err(malformed()),
     })
+}
+fn runtime_metrics(row: &Rec) -> Result<Vec<RuntimeMetric>> {
+    use RuntimeMetricKey as Key;
+    use RuntimeMetricUnit as Unit;
+    let pages = Unit::Pages { bytes_per_page: SQL_SERVER_PAGE_BYTES };
+    let mut duration = RuntimeMetric::average(Key::Duration, Unit::Microseconds, number(row, "avg_duration")?);
+    duration.minimum = Some(number(row, "min_duration")?);
+    duration.maximum = Some(number(row, "max_duration")?);
+    duration.standard_deviation = Some(number(row, "stdev_duration")?);
+    let mut metrics = vec![
+        duration,
+        RuntimeMetric::average(Key::CpuTime, Unit::Microseconds, number(row, "avg_cpu_time")?),
+        RuntimeMetric::average(Key::LogicalReads, pages, number(row, "avg_logical_io_reads")?),
+        RuntimeMetric::average(Key::PhysicalReads, pages, number(row, "avg_physical_io_reads")?),
+    ];
+    for (name, key, unit) in [
+        ("avg_logical_io_writes", Key::LogicalWrites, pages),
+        ("avg_rowcount", Key::Rows, Unit::Count),
+        ("avg_dop", Key::Parallelism, Unit::Ratio),
+        ("avg_query_max_used_memory", Key::Memory, pages),
+        ("avg_clr_time", Key::Native("mssql.clr-time".into()), Unit::Microseconds),
+        ("avg_log_bytes_used", Key::LogBytes, Unit::Bytes),
+        ("avg_tempdb_space_used", Key::TemporaryStorage, pages),
+    ] {
+        if let Some(value) = optional_number(row, name)? {
+            metrics.push(RuntimeMetric::average(key, unit, value));
+        }
+    }
+    Ok(metrics)
 }
 
 #[cfg(test)]

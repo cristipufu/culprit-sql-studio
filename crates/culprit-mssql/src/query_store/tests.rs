@@ -55,11 +55,13 @@ async fn raw_fragments_and_database_aggregates_preserve_native_units_and_exact_c
         Reader::new(FakeRead::new(vec![Ok(vec![Rec::of(&[("tempdb", Val::Int(0))])]), Ok(vec![summary_row()])]));
     let summary = reader.summary(60).await.unwrap().remove(0);
     let records = [runtime_row(1000), runtime_row(3000)]
-        .map(|row| decode::record(&row, TelemetryStream::QueryRuntime, None).unwrap());
+        .map(|row| decode::record(&row, TelemetryStream::QueryRuntime, StatementReferences::default()).unwrap());
     let duration = records
         .iter()
         .map(|record| match record {
-            TelemetryRecord::QueryRuntime(row) => row.avg_duration_us * row.executions.parse::<f64>().unwrap(),
+            TelemetryRecord::QueryRuntime(row) => {
+                row.metric(&RuntimeMetricKey::Duration).unwrap().average * row.executions.parse::<f64>().unwrap()
+            }
             _ => panic!("runtime"),
         })
         .sum::<f64>();
@@ -70,13 +72,14 @@ async fn raw_fragments_and_database_aggregates_preserve_native_units_and_exact_c
     assert_eq!(summary.first_seen.as_deref(), Some("2020-01-01T06:00:00.153333300Z"));
     let exact = 9_007_199_254_740_993i64;
     let exact = replace(&runtime_row(1000), &[("count_executions", Val::Int(exact))]);
-    let TelemetryRecord::QueryRuntime(row) = decode::record(&exact, TelemetryStream::QueryRuntime, None).unwrap()
+    let TelemetryRecord::QueryRuntime(row) =
+        decode::record(&exact, TelemetryStream::QueryRuntime, StatementReferences::default()).unwrap()
     else {
         panic!("runtime")
     };
     assert_eq!(row.executions, "9007199254740993");
-    assert_eq!(row.key.execution_type, 3);
-    assert_eq!(row.key.replica_group_id, "7");
+    assert_eq!(row.key.native.qualifiers["execution_type"], "3");
+    assert_eq!(row.key.native.qualifiers["replica_group_id"], "7");
     assert_eq!(reader.close().await, SourceShutdown::Quiescent);
 }
 #[test]
@@ -87,7 +90,7 @@ fn unknown_and_invalid_native_fields_never_become_measured_zero() {
         decode::record(
             &replace(&runtime_row(1000), &[("avg_cpu_time", Val::Text("0".into()))]),
             TelemetryStream::QueryRuntime,
-            None
+            StatementReferences::default()
         )
         .is_err()
     );
@@ -166,18 +169,18 @@ async fn cost_timeout_is_not_retried_as_an_older_database_layout() {
 #[test]
 fn optional_runtime_costs_preserve_nulls_and_reject_invalid_values() {
     let TelemetryRecord::QueryRuntime(record) =
-        decode::record(&runtime_row(1000), TelemetryStream::QueryRuntime, None).unwrap()
+        decode::record(&runtime_row(1000), TelemetryStream::QueryRuntime, StatementReferences::default()).unwrap()
     else {
         panic!("runtime")
     };
-    assert_eq!(record.avg_rows, Some(1.0));
-    assert_eq!(record.avg_max_used_memory_8kb_pages, None);
-    assert_eq!(record.avg_log_bytes, None);
+    assert_eq!(record.metric(&RuntimeMetricKey::Rows).map(|metric| metric.average), Some(1.0));
+    assert_eq!(record.metric(&RuntimeMetricKey::Memory), None);
+    assert_eq!(record.metric(&RuntimeMetricKey::LogBytes), None);
     assert!(
         decode::record(
             &replace(&runtime_row(1000), &[("avg_tempdb_space_used", Val::Float(-1.0))]),
             TelemetryStream::QueryRuntime,
-            None
+            StatementReferences::default()
         )
         .is_err()
     );
@@ -185,7 +188,7 @@ fn optional_runtime_costs_preserve_nulls_and_reject_invalid_values() {
         decode::record(
             &replace(&runtime_row(1000), &[("avg_dop", Val::Float(f64::INFINITY))]),
             TelemetryStream::QueryRuntime,
-            None
+            StatementReferences::default()
         )
         .is_err()
     );
@@ -221,4 +224,13 @@ fn compilation_lifetime_is_exact_and_never_borrows_the_runtime_window() {
     ] {
         assert!(costs::Compilation::decode(&replace(&compilation_row(), &[(column, value)])).is_err());
     }
+}
+
+#[test]
+fn native_definition_times_are_canonical_before_interactive_or_export_consumers_see_them() {
+    let first = definition_row("SELECT 1");
+    let equivalent = replace(&first, &[("query_initial_compile_at", Val::Text("2020-01-01T08:00:00+02:00".into()))]);
+    assert_eq!(decode::query_identity(&first).unwrap(), decode::query_identity(&equivalent).unwrap());
+    let malformed = replace(&first, &[("query_initial_compile_at", Val::Text("not-a-time".into()))]);
+    assert!(decode::query_identity(&malformed).is_err());
 }

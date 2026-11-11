@@ -174,9 +174,7 @@ impl<R: crate::read::NativeRead> Source<R> {
             return Err(decode::malformed().into());
         }
         let description = self.description.as_ref().ok_or_else(decode::malformed)?;
-        if stream == TelemetryStream::QueryWaits
-            && !description.value.query_history().ok_or_else(decode::malformed)?.waits_capture_enabled
-        {
+        if stream == TelemetryStream::QueryWaits && !description.waits_capture_enabled {
             return Ok(CollectionRead::Stopped(CollectionStop::SourceUnavailable));
         }
         let Some(query) = self.prepare_page(stream, token)? else {
@@ -205,10 +203,7 @@ impl<R: crate::read::NativeRead> Source<R> {
                 stream,
                 &description.value.query_history().ok_or_else(decode::malformed)?.interval.native_id,
             )?;
-            match cursor.next_range(
-                &description.value.query_history().ok_or_else(decode::malformed)?.replica_group_ids,
-                description.plan_upper_bound,
-            )? {
+            match cursor.next_range(&description.replica_group_ids, description.plan_upper_bound)? {
                 Some((replica, range)) => {
                     parameters.extend([
                         Parameter::Integer(replica),
@@ -263,11 +258,14 @@ impl<R: crate::read::NativeRead> Source<R> {
             let definition = self.definitions.reference(row, &description.value)?;
             records.push(decode::record(row, stream, definition)?);
         }
-        let history = description.value.query_history().ok_or_else(decode::malformed)?;
         if records.iter().any(|record| {
             record.measurement_key().is_none_or(|key| {
-                !history.replica_group_ids.contains(&key.replica_group_id)
-                    || !key.plan_id.parse::<i64>().is_ok_and(|id| id < description.plan_upper_bound)
+                !description.value.accepts_measurement(key)
+                    || !key
+                        .native
+                        .qualifiers
+                        .get("plan_id")
+                        .is_some_and(|id| id.parse::<i64>().is_ok_and(|id| id < description.plan_upper_bound))
             })
         }) {
             return Ok(CollectionRead::Stopped(CollectionStop::SourceChanged));
@@ -275,10 +273,7 @@ impl<R: crate::read::NativeRead> Source<R> {
         let next_cursor = if let Some(cursor) = cursor.take() {
             let mut remaining = cursor.clone();
             remaining
-                .next_range(
-                    &description.value.query_history().ok_or_else(decode::malformed)?.replica_group_ids,
-                    description.plan_upper_bound,
-                )?
+                .next_range(&description.replica_group_ids, description.plan_upper_bound)?
                 .map(|_| cursor.encode())
                 .transpose()?
         } else {

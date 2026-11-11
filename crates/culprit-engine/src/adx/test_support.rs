@@ -299,3 +299,100 @@ impl QueryTransport for Queries {
         }
     }
 }
+
+pub(super) fn interval_queries(catalog: &SchemaCatalog) -> Recovery {
+    let (mut manifest, _) = fixture();
+    manifest.source.database.engine = culprit_core::Engine::Postgres;
+    manifest.source.source = "native-history-fixture".into();
+    manifest.source.observation = SourceObservation::QueryHistory(QueryHistoryDescription {
+        interval: TelemetryInterval {
+            native_id: "native-period".into(),
+            from: "2020-01-01T06:00:00Z".into(),
+            until: "2020-01-01T07:00:00Z".into(),
+        },
+        dimensions: Default::default(),
+        native_properties: Default::default(),
+    });
+    let identity =
+        NativeQueryIdentity { query_id: "opaque-query".into(), qualifiers: [("userid".into(), "17".into())].into() };
+    let references = StatementReferences {
+        query: Some(NativeDefinitionReference {
+            native: identity.native(),
+            definition_id: Some(identity.definition_id(&manifest.source).unwrap()),
+        }),
+        plan: None,
+    };
+    let runtime = TelemetryRecord::QueryRuntime(RuntimeMeasurement {
+        key: NativeMeasurementKey { native: NativeIdentity::new("runtime-1"), references: references.clone() },
+        executions: "9007199254740993".into(),
+        metrics: vec![
+            RuntimeMetric::average(RuntimeMetricKey::Duration, RuntimeMetricUnit::Milliseconds, 1.25),
+            RuntimeMetric::average(
+                RuntimeMetricKey::LogicalReads,
+                RuntimeMetricUnit::Pages { bytes_per_page: 16384 },
+                7.0,
+            ),
+        ],
+        first_execution_at: None,
+        last_execution_at: None,
+    });
+    let waits = TelemetryRecord::QueryWaits(WaitMeasurement {
+        key: NativeMeasurementKey { native: NativeIdentity::new("wait-1"), references },
+        category: "native-io".into(),
+        unit: RuntimeMetricUnit::Microseconds,
+        total: MeasurementValue::Real(1.25),
+        average: None,
+        minimum: None,
+        maximum: None,
+    });
+    let query = TelemetryRecord::QueryDefinition(QueryDefinition {
+        id: identity.definition_id(&manifest.source).unwrap(),
+        identity,
+        origin: StatementOrigin::Application,
+        monitoring_template_id: None,
+        context: Default::default(),
+        context_available: false,
+        source_text_bytes: None,
+        sql: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
+    });
+    Recovery::capture(catalog, manifest.source, vec![runtime, waits, query], 9)
+}
+
+pub(super) fn cumulative_queries(catalog: &SchemaCatalog) -> Recovery {
+    let (mut manifest, _) = fixture();
+    manifest.source.database.engine = culprit_core::Engine::Postgres;
+    manifest.source.source = "statement-counters-fixture".into();
+    manifest.source.observation = SourceObservation::Snapshot(StateSnapshotDescription {
+        dataset: SnapshotDataset::Operational,
+        observed_from: "2020-01-01T12:00:00Z".into(),
+        observed_until: "2020-01-01T12:00:01Z".into(),
+        records: 1,
+        sources: vec![StateSourceCoverage::collected("native-query-counters".into(), 1)],
+    });
+    let sample = StatementCounterSample {
+        identity: NativeQueryIdentity {
+            query_id: "fingerprint".into(),
+            qualifiers: [("userid".into(), "17".into()), ("dbid".into(), "42".into())].into(),
+        },
+        observed_at: "2020-01-01T12:00:00Z".into(),
+        reset: culprit_core::ResetMarker::Unknown,
+        totals: vec![
+            StatementCounter {
+                key: RuntimeMetricKey::Executions,
+                unit: RuntimeMetricUnit::Count,
+                total: MeasurementValue::Integer("9007199254740993".into()),
+            },
+            StatementCounter {
+                key: RuntimeMetricKey::Duration,
+                unit: RuntimeMetricUnit::Milliseconds,
+                total: MeasurementValue::Real(1.25),
+            },
+        ],
+    };
+    let row = TelemetryRecord::Operational(OperationalObservation {
+        source: "native-query-counters".into(),
+        key: sample.key().unwrap(),
+        fact: OperationalFact::StatementCounters(Box::new(sample)),
+    });
+    Recovery::capture(catalog, manifest.source, vec![row], 10)
+}
