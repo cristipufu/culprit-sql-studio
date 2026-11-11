@@ -12,7 +12,7 @@ use crate::delivery::{
 use async_trait::async_trait;
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 struct OfflineSink {
@@ -23,6 +23,13 @@ struct SlowReadback {
     inner: FileTelemetrySink,
     entered: tokio::sync::Notify,
     release: tokio::sync::Notify,
+    pending: AtomicUsize,
+}
+struct ReadbackInFlight<'a>(&'a AtomicUsize);
+impl Drop for ReadbackInFlight<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 #[async_trait]
 impl TelemetrySink for SlowReadback {
@@ -33,6 +40,8 @@ impl TelemetrySink for SlowReadback {
         self.inner.dispatch(range, attempt, batch_id).await
     }
     async fn receipts(&self, range: &CommittedRange, cursor: Option<&str>, page_rows: u32) -> Result<ReceiptPage> {
+        self.pending.fetch_add(1, Ordering::SeqCst);
+        let _in_flight = ReadbackInFlight(&self.pending);
         self.entered.notify_one();
         self.release.notified().await;
         self.inner.receipts(range, cursor, page_rows).await
@@ -64,6 +73,8 @@ impl crate::service::ServiceReporter for Quiet {
 async fn a_stalled_analytical_readback_does_not_block_new_native_archive_commits() {
     use crate::{capture::CollectionCancellation, service::run_delivery};
     use std::time::Duration;
+    // This proves ownership independence, not a five-second filesystem throughput budget on every runner.
+    const PROGRESS_WATCHDOG: Duration = Duration::from_secs(60);
     let root = tempfile::tempdir().unwrap();
     let contract = Contract::new("pipeline".into(), "shard-0".into(), "file:test".into(), digest(b"schema")).unwrap();
     let store = Arc::new(FileRecoveryStore::create(&root.path().join("recovery"), contract.clone()).unwrap());
@@ -76,6 +87,7 @@ async fn a_stalled_analytical_readback_does_not_block_new_native_archive_commits
         inner: FileTelemetrySink::create(&root.path().join("warehouse"), contract.clone(), store.clone()).unwrap(),
         entered: tokio::sync::Notify::new(),
         release: tokio::sync::Notify::new(),
+        pending: AtomicUsize::new(0),
     };
     let mut journal = DeliveryJournal::create(&root.path().join("delivery"), contract.clone()).unwrap();
     let mut archive = DeliveryJournal::create(&root.path().join("archive"), contract.clone()).unwrap();
@@ -86,7 +98,7 @@ async fn a_stalled_analytical_readback_does_not_block_new_native_archive_commits
         &sink,
         owner.fence().clone(),
         contract.clone(),
-        DeliveryPolicy { visibility_delay_ms: 1, request_timeout_ms: 60_000, ..Default::default() },
+        DeliveryPolicy { visibility_delay_ms: 1, request_timeout_ms: 300_000, ..Default::default() },
     )
     .unwrap();
     let cancellation = CollectionCancellation::default();
@@ -94,7 +106,7 @@ async fn a_stalled_analytical_readback_does_not_block_new_native_archive_commits
     tokio::pin!(running);
     tokio::select! {
         result=&mut running=>panic!("delivery ended before the stalled query: {result:?}"),
-        result=tokio::time::timeout(Duration::from_secs(10),sink.entered.notified())=>result.unwrap(),
+        result=tokio::time::timeout(PROGRESS_WATCHDOG,sink.entered.notified())=>result.unwrap(),
     }
     let second = complete(&mut outbox).await;
     let prepared = outbox.delivery().prepare(&second.capture.observation_id, contract, vec![]).await.unwrap();
@@ -111,12 +123,14 @@ async fn a_stalled_analytical_readback_does_not_block_new_native_archive_commits
     };
     let archived = tokio::select! {
         result=&mut running=>panic!("delivery ended while a destination query was stalled: {result:?}"),
-        result=tokio::time::timeout(Duration::from_secs(5),probe)=>result.unwrap_or(false),
+        result=tokio::time::timeout(PROGRESS_WATCHDOG,probe)=>result.unwrap_or(false),
     };
+    let still_blocked = sink.pending.load(Ordering::SeqCst) == 1;
     cancellation.cancel();
     sink.release.notify_waiters();
-    tokio::time::timeout(Duration::from_secs(3), running).await.unwrap().unwrap();
+    tokio::time::timeout(PROGRESS_WATCHDOG, running).await.unwrap().unwrap();
     assert!(archived, "a stalled destination query must not hold the owner that commits new native captures");
+    assert!(still_blocked, "native archival must complete while the same destination readback is still pending");
 }
 #[async_trait]
 impl TelemetrySink for OfflineSink {
