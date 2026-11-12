@@ -1,6 +1,7 @@
 //! Native layouts and exact facts shared by application projections and background export.
 pub(crate) mod activity;
 pub(crate) mod catalog;
+pub(crate) mod locks;
 pub(crate) mod metadata;
 pub(crate) mod operational;
 pub(crate) mod replication;

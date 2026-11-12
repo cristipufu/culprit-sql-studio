@@ -14,6 +14,64 @@ fn fixture() -> crate::MysqlProvider {
     .unwrap()
 }
 
+#[tokio::test]
+#[ignore = "requires the owned MySQL/MariaDB fixture"]
+async fn routine_namespaces_and_index_visibility_are_shared_with_scans() {
+    use mysql_async::prelude::Queryable;
+    let provider = fixture();
+    let mut admin = provider.connector.connect(crate::connect::Scope::Database).await.unwrap();
+    admin.query_drop("/* culprit */ SET SESSION TRANSACTION READ WRITE").await.unwrap();
+    admin.query_drop("/* culprit */ CREATE PROCEDURE culprit_namespace_probe() SELECT 1").await.unwrap();
+    admin
+        .query_drop("/* culprit */ CREATE FUNCTION culprit_namespace_probe() RETURNS INT DETERMINISTIC NO SQL RETURN 1")
+        .await
+        .unwrap();
+    let (_, records) = capture(&provider, SnapshotDataset::Objects).await;
+    let identities: std::collections::BTreeSet<_> = records
+        .iter()
+        .filter_map(|record| match record {
+            TelemetryRecord::ObjectDefinition(ObjectDefinitionRecord {
+                fact: ObjectDefinitionFact::NativeCatalog(catalog),
+                ..
+            }) if catalog.properties.get("name").is_some_and(|name| name == "culprit_namespace_probe") => {
+                Some(catalog.identity.id.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    admin.query_drop("/* culprit */ DROP PROCEDURE culprit_namespace_probe").await.unwrap();
+    admin.query_drop("/* culprit */ DROP FUNCTION culprit_namespace_probe").await.unwrap();
+    assert_eq!(identities.len(), 2, "procedures and functions have independent native namespaces");
+
+    let version = provider.connector.version().unwrap();
+    let hidden = match provider.connector.flavor() {
+        crate::connect::Flavor::Mysql if culprit_core::version_at_least(version, [8, 0, 0]) => Some("INVISIBLE"),
+        crate::connect::Flavor::Mariadb if culprit_core::version_at_least(version, [10, 6, 0]) => Some("IGNORED"),
+        _ => None,
+    };
+    if let Some(hidden) = hidden {
+        admin
+            .query_drop(format!("/* culprit */ CREATE INDEX culprit_visibility_probe ON smoke_rows(value) {hidden}"))
+            .await
+            .unwrap();
+        let (_, records) = capture(&provider, SnapshotDataset::Indexes).await;
+        let exported = records.iter().any(|record| {
+            matches!(record,
+            TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::CatalogCounters(row), .. })
+            if row.catalog.properties.get("index_name").is_some_and(|name|name=="culprit_visibility_probe")
+                && row.catalog.properties.get("visible").is_some_and(|visible|visible=="NO"))
+        });
+        let snapshot = provider
+            .snapshot("visibility", &culprit_core::SnapshotOptions { plans: 0, ..Default::default() })
+            .await
+            .unwrap();
+        admin.query_drop("/* culprit */ DROP INDEX culprit_visibility_probe ON smoke_rows").await.unwrap();
+        assert!(exported, "the native collector must preserve hidden/ignored state");
+        assert!(snapshot.indexes.iter().any(|index| index.name == "culprit_visibility_probe" && index.is_disabled));
+    }
+    admin.disconnect().await.unwrap();
+}
+
 async fn capture(
     provider: &crate::MysqlProvider,
     dataset: SnapshotDataset,
@@ -71,7 +129,12 @@ async fn every_native_snapshot_preserves_membership_counts_scope_and_native_unit
         let (description, records) = capture(&provider, dataset).await;
         let SourceObservation::Snapshot(state) = description.observation else { panic!() };
         assert_eq!(state.records as usize, records.len(), "{dataset:?}");
-        assert!(state.sources.iter().all(|source| source.complete_scope), "{dataset:?}: {:?}", state.sources);
+        assert!(
+            state.sources.iter().all(|source| source.complete_scope
+                || (source.state == culprit_core::SourceState::NotApplicable && source.records == 0)),
+            "{dataset:?}: {:?}",
+            state.sources
+        );
         if matches!(
             dataset,
             SnapshotDataset::Settings
@@ -396,12 +459,16 @@ async fn a_populated_replication_channel_and_open_transaction_preserve_scope_wit
     use mysql_async::prelude::Queryable;
     let provider = fixture();
     let mut admin = provider.connector.connect_unconfigured().await.unwrap();
-    let flavor =
-        crate::connect::Flavor::of_version(&admin.query_first::<String, _>("SELECT VERSION()").await.unwrap().unwrap());
+    let version = admin.query_first::<String, _>("SELECT VERSION()").await.unwrap().unwrap();
+    let flavor = crate::connect::Flavor::of_version(&version);
     let (setup, cleanup) = match flavor {
-        crate::connect::Flavor::Mysql => (
+        crate::connect::Flavor::Mysql if culprit_core::version_at_least(&version, [8, 0, 23]) => (
             "CHANGE REPLICATION SOURCE TO SOURCE_HOST='127.0.0.1',SOURCE_PORT=1,SOURCE_USER='fixture_user',SOURCE_PASSWORD='private-replication-fixture' FOR CHANNEL 'culprit_test'",
             "RESET REPLICA ALL FOR CHANNEL 'culprit_test'",
+        ),
+        crate::connect::Flavor::Mysql => (
+            "CHANGE MASTER TO MASTER_HOST='127.0.0.1',MASTER_PORT=1,MASTER_USER='fixture_user',MASTER_PASSWORD='private-replication-fixture' FOR CHANNEL 'culprit_test'",
+            "RESET SLAVE ALL FOR CHANNEL 'culprit_test'",
         ),
         crate::connect::Flavor::Mariadb => (
             "CHANGE MASTER 'culprit_test' TO MASTER_HOST='127.0.0.1',MASTER_PORT=1,MASTER_USER='fixture_user',MASTER_PASSWORD='private-replication-fixture'",

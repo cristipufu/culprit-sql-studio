@@ -34,11 +34,14 @@ class Fixture:
     user: str
     memory: str = "1g"
     platform: str | None = None
+    options: tuple[str, ...] = ()
 
 
 FIXTURES = (
     Fixture("postgres", "postgres:18.6", "postgres", 5432, "culprit_smoke", "postgres"),
     Fixture("mysql", "mysql:8.4", "mysql", 3306, "culprit_smoke", "root", "2g"),
+    Fixture("mysql-5.7", "mysql:5.7", "mysql", 3306, "culprit_smoke", "root", "2g", "linux/amd64",
+            ("--master-info-repository=TABLE", "--relay-log-info-repository=TABLE")),
     *(Fixture(f"mariadb-{version}", f"mariadb:{version}", "mysql", 3306, "culprit_smoke", "root")
       for version in ("10.6", "10.11", "11.8")),
     Fixture("mssql", "mcr.microsoft.com/mssql/server:2022-latest", "mssql", 1433,
@@ -165,7 +168,7 @@ class Database:
         environment, command = self.configuration()
         for name in environment:
             args += ["-e", name]
-        self.commands.run([*args, fixture.image, *command], env=environment)
+        self.commands.run([*args, fixture.image, *command, *fixture.options], env=environment)
         self.commands.run(["docker", "start", self.name])
         _, port = self.commands.run(["docker", "port", self.name, str(fixture.port)])
         self.port = port.strip().removeprefix("127.0.0.1:")
@@ -192,7 +195,7 @@ class Database:
                     ["-c", f"shared_preload_libraries={preload}", "-c", "track_io_timing=on"])
         if fixture.engine == "mysql":
             return ({"MYSQL_ROOT_PASSWORD": self.password, "MYSQL_ROOT_HOST": "%", "MYSQL_DATABASE": fixture.database},
-                    ["--performance-schema=ON"])
+                    ["--performance-schema=ON", "--server-id=1"])
         if fixture.engine == "mssql":
             return ({"ACCEPT_EULA": "Y", "MSSQL_PID": "Developer", "MSSQL_SA_PASSWORD": self.password}, [])
         return ({}, ["bin/yugabyted", "start", "--background=false", "--callhome=false", "--ui=false",

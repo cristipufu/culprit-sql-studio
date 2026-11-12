@@ -1,4 +1,4 @@
-use culprit_core::Result;
+use culprit_core::{Result, limits::MAX_RESULT_ROWS as APPLICATION_ROWS};
 use mysql_async::{Row, Value};
 
 use crate::connect::TAG;
@@ -147,7 +147,6 @@ pub fn tagged(sql: &str) -> String {
     format!("{TAG} {sql}")
 }
 
-const APPLICATION_ROWS: usize = 10_000;
 pub async fn query(conn: &mut impl crate::read::QueryRead, sql: &str) -> Result<Vec<Rec>> {
     conn.read(sql, vec![], APPLICATION_ROWS).await
 }

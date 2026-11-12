@@ -58,7 +58,7 @@ impl Recipe {
         match self {
             Self::Settings => Ok(VariableSet::Configuration.query(&crate::catalog::settings_names(meta.flavor))),
             Self::Replication => Ok(native::replication::query(meta.flavor, &meta.version).into()),
-            Self::Catalog(kind) => Ok(kind.query(meta.flavor, budget.max_snapshot_rows as usize + 1)),
+            Self::Catalog(kind) => Ok(kind.query(meta.flavor, &meta.version, budget.max_snapshot_rows as usize + 1)),
             Self::Operational(kind) => Ok(kind.query(meta.flavor, budget.max_snapshot_rows as usize + 1)),
             Self::Statements | Self::Definitions => layout.ok_or_else(native::invalid)?.query(
                 matches!(self, Self::Definitions),

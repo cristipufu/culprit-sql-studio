@@ -47,8 +47,13 @@ impl QueryRead for Conn {
     async fn read(&mut self, sql: &str, parameters: Vec<Value>, row_limit: usize) -> Result<Vec<Rec>> {
         let progress = ReadProgress::default();
         let (limits, _) = mpsc::channel(1);
-        let request =
-            owned::Request { sql: sql.into(), parameters, row_limit, byte_limit: 8 * 1024 * 1024, prepared: false };
+        let request = owned::Request {
+            sql: sql.into(),
+            parameters,
+            row_limit,
+            byte_limit: culprit_core::limits::MAX_RESULT_BYTES,
+            prepared: false,
+        };
         if request.parameters.is_empty() {
             let result = self.query_iter(crate::rows::tagged(sql)).await.map_err(crate::connect::map_error)?;
             owned::drain(result, &request, &progress, limits, RowOutput::buffered())
@@ -96,18 +101,7 @@ impl ReadSession {
         Self::application_window(connector, scope, Duration::ZERO)
     }
     pub(crate) fn application_window(connector: Arc<Connector>, scope: Scope, window: Duration) -> Self {
-        Self::new(
-            connector,
-            CollectionBudget {
-                max_snapshot_rows: 10_000,
-                max_queries: 512,
-                total_timeout_ms: (window.as_millis() + 60_000).min(900_000) as u32,
-                page_bytes: 8 * 1024 * 1024,
-                statement_timeout_ms: culprit_core::limits::OBSERVE_TIMEOUT.as_millis() as u32,
-                ..Default::default()
-            },
-            scope,
-        )
+        Self::new(connector, culprit_read::application_budget(window), scope)
     }
     pub(crate) fn new(connector: Arc<Connector>, budget: CollectionBudget, scope: Scope) -> Self {
         Self {

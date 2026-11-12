@@ -20,11 +20,7 @@ impl<'a> BorrowedRead<'a> {
 #[async_trait::async_trait]
 impl QueryRead for BorrowedRead<'_> {
     async fn query(&mut self, sql: &str, limit: usize) -> Result<Vec<crate::rows::Row>> {
-        let (rows, truncated) = crate::rows::query_bounded(&self.0.client, sql, limit).await?;
-        if truncated {
-            return Err(culprit_core::telemetry::CollectionStop::RowLimit.error());
-        }
-        Ok(rows)
+        crate::rows::checked_query(&self.0.client, sql, limit).await
     }
 }
 impl NoticeRead for BorrowedRead<'_> {

@@ -94,6 +94,7 @@ jobs:
         include:
           - { fixture: postgres, os: ubuntu-latest }
           - { fixture: mysql, os: ubuntu-latest }
+          - { fixture: mysql-5.7, os: ubuntu-latest }
           - { fixture: mariadb-10.6, os: ubuntu-latest }
           - { fixture: mariadb-10.11, os: ubuntu-latest }
           - { fixture: mariadb-11.8, os: ubuntu-latest }

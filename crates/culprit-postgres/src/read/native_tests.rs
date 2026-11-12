@@ -23,6 +23,27 @@ fn session(budget: CollectionBudget) -> ReadSession {
 
 #[tokio::test]
 #[ignore = "requires the owned loopback PostgreSQL provider fixture"]
+async fn scan_rows_are_bounded_and_drained_before_the_next_source_runs() {
+    let client = connector().connect(crate::connect::COLLECTOR).await.unwrap();
+    for (sql, reason) in [
+        (
+            format!("SELECT i FROM pg_catalog.generate_series(1,{}) i", culprit_core::limits::MAX_RESULT_ROWS + 1),
+            CollectionStop::RowLimit,
+        ),
+        (
+            format!("SELECT repeat('x',{}) AS oversized", culprit_core::limits::MAX_RESULT_BYTES + 1),
+            CollectionStop::ByteLimit,
+        ),
+    ] {
+        assert_eq!(CollectionStop::from_error(&crate::rows::query(&client, &sql).await.unwrap_err()), reason);
+        let rows = crate::rows::query(&client, "SELECT 42 AS answer").await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].string("answer"), "42");
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires the owned loopback PostgreSQL provider fixture"]
 async fn native_setup_and_results_keep_read_only_budgets_exact_values_and_unknowns() {
     let mut reader = session(CollectionBudget::default());
     let row = reader.query("SELECT current_setting('default_transaction_read_only') AS ro, current_setting('max_parallel_workers_per_gather') AS parallel, current_setting('work_mem') AS memory, 9007199254740993::bigint AS exact, NULL::bigint AS unknown", 1).await.unwrap().remove(0);

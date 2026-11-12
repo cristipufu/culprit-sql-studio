@@ -131,12 +131,8 @@ pub(crate) async fn indexes(
     db: &str,
     probe: &Probe,
 ) -> Result<(Vec<IndexStat>, Option<String>)> {
-    let with_visibility = crate::native::catalog::indexes_query(true, true);
-    let without_visibility = crate::native::catalog::indexes_query(false, false);
-    let rows = match query_with(conn, &with_visibility, vec![Value::from(db)]).await {
-        Ok(rows) => rows,
-        Err(_) => query_with(conn, &without_visibility, vec![Value::from(db)]).await?,
-    };
+    let sql = crate::native::catalog::indexes_query(probe.flavor, &probe.version, true);
+    let rows = query_with(conn, &sql, vec![Value::from(db)]).await?;
     let engines: HashMap<String, String> = query_with(
         conn,
         "SELECT TABLE_NAME AS name, ENGINE AS engine FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?",

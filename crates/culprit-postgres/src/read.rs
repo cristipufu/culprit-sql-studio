@@ -31,11 +31,7 @@ pub trait QueryRead: Send {
 #[async_trait::async_trait]
 impl QueryRead for &Client {
     async fn query(&mut self, sql: &str, row_limit: usize) -> Result<Vec<Row>> {
-        let (rows, truncated) = crate::rows::query_bounded(self, sql, row_limit).await?;
-        if truncated {
-            return Err(CollectionStop::RowLimit.error());
-        }
-        Ok(rows)
+        crate::rows::checked_query(self, sql, row_limit).await
     }
 }
 #[async_trait::async_trait]

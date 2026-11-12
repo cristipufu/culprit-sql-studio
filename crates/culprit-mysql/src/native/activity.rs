@@ -1,6 +1,6 @@
 //! Persistent native request identities; healthy reads omit SQL, transaction scans and lock-manager detail.
+use super::locks;
 use super::*;
-use crate::{connect::Flavor, deadlocks};
 use culprit_core::{Engine, Error, ErrorCode, telemetry::*};
 use mysql_async::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -61,7 +61,7 @@ pub(crate) async fn observe<R: QueryRead>(
         }
         let ids: Vec<_> = pending.iter().cloned().collect();
         seen.extend(pending.iter().cloned());
-        let pairs = lock_pairs(reader, meta.flavor, &ids, budget.max_snapshot_rows as usize + 1).await;
+        let pairs = lock_pairs(reader, meta, &ids, budget.max_snapshot_rows as usize + 1).await;
         let pairs = match pairs {
             Ok(pairs) => pairs,
             Err(error) if error.code == ErrorCode::PermissionDenied => {
@@ -242,11 +242,14 @@ fn decode(row: &Rec, database: Option<&str>) -> Result<ActivityObservation> {
         statement: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
     })
 }
-async fn lock_pairs<R: QueryRead>(reader: &mut R, flavor: Flavor, ids: &[String], limit: usize) -> Result<Vec<Rec>> {
-    let (sql, alias) = match flavor {
-        Flavor::Mysql => (deadlocks::LOCK_WAITS_SQL, "t.PROCESSLIST_ID"),
-        Flavor::Mariadb => (deadlocks::INNODB_LOCK_WAITS_SQL, "r.trx_mysql_thread_id"),
-    };
+async fn lock_pairs<R: QueryRead>(
+    reader: &mut R,
+    meta: &metadata::Metadata,
+    ids: &[String],
+    limit: usize,
+) -> Result<Vec<Rec>> {
+    let layout = locks::row_waits(meta.flavor, &meta.version);
+    let (sql, alias) = (layout.sql, layout.session_column);
     let mut rows = reader
         .read(&format!("{sql} WHERE {alias} IN ({}) LIMIT {limit}", placeholders(ids.len())?), numeric_ids(ids)?, limit)
         .await?;
@@ -254,7 +257,7 @@ async fn lock_pairs<R: QueryRead>(reader: &mut R, flavor: Flavor, ids: &[String]
         .read(
             &format!(
                 "{} AND waiting_pid IN ({}) LIMIT {limit}",
-                deadlocks::METADATA_LOCK_WAITS_SQL,
+                locks::METADATA_LOCK_WAITS_SQL,
                 placeholders(ids.len())?
             ),
             numeric_ids(ids)?,

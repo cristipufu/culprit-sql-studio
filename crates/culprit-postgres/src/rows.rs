@@ -1,4 +1,8 @@
-use culprit_core::Result;
+use culprit_core::{
+    Result,
+    limits::{MAX_RESULT_BYTES, MAX_RESULT_ROWS},
+    telemetry::CollectionStop,
+};
 use tokio_postgres::{Client, SimpleQueryMessage, SimpleQueryRow};
 
 use crate::connect::map_error;
@@ -57,30 +61,45 @@ impl Row {
 }
 
 pub async fn query(client: &Client, sql: &str) -> Result<Vec<Row>> {
-    let messages = client.simple_query(&tagged(sql)).await.map_err(map_error)?;
-    Ok(rows_of(messages))
+    checked_query(client, sql, culprit_core::limits::MAX_RESULT_ROWS).await
+}
+
+pub(crate) async fn checked_query(client: &Client, sql: &str, limit: usize) -> Result<Vec<Row>> {
+    let (rows, stopped) = bounded_rows(client, sql, limit).await?;
+    if let Some(stopped) = stopped {
+        return Err(stopped.error());
+    }
+    Ok(rows)
 }
 
 /// Retain a bounded prefix of collector rows, draining completion and late errors after retention stops. The caller
 /// must record partial coverage when truncated; dropping rows never establishes absence or a complete catalog.
 pub async fn query_bounded(client: &Client, sql: &str, limit: usize) -> Result<(Vec<Row>, bool)> {
+    let (rows, stopped) = bounded_rows(client, sql, limit).await?;
+    Ok((rows, stopped.is_some()))
+}
+
+async fn bounded_rows(client: &Client, sql: &str, limit: usize) -> Result<(Vec<Row>, Option<CollectionStop>)> {
     use futures_util::TryStreamExt;
     let stream = client.simple_query_raw(&tagged(sql)).await.map_err(map_error)?;
     tokio::pin!(stream);
-    let mut budget = culprit_core::limits::ResultBudget::new(limit);
+    let mut budget = culprit_read::ReadBudget::new(limit.min(MAX_RESULT_ROWS), MAX_RESULT_BYTES);
     let mut rows = Vec::new();
+    let mut stopped = None;
     while let Some(message) = stream.try_next().await.map_err(map_error)? {
         if let SimpleQueryMessage::Row(row) = message {
-            if budget.truncated() {
+            if stopped.is_some() {
                 continue;
             }
             let bytes = (0..row.len()).fold(0usize, |total, i| total.saturating_add(row.get(i).map_or(0, str::len)));
-            if budget.retain(bytes) {
-                rows.push(Row::from_native(row));
+            if let Err(error) = budget.row_started().and_then(|_| budget.charge_values(bytes)) {
+                stopped = Some(CollectionStop::from_error(&error));
+                continue;
             }
+            rows.push(Row::from_native(row));
         }
     }
-    Ok((rows, budget.truncated()))
+    Ok((rows, stopped))
 }
 
 pub async fn query_one(client: &Client, sql: &str) -> Result<Option<Row>> {
@@ -97,16 +116,6 @@ pub(crate) fn monitoring(sql: &str) -> String {
         "{sql}\n/* culprit:monitor */ /* culprit:template:{} */",
         culprit_core::telemetry::digest(sql.as_bytes())
     ))
-}
-
-pub fn rows_of(messages: Vec<SimpleQueryMessage>) -> Vec<Row> {
-    messages
-        .into_iter()
-        .filter_map(|m| match m {
-            SimpleQueryMessage::Row(row) => Some(Row::from_native(row)),
-            _ => None,
-        })
-        .collect()
 }
 
 /// UTC ISO-8601 text for a timestamptz expression, matching the format other providers emit.

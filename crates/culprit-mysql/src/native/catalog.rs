@@ -61,12 +61,12 @@ impl Kind {
             Self::Sequences => "auto-increment",
         }
     }
-    pub(crate) fn query(self, flavor: Flavor, limit: usize) -> String {
+    pub(crate) fn query(self, flavor: Flavor, version: &str, limit: usize) -> String {
         let sql = match self {
             Self::Tables => tables_query(),
             Self::Histograms => histogram_query(flavor),
             Self::Columns => columns_query(false),
-            Self::Indexes | Self::Statistics => indexes_query(flavor == Flavor::Mysql, false),
+            Self::Indexes | Self::Statistics => indexes_query(flavor, version, false),
             Self::ForeignKeys => foreign_keys_query(),
             Self::Checks => "SELECT TABLE_NAME AS table_name, CONSTRAINT_NAME AS name
                 FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=? AND CONSTRAINT_TYPE='CHECK'"
@@ -95,7 +95,8 @@ impl Kind {
     }
     pub(crate) fn decode(self, row: &Rec, database: &str) -> Result<TelemetryRecord> {
         let keys: &[&str] = match self {
-            Self::Tables | Self::Objects => &["name"],
+            Self::Tables => &["name"],
+            Self::Objects => &["name", "routine_type"],
             Self::Indexes | Self::Statistics => &["table_name", "index_name", "seq"],
             Self::Columns => &["table_name", "name"],
             Self::Histograms => &["table_name", "column_name"],
@@ -232,9 +233,19 @@ pub(crate) fn columns_query(defaults: bool) -> String {
         FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? ORDER BY TABLE_NAME, ORDINAL_POSITION"
     )
 }
-pub(crate) fn indexes_query(visibility: bool, expressions: bool) -> String {
-    let visible = if visibility { "IS_VISIBLE" } else { "NULL" };
-    let expression = if visibility && expressions { "EXPRESSION" } else { "NULL" };
+pub(crate) fn indexes_query(flavor: Flavor, version: &str, expressions: bool) -> String {
+    let visible = match flavor {
+        Flavor::Mysql if culprit_core::version_at_least(version, [8, 0, 0]) => "IS_VISIBLE",
+        Flavor::Mariadb if culprit_core::version_at_least(version, [10, 6, 0]) => {
+            "CASE WHEN IGNORED='YES' THEN 'NO' WHEN IGNORED='NO' THEN 'YES' ELSE NULL END"
+        }
+        _ => "NULL",
+    };
+    let expression = if expressions && flavor == Flavor::Mysql && culprit_core::version_at_least(version, [8, 0, 13]) {
+        "EXPRESSION"
+    } else {
+        "NULL"
+    };
     // Expression bodies are fetched separately by interactive scans, never in the metadata export.
     format!(
         "SELECT TABLE_NAME AS table_name, INDEX_NAME AS index_name, CAST(NON_UNIQUE AS CHAR) AS non_unique,

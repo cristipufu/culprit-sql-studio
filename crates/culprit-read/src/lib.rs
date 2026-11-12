@@ -3,6 +3,8 @@
 use culprit_core::{Result, telemetry::CollectionStop};
 use tokio::sync::{mpsc, watch};
 
+mod application;
+pub use application::application_budget;
 mod fence;
 mod frozen;
 mod progress;
