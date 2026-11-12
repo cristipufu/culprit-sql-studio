@@ -41,8 +41,8 @@ fn fixture(mode: &'static str, marker: Option<PathBuf>) -> Factory {
         if mode == "hostkey" && calls.fetch_add(1, Ordering::SeqCst) > 0 {
             return Err(command::failure(b"Host key verification failed. private-proxy-diagnostic"));
         }
-        let mut command = Command::new(std::env::current_exe().unwrap());
-        command.args(["--exact", "ssh::tests::child_fixture", "--nocapture"]).env("CULPRIT_SSH_TEST_CHILD", mode);
+        let mut command = crate::process::test_child("ssh::tests::child_fixture");
+        command.env("CULPRIT_SSH_TEST_CHILD", mode);
         if let Some(marker) = &marker {
             command.env("CULPRIT_SSH_TEST_MARKER", marker);
         }
@@ -72,9 +72,8 @@ fn child_fixture() {
             std::fs::write(marker, "orphaned").unwrap();
         }
         "wrapper" => {
-            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            let mut child = crate::process::test_child("ssh::tests::child_fixture").into_std();
             child
-                .args(["--exact", "ssh::tests::child_fixture", "--nocapture"])
                 .env("CULPRIT_SSH_TEST_CHILD", "linger")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
@@ -168,8 +167,8 @@ fn relative_identity_paths_validate_expansion_without_changing_the_tests_working
     let temp = Temp::new();
     let cwd = temp.0.join("literal%h");
     std::fs::create_dir(&cwd).unwrap();
-    let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "ssh::tests::child_fixture", "--nocapture"])
+    let output = crate::process::test_child("ssh::tests::child_fixture")
+        .into_std()
         .env("CULPRIT_SSH_TEST_CHILD", "identity-path")
         .current_dir(cwd)
         .output()

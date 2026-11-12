@@ -145,7 +145,8 @@ pub(super) fn quiet_activity(root: &Path) -> PreparedRange {
     writer.confirm_source(SourceCompletion::Verified).unwrap();
     PreparedRange::from_validated(&path, &writer.finish(4).unwrap(), contract(), vec![]).unwrap()
 }
-#[tokio::test]
+// Transfer latency belongs to virtual time; filesystem scheduling must not spend the synthetic request budget.
+#[tokio::test(start_paused = true)]
 async fn transfers_larger_than_one_operation_budget_resume_at_the_next_batch_after_restart() {
     let root = tempfile::tempdir().unwrap();
     let range = quiet_activity(root.path());

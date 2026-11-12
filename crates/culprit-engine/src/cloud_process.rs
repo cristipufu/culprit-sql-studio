@@ -100,10 +100,8 @@ mod tests {
                 println!("CLI stdin reached EOF");
             }
             Ok("wrapper") => {
-                let mut command = std::process::Command::new(std::env::current_exe().unwrap());
-                command
-                    .args(["--exact", "cloud_process::tests::child_fixture", "--nocapture"])
-                    .env("CULPRIT_TEST_CLOUD_CHILD", "wait");
+                let mut command = crate::process::test_child("cloud_process::tests::child_fixture").into_std();
+                command.env("CULPRIT_TEST_CLOUD_CHILD", "wait");
                 let _ = command.spawn().unwrap().wait();
             }
             Ok("wait") => {
@@ -117,10 +115,8 @@ mod tests {
     }
 
     fn child(kind: &str) -> Command {
-        let mut command = Command::new(std::env::current_exe().unwrap());
-        command
-            .args(["--exact", "cloud_process::tests::child_fixture", "--nocapture"])
-            .env("CULPRIT_TEST_CLOUD_CHILD", kind);
+        let mut command = crate::process::test_child("cloud_process::tests::child_fixture");
+        command.env("CULPRIT_TEST_CLOUD_CHILD", kind);
         command
     }
 

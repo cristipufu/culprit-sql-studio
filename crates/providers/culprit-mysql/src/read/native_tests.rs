@@ -66,7 +66,9 @@ async fn a_native_timeout_discards_the_interrupted_client_and_preserves_known_sh
         CollectionBudget { statement_timeout_ms: 200, ..Default::default() },
         Scope::Server,
     );
-    let error = reader.read("SELECT SLEEP(30) AS value", vec![], 1).await.err().unwrap();
+    // A standalone SLEEP returns 1, rather than an error, when MySQL interrupts it. Put the delay in a predicate
+    // so this exercises an interrupted statement: https://dev.mysql.com/doc/refman/8.0/en/miscellaneous-functions.html
+    let error = reader.read("SELECT 1 AS value FROM DUAL WHERE SLEEP(30)=0", vec![], 1).await.err().unwrap();
     assert_eq!(error.code, culprit_core::ErrorCode::Timeout);
     assert_eq!(reader.close().await, SourceShutdown::Quiescent);
     assert_eq!(connector.source_shutdown(), SourceShutdown::Quiescent);

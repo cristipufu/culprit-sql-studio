@@ -6,6 +6,16 @@ use process_wrap::tokio::ProcessGroup;
 use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 use tokio::process::Command;
 
+#[cfg(test)]
+pub(crate) fn test_child(test: &str) -> Command {
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command.args(["--exact", test, "--nocapture"]);
+    // These fixtures emulate external programs and are deliberately killed. They must not leave truncated LLVM
+    // profiles in the parent suite's coverage directory; the parent still records the process-management code.
+    command.env("LLVM_PROFILE_FILE", if cfg!(windows) { "NUL" } else { "/dev/null" });
+    command
+}
+
 pub(crate) struct OwnedChild {
     pub child: Box<dyn ChildWrapper>,
     pub finished: bool,
