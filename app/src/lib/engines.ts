@@ -28,6 +28,7 @@ export function constraintLabel(engine: Engine): string {
   }
 }
 export const connectionSecurityFacts = (engine: Engine) => FACTS[engine].connection_security;
+export const evidencePresentation = (engine: Engine) => FACTS[engine].evidence_presentation;
 export const waitSampling = (engine: Engine) => FACTS[engine].wait_sampling;
 
 function productIdentity(engine: Engine, product?: string | null) {

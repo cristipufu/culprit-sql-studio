@@ -202,6 +202,10 @@ fn copies_finding(snapshot: &Snapshot, copies: Copies<'_>) -> Finding {
         .collect();
     // The change is in the code that sends the statement: the caveats quote one copy of it, as recorded.
     let quoted = !family.sample.is_empty();
+    f.facts.advice.statement_quote = quoted.then_some(culprit_core::StatementQuote::Caveat);
+    if matches!(differ, Differ::Literals) {
+        f.facts.advice.application = culprit_core::ApplicationAdvice::Preferred;
+    }
     f.fix = Some(match differ {
         Differ::Declarations(_) => Fix {
             summary: if quoted {

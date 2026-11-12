@@ -355,6 +355,9 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
             });
         }
         Warned::NoJoinPredicate(join) => {
+            if matches!(join, JoinCondition::Present) {
+                f.facts.advice.disposition = culprit_core::AdviceDisposition::NoChange;
+            }
             let (title, summary, fix) = match join {
                 JoinCondition::Missing => (
                     t!("check.plan_warnings.title.join_missing", query = capitalize(&query), tense = tense),

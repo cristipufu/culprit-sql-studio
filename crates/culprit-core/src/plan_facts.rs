@@ -6,6 +6,11 @@ use ts_rs::TS;
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
 pub struct PlanFacts {
+    /// Protection confirmed by the native provider for this measured execution. An imported or retained plan cannot
+    /// establish how Culprit executed it, and therefore leaves this unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub execution_protection: Option<ExecutionProtection>,
     // The source removed constants from the stored plan; selectivity cannot be justified by those hidden values.
     #[serde(default, skip_serializing_if = "is_false")]
     #[ts(as = "Option<bool>", optional)]
@@ -115,6 +120,14 @@ pub struct PlanFacts {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub sample_source: Option<PlanSampleSource>,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum ExecutionProtection {
+    ReadOnlyTransaction,
+    RolledBackTransaction,
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]

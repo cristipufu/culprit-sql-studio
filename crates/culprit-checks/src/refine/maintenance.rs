@@ -151,6 +151,7 @@ impl Refine for Rule {
                 Evidence::Compiles => {
                     f.summary.push_str(&t!("refine.maintenance.compiles", title = source.title.trim_end_matches('.')));
                     f.verify.extend(source.verify.iter().cloned());
+                    f.facts.advice.running_totals_explained |= source.facts.advice.running_totals_explained;
                 }
                 Evidence::Statistics { changes } => f.summary.push_str(&match changes {
                     Some(c) => t!("refine.maintenance.statistics_changes", changes = format::count(c)),

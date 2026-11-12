@@ -225,7 +225,10 @@ fn unstable_query_finding(snapshot: &Snapshot, case: UnstableQuery<'_>) -> Findi
                 cost: None,
             }
         }
-        (None, Engine::Mssql) => crate::queries::mssql_fix(snapshot, q, None, case.excess),
+        (None, Engine::Mssql) => {
+            f.facts.advice.application = culprit_core::ApplicationAdvice::Alternative;
+            crate::queries::mssql_fix(snapshot, q, None, case.excess)
+        }
         (None, Engine::Postgres) => crate::queries::postgres_fix(),
         (None, Engine::Yugabyte) => Fix { summary: t!("check.unstable_query.fix.yugabyte"), sql: None, cost: None },
         (None, Engine::Mysql) => crate::queries::mysql_fix(snapshot, q, case.recorded.lock_share(), Some(case.fewest)),

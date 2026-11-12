@@ -795,6 +795,9 @@ fn unindexed_key_finding(snapshot: &Snapshot, k: UnindexedKey<'_>) -> Finding {
         sql: Some(create_index_sql(snapshot, &fk.schema, &fk.table, &fk.columns, &[])),
         cost: write_cost(snapshot, &fk.schema, &fk.table),
     });
+    f.facts.advice.disappears_after_rescan = true;
+    f.facts.advice.running_totals_explained =
+        !k.slowed.is_empty() && crate::queries::running_totals(snapshot).is_some();
     f.verify = fk_verify(snapshot, fk, &k.slowed);
     if let Some(i) = k.filtered_index {
         f.caveats.push(filtered_caveat(i, &parent));

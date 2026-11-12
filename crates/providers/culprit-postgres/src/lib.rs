@@ -236,8 +236,10 @@ impl PostgresProvider {
                 }
                 .await;
                 let rollback = client.batch_execute(&tagged("ROLLBACK")).await;
-                let plan = result?;
+                let mut plan = result?;
                 rollback.map_err(map_error)?;
+                plan.facts_mut().execution_protection =
+                    Some(culprit_core::plan_facts::ExecutionProtection::RolledBackTransaction);
                 Ok(plan)
             }
         }

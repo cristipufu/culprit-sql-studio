@@ -204,7 +204,7 @@ export default function IndexAdvisor({ report, onOpenTable }: { report: Report; 
   const empty = a.candidates.length + a.cleanups.length + a.tables.length === 0;
   const indexCount = report.snapshot.indexes.length;
   const checkedArgs = { indexCount, indexes: count(indexCount), tableCount: report.snapshot.tables.length, tables: count(report.snapshot.tables.length) };
-  const requests = a.engine === "mssql";
+  const requests = report.snapshot.server.capabilities.includes("missing-indexes");
   const usage = report.snapshot.server.capabilities.includes("index-usage");
 
   return (

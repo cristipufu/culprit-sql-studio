@@ -178,6 +178,7 @@ fn big_result_finding(snapshot: &Snapshot, big: BigResult<'_>) -> Finding {
         runs_n = q.executions,
         runs = format::count(q.executions)
     );
+    f.facts.advice.running_totals_explained = crate::queries::running_totals(snapshot).is_some();
     f.verify = vec![match crate::queries::running_totals(snapshot) {
         Some(source) => t!("check.big_result.verify.between_scans", source = source, now = now),
         None => t!("check.big_result.verify.rescan"),

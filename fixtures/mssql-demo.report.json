@@ -449,6 +449,27 @@
       "caveats": [],
       "check": "failing-query",
       "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": true,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": false,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": null,
         "sql": "-- Capture errors raised in this database (one session for every failing statement: once is enough)\nIF NOT EXISTS (SELECT 1 FROM sys.server_event_sessions WHERE name = N'culprit_errors')\n    CREATE EVENT SESSION culprit_errors ON SERVER\n    ADD EVENT sqlserver.error_reported (\n      ACTION (sqlserver.client_app_name, sqlserver.sql_text)\n      WHERE severity >= 11 AND sqlserver.database_name = N'culprit_demo')\n    ADD TARGET package0.ring_buffer;\nIF NOT EXISTS (SELECT 1 FROM sys.dm_xe_sessions WHERE name = N'culprit_errors')\n    ALTER EVENT SESSION culprit_errors ON SERVER STATE = START;\n-- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_errors ON SERVER;",
@@ -1109,6 +1130,15 @@
       "check": "unindexed-fk",
       "confidence": "high",
       "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": true,
+          "disposition": "change",
+          "running_totals_explained": false,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
         "bloat": null,
         "histogram_columns": [],
         "index_keys": [
@@ -1259,6 +1289,27 @@
       "caveats": [],
       "check": "deadlocks",
       "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": false,
+          "statement_quote": "summary",
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": null,
         "sql": "ALTER DATABASE [culprit_demo] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;",
@@ -1317,6 +1368,27 @@
       ],
       "check": "duplicate-index",
       "confidence": "medium",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": true,
+          "disposition": "change",
+          "running_totals_explained": false,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": "Frees 26.5 MB.",
         "sql": "DROP INDEX [ix_orders_status] ON [shop].[orders];",
@@ -1360,6 +1432,27 @@
       "caveats": [],
       "check": "duplicate-index",
       "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": true,
+          "disposition": "change",
+          "running_totals_explained": false,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": "Frees 648 KB.",
         "sql": "DROP INDEX [ix_products_sku] ON [shop].[products];",
@@ -1618,6 +1711,27 @@
       ],
       "check": "lock-escalations",
       "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": true,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": false,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": null,
         "sql": "-- SQL Server doesn't record which statement escalated: this session keeps the next ones with their statement.\n-- It catches them on every table, so another table's finding starts this same session: once is enough.\nIF NOT EXISTS (SELECT 1 FROM sys.server_event_sessions WHERE name = N'culprit_lock_escalation')\n    CREATE EVENT SESSION culprit_lock_escalation ON SERVER\n    ADD EVENT sqlserver.lock_escalation (\n        SET collect_statement = 1\n        ACTION (sqlserver.sql_text, sqlserver.client_app_name)\n        WHERE sqlserver.database_name = N'culprit_demo')\n    ADD TARGET package0.ring_buffer\n    WITH (STARTUP_STATE = ON);\nIF NOT EXISTS (SELECT 1 FROM sys.dm_xe_sessions WHERE name = N'culprit_lock_escalation')\n    ALTER EVENT SESSION culprit_lock_escalation ON SERVER STATE = START;\n\n-- Then read what it caught\nSELECT e.x.value('@timestamp', 'datetime2') AS at_utc,\n       OBJECT_NAME(e.x.value('(data[@name=\"object_id\"]/value)[1]', 'int')) AS table_name,\n       e.x.value('(data[@name=\"escalated_lock_count\"]/value)[1]', 'int') AS locks,\n       e.x.value('(data[@name=\"statement\"]/value)[1]', 'nvarchar(max)') AS statement,\n       e.x.value('(action[@name=\"client_app_name\"]/value)[1]', 'nvarchar(256)') AS app\n  FROM (SELECT CAST(t.target_data AS xml) AS d\n          FROM sys.dm_xe_session_targets t\n          JOIN sys.dm_xe_sessions s ON s.address = t.event_session_address\n         WHERE s.name = N'culprit_lock_escalation' AND t.target_name = N'ring_buffer') r\n CROSS APPLY r.d.nodes('RingBufferTarget/event') e(x);\n\n-- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_lock_escalation ON SERVER;",

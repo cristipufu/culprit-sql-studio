@@ -307,6 +307,8 @@ class Database:
                           skip="cluster_tests::" if crate == "culprit-yugabyte" else None)
             return
         self.test("culprit-engine", "live_providers::live_registered_provider", library=False)
+        if self.fixture.name != "mysql-5.7":
+            self.test("culprit-engine", "live_providers::live_measured_plan_", library=False)
         fixture = self.fixture
         if fixture.engine == "postgres":
             self.test("culprit-engine", "live_providers::native_telemetry_", library=False)

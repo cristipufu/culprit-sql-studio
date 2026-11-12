@@ -7,6 +7,20 @@ use crate::model::Capability;
 pub(super) struct Mssql;
 
 impl EngineSpec for Mssql {
+    fn evidence_presentation(&self) -> EvidencePresentation {
+        EvidencePresentation {
+            storage_about: key!("ui.beyond_time.storage.about").into(),
+            storage_untimed: key!("ui.beyond_time.storage.untimed").into(),
+            health_empty: key!("ui.health.empty_hint").into(),
+            generic_plan_context: key!("ui.plan_surface.generic_settings").into(),
+            statistics_freshness: StatisticsFreshness::PerObject,
+            statistics_absence_known: false,
+            workload_windowed_by_default: true,
+            deadlock_time_window: true,
+            retained_actual_plans: true,
+        }
+    }
+
     fn connection_security(&self) -> Option<crate::ConnectionSecuritySpec> {
         Some(connection_security())
     }

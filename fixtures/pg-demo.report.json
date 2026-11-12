@@ -317,6 +317,27 @@
       "caveats": [],
       "check": "temp-spill",
       "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": true,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": "work_mem is per sort or hash, per connection: size it with your connection count in mind.",
         "sql": "-- For the role the application connects as (takes effect on its next connections):\nALTER ROLE <app_role> SET work_mem = '64MB';\n\n-- Or only for this statement, inside its transaction:\nSET LOCAL work_mem = '64MB';",
@@ -388,6 +409,15 @@
       "check": "filtered-scan",
       "confidence": "high",
       "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": true,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
         "bloat": null,
         "histogram_columns": [],
         "index_keys": [
@@ -466,6 +496,27 @@
       "caveats": [],
       "check": "planning-time",
       "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": true,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": null,
         "sql": null,
@@ -671,6 +722,27 @@
       ],
       "check": "chatty-query",
       "confidence": "medium",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": true,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": null,
         "sql": null,
@@ -726,6 +798,15 @@
       "check": "filtered-scan",
       "confidence": "high",
       "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": true,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
         "bloat": null,
         "histogram_columns": [],
         "index_keys": [
@@ -804,6 +885,27 @@
       "caveats": [],
       "check": "jit-overhead",
       "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": true,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": "This affects every statement that role runs, including analytical queries that may benefit from JIT.",
         "sql": "-- For the role the application connects as (takes effect on its next connections):\nALTER ROLE <app_role> SET jit = off;",
@@ -945,6 +1047,15 @@
       "check": "unindexed-fk",
       "confidence": "high",
       "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": true,
+          "disposition": "change",
+          "running_totals_explained": false,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
         "bloat": null,
         "histogram_columns": [],
         "index_keys": [
@@ -1009,6 +1120,27 @@
       ],
       "check": "duplicate-index",
       "confidence": "medium",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": true,
+          "disposition": "change",
+          "running_totals_explained": false,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": "Frees 13.3 MB.",
         "sql": "DROP INDEX CONCURRENTLY public.orders_status_idx;",
@@ -1052,6 +1184,27 @@
       "caveats": [],
       "check": "duplicate-index",
       "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": true,
+          "disposition": "change",
+          "running_totals_explained": false,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": "Frees 328 KB.",
         "sql": "DROP INDEX CONCURRENTLY public.products_sku_idx;",
@@ -1173,6 +1326,27 @@
       ],
       "check": "heavy-query",
       "confidence": "medium",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": true,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": null,
         "sql": null,
@@ -1243,6 +1417,27 @@
       ],
       "check": "heavy-query",
       "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": true,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": null,
         "sql": null,

@@ -13,7 +13,7 @@ import { ActivityHistoryView } from "./ActivityHistory";
 import { HealthTab, SignalTile } from "./Health";
 import type { WaitsTab } from "./Waits";
 import type { Engine } from "../gen/Engine";
-import { can, isMariadb, serverName, waitSampling } from "../lib/engines";
+import { statementMetrics, can, isMariadb, serverName, waitSampling } from "../lib/engines";
 import { t, useLanguage } from "../lib/i18n";
 import { slot, withElements } from "../lib/message-parts";
 
@@ -283,8 +283,8 @@ function WaitsView({
                 <span className="wq-meta">
                   {/* Waits of a parallel query's threads add up, so they can exceed its elapsed time: per run is always true. */}
                   {q.share_of_query < 0.95
-                    ? t("ui.waits_panel.per_run_share", { kind: report.engine === "postgres" && current.key === "other" ? "recorded" : "waits", time: duration(q.executions > 0 ? q.wait_ms / q.executions : q.wait_ms), share: percent(q.share_of_query) })
-                    : t("ui.waits_panel.per_run", { kind: report.engine === "postgres" && current.key === "other" ? "recorded" : "waits", time: duration(q.executions > 0 ? q.wait_ms / q.executions : q.wait_ms) })}
+                    ? t("ui.waits_panel.per_run_share", { kind: statementMetrics(report.engine).io_wait_within_statement_time && current.key === "other" ? "recorded" : "waits", time: duration(q.executions > 0 ? q.wait_ms / q.executions : q.wait_ms), share: percent(q.share_of_query) })
+                    : t("ui.waits_panel.per_run", { kind: statementMetrics(report.engine).io_wait_within_statement_time && current.key === "other" ? "recorded" : "waits", time: duration(q.executions > 0 ? q.wait_ms / q.executions : q.wait_ms) })}
                   {" · "}
                   {t("ui.waits_panel.runs", { n: q.executions, runs: count(q.executions) })}
                   {q.rows_per_run != null ? ` · ${t("ui.waits_panel.rows_per_run", { n: q.rows_per_run, rows: count(q.rows_per_run) })}` : ""}

@@ -2,7 +2,7 @@ import { ChevronLeft, ChevronRight, GitCompareArrows, Search, SquareArrowOutUpRi
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { LookToggle, PlanSurface, rememberLook, rememberedLook, type PlanLook } from "../components/PlanSurface";
 import { LastActualRun, PlanSourceToggle, type PlanSource } from "../components/ActualRun";
-import { measuresRuns, statementMetrics } from "../lib/engines";
+import { evidencePresentation, measuresRuns, statementMetrics } from "../lib/engines";
 import { QueryTrend, Sparkline } from "../components/Trends";
 import { RuntimeSpread } from "../components/RuntimeSpread";
 import { QueryCostsPanel } from "../components/BeyondTime";
@@ -41,8 +41,8 @@ const COLUMNS: { key: ColumnKey; optional?: boolean }[] = [
   { key: "reads", optional: true },
 ];
 
-/** A column's heading; YugabyteDB's reads are the storage entries it records. */
-function columnLabel(key: ColumnKey, native: boolean): string {
+/** A column heading reflects the native measurements present in this workload. */
+function columnLabel(key: ColumnKey, storageEntries: boolean): string {
   switch (key) {
     case "runs":
       return t("ui.queries.col.runs");
@@ -53,7 +53,7 @@ function columnLabel(key: ColumnKey, native: boolean): string {
     case "rows":
       return t("ui.queries.col.rows");
     case "reads":
-      return native ? t("ui.queries.col.entries") : t("ui.queries.col.reads");
+      return storageEntries ? t("ui.queries.col.entries") : t("ui.queries.col.reads");
   }
 }
 
@@ -98,7 +98,7 @@ function readsPerRun(query: QueryStat): number | null {
 
 export function Queries({ report }: { report: Report }) {
   const workload = report.snapshot.workload;
-  const native = report.snapshot.server.engine === "yugabyte";
+  const storageEntries = workload?.queries.some((q) => q.costs?.docdb?.rows_scanned != null) ?? false;
   const selected = useStore((s) => s.query);
   const [sort, setSort] = useState<SortKey>("share");
   const [filter, setFilter] = useState("");
@@ -178,9 +178,9 @@ export function Queries({ report }: { report: Report }) {
                     key={c.key}
                     className={`r sortable ${sort === c.key ? "sorted" : ""} ${c.optional ? "col-optional" : ""}`}
                     onClick={() => setSort(c.key)}
-                    title={c.key === "reads" && native ? t("ui.queries.col.entries_title") : c.key === "runs" && !rates.perDay ? t("ui.queries.col.runs_title", { suffix: rates.suffix }) : undefined}
+                    title={c.key === "reads" && storageEntries ? t("ui.queries.col.entries_title") : c.key === "runs" && !rates.perDay ? t("ui.queries.col.runs_title", { suffix: rates.suffix }) : undefined}
                   >
-                    {columnLabel(c.key, native)}
+                    {columnLabel(c.key, storageEntries)}
                   </th>
                 ))}
               </tr>
@@ -541,7 +541,7 @@ function QueryPlans(props: { report: Report; query: QueryStat; focus: number | n
             {t("ui.queries.plans")} <span className="muted">{variants.length}</span>
           </>
         ) : (
-          <span className="muted plan-source">{query.plan?.kind === "actual" ? t("ui.queries.actual_plan") : report.snapshot.server.engine === "mssql" ? (report.snapshot.workload ? workloadSource(report.snapshot.workload) : t("ui.queries.tab.plan")) : t("ui.queries.estimated_plan")}</span>
+          <span className="muted plan-source">{query.plan?.kind === "actual" ? t("ui.queries.actual_plan") : evidencePresentation(report.snapshot.server.engine).retained_actual_plans ? (report.snapshot.workload ? workloadSource(report.snapshot.workload) : t("ui.queries.tab.plan")) : t("ui.queries.estimated_plan")}</span>
         )}
         <span className="actions">
           {variants.length > 1 && (

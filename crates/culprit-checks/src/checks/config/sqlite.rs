@@ -121,6 +121,7 @@ fn statistics_finding(s: &Snapshot, secondary: usize, rows_known: bool) -> Findi
         secondary as f64,
         Unit::Count,
     ));
+    f.facts.advice.upkeep_on_connection_close = true;
     f.fix = Some(Fix {
         summary: t!("check.config.sqlite_statistics.fix"),
         sql: Some("ANALYZE;".into()),

@@ -239,6 +239,7 @@ fn pattern_finding(snapshot: &Snapshot, p: Pattern<'_>) -> Finding {
     } else {
         t!("check.deadlocks.title.undated", who = who, pattern = &label, tables = &tables)
     };
+    f.facts.advice.statement_quote = Some(culprit_core::StatementQuote::Summary);
     f.summary = [latest.headline.as_str(), latest.explanation.as_str()].join(" ");
     f.impact.score = base_score(f.severity) + (dated as f64).min(20.0);
     // What InnoDB keeps is the latest one: a floor, as the title says ("at least once"), never a count.

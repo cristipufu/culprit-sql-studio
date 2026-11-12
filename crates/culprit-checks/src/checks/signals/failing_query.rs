@@ -237,6 +237,7 @@ fn failing_query_finding(snapshot: &Snapshot, runs: FailingRuns<'_>) -> Finding 
     if let Some(e) = &costs.top_error {
         f.metrics.push(Metric::said_text(culprit_core::key!("check.failing_query.metric.recent_error"), e.clone()));
     }
+    f.facts.advice.diagnostic_cleanup = matches!(runs.fix, FailingFix::CaptureErrors);
     f.fix = Some(failing_fix(snapshot, &runs));
     // On running totals the failures hold every run from before the change: two scans show it.
     let now = t!(
@@ -245,6 +246,7 @@ fn failing_query_finding(snapshot: &Snapshot, runs: FailingRuns<'_>) -> Finding 
         n = q.executions,
         runs = format::count(q.executions)
     );
+    f.facts.advice.running_totals_explained = crate::queries::running_totals(snapshot).is_some();
     f.verify = vec![match crate::queries::running_totals(snapshot) {
         Some(source) => t!("check.failing_query.verify.between_scans", source = source, now = now),
         None => t!("check.failing_query.verify.rescan"),

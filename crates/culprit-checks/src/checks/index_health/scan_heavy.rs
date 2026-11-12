@@ -346,6 +346,8 @@ fn scan_heavy_finding(snapshot: &Snapshot, s: ScanHeavy<'_>) -> Finding {
     } else {
         t!("check.scan_heavy.fix.listed", generic = generic)
     };
+    f.facts.advice.disposition = culprit_core::AdviceDisposition::GatherRuntimeEvidence;
+    f.facts.advice.running_totals_explained = true;
     f.fix = Some(Fix {
         summary: [
             explain,

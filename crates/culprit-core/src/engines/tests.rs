@@ -601,3 +601,28 @@ fn setting_defaults_are_explicit_engine_facts() {
         assert_eq!(engine.spec().default_setting_value("unrecognized setting"), None);
     }
 }
+
+#[test]
+fn evidence_presentation_has_explicit_native_semantics_for_every_engine() {
+    use super::presentation::StatisticsFreshness::*;
+    let cases = [
+        (Engine::Mssql, PerObject, true, true, true),
+        (Engine::Postgres, PerTable, false, false, false),
+        (Engine::Yugabyte, Unavailable, false, false, false),
+        (Engine::Mysql, PerTable, false, true, false),
+        (Engine::Sqlite, Unavailable, false, false, false),
+    ];
+    assert_eq!(cases.map(|c| c.0), Engine::ALL);
+    for (engine, statistics, windowed, deadlocks, retained) in cases {
+        let facts = engine.facts().evidence_presentation;
+        assert_eq!(facts.statistics_freshness, statistics);
+        assert_eq!(facts.statistics_absence_known, engine == Engine::Postgres);
+        assert_eq!(
+            (facts.workload_windowed_by_default, facts.deadlock_time_window, facts.retained_actual_plans),
+            (windowed, deadlocks, retained)
+        );
+        for key in [&facts.storage_about, &facts.storage_untimed, &facts.health_empty, &facts.generic_plan_context] {
+            assert_ne!(say(key, &[]), *key, "missing presentation message for {engine:?}");
+        }
+    }
+}

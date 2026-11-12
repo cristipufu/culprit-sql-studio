@@ -3,6 +3,7 @@
 //! non-work waits (`Waited`).
 
 use super::*;
+use culprit_core::{AdviceDisposition, ApplicationAdvice, StatementQuote};
 
 /// What a coding agent does about the finding in the project: where the change lives (the application's statements, its
 /// schema, the server's settings, the database's upkeep, the connection pool) and whether there is one to make. Only for
@@ -34,7 +35,7 @@ pub(super) fn codebase(report: &Report, finding: &Finding) -> String {
             s.connection
         );
     }
-    let sql = FixSql::read(finding.fix.as_ref().and_then(|f| f.sql.as_deref()).unwrap_or_default(), s.server.engine);
+    let sql = FixSql::read(finding, s.server.engine);
     let mut said: Vec<String> = Vec::new();
     if finding.inactive && statements.is_empty() && finding.check == "missing-index" {
         said.push("This scan identifies no statement behind this historical index request. Make no change for it unless the optimizer asks again; a later scan can show the new request.".into());
@@ -68,7 +69,7 @@ pub(super) fn codebase(report: &Report, finding: &Finding) -> String {
         where_the_change_is(s, finding, &sql, &statements, &app, &mut said);
     }
     // A fix that asks for no change has none to wait for: the next scan shows where the finding stands.
-    let declines = !finding.inactive && !once && finding.fix.as_ref().is_some_and(advises_no_change);
+    let declines = !finding.inactive && !once && advises_no_change(finding);
     said.push(verify_line(s, finding, &sql, &statements, once, declines));
     said.retain(|s| !s.is_empty());
     said.join(" ")
@@ -83,8 +84,7 @@ fn where_the_change_is(
     app: &[&QueryStat],
     said: &mut Vec<String>,
 ) {
-    let fix = finding.fix.as_ref();
-    let declines = fix.is_some_and(advises_no_change);
+    let declines = advises_no_change(finding);
     // Reaching a cloud cap has two routes: reduce the workload first, then change capacity if needed. Its
     // Configuration category doesn't make batching the application's writes a server setting.
     if finding.check == "tier-limit" {
@@ -101,12 +101,7 @@ fn where_the_change_is(
         ));
         return;
     }
-    if fix.is_some_and(|f| {
-        f.sql.is_none()
-            && (finding.check == "scan-heavy"
-                || f.summary.starts_with("Read a retained actual plan")
-                || f.summary.starts_with("Capture an actual execution plan"))
-    }) {
+    if finding.facts.advice.disposition == AdviceDisposition::GatherRuntimeEvidence {
         said.push(
             "Gather the runtime evidence the fix asks for first, from a retained actual plan or a representative run \
              in a test environment. Check the actual row counts and IO for that run before choosing a change to \
@@ -144,7 +139,7 @@ fn where_the_change_is(
              choose a query change, find where the application sends {these} (search for {their} table and column \
              names) and make that change in the calling code."
         ));
-        if fix.is_some_and(|f| f.summary.contains("set these session variables")) {
+        if finding.facts.advice.application == ApplicationAdvice::SessionSettings {
             said.push(
                 "If you choose the session-setting option, set those variables on the application's connections."
                     .into(),
@@ -194,14 +189,9 @@ fn where_the_change_is(
     }
     if sql.upkeep {
         // Only SQLite's PRAGMA optimize is made to run as connections close: other upkeep reads whole tables.
-        let on_close = fix.is_some_and(|f| {
-            [Some(&f.summary), f.sql.as_ref()]
-                .into_iter()
-                .flatten()
-                .any(|t| t.to_ascii_lowercase().contains("pragma optimize"))
-        });
+        let on_close = finding.facts.advice.upkeep_on_connection_close;
         // A fix that says the database makes the upkeep itself ("No update is needed…") offers it, not asks for it.
-        if fix.is_some_and(offers_optional_upkeep) {
+        if finding.facts.advice.disposition == AdviceDisposition::OptionalUpkeep {
             said.push(
                 "The fix's upkeep is optional, as it says: the database makes it on its own. If you run it, run it \
                  against the database outside busy hours; it isn't a change to the application's code."
@@ -278,7 +268,7 @@ fn where_the_change_is(
         // Every table the finding is about, and the statements its summary quotes, if it quotes any (a deadlock's).
         let tables = finding_tables(finding);
         let names = format::list(&tables.iter().map(|t| format!("`{t}`")).collect::<Vec<_>>());
-        said.push(if finding.summary.contains('“') {
+        said.push(if finding.facts.advice.statement_quote == Some(StatementQuote::Summary) {
             format!(
                 "The statements to look for are quoted under *What's happening*: find the code that sends them \
                  (search for {names}) and make the change the fix describes there."
@@ -417,7 +407,7 @@ fn verify_line(
     // Said once a brief: not where the finding's own *How to verify* says it already.
     let kept = |stay: &str| {
         workload
-            .filter(|w| !w.is_windowed() && !says_running_totals(finding, w))
+            .filter(|w| !w.is_windowed() && !says_running_totals(finding))
             .map(|w| {
                 format!(
                     ": {} keeps running totals, so {stay} in them and their numbers move only as new runs add up",
@@ -495,12 +485,9 @@ fn verify_line(
     }
 }
 
-/// Whether the finding's own *How to verify* says that `w` keeps running totals (the one sentence every verify step on
-/// such a source uses), or that the counters it compares do ("The scan counters of orders keep totals since they
-/// started"), so the brief doesn't say it again.
-fn says_running_totals(finding: &Finding, w: &culprit_core::Workload) -> bool {
-    let sentence = format!("{} keeps running totals", w.source_name());
-    finding.verify.iter().any(|v| v.contains(&sentence) || v.contains("keep totals since"))
+/// The producer has already explained running totals under *How to verify*, so the brief does not repeat them.
+fn says_running_totals(finding: &Finding) -> bool {
+    finding.facts.advice.running_totals_explained
 }
 
 /// Whether a re-scan can show the finding gone (`culprit verify`, the step every export adds after *How to verify*).
@@ -508,10 +495,10 @@ fn says_running_totals(finding: &Finding, w: &culprit_core::Workload) -> bool {
 /// source of running totals: those totals keep it on the list after the right change.
 pub fn gone_after_rescan(report: &Report, finding: &Finding) -> bool {
     // A finding that reads a plan (an index the plan then seeks) is gone from the next scan whatever the totals keep.
-    let says_gone = finding.verify.iter().any(|v| v.contains("this finding should be gone"));
+    let says_gone = finding.facts.advice.disappears_after_rescan;
     finding.is_actionable()
         && finding.verification_basis != culprit_core::VerificationBasis::CounterChange
-        && (says_gone || report.snapshot.workload.as_ref().is_none_or(|w| !says_running_totals(finding, w)))
+        && (says_gone || report.snapshot.workload.as_ref().is_none_or(|_| !says_running_totals(finding)))
 }
 
 /// "`id`'s numbers under *Evidence*": what of a finding without its own verify step a later scan shows to compare.
@@ -558,20 +545,20 @@ struct FixSql {
     reads: bool,
     /// Anything else: a query rewrite, a batch, an EXPLAIN of the statement.
     other: bool,
-    /// A comment offers a change made in the application ("2. Or in the application, … append OPTION (…)").
+    /// The producer offers a change made in the application.
     in_the_application: bool,
-    /// A comment calls the SQL the fallback for a change in the application ("Prefer fixing the app. As a fallback:").
+    /// The producer makes SQL a fallback for the preferred application change.
     fallback: bool,
 }
 
 impl FixSql {
-    fn read(sql: &str, engine: Engine) -> FixSql {
-        let (comments, code): (Vec<&str>, Vec<&str>) = sql.lines().partition(|l| l.trim_start().starts_with("--"));
-        let routes = comments.join(" ").to_ascii_lowercase();
+    fn read(finding: &Finding, engine: Engine) -> FixSql {
+        let sql = finding.fix.as_ref().and_then(|f| f.sql.as_deref()).unwrap_or_default();
+        let code: Vec<&str> = sql.lines().filter(|l| !l.trim_start().starts_with("--")).collect();
         let mut out = FixSql {
-            in_the_application: routes.contains("in the application"),
-            fallback: routes.contains("fallback"),
-            session_drop: routes.contains("drop event session"),
+            in_the_application: finding.facts.advice.application == ApplicationAdvice::Alternative,
+            fallback: finding.facts.advice.application == ApplicationAdvice::Preferred,
+            session_drop: finding.facts.advice.diagnostic_cleanup,
             app_role: sql.contains("<app_role>"),
             ..FixSql::default()
         };
@@ -699,16 +686,8 @@ fn guarded(statement: &str) -> &str {
 
 /// A fix that says the change isn't worth making as things stand ("usually not worth having"), or that there is nothing
 /// to change ("Nothing to create", "Nothing to do while they help").
-fn advises_no_change(fix: &Fix) -> bool {
-    let text = fix.summary.to_ascii_lowercase();
-    text.contains("not worth") || text.starts_with("nothing to ") || text.contains(". nothing to ")
-}
-
-/// A fix whose SQL the database runs on its own anyway ("No update is needed before a query uses these statistics: SQL
-/// Server refreshes them…"): running it is an option, not the change.
-fn offers_optional_upkeep(fix: &Fix) -> bool {
-    let text = fix.summary.to_ascii_lowercase();
-    text.starts_with("no ") && text.split(':').next().is_some_and(|lead| lead.contains(" is needed"))
+fn advises_no_change(finding: &Finding) -> bool {
+    finding.facts.advice.disposition == AdviceDisposition::NoChange || finding.facts.nothing_to_check.is_some()
 }
 
 /// Where a finding's time went when it wasn't work, with a fix that changes no statement.
@@ -729,8 +708,8 @@ enum Waited {
 /// statement: the slow runs of unstable-query and parameter-sensitive, and a heavy query that waited for locks, for an
 /// application lock or on a pause of its own (`queries::idle_kind`, the way heavy-query read it).
 fn waited_rather_than_worked(s: &Snapshot, finding: &Finding, app: &[&QueryStat]) -> Option<Waited> {
-    let fix = finding.fix.as_ref()?;
-    let sql = FixSql::read(fix.sql.as_deref().unwrap_or_default(), s.server.engine);
+    finding.fix.as_ref()?;
+    let sql = FixSql::read(finding, s.server.engine);
     if sql.upkeep || sql.schema || sql.plan_pin || sql.local || sql.other || sql.in_the_application {
         return None;
     }
@@ -807,7 +786,7 @@ fn finding_tables(finding: &Finding) -> Vec<String> {
 /// A caveat quotes one of the finding's statements as the source recorded it ("One of them, as recorded:" and its
 /// text): where no statement is listed, that is the one to look for in the code.
 fn quotes_its_statement(finding: &Finding) -> bool {
-    finding.caveats.iter().any(|c| c.contains(", as recorded:\n"))
+    finding.facts.advice.statement_quote == Some(StatementQuote::Caveat)
 }
 
 /// "`public.apps`": the tables an insert's foreign keys reference, whose rows it checks and share-locks.

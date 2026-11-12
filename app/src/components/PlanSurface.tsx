@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import type { Plan } from "../gen/Plan";
 import type { QueryStat } from "../gen/QueryStat";
 import { planShares } from "../lib/actual";
-import { can } from "../lib/engines";
+import { evidencePresentation, can } from "../lib/engines";
 import { allNodes, cost, findingNoShareReason, insightsByNode, noShareReason } from "../lib/plan-format";
 import { NodeDetails } from "./NodeDetails";
 import { DocdbWork } from "./DocdbWork";
@@ -60,10 +60,10 @@ export function PlanSurface({ plan, query, focus, look, badge }: { plan: Plan; q
   return (
     <div className="plan-surface">
       {plan.facts.constants_redacted && <p className="notice">{t("ui.plan_surface.redacted")}</p>}
-      {!plan.insights?.note && plan.kind !== "actual" && (plan.props["Generic Plan"] || plan.kind === "generic") && (
+      {!plan.insights?.note && plan.kind !== "actual" && plan.kind === "generic" && (
         <PlanAssessmentNotes note={[
           t("ui.plan_surface.generic"),
-          plan.engine === "sqlite" ? t("ui.plan_surface.generic_sqlite") : t("ui.plan_surface.generic_settings"),
+          t(evidencePresentation(plan.engine).generic_plan_context),
           t("ui.plan_surface.generic_history"),
         ].join(" ")} />
       )}

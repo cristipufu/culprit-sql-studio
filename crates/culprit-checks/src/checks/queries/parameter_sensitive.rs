@@ -494,6 +494,9 @@ fn parameter_sensitive_finding(snapshot: &Snapshot, case: ParameterSensitive<'_>
             f.confidence = if tail.logged { Confidence::Medium } else { Confidence::High };
         }
     }
+    if matches!(case.fix, Ladder::Mssql(_)) {
+        f.facts.advice.application = culprit_core::ApplicationAdvice::Alternative;
+    }
     f.fix = Some(match &case.fix {
         Ladder::Mssql(ladder) => ladder.fix(snapshot, q),
         Ladder::Mysql { lock_share, slow_runs } => mysql_fix(snapshot, q, *lock_share, *slow_runs),

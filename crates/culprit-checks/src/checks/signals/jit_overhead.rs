@@ -143,6 +143,7 @@ fn jit_overhead_finding(snapshot: &Snapshot, case: JitOverhead<'_>) -> Finding {
         n = q.executions,
         runs = format::count(q.executions)
     );
+    f.facts.advice.running_totals_explained = crate::queries::running_totals(snapshot).is_some();
     f.verify = vec![match crate::queries::running_totals(snapshot) {
         Some(source) => t!("check.jit_overhead.verify.between_scans", source = source, now = now),
         None => t!("check.jit_overhead.verify.rescan"),

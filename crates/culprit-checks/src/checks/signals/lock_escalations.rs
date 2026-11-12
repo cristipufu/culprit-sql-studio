@@ -332,6 +332,7 @@ fn lock_escalations_finding(snapshot: &Snapshot, e: EscalatedTable<'_>) -> Findi
     };
     let started_on = started.map(crate::queries::when_phrase);
     f.verification_basis = culprit_core::VerificationBasis::CounterChange;
+    f.facts.advice.diagnostic_cleanup = true;
     if historical {
         f.actionability = Actionability::History;
     }

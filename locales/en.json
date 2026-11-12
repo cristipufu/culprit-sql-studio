@@ -5393,6 +5393,7 @@
   "ui.actual_run.loading": "Reading the last run…",
   "ui.actual_run.measure": "Measure it once",
   "ui.actual_run.measure_hint": "Runs the statement once; reads only on production, and writes are rolled back elsewhere",
+  "ui.actual_run.measured": "Measured just now: Culprit ran the statement once.",
   "ui.actual_run.measured_read_only": "Measured just now: Culprit ran the statement once inside a read-only transaction.",
   "ui.actual_run.measured_rolled_back": "Measured just now: Culprit ran the statement once inside a transaction that was rolled back.",
   "ui.actual_run.measuring": "Running it once and measuring every step…",

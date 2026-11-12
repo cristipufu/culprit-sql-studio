@@ -498,6 +498,8 @@ fn large_table_finding(snapshot: &Snapshot, large: LargeTable<'_>) -> Finding {
         sql: None,
         cost: None,
     });
+    f.facts.advice.running_totals_explained =
+        !statements.is_empty() && crate::queries::running_totals(snapshot).is_some();
     let compare_time = if statements.is_empty() {
         t!("check.large_rows.verify.record_runs")
     } else {

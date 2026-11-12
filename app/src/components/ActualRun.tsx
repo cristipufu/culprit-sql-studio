@@ -5,12 +5,13 @@ import type { Plan } from "../gen/Plan";
 import type { QueryStat } from "../gen/QueryStat";
 import { api, errorMessage, type ApiError } from "../lib/api";
 import { canOpenQueryInEditor, prepareQueryForEditor } from "../lib/editor-sql";
-import { serverName } from "../lib/engines";
+import { evidencePresentation, serverName } from "../lib/engines";
 import { t } from "../lib/i18n";
 import { tx } from "../lib/message-parts";
 import { currentReport, setState, useStore } from "../lib/store";
 import { PlanSurface, type PlanLook } from "./PlanSurface";
 import { copyAndTell } from "../lib/clipboard";
+import { measurementOrigin } from "../lib/measurement";
 import { tabListKeys } from "../lib/keys";
 
 export type PlanSource = "plan" | "actual";
@@ -93,7 +94,7 @@ export function LastActualRun(props: { connection: string; engine: Engine; query
       <>
         {state.measured && (
           <div className="actual-origin">
-            <Activity size={12} /> {engine === "mysql" ? t("ui.actual_run.measured_read_only") : t("ui.actual_run.measured_rolled_back")}
+            <Activity size={12} /> {measurementOrigin(state.plan.facts.execution_protection)}
           </div>
         )}
         <PlanSurface key={`actual-${query.id}-${planId}`} plan={state.plan} look={look} />
@@ -109,7 +110,7 @@ export function LastActualRun(props: { connection: string; engine: Engine; query
       <p className="am-body">
         {settingOff ? (
           tx("ui.actual_run.setting_explain", {}, { setting: <span className="mono">LAST_QUERY_PLAN_STATS</span> })
-        ) : engine === "mssql" ? (
+        ) : evidencePresentation(engine).retained_actual_plans ? (
           state.error.hint
         ) : (
           <>

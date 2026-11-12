@@ -200,3 +200,23 @@ async fn telemetry_roundtrip(spec: ConnectionSpec, activity: bool) {
     }
     assert!(projected > 10, "the native fixture must project actual rows, not only empty streams");
 }
+
+#[tokio::test]
+#[ignore = "requires an owned disposable database from dev/smoke-providers.py"]
+async fn live_measured_plan_reports_confirmed_protection_without_changing_data() {
+    use culprit_core::{ExplainMode, plan_facts::ExecutionProtection};
+    let spec = connection();
+    let engine = spec.engine.unwrap();
+    let provider = culprit_engine::registry::provider(&spec).unwrap();
+    let table = engine.dialect().qualified(&[&configured("CULPRIT_SMOKE_SCHEMA"), "smoke_rows"]);
+    let sql = format!("SELECT id, value FROM {table} WHERE id = 42");
+    let before = provider.run(&sql, 2).await.unwrap();
+    let measured = provider.explain(&sql, ExplainMode::Analyze).await.unwrap();
+    let protection = match engine {
+        Engine::Mssql | Engine::Postgres | Engine::Yugabyte => ExecutionProtection::RolledBackTransaction,
+        Engine::Mysql => ExecutionProtection::ReadOnlyTransaction,
+        Engine::Sqlite => panic!("SQLite does not measure application statements"),
+    };
+    assert_eq!(measured.facts().execution_protection, Some(protection));
+    assert_eq!(provider.run(&sql, 2).await.unwrap().rows, before.rows);
+}

@@ -607,6 +607,11 @@ fn render(snapshot: &Snapshot, q: &QueryStat, case: &HeavyCase) -> Finding {
     if let Some((_, _, names)) = &case.triggers {
         f.metrics.push(Metric::said_text(culprit_core::key!("check.heavy_query.metric.triggers"), names.join(", ")));
     }
+    if matches!(case.remedy, Remedy::Measure { .. }) {
+        f.facts.advice.disposition = culprit_core::AdviceDisposition::GatherRuntimeEvidence;
+    }
+    f.facts.advice.running_totals_explained =
+        matches!(case.verify, Verify::Scan(_)) && running_totals(snapshot).is_some();
     f.fix = Some(case.remedy.fix(snapshot, q));
     f.verify = vec![match &case.verify {
         Verify::Scan(expect) => verify_line(snapshot, q, *expect),

@@ -266,6 +266,27 @@
       "caveats": [],
       "check": "heavy-query",
       "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": true,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": null,
         "sql": null,

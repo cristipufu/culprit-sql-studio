@@ -221,6 +221,7 @@ fn lock_time_finding(snapshot: &Snapshot, wait: LockWait<'_>) -> Finding {
         n = q.executions,
         runs = format::count(q.executions)
     );
+    f.facts.advice.running_totals_explained = crate::queries::running_totals(snapshot).is_some();
     f.verify = vec![match crate::queries::running_totals(snapshot) {
         Some(source) => t!("check.lock_time.verify.between_scans", source = source, now = now),
         None => t!("check.lock_time.verify.rescan"),

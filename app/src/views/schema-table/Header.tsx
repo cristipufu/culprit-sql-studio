@@ -1,3 +1,4 @@
+import { evidencePresentation } from "../../lib/engines";
 import { ChevronRight, Copy } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { TableSignalFacts } from "../../components/BeyondTime";
@@ -24,8 +25,9 @@ export function Header({ report, table, findings }: { report: Report; table: Tab
   // SQL Server keeps statistics per object, not per table: show the stalest one Culprit read for this table.
   const stats = snapshot.statistics.filter((s) => s.schema === table.schema && s.table === table.name && s.last_updated);
   const stalest = stats.reduce<string | null>((oldest, s) => (oldest == null || (s.last_updated ?? "") < oldest ? s.last_updated : oldest), null);
-  const analyzed = snapshot.server.engine === "mssql" ? stalest : table.last_analyze;
-  const knowsStats = snapshot.server.engine === "postgres" || stats.length > 0 || table.last_analyze != null;
+  const freshness = evidencePresentation(snapshot.server.engine).statistics_freshness;
+  const analyzed = freshness === "per-object" ? stalest : table.last_analyze;
+  const knowsStats = evidencePresentation(snapshot.server.engine).statistics_absence_known || stats.length > 0 || table.last_analyze != null;
   const writes = [table.inserts, table.updates, table.deletes].every((v) => v == null)
     ? null
     : (table.inserts ?? 0) + (table.updates ?? 0) + (table.deletes ?? 0);

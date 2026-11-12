@@ -1,5 +1,16 @@
 {
   "mssql": {
+    "evidence_presentation": {
+      "storage_about": "ui.beyond_time.storage.about",
+      "storage_untimed": "ui.beyond_time.storage.untimed",
+      "health_empty": "ui.health.empty_hint",
+      "generic_plan_context": "ui.plan_surface.generic_settings",
+      "statistics_freshness": "per-object",
+      "statistics_absence_known": false,
+      "workload_windowed_by_default": true,
+      "deadlock_time_window": true,
+      "retained_actual_plans": true
+    },
     "partition_tail": "unbounded",
     "label": "SQL Server",
     "products": [
@@ -120,6 +131,17 @@
     }
   },
   "postgres": {
+    "evidence_presentation": {
+      "storage_about": "ui.beyond_time.storage.about_postgres",
+      "storage_untimed": "ui.beyond_time.storage.untimed_postgres",
+      "health_empty": "ui.health.empty_hint",
+      "generic_plan_context": "ui.plan_surface.generic_settings",
+      "statistics_freshness": "per-table",
+      "statistics_absence_known": true,
+      "workload_windowed_by_default": false,
+      "deadlock_time_window": false,
+      "retained_actual_plans": false
+    },
     "partition_tail": "from-catalog",
     "label": "PostgreSQL",
     "products": [
@@ -273,6 +295,17 @@
     }
   },
   "yugabyte": {
+    "evidence_presentation": {
+      "storage_about": "ui.beyond_time.storage.about",
+      "storage_untimed": "ui.beyond_time.storage.untimed",
+      "health_empty": "ui.health.empty_hint",
+      "generic_plan_context": "ui.plan_surface.generic_settings",
+      "statistics_freshness": "unavailable",
+      "statistics_absence_known": false,
+      "workload_windowed_by_default": false,
+      "deadlock_time_window": false,
+      "retained_actual_plans": false
+    },
     "partition_tail": "from-catalog",
     "label": "YugabyteDB",
     "products": [
@@ -425,6 +458,17 @@
     }
   },
   "mysql": {
+    "evidence_presentation": {
+      "storage_about": "ui.beyond_time.storage.about",
+      "storage_untimed": "ui.beyond_time.storage.untimed",
+      "health_empty": "ui.health.empty_hint",
+      "generic_plan_context": "ui.plan_surface.generic_settings",
+      "statistics_freshness": "per-table",
+      "statistics_absence_known": false,
+      "workload_windowed_by_default": false,
+      "deadlock_time_window": true,
+      "retained_actual_plans": false
+    },
     "partition_tail": "from-catalog",
     "label": "MySQL",
     "products": [
@@ -591,6 +635,17 @@
     }
   },
   "sqlite": {
+    "evidence_presentation": {
+      "storage_about": "ui.beyond_time.storage.about",
+      "storage_untimed": "ui.beyond_time.storage.untimed",
+      "health_empty": "ui.health.empty_sqlite",
+      "generic_plan_context": "ui.plan_surface.generic_sqlite",
+      "statistics_freshness": "unavailable",
+      "statistics_absence_known": false,
+      "workload_windowed_by_default": false,
+      "deadlock_time_window": false,
+      "retained_actual_plans": false
+    },
     "partition_tail": "unsupported",
     "label": "SQLite",
     "products": [

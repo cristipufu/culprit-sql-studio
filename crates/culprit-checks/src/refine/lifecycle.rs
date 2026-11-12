@@ -349,6 +349,7 @@ impl Decision {
                     fix.summary =
                         t!("refine.lifecycle.gone_fix", n = self.tables.len(), tables = format::list(&self.tables));
                 }
+                f.facts.advice.running_totals_explained = false;
                 f.verify = vec![t!("refine.lifecycle.gone_verify")];
                 f.facts.nothing_to_check = Some(NothingToCheck::Gone);
             }
@@ -362,6 +363,7 @@ impl Decision {
                 if let Some(fix) = &mut f.fix {
                     fix.summary = t!("refine.lifecycle.index_candidate", candidate = std::mem::take(&mut fix.summary));
                 }
+                f.facts.advice.running_totals_explained = false;
                 f.verify = vec![t!("refine.lifecycle.index_candidate_verify")];
                 f.facts.nothing_to_check = None;
             }
@@ -372,6 +374,7 @@ impl Decision {
                     return;
                 }
                 f.facts.nothing_to_check = Some(NothingToCheck::UntilItReturns);
+                f.facts.advice.running_totals_explained = false;
                 f.verify = vec![if f.queries.is_empty() && f.check == "missing-index" {
                     t!("refine.lifecycle.verify_if_asked_again")
                 } else if f.queries.len() <= 1 {
@@ -483,6 +486,19 @@ mod tests {
             assert_eq!(findings[1].verify, [t!("refine.lifecycle.verify_if_it_runs_again")]);
             assert_eq!(findings[1].facts.nothing_to_check, Some(NothingToCheck::UntilItReturns));
         });
+    }
+
+    #[test]
+    fn replacing_verification_retires_its_counter_explanation() {
+        let (s, original) = scenario();
+        for change in [Change::Gone, Change::IndexWork, Change::Verification] {
+            let mut finding = original.clone();
+            finding.facts.advice.running_totals_explained = true;
+            let decision = Decision { at: 0, queries: vec![], tables: vec!["shop.orders".into()], change };
+            decision.apply_state(&mut finding);
+            decision.render(&s, &mut finding);
+            assert!(!finding.facts.advice.running_totals_explained);
+        }
     }
 
     #[test]

@@ -7,6 +7,20 @@ use crate::dialect::{NewIndex, keys, unique};
 pub(super) struct Sqlite;
 
 impl EngineSpec for Sqlite {
+    fn evidence_presentation(&self) -> EvidencePresentation {
+        EvidencePresentation {
+            storage_about: key!("ui.beyond_time.storage.about").into(),
+            storage_untimed: key!("ui.beyond_time.storage.untimed").into(),
+            health_empty: key!("ui.health.empty_sqlite").into(),
+            generic_plan_context: key!("ui.plan_surface.generic_sqlite").into(),
+            statistics_freshness: StatisticsFreshness::Unavailable,
+            statistics_absence_known: false,
+            workload_windowed_by_default: false,
+            deadlock_time_window: false,
+            retained_actual_plans: false,
+        }
+    }
+
     fn partition_tail(&self) -> PartitionTail {
         PartitionTail::Unsupported
     }

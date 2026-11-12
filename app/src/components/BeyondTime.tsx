@@ -6,7 +6,7 @@ import type { QueryStat } from "../gen/QueryStat";
 import type { Replica } from "../gen/Replica";
 import type { Report } from "../gen/Report";
 import type { TableStat } from "../gen/TableStat";
-import { constraintLabel, serverName, statementMetrics } from "../lib/engines";
+import { evidencePresentation, constraintLabel, serverName, statementMetrics } from "../lib/engines";
 import { bytes, count, duration, percent, rowCount, storageLatency, when } from "../lib/format";
 import { key, t } from "../lib/i18n";
 import { waitKey } from "../lib/waits";
@@ -222,9 +222,7 @@ function fileName(f: FileIo): string {
 function storageLead(files: FileIo[], engine: Engine, report: Report): { text: string; status: Status } {
   const timed = files.filter((f) => f.read_ms != null || f.write_ms != null);
   if (timed.length === 0) {
-    return engine === "postgres"
-      ? { text: t("ui.beyond_time.storage.untimed_postgres"), status: "info" }
-      : { text: t("ui.beyond_time.storage.untimed"), status: "info" };
+    return { text: t(evidencePresentation(engine).storage_untimed), status: "info" };
   }
   const slow = [...files].map((f) => ({ f, s: storageStatus(report, f) })).sort((a, b) => RANK[a.s] - RANK[b.s])[0];
   if (slow && (slow.s === "bad" || slow.s === "watch")) {
@@ -273,7 +271,7 @@ export function StorageLatency({ files, engine, report, compact }: { files: File
         <div className="io-head">
           <h4>{t("ui.beyond_time.storage.title")}</h4>
           <span className="muted">
-            {engine === "postgres" ? t("ui.beyond_time.storage.about_postgres") : t("ui.beyond_time.storage.about")}
+            {t(evidencePresentation(engine).storage_about)}
           </span>
         </div>
       )}

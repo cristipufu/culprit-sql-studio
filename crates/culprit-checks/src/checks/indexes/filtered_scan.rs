@@ -599,6 +599,7 @@ fn filtered_scan_finding(snapshot: &Snapshot, s: FilteredScan<'_>) -> Finding {
             t!("check.filtered_scan.fix", keys = &key_text, n = &n),
         ),
     });
+    f.facts.advice.running_totals_explained = crate::queries::running_totals(snapshot).is_some();
     f.verify = if s.gone {
         f.facts.nothing_to_check = Some(culprit_core::NothingToCheck::Gone);
         vec![t!("check.filtered_scan.verify.gone", table = &table_name)]

@@ -133,6 +133,13 @@ impl Refine for Rule {
             if let Evidence::Chain { promote: true, .. } = d.evidence {
                 findings[d.into].actionability = Actionability::OptionalImprovement;
                 findings[d.into].fix = absorption.source.fix.clone();
+                // Promote the fix's routing together; keep the target's summary and verification evidence.
+                let advice = &mut findings[d.into].facts.advice;
+                let source = &absorption.source.facts.advice;
+                advice.disposition = source.disposition;
+                advice.application = source.application;
+                advice.diagnostic_cleanup = source.diagnostic_cleanup;
+                advice.upkeep_on_connection_close = source.upkeep_on_connection_close;
             }
             let target = &mut findings[d.into];
             let mut note = None;

@@ -117,6 +117,7 @@ fn duplicate_index_finding(snapshot: &Snapshot, d: DuplicateIndex<'_>) -> Findin
         sql: Some(drop_index_for_snapshot(snapshot, &a.schema, &a.table, &a.name)),
         cost: Some(t!("check.duplicate_index.fix_cost", size = format::bytes(d.size))),
     });
+    f.facts.advice.disappears_after_rescan = true;
     f.verify = vec![
         t!("check.duplicate_index.verify.gone", index = &a.name, keeper = &b.name),
         t!("check.duplicate_index.verify.timing", table = &table_name),

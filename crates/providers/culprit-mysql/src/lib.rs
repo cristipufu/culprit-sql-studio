@@ -145,6 +145,11 @@ impl MysqlProvider {
                         plan_json::parse(&json, PlanKind::Actual, Some(statement), schema)
                     }
                 }
+                .map(|mut plan| {
+                    plan.facts_mut().execution_protection =
+                        Some(culprit_core::plan_facts::ExecutionProtection::ReadOnlyTransaction);
+                    plan
+                })
             }
         }
     }

@@ -11,6 +11,7 @@
 mod mssql;
 mod mysql;
 mod postgres;
+mod presentation;
 mod products;
 mod sqlite;
 #[cfg(test)]
@@ -18,6 +19,7 @@ mod tests;
 mod timescale;
 mod yugabyte;
 
+pub use presentation::{EvidencePresentation, StatisticsFreshness};
 pub use products::{DatabaseProduct, ProductFacts, ProductSpec};
 pub use yugabyte::session_target as ysql_session_target;
 
@@ -73,6 +75,7 @@ pub enum ConstraintValidation {
 
 /// One engine, as checks and every surface see it.
 pub trait EngineSpec: Send + Sync {
+    fn evidence_presentation(&self) -> EvidencePresentation;
     /// TLS policy and native option names; file engines have no network security settings.
     fn connection_security(&self) -> Option<crate::ConnectionSecuritySpec> {
         None
@@ -432,6 +435,7 @@ impl Connect {
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]
 #[ts(export)]
 pub struct EngineFacts {
+    pub evidence_presentation: EvidencePresentation,
     pub partition_tail: PartitionTail,
     pub label: String,
     pub products: Vec<ProductFacts>,
@@ -498,6 +502,7 @@ impl Engine {
         let spec = self.spec();
         let abilities = spec.abilities();
         EngineFacts {
+            evidence_presentation: spec.evidence_presentation(),
             connection_security: spec.connection_security(),
             partition_tail: spec.partition_tail(),
             products: spec.products().iter().map(|product| product.facts()).collect(),

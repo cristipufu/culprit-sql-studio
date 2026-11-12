@@ -1,3 +1,4 @@
+import { evidencePresentation } from "../lib/engines";
 import { useState, type MouseEvent } from "react";
 import type { Engine } from "../gen/Engine";
 import type { OpenTransaction } from "../gen/OpenTransaction";
@@ -81,7 +82,7 @@ export function HealthTab({
       <div className="waits-empty">
         <h3>{t("ui.health.empty")}</h3>
         <p>
-          {engine === "sqlite" ? t("ui.health.empty_sqlite") : t("ui.health.empty_hint")}
+          {t(evidencePresentation(engine ?? report.snapshot.server.engine).health_empty)}
         </p>
       </div>
     );

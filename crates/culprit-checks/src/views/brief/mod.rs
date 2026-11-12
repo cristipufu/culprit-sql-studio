@@ -1,8 +1,8 @@
 use std::fmt::Write;
 
 use culprit_core::{
-    Category, Engine, Finding, Fix, Metric, NodeKind, Plan, PlanNode, QueryRef, QueryStat, Report, Snapshot,
-    SubjectKind, Unit, Workload, format,
+    Category, Engine, Finding, Metric, NodeKind, Plan, PlanNode, QueryRef, QueryStat, Report, Snapshot, SubjectKind,
+    Unit, Workload, format,
 };
 
 use crate::queries::IdleKind;
@@ -89,7 +89,7 @@ pub fn agent_brief(report: &Report, finding: &Finding) -> String {
     }
 
     if let Some(fix) = &finding.fix {
-        let _ = writeln!(out, "## Suggested fix\n\n{}\n", for_the_agent(&fix.summary));
+        let _ = writeln!(out, "## Suggested fix\n\n{}\n", fix.summary);
         if let Some(sql) = &fix.sql {
             let _ = writeln!(out, "```sql\n{sql}\n```\n");
         }
@@ -172,12 +172,6 @@ fn plan_line(out: &mut String, finding: &Finding, r: &QueryRef, q: &QueryStat, p
         let _ = write!(out, " {why}");
     }
     let _ = writeln!(out, "\n");
-}
-
-/// Fix text written for a person reading the finding, said to the coding agent reading the brief: it is the brief
-/// already, so it isn't told to copy one.
-fn for_the_agent(text: &str) -> String {
-    text.replace(" (copy the brief for your coding agent)", "").replace("(copy the brief for your coding agent) ", "")
 }
 
 /// Metrics that total a wait, by key: said to the second under an hour (`signals::total_wait`), the way their findings'

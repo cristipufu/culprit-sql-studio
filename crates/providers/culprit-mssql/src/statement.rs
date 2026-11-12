@@ -73,12 +73,17 @@ pub(crate) async fn statement_types(client: &mut MsClient, sql: &str) -> Result<
 pub(crate) async fn actual_plan(client: &mut MsClient, sql: &str) -> Result<Plan> {
     execute(client, "SET STATISTICS XML ON").await.map_err(map_error)?;
     let documents = collect_plans(client, &measured_batch(&marked(sql))).await;
-    let _ = execute(client, "IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION").await;
+    let rollback = execute(client, "IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION").await;
     let reset = execute(client, "SET STATISTICS XML OFF").await;
     let documents = documents?;
+    rollback.map_err(map_error)?;
     reset.map_err(map_error)?;
     let own: Vec<String> = documents.into_iter().filter(|xml| !is_wrapper_plan(xml)).map(unmarked).collect();
-    best_plan(&own)
+    best_plan(&own).map(|mut plan| {
+        plan.facts_mut().execution_protection =
+            Some(culprit_core::plan_facts::ExecutionProtection::RolledBackTransaction);
+        plan
+    })
 }
 
 const WRAPPER_START: &str = "SET XACT_ABORT ON; BEGIN TRANSACTION;";

@@ -26,8 +26,9 @@ with a fixture.
 | `culprit-mssql`, `culprit-postgres`, `culprit-yugabyte`, `culprit-mysql`, `culprit-sqlite` | Providers: the sources for one engine, and explain, live sessions, deadlocks where supported. YugabyteDB owns DocDB measurements and shares PostgreSQL wire transport, not its heap collectors. SQLite reads a file, read-only: schema, statistics, settings and plans, no sessions or waits. |
 | `culprit-querylog` | Logs an application's framework already writes (Rails, Django, EF Core, Phoenix/Ecto, JSON lines), read into a `Workload` for an engine that keeps no statement history: one module per format behind a `Format` trait, statements grouped by `culprit_core::fingerprint`. The log's own timestamps are its period (`Workload.log`), never "the last N hours". |
 | `culprit-checks` | The analysis pipeline, every check, the refine rules, and the views built on a report. |
-| `culprit-engine` | Connections and secrets, the provider registry, scans, saved reports, history and remote collection adapters. |
-| `culprit-collector` | Source-independent capture, local outbox, fleet scheduling, recovery/delivery contracts and service lifecycles. |
+| `culprit-engine` | Connections and secret storage, adapter composition, scans, saved reports and history. |
+| `culprit-collector` | Source-independent capture, local outbox, fleet scheduling, recovery/delivery contracts, analytical preparation and service lifecycles. |
+| `culprit-cloud` | Pluggable discovery and metrics with injected authentication, commands, HTTP and cache storage. |
 | `culprit-cli`, `culprit-mcp`, `app/` | Surfaces: the same report, worded for a terminal, a coding agent, a window. |
 
 ### Workspace services
@@ -49,7 +50,7 @@ factory applies to subsequent calls without maintaining a second copy of configu
   cloud context. Each operation uses that workspace's report directory and the requested period.
 
 Services do not hold a `Workspace` or call the façade to perform their work. Existing modules continue to own storage,
-provider registration, cloud transport and pure analysis; services compose them without duplicating their rules.
+provider registration, bounded host transports and pure analysis; services compose them without duplicating their rules.
 
 `files.rs` owns the desktop export writer shared by query results, plans and reports: document extensions only,
 a plain filename, a size limit (`MAX_EXPORT_BYTES`) and exclusive creation in Downloads. Files inherit the folder's Windows access rules;
@@ -92,7 +93,7 @@ A bounded metadata index records tabs and selection; each tab has its own SQL bo
 serialize other queries. Renaming moves only the index; removing the connection deletes the index and its bodies. Results and execution confirmations are never restored,
 and failed writes keep the prior index and surface an error in the editor.
 
-Cloud discovery uses `discover/paging.rs` and returns `DiscoveryResult` to the CLI and desktop: up to
+Cloud discovery uses `culprit-cloud/src/discovery/paging.rs` and returns `DiscoveryResult` to the CLI and desktop: up to
 `DISCOVERY_LIMIT` matches, a `has_more` indicator and bounded warnings. It retains one source page plus matching rows,
 stopping at the first match past the limit, which establishes that more exist. AWS CLI calls ask for `PAGE_SIZE` rows
 (`--page-size` and `--max-items` alike) and resume through the CLI's opaque `NextToken`; they never aggregate the whole
@@ -231,6 +232,23 @@ queries and ADX staging uploads. Explicitly reusing a profile shares its credent
 inherit another role's identity. Offline validation checks references and credential kinds without acquiring tokens or
 reading passwords. Delivery-only startup does not resolve the source profile.
 
+`source_credentials` binds each saved connection to a profile. `Workspace::with_connection_tokens` supports the
+same independent ownership for embedders. Authentication lifecycle dispatch uses `DatabaseAuthentication`; Entra
+sign-in, cancellation and sign-out stay in the native Azure adapter. AWS profiles own IAM signing and expiring
+access-key exports. The engine supplies bounded native command execution and secret storage.
+
+`culprit-cloud` defines independent `DiscoveryProvider` and `MetricsProvider` roles. Its Azure and AWS adapters receive
+command, bearer and HTTP interfaces. The engine supplies those transports and a private filesystem `MetricsCache`,
+then registers the adapters. Workspace can replace discovery, metrics and authentication providers independently.
+Native resource metadata is opaque outside its metrics provider; cached metadata is bound to that provider's ID and
+the connection identity. Pure assessment remains in core, and no cloud adapter acquires database connections.
+
+Recovery uses a runtime `RecoveryProvider` registry, native option values and a `CredentialResolver`. Its generic
+`ObjectRecoveryStore` runs the conditional-object commit protocol over an injected `ObjectTransport`; native Azure
+and S3 adapters share the bounded worker bridge, exact stream completion and file ownership rules. Warehouse
+composition never selects recovery. See [Background collection](collector.md#recovery-providers) for registration,
+profiles and native fixture coverage.
+
 Activity adapters produce one bounded metadata observation and an optional detail read. The shared core selects
 qualifying requests and their blocker closure, retaining native session/request generations, transaction identity,
 wait ownership, exact counters and database scope. It derives incident transitions only after a complete source
@@ -245,17 +263,19 @@ next poll after completion, at least one minute later, and reports coverage inde
 Outbox admission still precedes native work. This loop does not implement fleet fairness, shared-pool budgets,
 pressure suppression or remote delivery. The source has no knowledge of polling cadence or incident persistence.
 
-The package layout distinguishes three extension roles:
+The package layout distinguishes independent extension roles:
 
 | Directory | Role | Examples |
 |---|---|---|
 | `crates/providers/` | Databases being analyzed | `culprit-postgres`, `culprit-mssql` |
-| `crates/telemetry/` | Analytical destinations and recovery transports | `culprit-store-adx`, `culprit-store-clickhouse`, `culprit-blob-azure` |
+| `crates/telemetry/` | Analytical destinations | `culprit-store-adx`, `culprit-store-clickhouse` |
+| `crates/recovery/` | Private object recovery transports | `culprit-blob-azure`, `culprit-blob-s3` |
+| `crates/cloud/` | Cloud discovery and metrics adapters | `culprit-cloud` |
 | `crates/authentication/` | Credential interfaces and native authentication | `culprit-auth`, `culprit-auth-azure`, `culprit-auth-aws` |
 
 A future ClickHouse database provider can be `crates/providers/culprit-clickhouse` independently of the telemetry
-store. The engine's `collector`, `store-adx` and `store-clickhouse` features are opt-in. Desktop and standalone MCP
-build graphs contain no collector, store or Blob transport packages; the full CLI enables both stores. Shared native
+store. The engine's `collector`, `store-adx`, `store-clickhouse`, `recovery-azure` and `recovery-s3` features are opt-in. Desktop and standalone MCP
+build graphs contain no collector, store or Blob transport packages; the full CLI enables both stores and both recovery providers. ClickHouse plus S3 has no ADX or Azure Blob dependency. Shared native
 admission and durable ownership live in `culprit-read`, so scans and fleet captures use one guard without importing
 fleet runtime. `python3 dev/check-boundaries.py` verifies these resolved dependency boundaries in CI.
 
@@ -271,9 +291,13 @@ flowchart LR
     ADX[ADX store adapter] --> COLLECT
     CH[ClickHouse store adapter] --> COLLECT
     BLOB[Azure Blob transport] --> COLLECT
+    S3[S3 transport] --> COLLECT
+    CLOUD[Cloud discovery and metrics adapters] --> AUTH
     ENGINE --> ADX
     ENGINE --> CH
     ENGINE --> BLOB
+    ENGINE --> S3
+    ENGINE --> CLOUD
 ```
 
 The collector owns the logical analytical schemas, envelopes, payload recovery pointers, canonical digests, bounded
@@ -294,8 +318,7 @@ cursors and bounds reconciliation after status expiry. Retrying preserves source
 Local file recovery and analytical destinations exercise this protocol, including process exits around commit,
 dispatch and publication. They do not establish Blob durability, cloud authorization or managed ADX ingestion.
 
-`BlobRecoveryStore` implements recovery over an injected object transport. The engine's `AzureBlobTransport` owns
-Storage-audience credentials and bounded HTTP workers. An ETag-conditional root update commits the immutable
+`ObjectRecoveryStore` implements recovery over an injected object transport. Native recovery adapters receive explicit credential interfaces and own bounded HTTP workers. An ETag-conditional root update commits the immutable
 manifest and stream checkpoints together. Range and sequence indexes follow that commit; a later commit repairs
 the preceding head's indexes first. Recovery freezes its traversal boundary and verifies object lengths and SHA-256
 at EOF. Namespace creation and ownership acquisition are explicit; an expired timer never authorizes takeover.
@@ -834,6 +857,11 @@ The projection is output only: deserialization ignores a saved projection, inclu
 rebuilds it from the collected plan. In-flight plans retain their collected counters but get an estimated projection;
 partial execution is not a completed measured run. TypeScript maps these facts to layout data without repeating the
 analysis. Browser fixtures are generated with these same Rust functions and checked against them.
+
+A measured plan records its native execution protection only after confirmed cleanup. Imported and retained plans
+leave this unknown; the UI does not infer rollback or read-only execution from the engine name. Briefs consume
+`FindingFacts::advice` for runtime-evidence requirements, application routes and verification intent. Translated advice
+and SQL comments never choose those routes.
 
 Plan calculations read `PlanFacts` and `PlanNodeFacts`, defined in `culprit-core/src/plan_facts.rs`. Providers populate
 them from native XML, JSON or SQLite plan text; display properties remain available for inspection. Timing, memory,

@@ -43,6 +43,20 @@ const USER_SETTINGS: &[&str] = &[
 ];
 
 impl EngineSpec for Postgres {
+    fn evidence_presentation(&self) -> EvidencePresentation {
+        EvidencePresentation {
+            storage_about: key!("ui.beyond_time.storage.about_postgres").into(),
+            storage_untimed: key!("ui.beyond_time.storage.untimed_postgres").into(),
+            health_empty: key!("ui.health.empty_hint").into(),
+            generic_plan_context: key!("ui.plan_surface.generic_settings").into(),
+            statistics_freshness: StatisticsFreshness::PerTable,
+            statistics_absence_known: true,
+            workload_windowed_by_default: false,
+            deadlock_time_window: false,
+            retained_actual_plans: false,
+        }
+    }
+
     fn connection_security(&self) -> Option<crate::ConnectionSecuritySpec> {
         Some(connection_security())
     }

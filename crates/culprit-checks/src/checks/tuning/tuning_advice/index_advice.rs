@@ -291,6 +291,9 @@ pub(super) fn create_index_finding(snapshot: &Snapshot, c: CreateIndex<'_>) -> F
         })),
         cost: None,
     };
+    if low.is_some() || matches!(advice, Advice::Fast { .. } | Advice::AlreadyThere(_) | Advice::PickedElsewhere) {
+        f.facts.advice.disposition = culprit_core::AdviceDisposition::NoChange;
+    }
     let fix = match &advice {
         Advice::Fast { fastest, slowest, bits } => {
             let average = if format::duration(*fastest) == format::duration(*slowest) {

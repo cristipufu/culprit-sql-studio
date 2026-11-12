@@ -5,6 +5,9 @@ use ts_rs::TS;
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
 pub struct FindingFacts {
+    /// Advice intent selected with the evidence, independent of translated prose or SQL comments.
+    #[serde(default, skip_serializing_if = "AdviceFacts::is_empty")]
+    pub advice: AdviceFacts,
     /// The evidence's semantic role. Public finding IDs remain opaque identifiers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -213,4 +216,49 @@ impl PlanBaseline {
         });
         if recovered { None } else { unknown() }
     }
+}
+
+/// Where the application change belongs and what evidence must precede it.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq, Eq)]
+#[ts(export)]
+pub struct AdviceFacts {
+    pub disposition: AdviceDisposition,
+    pub application: ApplicationAdvice,
+    pub diagnostic_cleanup: bool,
+    pub upkeep_on_connection_close: bool,
+    pub statement_quote: Option<StatementQuote>,
+    pub running_totals_explained: bool,
+    pub disappears_after_rescan: bool,
+}
+impl AdviceFacts {
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+}
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum AdviceDisposition {
+    #[default]
+    Change,
+    NoChange,
+    GatherRuntimeEvidence,
+    OptionalUpkeep,
+}
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum ApplicationAdvice {
+    #[default]
+    Unspecified,
+    Alternative,
+    Preferred,
+    SessionSettings,
+}
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum StatementQuote {
+    Summary,
+    Caveat,
 }

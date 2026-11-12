@@ -127,6 +127,7 @@ fn chatty_query_finding(snapshot: &Snapshot, chatty: ChattyQuery<'_>) -> Finding
     let q = chatty.query;
     let workload = snapshot.workload.as_ref().expect("the check needs a workload");
     let mut f = finding("chatty-query", &q.id, Category::Queries, subject(SubjectKind::Query, &q.id));
+    f.facts.advice.running_totals_explained = running_totals(snapshot).is_some();
     let query = capitalize(&query_handle(q));
     // As its runs came: a burst by when it ran ("ran 30K times on Oct 17 at 10:17 UTC").
     let runs = runs_of(snapshot, q);

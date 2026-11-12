@@ -1,3 +1,4 @@
+import { evidencePresentation } from "../lib/engines";
 import { ArrowUpRight, CircleCheck, ClipboardPaste, Copy, FileWarning } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DeadlockGraph } from "../components/DeadlockGraph";
@@ -162,7 +163,7 @@ export default function Deadlocks({ connection, engine }: { connection: string; 
     >
       <div className="dl-toolbar">
         {/* PostgreSQL only counts deadlocks since its statistics were reset: there's no window to choose. */}
-        {engine !== "postgres" && (
+        {evidencePresentation(engine).deadlock_time_window && (
           <span className="seg" role="radiogroup" aria-label={t("ui.deadlocks.how_far_back")}>
             {RANGES.map((r) => (
               <button type="button" key={r} role="radio" aria-checked={hours === r} className={hours === r ? "on" : ""} onClick={() => setHours(r)}>

@@ -255,6 +255,9 @@ fn temp_spill_finding(snapshot: &Snapshot, spill: TempSpill<'_>) -> Finding {
             };
             f.metrics.push(Metric::new(label, per_run, Unit::Count));
             f.metrics.extend(crate::queries::average_metrics(snapshot, q));
+            if large.is_empty() && !limits.caps.is_empty() && !matches!(advice, LimitAdvice::IndexOnly) {
+                f.facts.advice.application = culprit_core::ApplicationAdvice::SessionSettings;
+            }
             f.fix = Some(if large.is_empty() {
                 limits.fix(snapshot, &advice)
             } else {
@@ -266,6 +269,7 @@ fn temp_spill_finding(snapshot: &Snapshot, spill: TempSpill<'_>) -> Finding {
             });
         }
     }
+    f.facts.advice.running_totals_explained = running_totals(snapshot).is_some();
     f
 }
 

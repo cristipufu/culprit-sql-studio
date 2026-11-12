@@ -34,6 +34,8 @@ fn plan_line(brief: &str) -> String {
 fn with_fix(finding: &Finding, summary: &str, sql: Option<&str>) -> Finding {
     let mut f = finding.clone();
     f.fix = Some(Fix { summary: summary.into(), sql: sql.map(Into::into), cost: None });
+    f.facts.advice.disposition = culprit_core::AdviceDisposition::Change;
+    f.facts.advice.application = culprit_core::ApplicationAdvice::Unspecified;
     f
 }
 
@@ -111,7 +113,8 @@ fn a_measurement_only_fix_gathers_evidence_before_prescribing_code_changes() {
         "Read a retained actual plan when the server has one; otherwise capture a representative actual plan in a test environment.",
         "Capture an actual execution plan for a representative run in a test environment.",
     ] {
-        let f = with_fix(heavy, diagnostic, None);
+        let mut f = with_fix(heavy, diagnostic, None);
+        f.facts.advice.disposition = culprit_core::AdviceDisposition::GatherRuntimeEvidence;
         let section = codebase(&agent_brief(&report, &f));
         assert!(section.contains("Gather the runtime evidence the fix asks for first"), "{section}");
         assert!(section.contains("before choosing a change"), "{section}");
@@ -239,6 +242,7 @@ fn a_setting_the_fix_calls_a_fallback_comes_after_the_application_change() {
             "-- Prefer fixing the app. As a database-wide fallback:\nALTER DATABASE [culprit_demo] SET PARAMETERIZATION FORCED;",
         ),
     );
+    f.facts.advice.application = culprit_core::ApplicationAdvice::Preferred;
     f.queries.clear();
     let section = codebase(&agent_brief(&mssql, &f));
     assert!(section.trim_start().starts_with("The change the fix prefers is in the application's code"), "{section}");
@@ -260,17 +264,19 @@ fn upkeep_the_fix_calls_optional_or_follows_with_a_code_change_is_briefed_as_suc
         "No update is needed before a query uses these statistics: SQL Server refreshes them on that query's compile. Updating them now (below) spares that compile the wait.",
         Some("UPDATE STATISTICS [shop].[products];"),
     );
+    optional.facts.advice.disposition = culprit_core::AdviceDisposition::OptionalUpkeep;
     optional.queries.clear();
     let section = codebase(&agent_brief(&mssql, &optional));
     assert!(section.trim_start().starts_with("The fix's upkeep is optional, as it says"), "{section}");
     assert!(!section.contains("The fix is upkeep of the database"), "{section}");
-    let hinted = with_fix(
+    let mut hinted = with_fix(
         base,
         "Update the statistics (the SQL below). If a re-scan still shows the same reads, change the statement where the application sends it to read shop.products with a table hint.",
         Some(
             "UPDATE STATISTICS [shop].[products];\n\n-- If a re-scan still shows about 750 pages a run, change the statement in the application:\n--    read [shop].[products] WITH (FORCESEEK ([ix_products_sku] ([sku])))",
         ),
     );
+    hinted.facts.advice.application = culprit_core::ApplicationAdvice::Alternative;
     let section = codebase(&agent_brief(&mssql, &hinted));
     assert!(
         !section.contains("The fix is upkeep of the database, not a change to the application's code"),
@@ -595,12 +601,13 @@ fn a_fix_that_advises_against_itself_ships_nothing() {
     let mssql = report("mssql-demo.json");
     let index = finding(&mssql, "missing-index:");
     let sql = index.fix.as_ref().and_then(|f| f.sql.clone());
-    let low = with_fix(
+    let mut low = with_fix(
         index,
         "Azure scores it 3 out of 100: it expects the index to save little next to what it costs every write, so it's \
          usually not worth having. If the queries that read orders are slow all the same, create it online.",
         sql.as_deref(),
     );
+    low.facts.advice.disposition = culprit_core::AdviceDisposition::NoChange;
     let section = codebase(&agent_brief(&mssql, &low));
     assert!(section.contains("The fix doesn't recommend this change as things stand"), "{section}");
     assert!(!section.contains("Ship the fix's index change"), "{section}");
@@ -610,10 +617,12 @@ fn a_fix_that_advises_against_itself_ships_nothing() {
     assert!(section.contains("A later `culprit scan mssql-demo` shows where"), "{section}");
 
     let mut nothing = with_fix(index, "Nothing to create: an index already finds these rows.", None);
+    nothing.facts.advice.disposition = culprit_core::AdviceDisposition::NoChange;
     let section = codebase(&agent_brief(&mssql, &nothing));
     assert!(section.contains("there is nothing to do in the codebase"), "{section}");
     assert!(!section.contains("After any change is live"), "{section}");
     nothing.verify.clear();
+    nothing.facts.advice.disposition = culprit_core::AdviceDisposition::NoChange;
     let section = codebase(&agent_brief(&mssql, &nothing));
     assert!(section.contains(&format!("shows whether `{}` still applies", nothing.id)), "{section}");
 }
@@ -680,6 +689,7 @@ fn without_a_verify_step_the_brief_says_what_a_later_scan_shows() {
     let postgres = report("postgres-demo.json");
     let mut spill = finding(&postgres, "temp-spill:").clone();
     spill.verify.clear();
+    spill.facts.advice.running_totals_explained = false;
     let section = codebase(&agent_brief(&postgres, &spill));
     assert!(
         section.contains(&format!("compare `{}`'s numbers under *Evidence* with this scan's", spill.id)),
@@ -705,6 +715,7 @@ fn a_verify_step_on_totals_since_a_reset_says_they_keep_the_old_runs() {
     assert_eq!(brief.matches("keeps running totals").count(), 1, "{brief}");
     // A step that doesn't say it: the brief does.
     let mut quiet = chatty.clone();
+    quiet.facts.advice.running_totals_explained = false;
     quiet.verify = vec!["Re-scan: it should run fewer times.".into()];
     let section = codebase(&agent_brief(&mysql, &quiet));
     assert!(
@@ -899,7 +910,8 @@ fn statements_listed_for_reference_or_caught_by_a_diagnostic_are_not_rewritten()
                    IF NOT EXISTS (SELECT 1 FROM sys.dm_xe_database_sessions WHERE name = N'culprit_x')\n    \
                    ALTER EVENT SESSION culprit_x ON DATABASE STATE = START;\n\
                    -- Once it has caught what you need, stop and remove it: DROP EVENT SESSION culprit_x ON DATABASE;";
-    let f = with_fix(finding(&mssql, "heavy-query:"), "Start the event session.", Some(guarded));
+    let mut f = with_fix(finding(&mssql, "heavy-query:"), "Start the event session.", Some(guarded));
+    f.facts.advice.diagnostic_cleanup = true;
     let section = codebase(&agent_brief(&mssql, &f));
     assert!(section.contains("The fix's SQL starts an event session on the database: run it there"), "{section}");
     assert!(section.contains("remove it with the DROP in the SQL's last line"), "{section}");
@@ -922,7 +934,7 @@ fn an_option_in_the_application_is_kept_beside_the_query_store_one() {
     // unstable-query on SQL Server: a Query Store hint, or OPTIMIZE FOR UNKNOWN appended in the application. The second
     // lives only in a comment of the fix's SQL.
     let mssql = report("mssql-demo.json");
-    let f = with_fix(
+    let mut f = with_fix(
         finding(&mssql, "heavy-query:"),
         "Plan each call for its own values, or for the typical value.",
         Some(
@@ -932,23 +944,18 @@ fn an_option_in_the_application_is_kept_beside_the_query_store_one() {
              --    append OPTION (OPTIMIZE FOR UNKNOWN) to the statement",
         ),
     );
+    f.facts.advice.application = culprit_core::ApplicationAdvice::Alternative;
     let section = codebase(&agent_brief(&mssql, &f));
     assert!(section.contains("The fix's Query Store procedure runs against the database"), "{section}");
     assert!(section.contains("The fix's other option is a change in the application's code"), "{section}");
 }
 
 #[test]
-fn the_brief_never_tells_its_reader_to_copy_the_brief() {
-    let postgres = report("postgres-demo.json");
-    let f = with_fix(
-        finding(&postgres, "chatty-query:"),
-        "Find this statement in the application (copy the brief for your coding agent) and check whether it reads \
-         more rows or columns than it needs.",
-        None,
-    );
-    let brief = agent_brief(&postgres, &f);
-    assert!(!brief.contains("copy the brief"), "{brief}");
-    assert!(brief.contains("Find this statement in the application and check whether it reads"), "{brief}");
+fn the_brief_preserves_advice_text_verbatim() {
+    let report = report("postgres-demo.json");
+    let text = "Find this statement in the application and check its row counts.";
+    let f = with_fix(finding(&report, "chatty-query:"), text, None);
+    assert!(agent_brief(&report, &f).contains(text));
 }
 
 #[test]
@@ -980,6 +987,7 @@ fn a_statement_quoted_in_a_caveat_is_the_one_to_look_for() {
         None,
     );
     (family.check, family.queries, family.verify) = ("query-family".into(), Vec::new(), Vec::new());
+    family.facts.advice.statement_quote = Some(culprit_core::StatementQuote::Caveat);
     family.caveats = vec!["One of them, as recorded:\nSELECT count(*) FROM (VALUES ($1),($2)) v(x)".into()];
     let section = codebase(&agent_brief(&postgres, &family));
     assert!(section.contains("The statement to look for is quoted under *Caveats*, as recorded"), "{section}");
@@ -993,6 +1001,7 @@ fn a_statement_quoted_in_a_caveat_is_the_one_to_look_for() {
         ),
     );
     fallback.caveats = family.caveats.clone();
+    fallback.facts.advice.application = culprit_core::ApplicationAdvice::Preferred;
     let section = codebase(&agent_brief(&postgres, &fallback));
     assert!(
         section.contains(
@@ -1021,4 +1030,39 @@ fn a_heavy_query_line_states_the_share_its_finding_states() {
         let line = brief.lines().find(|l| l.starts_with("Query `")).expect("a query line");
         assert!(line.contains(&said) && !line.contains(" — 42% of DB time, "), "{line}");
     }
+}
+
+#[test]
+fn codebase_routing_is_independent_of_translated_words_and_sql_comments() {
+    let report = report("mssql-demo.json");
+    let base = finding(&report, "heavy-query:");
+    for intent in [
+        culprit_core::AdviceDisposition::GatherRuntimeEvidence,
+        culprit_core::AdviceDisposition::NoChange,
+        culprit_core::AdviceDisposition::OptionalUpkeep,
+    ] {
+        let mut f =
+            with_fix(base, "No update is needed: not worth changing", Some("UPDATE STATISTICS [shop].[products];"));
+        f.facts.advice.disposition = intent;
+        let expected = codebase(&agent_brief(&report, &f));
+        f.summary = "Descripción independiente".into();
+        f.fix.as_mut().unwrap().summary = "Conseil traduit sans mots anglais".into();
+        assert_eq!(codebase(&agent_brief(&report, &f)), expected);
+    }
+    let mut f = with_fix(
+        base,
+        "localized advice",
+        Some(
+            "-- in the application; fallback; DROP EVENT SESSION
+ALTER DATABASE [shop] SET PARAMETERIZATION FORCED;",
+        ),
+    );
+    f.facts.advice.application = culprit_core::ApplicationAdvice::Preferred;
+    let expected = codebase(&agent_brief(&report, &f));
+    f.fix.as_mut().unwrap().sql = Some(
+        "-- commentaire traduit
+ALTER DATABASE [shop] SET PARAMETERIZATION FORCED;"
+            .into(),
+    );
+    assert_eq!(codebase(&agent_brief(&report, &f)), expected);
 }

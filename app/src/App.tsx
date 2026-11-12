@@ -1,3 +1,4 @@
+import { evidencePresentation } from "./lib/engines";
 import { t, useLanguage } from "./lib/i18n";
 import { AlertCircle } from "lucide-react";
 import { lazy, Suspense, useEffect } from "react";
@@ -136,7 +137,7 @@ function TopBar() {
   const w = report?.report.snapshot.workload;
   // Before the report loads, SQL Server keeps the picker's place; a scan without query history has nothing to window.
   // An application's log covers its own period: there's no window to choose.
-  const windowed = w ? w.windowed && w.log == null : engine === "mssql" && !report;
+  const windowed = w ? w.windowed && w.log == null : engine != null && evidencePresentation(engine).workload_windowed_by_default && !report;
   const noHistory = report && !w ? report.report.summary.no_workload : undefined;
   const showsWorkload = view === "dashboard" || view === "overview" || view === "queries" || view === "schema";
   if (view === "plans") {

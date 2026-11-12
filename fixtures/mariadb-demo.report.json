@@ -231,6 +231,27 @@
       "caveats": [],
       "check": "temp-spill",
       "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "session-settings",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": true,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": "The limit is per temporary table per connection; size it with your connection count in mind.",
         "sql": "SET GLOBAL tmp_table_size = 67108864;\nSET GLOBAL max_heap_table_size = 67108864;",
@@ -288,6 +309,27 @@
       ],
       "check": "chatty-query",
       "confidence": "medium",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": true,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": null,
         "sql": null,
@@ -342,6 +384,27 @@
       "caveats": [],
       "check": "heavy-query",
       "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": true,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": null,
         "sql": null,
@@ -412,6 +475,15 @@
       "check": "scan-heavy",
       "confidence": "medium",
       "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "gather-runtime-evidence",
+          "running_totals_explained": true,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
         "bloat": null,
         "histogram_columns": [],
         "index_keys": [],
@@ -490,6 +562,27 @@
       ],
       "check": "deadlocks",
       "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": false,
+          "statement_quote": "summary",
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": null,
         "sql": null,
@@ -548,6 +641,27 @@
       ],
       "check": "duplicate-index",
       "confidence": "medium",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": true,
+          "disposition": "change",
+          "running_totals_explained": false,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": "Frees 9.5 MB.",
         "sql": "ALTER TABLE `shop`.`orders` DROP INDEX `ix_orders_status`, ALGORITHM=INPLACE, LOCK=NONE;",
@@ -591,6 +705,27 @@
       "caveats": [],
       "check": "duplicate-index",
       "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": true,
+          "disposition": "change",
+          "running_totals_explained": false,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": "Frees 432 KB.",
         "sql": "ALTER TABLE `shop`.`products` DROP INDEX `ix_products_sku`, ALGORITHM=INPLACE, LOCK=NONE;",
