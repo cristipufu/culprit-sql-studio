@@ -166,6 +166,7 @@ impl Connector {
             .map_err(|error| transport_error(endpoint.as_ref(), map_connect_error(error, &self.host, self.port)))?;
         let notices = Arc::new(AtomicU64::new(0));
         let observed = notices.clone();
+        let fence = self.fence.clone();
         tokio::spawn(async move {
             let _endpoint = endpoint;
             while let Some(message) = futures_util::future::poll_fn(|cx| connection.poll_message(cx)).await {
@@ -173,7 +174,12 @@ impl Connector {
                     Ok(AsyncMessage::Notice(_)) => {
                         observed.fetch_add(1, Ordering::SeqCst);
                     }
-                    Err(_) => break,
+                    Err(_) => {
+                        // Losing a driver does not prove remote work stopped. Preserve the same admission fence
+                        // for interactive clients and owned telemetry readers, even if a scan records a source gap.
+                        fence.mark_uncertain();
+                        break;
+                    }
                     _ => {}
                 }
             }

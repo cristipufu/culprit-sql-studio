@@ -2,10 +2,10 @@
 use super::*;
 use culprit_core::{ConnectionSpec, ErrorCode};
 
-fn connector() -> Connector {
+fn spec() -> ConnectionSpec {
     let database = std::env::var("CULPRIT_PREVIEW_PG_DATABASE").expect("owned provider fixture database");
     assert!(matches!(database.as_str(), "culprit_smoke" | "culprit_timescale"));
-    let spec = ConnectionSpec {
+    ConnectionSpec {
         engine: Some(Engine::Postgres),
         host: "127.0.0.1".into(),
         port: Some(std::env::var("CULPRIT_PREVIEW_PG_PORT").unwrap().parse().unwrap()),
@@ -14,11 +14,81 @@ fn connector() -> Connector {
         password: Some(std::env::var("CULPRIT_PREVIEW_PG_PASSWORD").unwrap()),
         options: [("sslmode".into(), "disable".into())].into(),
         ..Default::default()
-    };
-    Connector::new(&spec).unwrap()
+    }
+}
+fn connector() -> Connector {
+    Connector::new(&spec()).unwrap()
 }
 fn session(budget: CollectionBudget) -> ReadSession {
     ReadSession::new(connector(), budget)
+}
+
+#[tokio::test]
+#[ignore = "requires the owned loopback PostgreSQL provider fixture"]
+async fn interactive_transport_loss_cannot_claim_quiet_shutdown() {
+    use culprit_core::{ConnectionEndpoint, ConnectionTransport};
+    use std::sync::Arc;
+    struct Route(std::net::SocketAddr);
+    #[async_trait::async_trait]
+    impl ConnectionTransport for Route {
+        async fn endpoint(&self, _: &str, _: u16) -> culprit_core::Result<ConnectionEndpoint> {
+            Ok(ConnectionEndpoint::new(self.0))
+        }
+    }
+    let mut spec = spec();
+    let backend = ("127.0.0.1", spec.port.unwrap());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    spec.transport = Some(Arc::new(Route(listener.local_addr().unwrap())));
+    let (cut, disconnect) = tokio::sync::oneshot::channel::<()>();
+    let proxy = tokio::spawn(async move {
+        let (mut client, _) = listener.accept().await.unwrap();
+        let mut server = tokio::net::TcpStream::connect(backend).await.unwrap();
+        tokio::select! {
+            _ = disconnect => {},
+            _ = tokio::io::copy_bidirectional(&mut client, &mut server) => {},
+        }
+    });
+    let routed = Connector::new(&spec).unwrap();
+    let client = routed.connect(crate::connect::COLLECTOR).await.unwrap();
+    let pid: i32 = client.query_one(&crate::rows::tagged("SELECT pg_backend_pid()"), &[]).await.unwrap().get(0);
+    let inspector = connector().connect(crate::connect::COLLECTOR).await.unwrap();
+    let query = tokio::spawn(async move { client.simple_query(&crate::rows::tagged("SELECT pg_sleep(5)")).await });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let active = inspector
+                .query_one(
+                    &crate::rows::tagged(
+                        "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid=$1 AND wait_event='PgSleep')",
+                    ),
+                    &[&pid],
+                )
+                .await
+                .unwrap()
+                .get::<_, bool>(0);
+            if active {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    cut.send(()).unwrap();
+    assert!(tokio::time::timeout(Duration::from_secs(2), query).await.unwrap().unwrap().is_err());
+    proxy.await.unwrap();
+    // This exact backend belongs to the owned fixture and was observed executing our sleep immediately above.
+    inspector
+        .query(
+            &crate::rows::tagged(
+                "SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE pid=$1 AND wait_event='PgSleep'",
+            ),
+            &[&pid],
+        )
+        .await
+        .unwrap();
+    assert_eq!(routed.source_shutdown(), SourceShutdown::Unconfirmed);
+    let error = routed.connect(crate::connect::COLLECTOR).await.err().unwrap();
+    assert_eq!(CollectionStop::from_error(&error), CollectionStop::CancellationUnconfirmed);
 }
 
 #[tokio::test]
