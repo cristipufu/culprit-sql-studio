@@ -15,10 +15,12 @@ const MAX_ENVIRONMENT_NAME_BYTES: usize = 256;
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum CredentialProfile {
     Azure { identity: IdentityConfig },
+    Aws { profile: Option<String> },
     PasswordEnvironment { username: String, variable: String },
 }
 enum ConfiguredProfile {
     Azure(Arc<AzureCredential>),
+    Aws(Arc<culprit_auth_aws::AwsCli>),
     PasswordEnvironment { username: String, variable: String },
 }
 pub struct ConfiguredCredentials(BTreeMap<String, ConfiguredProfile>);
@@ -39,6 +41,9 @@ impl ConfiguredCredentials {
                 let profile = match profile {
                     CredentialProfile::Azure { identity } => {
                         ConfiguredProfile::Azure(Arc::new(AzureCredential::new(identity.clone())?))
+                    }
+                    CredentialProfile::Aws { profile } => {
+                        ConfiguredProfile::Aws(Arc::new(super::aws_profile(profile.clone())?))
                     }
                     CredentialProfile::PasswordEnvironment { username, variable } => {
                         if username.is_empty()
@@ -64,22 +69,29 @@ impl ConfiguredCredentials {
     }
 }
 impl CredentialResolver for ConfiguredCredentials {
+    fn access_keys(&self, profile: &str) -> Result<Arc<dyn culprit_auth::AccessKeyProvider>> {
+        match self.profile(profile)? {
+            ConfiguredProfile::Aws(credential) => Ok(credential.clone()),
+            _ => Err(invalid()),
+        }
+    }
     fn bearer(&self, profile: &str) -> Result<Arc<dyn BearerTokenProvider>> {
         match self.profile(profile)? {
             ConfiguredProfile::Azure(credential) => Ok(credential.clone()),
-            ConfiguredProfile::PasswordEnvironment { .. } => Err(invalid()),
+            ConfiguredProfile::PasswordEnvironment { .. } | ConfiguredProfile::Aws(_) => Err(invalid()),
         }
     }
     fn database(&self, profile: &str) -> Result<Arc<dyn DatabaseTokenProvider>> {
         match self.profile(profile)? {
             ConfiguredProfile::Azure(credential) => Ok(credential.clone()),
+            ConfiguredProfile::Aws(credential) => Ok(credential.clone()),
             ConfiguredProfile::PasswordEnvironment { .. } => Err(invalid()),
         }
     }
     fn validate_password(&self, profile: &str) -> Result<()> {
         match self.profile(profile)? {
             ConfiguredProfile::PasswordEnvironment { .. } => Ok(()),
-            ConfiguredProfile::Azure(_) => Err(invalid()),
+            ConfiguredProfile::Azure(_) | ConfiguredProfile::Aws(_) => Err(invalid()),
         }
     }
     fn password(&self, profile: &str) -> Result<PasswordCredential> {
@@ -90,7 +102,7 @@ impl CredentialResolver for ConfiguredCredentials {
                 })?;
                 Ok(PasswordCredential { username: username.clone(), password: Zeroizing::new(password) })
             }
-            ConfiguredProfile::Azure(_) => Err(invalid()),
+            ConfiguredProfile::Azure(_) | ConfiguredProfile::Aws(_) => Err(invalid()),
         }
     }
 }

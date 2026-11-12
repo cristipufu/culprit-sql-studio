@@ -1,8 +1,8 @@
 //! Connection metadata, provider resolution and authentication. Dependencies are explicit; scan analysis and
 //! query execution do not belong to this service.
 
+use culprit_auth::AuthenticationService;
 use culprit_auth_aws as aws;
-use culprit_auth_azure::entra;
 use culprit_core::{
     AuthKind, ConnectionSpec, Engine, Environment, Error, ErrorCode, Provider, Result, ServerInfo, entra_host_allowed,
     t,
@@ -22,7 +22,10 @@ pub(crate) struct Connections<'a> {
     pub paths: &'a Paths,
     pub store: &'a Store,
     pub secrets: &'a dyn SecretStore,
-    pub entra: &'a entra::EntraAuth,
+    pub authentication: &'a dyn AuthenticationService,
+    pub cloud: &'a culprit_cloud::CloudServices,
+    pub connection_tokens:
+        &'a std::collections::BTreeMap<String, std::sync::Arc<dyn culprit_auth::DatabaseTokenProvider>>,
     pub database_tokens: Option<&'a dyn culprit_auth::DatabaseTokenProvider>,
     pub providers: &'a [(Engine, ProviderFactory)],
     pub ssh: &'a crate::ssh::Manager,
@@ -33,15 +36,8 @@ impl Connections<'_> {
     /// Forget device-code sign-ins: in-memory tokens and stored refresh tokens for every tenant the saved connections use.
     /// The Azure CLI's own login is untouched (`az logout`). Returns how many stored sign-ins were removed.
     pub(crate) fn sign_out(&self) -> Result<usize> {
-        let mut authorities = vec![entra::Authority::for_spec(&ConnectionSpec::default())?];
-        for (_, stored) in self.store.list()? {
-            if let Ok(authority) = entra::Authority::for_spec(&stored.spec())
-                && !authorities.contains(&authority)
-            {
-                authorities.push(authority);
-            }
-        }
-        self.entra.sign_out(&authorities, self.secrets)
+        let connections = self.store.list()?.into_iter().map(|(_, stored)| stored.spec()).collect::<Vec<_>>();
+        self.authentication.sign_out(&connections, self.secrets)
     }
 
     fn open_provider(&self, spec: &ConnectionSpec) -> Result<Box<dyn Provider>> {
@@ -312,14 +308,26 @@ impl Connections<'_> {
     /// Azure SQL and Azure Database for PostgreSQL / MySQL flexible-server databases the signed-in Azure CLI account can see,
     /// marked with the saved connection that already points at each.
     pub(crate) async fn discover_azure(&self, terms: &[String]) -> Result<DiscoveryResult> {
-        let mut found = discover::azure(terms).await?;
+        let mut found = self
+            .cloud
+            .discover(
+                discover::Cloud::Azure,
+                &culprit_cloud::DiscoveryRequest { terms: terms.to_vec(), regions: vec![] },
+            )
+            .await?;
         self.mark_saved(&mut found.items)?;
         Ok(found)
     }
 
     /// RDS instances and Aurora clusters the signed-in AWS CLI can see (all enabled regions when `regions` is empty).
     pub(crate) async fn discover_aws(&self, regions: &[String], terms: &[String]) -> Result<DiscoveryResult> {
-        let mut found = discover::aws_rds(regions, terms).await?;
+        let mut found = self
+            .cloud
+            .discover(
+                discover::Cloud::Aws,
+                &culprit_cloud::DiscoveryRequest { terms: terms.to_vec(), regions: regions.to_vec() },
+            )
+            .await?;
         self.mark_saved(&mut found.items)?;
         Ok(found)
     }
@@ -538,7 +546,7 @@ impl Connections<'_> {
         let mut spec = merge(new)?;
         self.ssh.attach(&mut spec)?;
         spec.environment = new.environment;
-        self.resolve_token(&mut spec).await?;
+        self.resolve_token(None, &mut spec).await?;
         self.materialize_certificates(&mut spec)?;
         self.open_provider(&spec)
     }
@@ -567,8 +575,8 @@ impl Connections<'_> {
     }
 
     /// Fetch a fresh token for token-based auth (Entra ID, AWS IAM); a no-op for other kinds.
-    async fn resolve_token(&self, spec: &mut ConnectionSpec) -> Result<()> {
-        use culprit_auth::{DatabaseTokenProvider, DatabaseTokenRequest};
+    async fn resolve_token(&self, name: Option<&str>, spec: &mut ConnectionSpec) -> Result<()> {
+        use culprit_auth::DatabaseTokenRequest;
         if !matches!(spec.auth, AuthKind::Entra | AuthKind::AwsIam) {
             return Ok(());
         }
@@ -580,17 +588,15 @@ impl Connections<'_> {
             username: spec.user.as_deref(),
             region: spec.option("region"),
         };
-        let credential = if let Some(provider) = self.database_tokens {
+        let credential = if let Some(provider) =
+            name.and_then(|name| self.connection_tokens.get(name).map(std::sync::Arc::as_ref)).or(self.database_tokens)
+        {
             if provider.auth_kind() != spec.auth {
                 return Err(Error::invalid(t!("engine.credentials.invalid_profile")));
             }
             provider.database_token(request).await?
         } else {
-            match spec.auth {
-                AuthKind::Entra => self.entra.credential(engine, spec, self.secrets).await?,
-                AuthKind::AwsIam => crate::credentials::aws().database_token(request).await?,
-                AuthKind::Password | AuthKind::None => return Ok(()),
-            }
+            self.authentication.credential(spec, self.secrets).await?
         };
         if spec.user.as_deref().is_none_or(str::is_empty) {
             spec.user = credential.username;
@@ -601,7 +607,7 @@ impl Connections<'_> {
 
     async fn resolve_secrets(&self, name: &str, stored: &StoredConnection, spec: &mut ConnectionSpec) -> Result<()> {
         match (spec.auth, stored.password_env.as_deref()) {
-            (AuthKind::Entra | AuthKind::AwsIam, _) => self.resolve_token(spec).await?,
+            (AuthKind::Entra | AuthKind::AwsIam, _) => self.resolve_token(Some(name), spec).await?,
             (AuthKind::Password, Some(var)) => {
                 let value = std::env::var(var).map_err(|_| {
                     Error::new(ErrorCode::AuthFailed, t!("engine.connection.password_env_unset", variable = var))

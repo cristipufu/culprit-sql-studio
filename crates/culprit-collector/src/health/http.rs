@@ -133,7 +133,7 @@ mod tests {
         assert!(!metrics.contains("private-connection-canary"));
         assert!(get(address, "/not-a-route").await.starts_with("HTTP/1.1 404"));
         cancellation.cancel();
-        worker.await.unwrap().unwrap();
-        assert!(TcpStream::connect(address).await.is_err());
+        tokio::time::timeout(REQUEST_TIMEOUT * 2, worker).await.unwrap().unwrap().unwrap();
+        // The joined owner has dropped its listener. Probing its old port races another test acquiring that port.
     }
 }

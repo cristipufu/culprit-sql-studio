@@ -2,8 +2,10 @@
 //! server back: CPU credits or storage burst run out, a tier's CPU, IO, log-rate or worker limit hit. A query that got
 //! slower with the same plan is often just that, and the database's own statistics can't see it.
 //!
-//! Fetching lives in culprit-engine (through the person's own `aws` / `az` sign-in, read-only); this module judges the
+//! Fetching lives in culprit-cloud (through the person's own `aws` / `az` sign-in, read-only); this module judges the
 //! numbers, so the rules are unit-tested without a cloud account.
+
+pub mod aws;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;

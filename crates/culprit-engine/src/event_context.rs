@@ -173,8 +173,8 @@ impl Events<'_> {
                 Vec::new()
             }
         };
-        if cloud != Some(false) && cloud::target(info).is_some() {
-            match cloud::signals(&dir, info, start, end, false).await {
+        if cloud != Some(false) && self.connections.cloud.recognizes(&cloud::metadata(info)) {
+            match cloud::signals(self.connections.cloud, &dir, info, start, end, false).await {
                 Ok(signals) => events.extend(signals.events()),
                 Err(e) => notes.push(match e.hint {
                     Some(hint) => t!(
@@ -220,6 +220,14 @@ impl Events<'_> {
     pub(crate) async fn cloud(&self, name: &str, request: &EventsRequest) -> Result<culprit_core::CloudSignals> {
         let info = self.connections.connection(name)?;
         let (start, end) = request.range()?;
-        cloud::signals(&self.reports.paths.reports_dir(name), &info, start, end, request.refresh).await
+        cloud::signals(
+            self.connections.cloud,
+            &self.reports.paths.reports_dir(name),
+            &info,
+            start,
+            end,
+            request.refresh,
+        )
+        .await
     }
 }

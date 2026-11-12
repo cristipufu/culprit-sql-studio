@@ -976,8 +976,11 @@ name = "culprit-auth-aws"
 version = "0.5.6"
 dependencies = [
  "async-trait",
+ "chrono",
  "culprit-auth",
  "culprit-core",
+ "serde",
+ "serde_json",
  "tokio",
  "zeroize",
 ]
@@ -1018,6 +1021,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "culprit-blob-s3"
+version = "0.5.6"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "culprit-auth",
+ "culprit-collector",
+ "culprit-core",
+ "culprit-store-clickhouse",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "tokio",
+ "ureq",
+ "zeroize",
+]
+
+[[package]]
 name = "culprit-checks"
 version = "0.5.6"
 dependencies = [
@@ -1047,11 +1070,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "culprit-cloud"
+version = "0.5.6"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "culprit-auth",
+ "culprit-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "ts-rs",
+ "zeroize",
+]
+
+[[package]]
 name = "culprit-collector"
 version = "0.5.6"
 dependencies = [
  "async-trait",
  "chrono",
+ "culprit-auth",
  "culprit-core",
  "culprit-read",
  "ring",
@@ -1090,7 +1130,9 @@ dependencies = [
  "culprit-auth-aws",
  "culprit-auth-azure",
  "culprit-blob-azure",
+ "culprit-blob-s3",
  "culprit-checks",
+ "culprit-cloud",
  "culprit-collector",
  "culprit-core",
  "culprit-mssql",

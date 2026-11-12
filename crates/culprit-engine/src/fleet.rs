@@ -9,7 +9,7 @@ impl FleetBackend for Workspace {
         let stored = self.store.get(connection)?;
         let unattended = match stored.auth {
             AuthKind::Entra | AuthKind::AwsIam => {
-                self.database_tokens.as_ref().is_some_and(|provider| provider.auth_kind() == stored.auth)
+                self.tokens_for(connection).is_some_and(|provider| provider.auth_kind() == stored.auth)
             }
             AuthKind::Password => stored.password_env.is_some(),
             AuthKind::None => true,

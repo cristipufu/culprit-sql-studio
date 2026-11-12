@@ -14,8 +14,8 @@ use culprit_collector::{
         sink::{AnalyticalSink, AnalyticalStore},
     },
     delivery::{
-        blob_store::transport::BlobTransport,
         contract::Contract,
+        object_store::transport::ObjectTransport,
         recovery::{CommittedRange, RecoveryStore},
         sink::{DeliveryAttempt, Submission},
     },
@@ -36,7 +36,7 @@ impl ClickHouseStore {
 pub fn new(
     contract: Contract,
     recovery: Arc<dyn RecoveryStore>,
-    validation: Arc<dyn BlobTransport>,
+    validation: Arc<dyn ObjectTransport>,
     query: Arc<dyn QueryTransport>,
     scratch: &Path,
 ) -> Result<AnalyticalSink> {

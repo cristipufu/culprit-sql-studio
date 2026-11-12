@@ -2,7 +2,9 @@
 pub mod config;
 mod destination;
 mod recovery;
-#[cfg(all(test, feature = "store-adx"))]
+mod runtime;
+pub use runtime::CollectorRuntime;
+#[cfg(all(test, feature = "store-adx", feature = "recovery-azure"))]
 mod tests;
 use crate::Workspace;
 use config::*;
@@ -10,10 +12,10 @@ use culprit_collector::{
     capture::CollectionCancellation,
     delivery::{
         activity_recovery::ActivityRestoreBudget,
-        blob_store::BlobRecoveryStore,
         contract::Contract,
         driver::DeliveryPolicy,
         journal::{DeliveryHealthReader, DeliveryJournal},
+        object_store::ObjectRecoveryStore,
         recovery::RecoveryStore,
         restore::restore_activity_page,
         worker::{DeliveryJournals, DeliveryWorker},
@@ -36,40 +38,46 @@ pub enum SourceMode {
 
 struct Adapters {
     workspace: Workspace,
-    recovery: Arc<BlobRecoveryStore>,
+    recovery: Arc<ObjectRecoveryStore>,
     destination: Box<dyn destination::SinkFactory>,
     contract: Contract,
 }
 struct ConfiguredAdapters {
     workspace: Workspace,
-    recovery: Arc<dyn culprit_collector::delivery::blob_store::transport::BlobTransport>,
+    recovery: Arc<dyn culprit_collector::delivery::object_store::transport::ObjectTransport>,
     destination: Box<dyn destination::SinkFactory>,
     contract: Contract,
 }
 impl ConfiguredAdapters {
-    fn new(config: &CollectorConfig, mode: SourceMode) -> Result<Self> {
-        let credentials = Arc::new(crate::credentials::ConfiguredCredentials::new(&config.credentials)?);
-        Self::with_credentials(config, mode, credentials)
+    fn new(config: &CollectorConfig, mode: SourceMode, runtime: &CollectorRuntime) -> Result<Self> {
+        let credentials: Arc<dyn culprit_auth::CredentialResolver> = match &runtime.credentials {
+            Some(credentials) => credentials.clone(),
+            None => Arc::new(crate::credentials::ConfiguredCredentials::new(&config.credentials)?),
+        };
+        Self::configured(config, mode, credentials, runtime)
     }
-    fn with_credentials(
+    fn configured(
         config: &CollectorConfig,
         mode: SourceMode,
         credentials: Arc<dyn culprit_auth::CredentialResolver>,
+        runtime: &CollectorRuntime,
     ) -> Result<Self> {
         config.validate()?;
         let mut workspace = Workspace::open_in(&config.workspace);
-        if mode == SourceMode::Collect
-            && let Some(profile) = &config.source_credential
-        {
-            workspace = workspace.with_database_tokens(credentials.database(profile)?);
-        }
         if mode == SourceMode::Collect {
             for target in config.inventory.targets.iter().filter(|target| target.shard == config.shard) {
+                if let Some(profile) = config.source_credentials.get(&target.connection) {
+                    workspace = workspace.with_connection_tokens(&target.connection, credentials.database(profile)?);
+                }
                 workspace.validate_target(&target.connection)?;
             }
         }
-        let transport = config.recovery.transport(credentials.as_ref())?;
+        let recovery = runtime.recovery.configure(&config.recovery, credentials.as_ref())?;
+        let transport = recovery.transport;
         let destination = destination::configure(&config.target, credentials, transport.clone())?;
+        if destination.staging_scope().is_some_and(|scope| scope == recovery.access_scope) {
+            return Err(DeliveryProblem::InvalidContract.error());
+        }
         let contract = Contract::new(
             config.pipeline.clone(),
             config.shard.clone(),
@@ -80,28 +88,33 @@ impl ConfiguredAdapters {
     }
 }
 impl Adapters {
-    async fn open(config: &CollectorConfig, initialize: bool, mode: SourceMode) -> Result<Self> {
+    async fn open(
+        config: &CollectorConfig,
+        initialize: bool,
+        mode: SourceMode,
+        runtime: &CollectorRuntime,
+    ) -> Result<Self> {
         let ConfiguredAdapters { workspace, recovery: transport, destination, contract } =
-            ConfiguredAdapters::new(config, mode)?;
+            ConfiguredAdapters::new(config, mode, runtime)?;
         let recovery = Arc::new(if initialize {
-            BlobRecoveryStore::create(transport, contract.clone()).await?
+            ObjectRecoveryStore::create(transport, contract.clone()).await?
         } else {
-            BlobRecoveryStore::open(transport, contract.clone()).await?
+            ObjectRecoveryStore::open(transport, contract.clone()).await?
         });
         Ok(Self { workspace, recovery, destination, contract })
     }
 }
 
 /// Validate source metadata, identity configuration, destinations and schema without acquiring tokens or
-/// contacting source databases, warehouses, Blob or Azure management. No local runtime state is created.
+/// contacting source databases, warehouses, recovery storage or cloud management. No local runtime state is created.
 pub fn validate(config: &CollectorConfig) -> Result<()> {
-    ConfiguredAdapters::new(config, SourceMode::Collect).map(|_| ())
+    CollectorRuntime::default().validate(config)
 }
 
 /// Explicit namespace provisioning. Normal startup refuses a missing remote history.
 /// This does not provision warehouse tables, Event Grid, containers, identities, permissions or networks.
 pub async fn initialize(config: &CollectorConfig) -> Result<()> {
-    Adapters::open(config, true, SourceMode::Collect).await.map(|_| ())
+    CollectorRuntime::default().initialize(config).await
 }
 
 /// The host must independently establish that a previous source owner is quiescent before this call.
@@ -114,7 +127,17 @@ pub async fn run(
     max_work: Option<u32>,
     reporter: &dyn ServiceReporter,
 ) -> Result<FleetSummary> {
-    ConfiguredAdapters::new(config, mode)?;
+    CollectorRuntime::default().run(config, mode, cancellation, max_work, reporter).await
+}
+async fn run_with_runtime(
+    runtime: &CollectorRuntime,
+    config: &CollectorConfig,
+    mode: SourceMode,
+    cancellation: &CollectionCancellation,
+    max_work: Option<u32>,
+    reporter: &dyn ServiceReporter,
+) -> Result<FleetSummary> {
+    ConfiguredAdapters::new(config, mode, runtime)?;
     if mode == SourceMode::DeliveryOnly && max_work.is_some() {
         return Err(DeliveryProblem::InvalidContract.error());
     }
@@ -125,12 +148,13 @@ pub async fn run(
     let probes = HealthServer::bind(config.health_listen, health.clone()).await?;
     with_background(
         cancellation,
-        run_configured(config, mode, cancellation, max_work, reporter, &health),
+        run_configured(runtime, config, mode, cancellation, max_work, reporter, &health),
         probes.run(cancellation),
     )
     .await
 }
 async fn run_configured(
+    runtime: &CollectorRuntime,
     config: &CollectorConfig,
     mode: SourceMode,
     cancellation: &CollectionCancellation,
@@ -138,7 +162,7 @@ async fn run_configured(
     reporter: &dyn ServiceReporter,
     health: &CollectorHealth,
 ) -> Result<FleetSummary> {
-    let adapters = Adapters::open(config, false, mode).await?;
+    let adapters = Adapters::open(config, false, mode, runtime).await?;
     if cancellation.is_cancelled() {
         return Ok(FleetSummary::default());
     }

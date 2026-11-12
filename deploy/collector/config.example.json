@@ -569,8 +569,8 @@
     ]
   },
   "recovery": {
-    "kind": "azure-blob",
-    "storage": {
+    "provider": "azure-blob",
+    "options": {
       "account": "REPLACE_STORAGE_ACCOUNT",
       "container": "culprit-native",
       "prefix": "database-telemetry/pilot"
@@ -595,7 +595,6 @@
     "max_bytes": 1073741824,
     "max_captures": 256
   },
-  "source_credential": "source",
   "credentials": {
     "source": {
       "kind": "azure",
@@ -633,5 +632,8 @@
         "token_file": "/var/run/secrets/culprit/token"
       }
     }
+  },
+  "source_credentials": {
+    "pilot": "source"
   }
 }

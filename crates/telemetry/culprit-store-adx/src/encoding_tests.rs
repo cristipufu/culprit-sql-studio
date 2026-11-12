@@ -15,19 +15,19 @@ struct HeldUpload {
     finished: tokio::sync::Notify,
 }
 #[async_trait::async_trait]
-impl culprit_collector::delivery::blob_store::transport::BlobTransport for HeldUpload {
+impl culprit_collector::delivery::object_store::transport::ObjectTransport for HeldUpload {
     async fn get(
         &self,
         _: &str,
-    ) -> culprit_core::Result<Option<culprit_collector::delivery::blob_store::transport::BlobRead>> {
+    ) -> culprit_core::Result<Option<culprit_collector::delivery::object_store::transport::ObjectRead>> {
         unreachable!()
     }
     async fn put(
         &self,
         _: &str,
         _: Vec<u8>,
-        _: culprit_collector::delivery::blob_store::transport::WriteCondition<'_>,
-    ) -> culprit_core::Result<culprit_collector::delivery::blob_store::transport::BlobWrite> {
+        _: culprit_collector::delivery::object_store::transport::WriteCondition<'_>,
+    ) -> culprit_core::Result<culprit_collector::delivery::object_store::transport::ObjectWrite> {
         unreachable!()
     }
     async fn put_file(
@@ -35,12 +35,12 @@ impl culprit_collector::delivery::blob_store::transport::BlobTransport for HeldU
         _: &str,
         path: &Path,
         bytes: u64,
-    ) -> culprit_core::Result<culprit_collector::delivery::blob_store::transport::BlobWrite> {
+    ) -> culprit_core::Result<culprit_collector::delivery::object_store::transport::ObjectWrite> {
         self.started.notify_one();
         self.release.notified().await;
         assert_eq!(std::fs::read(path).unwrap().len() as u64, bytes);
         self.finished.notify_one();
-        Ok(culprit_collector::delivery::blob_store::transport::BlobWrite::Written)
+        Ok(culprit_collector::delivery::object_store::transport::ObjectWrite::Written)
     }
 }
 

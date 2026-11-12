@@ -73,7 +73,7 @@ pub fn fixture() -> (RangeManifest, ExportedRecord) {
     (manifest, row)
 }
 
-use crate::delivery::{blob_store::transport::*, recovery::*};
+use crate::delivery::{object_store::transport::*, recovery::*};
 use async_trait::async_trait;
 use culprit_core::Result;
 use std::{
@@ -244,24 +244,24 @@ pub struct Blobs {
     pub uploads: Mutex<Vec<String>>,
 }
 #[async_trait]
-impl BlobTransport for Blobs {
-    async fn get(&self, key: &str) -> Result<Option<BlobRead>> {
-        Ok(self.objects.lock().unwrap().get(key).cloned().map(|bytes| BlobRead {
+impl ObjectTransport for Blobs {
+    async fn get(&self, key: &str) -> Result<Option<ObjectRead>> {
+        Ok(self.objects.lock().unwrap().get(key).cloned().map(|bytes| ObjectRead {
             etag: "fixture".into(),
             bytes: bytes.len() as u64,
             body: Box::pin(std::io::Cursor::new(bytes)),
         }))
     }
-    async fn put(&self, key: &str, bytes: Vec<u8>, condition: WriteCondition<'_>) -> Result<BlobWrite> {
+    async fn put(&self, key: &str, bytes: Vec<u8>, condition: WriteCondition<'_>) -> Result<ObjectWrite> {
         assert!(matches!(condition, WriteCondition::Absent));
         let mut objects = self.objects.lock().unwrap();
         if objects.contains_key(key) {
-            return Ok(BlobWrite::ConditionNotMet);
+            return Ok(ObjectWrite::ConditionNotMet);
         }
         objects.insert(key.into(), bytes);
-        Ok(BlobWrite::Written)
+        Ok(ObjectWrite::Written)
     }
-    async fn put_file(&self, key: &str, path: &Path, bytes: u64) -> Result<BlobWrite> {
+    async fn put_file(&self, key: &str, path: &Path, bytes: u64) -> Result<ObjectWrite> {
         self.uploads.lock().unwrap().push(key.into());
         let body = std::fs::read(path).unwrap();
         assert_eq!(body.len() as u64, bytes);

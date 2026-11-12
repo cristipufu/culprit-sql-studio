@@ -3,7 +3,7 @@ use super::config::TargetConfig;
 use culprit_auth::CredentialResolver;
 use culprit_collector::{
     analytical::sink::AnalyticalSink,
-    delivery::{blob_store::transport::BlobTransport, contract::Contract, recovery::RecoveryStore},
+    delivery::{contract::Contract, object_store::transport::ObjectTransport, recovery::RecoveryStore},
 };
 use culprit_core::Result;
 use std::{path::Path, sync::Arc};
@@ -11,6 +11,9 @@ use std::{path::Path, sync::Arc};
 pub(super) trait SinkFactory: Send + Sync {
     fn destination(&self) -> &str;
     fn schema_digest(&self) -> &str;
+    fn staging_scope(&self) -> Option<&str> {
+        None
+    }
     fn open(
         self: Box<Self>,
         contract: Contract,
@@ -21,7 +24,7 @@ pub(super) trait SinkFactory: Send + Sync {
 pub(super) fn configure(
     target: &TargetConfig,
     credentials: Arc<dyn CredentialResolver>,
-    validation: Arc<dyn BlobTransport>,
+    validation: Arc<dyn ObjectTransport>,
 ) -> Result<Box<dyn SinkFactory>> {
     match target {
         #[cfg(feature = "store-adx")]
@@ -53,6 +56,7 @@ mod adx {
         query: Arc<AdxClient>,
         ready: Arc<AzureBlobTransport>,
         catalog: SchemaCatalog,
+        staging_scope: String,
     }
     impl Destination {
         pub(super) fn new(
@@ -62,6 +66,7 @@ mod adx {
             ready_credential: Arc<dyn culprit_auth::BearerTokenProvider>,
         ) -> Result<Self> {
             Ok(Self {
+                staging_scope: ready.access_scope()?,
                 query: Arc::new(AdxClient::new(query.clone(), credential.clone())?),
                 ready: Arc::new(AzureBlobTransport::new(ready.clone(), ready_credential)?),
                 catalog: SchemaCatalog::new()?,
@@ -69,6 +74,9 @@ mod adx {
         }
     }
     impl SinkFactory for Destination {
+        fn staging_scope(&self) -> Option<&str> {
+            Some(&self.staging_scope)
+        }
         fn destination(&self) -> &str {
             self.query.destination()
         }
@@ -98,7 +106,7 @@ mod clickhouse {
         query: ClickHouseConfig,
         profile: String,
         credentials: Arc<dyn CredentialResolver>,
-        validation: Arc<dyn BlobTransport>,
+        validation: Arc<dyn ObjectTransport>,
         catalog: SchemaCatalog,
     }
     impl Destination {
@@ -106,7 +114,7 @@ mod clickhouse {
             query: &ClickHouseConfig,
             profile: &str,
             credentials: Arc<dyn CredentialResolver>,
-            validation: Arc<dyn BlobTransport>,
+            validation: Arc<dyn ObjectTransport>,
         ) -> Result<Self> {
             credentials.validate_password(profile)?;
             Ok(Self {

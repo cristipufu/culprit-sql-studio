@@ -1,5 +1,6 @@
 //! Static assignments and explicit source/recovery/target dependencies; configuration contains no credentials.
 use crate::credentials::CredentialProfile;
+#[cfg(feature = "store-adx")]
 use culprit_blob_azure::AzureBlobConfig;
 use culprit_core::{Result, telemetry::*};
 #[cfg(feature = "store-adx")]
@@ -24,16 +25,19 @@ pub struct CollectorConfig {
     pub state: PathBuf,
     pub inventory: FleetInventory,
     pub credentials: BTreeMap<String, CredentialProfile>,
-    pub source_credential: Option<String>,
+    #[serde(default)]
+    pub source_credentials: BTreeMap<String, String>,
     pub recovery: RecoveryConfig,
     pub target: TargetConfig,
     pub limits: OutboxLimits,
     pub health_listen: std::net::SocketAddr,
 }
 #[derive(Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum RecoveryConfig {
-    AzureBlob { storage: AzureBlobConfig, credential: String },
+#[serde(deny_unknown_fields)]
+pub struct RecoveryConfig {
+    pub provider: String,
+    pub options: serde_json::Value,
+    pub credential: String,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
@@ -82,18 +86,6 @@ impl CollectorConfig {
             || !self.limits.is_valid()
         {
             return Err(invalid());
-        }
-        match &self.target {
-            #[cfg(feature = "store-adx")]
-            TargetConfig::Adx { ready, .. } => {
-                let RecoveryConfig::AzureBlob { storage, .. } = &self.recovery;
-                // Ingestion permissions must not grant access to unredacted recovery data.
-                if storage.account == ready.account && storage.container == ready.container {
-                    return Err(invalid());
-                }
-            }
-            #[cfg(feature = "store-clickhouse")]
-            TargetConfig::ClickHouse { .. } => {}
         }
         Ok(())
     }

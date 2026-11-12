@@ -1,4 +1,6 @@
 //! Credential composition; native acquisition belongs to the authentication provider crates.
+mod authentication;
+pub(crate) use authentication::AuthenticationRegistry;
 #[cfg(feature = "collector")]
 mod profiles;
 use crate::{
@@ -26,6 +28,10 @@ impl CommandRunner for CloudCommand {
 pub(crate) fn entra() -> culprit_auth_azure::entra::EntraAuth {
     culprit_auth_azure::entra::EntraAuth::new(Arc::new(CloudCommand(Cli::Azure)))
 }
+#[cfg(feature = "collector")]
+pub(crate) fn aws_profile(profile: Option<String>) -> Result<culprit_auth_aws::AwsCli> {
+    culprit_auth_aws::AwsCli::with_profile(Arc::new(CloudCommand(Cli::Aws)), profile)
+}
 pub(crate) fn aws() -> culprit_auth_aws::AwsCli {
     culprit_auth_aws::AwsCli::new(Arc::new(CloudCommand(Cli::Aws)))
 }
@@ -44,3 +50,15 @@ pub(crate) fn rds_ca_file(data_dir: &Path) -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) fn authentication() -> AuthenticationRegistry {
+    AuthenticationRegistry::builtins(vec![Arc::new(entra()), Arc::new(aws())])
+}
+
+pub(crate) fn azure_cli() -> culprit_auth_azure::cli::AzureCliCredential {
+    culprit_auth_azure::cli::AzureCliCredential::new(Arc::new(CloudCommand(Cli::Azure)))
+}
+
+pub(crate) fn azure_commands() -> Arc<dyn CommandRunner> {
+    Arc::new(CloudCommand(Cli::Azure))
+}

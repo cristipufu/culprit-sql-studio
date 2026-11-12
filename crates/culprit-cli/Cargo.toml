@@ -20,7 +20,7 @@ culprit-auth.workspace = true
 culprit-auth-azure.workspace = true
 culprit-core.workspace = true
 culprit-collector.workspace = true
-culprit-engine = { workspace = true, features = ["store-adx", "store-clickhouse"] }
+culprit-engine = { workspace = true, features = ["store-adx", "store-clickhouse", "recovery-azure", "recovery-s3"] }
 culprit-store-adx.workspace = true
 culprit-store-clickhouse.workspace = true
 culprit-mcp.workspace = true

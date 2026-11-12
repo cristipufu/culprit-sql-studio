@@ -5,7 +5,8 @@ views. Database access stays in the collector's network. An analytical destinati
 investigations do not need a new connection to the production database.
 
 Remote delivery supports ADX and ClickHouse through one shared preparation, verification and publication path.
-Private Azure Blob storage retains native recovery evidence; ADX additionally uses an ingestion-ready container. The actual managed
+Private Azure Blob or S3 storage retains native recovery evidence through the same conditional-object protocol;
+ADX additionally uses a separate Azure ingestion-ready container. The actual managed
 ingestion route, cloud permissions, private networking, retention-scale costs and production source-load budgets
 require live qualification. The deployment example starts with **zero replicas**. Its resource requests and cadences
 are starting configurations, not measured capacity claims.
@@ -47,15 +48,16 @@ culprit collect schema --store clickhouse > clickhouse-schema.sql
 ```
 
 Validation reads saved metadata, checks unattended authentication and configures the adapters. It acquires no tokens,
-opens no database, Blob or warehouse connections and creates no runtime state. `collect schema` generates DDL, mappings, canonical
+opens no database, object-storage or warehouse connections and creates no runtime state. `collect schema` generates DDL, mappings, canonical
 queries and native ingestion assets without opening a workspace or applying anything to a service.
 
 Credential profiles are independent from source and destination selection. The example names four Azure profiles:
-`source`, `recovery`, `analytics` and `staging`. `source_credential` applies to unattended database token authentication;
+`source`, `recovery`, `analytics` and `staging`. `source_credentials` maps saved connection names to their own
+unattended authentication profiles;
 password-authenticated connections still use their saved password environment references. Recovery's `credential`,
 ADX's `credential` and its `ready_credential` can select different managed or workload identities. Explicitly selecting
 the same profile reuses that credential owner and its audience caches. Nothing inherits a different role's identity.
-Delivery-only mode neither resolves the source profile nor requires saved source connections.
+A fleet may mix Azure and AWS sources without sharing identities. Delivery-only mode neither resolves source profiles nor requires saved source connections.
 
 For ClickHouse, replace `target` and add a password profile:
 
@@ -77,6 +79,62 @@ is read only when opening the sink. It is sent in an HTTP header, never a URL, s
 HTTPS is required except for literal loopback fixture endpoints. Redirects and host proxies are disabled. The
 ClickHouse adapter does not depend on Azure authentication or Azure Blob; the service's chosen recovery transport
 remains independent of its analytical destination.
+
+### Recovery providers
+
+Recovery configuration names a provider and gives it native options; the collector does not interpret bucket,
+container, identity or endpoint fields. The built-in providers are `azure-blob` and `s3`. Their Cargo features,
+`recovery-azure` and `recovery-s3`, are independent of `store-adx` and `store-clickhouse`. For example:
+
+```json
+{
+  "recovery": {
+    "provider": "s3",
+    "options": {
+      "bucket": "culprit-private-recovery",
+      "region": "eu-west-1",
+      "prefix": "pilot/shard-0",
+      "expected_owner": "123456789012"
+    },
+    "credential": "archive-aws"
+  },
+  "credentials": {
+    "archive-aws": {"kind": "aws", "profile": "culprit-archive"}
+  }
+}
+```
+
+Merge this profile with the other role profiles. The AWS adapter resolves the named AWS CLI profile with
+`aws configure export-credentials --format process`; that profile can use the AWS CLI's configured role or workload
+credential source. It refreshes expiring credentials through that profile alone. Culprit never runs `aws login`
+automatically or falls back to another identity. Credentials and session tokens stay out of configuration and errors.
+The source's AWS IAM profile can be a different profile from recovery's, even in the same fleet.
+
+Provision the private bucket separately. Derived AWS endpoints require the expected 12-digit owner account and sign
+that constraint on every request. S3-compatible storage accepts an explicit trusted HTTPS origin through `endpoint`;
+HTTP is restricted to loopback fixtures. Native object writes sign exact payload hashes and conditional headers;
+redirects and proxies are disabled. A precondition failure is distinct from an ambiguous conflict or transport error.
+An upload owns its opened file through native completion, including when its caller is cancelled.
+
+Restrict access to this shard's prefix and the required GetObject/PutObject operations. Keep public access blocked,
+require TLS, configure bucket encryption and any required KMS permissions, and retain the evidence for the required
+recovery period. Do not expire or delete recovery objects while the collector still relies on them. Use CloudTrail
+S3 data events or equivalent storage audit logs to investigate writes. Account for PUT/GET requests, retained bytes,
+KMS requests and cross-region/cloud egress, particularly when S3 recovery feeds ADX. These fixtures do not establish
+managed AWS durability, IAM or networking guarantees.
+
+Embedders implement `RecoveryProvider` and register it with
+`CollectorRuntime::empty().with_recovery_provider(...)` (or add it to the defaults). The provider receives an
+explicit `CredentialResolver`; `CollectorRuntime::with_credentials(...)` injects an embedding profile registry.
+Neither recovery nor destination adapters discover identities. `ObjectRecoveryStore` implements immutable payloads,
+ETag-fenced commits and restart recovery once over `ObjectTransport`; Azure and S3 implement only native object I/O.
+The same runtime instance owns validation, initialization and service execution. Normal startup never initializes a
+missing namespace. Recovery fencing cannot stop an orphan database query; source admission remains independent.
+
+`python3 -B dev/smoke-s3.py` runs the same recovery contract as Azure Blob against an owned, digest-pinned RustFS
+fixture, then verifies real ClickHouse delivery and publication after restarting S3-backed recovery. Synthetic
+credentials and loopback ports are local to the fixture; both containers and their volumes are removed on exit.
+This complements `dev/smoke-delivery.py` (Azurite), `dev/smoke-clickhouse.py` and the final live ADX qualification.
 
 ### ClickHouse deployment and durability
 

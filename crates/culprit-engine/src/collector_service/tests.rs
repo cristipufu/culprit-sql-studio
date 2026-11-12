@@ -40,7 +40,7 @@ fn config(root: &Path) -> CollectorConfig {
                 }],
             }],
         },
-        source_credential: Some("source".into()),
+        source_credentials: [("fixture".into(), "source".into())].into(),
         credentials: [
             ("source", None),
             ("recovery", Some("11111111-1111-1111-1111-111111111111")),
@@ -56,13 +56,10 @@ fn config(root: &Path) -> CollectorConfig {
             )
         })
         .collect(),
-        recovery: RecoveryConfig::AzureBlob {
+        recovery: RecoveryConfig {
+            provider: "azure-blob".into(),
             credential: "recovery".into(),
-            storage: AzureBlobConfig {
-                account: "nevercontact".into(),
-                container: "recovery".into(),
-                prefix: "test/alpha".into(),
-            },
+            options: serde_json::json!({"account":"nevercontact", "container":"recovery", "prefix":"test/alpha"}),
         },
         target: TargetConfig::Adx {
             credential: "analytics".into(),
@@ -95,6 +92,90 @@ fn offline_validation_configures_all_adapters_without_tokens_connections_or_runt
     assert!(!config.state.exists());
 }
 
+struct NoObjectWork;
+#[async_trait::async_trait]
+impl culprit_collector::delivery::object_store::transport::ObjectTransport for NoObjectWork {
+    async fn get(&self, _: &str) -> Result<Option<culprit_collector::delivery::object_store::transport::ObjectRead>> {
+        panic!("offline object read")
+    }
+    async fn put(
+        &self,
+        _: &str,
+        _: Vec<u8>,
+        _: culprit_collector::delivery::object_store::transport::WriteCondition<'_>,
+    ) -> Result<culprit_collector::delivery::object_store::transport::ObjectWrite> {
+        panic!("offline object write")
+    }
+    async fn put_file(
+        &self,
+        _: &str,
+        _: &Path,
+        _: u64,
+    ) -> Result<culprit_collector::delivery::object_store::transport::ObjectWrite> {
+        panic!("offline object upload")
+    }
+}
+struct ExternalRecovery;
+impl culprit_collector::delivery::object_store::provider::RecoveryProvider for ExternalRecovery {
+    fn name(&self) -> &str {
+        "external"
+    }
+    fn configure(
+        &self,
+        options: &serde_json::Value,
+        profile: &str,
+        _: &dyn culprit_auth::CredentialResolver,
+    ) -> Result<culprit_collector::delivery::object_store::provider::RecoveryTarget> {
+        assert_eq!(profile, "external-profile");
+        assert_eq!(options["namespace"], "foreign");
+        Ok(culprit_collector::delivery::object_store::provider::RecoveryTarget {
+            transport: Arc::new(NoObjectWork),
+            access_scope: "external:foreign".into(),
+        })
+    }
+}
+#[test]
+fn recovery_plugins_use_the_same_runtime_registration_without_builtin_configuration_or_io() {
+    let root = tempfile::tempdir().unwrap();
+    let mut config = config(root.path());
+    config.recovery = RecoveryConfig {
+        provider: "external".into(),
+        options: serde_json::json!({"namespace":"foreign"}),
+        credential: "external-profile".into(),
+    };
+    assert!(validate(&config).is_err());
+    let runtime = CollectorRuntime::empty().with_recovery_provider(Arc::new(ExternalRecovery)).unwrap();
+    runtime.validate(&config).unwrap();
+    assert!(runtime.with_recovery_provider(Arc::new(ExternalRecovery)).is_err());
+    assert!(!config.state.exists());
+}
+
+#[test]
+fn one_fleet_can_bind_azure_and_aws_sources_to_distinct_credential_profiles_offline() {
+    let root = tempfile::tempdir().unwrap();
+    let mut config = config(root.path());
+    let workspace = Workspace::open_in(&config.workspace);
+    workspace
+        .add_connection(NewConnection {
+            name: "rds".into(),
+            input: "postgres://app@fixture.abc.eu-central-1.rds.amazonaws.com/shop".into(),
+            engine: Some(Engine::Postgres),
+            auth: Some(AuthKind::AwsIam),
+            ..Default::default()
+        })
+        .unwrap();
+    let mut target = config.inventory.targets[0].clone();
+    target.connection = "rds".into();
+    target.admission_group = "rds".into();
+    config.inventory.targets.push(target);
+    config.credentials.insert("aws-source".into(), CredentialProfile::Aws { profile: Some("fixture-aws".into()) });
+    config.source_credentials.insert("rds".into(), "aws-source".into());
+    let configured = ConfiguredAdapters::new(&config, SourceMode::Collect, &CollectorRuntime::default()).unwrap();
+    assert_eq!(configured.workspace.tokens_for("fixture").unwrap().auth_kind(), AuthKind::Entra);
+    assert_eq!(configured.workspace.tokens_for("rds").unwrap().auth_kind(), AuthKind::AwsIam);
+    assert!(!config.state.exists());
+}
+
 #[test]
 fn invalid_routes_overlapping_state_and_unknown_configuration_fields_are_refused_offline() {
     let root = tempfile::tempdir().unwrap();
@@ -120,7 +201,7 @@ fn invalid_routes_overlapping_state_and_unknown_configuration_fields_are_refused
 fn missing_unattended_source_authentication_and_identical_native_and_ready_namespaces_are_rejected() {
     let root = tempfile::tempdir().unwrap();
     let mut config = config(root.path());
-    let RecoveryConfig::AzureBlob { storage, .. } = &config.recovery;
+    let storage: AzureBlobConfig = serde_json::from_value(config.recovery.options.clone()).unwrap();
     let TargetConfig::Adx { ready, .. } = &mut config.target else { panic!("ADX fixture") };
     *ready = storage.clone();
     assert!(validate(&config).is_err());
@@ -136,10 +217,10 @@ fn delivery_only_configuration_needs_no_saved_source_or_native_admission_journal
     let root = tempfile::tempdir().unwrap();
     let config = config(root.path());
     std::fs::remove_dir_all(&config.workspace).unwrap();
-    ConfiguredAdapters::new(&config, SourceMode::DeliveryOnly).unwrap();
+    ConfiguredAdapters::new(&config, SourceMode::DeliveryOnly, &CollectorRuntime::default()).unwrap();
     assert!(!config.workspace.exists());
     assert!(!config.state.exists());
-    assert!(ConfiguredAdapters::new(&config, SourceMode::Collect).is_err());
+    assert!(ConfiguredAdapters::new(&config, SourceMode::Collect, &CollectorRuntime::default()).is_err());
 }
 
 #[test]
@@ -157,12 +238,12 @@ fn an_unexportable_source_budget_is_rejected_before_any_source_work_or_runtime_s
 fn role_profiles_are_independent_and_delivery_only_does_not_resolve_source_credentials() {
     let root = tempfile::tempdir().unwrap();
     let mut config = config(root.path());
-    config.source_credential = Some("not-configured-source".into());
-    assert!(ConfiguredAdapters::new(&config, SourceMode::Collect).is_err());
-    ConfiguredAdapters::new(&config, SourceMode::DeliveryOnly).unwrap();
+    config.source_credentials.insert("fixture".into(), "not-configured-source".into());
+    assert!(ConfiguredAdapters::new(&config, SourceMode::Collect, &CollectorRuntime::default()).is_err());
+    ConfiguredAdapters::new(&config, SourceMode::DeliveryOnly, &CollectorRuntime::default()).unwrap();
     let TargetConfig::Adx { credential, .. } = &mut config.target else { panic!("ADX fixture") };
     *credential = "not-configured-analytics".into();
-    assert!(ConfiguredAdapters::new(&config, SourceMode::DeliveryOnly).is_err());
+    assert!(ConfiguredAdapters::new(&config, SourceMode::DeliveryOnly, &CollectorRuntime::default()).is_err());
 }
 #[cfg(feature = "store-clickhouse")]
 #[test]
@@ -184,7 +265,7 @@ fn clickhouse_configuration_uses_its_password_profile_without_acquiring_it_offli
         },
         credential: "warehouse".into(),
     };
-    let configured = ConfiguredAdapters::new(&config, SourceMode::Collect).unwrap();
+    let configured = ConfiguredAdapters::new(&config, SourceMode::Collect, &CollectorRuntime::default()).unwrap();
     assert!(configured.contract.destination().starts_with("clickhouse:"));
     assert_ne!(configured.contract.schema_digest(), culprit_store_adx::catalog::SchemaCatalog::new().unwrap().digest());
     assert!(!config.state.exists());

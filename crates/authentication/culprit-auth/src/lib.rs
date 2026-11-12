@@ -31,12 +31,29 @@ pub struct PasswordCredential {
     pub password: Zeroizing<String>,
 }
 
+/// Access-key credentials for request-signing protocols. Native adapters own the signing scheme and endpoint policy.
+/// Neither credentials nor their providers are serializable or printable.
+#[derive(Clone)]
+pub struct AccessKeyCredential {
+    pub key_id: Zeroizing<String>,
+    pub secret_key: Zeroizing<String>,
+    pub session_token: Option<Zeroizing<String>>,
+    pub expires_at: Option<std::time::SystemTime>,
+}
+#[async_trait]
+pub trait AccessKeyProvider: Send + Sync {
+    async fn access_keys(&self) -> Result<AccessKeyCredential>;
+}
+
 /// Named profiles are selected by the host. Validation never acquires a token or reads a password.
 pub trait CredentialResolver: Send + Sync {
     fn bearer(&self, profile: &str) -> Result<std::sync::Arc<dyn BearerTokenProvider>>;
     fn database(&self, profile: &str) -> Result<std::sync::Arc<dyn DatabaseTokenProvider>>;
     fn validate_password(&self, profile: &str) -> Result<()>;
     fn password(&self, profile: &str) -> Result<PasswordCredential>;
+    fn access_keys(&self, _profile: &str) -> Result<std::sync::Arc<dyn AccessKeyProvider>> {
+        Err(culprit_core::Error::invalid(culprit_core::t!("engine.credentials.invalid_profile")))
+    }
 }
 
 /// A canonical DNS HTTPS origin. Adapter policy decides which hosts and resources it trusts.
@@ -121,3 +138,38 @@ pub enum SignInEvent {
 }
 
 pub type SignInHandler = Arc<dyn Fn(SignInEvent) + Send + Sync>;
+
+/// A native authentication adapter, including any interactive lifecycle it owns. Headless credential providers
+/// remain separate: resolving an unattended profile must never start an interactive sign-in.
+#[async_trait]
+pub trait DatabaseAuthentication: Send + Sync {
+    fn auth_kind(&self) -> culprit_core::AuthKind;
+    async fn credential(
+        &self,
+        connection: &culprit_core::ConnectionSpec,
+        secrets: &dyn SecretStore,
+    ) -> Result<DatabaseCredential>;
+    fn set_sign_in_handler(&self, _handler: Option<SignInHandler>) {}
+    fn cancel_sign_in(&self) {}
+    fn sign_out(&self, _connections: &[culprit_core::ConnectionSpec], _secrets: &dyn SecretStore) -> Result<usize> {
+        Ok(0)
+    }
+}
+
+#[async_trait]
+pub trait AuthenticationService: Send + Sync {
+    async fn credential(
+        &self,
+        connection: &culprit_core::ConnectionSpec,
+        secrets: &dyn SecretStore,
+    ) -> Result<DatabaseCredential>;
+    fn set_sign_in_handler(&self, handler: Option<SignInHandler>);
+    fn cancel_sign_in(&self);
+    fn sign_out(&self, connections: &[culprit_core::ConnectionSpec], secrets: &dyn SecretStore) -> Result<usize>;
+}
+
+/// An authenticated native command client. Only the selected adapter interprets native CLI failures.
+#[async_trait]
+pub trait CommandClient: Send + Sync {
+    async fn run(&self, arguments: &[&str]) -> Result<Vec<u8>>;
+}

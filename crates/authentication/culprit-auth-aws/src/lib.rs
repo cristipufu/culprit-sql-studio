@@ -1,6 +1,8 @@
 //! Amazon RDS through the AWS CLI: IAM authentication tokens and the RDS certificate authorities, so no database secret is
 //! stored and IAM tokens only travel over verified TLS.
 
+mod access_keys;
+use access_keys::CachedKeys;
 use culprit_auth::CommandRunner;
 use std::sync::Arc;
 
@@ -30,21 +32,39 @@ fn install_hint() -> String {
 
 pub struct AwsCli {
     runner: Arc<dyn CommandRunner>,
+    profile: Option<String>,
+    credentials: tokio::sync::Mutex<Option<CachedKeys>>,
 }
 impl AwsCli {
     pub fn new(runner: Arc<dyn CommandRunner>) -> Self {
-        Self { runner }
+        Self { runner, profile: None, credentials: tokio::sync::Mutex::new(None) }
+    }
+    pub fn with_profile(runner: Arc<dyn CommandRunner>, profile: Option<String>) -> Result<Self> {
+        if profile.as_ref().is_some_and(|profile| {
+            profile.is_empty()
+                || profile.len() > 128
+                || !profile.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.@".contains(&b))
+        }) {
+            return Err(Error::invalid(t!("engine.credentials.invalid_profile")));
+        }
+        Ok(Self { profile, ..Self::new(runner) })
     }
     /// Run the AWS CLI and return stdout, turning "not installed" and "not signed in" into actionable errors.
     pub async fn run(&self, args: &[&str]) -> Result<Vec<u8>> {
+        let mut arguments = args.to_vec();
+        if let Some(profile) = &self.profile {
+            arguments.extend(["--profile", profile]);
+        }
         let output =
-            self.runner.output(args, &[("AWS_PAGER", ""), ("AWS_CLI_AUTO_PROMPT", "off")]).await.map_err(|error| {
-                if error.code == ErrorCode::NotFound {
-                    Error::new(ErrorCode::AuthFailed, t!("engine.aws.cli_missing")).with_hint(install_hint())
-                } else {
-                    error
-                }
-            })?;
+            self.runner.output(&arguments, &[("AWS_PAGER", ""), ("AWS_CLI_AUTO_PROMPT", "off")]).await.map_err(
+                |error| {
+                    if error.code == ErrorCode::NotFound {
+                        Error::new(ErrorCode::AuthFailed, t!("engine.aws.cli_missing")).with_hint(install_hint())
+                    } else {
+                        error
+                    }
+                },
+            )?;
         if output.status.success() {
             return Ok(output.stdout);
         }
@@ -85,42 +105,7 @@ fn is_sign_in_problem(message: &str) -> bool {
     .any(|marker| message.contains(marker))
 }
 
-/// `shop.abc123.us-east-1.rds.amazonaws.com` → `us-east-1`.
-pub fn region_from_host(host: &str) -> Option<String> {
-    let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
-    let labels: Vec<&str> = host.split('.').collect();
-    let rds = labels.iter().rposition(|l| *l == "rds")?;
-    let region = labels.get(rds.checked_sub(1)?)?;
-    valid_region(region).then(|| region.to_string())
-}
-
-pub fn valid_region(region: &str) -> bool {
-    let parts: Vec<&str> = region.split('-').collect();
-    parts.len() >= 3
-        && parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()))
-        && parts.last().is_some_and(|p| p.chars().all(|c| c.is_ascii_digit()))
-        && region.len() <= 25
-}
-
-/// `us-east-1` → `use1`, `eu-central-1` → `euc1`, `ap-southeast-2` → `apse2`, `us-gov-west-1` → `usgw1`.
-pub fn region_short(region: &str) -> String {
-    region
-        .split('-')
-        .map(|part| match part {
-            "east" => "e".to_string(),
-            "west" => "w".to_string(),
-            "north" => "n".to_string(),
-            "south" => "s".to_string(),
-            "central" => "c".to_string(),
-            "northeast" => "ne".to_string(),
-            "northwest" => "nw".to_string(),
-            "southeast" => "se".to_string(),
-            "southwest" => "sw".to_string(),
-            "gov" => "g".to_string(),
-            other => other.to_string(),
-        })
-        .collect()
-}
+pub use culprit_core::cloud::aws::{region_from_host, region_short, valid_region};
 
 pub fn rds_ca_bundle() -> &'static [u8] {
     RDS_CA_BUNDLE
@@ -199,6 +184,35 @@ impl culprit_auth::DatabaseTokenProvider for AwsCli {
 
         let token = self.iam_token(engine, request.host, port, &user, &region).await?;
         Ok(culprit_auth::DatabaseCredential { token: zeroize::Zeroizing::new(token), username: Some(user) })
+    }
+}
+
+#[async_trait::async_trait]
+impl culprit_auth::DatabaseAuthentication for AwsCli {
+    fn auth_kind(&self) -> culprit_core::AuthKind {
+        culprit_core::AuthKind::AwsIam
+    }
+    async fn credential(
+        &self,
+        spec: &culprit_core::ConnectionSpec,
+        _: &dyn culprit_auth::SecretStore,
+    ) -> Result<culprit_auth::DatabaseCredential> {
+        use culprit_auth::{DatabaseTokenProvider, DatabaseTokenRequest};
+        self.database_token(DatabaseTokenRequest {
+            engine: spec.engine.ok_or_else(|| Error::invalid(t!("engine.connection.unknown_engine")))?,
+            host: &spec.host,
+            port: spec.port,
+            username: spec.user.as_deref(),
+            region: spec.option("region"),
+        })
+        .await
+    }
+}
+
+#[async_trait::async_trait]
+impl culprit_auth::CommandClient for AwsCli {
+    async fn run(&self, arguments: &[&str]) -> Result<Vec<u8>> {
+        AwsCli::run(self, arguments).await
     }
 }
 

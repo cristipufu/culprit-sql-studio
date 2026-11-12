@@ -495,6 +495,38 @@ pub async fn azure_cli_token(runner: &dyn CommandRunner, engine: Engine) -> Resu
     Ok(token)
 }
 
+#[async_trait::async_trait]
+impl culprit_auth::DatabaseAuthentication for EntraAuth {
+    fn auth_kind(&self) -> culprit_core::AuthKind {
+        culprit_core::AuthKind::Entra
+    }
+    async fn credential(
+        &self,
+        spec: &ConnectionSpec,
+        secrets: &dyn SecretStore,
+    ) -> Result<culprit_auth::DatabaseCredential> {
+        let engine = spec.engine.ok_or_else(|| Error::invalid(t!("engine.connection.unknown_engine")))?;
+        EntraAuth::credential(self, engine, spec, secrets).await
+    }
+    fn set_sign_in_handler(&self, handler: Option<SignInHandler>) {
+        self.set_handler(handler);
+    }
+    fn cancel_sign_in(&self) {
+        self.cancel();
+    }
+    fn sign_out(&self, connections: &[ConnectionSpec], secrets: &dyn SecretStore) -> Result<usize> {
+        let mut authorities = vec![Authority::for_spec(&ConnectionSpec::default())?];
+        for spec in connections {
+            if let Ok(authority) = Authority::for_spec(spec)
+                && !authorities.contains(&authority)
+            {
+                authorities.push(authority);
+            }
+        }
+        EntraAuth::sign_out(self, &authorities, secrets)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;

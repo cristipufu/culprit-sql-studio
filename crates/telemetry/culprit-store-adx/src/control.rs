@@ -5,7 +5,7 @@ use crate::{
     ready,
 };
 use culprit_collector::delivery::{
-    blob_store::transport::BlobTransport, recovery::CommittedRange, sink::DeliveryAttempt,
+    object_store::transport::ObjectTransport, recovery::CommittedRange, sink::DeliveryAttempt,
 };
 use culprit_core::{Result, telemetry::DeliveryProblem};
 use serde_json::{Value, json};
@@ -13,10 +13,10 @@ use std::{collections::BTreeMap, sync::Arc};
 pub struct AdxPublication {
     catalog: Arc<SchemaCatalog>,
     query: Arc<dyn QueryTransport>,
-    ready: Arc<dyn BlobTransport>,
+    ready: Arc<dyn ObjectTransport>,
 }
 impl AdxPublication {
-    pub fn new(catalog: Arc<SchemaCatalog>, query: Arc<dyn QueryTransport>, ready: Arc<dyn BlobTransport>) -> Self {
+    pub fn new(catalog: Arc<SchemaCatalog>, query: Arc<dyn QueryTransport>, ready: Arc<dyn ObjectTransport>) -> Self {
         Self { catalog, query, ready }
     }
     pub async fn publish(

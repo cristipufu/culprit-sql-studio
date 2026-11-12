@@ -21,7 +21,9 @@ mysql = ["dep:culprit-mysql"]
 sqlite = ["dep:culprit-sqlite"]
 collector = ["dep:culprit-collector"]
 store-adx = ["collector", "dep:culprit-store-adx", "dep:culprit-blob-azure"]
-store-clickhouse = ["collector", "dep:culprit-store-clickhouse", "dep:culprit-blob-azure"]
+store-clickhouse = ["collector", "dep:culprit-store-clickhouse"]
+recovery-azure = ["collector", "dep:culprit-blob-azure"]
+recovery-s3 = ["collector", "dep:culprit-blob-s3"]
 
 # All of tests/ in one binary: each test binary is linked, and scanned on its first run, on its own.
 [[test]]
@@ -29,6 +31,7 @@ name = "all"
 path = "tests/all.rs"
 
 [dependencies]
+culprit-cloud.workspace = true
 culprit-read.workspace = true
 culprit-auth.workspace = true
 culprit-auth-aws.workspace = true
@@ -39,6 +42,7 @@ culprit-core.workspace = true
 culprit-collector = { workspace = true, optional = true }
 culprit-store-adx = { workspace = true, optional = true }
 culprit-blob-azure = { workspace = true, optional = true }
+culprit-blob-s3 = { workspace = true, optional = true }
 culprit-store-clickhouse = { workspace = true, optional = true }
 culprit-checks.workspace = true
 culprit-mssql = { workspace = true, optional = true }

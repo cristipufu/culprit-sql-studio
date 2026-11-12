@@ -14,25 +14,25 @@ struct Memory {
     reads: AtomicUsize,
 }
 #[async_trait]
-impl BlobTransport for Memory {
-    async fn get(&self, key: &str) -> Result<Option<BlobRead>> {
+impl ObjectTransport for Memory {
+    async fn get(&self, key: &str) -> Result<Option<ObjectRead>> {
         self.reads.fetch_add(1, Ordering::Relaxed);
-        Ok(self.objects.lock().unwrap().get(key).cloned().map(|bytes| BlobRead {
+        Ok(self.objects.lock().unwrap().get(key).cloned().map(|bytes| ObjectRead {
             etag: "fixture".into(),
             bytes: bytes.len() as u64,
             body: Box::pin(std::io::Cursor::new(bytes)),
         }))
     }
-    async fn put(&self, key: &str, bytes: Vec<u8>, condition: WriteCondition<'_>) -> Result<BlobWrite> {
+    async fn put(&self, key: &str, bytes: Vec<u8>, condition: WriteCondition<'_>) -> Result<ObjectWrite> {
         assert!(matches!(condition, WriteCondition::Absent));
         let mut objects = self.objects.lock().unwrap();
         if objects.contains_key(key) {
-            return Ok(BlobWrite::ConditionNotMet);
+            return Ok(ObjectWrite::ConditionNotMet);
         }
         objects.insert(key.into(), bytes);
-        Ok(BlobWrite::Written)
+        Ok(ObjectWrite::Written)
     }
-    async fn put_file(&self, _: &str, _: &std::path::Path, _: u64) -> Result<BlobWrite> {
+    async fn put_file(&self, _: &str, _: &std::path::Path, _: u64) -> Result<ObjectWrite> {
         unreachable!("projection indexes never spool source payload files")
     }
 }

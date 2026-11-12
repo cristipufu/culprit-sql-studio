@@ -48,13 +48,18 @@ fn generic_resolver_receives_each_roles_own_profile_without_acquiring_credential
     let TargetConfig::Adx { ready_credential, .. } = &mut config.target else { panic!("ADX fixture") };
     *ready_credential = "staging".into();
     let profiles = Arc::new(Profiles::default());
-    ConfiguredAdapters::with_credentials(&config, SourceMode::Collect, profiles.clone()).unwrap();
+    CollectorRuntime::default().with_credentials(profiles.clone()).validate(&config).unwrap();
     assert_eq!(
         *profiles.0.lock().unwrap(),
         ["database:source", "bearer:recovery", "bearer:analytics", "bearer:staging"]
     );
     profiles.0.lock().unwrap().clear();
-    ConfiguredAdapters::with_credentials(&config, SourceMode::DeliveryOnly, profiles.clone()).unwrap();
+    ConfiguredAdapters::new(
+        &config,
+        SourceMode::DeliveryOnly,
+        &CollectorRuntime::default().with_credentials(profiles.clone()),
+    )
+    .unwrap();
     assert_eq!(*profiles.0.lock().unwrap(), ["bearer:recovery", "bearer:analytics", "bearer:staging"]);
     assert!(!config.state.exists());
     assert!(!config.workspace.join("collection-admission").exists());

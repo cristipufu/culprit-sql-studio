@@ -58,7 +58,7 @@ pub use cloud::{
 };
 pub use connection::{
     AuthKind, ConnectionAttempt, ConnectionEndpoint, ConnectionSpec, ConnectionTransport, SshConfig,
-    aws_iam_host_allowed, entra_host_allowed, expand_home, is_local_host, transport_error,
+    aws_iam_host_allowed, aws_region_valid, entra_host_allowed, expand_home, is_local_host, transport_error,
 };
 pub use connection_security::{
     ConnectionSecurity, ConnectionSecurityInfo, ConnectionSecurityMode, ConnectionSecuritySpec,

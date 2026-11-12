@@ -3173,6 +3173,7 @@
   "engine.aws.install_hint.linux": "Install the AWS CLI (https://aws.amazon.com/cli/), sign in with `aws login`, then try again",
   "engine.aws.install_hint.macos": "Install the AWS CLI (`brew install awscli`), sign in with `aws login`, then try again",
   "engine.aws.install_hint.windows": "Install the AWS CLI (`winget install Amazon.AWSCLI`), sign in with `aws login`, then try again",
+  "engine.aws.invalid_credentials": "The AWS credential provider returned invalid or expired credentials.",
   "engine.aws.not_signed_in": "The AWS CLI is not signed in: {message}",
   "engine.aws.refused": "AWS refused the request: {message}",
   "engine.aws.refused_hint": "The signed-in AWS identity needs rds:Describe* (and rds-db:connect for IAM database authentication)",

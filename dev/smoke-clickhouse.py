@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Native analytical correctness in an owned loopback ClickHouse fixture. No cloud or production access."""
+from contextlib import contextmanager
 import subprocess
 import time
 import urllib.error
@@ -28,8 +29,8 @@ def wait_for_engine(port):
         time.sleep(0.5)
 
 
-def main():
-    binary = test_binary("culprit-store-clickhouse")
+@contextmanager
+def fixture():
     container = command(["docker", "run", "--detach", "--rm", "--label", "dev.culprit.clickhouse",
                          "--memory", "2g", "--cpus", "2", "--publish", "127.0.0.1::8123",
                          "--env", "CLICKHOUSE_DB=culprit_fixture", "--env", "CLICKHOUSE_USER=culprit_fixture",
@@ -42,12 +43,18 @@ def main():
             raise RuntimeError("The owned ClickHouse fixture must bind loopback only")
         port = int(mapping.rsplit(":", 1)[1])
         wait_for_engine(port)
-        run_test(binary, TEST, {"CULPRIT_TEST_CLICKHOUSE_PORT": str(port)})
+        yield {"CULPRIT_TEST_CLICKHOUSE_PORT": str(port)}
     except Exception:
         command(["docker", "logs", container], timeout=10)
         raise
     finally:
-        command(["docker", "rm", "--force", container], timeout=30, stdout=subprocess.DEVNULL)
+        command(["docker", "rm", "--force", "--volumes", container], timeout=30, stdout=subprocess.DEVNULL)
+
+
+def main():
+    binary = test_binary("culprit-store-clickhouse")
+    with fixture() as environment:
+        run_test(binary, TEST, environment)
 
 
 if __name__ == "__main__":

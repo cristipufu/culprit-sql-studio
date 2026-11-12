@@ -98,3 +98,65 @@ async fn an_injected_provider_for_another_authentication_mode_is_rejected_before
     assert_eq!(error.code, culprit_core::ErrorCode::InvalidInput);
     assert!(tokens.requests.lock().unwrap().is_empty());
 }
+
+#[derive(Default)]
+struct AuthenticationLifecycle(Mutex<Vec<&'static str>>);
+#[async_trait::async_trait]
+impl culprit_auth::DatabaseAuthentication for AuthenticationLifecycle {
+    fn auth_kind(&self) -> AuthKind {
+        AuthKind::Entra
+    }
+    async fn credential(
+        &self,
+        _: &culprit_core::ConnectionSpec,
+        _: &dyn culprit_auth::SecretStore,
+    ) -> Result<DatabaseCredential> {
+        self.0.lock().unwrap().push("credential");
+        Ok(DatabaseCredential { token: Zeroizing::new("plugin-token".into()), username: Some("plugin-user".into()) })
+    }
+    fn set_sign_in_handler(&self, handler: Option<culprit_auth::SignInHandler>) {
+        assert!(handler.is_some());
+        self.0.lock().unwrap().push("handler");
+    }
+    fn cancel_sign_in(&self) {
+        self.0.lock().unwrap().push("cancel");
+    }
+    fn sign_out(
+        &self,
+        connections: &[culprit_core::ConnectionSpec],
+        _: &dyn culprit_auth::SecretStore,
+    ) -> Result<usize> {
+        assert_eq!(connections.len(), 1);
+        self.0.lock().unwrap().push("sign-out");
+        Ok(3)
+    }
+}
+#[tokio::test]
+async fn authentication_plugins_own_credential_acquisition_and_the_entire_interactive_lifecycle() {
+    let directory = tempfile::tempdir().unwrap();
+    let authentication = Arc::new(AuthenticationLifecycle::default());
+    let workspace = Workspace::open_in(directory.path())
+        .with_authentication_provider(authentication.clone())
+        .with_sign_in_handler(Arc::new(|_| {}))
+        .with_provider(
+            Engine::Postgres,
+            Arc::new(|spec| {
+                assert_eq!(spec.token.as_deref(), Some("plugin-token"));
+                assert_eq!(spec.user.as_deref(), Some("plugin-user"));
+                Err(Error::internal("owned provider boundary"))
+            }),
+        );
+    workspace
+        .add_connection(NewConnection {
+            name: "fixture".into(),
+            input: "host=fixture.postgres.database.azure.com dbname=fixture".into(),
+            engine: Some(Engine::Postgres),
+            auth: Some(AuthKind::Entra),
+            ..Default::default()
+        })
+        .unwrap();
+    workspace.connection_service().provider("fixture").await.err().unwrap();
+    workspace.cancel_sign_in();
+    assert_eq!(workspace.sign_out().unwrap(), 3);
+    assert_eq!(*authentication.0.lock().unwrap(), ["handler", "credential", "cancel", "sign-out"]);
+}

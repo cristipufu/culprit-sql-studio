@@ -401,7 +401,7 @@ Defaults retain up to 1 GiB of charged capture space and 256 attempts, including
 
 Use a private directory on a local filesystem and preserve it as a unit; do not copy, restore or share it with an active owner. Tests cover process termination around the local commit boundary. They do not establish power-loss durability or network-filesystem support.
 
-Embedding applications can compose a remote outbox with `BlobRecoveryStore`, `AzureBlobTransport` and `DeliveryWorker`. Remote commits permit local eviction while the analytical destination is unavailable, and a replacement delivery journal can resume without recollecting the database. The latest activity checkpoint remains local during normal eviction. Remote ownership and capture ordering are separate from database cancellation: after total volume loss, establish source quiescence independently before resuming collection. Azurite exercises the Blob protocol locally; live Azure authorization, networking and ADX ingestion are separate acceptance checks.
+Embedding applications can compose a remote outbox with `ObjectRecoveryStore`, `AzureBlobTransport` and `DeliveryWorker`. Remote commits permit local eviction while the analytical destination is unavailable, and a replacement delivery journal can resume without recollecting the database. The latest activity checkpoint remains local during normal eviction. Remote ownership and capture ordering are separate from database cancellation: after total volume loss, establish source quiescence independently before resuming collection. Azurite exercises the Blob protocol locally; live Azure authorization, networking and ADX ingestion are separate acceptance checks.
 
 Run the owned, loopback-only Blob integration fixture with `python3 dev/smoke-delivery.py`. It builds the affected engine tests, creates an isolated Azurite container with synthetic credentials, runs the conditional-write/recovery test and removes the container. It does not use Azure credentials or connect to a database.
 
@@ -500,7 +500,9 @@ crates/providers/culprit-mysql     MySQL and MariaDB provider
 crates/providers/culprit-sqlite    SQLite 3 file provider
 crates/culprit-querylog            framework query log parser (Rails, Django, EF Core, Ecto, JSONL)
 crates/authentication/             credential contracts, Azure/Entra and AWS authentication providers
-crates/telemetry/                  ADX and ClickHouse stores; Azure Blob recovery transport
+crates/telemetry/                  ADX and ClickHouse analytical stores
+crates/recovery/                   Azure Blob and S3 conditional object recovery
+crates/cloud/                      pluggable cloud discovery and metrics
 crates/culprit-collector           capture, outbox, fleet scheduling and verified analytical delivery
 crates/culprit-read                bounded native reads and shared source admission
 crates/culprit-engine              connection store, credential composition, scans, reports, agent approvals and audit log

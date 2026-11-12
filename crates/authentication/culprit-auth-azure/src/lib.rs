@@ -10,6 +10,7 @@ use std::{
 use tokio::time::Instant;
 use zeroize::Zeroizing;
 
+pub mod cli;
 mod endpoint;
 #[cfg(test)]
 mod tests;

@@ -136,6 +136,8 @@ jobs:
       # Kusto emulator does not support ARM and its license prohibits benchmarking.
       - name: Execute the production schema, mappings and canonical functions in Kusto
         run: python3 -B dev/smoke-adx.py
+      - name: S3 conditional recovery and ClickHouse delivery across restart
+        run: python3 -B dev/smoke-s3.py
       - name: Execute ClickHouse delivery, exact receipts and canonical views
         run: python3 -B dev/smoke-clickhouse.py
 

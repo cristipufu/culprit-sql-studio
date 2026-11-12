@@ -13,6 +13,7 @@ doctest = false
 test-support = []
 
 [dependencies]
+culprit-auth.workspace = true
 culprit-read.workspace = true
 culprit-core.workspace = true
 async-trait.workspace = true

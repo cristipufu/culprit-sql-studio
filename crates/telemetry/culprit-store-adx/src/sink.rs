@@ -12,8 +12,8 @@ use culprit_collector::{
         sink::{AnalyticalSink, AnalyticalStore},
     },
     delivery::{
-        blob_store::transport::BlobTransport,
         contract::Contract,
+        object_store::transport::ObjectTransport,
         recovery::{CommittedRange, RecoveryStore},
         sink::{DeliveryAttempt, Submission},
     },
@@ -30,7 +30,7 @@ pub struct AdxStore {
     control: AdxPublication,
 }
 impl AdxStore {
-    pub fn new(query: Arc<dyn QueryTransport>, ready: Arc<dyn BlobTransport>) -> Result<Self> {
+    pub fn new(query: Arc<dyn QueryTransport>, ready: Arc<dyn ObjectTransport>) -> Result<Self> {
         let catalog = Arc::new(SchemaCatalog::new()?);
         Ok(Self {
             readback: AdxReadback::new(query.clone(), catalog.clone()),
@@ -44,7 +44,7 @@ impl AdxStore {
 pub fn new(
     contract: Contract,
     recovery: Arc<dyn RecoveryStore>,
-    ready: Arc<dyn BlobTransport>,
+    ready: Arc<dyn ObjectTransport>,
     query: Arc<dyn QueryTransport>,
     scratch: &Path,
 ) -> Result<AnalyticalSink> {

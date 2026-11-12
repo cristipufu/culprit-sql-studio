@@ -10,6 +10,10 @@ publish.workspace = true
 doctest = false
 
 [dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
 culprit-auth.workspace = true
 culprit-core.workspace = true
 async-trait.workspace = true

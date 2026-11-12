@@ -1,5 +1,5 @@
 //! Immutable expected projection digests, bounded to one native batch. Receipt paging never rereads its source blob.
-use crate::delivery::{blob_store::transport::*, contract::MAX_RANGE_RECORDS, recovery::CommittedRange};
+use crate::delivery::{contract::MAX_RANGE_RECORDS, object_store::transport::*, recovery::CommittedRange};
 use culprit_core::{
     Result,
     telemetry::{DeliveryProblem, valid_digest},
@@ -85,12 +85,12 @@ struct CachedIndex {
 }
 
 pub struct ProjectionIndexes {
-    transport: Arc<dyn BlobTransport>,
+    transport: Arc<dyn ObjectTransport>,
     /// One batch only. Verification consumes its pages sequentially; other ranges cannot grow a hidden cache.
     cached: tokio::sync::Mutex<Option<CachedIndex>>,
 }
 impl ProjectionIndexes {
-    pub fn new(transport: Arc<dyn BlobTransport>) -> Self {
+    pub fn new(transport: Arc<dyn ObjectTransport>) -> Self {
         Self { transport, cached: tokio::sync::Mutex::new(None) }
     }
     pub async fn put(&self, key: &IndexKey, digests: &[ExpectedRow]) -> Result<()> {
@@ -104,7 +104,8 @@ impl ProjectionIndexes {
         }
         let bytes = encode(key, digests);
         let expected = Sha256::digest(&bytes);
-        if matches!(self.transport.put(&key.object, bytes, WriteCondition::Absent).await?, BlobWrite::ConditionNotMet) {
+        if matches!(self.transport.put(&key.object, bytes, WriteCondition::Absent).await?, ObjectWrite::ConditionNotMet)
+        {
             let actual = self.read_bytes(key).await?;
             if Sha256::digest(&actual) != expected {
                 return Err(invalid());

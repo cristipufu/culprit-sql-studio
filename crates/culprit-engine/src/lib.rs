@@ -79,7 +79,9 @@ pub struct Workspace {
     store: Store,
     saved: saved::SavedQueries,
     secrets: Arc<dyn SecretStore>,
-    entra: culprit_auth_azure::entra::EntraAuth,
+    authentication: credentials::AuthenticationRegistry,
+    cloud: culprit_cloud::CloudServices,
+    connection_tokens: std::collections::BTreeMap<String, Arc<dyn culprit_auth::DatabaseTokenProvider>>,
     database_tokens: Option<Arc<dyn culprit_auth::DatabaseTokenProvider>>,
     extra_checks: Vec<Arc<dyn Check>>,
     providers: Vec<(Engine, ProviderFactory)>,
@@ -120,7 +122,9 @@ impl Workspace {
             store,
             saved,
             secrets,
-            entra: credentials::entra(),
+            authentication: credentials::authentication(),
+            cloud: cloud::services(),
+            connection_tokens: Default::default(),
             database_tokens: None,
             extra_checks: Vec::new(),
             providers: Vec::new(),
@@ -135,7 +139,9 @@ impl Workspace {
             paths: &self.paths,
             store: &self.store,
             secrets: self.secrets.as_ref(),
-            entra: &self.entra,
+            authentication: &self.authentication,
+            cloud: &self.cloud,
+            connection_tokens: &self.connection_tokens,
             database_tokens: self.database_tokens.as_deref(),
             providers: &self.providers,
             ssh: &self.ssh,
@@ -162,19 +168,49 @@ impl Workspace {
     /// Show Microsoft Entra ID device codes (the CLI prints them, the app opens a dialog). Without a handler, connections
     /// that need a sign-in fail with a hint instead of waiting for a person.
     pub fn with_sign_in_handler(self, handler: culprit_auth::SignInHandler) -> Workspace {
-        self.entra.set_handler(Some(handler));
+        culprit_auth::AuthenticationService::set_sign_in_handler(&self.authentication, Some(handler));
         self
     }
 
     /// Stop a device-code sign-in that is waiting for the person.
     pub fn cancel_sign_in(&self) {
-        self.entra.cancel();
+        culprit_auth::AuthenticationService::cancel_sign_in(&self.authentication);
     }
 
     /// Forget device-code sign-ins: in-memory tokens and stored refresh tokens for every tenant the saved connections use.
     /// The Azure CLI's own login is untouched (`az logout`). Returns how many stored sign-ins were removed.
     pub fn sign_out(&self) -> Result<usize> {
         self.connection_service().sign_out()
+    }
+
+    pub fn with_discovery_provider(mut self, provider: Arc<dyn culprit_cloud::DiscoveryProvider>) -> Workspace {
+        self.cloud = self.cloud.with_discovery_provider(provider);
+        self
+    }
+    pub fn with_cloud_metrics_provider(mut self, provider: Arc<dyn culprit_cloud::MetricsProvider>) -> Workspace {
+        self.cloud = self.cloud.with_metrics_provider(provider);
+        self
+    }
+    /// Register or replace an authentication mode, using the same lifecycle contract as built-in providers.
+    pub fn with_authentication_provider(
+        mut self,
+        provider: Arc<dyn culprit_auth::DatabaseAuthentication>,
+    ) -> Workspace {
+        self.authentication.register(provider);
+        self
+    }
+    /// Bind an unattended credential owner to one connection. Other connections retain their own identities.
+    pub fn with_connection_tokens(
+        mut self,
+        connection: &str,
+        provider: Arc<dyn culprit_auth::DatabaseTokenProvider>,
+    ) -> Workspace {
+        self.connection_tokens.insert(connection.into(), provider);
+        self
+    }
+    #[cfg(feature = "collector")]
+    fn tokens_for(&self, connection: &str) -> Option<&Arc<dyn culprit_auth::DatabaseTokenProvider>> {
+        self.connection_tokens.get(connection).or(self.database_tokens.as_ref())
     }
 
     /// Keep passwords and sign-in tokens somewhere else (a vault, a test double).

@@ -142,6 +142,15 @@ pub fn aws_iam_host_allowed(host: &str) -> bool {
         .any(|suffix| host.len() > suffix.len() && host.ends_with(suffix))
 }
 
+/// Regional identifier shared by native AWS authentication and request-signing adapters.
+pub fn aws_region_valid(region: &str) -> bool {
+    let parts: Vec<&str> = region.split('-').collect();
+    parts.len() >= 3
+        && parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()))
+        && parts.last().is_some_and(|p| p.chars().all(|c| c.is_ascii_digit()))
+        && region.len() <= 25
+}
+
 /// A database on this machine (loopback or a local socket). Only these default to opportunistic TLS; every other host
 /// gets a verified certificate unless the connection string explicitly asks for less.
 pub fn is_local_host(host: &str) -> bool {

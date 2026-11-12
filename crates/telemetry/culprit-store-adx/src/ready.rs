@@ -1,7 +1,7 @@
 //! Fresh ready-prefix objects are created only from completely verified, committed native batches.
 use culprit_collector::analytical::encoding::EncodedBatch;
 use culprit_collector::delivery::{
-    blob_store::transport::*,
+    object_store::transport::*,
     recovery::CommittedRange,
     sink::{DeliveryAttempt, Submission},
 };
@@ -11,11 +11,11 @@ use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 
 pub struct ReadyDispatcher {
-    ready: Arc<dyn BlobTransport>,
+    ready: Arc<dyn ObjectTransport>,
 }
 impl ReadyDispatcher {
     /// The Event Grid subscription must cover only ready/<table>/, never native staging or validation objects.
-    pub fn new(ready: Arc<dyn BlobTransport>) -> Self {
+    pub fn new(ready: Arc<dyn ObjectTransport>) -> Self {
         Self { ready }
     }
     pub async fn dispatch(
@@ -32,7 +32,7 @@ impl ReadyDispatcher {
         let ready = self.ready.clone();
         // The bounded encoder's single batch lease survives cancellation of the caller through upload completion.
         tokio::spawn(async move {
-            if matches!(ready.put_file(&key, encoded.path(), encoded.bytes).await?, BlobWrite::ConditionNotMet) {
+            if matches!(ready.put_file(&key, encoded.path(), encoded.bytes).await?, ObjectWrite::ConditionNotMet) {
                 verify_existing(ready.as_ref(), &key, encoded.bytes, &encoded.sha256).await?;
             }
             // Blob acknowledgement does not establish ingestion. Exact receipts authorize publication.
@@ -43,7 +43,7 @@ impl ReadyDispatcher {
     }
 }
 pub(super) async fn publish_bytes(
-    transport: &dyn BlobTransport,
+    transport: &dyn ObjectTransport,
     table: &str,
     range: &CommittedRange,
     batch: &str,
@@ -53,7 +53,7 @@ pub(super) async fn publish_bytes(
     let sha256 = culprit_core::telemetry::digest(&bytes);
     let count = bytes.len() as u64;
     let key = object_key(table, range, batch, attempt, &sha256)?;
-    if matches!(transport.put(&key, bytes, WriteCondition::Absent).await?, BlobWrite::ConditionNotMet) {
+    if matches!(transport.put(&key, bytes, WriteCondition::Absent).await?, ObjectWrite::ConditionNotMet) {
         verify_existing(transport, &key, count, &sha256).await?;
     }
     Ok(())
@@ -69,7 +69,7 @@ fn object_key(
     Ok(format!("ready/{table}/{}/{batch}/{}-{sha256}.ndjson", range.manifest().range_id, attempt.id))
 }
 async fn verify_existing(
-    transport: &dyn BlobTransport,
+    transport: &dyn ObjectTransport,
     key: &str,
     expected_bytes: u64,
     expected_sha: &str,

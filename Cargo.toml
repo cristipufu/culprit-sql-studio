@@ -4,6 +4,8 @@ members = [
     "crates/culprit-*",
     "crates/providers/culprit-*",
     "crates/telemetry/culprit-*",
+    "crates/recovery/culprit-*",
+    "crates/cloud/culprit-*",
     "crates/authentication/culprit-*",
     "app/src-tauri",
 ]
@@ -11,6 +13,8 @@ default-members = [
     "crates/culprit-*",
     "crates/providers/culprit-*",
     "crates/telemetry/culprit-*",
+    "crates/recovery/culprit-*",
+    "crates/cloud/culprit-*",
     "crates/authentication/culprit-*",
 ]
 
@@ -23,11 +27,13 @@ publish = false
 repository = "https://github.com/cristipufu/culprit-sql-studio"
 
 [workspace.dependencies]
+culprit-cloud = { path = "crates/cloud/culprit-cloud" }
 culprit-auth-aws = { path = "crates/authentication/culprit-auth-aws" }
 culprit-auth = { path = "crates/authentication/culprit-auth" }
 culprit-auth-azure = { path = "crates/authentication/culprit-auth-azure" }
 culprit-store-adx = { path = "crates/telemetry/culprit-store-adx" }
-culprit-blob-azure = { path = "crates/telemetry/culprit-blob-azure" }
+culprit-blob-azure = { path = "crates/recovery/culprit-blob-azure" }
+culprit-blob-s3 = { path = "crates/recovery/culprit-blob-s3" }
 culprit-store-clickhouse = { path = "crates/telemetry/culprit-store-clickhouse" }
 zeroize = "1.9.1"
 culprit-core = { path = "crates/culprit-core" }
