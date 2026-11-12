@@ -7,7 +7,7 @@ import type { Replica } from "../gen/Replica";
 import type { Report } from "../gen/Report";
 import type { TableStat } from "../gen/TableStat";
 import { constraintLabel, serverName, statementMetrics } from "../lib/engines";
-import { bytes, count, duration, percent, rowCount, when } from "../lib/format";
+import { bytes, count, duration, percent, rowCount, storageLatency, when } from "../lib/format";
 import { key, t } from "../lib/i18n";
 import { waitKey } from "../lib/waits";
 import { querySignalStatus, replicaState, replicaStatus, storageStatus, tableSignalWarning, worstFinding } from "../lib/health";
@@ -209,12 +209,6 @@ function kindLabel(kind: FileIo["kind"]): string {
   }
 }
 
-/** Storage latency in µs below a tenth of a millisecond, where cache hits and fast SSDs live. */
-function latency(ms: number | null): string {
-  if (ms == null) return "—";
-  return ms < 0.1 ? `${Math.round(ms * 1000)} µs` : duration(ms);
-}
-
 function avg(ms: number | null, n: number): number | null {
   return ms != null && n > 0 ? ms / n : null;
 }
@@ -241,8 +235,8 @@ function storageLead(files: FileIo[], engine: Engine, report: Report): { text: s
   const reads = files.filter((f) => f.kind !== "log" && f.read_ms != null).reduce((a, f) => ({ ms: a.ms + (f.read_ms ?? 0), n: a.n + f.reads }), { ms: 0, n: 0 });
   const logs = files.filter((f) => f.kind === "log" && f.write_ms != null).reduce((a, f) => ({ ms: a.ms + (f.write_ms ?? 0), n: a.n + f.writes }), { ms: 0, n: 0 });
   const kind = files.some((f) => f.kind === "log" && f.write_operation === "flush") ? "flushes" : "writes";
-  const read = reads.n > 0 ? latency(reads.ms / reads.n) : null;
-  const log = logs.n > 0 ? latency(logs.ms / logs.n) : null;
+  const read = reads.n > 0 ? storageLatency(reads.ms / reads.n) : null;
+  const log = logs.n > 0 ? storageLatency(logs.ms / logs.n) : null;
   const text =
     read != null && log != null
       ? t("ui.beyond_time.storage.reads_and_log", { reads: read, kind, log })
@@ -260,7 +254,7 @@ function Latency({ ms, n, kind }: { ms: number | null; n: number; kind: "reads" 
   const a = avg(ms, n);
   return (
     <span className="io-cell" title={ms != null ? t("ui.beyond_time.latency_total", { n, count: count(n), kind, total: duration(ms) }) : t("ui.beyond_time.latency_untimed", { n, count: count(n), kind })}>
-      <b>{a == null ? t("ui.beyond_time.untimed") : latency(a)}</b>
+      <b>{a == null ? t("ui.beyond_time.untimed") : storageLatency(a)}</b>
       <span className="muted"> × {count(n)}</span>
     </span>
   );

@@ -28,17 +28,6 @@ pub(super) fn file_name(s: &Snapshot, f: &FileIo) -> String {
     }
 }
 
-/// A latency people can read: cache-fast storage in microseconds ("3 µs", as the Health panel says), not "0.00 ms".
-/// Storage latency in one unit family: microseconds below a millisecond ("40 µs", "630 µs"), so SQL Server's 0.04 ms
-/// and MySQL's 8 µs read alike.
-pub(super) fn latency(ms: f64) -> String {
-    if ms < 1.0 {
-        t!("common.duration.us", n = (ms * 1000.0).round().max(1.0).to_string())
-    } else {
-        format::duration(ms)
-    }
-}
-
 /// What a file is waited on for: reads of data, writes or flushes of the log.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Waited {
@@ -99,7 +88,7 @@ pub(super) fn storage(report: &Report) -> Tile {
     let op = if flush { "flush" } else { "write" };
     let (status, takeaway) = match worst_finding(report, "slow-storage") {
         Some(f) => (severity_status(f.severity), format!("{}.", f.title.trim_end_matches('.'))),
-        None => match (read.map(latency), log.map(latency)) {
+        None => match (read.map(format::storage_latency), log.map(format::storage_latency)) {
             (None, None) => (TileStatus::Info, t!("view.dashboard.storage.too_little")),
             (Some(read), None) => (TileStatus::Info, t!("view.dashboard.storage.averages_read", read = read)),
             (None, Some(log)) => (TileStatus::Info, t!("view.dashboard.storage.averages_log", op = op, log = log)),
@@ -110,7 +99,12 @@ pub(super) fn storage(report: &Report) -> Tile {
     };
     let mut t = Tile::new(TileKey::Storage, status, takeaway);
     if let Some(avg) = read {
-        t.metrics.push(TileMetric::new("read-ms", &t!("view.dashboard.storage.metric.read"), Some(avg), latency(avg)));
+        t.metrics.push(TileMetric::new(
+            "read-ms",
+            &t!("view.dashboard.storage.metric.read"),
+            Some(avg),
+            format::storage_latency(avg),
+        ));
     }
     if let Some(avg) = log {
         let label = if flush {
@@ -118,7 +112,7 @@ pub(super) fn storage(report: &Report) -> Tile {
         } else {
             t!("view.dashboard.storage.metric.log_write")
         };
-        t.metrics.push(TileMetric::new("log-write-ms", &label, Some(avg), latency(avg)));
+        t.metrics.push(TileMetric::new("log-write-ms", &label, Some(avg), format::storage_latency(avg)));
     }
     // The slowest files, each by what it's waited on for.
     let mut rows: Vec<(f64, TileItem)> = files
@@ -138,7 +132,7 @@ pub(super) fn storage(report: &Report) -> Tile {
                     name
                 };
                 let mut item = TileItem::new(ItemKind::Signal, id, label);
-                let average = latency(avg);
+                let average = format::storage_latency(avg);
                 item.value = Some(match what {
                     Waited::Read => t!("view.dashboard.storage.per_read", latency = average),
                     Waited::Write => t!("view.dashboard.storage.per_write", latency = average),

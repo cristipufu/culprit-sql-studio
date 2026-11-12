@@ -238,9 +238,9 @@ Health ("since start" covers 1 h 7 min)
     New connections (whole server)          3.0/min  since start The historical rate of new connections. A busy application can use a pool and still open connections; the rate alone does not prove pooling is missing.
 
 Storage (average per operation, since start)
-  culprit_demo_log                   reads     29 µs × 104     writes   0.63 ms × 26K   
-  culprit_demo                       reads     40 µs × 3.1K    writes   0.22 ms × 1.2K  
-  tempdb · templog                   reads      0 µs × 8       writes    2.2 ms × 148   
+  culprit_demo_log                   reads     29 µs × 104     writes    632 µs × 26K   
+  culprit_demo                       reads     40 µs × 3.1K    writes    220 µs × 1.2K  
+  tempdb · templog                   reads      0 ms × 8       writes    2.2 ms × 148   
   tempdb · tempdev                   reads     31 µs × 96      writes     60 µs × 84    
   tempdb · tempdev2                  reads     15 µs × 66      writes     48 µs × 63    
   tempdb · tempdev3                  reads     15 µs × 65      writes     48 µs × 62    
@@ -638,13 +638,13 @@ Storage (average per operation, since start)
   shop/products.ibd                  reads      8 µs × 13K     writes                   
   shop/order_items.ibd               reads      7 µs × 13K     writes                   
   mysql/mysql.ibd                    reads     20 µs × 650     writes     65 µs × 321   
-  mysql/#ib_16384_0.dblwr            reads    1.8 ms × 1       writes   0.43 ms × 44    
+  mysql/#ib_16384_0.dblwr            reads    1.8 ms × 1       writes    431 µs × 44    
   mysql/binlog.000002                reads      3 µs × 6.5K    writes                   
   mysql/undo_001                     reads      7 µs × 678     writes     42 µs × 240   
   mysql/ibtmp1                       reads      7 µs × 261     writes     81 µs × 143   
   mysql/undo_002                     reads      8 µs × 718     writes     78 µs × 57    
   shop/customers.ibd                 reads      9 µs × 729     writes                   
-  mysql/ibdata1                      reads     19 µs × 17      writes   0.20 ms × 31    
+  mysql/ibdata1                      reads     19 µs × 17      writes    199 µs × 31    
 $ culprit --format text findings x --report <repo>/fixtures/sqlite-demo.report.json
 5 opportunities. The top ones touch 43.9 s of database time over the 90 minutes the Rails log covers (99%).
 

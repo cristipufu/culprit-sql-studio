@@ -17,6 +17,23 @@ fn digits_whole(fixed: String) -> String {
     digits(fixed.strip_suffix(".0").map(str::to_string).unwrap_or(fixed))
 }
 
+/// Storage averages use whole microseconds below a millisecond; generic elapsed durations keep their own precision.
+/// Positive sub-microsecond averages remain visible. Rounding to a whole millisecond crosses into that unit.
+pub fn storage_latency(ms: f64) -> String {
+    if !ms.is_finite() || ms <= 0.0 {
+        return duration(0.0);
+    }
+    if ms < 1.0 {
+        let micros = (ms * 1_000.0).round().max(1.0);
+        return if micros < 1_000.0 {
+            t!("common.duration.us", n = digits(format!("{micros:.0}")))
+        } else {
+            duration(1.0)
+        };
+    }
+    duration(ms)
+}
+
 pub fn duration(ms: f64) -> String {
     if !ms.is_finite() {
         return t!("common.duration.ms", n = "0");
@@ -359,6 +376,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn storage_averages_have_one_precision_policy_without_changing_elapsed_durations() {
+        for (ms, expected) in [
+            (0.0, "0 ms"),
+            (-1.0, "0 ms"),
+            (f64::NAN, "0 ms"),
+            (f64::INFINITY, "0 ms"),
+            (f64::NEG_INFINITY, "0 ms"),
+            (0.000_000_1, "1 µs"),
+            (0.000_5, "1 µs"),
+            (0.009, "9 µs"),
+            (0.01, "10 µs"),
+            (0.099, "99 µs"),
+            (0.1, "100 µs"),
+            (0.5, "500 µs"),
+            (0.999, "999 µs"),
+            (0.999_5, "1 ms"),
+            (1.0, "1 ms"),
+            (1.44, "1.4 ms"),
+        ] {
+            assert_eq!(storage_latency(ms), expected, "{ms}");
+        }
+        assert_eq!(duration(0.5), "0.50 ms");
+        for (language, expected) in [("en", "1.4 ms"), ("es", "1,4 ms"), ("fr", "1,4 ms"), ("de", "1,4 ms")] {
+            i18n::scope(language, || {
+                assert_eq!(storage_latency(1.44), expected);
+                assert_eq!(storage_latency(0.125), "125 µs");
+            });
+        }
+    }
+
+    #[test]
     fn ages_between_timestamps() {
         assert_eq!(epoch_seconds("1970-01-02T00:00:00Z"), Some(86_400.0));
         assert_eq!(epoch_seconds("2026-10-01T02:00:00+02:00"), epoch_seconds("2026-10-01T00:00:00Z"));
@@ -488,7 +536,11 @@ mod tests {
 
     /// Inputs every surface formats: `app/src/lib/format.ts` must read each as this module does. Exact ties (2.5,
     /// 0.125, 12.5%) are among them: Rust rounds them to even, JavaScript's toFixed up.
-    const SHARED_CASES: [(&str, &[f64]); 6] = [
+    const SHARED_CASES: [(&str, &[f64]); 7] = [
+        (
+            "storage_latency",
+            &[-1.0, 0.0, 0.000_000_1, 0.000_5, 0.009, 0.01, 0.099, 0.1, 0.125, 0.5, 0.999, 0.999_5, 1.0, 1.44, 9.95],
+        ),
         (
             "duration",
             &[
@@ -593,6 +645,7 @@ mod tests {
             .iter()
             .map(|(name, inputs)| {
                 let f: fn(f64) -> String = match *name {
+                    "storage_latency" => storage_latency,
                     "duration" => duration,
                     "bytes" => bytes,
                     "count" => count,

@@ -453,7 +453,7 @@ fn print_storage(files: &[FileIo]) {
     println!();
     println!("{}", t!("cli.waits.storage"));
     let avg = |ms: Option<f64>, n: f64| match ms {
-        Some(ms) if n > 0.0 => format!("{:>9} × {:<6}", latency(ms / n), format::count(n)),
+        Some(ms) if n > 0.0 => format!("{:>9} × {:<6}", format::storage_latency(ms / n), format::count(n)),
         _ if n > 0.0 => format!("{:>9} × {:<6}", t!("cli.waits.untimed"), format::count(n)),
         _ => format!("{:>18}", ""),
     };
@@ -469,11 +469,6 @@ fn print_storage(files: &[FileIo]) {
             t!("cli.waits.writes", writes = avg(f.write_ms, f.writes))
         );
     }
-}
-
-/// Storage latency reads best in microseconds below a tenth of a millisecond (cache hits, fast SSDs).
-fn latency(ms: f64) -> String {
-    if ms < 0.1 { t!("common.duration.us", n = format!("{:.0}", ms * 1000.0)) } else { format::duration(ms) }
 }
 
 fn print_replicas(replicas: &[Replica]) {

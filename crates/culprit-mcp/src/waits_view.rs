@@ -17,11 +17,7 @@ fn signal(s: &Signal) -> Value {
 
 /// One file's average latency since startup, in words an agent can quote.
 fn file(f: &FileIo) -> Value {
-    let avg = |ms: Option<f64>, n: f64| {
-        ms.filter(|_| n > 0.0)
-            .map(|ms| ms / n)
-            .map(|ms| if ms < 0.1 { format!("{:.0} µs", ms * 1000.0) } else { format::duration(ms) })
-    };
+    let avg = |ms: Option<f64>, n: f64| ms.filter(|_| n > 0.0).map(|ms| ms / n).map(format::storage_latency);
     json!({
         "file": f.name,
         "kind": f.kind,
@@ -142,6 +138,24 @@ pub fn sample(s: &WaitSample) -> Value {
 mod tests {
     use super::*;
     use culprit_core::{Engine, SignalScope, SignalUnit};
+
+    #[test]
+    fn file_averages_share_storage_precision_and_leave_untimed_operations_unknown() {
+        let report: Report = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.report.json")).unwrap();
+        let mut source = report.snapshot.pressure.unwrap().files[0].clone();
+        source.reads = 100.0;
+        source.read_ms = Some(50.0);
+        source.writes = 100.0;
+        source.write_ms = Some(0.0);
+        let rendered = file(&source);
+        assert_eq!(rendered["avg_read"], "500 µs");
+        assert_eq!(rendered["avg_write"], "0 ms");
+        source.read_ms = None;
+        source.writes = 0.0;
+        let rendered = file(&source);
+        assert!(rendered["avg_read"].is_null());
+        assert!(rendered["avg_write"].is_null());
+    }
 
     #[test]
     fn shared_node_resources_remain_bounded_and_separate_from_database_signals() {

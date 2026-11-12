@@ -2,7 +2,7 @@
 // the same here, so a metric in the app says what the finding's prose and brief say.
 import { expect, test } from "bun:test";
 import cases from "../gen/format-cases.json";
-import { bytes, count, days, digits, duration, percent, percentValue, rowCount } from "./format";
+import { bytes, count, days, digits, duration, percent, percentValue, rowCount, storageLatency } from "./format";
 import { registerCatalogs, setLanguage } from "./i18n";
 import { fromRust } from "../test/fixtures";
 
@@ -16,8 +16,8 @@ test("format.ts writes digits with the language's separators and units in its wo
   });
   try {
     setLanguage("xx");
-    expect([duration(2590), bytes(1536), count(1234), days(1.5), days(12), percentValue(12.345), rowCount(1500), digits("1,234,567.5")])
-      .toEqual(["2,6 s", "1,5 KB", "1,2 k", "1,5 jour", "12 jours", "12,35%", "1,5 k rows", "1.234.567,5"]);
+    expect([duration(2590), bytes(1536), count(1234), days(1.5), days(12), percentValue(12.345), rowCount(1500), digits("1,234,567.5"), storageLatency(1.44), storageLatency(0.125)])
+      .toEqual(["2,6 s", "1,5 KB", "1,2 k", "1,5 jour", "12 jours", "12,35%", "1,5 k rows", "1.234.567,5", "1,4 ms", "125 µs"]);
   } finally {
     setLanguage("en");
     Reflect.deleteProperty(navigator, "languages");
@@ -26,7 +26,7 @@ test("format.ts writes digits with the language's separators and units in its wo
 });
 
 test("format.ts reads every shared case as culprit_core::format does", () => {
-  const formatters: Record<string, (value: number) => string> = { duration, bytes, count, percent, percent_value: percentValue, days };
+  const formatters: Record<string, (value: number) => string> = { storage_latency: storageLatency, duration, bytes, count, percent, percent_value: percentValue, days };
   const failures: string[] = [];
   let checked = 0;
   for (const [name, list] of Object.entries(fromRust<Record<string, [number, string][]>>(cases))) {
@@ -46,4 +46,12 @@ test("format.ts reads every shared case as culprit_core::format does", () => {
   }
   if (checked === 0) throw new Error("gen/format-cases.json has no cases; regenerate it with `cargo test -p culprit-core`");
   if ([null, undefined, NaN, Infinity].some((value) => percentValue(value) !== "—")) throw new Error("Missing percentages must stay unavailable");
+});
+
+
+test("Storage averages retain tiny measurements and canonicalize invalid numbers", () => {
+  expect([storageLatency(null), storageLatency(undefined)]).toEqual(["—", "—"]);
+  for (const invalid of [NaN, Infinity, -Infinity, -1, 0]) expect(storageLatency(invalid)).toBe("0 ms");
+  expect(storageLatency(0.0000001)).toBe("1 µs");
+  expect(duration(0.5)).toBe("0.50 ms");
 });

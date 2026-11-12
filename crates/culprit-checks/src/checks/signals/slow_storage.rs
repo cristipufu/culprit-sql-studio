@@ -285,7 +285,7 @@ fn slow_storage_finding(snapshot: &Snapshot, slow: SlowFiles) -> Finding {
         format!("{}:{}", slow.database.as_deref().unwrap_or(""), culprit_core::redact::shareable_name(&slow.what));
     let mut f =
         finding("slow-storage", &key, Category::Configuration, subject(SubjectKind::Database, label_name(&slow.label)));
-    let avg = format::duration(slow.avg_ms);
+    let avg = format::storage_latency(slow.avg_ms);
     f.title = if slow.bulk {
         t!(
             "check.slow_storage.title.bulk",

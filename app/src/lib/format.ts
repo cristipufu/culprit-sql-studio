@@ -54,6 +54,17 @@ export function dateFormat(options: Intl.DateTimeFormatOptions): Intl.DateTimeFo
   return format;
 }
 
+/** Whole microseconds for storage averages below a millisecond, as culprit_core::format::storage_latency. */
+export function storageLatency(ms: number | null | undefined): string {
+  if (ms == null) return "—";
+  if (!Number.isFinite(ms) || ms <= 0) return duration(0);
+  if (ms < 1) {
+    const micros = Math.max(1, Math.round(ms * 1000));
+    return micros < 1000 ? t("ui.format.duration.us", { value: digits(micros.toFixed(0)) }) : duration(1);
+  }
+  return duration(ms);
+}
+
 export function duration(ms: number | null | undefined): string {
   if (ms == null) return "—";
   const v = Math.max(0, ms);
