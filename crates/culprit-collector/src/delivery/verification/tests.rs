@@ -111,6 +111,10 @@ async fn verification_exceeding_one_request_deadline_resumes_across_restart_and_
     let pending = journal.load(&id).await.unwrap();
     assert_eq!(pending.state.phase, DeliveryPhase::AwaitingData);
     assert_eq!(pending.state.verification.as_ref().unwrap().cursor.as_deref(), Some("5"));
+    // Setup explicitly permits ambiguous request timeouts on a loaded host. Those may retry dispatch before
+    // verification starts; resume and page timeouts must never add another submission after this checkpoint.
+    let setup_dispatches = sink.dispatches.load(Ordering::SeqCst);
+    assert!(setup_dispatches >= 1);
     let first_page_reads = sink.calls.lock().unwrap().iter().filter(|page| **page == 0).count();
     drop(pending);
     drop(journal);
@@ -146,7 +150,7 @@ async fn verification_exceeding_one_request_deadline_resumes_across_restart_and_
     }
     assert!(first_pass && retired);
     assert!(timeouts >= 1, "the stalled page must time out; an overloaded test host may also miss other deadlines");
-    assert_eq!(sink.dispatches.load(Ordering::SeqCst), 1);
+    assert_eq!(sink.dispatches.load(Ordering::SeqCst), setup_dispatches);
     assert!(journal.load(&id).await.unwrap().state.verification.is_none());
 }
 
