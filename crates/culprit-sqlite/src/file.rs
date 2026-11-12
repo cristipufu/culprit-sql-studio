@@ -1,5 +1,4 @@
 //! Native file identity shared by scans and background captures, retained across SQLite reads.
-use crate::native;
 use culprit_core::{DatabaseIdentity, Error, Result, telemetry::CollectionStop};
 use rusqlite::Connection;
 use std::{
@@ -24,7 +23,7 @@ impl FileIdentity {
         let mut hash = std::collections::hash_map::DefaultHasher::new();
         handle.hash(&mut hash);
         let mut database = DatabaseIdentity::file(
-            path.file_name().and_then(|s| s.to_str()).ok_or_else(native::invalid)?,
+            path.file_name().and_then(|s| s.to_str()).ok_or_else(|| CollectionStop::InvalidPage.error())?,
             path.to_string_lossy().into_owned(),
         );
         database.incarnation = Some(format!("file-id-v1-{:016x}", hash.finish()));
@@ -34,11 +33,12 @@ impl FileIdentity {
         path.canonicalize().ok().as_ref() == Some(&self.path)
             && same_file::Handle::from_path(path).is_ok_and(|handle| handle == self.handle)
     }
-    pub(crate) fn bound_to(&self, conn: &Connection, path: &Path) -> Result<()> {
+    pub(crate) fn bound_to(&self, _connection: &Connection, path: &Path) -> Result<()> {
         #[cfg(unix)]
         {
             let mut moved = 1;
-            conn.file_control(Some("main"), rusqlite::FileControl::HasMoved(&mut moved))
+            _connection
+                .file_control(Some("main"), rusqlite::FileControl::HasMoved(&mut moved))
                 .map_err(|error| crate::map_error(&error))?;
             if moved != 0 {
                 return Err(changed());
