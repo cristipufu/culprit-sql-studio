@@ -60,7 +60,11 @@ async fn cancelling_ready_dispatch_retains_the_projection_until_the_transport_fi
         finished: tokio::sync::Notify::new(),
     });
     let dispatcher = crate::ready::ReadyDispatcher::new(upload.clone());
-    let task = tokio::spawn(async move { dispatcher.dispatch(&range, &DeliveryAttempt::new(1).unwrap(), batch).await });
+    let task = tokio::spawn(async move {
+        use crate::ingestion::{IngestionBatch, IngestionTransport};
+        let batch = IngestionBatch::encoded(&range, &DeliveryAttempt::new(1).unwrap(), batch)?;
+        dispatcher.submit(Arc::new(batch)).await
+    });
     upload.started.notified().await;
     task.abort();
     assert!(task.await.unwrap_err().is_cancelled());
@@ -90,7 +94,7 @@ async fn only_complete_verified_recovery_can_create_indexes_and_ready_objects_an
     let recovery = Arc::new(Recovery::new("adx:test", catalog.digest()));
     let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
     let blobs = Arc::new(Blobs::default());
-    let dispatcher = crate::sink::new(
+    let dispatcher = crate::test_support::event_grid_sink(
         range.manifest().contract.clone(),
         recovery.clone(),
         blobs.clone(),
@@ -173,7 +177,7 @@ async fn provider_neutral_query_contracts_encode_through_verified_recovery_witho
         let recovery = Arc::new(recovery);
         let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
         let blobs = Arc::new(Blobs::default());
-        let dispatcher = crate::sink::new(
+        let dispatcher = crate::test_support::event_grid_sink(
             range.manifest().contract.clone(),
             recovery.clone(),
             blobs.clone(),

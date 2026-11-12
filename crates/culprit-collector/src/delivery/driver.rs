@@ -15,6 +15,8 @@ use std::time::Duration;
 #[derive(Clone, Copy)]
 pub struct DeliveryPolicy {
     pub visibility_delay_ms: u32,
+    /// Keep polling for accepted data before repeating a physical submission. None uses the poll interval.
+    pub visibility_timeout_ms: Option<u32>,
     pub retry_delay_ms: u32,
     pub request_timeout_ms: u32,
     pub max_attempts: u32,
@@ -24,6 +26,7 @@ impl Default for DeliveryPolicy {
     fn default() -> Self {
         Self {
             visibility_delay_ms: 60_000,
+            visibility_timeout_ms: None,
             retry_delay_ms: 5_000,
             // One payload may require a bounded download, projection and upload. This delivery-only budget
             // is independent of the short source SQL deadlines; progress is saved after each batch/page.
@@ -38,6 +41,9 @@ impl DeliveryPolicy {
         self.verification.validate()?;
         if self.visibility_delay_ms == 0
             || self.visibility_delay_ms > 3_600_000
+            || self
+                .visibility_timeout_ms
+                .is_some_and(|timeout| timeout < self.visibility_delay_ms || timeout > 3_600_000)
             || self.retry_delay_ms == 0
             || self.request_timeout_ms == 0
             || self.request_timeout_ms > 900_000
@@ -81,6 +87,7 @@ impl<'a> DeliveryDriver<'a> {
     }
 
     async fn advance(&mut self, entry: &mut PendingRange, fence: &Fence, now: i64) -> Result<()> {
+        let started = tokio::time::Instant::now();
         match entry.state.phase {
             DeliveryPhase::Captured => {
                 super::archive_driver::advance(self.journal, self.store, entry, fence, now).await?
@@ -108,12 +115,8 @@ impl<'a> DeliveryDriver<'a> {
                             self.journal.save(entry).await?;
                             return Ok(());
                         }
-                        self.transition(
-                            entry,
-                            DeliveryPhase::AwaitingData,
-                            now.saturating_add(i64::from(self.policy.visibility_delay_ms)),
-                        )
-                        .await?
+                        self.begin_visibility_wait(entry, DeliveryPhase::AwaitingData, completed_at(now, started))
+                            .await?
                     }
                     Submission::Rejected => return Err(DeliveryProblem::Integrity.error()),
                 }
@@ -126,7 +129,7 @@ impl<'a> DeliveryDriver<'a> {
                     Err(error)
                         if error.detail == Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::NotReady)) =>
                     {
-                        self.attempt(entry, DeliveryPhase::DispatchPending, now).await?
+                        self.retry_visibility(entry, DeliveryPhase::DispatchPending, now).await?
                     }
                     Err(error) => return Err(error),
                 }
@@ -147,10 +150,10 @@ impl<'a> DeliveryDriver<'a> {
                             if result != publication {
                                 return Err(DeliveryProblem::Integrity.error());
                             }
-                            self.transition(
+                            self.begin_visibility_wait(
                                 entry,
                                 DeliveryPhase::AwaitingPublication,
-                                now.saturating_add(i64::from(self.policy.visibility_delay_ms)),
+                                completed_at(now, started),
                             )
                             .await?;
                         }
@@ -171,7 +174,7 @@ impl<'a> DeliveryDriver<'a> {
                 if self.sink.publication_visible(&publication, &committed).await? {
                     self.transition(entry, DeliveryPhase::Published, now).await?;
                 } else {
-                    self.attempt(entry, DeliveryPhase::PublicationPending, now).await?;
+                    self.retry_visibility(entry, DeliveryPhase::PublicationPending, now).await?;
                 }
             }
             DeliveryPhase::Published => {
@@ -217,7 +220,24 @@ impl<'a> DeliveryDriver<'a> {
         entry.state.retry_at_ms = retry_at;
         entry.state.reconcile = false;
         entry.state.problem = None;
+        if !matches!(phase, DeliveryPhase::AwaitingData | DeliveryPhase::AwaitingPublication) {
+            entry.state.visibility_deadline_ms = None;
+        }
         self.journal.save(entry).await
+    }
+    async fn begin_visibility_wait(&mut self, entry: &mut PendingRange, phase: DeliveryPhase, now: i64) -> Result<()> {
+        let timeout = self.policy.visibility_timeout_ms.unwrap_or(self.policy.visibility_delay_ms);
+        entry.state.visibility_deadline_ms = Some(now.saturating_add(i64::from(timeout)));
+        self.transition(entry, phase, now.saturating_add(i64::from(self.policy.visibility_delay_ms))).await
+    }
+    async fn retry_visibility(&mut self, entry: &mut PendingRange, resend: DeliveryPhase, now: i64) -> Result<()> {
+        let deadline = entry.state.visibility_deadline_ms.ok_or_else(|| DeliveryProblem::Integrity.error())?;
+        if now >= deadline {
+            return self.attempt(entry, resend, now).await;
+        }
+        let next = now.saturating_add(i64::from(self.policy.visibility_delay_ms)).min(deadline);
+        let phase = entry.state.phase;
+        self.transition(entry, phase, next).await
     }
     async fn attempt(&mut self, entry: &mut PendingRange, phase: DeliveryPhase, now: i64) -> Result<()> {
         if phase == DeliveryPhase::DispatchPending {
@@ -244,4 +264,7 @@ impl<'a> DeliveryDriver<'a> {
         self.journal.reconcile_expired(128).await?;
         Ok(())
     }
+}
+fn completed_at(now: i64, started: tokio::time::Instant) -> i64 {
+    now.saturating_add(started.elapsed().as_millis().min(i64::MAX as u128) as i64)
 }

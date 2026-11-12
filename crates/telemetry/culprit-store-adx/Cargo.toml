@@ -14,6 +14,7 @@ culprit-auth.workspace = true
 culprit-core.workspace = true
 culprit-collector.workspace = true
 async-trait.workspace = true
+base64.workspace = true
 chrono.workspace = true
 ring.workspace = true
 serde.workspace = true

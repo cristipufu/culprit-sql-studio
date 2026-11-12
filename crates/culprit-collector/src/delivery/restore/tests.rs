@@ -38,10 +38,13 @@ async fn a_fresh_delivery_journal_publishes_remote_ranges_after_all_original_loc
     let policy = DeliveryPolicy { visibility_delay_ms: 1, ..Default::default() };
     let mut capabilities = crate::delivery::committed_cache::CommittedRangeCache::default();
     let mut driver = DeliveryDriver::new(&mut journal, &*store, &sink, &mut capabilities, policy).unwrap();
-    for now in 0..10 {
-        if driver.step(&id, owner.fence(), now).await.unwrap().phase == DeliveryPhase::Retired {
+    let mut now = 0;
+    for _ in 0..10 {
+        let status = driver.step(&id, owner.fence(), now).await.unwrap();
+        if status.phase == DeliveryPhase::Retired {
             break;
         }
+        now = status.retry_at_ms.parse::<i64>().unwrap().max(now + 1);
     }
     assert_eq!(journal.status(&id).await.unwrap().phase, DeliveryPhase::Retired);
     assert_eq!(sink.physical_rows(&id).await.unwrap(), 1);

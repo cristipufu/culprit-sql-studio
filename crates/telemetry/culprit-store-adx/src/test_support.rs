@@ -11,6 +11,23 @@ use serde_json::{Value, json};
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
+pub(crate) fn event_grid_sink(
+    contract: culprit_collector::delivery::contract::Contract,
+    recovery: std::sync::Arc<dyn culprit_collector::delivery::recovery::RecoveryStore>,
+    blobs: std::sync::Arc<Blobs>,
+    query: std::sync::Arc<dyn QueryTransport>,
+    scratch: &std::path::Path,
+) -> Result<culprit_collector::analytical::sink::AnalyticalSink> {
+    crate::sink::new(
+        contract,
+        recovery,
+        blobs.clone(),
+        std::sync::Arc::new(crate::ready::ReadyDispatcher::new(blobs)),
+        query,
+        scratch,
+    )
+}
+
 pub(super) enum Reply {
     Audit(u64),
     Rows(Vec<Vec<Value>>),
@@ -36,4 +53,21 @@ impl QueryTransport for Queries {
             Reply::Failure => Err(DeliveryProblem::Transport.error()),
         }
     }
+}
+
+pub(crate) fn returned(schema: &crate::schema::Schema, row: &Value) -> Vec<Value> {
+    schema
+        .columns()
+        .iter()
+        .map(|column| {
+            let value = &row[&column.name];
+            match column.kind {
+                crate::projection::ScalarType::JsonContainer => {
+                    value.as_str().map_or_else(|| json!(""), |text| json!(text))
+                }
+                crate::projection::ScalarType::ExactCounter => json!(value.as_str().unwrap_or_default()),
+                _ => value.clone(),
+            }
+        })
+        .collect()
 }

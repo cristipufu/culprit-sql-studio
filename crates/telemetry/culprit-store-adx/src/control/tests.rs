@@ -1,8 +1,5 @@
 use super::*;
-use crate::{
-    projection::ScalarType,
-    test_support::{Blobs, Queries, Recovery, Reply},
-};
+use crate::test_support::{Blobs, Queries, Recovery, Reply, returned};
 use culprit_collector::delivery::sink::Publication;
 use culprit_collector::delivery::{
     recovery::reopen,
@@ -11,20 +8,6 @@ use culprit_collector::delivery::{
 use culprit_core::telemetry::digest;
 use std::{collections::VecDeque, sync::Mutex};
 
-fn returned(schema: &super::super::schema::Schema, row: &Value) -> Vec<Value> {
-    schema
-        .columns()
-        .iter()
-        .map(|column| {
-            let value = &row[&column.name];
-            match column.kind {
-                ScalarType::JsonContainer => value.as_str().map_or_else(|| json!(""), |text| json!(text)),
-                ScalarType::ExactCounter => json!(value.as_str().unwrap_or_default()),
-                _ => value.clone(),
-            }
-        })
-        .collect()
-}
 #[tokio::test]
 async fn data_readback_precedes_completion_and_publication_waits_for_exact_control_visibility() {
     let temp = tempfile::tempdir().unwrap();
@@ -33,8 +16,14 @@ async fn data_readback_precedes_completion_and_publication_waits_for_exact_contr
     let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
     let blobs = Arc::new(Blobs::default());
     let query = Arc::new(Queries { replies: Mutex::new(VecDeque::new()), requests: Mutex::new(vec![]) });
-    let sink = crate::sink::new(range.manifest().contract.clone(), recovery, blobs.clone(), query.clone(), temp.path())
-        .unwrap();
+    let sink = crate::test_support::event_grid_sink(
+        range.manifest().contract.clone(),
+        recovery,
+        blobs.clone(),
+        query.clone(),
+        temp.path(),
+    )
+    .unwrap();
     let attempt = DeliveryAttempt::new(1).unwrap();
     culprit_collector::delivery::sink::dispatch_range(&sink, &range, &attempt).await.unwrap();
     let values = {
@@ -95,8 +84,14 @@ async fn an_empty_successful_capture_has_explicit_coverage_and_no_empty_data_blo
     let blobs = Arc::new(Blobs::default());
     let query =
         Arc::new(Queries { replies: Mutex::new(VecDeque::from([Reply::Audit(0)])), requests: Mutex::new(vec![]) });
-    let sink = crate::sink::new(range.manifest().contract.clone(), recovery, blobs.clone(), query.clone(), temp.path())
-        .unwrap();
+    let sink = crate::test_support::event_grid_sink(
+        range.manifest().contract.clone(),
+        recovery,
+        blobs.clone(),
+        query.clone(),
+        temp.path(),
+    )
+    .unwrap();
     let attempt = DeliveryAttempt::new(1).unwrap();
     culprit_collector::delivery::sink::dispatch_range(&sink, &range, &attempt).await.unwrap();
     assert!(blobs.objects.lock().unwrap().is_empty());
@@ -129,7 +124,7 @@ fn destination_and_schema_identity_are_checked_before_opening_scratch_or_dispatc
     )
     .unwrap();
     let scratch = temp.path().join("not-created");
-    assert!(crate::sink::new(contract, recovery, blobs.clone(), query.clone(), &scratch).is_err());
+    assert!(crate::test_support::event_grid_sink(contract, recovery, blobs.clone(), query.clone(), &scratch).is_err());
     assert!(!scratch.exists());
     assert!(blobs.objects.lock().unwrap().is_empty());
     assert!(query.requests.lock().unwrap().is_empty());

@@ -43,10 +43,38 @@ pub struct RecoveryConfig {
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum TargetConfig {
     #[cfg(feature = "store-adx")]
-    Adx { query: AdxConfig, ready: AzureBlobConfig, credential: String, ready_credential: String },
+    Adx { query: AdxConfig, credential: String, delivery: AdxDeliveryConfig },
     #[cfg(feature = "store-clickhouse")]
     #[serde(rename = "clickhouse")]
     ClickHouse { query: ClickHouseConfig, credential: String },
+}
+
+#[cfg(feature = "store-adx")]
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdxDeliveryConfig {
+    pub credential: String,
+    #[serde(default)]
+    pub transport: AdxDeliveryTransport,
+}
+
+#[cfg(feature = "store-adx")]
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum AdxDeliveryTransport {
+    Queued {
+        #[serde(default)]
+        endpoint: Option<String>,
+    },
+    EventGrid {
+        ready: AzureBlobConfig,
+    },
+}
+#[cfg(feature = "store-adx")]
+impl Default for AdxDeliveryTransport {
+    fn default() -> Self {
+        Self::Queued { endpoint: None }
+    }
 }
 
 impl CollectorConfig {

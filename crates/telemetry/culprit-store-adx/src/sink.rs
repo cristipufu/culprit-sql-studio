@@ -1,6 +1,9 @@
-//! ADX composes the shared analytical lifecycle with Kusto queries and ready-blob dispatch.
+//! ADX composes one analytical lifecycle with Kusto readback and a selected ingestion transport.
 use crate::{
-    catalog::SchemaCatalog, client::QueryTransport, control::AdxPublication, ready::ReadyDispatcher,
+    catalog::SchemaCatalog,
+    client::QueryTransport,
+    control::AdxPublication,
+    ingestion::{IngestionBatch, IngestionTransport},
     receipts::AdxReadback,
 };
 use async_trait::async_trait;
@@ -25,17 +28,17 @@ use std::{path::Path, sync::Arc};
 pub struct AdxStore {
     catalog: Arc<SchemaCatalog>,
     query: Arc<dyn QueryTransport>,
-    dispatcher: ReadyDispatcher,
+    ingestion: Arc<dyn IngestionTransport>,
     readback: AdxReadback,
     control: AdxPublication,
 }
 impl AdxStore {
-    pub fn new(query: Arc<dyn QueryTransport>, ready: Arc<dyn ObjectTransport>) -> Result<Self> {
+    pub fn new(query: Arc<dyn QueryTransport>, ingestion: Arc<dyn IngestionTransport>) -> Result<Self> {
         let catalog = Arc::new(SchemaCatalog::new()?);
         Ok(Self {
             readback: AdxReadback::new(query.clone(), catalog.clone()),
-            control: AdxPublication::new(catalog.clone(), query.clone(), ready.clone()),
-            dispatcher: ReadyDispatcher::new(ready),
+            control: AdxPublication::new(catalog.clone(), query.clone(), ingestion.clone()),
+            ingestion,
             catalog,
             query,
         })
@@ -44,12 +47,13 @@ impl AdxStore {
 pub fn new(
     contract: Contract,
     recovery: Arc<dyn RecoveryStore>,
-    ready: Arc<dyn ObjectTransport>,
+    validation: Arc<dyn ObjectTransport>,
+    ingestion: Arc<dyn IngestionTransport>,
     query: Arc<dyn QueryTransport>,
     scratch: &Path,
 ) -> Result<AnalyticalSink> {
-    let indexes = Arc::new(ProjectionIndexes::new(ready.clone()));
-    AnalyticalSink::new(contract, recovery, indexes, Arc::new(AdxStore::new(query, ready)?), scratch)
+    let indexes = Arc::new(ProjectionIndexes::new(validation));
+    AnalyticalSink::new(contract, recovery, indexes, Arc::new(AdxStore::new(query, ingestion)?), scratch)
 }
 #[async_trait]
 impl AnalyticalStore for AdxStore {
@@ -68,7 +72,8 @@ impl AnalyticalStore for AdxStore {
         attempt: &DeliveryAttempt,
         batch: Arc<EncodedBatch>,
     ) -> Result<Submission> {
-        self.dispatcher.dispatch(range, attempt, batch).await
+        self.ingestion.submit(Arc::new(IngestionBatch::encoded(range, attempt, batch)?)).await?;
+        Ok(Submission::Accepted)
     }
     async fn audit_membership(&self, range: &CommittedRange) -> Result<()> {
         self.readback.audit_membership(range).await

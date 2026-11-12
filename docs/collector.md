@@ -6,8 +6,9 @@ investigations do not need a new connection to the production database.
 
 Remote delivery supports ADX and ClickHouse through one shared preparation, verification and publication path.
 Private Azure Blob or S3 storage retains native recovery evidence through the same conditional-object protocol;
-ADX additionally uses a separate Azure ingestion-ready container. The actual managed
-ingestion route, cloud permissions, private networking, retention-scale costs and production source-load budgets
+ADX defaults to queued ingestion using temporary storage and queues supplied by ADX. An explicit Event Grid mode
+uses a separate Azure ingestion-ready container and Event Hubs. The actual managed ingestion routes,
+cloud permissions, private networking, retention-scale costs and production source-load budgets
 require live qualification. The deployment example starts with **zero replicas**. Its resource requests and cadences
 are starting configurations, not measured capacity claims.
 
@@ -52,10 +53,11 @@ opens no database, object-storage or warehouse connections and creates no runtim
 queries and native ingestion assets without opening a workspace or applying anything to a service.
 
 Credential profiles are independent from source and destination selection. The example names four Azure profiles:
-`source`, `recovery`, `analytics` and `staging`. `source_credentials` maps saved connection names to their own
+`source`, `recovery`, `analytics` and `ingestion`. `source_credentials` maps saved connection names to their own
 unattended authentication profiles;
 password-authenticated connections still use their saved password environment references. Recovery's `credential`,
-ADX's `credential` and its `ready_credential` can select different managed or workload identities. Explicitly selecting
+ADX's query `credential` and `delivery.credential` can select different managed or workload identities. In Event Grid
+mode, `delivery.credential` authenticates staging Blob writes. Explicitly selecting
 the same profile reuses that credential owner and its audience caches. Nothing inherits a different role's identity.
 A fleet may mix Azure and AWS sources without sharing identities. Delivery-only mode neither resolves source profiles nor requires saved source connections.
 
@@ -135,6 +137,70 @@ missing namespace. Recovery fencing cannot stop an orphan database query; source
 fixture, then verifies real ClickHouse delivery and publication after restarting S3-backed recovery. Synthetic
 credentials and loopback ports are local to the fixture; both containers and their volumes are removed on exit.
 This complements `dev/smoke-delivery.py` (Azurite), `dev/smoke-clickhouse.py` and the final live ADX qualification.
+
+### ADX delivery modes
+
+Queued ingestion is the default when `delivery.transport` is omitted:
+
+```json
+{
+  "target": {
+    "kind": "adx",
+    "query": {"endpoint": "https://CLUSTER.REGION.kusto.windows.net", "database": "culprit"},
+    "credential": "analytics",
+    "delivery": {"credential": "ingestion"}
+  }
+}
+```
+
+The query identity needs read access for exact verification. The delivery identity needs ingestion access to the
+generated tables. Their profiles are explicit and independent. Schema deployment uses a separate identity.
+
+Culprit obtains temporary storage locations, an ingestion queue and authorization evidence from the Kusto ingestion
+service. It uploads each prepared batch to that temporary storage and submits its location to the queue. ADX then
+downloads, batches and ingests it. This uses the established
+[queued ingestion protocol](https://learn.microsoft.com/en-us/kusto/api/netfx/kusto-ingest-client-rest), rather than
+the preview queued REST endpoint or synchronous inline ingestion. It requires no customer-provisioned staging
+account, Event Grid subscription or Event Hub. The ingestion endpoint defaults to `https://ingest-CLUSTER.REGION.kusto.windows.net`;
+set `delivery.transport` to `{"kind":"queued","endpoint":"https://ingest-ALIAS.REGION.kusto.windows.net"}` for an explicit endpoint.
+
+Durable recovery storage remains a separate requirement. ADX consumes its temporary staging files; it does not read
+the native recovery archive. With S3 recovery, queued ADX delivery requires no customer Azure Storage account.
+Projection verification indexes are retained in the recovery namespace, independently of the selected ADX transport.
+
+Service-issued SAS URLs and authorization evidence stay in memory. Their cache expires within five minutes and
+earlier when storage credentials approach expiry; failed delivery invalidates it. Each client permits at most two
+native deliveries concurrently. Upload and queue requests disable redirects and proxies, bound response bodies and
+use service-issued Azure storage endpoints only. Caller cancellation retains the native worker, encoded file and
+concurrency permit until the request settles. Batching stays enabled. Queue acceptance is only a hint: exact data and
+publication readback still gate retirement, through the same lifecycle as Event Grid delivery.
+
+ADX's default batching policy can delay each ingestion stage by five minutes. The service checks visibility every
+minute and allows six minutes before emitting a new attempt, avoiding repeated uploads during normal batching.
+That deadline is persisted across restart. Data and the
+completion record are separate stages, so this is a historical telemetry pipeline with several minutes of latency.
+Qualify table batching policies and freshness requirements before using it for urgent activity alerts. See
+[ADX batching policy](https://learn.microsoft.com/en-us/kusto/management/batching-policy).
+
+To keep the Event Grid route, configure its staging identity and container explicitly:
+
+```json
+{
+  "delivery": {
+    "credential": "staging",
+    "transport": {
+      "kind": "event-grid",
+      "ready": {"account": "culpritstaging", "container": "ready", "prefix": "pilot/shard-0"}
+    }
+  }
+}
+```
+
+This mode requires Blob Storage, an Event Grid subscription, Event Hubs and an ADX data connection. The staging
+identity needs Blob access; ADX's ingestion identity needs access to the staging files and notifications. See
+[Event Grid data connections](https://learn.microsoft.com/en-us/azure/data-explorer/ingest-data-event-grid-overview).
+The generated `routes` describe the table mappings and ready-file filters for this optional mode. Both transports
+use the same generated schema, recovery evidence, exact verification and publication records.
 
 ### ClickHouse deployment and durability
 
@@ -316,7 +382,7 @@ available for current observations; exhausting the remaining budget backpressure
 observations and older backlog receive delivery work. Verified
 manifests are cached within bounded process-local limits; restarting reopens their authoritative recovery commits.
 
-Native archive commits precede ready-object dispatch. Successful upload alone does not publish a range: readback
+Native archive commits precede analytical dispatch. Successful upload alone does not publish a range: readback
 must establish exact distinct row membership and every projected field, then the exact completion record. Verified
 publication removes the range from the remote unfinished index; native history and captured-range receipts remain.
 Cold recovery therefore follows unfinished work instead of replaying years of published history. The index is bounded
@@ -375,17 +441,19 @@ provider. Preserve native units, unknown values, scope and reset evidence. Do no
 deltas across an unknown reset. Full SQL/XML payloads stay in the private native recovery store; analytical rows carry bounded previews, checksums, redaction
 versions and native references. Large fact detail also becomes an explicit recovery reference.
 
-Configure managed ingestion only for each generated `ready/<table>/` prefix in the **ready container**, with its
+For Event Grid delivery, configure managed ingestion only for each generated `ready/<table>/` prefix in the **ready container**, with its
 matching table and mapping. Apply the configured storage prefix before the generated route. Subscribe to neither
 native payload/manifests nor projection indexes. Ready objects use new physical names on re-drive so an expired
 notification can be retried without changing logical measurement identity. Cloud-route behavior remains a live gate.
 
 ## Identity, storage and probes
 
-The runtime identity needs source-specific read permissions, native/ready container access and ADX verification
-read access. It needs no SQL write permissions, cluster management role or permission to create its own collectors.
-Provisioning identities apply schemas and managed ingestion configuration separately. Grant the ingestion service
-access to the ready container, not the native container. The runtime rejects using the same container for both.
+Source identities need source-specific read permissions; recovery identities need access to the chosen recovery
+namespace; warehouse query identities need verification read access. Queued ADX delivery has its own ingestion
+identity. Event Grid delivery instead has a staging identity with Blob access. No role needs SQL write permissions
+or a cluster management role. Provisioning identities apply schemas and managed ingestion configuration separately.
+For Event Grid, grant the ingestion service access to the ready container and keep the native archive private. The
+runtime rejects using the same container for both.
 
 The Kubernetes example projects its own direct-federation token with audience `api://AzureADTokenExchange`; its token
 path belongs to this manifest rather than depending on the webhook's internal mount path. Token content is reread

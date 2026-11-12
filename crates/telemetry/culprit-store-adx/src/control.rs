@@ -2,22 +2,24 @@
 use crate::{
     catalog::SchemaCatalog,
     client::{QueryRequest, QueryTransport},
-    ready,
+    ingestion::{IngestionBatch, IngestionTransport},
 };
-use culprit_collector::delivery::{
-    object_store::transport::ObjectTransport, recovery::CommittedRange, sink::DeliveryAttempt,
-};
+use culprit_collector::delivery::{recovery::CommittedRange, sink::DeliveryAttempt};
 use culprit_core::{Result, telemetry::DeliveryProblem};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc};
 pub struct AdxPublication {
     catalog: Arc<SchemaCatalog>,
     query: Arc<dyn QueryTransport>,
-    ready: Arc<dyn ObjectTransport>,
+    ingestion: Arc<dyn IngestionTransport>,
 }
 impl AdxPublication {
-    pub fn new(catalog: Arc<SchemaCatalog>, query: Arc<dyn QueryTransport>, ready: Arc<dyn ObjectTransport>) -> Self {
-        Self { catalog, query, ready }
+    pub fn new(
+        catalog: Arc<SchemaCatalog>,
+        query: Arc<dyn QueryTransport>,
+        ingestion: Arc<dyn IngestionTransport>,
+    ) -> Self {
+        Self { catalog, query, ingestion }
     }
     pub async fn publish(
         &self,
@@ -26,7 +28,8 @@ impl AdxPublication {
         id: &str,
         bytes: Vec<u8>,
     ) -> Result<()> {
-        ready::publish_bytes(self.ready.as_ref(), self.catalog.publication().table(), range, id, attempt, bytes).await
+        let batch = IngestionBatch::publication(self.catalog.publication().table(), range, id, attempt, bytes)?;
+        self.ingestion.submit(Arc::new(batch)).await
     }
     pub async fn rows(&self, range: &CommittedRange) -> Result<Vec<Vec<Value>>> {
         let schema = self.catalog.publication();

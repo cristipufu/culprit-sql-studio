@@ -13,7 +13,6 @@ use culprit_collector::{
     delivery::{
         activity_recovery::ActivityRestoreBudget,
         contract::Contract,
-        driver::DeliveryPolicy,
         journal::{DeliveryHealthReader, DeliveryJournal},
         object_store::ObjectRecoveryStore,
         recovery::RecoveryStore,
@@ -203,6 +202,7 @@ async fn run_configured(
         archive: archive.health_reader(),
         analytical: journal.health_reader(),
     };
+    let delivery_policy = adapters.destination.delivery_policy();
     let sink = adapters.destination.open(
         adapters.contract.clone(),
         adapters.recovery.clone(),
@@ -215,7 +215,7 @@ async fn run_configured(
         &sink,
         fence,
         adapters.contract,
-        DeliveryPolicy::default(),
+        delivery_policy,
     )?;
     let reporter = ObservedReporter { health, delegate: reporter };
     if source_paused {

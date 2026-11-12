@@ -97,9 +97,14 @@ impl Scenario {
         let recovery = Arc::new(recovery);
         let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
         let blobs = Arc::new(Blobs::default());
-        let sink =
-            crate::sink::new(range.manifest().contract.clone(), recovery, blobs.clone(), emulator, scratch.path())
-                .unwrap();
+        let sink = crate::test_support::event_grid_sink(
+            range.manifest().contract.clone(),
+            recovery,
+            blobs.clone(),
+            emulator,
+            scratch.path(),
+        )
+        .unwrap();
         Self { _scratch: scratch, range, sink, blobs, ingested: Mutex::new(BTreeSet::new()) }
     }
     async fn dispatch(&self, emulator: &Emulator) {

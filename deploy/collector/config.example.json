@@ -583,13 +583,10 @@
       "endpoint": "https://REPLACE_CLUSTER.REGION.kusto.windows.net",
       "database": "REPLACE_ADX_DATABASE"
     },
-    "ready": {
-      "account": "REPLACE_STORAGE_ACCOUNT",
-      "container": "culprit-ready",
-      "prefix": "database-telemetry/pilot"
-    },
     "credential": "analytics",
-    "ready_credential": "staging"
+    "delivery": {
+      "credential": "ingestion"
+    }
   },
   "limits": {
     "max_bytes": 1073741824,
@@ -623,12 +620,12 @@
         "token_file": "/var/run/secrets/culprit/token"
       }
     },
-    "staging": {
+    "ingestion": {
       "kind": "azure",
       "identity": {
         "kind": "workload-identity",
         "tenant_id": "REPLACE_TENANT_ID",
-        "client_id": "REPLACE_STAGING_CLIENT_ID",
+        "client_id": "REPLACE_INGESTION_CLIENT_ID",
         "token_file": "/var/run/secrets/culprit/token"
       }
     }

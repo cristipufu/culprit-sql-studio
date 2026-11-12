@@ -24,7 +24,7 @@ impl Fixture {
         let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
         let blobs = Arc::new(Blobs::default());
         let indexes = Arc::new(ProjectionIndexes::new(blobs.clone()));
-        let dispatcher = crate::sink::new(
+        let dispatcher = crate::test_support::event_grid_sink(
             range.manifest().contract.clone(),
             recovery,
             blobs.clone(),
@@ -61,7 +61,13 @@ impl Fixture {
         let query = Arc::new(Queries { replies: Mutex::new(replies.into()), requests: Mutex::new(vec![]) });
         (
             ReceiptReader::new(
-                Arc::new(AdxStore::new(query.clone(), Arc::new(Blobs::default())).unwrap()),
+                Arc::new(
+                    AdxStore::new(
+                        query.clone(),
+                        Arc::new(crate::ready::ReadyDispatcher::new(Arc::new(Blobs::default()))),
+                    )
+                    .unwrap(),
+                ),
                 self.catalog.clone(),
                 self.indexes.clone(),
             ),

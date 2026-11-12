@@ -242,14 +242,16 @@ async fn destination_outage_does_not_prevent_remote_commit_eviction_or_more_sour
     assert_eq!(store.recover(None, 50).await.unwrap().ranges.len(), 2);
     sink.available.store(true, Ordering::Release);
     for _ in 0..60 {
-        now += 1;
+        let mut next = now + 1;
         worker
             .work_once(now, &crate::capture::CollectionCancellation::default(), |_, result| {
-                result.unwrap();
+                let status = result.unwrap();
+                next = next.max(status.retry_at_ms.parse::<i64>().unwrap());
                 Ok(())
             })
             .await
             .unwrap();
+        now = next;
     }
     drop(worker);
     assert!(journal.pending(0, 50).await.unwrap().0.is_empty());

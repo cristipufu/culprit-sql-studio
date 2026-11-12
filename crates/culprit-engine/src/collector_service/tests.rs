@@ -63,15 +63,19 @@ fn config(root: &Path) -> CollectorConfig {
         },
         target: TargetConfig::Adx {
             credential: "analytics".into(),
-            ready_credential: "analytics".into(),
             query: culprit_store_adx::client::AdxConfig {
                 endpoint: "https://never-contact.westeurope.kusto.windows.net".into(),
                 database: "test".into(),
             },
-            ready: AzureBlobConfig {
-                account: "nevercontact".into(),
-                container: "ready".into(),
-                prefix: "test/alpha".into(),
+            delivery: AdxDeliveryConfig {
+                credential: "analytics".into(),
+                transport: AdxDeliveryTransport::EventGrid {
+                    ready: AzureBlobConfig {
+                        account: "nevercontact".into(),
+                        container: "ready".into(),
+                        prefix: "test/alpha".into(),
+                    },
+                },
             },
         },
         limits: OutboxLimits::default(),
@@ -84,12 +88,32 @@ fn offline_validation_configures_all_adapters_without_tokens_connections_or_runt
     let root = tempfile::tempdir().unwrap();
     let config = config(root.path());
     validate(&config).unwrap();
+    let adapters = ConfiguredAdapters::new(&config, SourceMode::Collect, &CollectorRuntime::default()).unwrap();
+    let policy = adapters.destination.delivery_policy();
+    assert_eq!(policy.visibility_delay_ms, 60_000);
+    assert_eq!(policy.visibility_timeout_ms, Some(360_000));
     assert!(!config.state.exists());
     assert!(!config.workspace.join("collection-admission").exists());
     let path = root.path().join("collector.json");
     std::fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
     validate(&CollectorConfig::from_file(&path).unwrap()).unwrap();
     assert!(!config.state.exists());
+}
+
+#[test]
+fn omitted_adx_transport_selects_queued_delivery_without_a_ready_container() {
+    let root = tempfile::tempdir().unwrap();
+    let mut value = serde_json::to_value(config(root.path())).unwrap();
+    value["target"]["delivery"] = serde_json::json!({"credential":"analytics"});
+    let config: CollectorConfig = serde_json::from_value(value.clone()).unwrap();
+    let TargetConfig::Adx { delivery, .. } = &config.target else { panic!("ADX fixture") };
+    assert!(matches!(delivery.transport, AdxDeliveryTransport::Queued { endpoint: None }));
+    validate(&config).unwrap();
+    assert!(!config.state.exists());
+    value["target"]["delivery"]["transport"] =
+        serde_json::json!({"kind":"queued","endpoint":"http://unsafe.kusto.windows.net"});
+    let invalid: CollectorConfig = serde_json::from_value(value).unwrap();
+    assert!(validate(&invalid).is_err());
 }
 
 struct NoObjectWork;
@@ -202,10 +226,12 @@ fn missing_unattended_source_authentication_and_identical_native_and_ready_names
     let root = tempfile::tempdir().unwrap();
     let mut config = config(root.path());
     let storage: AzureBlobConfig = serde_json::from_value(config.recovery.options.clone()).unwrap();
-    let TargetConfig::Adx { ready, .. } = &mut config.target else { panic!("ADX fixture") };
+    let TargetConfig::Adx { delivery, .. } = &mut config.target else { panic!("ADX fixture") };
+    let AdxDeliveryTransport::EventGrid { ready } = &mut delivery.transport else { panic!("Event Grid fixture") };
     *ready = storage.clone();
     assert!(validate(&config).is_err());
-    let TargetConfig::Adx { ready, .. } = &mut config.target else { panic!("ADX fixture") };
+    let TargetConfig::Adx { delivery, .. } = &mut config.target else { panic!("ADX fixture") };
+    let AdxDeliveryTransport::EventGrid { ready } = &mut delivery.transport else { panic!("Event Grid fixture") };
     ready.container = "ready".into();
     config.inventory.targets[0].connection = "not-saved".into();
     assert!(validate(&config).is_err());

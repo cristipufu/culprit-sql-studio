@@ -45,8 +45,8 @@ impl CredentialResolver for Profiles {
 fn generic_resolver_receives_each_roles_own_profile_without_acquiring_credentials() {
     let root = tempfile::tempdir().unwrap();
     let mut config = config(root.path());
-    let TargetConfig::Adx { ready_credential, .. } = &mut config.target else { panic!("ADX fixture") };
-    *ready_credential = "staging".into();
+    let TargetConfig::Adx { delivery, .. } = &mut config.target else { panic!("ADX fixture") };
+    delivery.credential = "staging".into();
     let profiles = Arc::new(Profiles::default());
     CollectorRuntime::default().with_credentials(profiles.clone()).validate(&config).unwrap();
     assert_eq!(
@@ -63,4 +63,20 @@ fn generic_resolver_receives_each_roles_own_profile_without_acquiring_credential
     assert_eq!(*profiles.0.lock().unwrap(), ["bearer:recovery", "bearer:analytics", "bearer:staging"]);
     assert!(!config.state.exists());
     assert!(!config.workspace.join("collection-admission").exists());
+}
+
+#[test]
+fn queued_ingestion_resolves_its_own_identity_without_resolving_a_staging_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let mut config = config(root.path());
+    let TargetConfig::Adx { delivery, .. } = &mut config.target else { panic!("ADX fixture") };
+    delivery.credential = "ingestion".into();
+    delivery.transport = AdxDeliveryTransport::default();
+    let profiles = Arc::new(Profiles::default());
+    CollectorRuntime::default().with_credentials(profiles.clone()).validate(&config).unwrap();
+    assert_eq!(
+        *profiles.0.lock().unwrap(),
+        ["database:source", "bearer:recovery", "bearer:analytics", "bearer:ingestion"]
+    );
+    assert!(!config.state.exists());
 }

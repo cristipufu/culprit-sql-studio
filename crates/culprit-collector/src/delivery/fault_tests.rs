@@ -240,6 +240,8 @@ struct DelayedSink<'a> {
     skip_dispatch: std::sync::atomic::AtomicBool,
     stall_receipt: std::sync::atomic::AtomicBool,
     attempts: std::sync::Mutex<Vec<String>>,
+    hide_publication: std::sync::atomic::AtomicBool,
+    publications: std::sync::Mutex<Vec<String>>,
 }
 #[async_trait]
 impl TelemetrySink for DelayedSink<'_> {
@@ -260,9 +262,13 @@ impl TelemetrySink for DelayedSink<'_> {
         self.inner.receipts(range, cursor, rows).await
     }
     async fn publish(&self, range: &VerifiedRange, attempt: &DeliveryAttempt) -> Result<Publication> {
+        self.publications.lock().unwrap().push(attempt.id.clone());
         self.inner.publish(range, attempt).await
     }
     async fn publication_visible(&self, publication: &Publication, range: &CommittedRange) -> Result<bool> {
+        if self.hide_publication.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(false);
+        }
         self.inner.publication_visible(publication, range).await
     }
     async fn poll_updates(&self, cursor: Option<&str>, limit: u32) -> Result<DeliveryUpdates> {
@@ -282,6 +288,8 @@ async fn expired_notification_redrives_a_new_physical_attempt_with_identical_log
         skip_dispatch: true.into(),
         stall_receipt: false.into(),
         attempts: Default::default(),
+        hide_publication: false.into(),
+        publications: Default::default(),
     };
     let mut journal = DeliveryJournal::create(&root.path().join("delivery"), contract()).unwrap();
     journal.register(&prepared).await.unwrap();
@@ -323,6 +331,8 @@ async fn receipt_timeout_preserves_the_submitted_attempt_and_recovers_without_re
         skip_dispatch: false.into(),
         stall_receipt: true.into(),
         attempts: Default::default(),
+        hide_publication: false.into(),
+        publications: Default::default(),
     };
     let mut journal = DeliveryJournal::create(&root.path().join("delivery"), contract()).unwrap();
     journal.register(&prepared).await.unwrap();
@@ -351,4 +361,101 @@ async fn receipt_timeout_preserves_the_submitted_attempt_and_recovers_without_re
     let status = driver.step(&id, owner.fence(), now + 10_000).await.unwrap();
     assert_eq!(status.phase, DeliveryPhase::PublicationPending);
     assert_eq!(sink.attempts.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn visibility_polling_survives_restart_without_resubmitting_data_or_publication_before_the_deadline() {
+    for arrives_before_deadline in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let prepared = prepared(root.path(), 1);
+        let id = prepared.manifest().range_id.clone();
+        let store = Arc::new(FileRecoveryStore::create(&root.path().join("recovery"), contract()).unwrap());
+        let owner = store.acquire().await.unwrap();
+        let file = FileTelemetrySink::create(&root.path().join("warehouse"), contract(), store.clone()).unwrap();
+        let sink = DelayedSink {
+            inner: &file,
+            skip_dispatch: true.into(),
+            stall_receipt: false.into(),
+            attempts: Default::default(),
+            hide_publication: true.into(),
+            publications: Default::default(),
+        };
+        let path = root.path().join("delivery");
+        let mut journal = DeliveryJournal::create(&path, contract()).unwrap();
+        journal.register(&prepared).await.unwrap();
+        let policy =
+            DeliveryPolicy { visibility_delay_ms: 1000, visibility_timeout_ms: Some(6000), ..Default::default() };
+        let mut cache = super::committed_cache::CommittedRangeCache::default();
+        let mut now = 0;
+        {
+            let mut driver = DeliveryDriver::new(&mut journal, store.as_ref(), &sink, &mut cache, policy).unwrap();
+            for _ in 0..20 {
+                let status = driver.step(&id, owner.fence(), now).await.unwrap();
+                now += 1000;
+                if status.phase == DeliveryPhase::AwaitingData {
+                    break;
+                }
+            }
+        }
+        let waiting = journal.load(&id).await.unwrap();
+        assert_eq!(waiting.state.phase, DeliveryPhase::AwaitingData);
+        let deadline = waiting.state.visibility_deadline_ms.unwrap();
+        let attempt = waiting.state.attempt.clone().unwrap();
+        drop(journal);
+        let mut journal = DeliveryJournal::open(&path, contract()).unwrap();
+        assert_eq!(journal.load(&id).await.unwrap().state.visibility_deadline_ms, Some(deadline));
+        {
+            let mut driver = DeliveryDriver::new(&mut journal, store.as_ref(), &sink, &mut cache, policy).unwrap();
+            for tick in [deadline - 4000, deadline - 2000] {
+                assert_eq!(driver.step(&id, owner.fence(), tick).await.unwrap().phase, DeliveryPhase::AwaitingData);
+                assert_eq!(sink.attempts.lock().unwrap().len(), 1);
+            }
+            if !arrives_before_deadline {
+                assert_eq!(
+                    driver.step(&id, owner.fence(), deadline).await.unwrap().phase,
+                    DeliveryPhase::DispatchPending
+                );
+                driver.step(&id, owner.fence(), deadline + 1).await.unwrap();
+                assert_eq!(sink.attempts.lock().unwrap().len(), 2);
+                assert_ne!(sink.attempts.lock().unwrap()[1], attempt.id);
+            }
+        }
+        if arrives_before_deadline {
+            let committed = reopen(store.as_ref(), &id).await.unwrap();
+            file.dispatch(&committed, &attempt, &committed.manifest().batches[0].batch_id).await.unwrap();
+        }
+        now = deadline + 2000;
+        {
+            let mut driver = DeliveryDriver::new(&mut journal, store.as_ref(), &sink, &mut cache, policy).unwrap();
+            for _ in 0..20 {
+                let status = driver.step(&id, owner.fence(), now).await.unwrap();
+                now += 1000;
+                if status.phase == DeliveryPhase::AwaitingPublication {
+                    break;
+                }
+            }
+        }
+        let waiting = journal.load(&id).await.unwrap();
+        assert_eq!(waiting.state.phase, DeliveryPhase::AwaitingPublication);
+        let deadline = waiting.state.visibility_deadline_ms.unwrap();
+        drop(journal);
+        let mut journal = DeliveryJournal::open(&path, contract()).unwrap();
+        let mut driver = DeliveryDriver::new(&mut journal, store.as_ref(), &sink, &mut cache, policy).unwrap();
+        for tick in [deadline - 4000, deadline - 2000] {
+            assert_eq!(driver.step(&id, owner.fence(), tick).await.unwrap().phase, DeliveryPhase::AwaitingPublication);
+            assert_eq!(sink.publications.lock().unwrap().len(), 1);
+        }
+        if !arrives_before_deadline {
+            assert_eq!(
+                driver.step(&id, owner.fence(), deadline).await.unwrap().phase,
+                DeliveryPhase::PublicationPending
+            );
+            driver.step(&id, owner.fence(), deadline + 1).await.unwrap();
+            assert_eq!(sink.publications.lock().unwrap().len(), 2);
+        }
+        sink.hide_publication.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(driver.step(&id, owner.fence(), deadline + 3000).await.unwrap().phase, DeliveryPhase::Published);
+        assert_eq!(driver.step(&id, owner.fence(), deadline + 4000).await.unwrap().phase, DeliveryPhase::Retired);
+        assert_eq!(file.physical_rows(&id).await.unwrap(), 1);
+    }
 }

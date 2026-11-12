@@ -49,8 +49,7 @@ def fixture(directory):
                                                       "prefix": "one"}, "credential": "fixture"},
         "target": {"kind": "adx", "query": {"endpoint": "https://never-contact.westeurope.kusto.windows.net",
                                             "database": "fixture"},
-                   "ready": {"account": "nevercontact", "container": "ready", "prefix": "one"},
-                   "credential": "fixture", "ready_credential": "fixture"},
+                   "credential": "fixture", "delivery": {"credential": "fixture"}},
         "limits": {"max_bytes": 1073741824, "max_captures": 256},
     }
     (directory / "collector.json").write_text(json.dumps(config))

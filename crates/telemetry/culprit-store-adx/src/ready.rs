@@ -1,10 +1,7 @@
 //! Fresh ready-prefix objects are created only from completely verified, committed native batches.
-use culprit_collector::analytical::encoding::EncodedBatch;
-use culprit_collector::delivery::{
-    object_store::transport::*,
-    recovery::CommittedRange,
-    sink::{DeliveryAttempt, Submission},
-};
+use crate::ingestion::{IngestionBatch, IngestionTransport, Payload};
+use async_trait::async_trait;
+use culprit_collector::delivery::object_store::transport::*;
 use culprit_core::{Result, telemetry::DeliveryProblem};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -18,55 +15,28 @@ impl ReadyDispatcher {
     pub fn new(ready: Arc<dyn ObjectTransport>) -> Self {
         Self { ready }
     }
-    pub async fn dispatch(
-        &self,
-        range: &CommittedRange,
-        attempt: &DeliveryAttempt,
-        encoded: Arc<EncodedBatch>,
-    ) -> Result<Submission> {
-        attempt.validate()?;
-        if encoded.bytes == 0 {
-            return Ok(Submission::Accepted);
+}
+#[async_trait]
+impl IngestionTransport for ReadyDispatcher {
+    async fn submit(&self, batch: Arc<IngestionBatch>) -> Result<()> {
+        if batch.bytes() == 0 {
+            return Ok(());
         }
-        let key = object_key(&encoded.table, range, &encoded.batch_id, attempt, &encoded.sha256)?;
         let ready = self.ready.clone();
-        // The bounded encoder's single batch lease survives cancellation of the caller through upload completion.
+        // The batch lease survives caller cancellation until the upload has settled.
         tokio::spawn(async move {
-            if matches!(ready.put_file(&key, encoded.path(), encoded.bytes).await?, ObjectWrite::ConditionNotMet) {
-                verify_existing(ready.as_ref(), &key, encoded.bytes, &encoded.sha256).await?;
+            let written = match batch.payload() {
+                Payload::Encoded(encoded) => ready.put_file(batch.key(), encoded.path(), batch.bytes()).await?,
+                Payload::Publication(bytes) => ready.put(batch.key(), bytes.to_vec(), WriteCondition::Absent).await?,
+            };
+            if matches!(written, ObjectWrite::ConditionNotMet) {
+                verify_existing(ready.as_ref(), batch.key(), batch.bytes(), batch.sha256()).await?;
             }
-            // Blob acknowledgement does not establish ingestion. Exact receipts authorize publication.
-            Ok(Submission::Accepted)
+            Ok(())
         })
         .await
         .map_err(|_| DeliveryProblem::Transport.error())?
     }
-}
-pub(super) async fn publish_bytes(
-    transport: &dyn ObjectTransport,
-    table: &str,
-    range: &CommittedRange,
-    batch: &str,
-    attempt: &DeliveryAttempt,
-    bytes: Vec<u8>,
-) -> Result<()> {
-    let sha256 = culprit_core::telemetry::digest(&bytes);
-    let count = bytes.len() as u64;
-    let key = object_key(table, range, batch, attempt, &sha256)?;
-    if matches!(transport.put(&key, bytes, WriteCondition::Absent).await?, ObjectWrite::ConditionNotMet) {
-        verify_existing(transport, &key, count, &sha256).await?;
-    }
-    Ok(())
-}
-fn object_key(
-    table: &str,
-    range: &CommittedRange,
-    batch: &str,
-    attempt: &DeliveryAttempt,
-    sha256: &str,
-) -> Result<String> {
-    attempt.validate()?;
-    Ok(format!("ready/{table}/{}/{batch}/{}-{sha256}.ndjson", range.manifest().range_id, attempt.id))
 }
 async fn verify_existing(
     transport: &dyn ObjectTransport,

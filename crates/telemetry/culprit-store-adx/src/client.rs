@@ -1,25 +1,22 @@
 //! Authenticated, read-only verification queries. Management and ingestion use separate contracts.
 use super::response::{self, Column, QueryTable};
-use crate::authentication::{Audience, TokenProvider, kusto_origin};
+use crate::{
+    authentication::{TokenProvider, kusto_origin},
+    http,
+};
 use async_trait::async_trait;
 use culprit_core::{Result, telemetry::DeliveryProblem};
-use ring::rand::SecureRandom;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc};
-use tokio::sync::{OnceCell, Semaphore};
-use zeroize::Zeroizing;
 
-mod http;
 #[cfg(test)]
 mod tests;
 
 const MAX_REQUEST_BYTES: usize = 256 * 1024;
 const MAX_QUERY_BYTES: usize = 64 * 1024;
 const MAX_PARAMETERS: usize = 32;
-const MAX_PARALLEL_QUERIES: usize = 2;
 const MAX_QUERY_MEMORY_BYTES: u64 = 256 * 1024 * 1024;
-static METADATA_REQUESTS: Semaphore = Semaphore::const_new(2);
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -94,40 +91,17 @@ pub trait QueryTransport: Send + Sync {
 
 pub struct AdxClient {
     destination: String,
-    origin: String,
     database: String,
-    audience: OnceCell<Audience>,
-    credential: Arc<dyn TokenProvider>,
-    queries: Arc<Semaphore>,
+    service: http::Service,
 }
 impl AdxClient {
-    /// Validate without network or token acquisition. A destination outage cannot prevent source/recovery startup.
+    /// Validates without network or token acquisition; destination outages cannot prevent source/recovery startup.
     pub fn new(config: AdxConfig, credential: Arc<dyn TokenProvider>) -> Result<Self> {
-        let origin = config.validated()?;
-        let destination = config.destination_id()?;
         Ok(Self {
-            destination,
-            origin,
+            destination: config.destination_id()?,
+            service: http::Service::new(&config.endpoint, credential)?,
             database: config.database,
-            audience: OnceCell::new(),
-            credential,
-            queries: Arc::new(Semaphore::new(MAX_PARALLEL_QUERIES)),
         })
-    }
-    /// Reads only same-origin public authentication metadata. No credentials accompany discovery.
-    async fn audience(&self) -> Result<&Audience> {
-        self.audience
-            .get_or_try_init(|| async {
-                let origin = self.origin.clone();
-                let permit = METADATA_REQUESTS.acquire().await.map_err(|_| DeliveryProblem::Transport.error())?;
-                tokio::task::spawn_blocking(move || {
-                    let _permit = permit;
-                    http::discover(&origin)
-                })
-                .await
-                .map_err(|_| DeliveryProblem::Transport.error())?
-            })
-            .await
     }
 }
 #[async_trait]
@@ -136,28 +110,19 @@ impl QueryTransport for AdxClient {
         &self.destination
     }
     async fn query(&self, request: QueryRequest) -> Result<QueryTable> {
-        let request_id = request_id()?;
+        let request_id = http::request_id()?;
         let body = request.encode(&self.database, &request_id)?;
-        let permit = self.queries.clone().acquire_owned().await.map_err(|_| DeliveryProblem::Transport.error())?;
-        let token = self.credential.bearer_token(self.audience().await?.resource()).await?;
-        let origin = self.origin.clone();
-        tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            http::query(&origin, &token, &request_id, body, &request.columns, request.row_limit)
-        })
-        .await
-        .map_err(|_| DeliveryProblem::Transport.error())?
+        self.service
+            .execute(move |origin, token| {
+                http::query(origin, token, &request_id, body, &request.columns, request.row_limit)
+            })
+            .await
     }
-}
-fn request_id() -> Result<String> {
-    let mut bytes = [0u8; 16];
-    ring::rand::SystemRandom::new().fill(&mut bytes).map_err(|_| DeliveryProblem::Transport.error())?;
-    Ok(format!("Culprit.Delivery;{}", bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>()))
 }
 
 #[cfg(test)]
 pub(super) fn emulator_query(port: u16, request: QueryRequest) -> Result<QueryTable> {
-    let id = request_id()?;
+    let id = http::request_id()?;
     let body = request.encode("CulpritFixture", &id)?;
     http::query(
         &format!("http://127.0.0.1:{port}"),
