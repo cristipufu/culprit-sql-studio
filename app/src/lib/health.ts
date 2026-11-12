@@ -32,8 +32,10 @@ export function tableSignalWarning(report: Report, table: TableStat, checks: str
 }
 
 export function storageStatus(report: Report, file: FileIo): SignalStatus {
-  return findingStatus(worstFinding(report, (f) => f.check === "slow-storage" && f.id.startsWith(`slow-storage:${file.database ?? ""}:`) &&
-    (f.facts?.storage_files ?? []).includes(file.name)));
+  return findingStatus(worstFinding(report, (f) => (f.facts?.storage_files ?? []).some((source) =>
+    source.name === file.name && source.kind === file.kind && source.database === file.database &&
+    source.scope === (file.scope ?? null) && source.stats_reset === (file.stats_reset ?? null) &&
+    source.write_operation === (file.write_operation ?? null))));
 }
 
 export function replicaStatus(report: Report, replica: Replica): SignalStatus {

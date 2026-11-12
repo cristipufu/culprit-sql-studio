@@ -370,6 +370,7 @@ fn large_table_finding(snapshot: &Snapshot, large: LargeTable<'_>) -> Finding {
     let average = size / rows;
     let share = large_bytes / size;
     let mut f = finding("large-rows", &name, Category::Maintenance, subject(SubjectKind::Table, &name));
+    f.facts.cause = Some(culprit_core::FindingCause::LargeRows);
     f.facts.large_rows = Some(culprit_core::FindingLargeRows { rows, size, large: large_bytes });
     let (rows_said, size_said, average_said) = (format::count(rows), format::bytes(size), format::bytes(average));
     f.title =

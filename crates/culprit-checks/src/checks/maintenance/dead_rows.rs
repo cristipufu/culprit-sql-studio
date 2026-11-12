@@ -277,6 +277,7 @@ fn backlog_finding(b: Backlog<'_>) -> Finding {
     let t = b.table;
     let table_name = t.qualified();
     let mut f = finding("dead-rows", &table_name, Category::Maintenance, subject(SubjectKind::Table, &table_name));
+    f.facts.cause = Some(culprit_core::FindingCause::DeadRows);
     f.title = t!("check.dead_rows.title", share = format::percent(b.ratio), table = &t.name);
     let mut summary = vec![t!(
         "check.dead_rows.summary.dead",

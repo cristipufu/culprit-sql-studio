@@ -511,6 +511,7 @@ fn filtered_scan_finding(snapshot: &Snapshot, s: FilteredScan<'_>) -> Finding {
         Category::Indexes,
         subject(SubjectKind::Table, &table_name),
     );
+    f.facts.workload_dependency = Some(culprit_core::WorkloadDependency::CurrentStatements);
     f.facts.index_keys = g.keys.clone();
     apply_query_impact(&mut f, &s.impact);
     f.severity = s.severity;

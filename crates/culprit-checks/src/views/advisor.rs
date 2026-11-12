@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use culprit_core::{
     AdviceQuery, CandidateSource, Capability, CleanupKind, Engine, IndexAdvice, IndexCandidate, IndexCleanup,
-    MergedRequest, QueryStat, Report, Snapshot, TableAdvice, TableAdviceKind, format, t,
+    MergedRequest, QueryStat, Report, Snapshot, SubjectKind, TableAdvice, TableAdviceKind, format, t,
 };
 
 use crate::index_health::{hide_index_sql, overlapping_pairs};
@@ -751,7 +751,10 @@ fn collect_table_advice(scope: &AdvisorScope<'_>) -> Vec<TableAdvice> {
         let table_name = t.qualified();
         // Listed where the scan-heavy check found it worth a finding (its bars, and full reads that aren't all from
         // statements that read every row on purpose), with the statements that finding lists, so the two agree.
-        if let Some(f) = report.findings.iter().find(|f| f.id == format!("scan-heavy:{table_name}"))
+        if let Some(f) = report
+            .findings
+            .iter()
+            .find(|f| f.check == "scan-heavy" && f.subject.kind == SubjectKind::Table && f.subject.name == table_name)
             && let Some((scans_total, read_total, days)) = crate::index_health::full_scans_measured(s, t)
         {
             let (scans, rows_read) = (scans_total / days, read_total / days);
@@ -787,7 +790,9 @@ fn collect_table_advice(scope: &AdvisorScope<'_>) -> Vec<TableAdvice> {
         // Listed where the heap-table check found it worth a finding (its size and rate bars), so the two agree.
         if t.is_heap == Some(true)
             && let Some(forwarded) = t.forwarded_fetches.filter(|f| *f > 0.0)
-            && report.findings.iter().any(|f| f.id == format!("heap-table:{table_name}"))
+            && report.findings.iter().any(|f| {
+                f.check == "heap-table" && f.subject.kind == SubjectKind::Table && f.subject.name == table_name
+            })
         {
             // A per-day rate only from a day's worth of counters (20 hours): less would be an extrapolation.
             let per_day = counter_days(s).filter(|d| *d * 24.0 >= 20.0).map(|d| forwarded / d);
@@ -882,7 +887,9 @@ fn collect_advisor_notes(scope: &AdvisorScope<'_>, skipped: usize) -> Vec<String
             count = partition_copies.to_string()
         ));
     }
-    if let Some(f) = report.findings.iter().find(|f| f.id == "unindexed-fk:schema") {
+    if let Some(f) =
+        report.findings.iter().find(|f| f.check == "unindexed-fk" && f.subject.kind == SubjectKind::Database)
+    {
         let threshold = crate::indexes::FK_OWN_FINDING_ROWS;
         let small = crate::indexes::unindexed_foreign_keys(s)
             .iter()

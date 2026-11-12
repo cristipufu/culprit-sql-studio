@@ -5,6 +5,22 @@ use ts_rs::TS;
 #[derive(Serialize, Deserialize, TS, Clone, Debug, Default, PartialEq)]
 #[ts(export)]
 pub struct FindingFacts {
+    /// The evidence's semantic role. Public finding IDs remain opaque identifiers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cause: Option<FindingCause>,
+    /// Whether the linked statements establish the finding or merely provide context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workload_dependency: Option<WorkloadDependency>,
+    /// The affected table when the displayed subject is a particular index instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub table: Option<String>,
+    /// The cleanup holder's native identity, independent of the database display subject.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cleanup_holder: Option<String>,
     pub histogram_columns: Vec<String>,
     pub index_keys: Vec<String>,
     pub network_wait_share: Option<f64>,
@@ -19,9 +35,9 @@ pub struct FindingFacts {
     pub bloat: Option<FindingBloat>,
     pub log_write: Option<FindingLogWrite>,
     pub large_rows: Option<FindingLargeRows>,
-    /// The files a storage finding is about, by their names in the snapshot (a log said as one: each of its files).
+    /// The files a storage finding is about, including each constituent of a merged log.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub storage_files: Vec<String>,
+    pub storage_files: Vec<crate::signals::FileReference>,
     /// Its first verify step says there is nothing to check for now, and why: refine keeps a check's own such step,
     /// and the brief adds no step of its own to it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -34,6 +50,38 @@ pub struct FindingFacts {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub uncosted_plan_explained: Option<bool>,
+}
+
+/// Evidence used to relate findings, independent of a check's public naming convention.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum FindingCause {
+    PredicateRewrite,
+    Sort,
+    Spill,
+    IndexRequest,
+    AutomaticIndex,
+    ForcedPlanScan,
+    TableStatistics,
+    DeadRows,
+    LargeRows,
+    HotUpdates,
+    PlanCache,
+    StatisticsCapture,
+    TableRewrite,
+    VolatileDefault,
+    RequiredColumn,
+    ConstraintValidation,
+    ForeignKeyIndex,
+}
+
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum WorkloadDependency {
+    CurrentStatements,
+    Independent,
 }
 
 /// An exact SQL source range: zero-based UTF-16 start and exclusive end, plus its one-based line number.

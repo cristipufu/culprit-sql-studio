@@ -69,7 +69,7 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Option<Decision
                 {
                     continue;
                 }
-                let Some(into) = position_on(findings, "dead-rows", &table) else { continue };
+                let Some(into) = position_on(findings, FindingCause::DeadRows, &table) else { continue };
                 (into, Evidence::Bloat(bloat.clone()))
             }
             Policy::ColdUpdates | Policy::LargeValues if f.check == "log-volume" => {
@@ -92,13 +92,13 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Option<Decision
                         continue;
                     };
                     let Some(rows) = q.rows.filter(|rows| cold > 0.0 && *rows >= 0.5 * cold) else { continue };
-                    let Some(into) = position_on(findings, "hot-updates", &table) else { continue };
+                    let Some(into) = position_on(findings, FindingCause::HotUpdates, &table) else { continue };
                     (into, Evidence::Cold { query: q.id.clone(), rows, log, once: ran_once(q) })
                 } else {
                     if !log.per_row.is_some_and(|bytes| bytes >= 8192.0) {
                         continue;
                     }
-                    let Some(into) = position_on(findings, "large-rows", &table).filter(|&at| {
+                    let Some(into) = position_on(findings, FindingCause::LargeRows, &table).filter(|&at| {
                         findings[at].facts.large_rows.is_some() && merge::complete_queries(s, &findings[at]).is_some()
                     }) else {
                         continue;

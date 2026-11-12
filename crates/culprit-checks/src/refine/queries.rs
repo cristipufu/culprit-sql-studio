@@ -77,7 +77,11 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Option<Decision
     let w = s.workload.as_ref()?;
     // Timeline evidence joins the engine's recommendation before that recommendation joins a sensitivity finding.
     if matches!(policy, Policy::PlanStory) {
-        for (into, rec) in findings.iter().enumerate().filter(|(_, f)| f.id.starts_with("tuning-advice:force:")) {
+        for (into, rec) in findings
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.check == "tuning-advice" && f.facts.recommended_plan.is_some())
+        {
             let Some(id) = single(rec).filter(|id| w.query(id).is_some()) else { continue };
             if let Some(from) = findings
                 .iter()

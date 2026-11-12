@@ -163,6 +163,7 @@ pub(super) fn forced_scan_finding(snapshot: &Snapshot, forced: ForcedScan<'_>) -
         Category::Queries,
         subject(SubjectKind::Query, p.query_id.clone()),
     );
+    f.facts.cause = Some(culprit_core::FindingCause::ForcedPlanScan);
     f.title =
         t!("check.tuning_advice.forced_scan.title", statement = query_handle(q), table = &scan.table, index = index);
     let (how, forced_on) = how.said(snapshot);

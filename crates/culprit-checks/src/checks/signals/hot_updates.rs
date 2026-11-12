@@ -107,6 +107,7 @@ fn hot_updates_finding(_: &Snapshot, cold: ColdUpdates<'_>) -> Finding {
     let t = cold.table;
     let name = t.qualified();
     let mut f = finding("hot-updates", &name, Category::Maintenance, subject(SubjectKind::Table, &name));
+    f.facts.cause = Some(culprit_core::FindingCause::HotUpdates);
     let ratio = format::percent(cold.ratio);
     let fillfactor = format!("{:.0}", cold.fillfactor);
     f.title = if cold.hot < 1.0 {

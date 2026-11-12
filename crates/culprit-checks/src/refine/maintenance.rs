@@ -49,18 +49,17 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Vec<Decision> {
         Policy::Compiles => {
             if let (Some(from), Some(into)) = (
                 findings.iter().position(|f| f.check == "compile-pressure"),
-                findings.iter().position(|f| f.id == "query-family:plan-cache"),
+                findings.iter().position(|f| f.facts.cause == Some(FindingCause::PlanCache)),
             ) {
                 out.push(Decision { from, into, evidence: Evidence::Compiles });
             }
         }
         Policy::Statistics => {
-            for (from, f) in findings.iter().enumerate().filter(|(_, f)| {
-                f.check == "stale-stats" && f.id.eq_ignore_ascii_case(&format!("stale-stats:{}", f.subject.name))
-            }) {
+            for (from, f) in
+                findings.iter().enumerate().filter(|(_, f)| f.facts.cause == Some(FindingCause::TableStatistics))
+            {
                 if let Some(into) = findings.iter().position(|g| {
-                    g.check == "dead-rows"
-                        && g.id.eq_ignore_ascii_case(&format!("dead-rows:{}", f.subject.name))
+                    g.facts.cause == Some(FindingCause::DeadRows)
                         && g.subject.name.eq_ignore_ascii_case(&f.subject.name)
                 }) {
                     let changes = f
@@ -85,8 +84,10 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Vec<Decision> {
                 return out;
             };
             if let (Some(from), Some(into)) = (
-                findings.iter().position(|f| f.id == format!("held-cleanup:{}", holder.session)),
-                findings.iter().position(|f| f.id == format!("replica-lag:{}", holder.session)),
+                findings.iter().position(|f| {
+                    f.check == "held-cleanup" && f.facts.cleanup_holder.as_deref() == Some(holder.session.as_str())
+                }),
+                findings.iter().position(|f| f.check == "replica-lag" && f.subject.name == holder.session),
             ) {
                 out.push(Decision {
                     from,
@@ -189,12 +190,14 @@ mod tests {
             ..Default::default()
         });
         let finding = |check: &str| {
-            support::finding(
+            let mut f = support::finding(
                 check,
                 "consumer_a",
                 Category::Maintenance,
-                support::subject(SubjectKind::Database, "shop"),
-            )
+                support::subject(SubjectKind::Database, "consumer_a"),
+            );
+            f.facts.cleanup_holder = Some("consumer_a".into());
+            f
         };
         (s, vec![finding("held-cleanup"), finding("replica-lag")])
     }
@@ -256,12 +259,13 @@ mod tests {
                 compiles(key!("check.compile_pressure.metric.per_minute")),
                 compiles(key!("check.compile_pressure.metric.recompiles")),
             ];
-            let cache = support::finding(
+            let mut cache = support::finding(
                 "query-family",
                 "plan-cache",
                 Category::Queries,
                 support::subject(SubjectKind::Database, "shop"),
             );
+            cache.facts.cause = Some(FindingCause::PlanCache);
             let mut findings = vec![pressure, cache];
             Rule(Policy::Compiles).refine(&s, &mut findings);
             let carried: Vec<_> = findings[0].metrics.iter().map(|m| m.key.as_str()).collect();
@@ -269,8 +273,10 @@ mod tests {
 
             let table = support::subject(SubjectKind::Table, "public.orders");
             let mut stats = support::finding("stale-stats", "public.orders", Category::Maintenance, table.clone());
+            stats.facts.cause = Some(FindingCause::TableStatistics);
             stats.metrics = vec![Metric::said(crate::checks::maintenance::CHANGES_SINCE_UPDATE, 1234.0, Unit::Count)];
-            let dead = support::finding("dead-rows", "public.orders", Category::Maintenance, table);
+            let mut dead = support::finding("dead-rows", "public.orders", Category::Maintenance, table);
+            dead.facts.cause = Some(FindingCause::DeadRows);
             let decided = decide(Policy::Statistics, &s, &[stats, dead]);
             assert_eq!(decided[0].evidence, Evidence::Statistics { changes: Some(1234.0) });
         });
@@ -288,8 +294,13 @@ mod tests {
         );
         let scale_factor =
             support::finding("dead-rows", "scale-factor:public.orders", Category::Maintenance, table.clone());
-        let base_stats = support::finding("stale-stats", "public.orders", Category::Maintenance, table.clone());
-        let base_dead = support::finding("dead-rows", "public.orders", Category::Maintenance, table);
+        let mut base_stats = support::finding("stale-stats", "public.orders", Category::Maintenance, table.clone());
+        let mut base_dead = support::finding("dead-rows", "public.orders", Category::Maintenance, table);
+
+        base_stats.facts.cause = Some(FindingCause::TableStatistics);
+        base_dead.facts.cause = Some(FindingCause::DeadRows);
+        base_stats.id = "opaque-statistics".into();
+        base_dead.id = "opaque-cleanup".into();
 
         // Sub-findings (correlated stats, scale-factor tuning) are never absorbed into or by each other.
         assert!(decide(Policy::Statistics, &s, &[correlated.clone(), base_dead.clone()]).is_empty());
@@ -300,7 +311,7 @@ mod tests {
         Rule(Policy::Statistics).refine(&s, &mut findings);
         assert_eq!(findings.len(), 2);
         assert!(findings.iter().any(|f| f.id == "stale-stats:correlated:public.orders(status,region)"));
-        assert!(findings.iter().any(|f| f.id == "dead-rows:public.orders"));
+        assert!(findings.iter().any(|f| f.id == "opaque-cleanup"));
     }
 
     #[test]

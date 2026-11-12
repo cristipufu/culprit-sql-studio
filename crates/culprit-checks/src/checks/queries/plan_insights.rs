@@ -161,6 +161,15 @@ fn plan_insight_finding(_: &Snapshot, case: PlanInsightCase<'_>) -> Finding {
         None => subject(SubjectKind::Query, q.id.clone()),
     };
     let mut f = finding("plan-insights", &case.key, Category::Queries, subject);
+    f.facts.workload_dependency = Some(culprit_core::WorkloadDependency::CurrentStatements);
+    f.facts.cause = match i.rule.as_str() {
+        "non-sargable" | "leading-wildcard" => Some(culprit_core::FindingCause::PredicateRewrite),
+        "big-sort" | "temp-table-sort" => Some(culprit_core::FindingCause::Sort),
+        "spill" => Some(culprit_core::FindingCause::Spill),
+        "missing-index-hint" => Some(culprit_core::FindingCause::IndexRequest),
+        "automatic-index" => Some(culprit_core::FindingCause::AutomaticIndex),
+        _ => None,
+    };
     f.severity = case.severity;
     f.confidence = if actual { Confidence::High } else { Confidence::Medium };
     f.title = i.title.clone();

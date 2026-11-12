@@ -1,6 +1,7 @@
 import { test } from "bun:test";
 import type { Finding } from "../gen/Finding";
 import type { FileIo } from "../gen/FileIo";
+import type { FileReference } from "../gen/FileReference";
 import type { FindingFacts } from "../gen/FindingFacts";
 import type { Replica } from "../gen/Replica";
 import type { Report } from "../gen/Report";
@@ -21,6 +22,11 @@ const finding = (extra: Partial<Finding>): Finding => {
 };
 const report = (findings: Finding[]) => partial<Report>({ findings });
 
+function reference(file: FileIo): FileReference {
+  return { name: file.name, kind: file.kind, database: file.database, scope: file.scope ?? null,
+    stats_reset: file.stats_reset ?? null, write_operation: file.write_operation ?? null };
+}
+
 test("Health warnings follow measured evidence", () => {
   // A tiny query can spend nearly all its time planning or in JIT without costing a meaningful amount of time.
   const tiny = { id: "tiny", executions: 1000, total_time_ms: 1, costs: { jit_ms: 0.9, plan_ms: 10 } } as QueryStat;
@@ -29,16 +35,19 @@ test("Health warnings follow measured evidence", () => {
   check(querySignalStatus(report([finding({ check: "jit-overhead", severity: "medium", queries: [{ id: "tiny", plan_node: null, note: null }] })]), tiny, ["jit-overhead"]) === "watch", "A supported warning must remain visible");
 
   // Bulk reads are a Low context finding; a file with the same name in another database is separate evidence.
-  const file = { name: "data", database: "shop", kind: "data", reads: 10000, read_ms: 1_000_000 } as FileIo;
-  const storage = finding({ id: "slow-storage:shop:data", check: "slow-storage", facts: partial<FindingFacts>({ storage_files: ["data"] }) });
+  const file = { name: "data, archive", database: "shop", kind: "data", reads: 10000, read_ms: 1_000_000 } as FileIo;
+  const storage = finding({ id: "opaque-storage", check: "slow-storage", facts: partial<FindingFacts>({ storage_files: [reference(file)] }) });
   // A log said as one (MySQL's redo log) covers each of its files, whatever the finding calls it.
   const redo = { name: "#ib_redo10", database: "shop", kind: "log", reads: 0, writes: 10000, write_ms: 300_000 } as FileIo;
-  const log = finding({ id: "slow-storage:shop:redo log", check: "slow-storage", severity: "medium", facts: partial<FindingFacts>({ storage_files: ["#ib_redo9", "#ib_redo10"] }) });
+  const log = finding({ id: "opaque-log", check: "slow-storage", severity: "medium", facts: partial<FindingFacts>({ storage_files: [reference({ ...redo, name: "#ib_redo9" }), reference(redo)] }) });
   check(storageStatus(report([log]), redo) === "watch", "Each file of a slow log shows it");
   check(storageStatus(report([log]), file) === "info", "A slow log says nothing of a data file");
   check(storageStatus(report([storage]), file) === "info", "Bulk or historical storage context cannot become a red disk warning");
-  check(storageStatus(report([{ ...storage, id: "slow-storage:other:data", severity: "high", actionability: "needs-attention" }]), file) === "info", "Another database's matching filename cannot warn here");
+  check(storageStatus(report([{ ...storage, id: "opaque-other", severity: "high", actionability: "needs-attention", facts: partial<FindingFacts>({ storage_files: [reference({ ...file, database: "other" })] }) }]), file) === "info", "Another database's matching filename cannot warn here");
   check(storageStatus(report([{ ...storage, severity: "medium", actionability: "needs-attention" }]), file) === "watch", "Assessed slow storage still warns");
+
+  check(storageStatus(report([{ ...storage, severity: "high", actionability: "needs-attention" }]), { ...file, scope: "server" }) === "info", "Shared and database-local sources remain distinct");
+  check(storageStatus(report([{ ...storage, severity: "high", actionability: "needs-attention" }]), { ...file, name: "archive" }) === "info", "Commas are part of a filename");
 
   // An inactive slot may be between syncs or bounded by a WAL cap; inactivity and byte count alone do not grade it.
   const slot = { name: "batch_consumer", role: "slot", condition: "slot_inactive", state: null, lag_bytes: 2 * 1024 ** 3 } as const;

@@ -6,7 +6,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use culprit_core::{Engine, Finding, QueryStat, Severity, Snapshot, SubjectKind, format, key, t};
+use culprit_core::{
+    Engine, Finding, FindingCause, QueryStat, Severity, Snapshot, SubjectKind, WorkloadDependency, format, key, t,
+};
 
 use crate::pipeline::Refine;
 use crate::{signals, support};
@@ -75,8 +77,8 @@ pub(crate) fn rules() -> Vec<Arc<dyn Refine>> {
 fn measures_no_time(f: &Finding) -> bool {
     matches!(f.check.as_str(), "missing-histogram" | "stale-stats")
         || (f.check == "tuning-advice"
-            && !f.id.starts_with("tuning-advice:force:")
-            && !f.id.starts_with("tuning-advice:forced-scan:"))
+            && f.facts.recommended_plan.is_none()
+            && f.facts.cause != Some(FindingCause::ForcedPlanScan))
 }
 
 /// SQL Server writes names in plans and DMVs with the database in front (`[shop_db].[dbo].[orders].[email]`). In
@@ -218,27 +220,12 @@ fn longest_return(q: &QueryStat, workload: &culprit_core::Workload) -> Option<f6
 /// A finding is about queries when its subject is one (lock time, tuning advice, parameter sensitivity…) or its check
 /// reads plans: what it says rests on how those statements ran.
 fn about_queries(f: &Finding) -> bool {
-    // A family's statements are literal copies of one: each runs once and is gone by construction, the family runs on.
-    // Structured error events retain their own dates, including untimed failures after the last timed execution.
-    // Linking that old execution for context must not make a newly logged failure history.
-    if matches!(f.check.as_str(), "query-family" | "logged-errors") {
-        return false;
-    }
-    const QUERY_DRIVEN: [&str; 11] = [
-        // An index request or a table's scans stand on the statements that asked for them or read it.
-        "missing-index",
-        "scan-heavy",
-        "plan-warnings",
-        "plan-insights",
-        "filtered-scan",
-        "heavy-query",
-        "chatty-query",
-        "unstable-query",
-        "plan-regression",
-        "regression",
-        "temp-spill",
-    ];
-    !f.queries.is_empty() && (f.subject.kind == SubjectKind::Query || QUERY_DRIVEN.contains(&f.check.as_str()))
+    !f.queries.is_empty()
+        && match f.facts.workload_dependency {
+            Some(WorkloadDependency::CurrentStatements) => true,
+            Some(WorkloadDependency::Independent) => false,
+            None => f.subject.kind == SubjectKind::Query,
+        }
 }
 
 /// Whether fix SQL creates something in the database: an index or statistics (`CREATE …`, `ALTER TABLE … ADD`, an
@@ -275,18 +262,11 @@ pub(crate) fn missing_index_serves_scan(missing_keys: &[String], scan_keys: &[St
     missing_keys.first().is_some_and(|lead| scan_keys.iter().any(|k| k.eq_ignore_ascii_case(lead)))
 }
 
-/// The table a finding about a table names, as `schema.table` lowercased: its subject, or for hot-rows (whose subject
-/// is the index most of the waiting was on) its id.
+/// A finding's affected table, even when its displayed subject is a particular index.
 fn finding_table(f: &Finding) -> String {
-    match f.id.strip_prefix("hot-rows:") {
-        Some(table) => table.to_ascii_lowercase(),
-        None => f.subject.name.to_ascii_lowercase(),
-    }
+    f.facts.table.as_deref().unwrap_or(&f.subject.name).to_ascii_lowercase()
 }
 
-/// Takes the finding at `from` out of `findings` and lets `into` (the finding that names the cause) absorb what it
-/// adds: its queries, its rank and, unless its statements are history (they stopped running, or ran once), its
-/// severity. The finding after `from` takes its place.
 #[cfg(test)]
 fn absorb(snapshot: &Snapshot, findings: &mut Vec<Finding>, into: usize, from: usize, note: Option<String>) {
     let decision = merge::Absorption::decide(snapshot, findings, into, from);
@@ -306,10 +286,9 @@ fn share_of_listed(snapshot: &Snapshot, f: &Finding) -> Option<f64> {
     ((theirs - share).abs() <= 0.0005).then_some(share)
 }
 
-/// The position of the first base finding of `check` about `table` (`schema.table`, lowercased).
-fn position_on(findings: &[Finding], check: &str, table: &str) -> Option<usize> {
-    let base_id = format!("{check}:{table}");
-    findings.iter().position(|f| f.check == check && finding_table(f) == table && f.id.eq_ignore_ascii_case(&base_id))
+/// The position of the finding that establishes `cause` on `table` (`schema.table`, lowercased).
+fn position_on(findings: &[Finding], cause: FindingCause, table: &str) -> Option<usize> {
+    findings.iter().position(|f| f.facts.cause == Some(cause) && finding_table(f) == table)
 }
 
 fn leaf(table: &str) -> &str {
@@ -370,7 +349,9 @@ mod tests {
         assert!((a + b) / 3.0 >= a.min(b) * 0.5, "{a} {b}");
         assert_eq!(left(about("hot-rows", "shop.orders", &ids, (a + b) / 3.0)).len(), 2);
         // SQL Server's plan to force stands on the regression it measured.
-        let force = about("tuning-advice", &format!("force:{}", ids[0]), &ids[..1], a);
+        let mut force = about("tuning-advice", "opaque-force", &ids[..1], a);
+        force.facts.recommended_plan =
+            Some(culprit_core::FindingPlanRecommendation { plan: "42".into(), cpu_saved_share: None });
         assert_eq!(left(force), vec![format!("heavy-query:{}", ids[1])]);
     }
 

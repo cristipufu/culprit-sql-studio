@@ -207,6 +207,7 @@ pub(super) fn request_base(c: &Candidate) -> Finding {
         Category::Indexes,
         subject(SubjectKind::Table, &table_name),
     );
+    f.facts.workload_dependency = Some(culprit_core::WorkloadDependency::CurrentStatements);
     f.facts.index_keys = keys;
     f
 }

@@ -157,12 +157,37 @@ fn same_log(a: &FileIo, b: &FileIo) -> bool {
         && a.write_operation == b.write_operation
 }
 
-/// The names of the files in `files` that [`merge_logs`] made `merged` of: its own, or each file of its log.
-pub fn merged_from(merged: &FileIo, files: &[FileIo]) -> Vec<String> {
-    if merged.kind != FileKind::Log {
-        return vec![merged.name.clone()];
+/// Identity of a measured storage source, without its display wording or counters.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct FileReference {
+    pub name: String,
+    pub kind: FileKind,
+    pub database: Option<String>,
+    pub scope: Option<FileScope>,
+    pub stats_reset: Option<String>,
+    pub write_operation: Option<FileWriteOperation>,
+}
+
+impl FileIo {
+    pub fn reference(&self) -> FileReference {
+        FileReference {
+            name: self.name.clone(),
+            kind: self.kind,
+            database: self.database.clone(),
+            scope: self.scope,
+            stats_reset: self.stats_reset.clone(),
+            write_operation: self.write_operation,
+        }
     }
-    files.iter().filter(|f| same_log(f, merged)).map(|f| f.name.clone()).collect()
+}
+
+/// The files in `files` that [`merge_logs`] made `merged` of: itself, or each file of its log.
+pub fn merged_from(merged: &FileIo, files: &[FileIo]) -> Vec<FileReference> {
+    if merged.kind != FileKind::Log {
+        return vec![merged.reference()];
+    }
+    files.iter().filter(|f| same_log(f, merged)).map(FileIo::reference).collect()
 }
 
 /// Log files of the same database as one: MySQL 8.0.30+ spreads redo over many `#ib_redo*` files, each too quiet on
@@ -977,9 +1002,9 @@ mod merge_tests {
         assert_eq!((log.name.as_str(), log.writes, log.write_ms), ("redo log", 1_500.0, Some(9.0)));
         assert_eq!(merged.len(), 2);
         // What it was made of, by the names the snapshot gives them.
-        assert_eq!(merged_from(log, &files), ["#ib_redo10", "#ib_redo11"]);
+        assert_eq!(merged_from(log, &files), [files[0].reference(), files[1].reference()]);
         let data = merged.iter().find(|f| f.kind == FileKind::Data).unwrap();
-        assert_eq!(merged_from(data, &files), ["shop/orders.ibd"]);
+        assert_eq!(merged_from(data, &files), [data.reference()]);
     }
 
     #[test]

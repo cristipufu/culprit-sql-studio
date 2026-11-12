@@ -119,6 +119,7 @@ fn logged_error_finding(s: &Snapshot, error: LoggedError<'_>) -> Finding {
         Category::Queries,
         subject(SubjectKind::Query, &e.query_id),
     );
+    f.facts.workload_dependency = Some(culprit_core::WorkloadDependency::Independent);
     let count = format::count(e.count);
     f.title = t!("check.logged_errors.title", code = &e.code, count = count.clone());
     let dated = match e.last_at.as_deref() {

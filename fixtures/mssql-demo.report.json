@@ -513,6 +513,19 @@
       ],
       "check": "hot-rows",
       "confidence": "high",
+      "facts": {
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "table": "shop.orders",
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": null,
         "sql": null,
@@ -587,6 +600,19 @@
       ],
       "check": "plan-insights",
       "confidence": "medium",
+      "facts": {
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null,
+        "workload_dependency": "current-statements"
+      },
       "fix": {
         "cost": null,
         "sql": null,
@@ -653,6 +679,19 @@
       ],
       "check": "plan-insights",
       "confidence": "medium",
+      "facts": {
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null,
+        "workload_dependency": "current-statements"
+      },
       "fix": {
         "cost": null,
         "sql": null,
@@ -766,6 +805,19 @@
       "caveats": [],
       "check": "plan-warnings",
       "confidence": "high",
+      "facts": {
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null,
+        "workload_dependency": "current-statements"
+      },
       "fix": {
         "cost": null,
         "sql": null,
@@ -842,7 +894,8 @@
         "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
-        "usual_fast_plan": null
+        "usual_fast_plan": null,
+        "workload_dependency": "current-statements"
       },
       "fix": {
         "cost": "shop.order_items had no writes in the 1 h 7 min its counters cover, too short to say it gets none (a weekly job may not have run yet); each write it gets will also update this index.",
@@ -1132,7 +1185,8 @@
         "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
-        "usual_fast_plan": null
+        "usual_fast_plan": null,
+        "workload_dependency": "current-statements"
       },
       "fix": {
         "cost": "shop.orders had no writes in the 1 h 7 min its counters cover, too short to say it gets none (a weekly job may not have run yet); each write it gets will also update this index.",
@@ -1480,6 +1534,19 @@
       "caveats": [],
       "check": "config",
       "confidence": "medium",
+      "facts": {
+        "bloat": null,
+        "cause": "statistics-capture",
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": null,
         "sql": "ALTER DATABASE [culprit_demo] SET QUERY_STORE (QUERY_CAPTURE_MODE = AUTO);",
@@ -1760,7 +1827,7 @@
     "analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.5"
+      "version": "0.5.6"
     },
     "baselines": [],
     "collection": null,
@@ -1878,7 +1945,7 @@
     "previous_analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.4"
+      "version": "0.5.5"
     }
   },
   "refinement": [

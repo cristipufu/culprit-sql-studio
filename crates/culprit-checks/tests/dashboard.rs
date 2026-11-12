@@ -24,6 +24,43 @@ fn tile(d: &Dashboard, key: TileKey) -> &culprit_core::Tile {
     d.tile(key).expect("tile")
 }
 
+#[test]
+fn storage_status_uses_file_identity_instead_of_ids_or_display_text() {
+    use culprit_core::{FileKind, FileScope, Metric, Subject, SubjectKind};
+    let mut r = report("mssql-demo");
+    let mut file = r.snapshot.pressure.as_ref().unwrap().files[0].clone();
+    file.name = "data, archive".into();
+    file.kind = FileKind::Data;
+    file.database = Some("shop".into());
+    file.scope = Some(FileScope::Database);
+    file.reads = 10_000.0;
+    file.read_ms = Some(400_000.0);
+    let mut other_database = file.clone();
+    other_database.database = Some("another database".into());
+    let mut shared = file.clone();
+    shared.scope = Some(FileScope::Server);
+    let mut other_name = file.clone();
+    other_name.name = "archive".into();
+    r.snapshot.pressure.as_mut().unwrap().files = vec![file.clone(), other_database, shared, other_name];
+    let mut finding = r.findings[0].clone();
+    r.findings.clear();
+    finding.check = "slow-storage".into();
+    finding.id = "opaque".into();
+    finding.subject = Subject { kind: SubjectKind::Database, name: "shop".into() };
+    finding.actionability = culprit_core::Actionability::NeedsAttention;
+    finding.facts = Default::default();
+    finding.severity = Severity::High;
+    finding.metrics = vec![Metric::text("Translated file label", "unrelated display text")];
+    finding.facts.storage_files = vec![file.reference()];
+    r.findings.push(finding);
+    let d = dashboard(&r);
+    let statuses: Vec<_> = tile(&d, TileKey::Storage).items.iter().map(|item| item.status).collect();
+    assert_eq!(
+        statuses,
+        [Some(TileStatus::Bad), Some(TileStatus::Info), Some(TileStatus::Info), Some(TileStatus::Info)]
+    );
+}
+
 fn session(id: &str, state: &str) -> Session {
     Session {
         id: id.into(),

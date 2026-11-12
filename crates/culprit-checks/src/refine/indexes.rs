@@ -69,7 +69,7 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Vec<Decision> {
                         && missing_index_serves_scan(&g.facts.index_keys, &f.facts.index_keys)
                 })
                 .map(|into| Action::Move { into, missing_plan_node: true }),
-            Policy::PlanRequest if f.id.starts_with("plan-insights:missing-index-hint:") => {
+            Policy::PlanRequest if f.facts.cause == Some(FindingCause::IndexRequest) => {
                 let Some(w) = &s.workload else {
                     continue;
                 };
@@ -95,7 +95,7 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Vec<Decision> {
                     })
                     .map(|into| Action::Move { into, missing_plan_node: false })
             }
-            Policy::AutomaticForeignKey if f.id.starts_with("plan-insights:automatic-index:") => {
+            Policy::AutomaticForeignKey if f.facts.cause == Some(FindingCause::AutomaticIndex) => {
                 let Some(w) = &s.workload else {
                     continue;
                 };

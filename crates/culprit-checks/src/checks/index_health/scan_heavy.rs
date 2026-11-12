@@ -232,6 +232,7 @@ fn scan_heavy_finding(snapshot: &Snapshot, s: ScanHeavy<'_>) -> Finding {
     let table_name = t.qualified();
     let (scans, rows_read) = (s.full_reads / s.days, s.rows_read / s.days);
     let mut f = finding("scan-heavy", &table_name, Category::Indexes, subject(SubjectKind::Table, &table_name));
+    f.facts.workload_dependency = Some(culprit_core::WorkloadDependency::CurrentStatements);
     let how_often = how_many(snapshot, s.full_reads, s.days, culprit_core::key!("common.noun.time"));
     let tense = if s.stopped { "past" } else { "present" };
     f.title = if s.measured {

@@ -42,20 +42,6 @@ use waits::*;
 /// Below this many hours, per-day figures would be forecasts from a sliver of data (the UI's `PER_DAY_MIN_HOURS`).
 const PER_DAY_MIN_HOURS: f64 = 20.0;
 
-/// Findings about the query statistics themselves: a store that is off, full, forgetting or capturing too little.
-const STATISTICS_FINDINGS: [&str; 10] = [
-    "config:query-store",
-    "config:query-store-size",
-    "config:query-store-capture",
-    "config:query-store-waits",
-    "config:pg_stat_statements.track",
-    "config:pg_stat_statements.max",
-    "config:performance_schema",
-    "config:statements_digest",
-    "config:performance_schema_digests_size",
-    "config:max_digest_length",
-];
-
 /// Most urgent first when two tiles share a status.
 const PRIORITY: [TileKey; 14] = [
     TileKey::Now,

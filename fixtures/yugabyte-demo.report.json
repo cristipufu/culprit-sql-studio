@@ -379,7 +379,8 @@
         "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
-        "usual_fast_plan": null
+        "usual_fast_plan": null,
+        "workload_dependency": "current-statements"
       },
       "fix": {
         "cost": null,
@@ -506,7 +507,7 @@
     "analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.5"
+      "version": "0.5.6"
     },
     "baselines": [],
     "collection": null,
@@ -624,7 +625,7 @@
     "previous_analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.4"
+      "version": "0.5.5"
     }
   },
   "refinement": [

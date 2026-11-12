@@ -144,22 +144,12 @@ pub(super) fn storage(report: &Report) -> Tile {
                     Waited::Write => t!("view.dashboard.storage.per_write", latency = average),
                     Waited::Flush => t!("view.dashboard.storage.per_flush", latency = average),
                 });
-                let prefix = format!("slow-storage:{}:", f.database.as_deref().unwrap_or(""));
+                let file = f.reference();
                 item.status = Some(
                     report
                         .findings
                         .iter()
-                        .filter(|g| g.is_actionable() && g.id.starts_with(&prefix))
-                        // The finding names its files in its one text metric (its label is words, in the reader's
-                        // language): the names, comma-separated.
-                        .filter(|g| {
-                            g.metrics.iter().any(|m| {
-                                m.unit == culprit_core::Unit::Text
-                                    && m.text
-                                        .as_ref()
-                                        .is_some_and(|names| names == &f.name || names.split(", ").any(|n| n == f.name))
-                            })
-                        })
+                        .filter(|g| g.is_actionable() && g.facts.storage_files.contains(&file))
                         .map(|g| severity_status(g.severity))
                         .max()
                         .unwrap_or(TileStatus::Info),
@@ -506,15 +496,11 @@ pub(super) fn failures(report: &Report) -> Tile {
                 t!("view.dashboard.failures.of_runs", share = format::percent(*rate))
             });
             item.share = Some(*rate);
-            let id = format!("failing-query:{}", q.id);
-            item.finding_id = report.findings.iter().find(|f| f.id == id).map(|f| f.id.clone());
+            let finding =
+                report.findings.iter().find(|f| f.check == "failing-query" && f.queries.iter().any(|r| r.id == q.id));
+            item.finding_id = finding.map(|f| f.id.clone());
             item.status = Some(
-                report
-                    .findings
-                    .iter()
-                    .find(|f| f.id == id && f.is_actionable())
-                    .map(|f| severity_status(f.severity))
-                    .unwrap_or(TileStatus::Info),
+                finding.filter(|f| f.is_actionable()).map(|f| severity_status(f.severity)).unwrap_or(TileStatus::Info),
             );
             item
         })
@@ -525,8 +511,11 @@ pub(super) fn failures(report: &Report) -> Tile {
 pub(super) fn statistics(report: &Report) -> Tile {
     let s = &report.snapshot;
     let locked = report.locked.len();
-    let stats_findings: Vec<&Finding> =
-        report.findings.iter().filter(|f| STATISTICS_FINDINGS.contains(&f.id.as_str())).collect();
+    let stats_findings: Vec<&Finding> = report
+        .findings
+        .iter()
+        .filter(|f| f.facts.cause == Some(culprit_core::FindingCause::StatisticsCapture))
+        .collect();
     let mut tile = match &s.workload {
         None => {
             let missing = s.server.missing.iter().find(|m| m.capability.is_workload_source());

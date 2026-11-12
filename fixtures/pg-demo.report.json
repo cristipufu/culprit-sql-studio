@@ -399,7 +399,8 @@
         "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
-        "usual_fast_plan": null
+        "usual_fast_plan": null,
+        "workload_dependency": "current-statements"
       },
       "fix": {
         "cost": "public.orders had no writes in the 6 h 59 min its counters cover, too short to say it gets none (a weekly job may not have run yet); each write it gets will also update this index.",
@@ -579,6 +580,19 @@
       ],
       "check": "hot-updates",
       "confidence": "high",
+      "facts": {
+        "bloat": null,
+        "cause": "hot-updates",
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": null,
         "sql": "ALTER TABLE archive.wide SET (fillfactor = 85);",
@@ -723,7 +737,8 @@
         "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
-        "usual_fast_plan": null
+        "usual_fast_plan": null,
+        "workload_dependency": "current-statements"
       },
       "fix": {
         "cost": "public.order_items had no writes in the 6 h 59 min its counters cover, too short to say it gets none (a weekly job may not have run yet); each write it gets will also update this index.",
@@ -853,6 +868,19 @@
       ],
       "check": "dead-rows",
       "confidence": "high",
+      "facts": {
+        "bloat": null,
+        "cause": "dead-rows",
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "network_wait_share": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
       "fix": {
         "cost": "VACUUM doesn't block reads or writes; it does add I/O while it runs.",
         "sql": "VACUUM (ANALYZE) archive.wide;\nALTER TABLE archive.wide SET (autovacuum_vacuum_scale_factor = 0.02);",
@@ -1305,7 +1333,7 @@
     "analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.5"
+      "version": "0.5.6"
     },
     "baselines": [],
     "collection": null,
@@ -1423,7 +1451,7 @@
     "previous_analyzer": {
       "component": "culprit-checks",
       "revision": null,
-      "version": "0.5.4"
+      "version": "0.5.5"
     }
   },
   "refinement": [

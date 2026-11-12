@@ -111,6 +111,7 @@ fn stale_stats_finding(snapshot: &Snapshot, case: StaleTable<'_>) -> Finding {
     let s = &case.stale;
     let table_name = format!("{}.{}", s.schema, s.table);
     let mut f = finding("stale-stats", &table_name, Category::Maintenance, subject(SubjectKind::Table, &table_name));
+    f.facts.cause = Some(culprit_core::FindingCause::TableStatistics);
     // The modification counter counts changes (a row updated twice is two), not rows.
     let changes = format::count(s.modifications);
     f.title = if case.auto_update {

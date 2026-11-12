@@ -170,6 +170,7 @@ fn write_merges_keep_schemas_distinct_and_leave_ambiguous_names_alone() {
     log.facts.log_write = Some(FindingLogWrite { bytes: 10_000_000.0, per_row: Some(100_000.0) });
     let mut large = finding("large-rows", "tenant_one.orders", &[]);
     large.subject.name = "tenant_one.orders".into();
+    large.facts.cause = Some(FindingCause::LargeRows);
     large.facts.large_rows = Some(FindingLargeRows { rows: 100.0, size: 100_000_000.0, large: 80_000_000.0 });
     for text in ["UPDATE tenant_two.orders SET payload = @p0", "UPDATE orders SET payload = @p0"] {
         s.workload.as_mut().unwrap().queries[0].text = text.into();
@@ -303,4 +304,48 @@ fn partial_automatic_index_transfer_remeasures_the_remaining_queries() {
         indexes::Rule(indexes::Policy::AutomaticForeignKey).refine_traced(&s, &mut findings).is_empty(),
         "a partial merge cannot silently drop an unresolved reference"
     );
+}
+
+#[test]
+fn built_in_refinement_treats_finding_ids_as_opaque() {
+    for text in [
+        include_str!("../../../../fixtures/mssql-demo.json"),
+        include_str!("../../../../fixtures/postgres-demo.json"),
+        include_str!("../../../../fixtures/mysql-demo.json"),
+    ] {
+        let s: Snapshot = serde_json::from_str(text).unwrap();
+        let detected: Vec<_> = crate::all()
+            .iter()
+            .filter(|check| {
+                let info = check.info();
+                info.engines.contains(&s.server.engine)
+                    && info.requires.iter().all(|capability| s.server.has(*capability))
+            })
+            .flat_map(|check| check.run(&s))
+            .collect();
+        assert!(!detected.is_empty());
+        let mut expected = detected.clone();
+        let mut actual = detected;
+        let original: BTreeMap<_, _> = actual
+            .iter_mut()
+            .enumerate()
+            .map(|(at, f)| {
+                let old = std::mem::replace(&mut f.id, format!("opaque:spill:force:{at}"));
+                (f.id.clone(), old)
+            })
+            .collect();
+        for rule in rules() {
+            rule.refine(&s, &mut expected);
+            rule.refine(&s, &mut actual);
+        }
+        for f in &mut actual {
+            f.id = original[&f.id].clone();
+        }
+        assert_eq!(
+            serde_json::to_value(expected).unwrap(),
+            serde_json::to_value(actual).unwrap(),
+            "{:?}",
+            s.server.engine
+        );
+    }
 }

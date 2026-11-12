@@ -88,21 +88,17 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Vec<Decision> {
                 .iter()
                 .enumerate()
                 .filter(|(_, g)| {
-                    (g.id.starts_with("plan-insights:non-sargable:")
-                        || g.id.starts_with("plan-insights:leading-wildcard:"))
+                    g.facts.cause == Some(FindingCause::PredicateRewrite)
                         && table_leaf(&g.subject.name) == table_leaf(&f.subject.name)
                         && shares_query(f, g)
                 })
                 .map(|(at, _)| at)
                 .collect(),
-            Policy::SpillSort
-                if f.id.starts_with("plan-insights:big-sort:")
-                    || f.id.starts_with("plan-insights:temp-table-sort:") =>
-            {
+            Policy::SpillSort if f.facts.cause == Some(FindingCause::Sort) => {
                 let spilled: Vec<_> = findings
                     .iter()
                     .enumerate()
-                    .filter(|(_, g)| g.check == "temp-spill" || g.id.contains(":spill"))
+                    .filter(|(_, g)| g.check == "temp-spill" || g.facts.cause == Some(FindingCause::Spill))
                     .collect();
                 // A malformed finding with no query evidence cannot be covered by vacuous truth.
                 if f.queries.is_empty()
@@ -288,6 +284,7 @@ mod tests {
         let s = snapshot();
         let id = &s.queries()[0].id;
         let mut sort = finding("plan-insights", "big-sort:shop.orders", id);
+        sort.facts.cause = Some(FindingCause::Sort);
         sort.queries.clear();
         assert!(decide(Policy::SpillSort, &s, &[sort, finding("temp-spill", id, id)]).is_empty());
     }
@@ -338,22 +335,23 @@ mod tests {
         network.metrics.push(Metric::new("Waiting on the app", 0.75, Unit::Ratio));
         network.facts.network_wait_share = Some(0.75);
         let mut rewrite = finding("plan-insights", "non-sargable:shop.orders", id);
+        rewrite.facts.cause = Some(FindingCause::PredicateRewrite);
         rewrite.subject = support::subject(SubjectKind::Table, "shop.orders");
+        let mut sort = finding("plan-insights", "big-sort:shop.orders", id);
+        sort.facts.cause = Some(FindingCause::Sort);
         let pairs = [
             (Policy::Rewrite, vec![finding("filtered-scan", "shop.orders", id), rewrite]),
             (Policy::Heavy, vec![finding("heavy-query", id, id), finding("temp-spill", id, id)]),
             (Policy::Network, vec![finding("heavy-query", id, id), network]),
             (Policy::ForeignKey, index_pair(&s)),
             (Policy::Regression, vec![finding("plan-regression", id, id), finding("regression", id, id)]),
-            (
-                Policy::SpillSort,
-                vec![finding("plan-insights", "big-sort:shop.orders", id), finding("temp-spill", id, id)],
-            ),
+            (Policy::SpillSort, vec![sort, finding("temp-spill", id, id)]),
         ];
         for (policy, mut findings) in pairs {
             let expected = decide(policy, &s, &findings);
             assert!(!expected.is_empty());
             for f in &mut findings {
+                f.id = "opaque:spill:force:unrelated".into();
                 f.title = "Other title".into();
                 f.summary = "Different wording".into();
                 f.caveats = vec!["Other caveat".into()];

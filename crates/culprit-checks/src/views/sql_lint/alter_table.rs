@@ -1,7 +1,8 @@
 //! `ALTER TABLE` rewrites, foreign-key additions, constraint validation, and type-change checks.
 
 use culprit_core::{
-    Actionability, Category, Confidence, Engine, Finding, Fix, Severity, Snapshot, SubjectKind, TableStat, t,
+    Actionability, Category, Confidence, Engine, Finding, FindingCause, Fix, Severity, Snapshot, SubjectKind,
+    TableStat, t,
 };
 
 use crate::support::{base_score, finding, subject};
@@ -96,9 +97,10 @@ pub(super) fn check_alter_table(
         && !has_mysql_online_ddl(&upper)
         && !adds_fk
         && !findings[before_count..].iter().any(|f| {
-            f.id.starts_with("sql-lint:table-rewrite:")
-                || f.id.starts_with("sql-lint:volatile-default:")
-                || f.id.starts_with("sql-lint:not-null-without-default:")
+            matches!(
+                f.facts.cause,
+                Some(FindingCause::TableRewrite | FindingCause::VolatileDefault | FindingCause::RequiredColumn)
+            )
         })
     {
         let rows = table_rows(table);
@@ -315,6 +317,7 @@ fn check_add_not_null_without_default(
             Category::Maintenance,
             subject(SubjectKind::Table, &qual),
         );
+        f.facts.cause = Some(FindingCause::RequiredColumn);
         f.actionability = Actionability::NeedsAttention;
         f.confidence = Confidence::High;
         f.severity = Severity::High;
@@ -487,6 +490,7 @@ fn check_add_volatile_default(
             Category::Maintenance,
             subject(SubjectKind::Table, &qual),
         );
+        f.facts.cause = Some(FindingCause::VolatileDefault);
         f.actionability = Actionability::NeedsAttention;
         f.confidence = Confidence::High;
         f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
@@ -572,13 +576,18 @@ fn check_column_type_or_set_not_null(
             None => true,
         }
     });
-    if is_rewrite && !findings[scope.before_count..].iter().any(|f| f.id == format!("sql-lint:table-rewrite:{qual}")) {
+    if is_rewrite
+        && !findings[scope.before_count..]
+            .iter()
+            .any(|f| f.facts.cause == Some(FindingCause::TableRewrite) && f.subject.name == qual)
+    {
         let mut f = finding(
             "sql-lint",
             &format!("table-rewrite:{qual}"),
             Category::Maintenance,
             subject(SubjectKind::Table, &qual),
         );
+        f.facts.cause = Some(FindingCause::TableRewrite);
         f.actionability = Actionability::NeedsAttention;
         f.confidence = Confidence::High;
         f.severity = if rows >= HIGH_TABLE_ROWS || bytes >= GB { Severity::High } else { Severity::Medium };
@@ -600,7 +609,9 @@ fn check_column_type_or_set_not_null(
     } else if has_set_not_null
         && scope.snapshot.server.engine == Engine::Postgres
         && !table_validated
-        && !findings[scope.before_count..].iter().any(|f| f.id == format!("sql-lint:set-not-null:{qual}"))
+        && !findings[scope.before_count..]
+            .iter()
+            .any(|f| f.facts.cause == Some(FindingCause::ConstraintValidation) && f.subject.name == qual)
     {
         let mut f = finding(
             "sql-lint",
@@ -608,6 +619,7 @@ fn check_column_type_or_set_not_null(
             Category::Maintenance,
             subject(SubjectKind::Table, &qual),
         );
+        f.facts.cause = Some(FindingCause::ConstraintValidation);
         f.actionability = Actionability::NeedsAttention;
         f.confidence = Confidence::High;
         f.severity = Severity::Medium;
@@ -671,9 +683,15 @@ fn check_foreign_key_addition(
     let fk_finding_id = format!("unindexed-fk:{child_qual}.{cols_label}");
     if !covered_in_snapshot
         && !covered_in_script
-        && !findings[before_count..].iter().any(|f| f.id == format!("sql-lint:{fk_finding_id}"))
+        && !findings[before_count..].iter().any(|f| {
+            f.facts.cause == Some(FindingCause::ForeignKeyIndex)
+                && f.subject.name == child_qual
+                && f.facts.index_keys == child_cols
+        })
     {
         let mut f = finding("sql-lint", &fk_finding_id, Category::Indexes, subject(SubjectKind::Table, &child_qual));
+        f.facts.cause = Some(FindingCause::ForeignKeyIndex);
+        f.facts.index_keys = child_cols.to_vec();
         f.actionability = Actionability::NeedsAttention;
         f.confidence = Confidence::High;
         f.severity = if is_large_table(child_table) { Severity::High } else { Severity::Medium };

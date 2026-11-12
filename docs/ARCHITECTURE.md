@@ -629,6 +629,11 @@ cross-finding facts they establish to `Finding::facts`: column lists, a recorded
 write measurements. Human titles, metric labels and sentences do not identify those facts. Wording-only rules have
 mutable access to display fields, never rank, actionability, query references or executable SQL.
 
+Finding IDs are opaque references for links and traces. `FindingFacts::cause` identifies evidence used by a
+refinement policy, and `workload_dependency` distinguishes current-statement evidence from contextual query links.
+Table and cleanup-holder references survive changes to the displayed subject. Storage findings retain structured
+file references, including database, scope and reset identity; display metrics never identify their files.
+
 `Report::refinement` records the rule, affected finding and evidence references, with typed outcomes for history,
 withheld fixes, absorption and coverage. Transferring only some queries records a partial transfer and recalculates
 the source finding from its remaining evidence. Every removed detector finding must lead to a retained cause;

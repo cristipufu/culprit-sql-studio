@@ -14,7 +14,7 @@ mod lex;
 #[cfg(test)]
 mod tests;
 
-use culprit_core::{Engine, Finding, Metric, Snapshot, StatementEvidence, TableStat, Unit, format, t};
+use culprit_core::{Engine, Finding, FindingCause, Metric, Snapshot, StatementEvidence, TableStat, Unit, format, t};
 
 use alter_table::{check_alter_table, collect_validated_constraint_tables};
 use index_ddl::{
@@ -92,7 +92,7 @@ pub fn apply_sql_fixes(snapshot: &Snapshot, sql: &str) -> (String, usize) {
 
         let mut emitted_fk_fixes = Vec::<String>::new();
         for f in &stmt_findings {
-            if f.id.starts_with("sql-lint:unindexed-fk:")
+            if f.facts.cause == Some(FindingCause::ForeignKeyIndex)
                 && !(in_transaction && snapshot.server.engine == Engine::Postgres)
                 && let Some(fix_sql) = f.fix.as_ref().and_then(|fix| fix.sql.as_deref())
             {
@@ -109,7 +109,7 @@ pub fn apply_sql_fixes(snapshot: &Snapshot, sql: &str) -> (String, usize) {
 
         let replacements: Vec<&str> = stmt_findings
             .iter()
-            .filter(|f| !f.id.starts_with("sql-lint:unindexed-fk:"))
+            .filter(|f| f.facts.cause != Some(FindingCause::ForeignKeyIndex))
             .filter_map(|f| f.fix.as_ref().and_then(|fix| fix.sql.as_deref()))
             .collect();
 

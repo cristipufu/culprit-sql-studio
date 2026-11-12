@@ -127,6 +127,7 @@ fn copies_finding(snapshot: &Snapshot, copies: Copies<'_>) -> Finding {
         Category::Queries,
         subject(SubjectKind::Query, family.key.clone()),
     );
+    f.facts.workload_dependency = Some(culprit_core::WorkloadDependency::Independent);
     let handle = statement_handle(without_declaration(&family.sample));
     let variants = format::count(family.variants);
     f.title = match &differ {
@@ -254,6 +255,8 @@ fn single_use_finding(snapshot: &Snapshot, plans: SingleUsePlans<'_>) -> Finding
     let SingleUsePlans { cache, share, ad_hoc_on, severity } = plans;
     let mut f =
         finding("query-family", "plan-cache", Category::Configuration, subject(SubjectKind::Setting, "plan cache"));
+    f.facts.workload_dependency = Some(culprit_core::WorkloadDependency::Independent);
+    f.facts.cause = Some(culprit_core::FindingCause::PlanCache);
     let bytes = format::bytes(cache.single_use_bytes);
     f.title = t!("check.query_family.plan_cache.title", share = format::percent(share), size = &bytes);
     let mut summary = vec![t!("check.query_family.plan_cache.summary", plans = format::count(cache.single_use_plans))];

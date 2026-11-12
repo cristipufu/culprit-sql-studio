@@ -125,6 +125,7 @@ fn held_cleanup_finding(snapshot: &Snapshot, h: HeldCleanup<'_>) -> Finding {
         Category::Maintenance,
         subject(SubjectKind::Database, snapshot.server.database.clone()),
     );
+    f.facts.cleanup_holder = Some(t.session.clone());
     let (session, open, behind) = (&t.session, format::duration(t.seconds * 1000.0), format::count(h.behind));
     f.title = match &h.holding {
         Holding::Mssql { version_store: Some(b), .. } => {

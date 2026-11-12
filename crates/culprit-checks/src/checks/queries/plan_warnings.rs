@@ -301,6 +301,7 @@ fn plan_warning_finding(snapshot: &Snapshot, case: PlanWarningCase<'_>) -> Findi
         Category::Queries,
         subject(SubjectKind::Query, &q.id),
     );
+    f.facts.workload_dependency = Some(culprit_core::WorkloadDependency::CurrentStatements);
     apply_impact(snapshot, &mut f, &case.impact);
     f.queries = case
         .steps

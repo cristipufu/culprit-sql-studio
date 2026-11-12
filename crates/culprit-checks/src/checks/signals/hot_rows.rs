@@ -157,6 +157,7 @@ fn hot_rows_finding(_: &Snapshot, hot: ContendedTable<'_>) -> Finding {
         Category::Indexes,
         subject(SubjectKind::Index, format!("{}.{}", index_label(top), top.name)),
     );
+    f.facts.table = Some(name.clone());
     f.verification_basis = culprit_core::VerificationBasis::CounterChange;
     let shown_ms = measured.map_or(wait_ms, |(_, _, _, ms)| ms);
     f.title = match measured {

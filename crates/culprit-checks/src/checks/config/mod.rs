@@ -60,12 +60,32 @@ fn config_cases(snapshot: &Snapshot) -> Vec<ConfigCase<'_>> {
 }
 
 fn config_finding(snapshot: &Snapshot, case: ConfigCase<'_>) -> Finding {
-    match case {
+    let statistics_capture = matches!(
+        &case,
+        ConfigCase::Mssql(
+            mssql::Case::QueryStoreOff
+                | mssql::Case::QueryStoreReadOnly { .. }
+                | mssql::Case::QueryStoreSize { .. }
+                | mssql::Case::QueryStoreCapture { .. }
+                | mssql::Case::QueryStoreWaits
+        ) | ConfigCase::Postgres(postgres::Case::StatementsNotTracked | postgres::Case::StatementsEvicted { .. })
+            | ConfigCase::Mysql(
+                mysql::Case::PerformanceSchemaOff { .. }
+                    | mysql::Case::StatementsDigest
+                    | mysql::Case::DigestsLost { .. }
+                    | mysql::Case::DigestLength { .. }
+            )
+    );
+    let mut finding = match case {
         ConfigCase::Mssql(case) => mssql::render(snapshot, case),
         ConfigCase::Postgres(case) => postgres::render(snapshot, case),
         ConfigCase::Mysql(case) => mysql::render(snapshot, case),
         ConfigCase::Sqlite(case) => sqlite::render(snapshot, case),
+    };
+    if statistics_capture {
+        finding.facts.cause = Some(culprit_core::FindingCause::StatisticsCapture);
     }
+    finding
 }
 
 pub(crate) fn value<'a>(snapshot: &'a Snapshot, names: &[&str]) -> Option<&'a str> {
