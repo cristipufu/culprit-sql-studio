@@ -1,13 +1,10 @@
 //! Runtime composition owns credentials and adapters; capture, recovery and delivery retain their own lifecycles.
 pub mod config;
-#[cfg(test)]
+mod destination;
+mod recovery;
+#[cfg(all(test, feature = "store-adx"))]
 mod tests;
-use crate::{
-    Workspace,
-    adx::{catalog::SchemaCatalog, client::AdxClient, sink::AdxTelemetrySink},
-    azure_blob::AzureBlobTransport,
-    azure_identity::AzureCredential,
-};
+use crate::Workspace;
 use config::*;
 use culprit_collector::{
     capture::CollectionCancellation,
@@ -40,62 +37,69 @@ pub enum SourceMode {
 struct Adapters {
     workspace: Workspace,
     recovery: Arc<BlobRecoveryStore>,
-    ready: Arc<AzureBlobTransport>,
-    query: Arc<AdxClient>,
+    destination: Box<dyn destination::SinkFactory>,
     contract: Contract,
 }
 struct ConfiguredAdapters {
     workspace: Workspace,
-    recovery: Arc<AzureBlobTransport>,
-    ready: Arc<AzureBlobTransport>,
-    query: Arc<AdxClient>,
+    recovery: Arc<dyn culprit_collector::delivery::blob_store::transport::BlobTransport>,
+    destination: Box<dyn destination::SinkFactory>,
     contract: Contract,
 }
 impl ConfiguredAdapters {
     fn new(config: &CollectorConfig, mode: SourceMode) -> Result<Self> {
+        let credentials = Arc::new(crate::credentials::ConfiguredCredentials::new(&config.credentials)?);
+        Self::with_credentials(config, mode, credentials)
+    }
+    fn with_credentials(
+        config: &CollectorConfig,
+        mode: SourceMode,
+        credentials: Arc<dyn culprit_auth::CredentialResolver>,
+    ) -> Result<Self> {
         config.validate()?;
-        let credential = Arc::new(AzureCredential::new(config.identity.clone())?);
-        let workspace = Workspace::open_in(&config.workspace).with_azure_credential(credential.clone());
+        let mut workspace = Workspace::open_in(&config.workspace);
+        if mode == SourceMode::Collect
+            && let Some(profile) = &config.source_credential
+        {
+            workspace = workspace.with_database_tokens(credentials.database(profile)?);
+        }
         if mode == SourceMode::Collect {
             for target in config.inventory.targets.iter().filter(|target| target.shard == config.shard) {
                 workspace.validate_target(&target.connection)?;
             }
         }
-        let RecoveryConfig::AzureBlob { storage } = &config.recovery;
-        let TargetConfig::Adx { query, ready } = &config.target;
-        let query = Arc::new(AdxClient::new(query.clone(), credential.clone())?);
+        let transport = config.recovery.transport(credentials.as_ref())?;
+        let destination = destination::configure(&config.target, credentials, transport.clone())?;
         let contract = Contract::new(
             config.pipeline.clone(),
             config.shard.clone(),
-            crate::adx::client::QueryTransport::destination(&*query).into(),
-            SchemaCatalog::new()?.digest().into(),
+            destination.destination().into(),
+            destination.schema_digest().into(),
         )?;
-        let transport = Arc::new(AzureBlobTransport::new(storage.clone(), credential.clone())?);
-        let ready = Arc::new(AzureBlobTransport::new(ready.clone(), credential)?);
-        Ok(Self { workspace, recovery: transport, ready, query, contract })
+        Ok(Self { workspace, recovery: transport, destination, contract })
     }
 }
 impl Adapters {
     async fn open(config: &CollectorConfig, initialize: bool, mode: SourceMode) -> Result<Self> {
-        let ConfiguredAdapters { workspace, recovery: transport, ready, query, contract } =
+        let ConfiguredAdapters { workspace, recovery: transport, destination, contract } =
             ConfiguredAdapters::new(config, mode)?;
         let recovery = Arc::new(if initialize {
             BlobRecoveryStore::create(transport, contract.clone()).await?
         } else {
             BlobRecoveryStore::open(transport, contract.clone()).await?
         });
-        Ok(Self { workspace, recovery, ready, query, contract })
+        Ok(Self { workspace, recovery, destination, contract })
     }
 }
 
 /// Validate source metadata, identity configuration, destinations and schema without acquiring tokens or
-/// contacting SQL, Blob, ADX or Azure management. No local runtime state is created.
+/// contacting source databases, warehouses, Blob or Azure management. No local runtime state is created.
 pub fn validate(config: &CollectorConfig) -> Result<()> {
     ConfiguredAdapters::new(config, SourceMode::Collect).map(|_| ())
 }
 
 /// Explicit namespace provisioning. Normal startup refuses a missing remote history.
-/// This does not provision ADX, Event Grid, containers, identities, permissions or networks.
+/// This does not provision warehouse tables, Event Grid, containers, identities, permissions or networks.
 pub async fn initialize(config: &CollectorConfig) -> Result<()> {
     Adapters::open(config, true, SourceMode::Collect).await.map(|_| ())
 }
@@ -175,11 +179,9 @@ async fn run_configured(
         archive: archive.health_reader(),
         analytical: journal.health_reader(),
     };
-    let sink = AdxTelemetrySink::new(
+    let sink = adapters.destination.open(
         adapters.contract.clone(),
         adapters.recovery.clone(),
-        adapters.ready,
-        adapters.query,
         &config.state.join("scratch"),
     )?;
     let mut delivery = DeliveryWorker::new(

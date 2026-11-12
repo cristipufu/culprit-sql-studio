@@ -99,6 +99,6 @@ Filegroup capacity is aggregated across files. Shared tempdb is context, not att
 
 The saved examples cover SQL Server 2022 and Azure SQL Database. The reproducible [SQL Server fixture](../../dev/mssql/README.md) plants workload, index, blocking and deadlock problems; saved snapshots exercise offline replay, plan analysis, views and agent output.
 
-The implementation declares its sources in [`culprit-mssql/src/sources.rs`](../../crates/culprit-mssql/src/sources.rs). Version-, edition- and permission-dependent measurements remain unavailable when the server does not supply them.
+The implementation declares its sources in [`culprit-mssql/src/sources.rs`](../../crates/providers/culprit-mssql/src/sources.rs). Version-, edition- and permission-dependent measurements remain unavailable when the server does not supply them.
 
 Source references: [SQL Server file-space DMV](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-db-file-space-usage-transact-sql).

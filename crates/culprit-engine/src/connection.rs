@@ -1,6 +1,8 @@
 //! Connection metadata, provider resolution and authentication. Dependencies are explicit; scan analysis and
 //! query execution do not belong to this service.
 
+use culprit_auth_aws as aws;
+use culprit_auth_azure::entra;
 use culprit_core::{
     AuthKind, ConnectionSpec, Engine, Environment, Error, ErrorCode, Provider, Result, ServerInfo, entra_host_allowed,
     t,
@@ -8,8 +10,7 @@ use culprit_core::{
 
 use crate::{
     ConnectionInfo, ConnectionSettings, DiscoveredDatabase, DiscoveryResult, ImportCandidate, ImportSource,
-    NewConnection, ParsedConnection, ProviderFactory, aws, connstr, discover, entra, import, query_log, registry,
-    reports,
+    NewConnection, ParsedConnection, ProviderFactory, connstr, discover, import, query_log, registry, reports,
     secrets::SecretStore,
     store::{self, Paths, Store, StoredConnection},
 };
@@ -22,10 +23,10 @@ pub(crate) struct Connections<'a> {
     pub store: &'a Store,
     pub secrets: &'a dyn SecretStore,
     pub entra: &'a entra::EntraAuth,
-    pub azure_credential: Option<&'a crate::azure_identity::AzureCredential>,
+    pub database_tokens: Option<&'a dyn culprit_auth::DatabaseTokenProvider>,
     pub providers: &'a [(Engine, ProviderFactory)],
     pub ssh: &'a crate::ssh::Manager,
-    pub source_gate: &'a culprit_collector::admission::SourceGate,
+    pub source_gate: &'a culprit_read::admission::SourceGate,
 }
 
 impl Connections<'_> {
@@ -496,7 +497,7 @@ impl Connections<'_> {
         if keys.is_empty() {
             return Ok(());
         }
-        let path = aws::rds_ca_file(&self.paths.data)?.to_string_lossy().into_owned();
+        let path = crate::credentials::rds_ca_file(&self.paths.data)?.to_string_lossy().into_owned();
         for key in keys {
             spec.options.insert(key, path.clone());
         }
@@ -567,48 +568,34 @@ impl Connections<'_> {
 
     /// Fetch a fresh token for token-based auth (Entra ID, AWS IAM); a no-op for other kinds.
     async fn resolve_token(&self, spec: &mut ConnectionSpec) -> Result<()> {
-        let engine = || spec.engine.ok_or_else(|| Error::invalid(t!("engine.connection.unknown_engine")));
-        match spec.auth {
-            AuthKind::Entra => {
-                let engine = engine()?;
-                let token = match self.azure_credential {
-                    Some(credential) => credential.database_token(engine, &spec.host).await?,
-                    None => self.entra.token(engine, spec, self.secrets).await?,
-                };
-                // PostgreSQL and MySQL sign in as the person the token names.
-                if engine != Engine::Mssql && spec.user.as_deref().is_none_or(str::is_empty) {
-                    spec.user = entra::token_user(&token);
-                }
-                spec.token = Some(token);
-            }
-            AuthKind::AwsIam => {
-                let engine = engine()?;
-                let user = spec
-                    .user
-                    .clone()
-                    .filter(|u| !u.is_empty())
-                    .ok_or_else(|| Error::invalid(t!("engine.connection.iam_needs_user")))?;
-                let port = spec.port.unwrap_or(match engine {
-                    Engine::Postgres => 5432,
-                    Engine::Yugabyte => {
-                        return Err(Error::invalid(t!("engine.connection.iam_not_yugabyte")));
-                    }
-                    Engine::Mysql => 3306,
-                    Engine::Mssql => 1433,
-                    Engine::Sqlite => 0,
-                });
-                let region = spec
-                    .option("region")
-                    .map(str::to_string)
-                    .or_else(|| aws::region_from_host(&spec.host))
-                    .ok_or_else(|| {
-                        Error::invalid(t!("engine.connection.unknown_region"))
-                            .with_hint(t!("engine.connection.unknown_region_hint"))
-                    })?;
-                spec.token = Some(aws::iam_token(engine, &spec.host, port, &user, &region).await?);
-            }
-            AuthKind::Password | AuthKind::None => {}
+        use culprit_auth::{DatabaseTokenProvider, DatabaseTokenRequest};
+        if !matches!(spec.auth, AuthKind::Entra | AuthKind::AwsIam) {
+            return Ok(());
         }
+        let engine = spec.engine.ok_or_else(|| Error::invalid(t!("engine.connection.unknown_engine")))?;
+        let request = DatabaseTokenRequest {
+            engine,
+            host: &spec.host,
+            port: spec.port,
+            username: spec.user.as_deref(),
+            region: spec.option("region"),
+        };
+        let credential = if let Some(provider) = self.database_tokens {
+            if provider.auth_kind() != spec.auth {
+                return Err(Error::invalid(t!("engine.credentials.invalid_profile")));
+            }
+            provider.database_token(request).await?
+        } else {
+            match spec.auth {
+                AuthKind::Entra => self.entra.credential(engine, spec, self.secrets).await?,
+                AuthKind::AwsIam => crate::credentials::aws().database_token(request).await?,
+                AuthKind::Password | AuthKind::None => return Ok(()),
+            }
+        };
+        if spec.user.as_deref().is_none_or(str::is_empty) {
+            spec.user = credential.username;
+        }
+        spec.token = Some(credential.token.to_string());
         Ok(())
     }
 

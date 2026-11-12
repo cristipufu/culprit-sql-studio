@@ -1,30 +1,29 @@
+#[cfg(feature = "collector")]
 pub mod activity_monitor;
-pub mod adx;
 pub mod agent;
 mod analysis;
-pub mod aws;
-pub mod azure_blob;
-pub mod azure_identity;
+
 pub mod catalog;
 pub mod changes;
 pub mod cloud;
 mod cloud_process;
+#[cfg(feature = "collector")]
 mod collection;
+#[cfg(any(feature = "store-adx", feature = "store-clickhouse"))]
 pub mod collector_service;
 mod connection;
 pub mod connstr;
+pub mod credentials;
 pub mod deadlocks;
 pub mod discover;
-pub mod entra;
 mod event_context;
 mod execution;
 pub mod export;
 pub mod files;
+#[cfg(feature = "collector")]
 mod fleet;
 pub mod history;
 mod http;
-#[cfg(test)]
-mod http_fixture;
 pub mod import;
 pub mod marks;
 mod operation;
@@ -80,13 +79,13 @@ pub struct Workspace {
     store: Store,
     saved: saved::SavedQueries,
     secrets: Arc<dyn SecretStore>,
-    entra: entra::EntraAuth,
-    azure_credential: Option<Arc<azure_identity::AzureCredential>>,
+    entra: culprit_auth_azure::entra::EntraAuth,
+    database_tokens: Option<Arc<dyn culprit_auth::DatabaseTokenProvider>>,
     extra_checks: Vec<Arc<dyn Check>>,
     providers: Vec<(Engine, ProviderFactory)>,
     ssh: ssh::Manager,
     previews: tokio::sync::Semaphore,
-    source_gate: culprit_collector::admission::SourceGate,
+    source_gate: culprit_read::admission::SourceGate,
 }
 
 impl Workspace {
@@ -121,13 +120,13 @@ impl Workspace {
             store,
             saved,
             secrets,
-            entra: entra::EntraAuth::default(),
-            azure_credential: None,
+            entra: credentials::entra(),
+            database_tokens: None,
             extra_checks: Vec::new(),
             providers: Vec::new(),
             ssh: ssh::Manager::default(),
             previews: tokio::sync::Semaphore::new(1),
-            source_gate: culprit_collector::admission::SourceGate::default(),
+            source_gate: culprit_read::admission::SourceGate::default(),
         }
     }
 
@@ -137,7 +136,7 @@ impl Workspace {
             store: &self.store,
             secrets: self.secrets.as_ref(),
             entra: &self.entra,
-            azure_credential: self.azure_credential.as_deref(),
+            database_tokens: self.database_tokens.as_deref(),
             providers: &self.providers,
             ssh: &self.ssh,
             source_gate: &self.source_gate,
@@ -162,7 +161,7 @@ impl Workspace {
 
     /// Show Microsoft Entra ID device codes (the CLI prints them, the app opens a dialog). Without a handler, connections
     /// that need a sign-in fail with a hint instead of waiting for a person.
-    pub fn with_sign_in_handler(self, handler: entra::SignInHandler) -> Workspace {
+    pub fn with_sign_in_handler(self, handler: culprit_auth::SignInHandler) -> Workspace {
         self.entra.set_handler(Some(handler));
         self
     }
@@ -183,9 +182,9 @@ impl Workspace {
         self.secrets = secrets;
         self
     }
-    /// Unattended Entra connections use this explicit identity and never try Azure CLI or device-code sign-in.
-    pub fn with_azure_credential(mut self, credential: Arc<azure_identity::AzureCredential>) -> Workspace {
-        self.azure_credential = Some(credential);
+    /// Unattended database token authentication uses this explicit provider without interactive fallback.
+    pub fn with_database_tokens(mut self, credential: Arc<dyn culprit_auth::DatabaseTokenProvider>) -> Workspace {
+        self.database_tokens = Some(credential);
         self
     }
 

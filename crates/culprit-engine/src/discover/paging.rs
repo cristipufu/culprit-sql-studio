@@ -46,7 +46,7 @@ struct Live;
 impl Transport for Live {
     async fn aws(&self, args: &[String]) -> Result<Value> {
         let args: Vec<_> = args.iter().map(String::as_str).collect();
-        serde_json::from_slice(&aws::run(&args).await?)
+        serde_json::from_slice(&crate::credentials::aws().run(&args).await?)
             .map_err(|_| Error::new(ErrorCode::QueryFailed, t!("engine.discover.aws_bad_json")))
     }
 

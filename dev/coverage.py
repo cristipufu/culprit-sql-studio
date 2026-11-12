@@ -67,7 +67,9 @@ def rust():
     by = collections.defaultdict(lambda: [0, 0, 0, 0])
     for file in exported["data"][0]["files"]:
         name = os.path.relpath(file["filename"], ROOT)
-        area = "/".join(name.split("/")[:2]) if name.startswith("crates/") else name.split("/")[0]
+        parts = name.split("/")
+        crate = next((i for i, part in enumerate(parts) if part.startswith("culprit-")), None)
+        area = "/".join(parts[:crate + 1]) if name.startswith("crates/") and crate is not None else parts[0]
         s = file["summary"]
         by[area][0] += s["lines"]["covered"]
         by[area][1] += s["lines"]["count"]

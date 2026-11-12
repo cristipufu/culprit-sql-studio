@@ -120,7 +120,8 @@ def run_tests(commands, crate, selection, environment, *, library=True, skip=Non
     target = ["--lib"] if library else ["--test", "all"]
     print(f"  Testing {crate} {selection}", flush=True)
     filters = ["--skip", skip] if skip else []
-    _, output = commands.run(["cargo", "test", "--locked", "-p", crate, *target, selection,
+    features = ["--features", "collector"] if crate == "culprit-engine" else []
+    _, output = commands.run(["cargo", "test", "--locked", "-p", crate, *features, *target, selection,
                              "--", "--ignored", "--test-threads=1", *filters],
                             env=environment, timeout=TEST_BUDGET, echo=True)
     counts = re.findall(r"test result: ok\. (\d+) passed", output)

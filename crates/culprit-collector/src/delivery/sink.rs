@@ -12,6 +12,12 @@ pub struct DeliveryAttempt {
     pub ordinal: u32,
 }
 impl DeliveryAttempt {
+    pub fn validate(&self) -> Result<()> {
+        if self.ordinal == 0 || self.id.len() != 32 || !self.id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(DeliveryProblem::Integrity.error());
+        }
+        Ok(())
+    }
     pub fn new(ordinal: u32) -> Result<Self> {
         if ordinal == 0 {
             return Err(DeliveryProblem::NotReady.error());

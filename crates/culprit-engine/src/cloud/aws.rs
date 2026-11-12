@@ -6,7 +6,6 @@ use culprit_core::{Error, ErrorCode, Result, format, key, t};
 use serde_json::Value;
 
 use super::{CloudAssessment, Resource, finish, iso, normalize_time, period_for};
-use crate::aws;
 
 pub(super) async fn resolve_rds(region: &str, id: &str, cluster: bool, reader: bool) -> Result<Resource> {
     let instance = if cluster { cluster_member(region, id, reader).await? } else { id.to_string() };
@@ -86,7 +85,7 @@ async fn cluster_member(region: &str, cluster: &str, reader: bool) -> Result<Str
 }
 
 async fn aws_json(args: &[&str]) -> Result<Value> {
-    let bytes = aws::run(args).await.map_err(|e| match e.code {
+    let bytes = crate::credentials::aws().run(args).await.map_err(|e| match e.code {
         ErrorCode::PermissionDenied => e.with_hint(t!("engine.cloud.rds.permissions_hint")),
         _ => e,
     })?;

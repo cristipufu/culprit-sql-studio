@@ -24,9 +24,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use culprit_auth::SignInEvent;
 use culprit_core::{Error, Report, Severity, t};
 use culprit_engine::Workspace;
-use culprit_engine::entra::SignInEvent;
 use output::{Format, Out};
 
 #[derive(Parser)]

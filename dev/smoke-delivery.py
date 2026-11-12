@@ -3,40 +3,18 @@
 import base64
 import hashlib
 import hmac
-import json
-import os
 import subprocess
 import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
-from pathlib import Path
+from telemetry_fixture import command, test_binary, run_test
 
-ROOT = Path(__file__).resolve().parent.parent
 IMAGE = "mcr.microsoft.com/azure-storage/azurite@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5"
 OWNER_LABEL = "dev.culprit.delivery"
 ACCOUNT = "culprittest"
 KEY = bytes([42]) * 32  # Synthetic emulator account only.
-TEST = "azure_blob::tests::azurite_conditional_checkpoint_and_streamed_payload_roundtrip"
-
-
-def command(arguments, *, timeout=120, **kwargs):
-    result = subprocess.run(arguments, cwd=ROOT, check=False, timeout=timeout, **kwargs)
-    if result.returncode and result.stdout:
-        print(result.stdout, end="" if isinstance(result.stdout, str) else None)
-    result.check_returncode()
-    return result
-
-
-def test_binary():
-    build = command(["cargo", "test", "--locked", "-p", "culprit-engine", "--lib", "azure_blob::",
-                     "--no-run", "--message-format=json"], timeout=1200, text=True, stdout=subprocess.PIPE)
-    artifacts = [json.loads(line) for line in build.stdout.splitlines() if line.startswith("{")]
-    executables = [item["executable"] for item in artifacts if item.get("reason") == "compiler-artifact"
-                   and item.get("target", {}).get("name") == "culprit_engine" and item.get("executable")]
-    if len(executables) != 1:
-        raise RuntimeError("Expected one compiled engine test binary")
-    return executables[0]
+TEST = "tests::azurite_conditional_checkpoint_and_streamed_payload_roundtrip"
 
 
 def create_container(port):
@@ -58,7 +36,7 @@ def create_container(port):
 
 
 def main():
-    binary = test_binary()  # Compile before starting the disposable service.
+    binary = test_binary("culprit-blob-azure")  # Compile before starting the disposable service.
     container = command(["docker", "run", "--detach", "--rm", "--label", OWNER_LABEL,
                          "--memory", "512m", "--cpus", "1", "--publish", "127.0.0.1::10000",
                          "--env", f"AZURITE_ACCOUNTS={ACCOUNT}:{base64.b64encode(KEY).decode()}",
@@ -80,12 +58,7 @@ def main():
                 if time.monotonic() >= deadline:
                     raise
                 time.sleep(0.2)
-        result = command([binary, "--ignored", "--exact", TEST, "--nocapture"],
-                         env={**os.environ, "CULPRIT_TEST_AZURITE_PORT": str(port)}, text=True,
-                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        print(result.stdout, end="")
-        if "1 passed; 0 failed" not in result.stdout:
-            raise RuntimeError("The intended Azurite test did not execute")
+        run_test(binary, TEST, {"CULPRIT_TEST_AZURITE_PORT": str(port)})
     except Exception:
         command(["docker", "logs", container], timeout=10)
         raise

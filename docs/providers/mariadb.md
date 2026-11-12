@@ -89,6 +89,6 @@ Digests are aggregates, not request traces. Shared redo counts do not measure th
 
 Verified environments include MariaDB 10.5.29, 10.6.28, 10.11 and 11.8. Cases cover performance schema on and off, slow-log fallback, user statistics, blocking chains, deadlocks, plans and live progress.
 
-The [MySQL/MariaDB fixture](../../dev/mysql/README.md) supplies the schema and workload. Saved MariaDB reports and integration tests exercise both the normal and fallback paths. MariaDB 10.4 and earlier have not been verified. The shared provider declares its sources in [`culprit-mysql/src/sources.rs`](../../crates/culprit-mysql/src/sources.rs).
+The [MySQL/MariaDB fixture](../../dev/mysql/README.md) supplies the schema and workload. Saved MariaDB reports and integration tests exercise both the normal and fallback paths. MariaDB 10.4 and earlier have not been verified. The shared provider declares its sources in [`culprit-mysql/src/sources.rs`](../../crates/providers/culprit-mysql/src/sources.rs).
 
 Source references: [MariaDB replication channels](https://mariadb.com/docs/server/reference/sql-statements/administrative-sql-statements/show/show-replica-status), [Galera status periods](https://mariadb.com/docs/galera-cluster/reference/galera-cluster-status-variables).

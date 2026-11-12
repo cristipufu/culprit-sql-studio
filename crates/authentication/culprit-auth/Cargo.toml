@@ -1,0 +1,17 @@
+[package]
+name = "culprit-auth"
+description = "Credential interfaces shared by database, recovery and telemetry adapters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+culprit-core.workspace = true
+async-trait.workspace = true
+zeroize.workspace = true
+serde.workspace = true
+ts-rs.workspace = true

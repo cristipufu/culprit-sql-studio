@@ -1,4 +1,4 @@
-//! SQLite's own findings, from what the file records about itself (`crates/culprit-sqlite`): whether the planner has
+//! SQLite's own findings, from what the file records about itself (`crates/providers/culprit-sqlite`): whether the planner has
 //! statistics, and how much of the file is free pages. What only the application knows isn't judged: whether several
 //! processes share the file decides if the rollback journal hurts, so the journal mode is shown as a setting, never as
 //! a finding.

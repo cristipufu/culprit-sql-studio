@@ -145,6 +145,6 @@ No checkpoint is run and the WAL is never deleted. WAL allocation does not measu
 
 The [SQLite fixture](../../dev/sqlite/README.md) provides a reproducible database and query logs; the saved SQLite snapshot records library version 3.53.2. Tests cover file-size/read budgets, cancellation, read-only operation, EQP parsing, query-log attachment and missing measurements.
 
-Source declarations are in [`culprit-sqlite/src/sources.rs`](../../crates/culprit-sqlite/src/sources.rs); framework formats and statement grouping live in [`culprit-querylog`](../../crates/culprit-querylog).
+Source declarations are in [`culprit-sqlite/src/sources.rs`](../../crates/providers/culprit-sqlite/src/sources.rs); framework formats and statement grouping live in [`culprit-querylog`](../../crates/culprit-querylog).
 
 Source references: [SQLite error semantics](https://www.sqlite.org/rescode.html).

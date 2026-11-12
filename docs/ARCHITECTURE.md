@@ -216,12 +216,20 @@ not a universal list of files. Native intervals, timestamp windows and current a
 metrics carry stable keys, scope, units, aggregation, native period and limit basis instead of engine-specific display
 fields. A sample is not a cumulative counter or an event; a future adapter needs the corresponding evidence contract.
 
-Authentication remains in `culprit-engine`. `AzureCredential` supplies explicit projected workload identity or
-VM/VMSS IMDS identity to the existing Workspace connection service. It never invokes Azure CLI, device-code sign-in
-or the keychain. A credential owner fixes the tenant/identity and keeps bounded per-audience caches with single-flight
-refresh; refresh reopens projected token files. Token requests have fixed identity endpoints, complete bounded replies,
-no redirects and no raw response/error logging. SQL host validation precedes acquisition. Pipeline jobs may continue
-using their existing authenticated Azure CLI session; that credential path is separate from direct pod authentication.
+Authentication has independent interfaces in `crates/authentication/culprit-auth`. Azure workload/managed identity
+and Microsoft Entra device-code/CLI authentication live in `culprit-auth-azure`; AWS CLI and IAM database tokens live
+in `culprit-auth-aws`. Both token providers implement one typed request containing engine, host, port, username and
+optional region, and return the token with any resolved principal. Connection consumers do not parse cloud tokens or
+choose IAM signing inputs. These crates receive secret-store and command-runner interfaces. The engine owns keychain access,
+password environment references, executable discovery and cancellation of owned process trees. Native database and
+telemetry adapters receive resolved credentials or token-provider interfaces, never a concrete Azure/AWS credential.
+The unattended source path never falls back to interactive sign-in. Azure credentials retain bounded per-audience
+caches, single-flight refresh, rotating assertion reads, fixed identity endpoints and database-host validation.
+
+`collector_service` selects named credential profiles independently for source access, recovery storage, warehouse
+queries and ADX staging uploads. Explicitly reusing a profile shares its credential owner; different profiles never
+inherit another role's identity. Offline validation checks references and credential kinds without acquiring tokens or
+reading passwords. Delivery-only startup does not resolve the source profile.
 
 Activity adapters produce one bounded metadata observation and an optional detail read. The shared core selects
 qualifying requests and their blocker closure, retaining native session/request generations, transaction identity,
@@ -236,6 +244,45 @@ namespace rather than resolving old incidents as if the database had been observ
 next poll after completion, at least one minute later, and reports coverage independently of incident changes.
 Outbox admission still precedes native work. This loop does not implement fleet fairness, shared-pool budgets,
 pressure suppression or remote delivery. The source has no knowledge of polling cadence or incident persistence.
+
+The package layout distinguishes three extension roles:
+
+| Directory | Role | Examples |
+|---|---|---|
+| `crates/providers/` | Databases being analyzed | `culprit-postgres`, `culprit-mssql` |
+| `crates/telemetry/` | Analytical destinations and recovery transports | `culprit-store-adx`, `culprit-store-clickhouse`, `culprit-blob-azure` |
+| `crates/authentication/` | Credential interfaces and native authentication | `culprit-auth`, `culprit-auth-azure`, `culprit-auth-aws` |
+
+A future ClickHouse database provider can be `crates/providers/culprit-clickhouse` independently of the telemetry
+store. The engine's `collector`, `store-adx` and `store-clickhouse` features are opt-in. Desktop and standalone MCP
+build graphs contain no collector, store or Blob transport packages; the full CLI enables both stores. Shared native
+admission and durable ownership live in `culprit-read`, so scans and fleet captures use one guard without importing
+fleet runtime. `python3 dev/check-boundaries.py` verifies these resolved dependency boundaries in CI.
+
+```mermaid
+flowchart LR
+    DB[Database providers] --> READ[Shared native reads and admission]
+    DB --> CORE[Snapshots and telemetry facts]
+    ENGINE[Engine composition] --> AUTH[Credential interfaces]
+    AZURE[Azure and Entra authentication] --> AUTH
+    AWS[AWS authentication] --> AUTH
+    ENGINE --> DB
+    ENGINE --> COLLECT[Collector capture, recovery and delivery]
+    ADX[ADX store adapter] --> COLLECT
+    CH[ClickHouse store adapter] --> COLLECT
+    BLOB[Azure Blob transport] --> COLLECT
+    ENGINE --> ADX
+    ENGINE --> CH
+    ENGINE --> BLOB
+```
+
+The collector owns the logical analytical schemas, envelopes, payload recovery pointers, canonical digests, bounded
+encoding, receipt pagination and publication checks. Each store maps logical fields to its own physical types and
+owns native DDL, writes, membership audits and typed readback queries. ADX's nullable-string presence columns and
+100 ns timestamps are native policies; ClickHouse uses `Nullable(String)` and `DateTime64(9)`. Schema fingerprints
+include normalization, preparation and physical representation, so a contract cannot be adopted by a different store.
+Canonical revision and complete/current-set policies are shared; each adapter renders its query dialect and executes
+it in an owned native fixture. Push-only metrics/APM endpoints cannot claim this warehouse readback contract.
 
 Capture and outbox code have no ADX or Blob dependencies. Destinations consume immutable validated evidence and keep
 their registration, authentication and delivery state separate from database providers. Adding a destination must not

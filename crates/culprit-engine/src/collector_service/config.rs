@@ -1,8 +1,14 @@
 //! Static assignments and explicit source/recovery/target dependencies; configuration contains no credentials.
-use crate::{adx::client::AdxConfig, azure_blob::AzureBlobConfig, azure_identity::IdentityConfig};
+use crate::credentials::CredentialProfile;
+use culprit_blob_azure::AzureBlobConfig;
 use culprit_core::{Result, telemetry::*};
+#[cfg(feature = "store-adx")]
+use culprit_store_adx::client::AdxConfig;
+#[cfg(feature = "store-clickhouse")]
+use culprit_store_clickhouse::client::ClickHouseConfig;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     io::Read,
     path::{Path, PathBuf},
 };
@@ -17,7 +23,8 @@ pub struct CollectorConfig {
     pub workspace: PathBuf,
     pub state: PathBuf,
     pub inventory: FleetInventory,
-    pub identity: IdentityConfig,
+    pub credentials: BTreeMap<String, CredentialProfile>,
+    pub source_credential: Option<String>,
     pub recovery: RecoveryConfig,
     pub target: TargetConfig,
     pub limits: OutboxLimits,
@@ -26,12 +33,16 @@ pub struct CollectorConfig {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum RecoveryConfig {
-    AzureBlob { storage: AzureBlobConfig },
+    AzureBlob { storage: AzureBlobConfig, credential: String },
 }
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum TargetConfig {
-    Adx { query: AdxConfig, ready: AzureBlobConfig },
+    #[cfg(feature = "store-adx")]
+    Adx { query: AdxConfig, ready: AzureBlobConfig, credential: String, ready_credential: String },
+    #[cfg(feature = "store-clickhouse")]
+    #[serde(rename = "clickhouse")]
+    ClickHouse { query: ClickHouseConfig, credential: String },
 }
 
 impl CollectorConfig {
@@ -72,11 +83,17 @@ impl CollectorConfig {
         {
             return Err(invalid());
         }
-        let RecoveryConfig::AzureBlob { storage } = &self.recovery;
-        let TargetConfig::Adx { ready, .. } = &self.target;
-        // Container-scoped ingestion permissions must not grant access to the native, unredacted recovery data.
-        if storage.account == ready.account && storage.container == ready.container {
-            return Err(invalid());
+        match &self.target {
+            #[cfg(feature = "store-adx")]
+            TargetConfig::Adx { ready, .. } => {
+                let RecoveryConfig::AzureBlob { storage, .. } = &self.recovery;
+                // Ingestion permissions must not grant access to unredacted recovery data.
+                if storage.account == ready.account && storage.container == ready.container {
+                    return Err(invalid());
+                }
+            }
+            #[cfg(feature = "store-clickhouse")]
+            TargetConfig::ClickHouse { .. } => {}
         }
         Ok(())
     }

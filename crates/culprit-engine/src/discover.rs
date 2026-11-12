@@ -8,7 +8,7 @@ use culprit_core::{AuthKind, Engine, Environment, Error, ErrorCode, Result, t};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::aws;
+use culprit_auth_aws as aws;
 
 mod paging;
 

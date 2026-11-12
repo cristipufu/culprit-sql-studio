@@ -88,15 +88,17 @@ async fn live_registered_provider_collects_and_degrades_without_changing_data() 
     assert_eq!(limited.run(&rows_sql, 101).await.unwrap().rows, before.rows);
 }
 
-/// No ADX account is involved: native data crosses the real journal, restart, replay and ADX wire projection.
+/// Native data crosses the real journal, restart, replay and destination-independent analytical projection.
+#[cfg(feature = "collector")]
 #[tokio::test]
 #[ignore = "requires an owned loopback fixture from dev/smoke-providers.py"]
-async fn native_telemetry_survives_outbox_restart_and_adx_projection() {
+async fn native_telemetry_survives_outbox_restart_and_analytical_projection() {
     telemetry_roundtrip(connection(), true).await;
 }
 
+#[cfg(feature = "collector")]
 #[tokio::test]
-async fn sqlite_telemetry_survives_outbox_restart_and_adx_projection() {
+async fn sqlite_telemetry_survives_outbox_restart_and_analytical_projection() {
     let root = tempfile::TempDir::with_prefix("culprit-file-pipeline-").unwrap();
     let path = root.path().join("fixture.sqlite");
     let spec = ConnectionSpec {
@@ -111,13 +113,12 @@ async fn sqlite_telemetry_survives_outbox_restart_and_adx_projection() {
     telemetry_roundtrip(spec, false).await;
 }
 
+#[cfg(feature = "collector")]
 async fn telemetry_roundtrip(spec: ConnectionSpec, activity: bool) {
+    use culprit_collector::analytical::{catalog::LogicalCatalog, envelope::Envelope, projection};
     use culprit_collector::{capture::CollectionCancellation, delivery::contract::Contract, outbox::Outbox};
     use culprit_core::{AuthKind, telemetry::*};
-    use culprit_engine::{
-        NewConnection, Workspace,
-        adx::{catalog::SchemaCatalog, envelope::Envelope, projection},
-    };
+    use culprit_engine::{NewConnection, Workspace};
     use std::sync::Arc;
 
     let engine = spec.engine.unwrap();
@@ -138,9 +139,10 @@ async fn telemetry_roundtrip(spec: ConnectionSpec, activity: bool) {
         .unwrap();
     let path = root.path().join("outbox");
     let mut outbox = Outbox::create(&path, Default::default()).unwrap();
-    let catalog = SchemaCatalog::new().unwrap();
+    let catalog = LogicalCatalog::new().unwrap();
     let contract =
-        Contract::new("owned-test".into(), "shard-0".into(), "adx:fixture".into(), catalog.digest().into()).unwrap();
+        Contract::new("owned-test".into(), "shard-0".into(), "projection:fixture".into(), catalog.digest().into())
+            .unwrap();
     let mut projected = 0;
     let mut selections: Vec<_> =
         [SnapshotDataset::Operational, SnapshotDataset::Settings, SnapshotDataset::Tables, SnapshotDataset::Columns]
@@ -184,7 +186,13 @@ async fn telemetry_roundtrip(spec: ConnectionSpec, activity: bool) {
                 let values = schema.project(&input).unwrap();
                 let encoded: serde_json::Value = serde_json::from_slice(&schema.encode(&values).unwrap()).unwrap();
                 let returned: Vec<_> = schema.columns().iter().map(|column| encoded[&column.name].clone()).collect();
-                assert_eq!(schema.returned_digest(&returned).unwrap(), projection::digest(&values).unwrap());
+                let normalized = schema
+                    .columns()
+                    .iter()
+                    .zip(&returned)
+                    .map(|(column, value)| column.kind.returned(value, column.nullable).unwrap())
+                    .collect::<Vec<_>>();
+                assert_eq!(projection::digest(&normalized).unwrap(), projection::digest(&values).unwrap());
                 assert_eq!(encoded["Engine"], serde_json::to_value(engine).unwrap());
                 projected += 1;
             }

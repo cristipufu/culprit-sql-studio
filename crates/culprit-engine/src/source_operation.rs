@@ -1,13 +1,10 @@
 //! Workspace-wide native ownership, shared by scans and the capture controller.
 use crate::{connection::Connections, store::Paths};
-use culprit_collector::{
-    admission::{SourceAdmission, SourcePermit},
-    capture,
-};
 use culprit_core::{
     Result,
     telemetry::{CollectionStop, SourceShutdown},
 };
+use culprit_read::admission::{SourceAdmission, SourcePermit};
 
 pub(crate) struct SourceOperation<'a> {
     journal: SourceAdmission,
@@ -42,7 +39,7 @@ impl<'a> Connections<'a> {
         self.connection(name)?;
         let journal = SourceAdmission::acquire(admission_path(self.paths)).await?;
         let mut permit = self.source_gate.acquire().await?;
-        journal.started(capture::observation_identity()?.observation_id, name.to_owned()).await?;
+        journal.started(culprit_read::admission::observation_identity()?.observation_id, name.to_owned()).await?;
         permit.begin()?;
         Ok(SourceOperation { journal, permit })
     }
@@ -61,7 +58,7 @@ impl SourceOperation<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "collector"))]
 mod tests;
 
 /// Untyped outer timeouts retire a provider future without proving its native shutdown. A typed read timeout can

@@ -76,7 +76,7 @@ fn redaction_is_on_unless_asked() {
 #[test]
 fn retained_native_exports_preserve_missing_costs_and_row_estimates() {
     let mut plan = culprit_yugabyte::plan::parse(
-        include_str!("../../../culprit-yugabyte/tests/data/qpm.json"),
+        include_str!("../../../providers/culprit-yugabyte/tests/data/qpm.json"),
         culprit_core::PlanKind::Estimated,
         None,
     )

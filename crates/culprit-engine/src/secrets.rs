@@ -9,14 +9,7 @@ use culprit_core::{Error, ErrorCode, Result, t};
 
 const KEYCHAIN_SERVICE: &str = "culprit";
 
-pub trait SecretStore: Send + Sync {
-    fn get(&self, account: &str) -> Result<Option<String>>;
-    fn set(&self, account: &str, secret: &str) -> Result<()>;
-    /// Deleting something that isn't there is not an error.
-    fn delete(&self, account: &str) -> Result<()>;
-    /// Drop any copy kept in this process (the server rejected it), so the next `get` reads the backing store again.
-    fn forget(&self, _account: &str) {}
-}
+pub use culprit_auth::{Memory, SecretStore};
 
 /// The OS keychain (macOS Keychain, Windows Credential Manager, Secret Service on Linux), service `culprit`.
 ///
@@ -85,26 +78,6 @@ impl SecretStore for Keychain {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(e) => Err(keychain_error(e)),
         }
-    }
-}
-
-/// Secrets that live as long as the process. Nothing touches the OS keychain.
-#[derive(Default)]
-pub struct Memory(Mutex<HashMap<String, String>>);
-
-impl SecretStore for Memory {
-    fn get(&self, account: &str) -> Result<Option<String>> {
-        Ok(self.0.lock().map_err(|_| Error::internal("secret store poisoned"))?.get(account).cloned())
-    }
-
-    fn set(&self, account: &str, secret: &str) -> Result<()> {
-        self.0.lock().map_err(|_| Error::internal("secret store poisoned"))?.insert(account.into(), secret.into());
-        Ok(())
-    }
-
-    fn delete(&self, account: &str) -> Result<()> {
-        self.0.lock().map_err(|_| Error::internal("secret store poisoned"))?.remove(account);
-        Ok(())
     }
 }
 

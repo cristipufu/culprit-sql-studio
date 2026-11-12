@@ -19,6 +19,9 @@ postgres = ["dep:culprit-postgres"]
 yugabyte = ["dep:culprit-yugabyte"]
 mysql = ["dep:culprit-mysql"]
 sqlite = ["dep:culprit-sqlite"]
+collector = ["dep:culprit-collector"]
+store-adx = ["collector", "dep:culprit-store-adx", "dep:culprit-blob-azure"]
+store-clickhouse = ["collector", "dep:culprit-store-clickhouse", "dep:culprit-blob-azure"]
 
 # All of tests/ in one binary: each test binary is linked, and scanned on its first run, on its own.
 [[test]]
@@ -26,10 +29,17 @@ name = "all"
 path = "tests/all.rs"
 
 [dependencies]
+culprit-read.workspace = true
+culprit-auth.workspace = true
+culprit-auth-aws.workspace = true
+culprit-auth-azure.workspace = true
 async-trait.workspace = true
-zeroize = "1.9.1"
+zeroize.workspace = true
 culprit-core.workspace = true
-culprit-collector.workspace = true
+culprit-collector = { workspace = true, optional = true }
+culprit-store-adx = { workspace = true, optional = true }
+culprit-blob-azure = { workspace = true, optional = true }
+culprit-store-clickhouse = { workspace = true, optional = true }
 culprit-checks.workspace = true
 culprit-mssql = { workspace = true, optional = true }
 culprit-postgres = { workspace = true, optional = true }

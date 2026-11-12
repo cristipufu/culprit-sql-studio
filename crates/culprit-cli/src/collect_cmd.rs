@@ -11,7 +11,7 @@ use std::path::PathBuf;
 #[derive(Subcommand)]
 pub(crate) enum CollectCommand {
     #[command(about=culprit_core::t!("delivery.cli.schema"))]
-    Schema,
+    Schema(SchemaArgs),
     #[command(subcommand,about=culprit_core::t!("service.cli.about"))]
     Service(crate::service_cmd::ServiceCommand),
     #[command(about=culprit_core::t!("collection.cli.once"))]
@@ -55,9 +55,8 @@ pub(crate) struct AzureIdentityArgs {
 impl AzureIdentityArgs {
     pub(crate) fn configure(&self, workspace: Workspace) -> Result<Workspace> {
         match &self.azure_identity {
-            Some(path) => Ok(workspace.with_azure_credential(std::sync::Arc::new(
-                culprit_engine::azure_identity::AzureCredential::from_file(path)?,
-            ))),
+            Some(path) => Ok(workspace
+                .with_database_tokens(std::sync::Arc::new(culprit_auth_azure::AzureCredential::from_file(path)?))),
             None => Ok(workspace),
         }
     }
@@ -242,7 +241,7 @@ impl OnceArgs {
 
 pub(crate) fn run(command: CollectCommand, out: &Out) -> crate::CommandTask<'_> {
     match command {
-        CollectCommand::Schema => crate::command_task(|| async { schema(out) }),
+        CollectCommand::Schema(args) => crate::command_task(|| async { schema(args, out) }),
         CollectCommand::Service(command) => crate::command_task(|| crate::service_cmd::run(command, out)),
         CollectCommand::Outbox(command) => crate::command_task(|| crate::outbox_cmd::run(command, out)),
         CollectCommand::Once(args) => crate::command_task(|| once(args, out)),
@@ -301,18 +300,41 @@ async fn once(args: OnceArgs, out: &Out) -> Result<u8> {
     }
     Ok(if complete { 0 } else { 2 })
 }
-pub(crate) fn schema(out: &Out) -> Result<u8> {
+#[derive(Args)]
+pub(crate) struct SchemaArgs {
+    #[arg(long, value_enum, default_value_t=StoreChoice::Adx, help=culprit_core::t!("delivery.cli.store"))]
+    store: StoreChoice,
+    #[arg(long, requires="store", help=culprit_core::t!("delivery.cli.replicated"))]
+    replicated: bool,
+}
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum StoreChoice {
+    Adx,
+    Clickhouse,
+}
+pub(crate) fn schema(args: SchemaArgs, out: &Out) -> Result<u8> {
     use std::io::Write;
-    let assets = culprit_engine::adx::deployment::DeploymentAssets::new()?;
+    if args.replicated && args.store != StoreChoice::Clickhouse {
+        return Err(culprit_core::Error::invalid(culprit_core::t!("delivery.cli.replicated_requires_clickhouse")));
+    }
+    let (value, script) = match args.store {
+        StoreChoice::Adx => {
+            let assets = culprit_store_adx::deployment::DeploymentAssets::new()?;
+            (serde_json::to_value(&assets), assets.script())
+        }
+        StoreChoice::Clickhouse => {
+            use culprit_store_clickhouse::deployment::{DeploymentAssets, TableLayout};
+            let layout = if args.replicated { TableLayout::Replicated } else { TableLayout::SingleNode };
+            let assets = DeploymentAssets::with_layout(layout)?;
+            (serde_json::to_value(&assets), assets.script())
+        }
+    };
     if out.format() == Format::Json {
-        out.value(
-            &serde_json::to_value(assets)
-                .map_err(|_| culprit_core::Error::internal(culprit_core::t!("collection.manifest_failed")))?,
-        );
+        out.value(&value.map_err(|_| culprit_core::Error::internal(culprit_core::t!("collection.manifest_failed")))?);
     } else {
         std::io::stdout()
             .lock()
-            .write_all(assets.script().as_bytes())
+            .write_all(script.as_bytes())
             .map_err(|_| culprit_core::Error::internal(culprit_core::t!("activity.cli.output_failed")))?;
     }
     Ok(0)

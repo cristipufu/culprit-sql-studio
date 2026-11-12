@@ -58,6 +58,9 @@ jobs:
       # The desktop app crate needs the frontend build and, on Linux, WebKitGTK; the `app` job covers it.
       - name: Clippy
         run: cargo clippy --locked --workspace --exclude culprit-app --all-targets -- -D warnings
+      - name: Adapter build dependency boundaries
+        if: runner.os == 'Linux'
+        run: python3 -B dev/check-boundaries.py
       - name: Engine without bundled providers
         run: cargo clippy --locked -p culprit-engine --no-default-features -- -D warnings
       - name: Test
@@ -116,7 +119,7 @@ jobs:
         run: python3 -B dev/smoke-providers.py ${{ matrix.fixture }}
 
   telemetry:
-    name: Telemetry protocol and Kusto correctness
+    name: Telemetry protocol and warehouse correctness
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -133,6 +136,8 @@ jobs:
       # Kusto emulator does not support ARM and its license prohibits benchmarking.
       - name: Execute the production schema, mappings and canonical functions in Kusto
         run: python3 -B dev/smoke-adx.py
+      - name: Execute ClickHouse delivery, exact receipts and canonical views
+        run: python3 -B dev/smoke-clickhouse.py
 
   dependencies:
     name: Dependencies

@@ -1,7 +1,6 @@
 //! Workspace authentication composes with the source-independent capture controller.
 use crate::Workspace;
 use culprit_collector::{
-    admission::SourceAdmission,
     capture::{self, CollectionCancellation, SourceFactory},
     outbox::Outbox,
 };
@@ -9,6 +8,7 @@ use culprit_core::{
     Result,
     telemetry::{CollectionManifest, CollectionRequest, TelemetrySource},
 };
+use culprit_read::admission::SourceAdmission;
 use std::path::Path;
 
 struct AuthenticatedSource<'a> {
@@ -71,7 +71,7 @@ impl Workspace {
         request.validate()?;
         self.connection(name)?;
         let admission = SourceAdmission::acquire(self.collection_admission_path()).await?;
-        let identity = capture::observation_identity()?;
+        let identity = culprit_read::admission::observation_identity()?;
         let source = AuthenticatedSource {
             workspace: self,
             name,

@@ -5,6 +5,6 @@
  */
 export type DeviceCodePrompt = { user_code: string, verification_uri: string, 
 /**
- * Microsoft's own instructions, e.g. "To sign in, use a web browser to open the page … and enter the code …".
+ * The identity provider's instructions, e.g. "To sign in, use a web browser to open the page … and enter the code …".
  */
 message: string, expires_in_secs: number, };

@@ -16,7 +16,8 @@ use culprit_core::cloud::{CloudProvider, CloudSeries, CloudSignals, ThrottleEpis
 use culprit_core::{Engine, Error, ErrorCode, Result, format, t};
 use serde::{Deserialize, Serialize};
 
-use crate::{ConnectionInfo, aws as aws_cli, private_fs};
+use crate::{ConnectionInfo, private_fs};
+use culprit_auth_aws as aws_cli;
 
 /// Metrics fetched within this long are reused.
 const FRESH_SECONDS: f64 = 300.0;

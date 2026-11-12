@@ -2,13 +2,13 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use culprit_auth::{DeviceCodePrompt, SignInEvent};
 use culprit_core::Verification;
 use culprit_core::{
     Drift, Error, ErrorCode, ExplainMode, LiveState, Plan, PlanDiff, Report, Result, ResultSet, ServerInfo,
     SessionAction, SnapshotOptions,
 };
 use culprit_engine::SshConfig;
-use culprit_engine::entra::{DeviceCodePrompt, SignInEvent};
 use culprit_engine::export::{ExportFile, ExportFormat, ExportOptions};
 use culprit_engine::{
     AgentAccess, ApprovalRequest, ConnectionInfo, ConnectionSettings, DiscoveredDatabase, ImportCandidate,

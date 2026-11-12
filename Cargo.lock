@@ -943,6 +943,7 @@ name = "culprit-app"
 version = "0.5.6"
 dependencies = [
  "block2",
+ "culprit-auth",
  "culprit-core",
  "culprit-engine",
  "objc2",
@@ -960,6 +961,63 @@ dependencies = [
 ]
 
 [[package]]
+name = "culprit-auth"
+version = "0.5.6"
+dependencies = [
+ "async-trait",
+ "culprit-core",
+ "serde",
+ "ts-rs",
+ "zeroize",
+]
+
+[[package]]
+name = "culprit-auth-aws"
+version = "0.5.6"
+dependencies = [
+ "async-trait",
+ "culprit-auth",
+ "culprit-core",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
+name = "culprit-auth-azure"
+version = "0.5.6"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "culprit-auth",
+ "culprit-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "ureq",
+ "zeroize",
+]
+
+[[package]]
+name = "culprit-blob-azure"
+version = "0.5.6"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "chrono",
+ "culprit-auth",
+ "culprit-collector",
+ "culprit-core",
+ "ring",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "ureq",
+ "zeroize",
+]
+
+[[package]]
 name = "culprit-checks"
 version = "0.5.6"
 dependencies = [
@@ -972,10 +1030,14 @@ name = "culprit-cli"
 version = "0.5.6"
 dependencies = [
  "clap",
+ "culprit-auth",
+ "culprit-auth-azure",
  "culprit-collector",
  "culprit-core",
  "culprit-engine",
  "culprit-mcp",
+ "culprit-store-adx",
+ "culprit-store-clickhouse",
  "ring",
  "serde",
  "serde_json",
@@ -991,6 +1053,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "culprit-core",
+ "culprit-read",
  "ring",
  "rusqlite",
  "serde",
@@ -998,6 +1061,7 @@ dependencies = [
  "sha2 0.11.1",
  "tempfile",
  "tokio",
+ "zeroize",
 ]
 
 [[package]]
@@ -1022,6 +1086,10 @@ dependencies = [
  "async-trait",
  "base64 0.23.1",
  "chrono",
+ "culprit-auth",
+ "culprit-auth-aws",
+ "culprit-auth-azure",
+ "culprit-blob-azure",
  "culprit-checks",
  "culprit-collector",
  "culprit-core",
@@ -1029,7 +1097,10 @@ dependencies = [
  "culprit-mysql",
  "culprit-postgres",
  "culprit-querylog",
+ "culprit-read",
  "culprit-sqlite",
+ "culprit-store-adx",
+ "culprit-store-clickhouse",
  "culprit-yugabyte",
  "dirs",
  "keyring",
@@ -1129,7 +1200,10 @@ dependencies = [
  "async-trait",
  "culprit-core",
  "futures-util",
+ "ring",
+ "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 
@@ -1144,6 +1218,43 @@ dependencies = [
  "same-file",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "culprit-store-adx"
+version = "0.5.6"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "culprit-auth",
+ "culprit-collector",
+ "culprit-core",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "tokio",
+ "ureq",
+ "zeroize",
+]
+
+[[package]]
+name = "culprit-store-clickhouse"
+version = "0.5.6"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "culprit-collector",
+ "culprit-core",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "tokio",
+ "ureq",
+ "zeroize",
 ]
 
 [[package]]

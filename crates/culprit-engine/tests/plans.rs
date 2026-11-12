@@ -5,7 +5,7 @@ use culprit_engine::plans::{PlanFormat, decode, detect, parse_plan};
 
 #[test]
 fn native_docdb_plans_are_imported_as_yugabyte_with_total_rows_and_native_metrics() {
-    let text = include_str!("../../culprit-yugabyte/tests/data/loops.json");
+    let text = include_str!("../../providers/culprit-yugabyte/tests/data/loops.json");
     assert_eq!(detect(text), Some(PlanFormat::YugabyteJson));
     let plan = parse_plan(text).unwrap();
     assert_eq!(plan.engine, Engine::Yugabyte);

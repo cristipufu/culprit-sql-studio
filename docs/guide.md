@@ -491,18 +491,22 @@ CI (`.github/workflows/ci.yml`) checks formatting, runs clippy and the tests on 
 ## Layout
 
 ```
-crates/culprit-core      model: snapshots, plans, findings; Provider and Check contracts
-crates/culprit-checks    every check, as a pure function of a snapshot
-crates/culprit-mssql     SQL Server provider
-crates/culprit-postgres  PostgreSQL provider and TimescaleDB integration
-crates/culprit-yugabyte  Native YugabyteDB YSQL/DocDB provider
-crates/culprit-mysql     MySQL and MariaDB provider
-crates/culprit-sqlite    SQLite 3 file provider
-crates/culprit-querylog  framework query log parser (Rails, Django, EF Core, Ecto, JSONL)
-crates/culprit-engine    connection store, keychain, Entra tokens, scans, reports, agent approvals and audit log
-crates/culprit-mcp       the MCP server for coding agents and `culprit agent init`
-crates/culprit-cli       the `culprit` binary
-app/                     React UI and the Tauri shell
-docs/DESIGN.md           UX and functional design
-docs/guide.md            this guide
+crates/culprit-core                model: snapshots, plans, findings; Provider and Check contracts
+crates/culprit-checks              every check, as a pure function of a snapshot
+crates/providers/culprit-mssql     SQL Server provider
+crates/providers/culprit-postgres  PostgreSQL provider and TimescaleDB integration
+crates/providers/culprit-yugabyte  Native YugabyteDB YSQL/DocDB provider
+crates/providers/culprit-mysql     MySQL and MariaDB provider
+crates/providers/culprit-sqlite    SQLite 3 file provider
+crates/culprit-querylog            framework query log parser (Rails, Django, EF Core, Ecto, JSONL)
+crates/authentication/             credential contracts, Azure/Entra and AWS authentication providers
+crates/telemetry/                  ADX and ClickHouse stores; Azure Blob recovery transport
+crates/culprit-collector           capture, outbox, fleet scheduling and verified analytical delivery
+crates/culprit-read                bounded native reads and shared source admission
+crates/culprit-engine              connection store, credential composition, scans, reports, agent approvals and audit log
+crates/culprit-mcp                 the MCP server for coding agents and `culprit agent init`
+crates/culprit-cli                 the `culprit` binary
+app/                               React UI and the Tauri shell
+docs/DESIGN.md                     UX and functional design
+docs/guide.md                      this guide
 ```

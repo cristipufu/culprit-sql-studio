@@ -59,10 +59,13 @@ async fn cancellation_closes_native_work_before_waiting_for_stalled_artifact_io(
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Operational },
         budget: CollectionBudget::default(),
     };
-    let files =
-        ObservationWriter::create(directory.path().join("capture"), request.clone(), observation_identity().unwrap())
-            .await
-            .unwrap();
+    let files = ObservationWriter::create(
+        directory.path().join("capture"),
+        request.clone(),
+        culprit_read::admission::observation_identity().unwrap(),
+    )
+    .await
+    .unwrap();
     let (entered, waiting) = tokio::sync::oneshot::channel();
     let (release, blocked) = std::sync::mpsc::channel();
     let pending = files.clone();

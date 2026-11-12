@@ -568,19 +568,14 @@
       }
     ]
   },
-  "identity": {
-    "kind": "workload-identity",
-    "tenant_id": "REPLACE_TENANT_ID",
-    "client_id": "REPLACE_CLIENT_ID",
-    "token_file": "/var/run/secrets/culprit/token"
-  },
   "recovery": {
     "kind": "azure-blob",
     "storage": {
       "account": "REPLACE_STORAGE_ACCOUNT",
       "container": "culprit-native",
       "prefix": "database-telemetry/pilot"
-    }
+    },
+    "credential": "recovery"
   },
   "target": {
     "kind": "adx",
@@ -592,10 +587,51 @@
       "account": "REPLACE_STORAGE_ACCOUNT",
       "container": "culprit-ready",
       "prefix": "database-telemetry/pilot"
-    }
+    },
+    "credential": "analytics",
+    "ready_credential": "staging"
   },
   "limits": {
     "max_bytes": 1073741824,
     "max_captures": 256
+  },
+  "source_credential": "source",
+  "credentials": {
+    "source": {
+      "kind": "azure",
+      "identity": {
+        "kind": "workload-identity",
+        "tenant_id": "REPLACE_TENANT_ID",
+        "client_id": "REPLACE_SOURCE_CLIENT_ID",
+        "token_file": "/var/run/secrets/culprit/token"
+      }
+    },
+    "recovery": {
+      "kind": "azure",
+      "identity": {
+        "kind": "workload-identity",
+        "tenant_id": "REPLACE_TENANT_ID",
+        "client_id": "REPLACE_RECOVERY_CLIENT_ID",
+        "token_file": "/var/run/secrets/culprit/token"
+      }
+    },
+    "analytics": {
+      "kind": "azure",
+      "identity": {
+        "kind": "workload-identity",
+        "tenant_id": "REPLACE_TENANT_ID",
+        "client_id": "REPLACE_ANALYTICS_CLIENT_ID",
+        "token_file": "/var/run/secrets/culprit/token"
+      }
+    },
+    "staging": {
+      "kind": "azure",
+      "identity": {
+        "kind": "workload-identity",
+        "tenant_id": "REPLACE_TENANT_ID",
+        "client_id": "REPLACE_STAGING_CLIENT_ID",
+        "token_file": "/var/run/secrets/culprit/token"
+      }
+    }
   }
 }

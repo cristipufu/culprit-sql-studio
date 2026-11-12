@@ -1,7 +1,18 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "app/src-tauri"]
-default-members = ["crates/*"]
+members = [
+    "crates/culprit-*",
+    "crates/providers/culprit-*",
+    "crates/telemetry/culprit-*",
+    "crates/authentication/culprit-*",
+    "app/src-tauri",
+]
+default-members = [
+    "crates/culprit-*",
+    "crates/providers/culprit-*",
+    "crates/telemetry/culprit-*",
+    "crates/authentication/culprit-*",
+]
 
 [workspace.package]
 version = "0.5.6"
@@ -12,15 +23,22 @@ publish = false
 repository = "https://github.com/cristipufu/culprit-sql-studio"
 
 [workspace.dependencies]
+culprit-auth-aws = { path = "crates/authentication/culprit-auth-aws" }
+culprit-auth = { path = "crates/authentication/culprit-auth" }
+culprit-auth-azure = { path = "crates/authentication/culprit-auth-azure" }
+culprit-store-adx = { path = "crates/telemetry/culprit-store-adx" }
+culprit-blob-azure = { path = "crates/telemetry/culprit-blob-azure" }
+culprit-store-clickhouse = { path = "crates/telemetry/culprit-store-clickhouse" }
+zeroize = "1.9.1"
 culprit-core = { path = "crates/culprit-core" }
 culprit-read = { path = "crates/culprit-read" }
 culprit-collector = { path = "crates/culprit-collector" }
 culprit-checks = { path = "crates/culprit-checks" }
-culprit-mssql = { path = "crates/culprit-mssql" }
-culprit-postgres = { path = "crates/culprit-postgres" }
-culprit-yugabyte = { path = "crates/culprit-yugabyte" }
-culprit-mysql = { path = "crates/culprit-mysql" }
-culprit-sqlite = { path = "crates/culprit-sqlite" }
+culprit-mssql = { path = "crates/providers/culprit-mssql" }
+culprit-postgres = { path = "crates/providers/culprit-postgres" }
+culprit-yugabyte = { path = "crates/providers/culprit-yugabyte" }
+culprit-mysql = { path = "crates/providers/culprit-mysql" }
+culprit-sqlite = { path = "crates/providers/culprit-sqlite" }
 culprit-querylog = { path = "crates/culprit-querylog" }
 culprit-engine = { path = "crates/culprit-engine" }
 culprit-mcp = { path = "crates/culprit-mcp" }

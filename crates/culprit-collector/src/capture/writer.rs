@@ -68,7 +68,7 @@ mod tests {
         let writer = ObservationWriter::create(
             directory.path().join("capture"),
             request,
-            super::super::observation_identity().unwrap(),
+            culprit_read::admission::observation_identity().unwrap(),
         )
         .await
         .unwrap();

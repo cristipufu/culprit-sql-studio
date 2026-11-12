@@ -617,10 +617,10 @@ async fn fleet_refuses_implicit_cli_sign_in_before_resolving_a_provider() {
     .unwrap();
     assert!(FleetBackend::validate_target(&ws, "azure").is_err());
     assert_eq!(state.factories.load(Ordering::SeqCst), 0);
-    let ws = ws.with_azure_credential(Arc::new(
-        culprit_engine::azure_identity::AzureCredential::new(
-            culprit_engine::azure_identity::IdentityConfig::ManagedIdentity { client_id: None },
-        )
+    let ws = ws.with_database_tokens(Arc::new(
+        culprit_auth_azure::AzureCredential::new(culprit_auth_azure::IdentityConfig::ManagedIdentity {
+            client_id: None,
+        })
         .unwrap(),
     ));
     FleetBackend::validate_target(&ws, "azure").unwrap();

@@ -85,6 +85,6 @@ polls and deadlock graphs require other evidence. Background capture does not ru
 
 Coverage has been exercised on PostgreSQL 15–18, including Amazon RDS; saved fixtures include PostgreSQL 18.6. The [PostgreSQL fixture](../../dev/postgres/README.md) reproduces workload and schema problems. Parser fixtures and provider/embedding tests cover captured plans, missing measurements and offline replay.
 
-The provider's declared sources are in [`culprit-postgres/src/sources.rs`](../../crates/culprit-postgres/src/sources.rs). Optional timing and extension features are tested independently of the base catalog.
+The provider's declared sources are in [`culprit-postgres/src/sources.rs`](../../crates/providers/culprit-postgres/src/sources.rs). Optional timing and extension features are tested independently of the base catalog.
 
 Source references: [PostgreSQL vacuum thresholds and MultiXacts](https://www.postgresql.org/docs/18/routine-vacuuming.html), [sequence allocation](https://www.postgresql.org/docs/18/view-pg-sequences.html).

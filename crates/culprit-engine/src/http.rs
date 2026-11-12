@@ -34,27 +34,6 @@ pub struct Reply {
     pub json: Value,
 }
 
-/// A sign-in reply, or why the request failed.
-fn finish(result: std::result::Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Result<Reply> {
-    let mut response = result.map_err(|e| {
-        Error::new(ErrorCode::ConnectionFailed, t!("engine.http.sign_in_failed", error = e.to_string()))
-            .with_hint(t!("engine.http.failed_hint"))
-    })?;
-    let status = response.status().as_u16();
-    let text = response.body_mut().read_to_string().unwrap_or_default();
-    Ok(Reply { status, json: serde_json::from_str(&text).unwrap_or(Value::Null) })
-}
-
-/// POST an `application/x-www-form-urlencoded` body to Microsoft Entra ID's sign-in endpoints.
-pub async fn post_form(url: String, fields: Vec<(&'static str, String)>) -> Result<Reply> {
-    tokio::task::spawn_blocking(move || {
-        let form: Vec<(&str, &str)> = fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        finish(agent().post(&url).header("Accept", "application/json").send_form(form))
-    })
-    .await
-    .map_err(|e| Error::internal(e.to_string()))?
-}
-
 /// One page of an Azure Resource Manager database listing. Responses stay bounded even when an ARM endpoint returns an
 /// unpaged list.
 pub async fn get_bearer_limited(url: String, token: String, limit: u64) -> Result<Reply> {

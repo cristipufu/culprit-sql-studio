@@ -16,6 +16,7 @@ doctest = false
 tauri-build = { version = "2.7.2", features = [] }
 
 [dependencies]
+culprit-auth.workspace = true
 culprit-core.workspace = true
 culprit-engine.workspace = true
 serde.workspace = true

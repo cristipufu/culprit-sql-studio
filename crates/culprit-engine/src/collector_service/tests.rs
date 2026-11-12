@@ -1,5 +1,7 @@
 use super::*;
-use crate::{NewConnection, azure_blob::AzureBlobConfig, azure_identity::IdentityConfig};
+use crate::{NewConnection, credentials::CredentialProfile};
+use culprit_auth_azure::IdentityConfig;
+use culprit_blob_azure::AzureBlobConfig;
 use culprit_core::{AuthKind, Engine, Environment};
 
 fn config(root: &Path) -> CollectorConfig {
@@ -38,8 +40,24 @@ fn config(root: &Path) -> CollectorConfig {
                 }],
             }],
         },
-        identity: IdentityConfig::ManagedIdentity { client_id: None },
+        source_credential: Some("source".into()),
+        credentials: [
+            ("source", None),
+            ("recovery", Some("11111111-1111-1111-1111-111111111111")),
+            ("analytics", Some("22222222-2222-2222-2222-222222222222")),
+        ]
+        .into_iter()
+        .map(|(name, client_id)| {
+            (
+                name.into(),
+                CredentialProfile::Azure {
+                    identity: IdentityConfig::ManagedIdentity { client_id: client_id.map(str::to_string) },
+                },
+            )
+        })
+        .collect(),
         recovery: RecoveryConfig::AzureBlob {
+            credential: "recovery".into(),
             storage: AzureBlobConfig {
                 account: "nevercontact".into(),
                 container: "recovery".into(),
@@ -47,7 +65,9 @@ fn config(root: &Path) -> CollectorConfig {
             },
         },
         target: TargetConfig::Adx {
-            query: crate::adx::client::AdxConfig {
+            credential: "analytics".into(),
+            ready_credential: "analytics".into(),
+            query: culprit_store_adx::client::AdxConfig {
                 endpoint: "https://never-contact.westeurope.kusto.windows.net".into(),
                 database: "test".into(),
             },
@@ -68,7 +88,7 @@ fn offline_validation_configures_all_adapters_without_tokens_connections_or_runt
     let config = config(root.path());
     validate(&config).unwrap();
     assert!(!config.state.exists());
-    assert!(!config.workspace.join("source-admission").exists());
+    assert!(!config.workspace.join("collection-admission").exists());
     let path = root.path().join("collector.json");
     std::fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
     validate(&CollectorConfig::from_file(&path).unwrap()).unwrap();
@@ -79,10 +99,10 @@ fn offline_validation_configures_all_adapters_without_tokens_connections_or_runt
 fn invalid_routes_overlapping_state_and_unknown_configuration_fields_are_refused_offline() {
     let root = tempfile::tempdir().unwrap();
     let mut config = config(root.path());
-    let TargetConfig::Adx { query, .. } = &mut config.target;
+    let TargetConfig::Adx { query, .. } = &mut config.target else { panic!("ADX fixture") };
     query.endpoint = "https://untrusted.invalid".into();
     assert!(validate(&config).is_err());
-    let TargetConfig::Adx { query, .. } = &mut config.target;
+    let TargetConfig::Adx { query, .. } = &mut config.target else { panic!("ADX fixture") };
     query.endpoint = "https://never-contact.westeurope.kusto.windows.net".into();
     config.state = config.workspace.join("runtime");
     assert!(validate(&config).is_err());
@@ -100,11 +120,11 @@ fn invalid_routes_overlapping_state_and_unknown_configuration_fields_are_refused
 fn missing_unattended_source_authentication_and_identical_native_and_ready_namespaces_are_rejected() {
     let root = tempfile::tempdir().unwrap();
     let mut config = config(root.path());
-    let RecoveryConfig::AzureBlob { storage } = &config.recovery;
-    let TargetConfig::Adx { ready, .. } = &mut config.target;
+    let RecoveryConfig::AzureBlob { storage, .. } = &config.recovery;
+    let TargetConfig::Adx { ready, .. } = &mut config.target else { panic!("ADX fixture") };
     *ready = storage.clone();
     assert!(validate(&config).is_err());
-    let TargetConfig::Adx { ready, .. } = &mut config.target;
+    let TargetConfig::Adx { ready, .. } = &mut config.target else { panic!("ADX fixture") };
     ready.container = "ready".into();
     config.inventory.targets[0].connection = "not-saved".into();
     assert!(validate(&config).is_err());
@@ -130,5 +150,50 @@ fn an_unexportable_source_budget_is_rejected_before_any_source_work_or_runtime_s
     config.inventory.targets[0].schedules[0].budget.max_pages = 100;
     assert!(validate(&config).is_err());
     assert!(!config.state.exists());
-    assert!(!config.workspace.join("source-admission").exists());
+    assert!(!config.workspace.join("collection-admission").exists());
 }
+
+#[test]
+fn role_profiles_are_independent_and_delivery_only_does_not_resolve_source_credentials() {
+    let root = tempfile::tempdir().unwrap();
+    let mut config = config(root.path());
+    config.source_credential = Some("not-configured-source".into());
+    assert!(ConfiguredAdapters::new(&config, SourceMode::Collect).is_err());
+    ConfiguredAdapters::new(&config, SourceMode::DeliveryOnly).unwrap();
+    let TargetConfig::Adx { credential, .. } = &mut config.target else { panic!("ADX fixture") };
+    *credential = "not-configured-analytics".into();
+    assert!(ConfiguredAdapters::new(&config, SourceMode::DeliveryOnly).is_err());
+}
+#[cfg(feature = "store-clickhouse")]
+#[test]
+fn clickhouse_configuration_uses_its_password_profile_without_acquiring_it_offline() {
+    let root = tempfile::tempdir().unwrap();
+    let mut config = config(root.path());
+    config.credentials.insert(
+        "warehouse".into(),
+        CredentialProfile::PasswordEnvironment {
+            username: "fixture".into(),
+            variable: "CULPRIT_UNSET_WAREHOUSE_FIXTURE_PASSWORD_6D7B".into(),
+        },
+    );
+    config.target = TargetConfig::ClickHouse {
+        query: culprit_store_clickhouse::client::ClickHouseConfig {
+            endpoint: "https://never-contact.example".into(),
+            database: "fixture".into(),
+            insert_quorum: None,
+        },
+        credential: "warehouse".into(),
+    };
+    let configured = ConfiguredAdapters::new(&config, SourceMode::Collect).unwrap();
+    assert!(configured.contract.destination().starts_with("clickhouse:"));
+    assert_ne!(configured.contract.schema_digest(), culprit_store_adx::catalog::SchemaCatalog::new().unwrap().digest());
+    assert!(!config.state.exists());
+    let path = root.path().join("collector.json");
+    std::fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+    validate(&CollectorConfig::from_file(&path).unwrap()).unwrap();
+    let TargetConfig::ClickHouse { credential, .. } = &mut config.target else { panic!("ClickHouse fixture") };
+    *credential = "analytics".into();
+    assert!(validate(&config).is_err(), "a token profile cannot silently become a password profile");
+}
+
+mod profile_resolution;

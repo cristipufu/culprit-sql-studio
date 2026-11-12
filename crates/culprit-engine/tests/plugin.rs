@@ -39,7 +39,7 @@ async fn retained_native_plans_open_offline_without_borrowing_current_catalog_or
     snapshot.connection = "native-cache".into();
     let q = &mut snapshot.workload.as_mut().unwrap().queries[0];
     let mut cached = culprit_yugabyte::plan::parse(
-        include_str!("../../culprit-yugabyte/tests/data/qpm.json"),
+        include_str!("../../providers/culprit-yugabyte/tests/data/qpm.json"),
         culprit_core::PlanKind::Estimated,
         None,
     )

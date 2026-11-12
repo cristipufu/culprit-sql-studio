@@ -1,6 +1,6 @@
 //! One bounded observation. Source ownership, cancellation and file completion have one controller.
 mod writer;
-use crate::{admission::SourceGate, durable_fs, outbox::CaptureLease};
+use crate::outbox::CaptureLease;
 use culprit_core::{
     Error, Result,
     telemetry::{
@@ -8,6 +8,7 @@ use culprit_core::{
         SourceShutdown, TelemetrySource, TelemetryStream,
     },
 };
+use culprit_read::admission::SourceGate;
 use std::{collections::HashSet, path::Path, time::Duration};
 use tokio::{sync::watch, time::Instant};
 use writer::ObservationWriter;
@@ -43,11 +44,6 @@ pub trait SourceFactory: Send + Sync {
     async fn open(&self, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>>;
 }
 
-/// A new observation remains distinct from a retry or a revision of retained evidence.
-pub fn observation_identity() -> Result<CaptureIdentity> {
-    Ok(CaptureIdentity { observation_id: durable_fs::random_id()?, revision: None })
-}
-
 pub async fn collect_once(
     admission: &SourceGate,
     factory: &dyn SourceFactory,
@@ -55,7 +51,7 @@ pub async fn collect_once(
     output: &Path,
     cancellation: &CollectionCancellation,
 ) -> Result<CollectionManifest> {
-    let capture = observation_identity()?;
+    let capture = culprit_read::admission::observation_identity()?;
     collect(admission, factory, request, output, capture, cancellation, None).await
 }
 

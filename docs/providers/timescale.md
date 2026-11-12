@@ -62,7 +62,7 @@ Local verification used TimescaleDB **2.31.0** on PostgreSQL **17.11**, includin
 
 The captured example has `public.sensor_readings` with **120,000 rows, 14 chunks and seven compressed chunks**, plus `public.devices`. `fixtures/timescale-demo.report.json` contains the actual collected input and today's analysis. The development browser renders this saved report without a database connection.
 
-The extension collector is [`culprit-postgres/src/timescale.rs`](../../crates/culprit-postgres/src/timescale.rs); its sources are declared alongside the PostgreSQL sources.
+The extension collector is [`culprit-postgres/src/timescale.rs`](../../crates/providers/culprit-postgres/src/timescale.rs); its sources are declared alongside the PostgreSQL sources.
 
 ### Screenshots
 

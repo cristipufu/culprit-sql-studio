@@ -84,6 +84,6 @@ Verified versions include MySQL 5.7.44 and 8.4; the saved fixture records MySQL 
 | MySQL 8.0.19+ | Runtime histograms can be available when the instrumentation and permissions allow them |
 | Older MySQL 5.7 TLS builds | A server offering no shared cipher suite is reported as such; only TLS modes that permit plaintext fallback can fall back |
 
-MySQL 5.6 and earlier, Percona Server and MySQL 5.7 with `performance_schema` off have not been verified. Source declarations live in [`culprit-mysql/src/sources.rs`](../../crates/culprit-mysql/src/sources.rs).
+MySQL 5.6 and earlier, Percona Server and MySQL 5.7 with `performance_schema` off have not been verified. Source declarations live in [`culprit-mysql/src/sources.rs`](../../crates/providers/culprit-mysql/src/sources.rs).
 
 Source references: [MySQL metadata-lock view](https://dev.mysql.com/doc/refman/8.4/en/sys-schema-table-lock-waits.html).

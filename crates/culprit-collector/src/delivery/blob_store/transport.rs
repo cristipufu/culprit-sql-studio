@@ -1,4 +1,4 @@
-//! Conditional object operations. Authentication and HTTP belong to the host application.
+//! Conditional object operations. Native transports own HTTP and receive credentials from the host.
 use crate::delivery::recovery::RecoveryReader;
 use async_trait::async_trait;
 use culprit_core::Result;

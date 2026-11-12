@@ -8,9 +8,10 @@ impl FleetBackend for Workspace {
     fn validate_target(&self, connection: &str) -> Result<()> {
         let stored = self.store.get(connection)?;
         let unattended = match stored.auth {
-            AuthKind::Entra => self.azure_credential.is_some(),
+            AuthKind::Entra | AuthKind::AwsIam => {
+                self.database_tokens.as_ref().is_some_and(|provider| provider.auth_kind() == stored.auth)
+            }
             AuthKind::Password => stored.password_env.is_some(),
-            AuthKind::AwsIam => false,
             AuthKind::None => true,
         };
         if !unattended {

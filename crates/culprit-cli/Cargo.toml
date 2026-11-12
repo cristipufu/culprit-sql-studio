@@ -16,9 +16,13 @@ name = "all"
 path = "tests/all.rs"
 
 [dependencies]
+culprit-auth.workspace = true
+culprit-auth-azure.workspace = true
 culprit-core.workspace = true
 culprit-collector.workspace = true
-culprit-engine.workspace = true
+culprit-engine = { workspace = true, features = ["store-adx", "store-clickhouse"] }
+culprit-store-adx.workspace = true
+culprit-store-clickhouse.workspace = true
 culprit-mcp.workspace = true
 clap.workspace = true
 serde.workspace = true

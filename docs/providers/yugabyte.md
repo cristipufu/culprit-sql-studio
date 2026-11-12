@@ -283,7 +283,7 @@ This is a local-cluster verification, not a multi-region latency or large-cluste
 
 See [dev/yugabyte](../../dev/yugabyte/README.md) for the disposable database, seed workload and opt-in checks.
 
-Declared sources are listed in [`culprit-yugabyte/src/sources.rs`](../../crates/culprit-yugabyte/src/sources.rs).
+Declared sources are listed in [`culprit-yugabyte/src/sources.rs`](../../crates/providers/culprit-yugabyte/src/sources.rs).
 
 ### Source verification
 

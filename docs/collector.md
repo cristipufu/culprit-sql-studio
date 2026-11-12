@@ -4,7 +4,8 @@ The collector archives database observations through the CLI, using the same pro
 views. Database access stays in the collector's network. An analytical destination receives prepared observations;
 investigations do not need a new connection to the production database.
 
-The initial remote adapter uses private Azure Blob recovery and an ADX ingestion-ready container. The actual managed
+Remote delivery supports ADX and ClickHouse through one shared preparation, verification and publication path.
+Private Azure Blob storage retains native recovery evidence; ADX additionally uses an ingestion-ready container. The actual managed
 ingestion route, cloud permissions, private networking, retention-scale costs and production source-load budgets
 require live qualification. The deployment example starts with **zero replicas**. Its resource requests and cadences
 are starting configurations, not measured capacity claims.
@@ -41,12 +42,75 @@ storage; persisting only the outbox loses part of the source ownership proof.
 
 ```sh
 culprit collect service validate --config collector.json
-culprit collect schema --format json > adx-assets.json
+culprit collect schema --store adx --format json > adx-assets.json
+culprit collect schema --store clickhouse > clickhouse-schema.sql
 ```
 
 Validation reads saved metadata, checks unattended authentication and configures the adapters. It acquires no tokens,
-opens no SQL/Blob/ADX connections and creates no runtime state. `collect schema` generates DDL, mappings, canonical
-functions and per-table ingestion routes without opening a workspace or applying anything to Azure.
+opens no database, Blob or warehouse connections and creates no runtime state. `collect schema` generates DDL, mappings, canonical
+queries and native ingestion assets without opening a workspace or applying anything to a service.
+
+Credential profiles are independent from source and destination selection. The example names four Azure profiles:
+`source`, `recovery`, `analytics` and `staging`. `source_credential` applies to unattended database token authentication;
+password-authenticated connections still use their saved password environment references. Recovery's `credential`,
+ADX's `credential` and its `ready_credential` can select different managed or workload identities. Explicitly selecting
+the same profile reuses that credential owner and its audience caches. Nothing inherits a different role's identity.
+Delivery-only mode neither resolves the source profile nor requires saved source connections.
+
+For ClickHouse, replace `target` and add a password profile:
+
+```json
+{
+  "target": {
+    "kind": "clickhouse",
+    "query": {"endpoint": "https://warehouse.example:8443", "database": "culprit", "insert_quorum": null},
+    "credential": "clickhouse"
+  },
+  "credentials": {
+    "clickhouse": {"kind": "password-environment", "username": "culprit", "variable": "CULPRIT_WAREHOUSE_PASSWORD"}
+  }
+}
+```
+
+Merge that profile into the existing `credentials` object; keep the separate recovery profile. The password's value
+is read only when opening the sink. It is sent in an HTTP header, never a URL, serialized configuration or error.
+HTTPS is required except for literal loopback fixture endpoints. Redirects and host proxies are disabled. The
+ClickHouse adapter does not depend on Azure authentication or Azure Blob; the service's chosen recovery transport
+remains independent of its analytical destination.
+
+### ClickHouse deployment and durability
+
+Apply the generated SQL explicitly to the configured database before starting delivery. Give the collector only
+SELECT/INSERT access to the generated tables; use a separate deployment identity for DDL and preserve append-only
+landing data. Ordinary collector startup
+never provisions or mutates schema. The schema contains 15 analytical landing tables and one publication table;
+recovery-only activity checkpoints have no analytical table. Landing tables sort by range, batch and ordinal for
+bounded readback. A publication-table projection supports database/time selection without duplicating every payload.
+
+`--store clickhouse --replicated` emits `ReplicatedMergeTree` tables using server-configured replication paths/macros.
+For that layout, configure a positive `insert_quorum` and a read/write endpoint with the required replica consistency.
+Single-node tables use synchronous inserts and local fsync; that does not promise survival of node or disk loss.
+Replica failover, distributed routing and cloud deployments need separate qualification. The owned native fixture
+verifies single-node ClickHouse 26.8.36.3, not those deployment guarantees.
+
+The adapter keeps at most two HTTP requests in flight. Queries have a 30-second execution limit, a 45-second transport
+limit, two execution threads, 256 MiB memory/read-byte limits, one million read rows and a 16 MiB response cap. Receipt
+pages also respect the shared projected-byte limit. Limit or partial-response failures retain local/recovery evidence;
+a successful HTTP acknowledgement cannot retire it. These bounds may require smaller captures at high volume. Tune
+capture/range sizes and warehouse capacity using measurements; do not replace exact readback with count-only checks.
+
+Query the parameterized `Culprit<Table>Rows` views rather than raw landing tables. They admit published, complete,
+unambiguous batches, collapse identical retries and select revisions by owner epoch, capture sequence and representation.
+`Current` views additionally select fresh complete source heads, including successful-empty captures. Partial visibility
+does not replace a complete head. Scope every view call by contract, recovery store, database and observation time;
+ClickHouse datetime query parameters use UTC `YYYY-MM-DD HH:MM:SS[.nnnnnnnnn]` values. JSON facts are preserved as JSON
+text; exact counters use decimal columns and timestamps retain nanoseconds. ADX's native presence columns and 100 ns
+precision do not affect ClickHouse.
+
+Run `python3 dev/smoke-clickhouse.py` for native delivery, restart/index reuse, exact values, revision/current-set
+semantics and invalid-membership checks. It owns a pinned, resource-bounded loopback container and removes it on exit.
+Kusto mappings/functions and Azure Blob conditional recovery have separate owned fixture gates. None of these
+fixtures establish production source-load budgets or replace the final live ADX qualification.
 
 The example includes activity, Query Store history, resource history, deadlock history and SQL Server point-observation
 families. Each has its own cadence and budget. A family being scheduled does not establish source availability:
