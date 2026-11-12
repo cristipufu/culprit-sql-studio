@@ -123,8 +123,8 @@ hot-rows: Rows that many sessions fight over
 Indexes where sessions waited a long time for row and page locks, and where locks escalated to the whole table (sys.dm_db_index_operational_stats). MySQL, MariaDB and PostgreSQL keep no lock waits per table; see lock-time and Live.
 lock-escalations: Statements that lock a whole table
 Tables where one statement took so many row or page locks that SQL Server replaced them with a lock on the whole table (sys.dm_db_index_operational_stats). MySQL, MariaDB and PostgreSQL never escalate row locks.
-last-page-insert: Inserts that queue for the last page
-Indexes keyed on an ever-increasing value (identity, sequence, insert time) where concurrent inserts wait for the latch on the last page (PAGELATCH_EX).
+last-page-insert: Index page-latch contention
+Index-level in-memory page-latch waits, with possible causes separated from confirmed page and query evidence.
 untrusted-constraint: Unvalidated or disabled constraints
 SQL Server foreign keys and check constraints added or re-enabled WITH NOCHECK (or switched off), PostgreSQL CHECK constraints added NOT VALID, and YugabyteDB CHECK or foreign-key constraints awaiting validation.
 missing-histogram: Filter columns the optimizer has to guess about
@@ -710,52 +710,55 @@ fn latch(leaf_inserts: Option<f64>, optimize: Option<bool>) -> culprit_core::Ind
 }
 
 #[test]
-fn last_page_inserts_on_sql_server_2019() {
+fn page_latch_counters_without_insert_counts_leave_the_cause_unresolved() {
     says(
         &latched(Some(240.0), latch(None, Some(false))),
         r#"id: last-page-insert:shop.customers.pk_customers
-title: Inserts into customers queue for the last page of pk_customers
-summary: pk_customers starts with a value that only grows (id), so every insert goes to the same last page. Concurrent inserts wait for each other's latch on it (PAGELATCH_EX): 5.0K waits, 10 min in all since the index was loaded. It gets worse with more concurrent writers.
+title: Page-latch waits on pk_customers
+summary: pk_customers recorded 5.0K in-memory page-latch waits (10 min) over its counter lifetime. The counters do not identify the hot page, latch holder or responsible queries.
 impact: 10 min latch waits
 metric: Page latch waits
 metric: Time waiting
-fix: SQL Server 2019 can pace concurrent inserts into a sequential key to help sustain throughput when many writers compete for the last page: try OPTIMIZE_FOR_SEQUENTIAL_KEY on this index and compare throughput. It's a metadata change and takes effect at once.
-sql: ALTER INDEX [pk_customers] ON [shop].[customers] SET (OPTIMIZE_FOR_SEQUENTIAL_KEY = ON);
-verify: Re-scan to confirm OPTIMIZE_FOR_SEQUENTIAL_KEY is ON. Compare completed inserts per second and the time to insert the same batch before and after, under comparable writer concurrency: the goal is better insert throughput under contention.
-verify: Page-latch waits can continue, and BTREE_INSERT_FLOW_CONTROL waits may appear. Compare measurements over equal intervals; cumulative wait totals need not stop growing."#,
+fix: Observe current PAGELATCH waits and map the reported database, file and page to the index. Identify waiting statements and any owner evidence separately. Confirm the access pattern before changing an index key or concurrency.
+verify: Confirm that current PAGELATCH wait resources map to this index; distinguish them from PAGEIOLATCH storage waits and PFS/GAM/SGAM allocation pages.
+verify: After fixing the confirmed cause, compare completed statements per second and their time under comparable load. Compare the increase in page-latch wait time over equal intervals; cumulative totals need not stop growing."#,
     );
 }
 
 #[test]
-fn hot_pages_counted_for_half_an_hour() {
+fn small_insert_counts_do_not_establish_a_hot_row_cause() {
     says(
         &latched(Some(0.5), latch(Some(100.0), Some(false))),
         r#"id: last-page-insert:shop.customers.pk_customers
-title: Sessions queue for the latch on a few hot pages of pk_customers
-summary: pk_customers waited 5.0K times for page latches (10 min in all) since the index was loaded, but took only 100 inserts: the waits are sessions reading and changing the same few rows over and over (a counter, a queue table), not inserts on its last page.
+title: Page-latch waits on pk_customers
+summary: pk_customers recorded 5.0K in-memory page-latch waits (10 min) over its counter lifetime. The counters do not identify the hot page, latch holder or responsible queries.
 impact: 10 min latch waits
 metric: Page latch waits
 metric: Time waiting
 metric: Inserts
-fix: Spread the hot rows (several counter rows summed when read, or a queue that hands out rows by key rather than from one end), and keep the transactions that change them short. OPTIMIZE_FOR_SEQUENTIAL_KEY paces inserts only, so it wouldn't help here.
-verify: Compare completed row changes per second and their time under comparable load before and after. Compare the increase in page-latch wait time over equal intervals for that work; cumulative wait totals need not stop growing.
+fix: Capture current PAGELATCH wait resources and the statements waiting on them. If this confirms last-page insert contention, test OPTIMIZE_FOR_SEQUENTIAL_KEY under representative writer concurrency and compare throughput. Waiting statements are affected participants; their presence does not identify the latch holder.
+verify: Confirm that current PAGELATCH wait resources map to this index; distinguish them from PAGEIOLATCH storage waits and PFS/GAM/SGAM allocation pages.
+verify: After fixing the confirmed cause, compare completed statements per second and their time under comparable load. Compare the increase in page-latch wait time over equal intervals; cumulative totals need not stop growing.
+caveat: The leading key (id) is append-oriented and inserts were recorded. Last-page insert contention is a candidate; the counters do not establish that it caused these waits.
 caveat: SQL Server has counted these latch waits for 30 minutes. At least an hour is needed to assess a rate."#,
     );
 }
 
 #[test]
-fn last_page_inserts_before_sql_server_2019_counted_since_an_unknown_start() {
+fn append_key_and_insert_counts_establish_a_candidate_not_a_last_page_cause() {
     says(
         &latched(None, latch(Some(9_000.0), None)),
         r#"id: last-page-insert:shop.customers.pk_customers
-title: Inserts into customers queue for the last page of pk_customers
-summary: pk_customers starts with a value that only grows (id), so every insert goes to the same last page. Concurrent inserts wait for each other's latch on it (PAGELATCH_EX): 5.0K waits, 10 min in all since the index was loaded. It gets worse with more concurrent writers.
+title: Page-latch waits on pk_customers
+summary: pk_customers recorded 5.0K in-memory page-latch waits (10 min) over its counter lifetime. The counters do not identify the hot page, latch holder or responsible queries.
 impact: 10 min latch waits
 metric: Page latch waits
 metric: Time waiting
 metric: Inserts
-fix: Before SQL Server 2019 the remedies change the key: lead the index with a value that spreads inserts (a hashed or partitioned key column), or batch inserts so fewer sessions compete.
-verify: Compare completed inserts per second and their time under comparable load before and after. Compare the increase in page-latch wait time over equal intervals for that work; cumulative wait totals need not stop growing.
+fix: Observe current PAGELATCH waits and map the reported database, file and page to the index. Identify waiting statements and any owner evidence separately. Confirm the access pattern before changing an index key or concurrency.
+verify: Confirm that current PAGELATCH wait resources map to this index; distinguish them from PAGEIOLATCH storage waits and PFS/GAM/SGAM allocation pages.
+verify: After fixing the confirmed cause, compare completed statements per second and their time under comparable load. Compare the increase in page-latch wait time over equal intervals; cumulative totals need not stop growing.
+caveat: The leading key (id) is append-oriented and inserts were recorded. Last-page insert contention is a candidate; the counters do not establish that it caused these waits.
 caveat: SQL Server keeps latch waits for the index metadata’s lifetime. Its starting time is unknown, so the total does not establish a rate."#,
     );
 }

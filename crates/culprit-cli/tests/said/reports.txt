@@ -45,7 +45,7 @@ $ culprit --format text findings x --report <repo>/fixtures/mssql-demo.report.js
 Information and history (3)
  21  ○  Row locks on support_tickets escalated to a table lock 5 times since its indexes were loaded into memory
        lock-escalations:shop.support_tickets
- 22  ○  Inserts into hot queue for the last page of pk_hot
+ 22  ○  Page-latch waits on pk_hot
        last-page-insert:archive.hot.pk_hot
  23  ○  An update of wide writes 7.9 KB of transaction log per row it changes
        log-volume:255
@@ -993,7 +993,7 @@ SQL Server 2022 · database `culprit_demo` · Sun Oct 11 12:13 UTC
 | # | Status | Finding | Impact | Id |
 |---|---|---|---|---|
 | 21 | Information | Row locks on support_tickets escalated to a table lock 5 times since its indexes were loaded into memory | 5 table locks | `lock-escalations:shop.support_tickets` |
-| 22 | Information | Inserts into hot queue for the last page of pk_hot | 53.6 s latch waits | `last-page-insert:archive.hot.pk_hot` |
+| 22 | Information | Page-latch waits on pk_hot | 53.6 s latch waits | `last-page-insert:archive.hot.pk_hot` |
 | 23 | History | An update of wide writes 7.9 KB of transaction log per row it changes | 232 MB of transaction log | `log-volume:255` |
 $ culprit --format md analyze <repo>/fixtures/pg-demo.report.json
 # Culprit report: pg-demo

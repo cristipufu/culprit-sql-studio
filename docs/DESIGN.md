@@ -12,6 +12,7 @@ Culprit connects to a database and tells you, in plain language, what is making 
 6. **Agent-first.** Everything the app shows, the CLI prints as stable JSON with stable IDs. Agents reference connections by name and never see credentials.
 7. **Fast.** Window on screen in < 300 ms, last scan rendered instantly from disk, fresh scan in < 5 s, every interaction < 100 ms, keyboard for everything.
 8. **Honest.** Each finding states its confidence and the data window it is based on ("Query Store, last 7 days"). Missing permissions or features are shown as locked checks with the exact fix, never as silence.
+9. **Find the cause developers can fix.** Apply this to every signal: connect the symptom to evidenced queries, transactions and resources, then a code or database change and verification. Distinguish established causes, supported explanations, candidates and unknowns. A waiting query is affected; it is not automatically the owner or cause. When the source cannot establish attribution, say what evidence is missing and give a bounded next step.
 
 ## Who it is for
 

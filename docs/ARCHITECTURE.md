@@ -773,6 +773,14 @@ displayed report's id, and a captured plan is reused only for its recorded `plan
 
 Every check and insight follows these. Each has one implementation; use it rather than restating it.
 
+Attribution is part of evidence for every signal. Keep an observed symptom separate from an established cause,
+a supported explanation, a candidate and an unknown. Link affected statements separately from responsible
+transactions or resource owners. Matching time, SQL text, a cumulative counter or an append-oriented key does not
+establish ownership. A cause-specific setting or schema change needs evidence for that cause; otherwise the next
+step collects the missing facts within the existing read budgets. In particular, index page-latch totals identify
+an index's waits, not the page, latch mode, holder or query. Insert counts cannot distinguish last-page contention
+from hot-row updates, and enabling insert pacing does not prove that remaining waits are resolved.
+
 | Rule | Where |
 |---|---|
 | A rate compared with a threshold needs at least an hour of data; a sentence that says "a day" needs 20 hours, otherwise it says what was counted and over how long. Runs said as they came: a burst is when it ran, in any window of an hour or more ("750 runs on Oct 11, 15:51–15:55 UTC"), runs on a few of the window's days are those days ("120K runs on Oct 11 and Oct 17", from the timeline's buckets), fewer runs than days a count ("1 run in the last 6 days"). A burst is graded on its total and never extrapolated to a day; a statement-level bar a day (chatty's 20K runs, an amount behind a severity) judges it at the rate it ran while it ran. | `RATE_MIN_HOURS`, `PER_DAY_MIN_HOURS`; `support::rate_per_day`, `rate_per_day_of`, `at_least_per_day_of`, `counter_rate_per_day`, `how_many`, `runs_phrase`, `runs_of`; `Workload::cadence`, `rate_per_day_of`, `how_often_of` |

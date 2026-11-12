@@ -539,31 +539,38 @@ fn large_row_verification_separates_projection_from_storage_changes() {
 }
 
 #[test]
-fn sequential_key_pacing_is_verified_by_throughput_not_zero_wait_growth() {
-    let mut s = demo("mssql-demo");
+fn aggregate_page_latches_do_not_authorize_a_cause_specific_change_or_hide_paced_indexes() {
+    let original = demo("mssql-demo");
     let id = "last-page-insert:archive.hot.pk_hot";
-    let r = analyze(s.clone());
-    let f = r.findings.iter().find(|f| f.id == id).expect("demo's contended insert index");
-    assert!(f.verify[0].contains("OPTIMIZE_FOR_SEQUENTIAL_KEY is ON"), "{:?}", f.verify);
-    assert!(f.verify[0].contains("completed inserts per second"), "{:?}", f.verify);
-    assert!(f.verify[0].contains("comparable writer concurrency"), "{:?}", f.verify);
-    assert!(f.verify[1].contains("BTREE_INSERT_FLOW_CONTROL"), "{:?}", f.verify);
-    assert!(f.verify[1].contains("cumulative wait totals need not stop growing"), "{:?}", f.verify);
-    fn hot(s: &mut Snapshot) -> &mut IndexContention {
-        s.indexes.iter_mut().find(|i| i.schema == "archive" && i.name == "pk_hot").unwrap().contention.as_mut().unwrap()
+    for sequential in [false, true] {
+        for inserts in [None, Some(0.0), Some(1.0), Some(1_000_000.0)] {
+            for paced in [None, Some(false), Some(true)] {
+                let mut snapshot = original.clone();
+                let contention = snapshot
+                    .indexes
+                    .iter_mut()
+                    .find(|index| index.schema == "archive" && index.name == "pk_hot")
+                    .unwrap()
+                    .contention
+                    .as_mut()
+                    .unwrap();
+                contention.sequential_key = sequential;
+                contention.leaf_inserts = inserts;
+                contention.optimize_for_sequential_key = paced;
+                let report = analyze(snapshot);
+                let finding = report
+                    .findings
+                    .iter()
+                    .find(|finding| finding.id == id)
+                    .expect("remaining page-latch waits need evidence even when insert pacing is enabled");
+                assert!(finding.queries.is_empty(), "aggregate counters identify no responsible query");
+                assert!(
+                    finding.fix.as_ref().unwrap().sql.is_none(),
+                    "a candidate cause cannot authorize a setting or key change"
+                );
+            }
+        }
     }
-    hot(&mut s).optimize_for_sequential_key = Some(true);
-    assert!(analyze(s.clone()).findings.iter().all(|f| f.id != id));
-    // Older versions get key/batching advice; a mostly-updated hot page gets row-change verification.
-    hot(&mut s).optimize_for_sequential_key = None;
-    let r = analyze(s.clone());
-    let f = r.findings.iter().find(|f| f.id == id).unwrap();
-    assert!(f.verify[0].contains("inserts per second"), "{:?}", f.verify);
-    assert!(!f.verify.iter().any(|v| v.contains("BTREE_INSERT_FLOW_CONTROL")), "{:?}", f.verify);
-    hot(&mut s).leaf_inserts = Some(1.0);
-    let r = analyze(s);
-    let f = r.findings.iter().find(|f| f.id == id).unwrap();
-    assert!(f.verify[0].contains("row changes per second"), "{:?}", f.verify);
 }
 
 #[test]

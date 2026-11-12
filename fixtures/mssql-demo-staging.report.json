@@ -238,7 +238,7 @@
       "check": "last-page-insert",
       "reason": "This scan did not record the required source's collection outcome.",
       "status": "insufficient-evidence",
-      "title": "Inserts that queue for the last page"
+      "title": "Index page-latch contention"
     },
     {
       "check": "untrusted-constraint",

@@ -99,8 +99,8 @@ hot-rows          Rows that many sessions fight over
                   SQL Server · Indexes where sessions waited a long time for row and page locks, and where locks escalated to the whole table (sys.dm_db_index_operational_stats). MySQL, MariaDB and PostgreSQL keep no lock waits per table; see lock-time and Live.
 lock-escalations  Statements that lock a whole table
                   SQL Server · Tables where one statement took so many row or page locks that SQL Server replaced them with a lock on the whole table (sys.dm_db_index_operational_stats). MySQL, MariaDB and PostgreSQL never escalate row locks.
-last-page-insert  Inserts that queue for the last page
-                  SQL Server · Indexes keyed on an ever-increasing value (identity, sequence, insert time) where concurrent inserts wait for the latch on the last page (PAGELATCH_EX).
+last-page-insert  Index page-latch contention
+                  SQL Server · Index-level in-memory page-latch waits, with possible causes separated from confirmed page and query evidence.
 untrusted-constraint  Unvalidated or disabled constraints
                   SQL Server, PostgreSQL, YugabyteDB · SQL Server foreign keys and check constraints added or re-enabled WITH NOCHECK (or switched off), PostgreSQL CHECK constraints added NOT VALID, and YugabyteDB CHECK or foreign-key constraints awaiting validation.
 missing-histogram  Filter columns the optimizer has to guess about

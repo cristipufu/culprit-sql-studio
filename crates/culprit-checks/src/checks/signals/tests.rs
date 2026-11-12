@@ -288,8 +288,9 @@ fn hot_rows_and_last_page() {
     assert_eq!(hot[0].actionability, culprit_core::Actionability::Information);
     assert!(hot[0].summary.contains("escalated"));
     let page = LastPageInsertCheck.run(&s);
-    assert_eq!(page[0].title, format!("Inserts into {table} queue for the last page of {index}"));
-    assert!(page[0].fix.as_ref().unwrap().sql.as_ref().unwrap().contains("OPTIMIZE_FOR_SEQUENTIAL_KEY = ON"));
+    assert_eq!(page[0].title, format!("Page-latch waits on {index}"));
+    assert!(page[0].fix.as_ref().unwrap().sql.is_none());
+    assert!(page[0].queries.is_empty());
 }
 
 fn escalating(escalations: f64, attempts: f64, lock_wait_ms: f64) -> IndexContention {

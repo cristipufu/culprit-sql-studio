@@ -607,13 +607,13 @@
   },
   {
     "category": "indexes",
-    "description": "Indexes keyed on an ever-increasing value (identity, sequence, insert time) where concurrent inserts wait for the latch on the last page (PAGELATCH_EX).",
+    "description": "Index-level in-memory page-latch waits, with possible causes separated from confirmed page and query evidence.",
     "engines": [
       "mssql"
     ],
     "id": "last-page-insert",
     "requires": [],
-    "title": "Inserts that queue for the last page"
+    "title": "Index page-latch contention"
   },
   {
     "category": "maintenance",

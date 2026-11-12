@@ -334,7 +334,7 @@
       "check": "last-page-insert",
       "reason": null,
       "status": "findings",
-      "title": "Inserts that queue for the last page"
+      "title": "Index page-latch contention"
     },
     {
       "check": "untrusted-constraint",
@@ -1778,14 +1778,15 @@
       "actionability": "information",
       "category": "indexes",
       "caveats": [
+        "The leading key (id) is append-oriented and inserts were recorded. Last-page insert contention is a candidate; the counters do not establish that it caused these waits.",
         "SQL Server keeps latch waits for the index metadata’s lifetime. Its starting time is unknown, so the total does not establish a rate."
       ],
       "check": "last-page-insert",
       "confidence": "medium",
       "fix": {
         "cost": null,
-        "sql": "ALTER INDEX [pk_hot] ON [archive].[hot] SET (OPTIMIZE_FOR_SEQUENTIAL_KEY = ON);",
-        "summary": "SQL Server 2019 can pace concurrent inserts into a sequential key to help sustain throughput when many writers compete for the last page: try OPTIMIZE_FOR_SEQUENTIAL_KEY on this index and compare throughput. It's a metadata change and takes effect at once."
+        "sql": null,
+        "summary": "Capture current PAGELATCH wait resources and the statements waiting on them. If this confirms last-page insert contention, test OPTIMIZE_FOR_SEQUENTIAL_KEY under representative writer concurrency and compare throughput. Waiting statements are affected participants; their presence does not identify the latch holder."
       },
       "id": "last-page-insert:archive.hot.pk_hot",
       "impact": {
@@ -1825,12 +1826,12 @@
         "kind": "index",
         "name": "archive.hot.pk_hot"
       },
-      "summary": "pk_hot starts with a value that only grows (id), so every insert goes to the same last page. Concurrent inserts wait for each other's latch on it (PAGELATCH_EX): 106K waits, 53.6 s in all since the index was loaded. It gets worse with more concurrent writers.",
-      "title": "Inserts into hot queue for the last page of pk_hot",
+      "summary": "pk_hot recorded 106K in-memory page-latch waits (53.6 s) over its counter lifetime. The counters do not identify the hot page, latch holder or responsible queries.",
+      "title": "Page-latch waits on pk_hot",
       "verification_basis": "rescan",
       "verify": [
-        "Re-scan to confirm OPTIMIZE_FOR_SEQUENTIAL_KEY is ON. Compare completed inserts per second and the time to insert the same batch before and after, under comparable writer concurrency: the goal is better insert throughput under contention.",
-        "Page-latch waits can continue, and BTREE_INSERT_FLOW_CONTROL waits may appear. Compare measurements over equal intervals; cumulative wait totals need not stop growing."
+        "Confirm that current PAGELATCH wait resources map to this index; distinguish them from PAGEIOLATCH storage waits and PFS/GAM/SGAM allocation pages.",
+        "After fixing the confirmed cause, compare completed statements per second and their time under comparable load. Compare the increase in page-latch wait time over equal intervals; cumulative totals need not stop growing."
       ]
     },
     {
