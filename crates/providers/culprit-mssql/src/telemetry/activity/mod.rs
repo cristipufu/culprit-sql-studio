@@ -82,7 +82,7 @@ pub(crate) async fn capture<R: crate::read::NativeRead>(
     let keys: BTreeSet<_> = selected.observations.iter().map(|row| row.key.clone()).collect();
     let details = reader.enrich(&mut frame, &keys, false, MAX_ACTIVITY_SQL_BYTES).await?;
     let description = CollectionDescription {
-        database: frame.context.database.clone(),
+        target: frame.context.database.clone().into(),
         source: culprit_core::source_id::SESSIONS.into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {

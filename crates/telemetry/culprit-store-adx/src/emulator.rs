@@ -81,7 +81,7 @@ fn scope(range: &CommittedRange) -> BTreeMap<String, Value> {
     BTreeMap::from([
         ("c".into(), json!(range.manifest().contract.id().unwrap())),
         ("s".into(), json!(range.store_id())),
-        ("d".into(), json!(range.manifest().source.database.telemetry_id().unwrap())),
+        ("d".into(), json!(range.manifest().source.target.telemetry_id().unwrap())),
     ])
 }
 struct Scenario {
@@ -180,6 +180,7 @@ async fn functional_contract_and_canonical_sets() {
         emulator.management(true, &command);
     }
     let catalog = SchemaCatalog::new().unwrap();
+    shared_resource_scopes(&emulator, &catalog).await;
     let first = Scenario::new(Recovery::new("adx:test", catalog.digest()), emulator.clone()).await;
     first.dispatch(&emulator).await;
     assert_eq!(emulator.count("CulpritResourceSamplesV1Rows", &first.range, false).await, 0);
@@ -290,4 +291,33 @@ async fn functional_contract_and_canonical_sets() {
     }
     assert!(verify(&later.sink, &later.range, VerificationBudget::default()).await.is_err());
     assert_eq!(emulator.values(query.into(), scope(&first.range), columns).await, vec![vec![json!(12.5)]]);
+}
+
+async fn shared_resource_scopes(emulator: &Arc<Emulator>, catalog: &SchemaCatalog) {
+    let mut sequence = 1_000;
+    for kind in
+        [SharedResourceKind::Instance, SharedResourceKind::Pool, SharedResourceKind::Cluster, SharedResourceKind::Node]
+    {
+        for namespace in ["native-namespace-a", "native-namespace-b"] {
+            let (source, record) = culprit_collector::analytical::test_support::shared_resource(kind, namespace);
+            let scenario = Scenario::new(
+                Recovery::capture("adx:test", catalog.digest(), source, vec![record], sequence),
+                emulator.clone(),
+            )
+            .await;
+            sequence += 1;
+            scenario.dispatch(emulator).await;
+            scenario.publish(emulator).await;
+            assert_eq!(emulator.count("CulpritResourceSamplesV1Rows", &scenario.range, false).await, 1);
+            let text = "declare query_parameters(c:string,s:string,d:string); CulpritResourceSamplesV1Rows(c,s,d,datetime(2019),datetime(2021)) | project ResourceKind, OwnsSubject=tobool(Metrics[0].describes_subject)";
+            let columns = vec![
+                Column { column_name: "ResourceKind".into(), column_type: "string".into() },
+                Column { column_name: "OwnsSubject".into(), column_type: "bool".into() },
+            ];
+            assert_eq!(
+                emulator.values(text.into(), scope(&scenario.range), columns).await,
+                vec![vec![serde_json::to_value(kind).unwrap(), json!(true)]]
+            );
+        }
+    }
 }

@@ -72,9 +72,12 @@ impl ControlPublisher {
             Ok(json!({"batch_id":batch.batch_id,"stream":batch.stream,"table":table,"rows":batch.rows.len(),
                 "native_object":batch.object,"native_sha256":batch.sha256,"bytes":batch.bytes,"delivery_required":batch.delivery_required}))
         }).collect::<Result<Vec<_>>>()?;
+        // Coverage is public analytical evidence; raw target identities remain in the private recovery manifest.
         Ok(json!({"_culprit":capture_context(manifest,range.manifest_digest())?,"recovery_store_id":range.store_id(),
             "receipts_sha256":receipts,"publication_id":publication_id,"capture":manifest.capture,
-            "source":manifest.source,"read_metrics":manifest.read_metrics,"batches":batches}))
+            "source":{"source":manifest.source.source,"continuity":manifest.source.continuity,
+                "observation":manifest.source.observation},
+            "read_metrics":manifest.read_metrics,"batches":batches}))
     }
 }
 fn invalid() -> culprit_core::Error {

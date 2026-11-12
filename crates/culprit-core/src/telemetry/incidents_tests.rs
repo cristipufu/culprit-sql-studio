@@ -3,7 +3,8 @@ use crate::telemetry::activity::tests::request;
 
 fn source(at: &str, qualifying: u32) -> CollectionDescription {
     CollectionDescription {
-        database: crate::DatabaseIdentity::server(crate::Engine::Postgres, "fixture", "fixture.invalid", 5432, None),
+        target: crate::DatabaseIdentity::server(crate::Engine::Postgres, "fixture", "fixture.invalid", 5432, None)
+            .into(),
         source: "activity-fixture".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {

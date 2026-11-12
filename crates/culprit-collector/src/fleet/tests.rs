@@ -96,7 +96,7 @@ impl FleetBackend for Backend {
             finished_at: Some("2026-11-10T12:00:01Z".into()),
             request,
             description: Some(CollectionDescription {
-                database: self.database.lock().unwrap().clone(),
+                target: self.database.lock().unwrap().clone().into(),
                 source: "query_store".into(),
                 continuity: SourceContinuity::Unverified,
                 observation,

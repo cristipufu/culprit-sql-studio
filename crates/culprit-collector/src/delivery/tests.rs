@@ -18,13 +18,14 @@ fn prepared_database(root: &std::path::Path, sequence: u64, database: &str) -> P
         budget: CollectionBudget::default(),
     };
     let source = CollectionDescription {
-        database: culprit_core::DatabaseIdentity::server(
+        target: culprit_core::DatabaseIdentity::server(
             culprit_core::Engine::Mssql,
             database,
             "fixture.invalid",
             1433,
             None,
-        ),
+        )
+        .into(),
         source: "resources".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::RetainedSamples(SampleHistoryDescription {

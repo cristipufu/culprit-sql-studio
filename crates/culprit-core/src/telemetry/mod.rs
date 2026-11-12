@@ -49,6 +49,7 @@ mod state;
 mod statement_counters;
 mod statistics;
 mod tables;
+mod target;
 mod transactions;
 mod triggers;
 mod tuning;
@@ -94,6 +95,7 @@ pub use state::*;
 pub use statement_counters::*;
 pub use statistics::*;
 pub use tables::*;
+pub use target::*;
 pub use transactions::*;
 pub use triggers::*;
 pub use tuning::*;
@@ -379,13 +381,13 @@ impl TelemetryRecord {
         let valid_identity = match &mut record {
             Self::QueryDefinition(row) => {
                 if let DefinitionPayload::Available { text, .. } = &row.sql {
-                    row.sql = DefinitionPayload::sql(text, source.database.engine);
+                    row.sql = DefinitionPayload::sql(text, source.target.engine());
                 }
                 row.id == row.identity.definition_id(source)?
             }
             Self::PlanDefinition(row) => {
                 if let DefinitionPayload::Available { text, .. } = &row.plan {
-                    row.plan = DefinitionPayload::plan(text, source.database.engine);
+                    row.plan = DefinitionPayload::plan(text, source.target.engine());
                 }
                 row.id == row.identity.definition_id(source)?
                     && row
@@ -398,29 +400,29 @@ impl TelemetryRecord {
                 source.observation.accepts_sample(&row.at)
             }
             Self::Activity(row) => {
-                row.redact(source.database.engine);
+                row.redact(source.target.engine());
                 source.observation.activity().is_some()
             }
             Self::Incident(row) => {
-                row.state.observation.redact(source.database.engine);
+                row.state.observation.redact(source.target.engine());
                 source.observation.activity().is_some()
             }
             Self::ActivityCheckpoint(row) => {
-                row.observation.redact(source.database.engine);
+                row.observation.redact(source.target.engine());
                 source.observation.activity().is_some()
             }
             Self::Deadlock(row) => {
                 row.at = canonical_time(&row.at)?;
-                row.redact(source.database.engine);
+                row.redact(source.target.engine());
                 source.observation.events().is_some_and(|history| history.accepts(&row.at))
             }
             Self::Blocking(_) => source.observation.activity().is_some(),
             Self::Operational(row) => {
-                row.fact.redact(source.database.engine);
+                row.fact.redact(source.target.engine());
                 source.observation.accepts_snapshot_record(row.stream(), &row.source)
             }
             Self::ObjectDefinition(row) => {
-                *row = row.for_export(source.database.engine)?;
+                *row = row.for_export(source.target.engine())?;
                 source.observation.accepts_snapshot_record(TelemetryStream::ObjectDefinitions, &row.source)
             }
             Self::WaitCounter(row) => {
@@ -433,7 +435,7 @@ impl TelemetryRecord {
                 source.observation.accepts_snapshot_record(TelemetryStream::SettingObservations, &row.source)
             }
             Self::Tuning(row) => {
-                row.fact.redact(source.database.engine);
+                row.fact.redact(source.target.engine());
                 source.observation.accepts_snapshot_record(TelemetryStream::TuningObservations, &row.source)
             }
             Self::QueryRuntime(row) => source.accepts_measurement(&row.key),

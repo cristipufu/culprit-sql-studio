@@ -31,7 +31,7 @@ impl ObservationReader for ActivityReader {
             .min(16 * 1024);
         native::activity::enrich(&mut self.io, &mut evidence.observations, cap).await?;
         let description = CollectionDescription {
-            database: meta.database.clone(),
+            target: meta.database.clone().into(),
             source: "mysql-persistent-activity".into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::Activity(ActivitySnapshotDescription {

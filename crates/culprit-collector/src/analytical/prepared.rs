@@ -2,11 +2,11 @@
 use culprit_core::{Result, telemetry::*};
 use serde_json::{Value, json};
 
-pub const PREPARATION_VERSION: u32 = 1;
+pub const PREPARATION_VERSION: u32 = 2;
 const MAX_PREVIEW_BYTES: usize = 1024;
 const MAX_INLINE_DETAIL_BYTES: usize = 128 * 1024;
 
-pub fn prepare(input: &mut Value, record: &TelemetryRecord) -> Result<()> {
+pub fn prepare(input: &mut Value, record: &TelemetryRecord, target: &CollectionTarget) -> Result<()> {
     input["_projection"] = json!({"payloads":[]});
     for field in record.definition_payloads() {
         let pointer = field.pointer;
@@ -17,6 +17,18 @@ pub fn prepare(input: &mut Value, record: &TelemetryRecord) -> Result<()> {
         input["_projection"]["payloads"].as_array_mut().ok_or_else(invalid)?.push(reference);
     }
     match record {
+        TelemetryRecord::ResourceSample(row) => {
+            let metrics = row
+                .metrics
+                .iter()
+                .map(|metric| {
+                    let mut value = serde_json::to_value(metric).map_err(|_| invalid())?;
+                    value["describes_subject"] = json!(metric.describes_subject(target));
+                    Ok(value)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            input["_projection"]["resource_metrics"] = json!(metrics);
+        }
         TelemetryRecord::Activity(_) => input["_projection"]["activity"] = input["record"]["data"].clone(),
         TelemetryRecord::Incident(_) => {
             input["_projection"]["activity"] = input["record"]["data"]["state"]["observation"].clone();

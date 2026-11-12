@@ -9,7 +9,7 @@ fn physical_storage_and_canonical_views_share_one_complete_contract() {
     assert!(script.contains("DateTime64(9, 'UTC')"));
     assert!(script.contains("Decimal(38, 0)"));
     assert!(script.contains("ORDER BY (RangeId, BatchId, RowOrdinal)"));
-    assert!(script.contains("PROJECTION ByDatabaseTime"));
+    assert!(script.contains("PROJECTION ByResourceTime"));
     for name in [
         "CulpritPublishedV1",
         "CulpritActivityHeadsV1",

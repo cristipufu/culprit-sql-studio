@@ -44,6 +44,12 @@ pub struct ResourceMetricSample {
     pub value: Option<f64>,
 }
 impl ResourceMetricSample {
+    /// A capacity denominator does not change which resource was measured. Broader or unresolved
+    /// context can explain a symptom but cannot be charged to the subject of this collection.
+    pub fn describes_subject(&self, target: &CollectionTarget) -> bool {
+        self.scope == target.measurement_scope()
+    }
+
     fn is_valid(&self) -> bool {
         !self.key.is_empty()
             && self.key.len() <= 128
@@ -101,13 +107,8 @@ mod tests {
     }
     fn source() -> CollectionDescription {
         CollectionDescription {
-            database: crate::DatabaseIdentity::server(
-                crate::Engine::Postgres,
-                "fixture",
-                "fixture.invalid",
-                5432,
-                None,
-            ),
+            target: crate::DatabaseIdentity::server(crate::Engine::Postgres, "fixture", "fixture.invalid", 5432, None)
+                .into(),
             source: "native-resources".into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::RetainedSamples(SampleHistoryDescription {
@@ -159,6 +160,30 @@ mod tests {
         assert!(!row.is_valid());
         row.metrics[0].value = Some(-1.0);
         assert!(!row.is_valid());
+    }
+
+    #[test]
+    fn measured_subject_is_independent_from_its_limit_denominator_across_every_engine() {
+        for engine in crate::Engine::ALL {
+            let database =
+                CollectionTarget::Database(DatabaseIdentity::server(engine, "db", "fixture.invalid", 1, None));
+            let pool = CollectionTarget::Shared(SharedResourceIdentity {
+                engine,
+                kind: SharedResourceKind::Pool,
+                namespace: NativeIdentity::new("instance"),
+                native: NativeIdentity::new("pool"),
+            });
+            let mut metric = sample().metrics.remove(0);
+            metric.limit_basis = ResourceLimitBasis::PoolLimit;
+            assert!(metric.describes_subject(&database));
+            assert!(!metric.describes_subject(&pool));
+            metric.scope = crate::MeasurementScope::Pool;
+            assert!(metric.describes_subject(&pool));
+            assert!(!metric.describes_subject(&database));
+            metric.scope = crate::MeasurementScope::Unknown;
+            assert!(!metric.describes_subject(&pool));
+            assert!(!metric.describes_subject(&database));
+        }
     }
     #[test]
     fn retention_bounds_do_not_turn_expired_history_into_complete_emptiness() {

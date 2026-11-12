@@ -54,7 +54,7 @@ pub(super) async fn step(
         journal.save(&job.key, checkpoint).await?;
     }
     let scan = checkpoint.history.as_ref().ok_or_else(state_failed)?;
-    scan.validate(job, checkpoint.database.as_ref(), &policy)?;
+    scan.validate(job, checkpoint.target.as_ref().and_then(CollectionTarget::database), &policy)?;
     if scan.pending.is_empty() {
         if cancellation.is_cancelled() {
             return work::failure(job, FleetWork::DiscoverIntervals, CollectionStop::Cancelled.error(), None);
@@ -62,7 +62,7 @@ pub(super) async fn step(
         return discover(backend, journal, job, checkpoint).await;
     }
     let interval = scan.pending.front().ok_or_else(state_failed)?.clone();
-    let database = checkpoint.database.as_ref().ok_or_else(state_failed)?;
+    let database = checkpoint.target.as_ref().and_then(CollectionTarget::database).ok_or_else(state_failed)?;
     let source = scan.source.as_ref().ok_or_else(state_failed)?.clone();
     let cutoff = parse_time(scan.observed_at.as_deref().ok_or_else(state_failed)?)?
         - TimeDelta::seconds(i64::from(policy.reconcile_seconds));
@@ -88,7 +88,7 @@ pub(super) async fn step(
         Err(error) => return work::failure(job, FleetWork::Capture, error, None),
     };
     if let Some(description) = &manifest.description {
-        checkpoint.pin_database(&description.database)?;
+        checkpoint.pin_target(&description.target)?;
         if description.source != source
             || !description.matches_request(&request)
             || description.query_history().is_none_or(|history| history.interval.native_id != interval.native_id)
@@ -156,7 +156,7 @@ async fn discover(
     {
         return work::failure(job, FleetWork::DiscoverIntervals, CollectionStop::InvalidPage.error(), None);
     }
-    checkpoint.pin_database(&page.database)?;
+    checkpoint.pin_target(&CollectionTarget::Database(page.database.clone()))?;
     let scan = checkpoint.history.as_mut().ok_or_else(state_failed)?;
     scan.source = Some(page.source);
     scan.observed_at = Some(page.observed_at);

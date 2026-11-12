@@ -61,7 +61,7 @@ impl<R: NativeRead> TelemetrySource for ResourceSource<R> {
         let (database, physical) = description::identity(&mut self.session, &self.host, self.port).await?;
         let inventory = self.inventory().await?;
         let description = CollectionDescription {
-            database,
+            target: database.into(),
             source: culprit_core::source_id::RESOURCES.into(),
             observation: SourceObservation::RetainedSamples(inventory.history.clone()),
             continuity: SourceContinuity::Unverified,
@@ -102,7 +102,7 @@ impl<R: NativeRead> TelemetrySource for ResourceSource<R> {
         let current = self.inventory().await?;
         self.progress.verified();
         Ok(culprit_core::telemetry::SourceCompletion::verified_if(
-            self.description.as_ref().is_some_and(|description| description.database == database)
+            self.description.as_ref().is_some_and(|description| description.target.database() == Some(&database))
                 && self.physical_incarnation.as_ref() == Some(&physical)
                 && self.inventory.as_ref().is_some_and(|before| {
                     before.same_rows(&current) && self.pager.complete(before.history.expected_samples)

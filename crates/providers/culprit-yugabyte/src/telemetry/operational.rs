@@ -31,7 +31,7 @@ impl SnapshotReader for OperationalReader {
     async fn describe(&mut self, _: &CollectionRequest) -> Result<CollectionDescription> {
         let meta = metadata::read(&mut self.io, &self.host, self.port).await?;
         let description = CollectionDescription {
-            database: meta.database.clone(),
+            target: meta.database.clone().into(),
             source: format!("ysql-operational-{}", meta.node),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::PagedSnapshot(PagedSnapshotDescription {

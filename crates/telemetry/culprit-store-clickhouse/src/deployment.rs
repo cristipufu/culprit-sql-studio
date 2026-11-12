@@ -81,7 +81,7 @@ fn create_table(schema: &Schema, layout: TableLayout, publication: bool) -> Stri
         .collect::<Vec<_>>();
     if publication {
         // Only completion rows need a second sort order. Data is looked up by published range IDs through its primary key.
-        columns.push("PROJECTION ByDatabaseTime (SELECT * ORDER BY (ContractId, RecoveryStoreId, DatabaseId, CollectedUntil, RangeId))".into());
+        columns.push("PROJECTION ByResourceTime (SELECT * ORDER BY (ContractId, RecoveryStoreId, ResourceId, CollectedUntil, RangeId))".into());
     }
     let engine = match layout {
         TableLayout::SingleNode => "MergeTree",
@@ -122,7 +122,7 @@ fn heads(snapshot: bool) -> String {
         .replace("$ARGS", arguments())
 }
 fn arguments() -> &'static str {
-    "contract={contract:String}, store={store:String}, database={database:String}, captured_from={captured_from:DateTime64(9, 'UTC')}, asof={asof:DateTime64(9, 'UTC')}"
+    "contract={contract:String}, store={store:String}, resource={resource:String}, captured_from={captured_from:DateTime64(9, 'UTC')}, asof={asof:DateTime64(9, 'UTC')}"
 }
 #[cfg(test)]
 mod tests;

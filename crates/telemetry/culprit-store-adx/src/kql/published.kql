@@ -1,7 +1,7 @@
-.create function CulpritPublishedV1(contract:string,store:string,database:string,captured_from:datetime,asof:datetime) {
+.create function CulpritPublishedV1(contract:string,store:string,resource:string,captured_from:datetime,asof:datetime) {
 let Observations=materialize(
     CulpritPublishedRangesV1
-    | where ContractId == contract and RecoveryStoreId == store and DatabaseId == database
+    | where ContractId == contract and RecoveryStoreId == store and ResourceId == resource
     | where SchemaDigest == "$SCHEMA" and CollectedUntil >= captured_from and CollectedUntil <= asof
     | project $PROJECTION
     | distinct $COLUMNS

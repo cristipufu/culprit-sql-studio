@@ -194,7 +194,8 @@ mod tests {
     }
     fn source() -> CollectionDescription {
         CollectionDescription {
-            database: crate::DatabaseIdentity::server(crate::Engine::Mssql, "fixture", "fixture.invalid", 1433, None),
+            target: crate::DatabaseIdentity::server(crate::Engine::Mssql, "fixture", "fixture.invalid", 1433, None)
+                .into(),
             source: "tuning-state".into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::Snapshot(StateSnapshotDescription {

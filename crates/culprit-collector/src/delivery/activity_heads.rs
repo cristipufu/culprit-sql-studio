@@ -82,7 +82,9 @@ impl ActivityHeads {
         let scope_id = source.captured_range()?.scope_id;
         let logical_source_id = source.logical_source_id()?;
         let mut endpoint = source.clone();
-        endpoint.database.incarnation = None;
+        if let culprit_core::telemetry::CollectionTarget::Database(database) = &mut endpoint.target {
+            database.incarnation = None;
+        }
         let endpoint_key = endpoint.logical_source_id()?;
         let candidate = ActivityHead {
             scope_id: scope_id.clone(),
@@ -168,6 +170,7 @@ fn invalid() -> culprit_core::Error {
 mod tests {
     use super::*;
     use crate::delivery::batch_tests::quiet_activity;
+    use culprit_core::telemetry::CollectionTarget;
     fn manifest() -> RangeManifest {
         let root = tempfile::tempdir().unwrap();
         quiet_activity(root.path()).manifest().clone()
@@ -202,7 +205,8 @@ mod tests {
         let first = manifest();
         heads.observe(&first, &first.digest().unwrap()).unwrap();
         let mut second = first.clone();
-        second.source.database.database = "other".into();
+        let CollectionTarget::Database(database) = &mut second.source.target else { panic!("database fixture") };
+        database.database = "other".into();
         revision(&mut second, 1, 2);
         heads.observe(&second, &second.digest().unwrap()).unwrap();
         let page = heads.page(None, 1, 2).unwrap();
@@ -212,7 +216,8 @@ mod tests {
         assert_eq!(last.heads.len(), 1);
         assert!(last.next_cursor.is_none());
         let mut replacement = first.clone();
-        replacement.source.database.incarnation = Some("new-native-database".into());
+        let CollectionTarget::Database(database) = &mut replacement.source.target else { panic!("database fixture") };
+        database.incarnation = Some("new-native-database".into());
         revision(&mut replacement, 1, 3);
         heads.observe(&replacement, &replacement.digest().unwrap()).unwrap();
         assert_eq!(heads.page(None, 10, 3).unwrap().heads.len(), 2);

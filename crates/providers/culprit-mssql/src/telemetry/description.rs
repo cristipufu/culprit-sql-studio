@@ -37,7 +37,7 @@ pub(super) async fn read<R: NativeRead>(
     let plan_upper_bound = plan_upper_bound(session).await?;
     Ok(Description {
         value: CollectionDescription {
-            database,
+            target: database.into(),
             source: culprit_core::source_id::QUERY_STORE.into(),
             observation: culprit_core::telemetry::SourceObservation::QueryHistory(
                 culprit_core::telemetry::QueryHistoryDescription {

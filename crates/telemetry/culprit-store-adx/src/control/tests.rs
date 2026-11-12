@@ -109,6 +109,49 @@ async fn an_empty_successful_capture_has_explicit_coverage_and_no_empty_data_blo
     query.replies.lock().unwrap().push_back(Reply::Rows(vec![values]));
     assert!(sink.publication_visible(&publication, &range).await.unwrap());
 }
+
+#[tokio::test]
+async fn shared_resource_publication_retains_coverage_but_keeps_native_identity_in_private_recovery() {
+    use culprit_collector::analytical::test_support::shared_resource;
+    use culprit_core::telemetry::SharedResourceKind;
+    for kind in
+        [SharedResourceKind::Instance, SharedResourceKind::Pool, SharedResourceKind::Cluster, SharedResourceKind::Node]
+    {
+        let temp = tempfile::tempdir().unwrap();
+        let catalog = SchemaCatalog::new().unwrap();
+        let (source, record) = shared_resource(kind, "private-namespace-canary");
+        let mut recovery = Recovery::capture("adx:test", catalog.digest(), source, vec![record], 2);
+        recovery.make_empty();
+        let recovery = Arc::new(recovery);
+        let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
+        let blobs = Arc::new(Blobs::default());
+        let query =
+            Arc::new(Queries { replies: Mutex::new(VecDeque::from([Reply::Audit(0)])), requests: Mutex::new(vec![]) });
+        let sink = crate::test_support::event_grid_sink(
+            range.manifest().contract.clone(),
+            recovery,
+            blobs.clone(),
+            query.clone(),
+            temp.path(),
+        )
+        .unwrap();
+        let verified = verify(&sink, &range, VerificationBudget::default()).await.unwrap();
+        let publication = sink.publish(&verified, &DeliveryAttempt::new(1).unwrap()).await.unwrap();
+        let values = {
+            let objects = blobs.objects.lock().unwrap();
+            let bytes = objects.values().next().unwrap();
+            assert!(!String::from_utf8_lossy(bytes).contains("private-namespace-canary"));
+            let row: Value = serde_json::from_slice(bytes).unwrap();
+            assert_eq!(row["ResourceKind"], serde_json::to_value(kind).unwrap());
+            let coverage: Value = serde_json::from_str(row["SourceDescription"].as_str().unwrap()).unwrap();
+            assert!(coverage.get("target").is_none());
+            assert_eq!(coverage["observation"], serde_json::to_value(&range.manifest().source.observation).unwrap());
+            returned(catalog.publication(), &row)
+        };
+        query.replies.lock().unwrap().push_back(Reply::Rows(vec![values]));
+        assert!(sink.publication_visible(&publication, &range).await.unwrap());
+    }
+}
 #[test]
 fn destination_and_schema_identity_are_checked_before_opening_scratch_or_dispatching_anything() {
     let temp = tempfile::tempdir().unwrap();

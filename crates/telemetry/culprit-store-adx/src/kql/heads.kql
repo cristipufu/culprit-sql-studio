@@ -1,6 +1,6 @@
-.create function $FUNCTION(contract:string,store:string,database:string,captured_from:datetime,asof:datetime) {
+.create function $FUNCTION(contract:string,store:string,resource:string,captured_from:datetime,asof:datetime) {
 let Observations=materialize(
-    CulpritPublishedV1(contract,store,database,captured_from,asof)
+    CulpritPublishedV1(contract,store,resource,captured_from,asof)
     | where RangeKind == "current" and $SELECTION
     $COMPLETE
 );

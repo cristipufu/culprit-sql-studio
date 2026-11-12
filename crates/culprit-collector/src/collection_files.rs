@@ -376,13 +376,14 @@ mod tests {
             .unwrap();
             files
                 .describe(CollectionDescription {
-                    database: culprit_core::DatabaseIdentity::server(
+                    target: culprit_core::DatabaseIdentity::server(
                         culprit_core::Engine::Mssql,
                         "sample",
                         "fixture.invalid",
                         1433,
                         None,
-                    ),
+                    )
+                    .into(),
                     source: "paged-fixture".into(),
                     continuity: SourceContinuity::Unverified,
                     observation: SourceObservation::PagedSnapshot(PagedSnapshotDescription {
@@ -471,13 +472,14 @@ mod tests {
             let mut files = ObservationFiles::create(&directory, request, capture).unwrap();
             files
                 .describe(CollectionDescription {
-                    database: culprit_core::DatabaseIdentity::server(
+                    target: culprit_core::DatabaseIdentity::server(
                         culprit_core::Engine::Mssql,
                         "db",
                         "fixture.invalid",
                         1433,
                         None,
-                    ),
+                    )
+                    .into(),
                     source: format!("{source}-state"),
                     continuity: SourceContinuity::Unverified,
                     observation: SourceObservation::PagedSnapshot(PagedSnapshotDescription {
@@ -528,13 +530,14 @@ mod tests {
         }
         files
             .describe(CollectionDescription {
-                database: culprit_core::DatabaseIdentity::server(
+                target: culprit_core::DatabaseIdentity::server(
                     culprit_core::Engine::Mssql,
                     "sample",
                     "fixture.invalid",
                     1433,
                     None,
-                ),
+                )
+                .into(),
                 source: "query-store".into(),
                 observation: culprit_core::telemetry::SourceObservation::QueryHistory(
                     culprit_core::telemetry::QueryHistoryDescription {

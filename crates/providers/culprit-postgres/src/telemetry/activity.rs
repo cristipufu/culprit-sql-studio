@@ -54,7 +54,7 @@ impl ObservationReader for ActivityReader {
         let observations: Vec<_> =
             frame.records.into_iter().filter_map(|row| row.facts).filter(|row| keys.contains(&row.key)).collect();
         let description = CollectionDescription {
-            database: meta.database.clone(),
+            target: meta.database.clone().into(),
             source: "pg_stat_activity".into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::Activity(ActivitySnapshotDescription {

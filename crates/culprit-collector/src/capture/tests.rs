@@ -21,13 +21,14 @@ impl TelemetrySource for Source {
     async fn describe(&mut self) -> Result<CollectionDescription> {
         self.0.entered.notify_one();
         Ok(CollectionDescription {
-            database: culprit_core::DatabaseIdentity::server(
+            target: culprit_core::DatabaseIdentity::server(
                 culprit_core::Engine::Mssql,
                 "fixture",
                 "localhost",
                 1433,
                 None,
-            ),
+            )
+            .into(),
             source: "fixture".into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::PagedSnapshot(PagedSnapshotDescription {

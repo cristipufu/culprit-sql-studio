@@ -297,7 +297,7 @@ impl SourceObservation {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq, Eq)]
 #[ts(export)]
 pub struct CollectionDescription {
-    pub database: DatabaseIdentity,
+    pub target: CollectionTarget,
     pub source: String,
     pub observation: SourceObservation,
     pub continuity: SourceContinuity,
@@ -338,7 +338,7 @@ impl CollectionDescription {
         }
     }
     pub fn matches_request(&self, request: &CollectionRequest) -> bool {
-        if self.source.is_empty() || self.database.database.is_empty() {
+        if self.source.is_empty() || !self.target.is_valid() {
             return false;
         }
         if let (SourceObservation::Activity(snapshot), CollectionSelection::Activity { policy }) =
@@ -378,7 +378,7 @@ impl CollectionDescription {
         };
         valid
             && !self.source.is_empty()
-            && !self.database.database.is_empty()
+            && self.target.is_valid()
             && TelemetryRange::TimeWindow { from: start.clone(), until: end.clone() }.canonical().ok() == expected.ok()
     }
 }

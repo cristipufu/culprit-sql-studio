@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ts_rs::TS;
 
-pub const EXPORT_FORMAT_VERSION: u32 = 10;
+pub const EXPORT_FORMAT_VERSION: u32 = 11;
 pub const REPRESENTATION_VERSION: u32 = 2;
 
 impl DatabaseIdentity {
@@ -26,12 +26,12 @@ pub fn valid_digest(value: &str) -> bool {
 impl CollectionDescription {
     /// Stable grouping for the latest complete observation set. Captured scopes retain native generations.
     pub fn logical_source_id(&self) -> Result<String> {
-        scoped_id("logical-source-v1", &self.database, &self.source, &())
+        target_scoped_id("logical-source-v1", &self.target, &self.source, &())
     }
     pub fn scoped_id(&self, domain: &str, identity: &impl Serialize) -> Result<String> {
         match self.observation.activity() {
-            Some(snapshot) => scoped_id(domain, &self.database, &self.source, &(&snapshot.epoch, identity)),
-            None => scoped_id(domain, &self.database, &self.source, identity),
+            Some(snapshot) => target_scoped_id(domain, &self.target, &self.source, &(&snapshot.epoch, identity)),
+            None => target_scoped_id(domain, &self.target, &self.source, identity),
         }
     }
     pub fn captured_range(&self) -> Result<super::CapturedRange> {
@@ -49,10 +49,25 @@ impl super::CapturedRange {
         interval: &super::TelemetryInterval,
     ) -> Result<Self> {
         Ok(Self {
-            scope_id: scoped_id("outbox-source-v1", database, source, &())?,
+            scope_id: target_scoped_id(
+                "outbox-source-v1",
+                &super::CollectionTarget::Database(database.clone()),
+                source,
+                &(),
+            )?,
             range: super::TelemetryRange::NativeInterval { interval: interval.clone() }.canonical()?,
         })
     }
+}
+fn target_scoped_id(
+    domain: &str,
+    target: &super::CollectionTarget,
+    source: &str,
+    identity: &impl Serialize,
+) -> Result<String> {
+    let bytes = serde_json::to_vec(&(domain, target.telemetry_id()?, source, identity))
+        .map_err(|_| super::CollectionStop::InvalidPage.error())?;
+    Ok(digest(&bytes))
 }
 fn scoped_id(domain: &str, database: &DatabaseIdentity, source: &str, identity: &impl Serialize) -> Result<String> {
     // A native server incarnation survives endpoint/alias changes. File IDs are scoped to their filesystem path.
@@ -214,7 +229,7 @@ mod tests {
         let mut database = DatabaseIdentity::server(crate::Engine::Mssql, "sample", "original.invalid", 1433, None);
         database.incarnation = Some("native-database-guid".into());
         CollectionDescription {
-            database,
+            target: database.into(),
             source: "query_store".into(),
             observation: crate::telemetry::SourceObservation::QueryHistory(crate::telemetry::QueryHistoryDescription {
                 interval: TelemetryInterval {
@@ -288,8 +303,9 @@ mod tests {
         )
         .unwrap();
         let mut renamed = source.clone();
-        renamed.database.database = "renamed".into();
-        renamed.database.location =
+        let super::super::CollectionTarget::Database(database) = &mut renamed.target else { panic!("database") };
+        database.database = "renamed".into();
+        database.location =
             crate::DatabaseLocation::Server { host: "renamed.invalid".into(), port: 1433, instance: None };
         if let super::super::SourceObservation::QueryHistory(history) = &mut renamed.observation {
             history.interval.from = "2020-01-01T08:00:00+02:00".into();
@@ -312,7 +328,8 @@ mod tests {
         changed.qualifiers.insert("initial_compile_at".into(), "2020-01-02T05:00:01Z".into());
         assert_ne!(old, changed.definition_id(&source).unwrap());
         let mut recreated = source.clone();
-        recreated.database.incarnation = Some("different-guid".into());
+        let super::super::CollectionTarget::Database(database) = &mut recreated.target else { panic!("database") };
+        database.incarnation = Some("different-guid".into());
         assert_ne!(old, plan().definition_id(&recreated).unwrap());
         // Native qualifier meaning and canonicalization belong to the adapter.
         changed = plan();

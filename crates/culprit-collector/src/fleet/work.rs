@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Checkpoint {
-    pub database: Option<culprit_core::DatabaseIdentity>,
+    pub target: Option<CollectionTarget>,
     pub last_until: Option<String>,
     pub pending: Option<CollectionRequest>,
     pub pending_gap: Option<TelemetryRange>,
@@ -65,7 +65,7 @@ pub(super) async fn execute(
         Err(error) => return failure(job, FleetWork::Capture, error, gap),
     };
     if let Some(source) = &manifest.description {
-        checkpoint.pin_database(&source.database)?;
+        checkpoint.pin_target(&source.target)?;
     }
     if manifest.request != request
         || manifest.description.as_ref().is_some_and(|source| !source.matches_request(&request))
@@ -108,11 +108,13 @@ pub(super) async fn execute(
 }
 
 impl Checkpoint {
-    pub fn pin_database(&mut self, database: &culprit_core::DatabaseIdentity) -> Result<()> {
-        if self.database.as_ref().is_some_and(|before| before != database) {
+    pub fn pin_target(&mut self, target: &CollectionTarget) -> Result<()> {
+        let current = target.telemetry_id()?;
+        let previous = self.target.as_ref().map(CollectionTarget::telemetry_id).transpose()?;
+        if previous.is_some_and(|before| before != current) {
             return Err(Error::invalid(culprit_core::t!("fleet.assignment_changed")));
         }
-        self.database = Some(database.clone());
+        self.target = Some(target.clone());
         Ok(())
     }
 }
@@ -187,4 +189,41 @@ pub(super) fn failure(job: &Job, work: FleetWork, error: Error, gap: Option<Tele
 }
 pub(super) fn parse_time(value: &str) -> Result<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(value).map(|at| at.with_timezone(&Utc)).map_err(|_| state_failed())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pool(namespace: &str) -> CollectionTarget {
+        CollectionTarget::Shared(SharedResourceIdentity {
+            engine: culprit_core::Engine::Mssql,
+            kind: SharedResourceKind::Pool,
+            namespace: NativeIdentity::new(namespace),
+            native: NativeIdentity::new("pool"),
+        })
+    }
+
+    #[test]
+    fn a_resource_change_or_invalid_identity_cannot_replace_the_pinned_subject() {
+        let mut checkpoint = Checkpoint::default();
+        let original = pool("instance-a");
+        checkpoint.pin_target(&original).unwrap();
+        assert!(checkpoint.pin_target(&pool("instance-b")).is_err());
+        assert!(checkpoint.pin_target(&pool("")).is_err());
+        assert_eq!(checkpoint.target.as_ref(), Some(&original));
+    }
+
+    #[test]
+    fn native_database_identity_survives_a_rename_without_permitting_a_recreated_database() {
+        let mut checkpoint = Checkpoint::default();
+        let mut database =
+            culprit_core::DatabaseIdentity::server(culprit_core::Engine::Postgres, "app", "first.invalid", 5432, None);
+        database.incarnation = Some("native-resource".into());
+        checkpoint.pin_target(&database.clone().into()).unwrap();
+        database.database = "renamed".into();
+        checkpoint.pin_target(&database.clone().into()).unwrap();
+        database.incarnation = Some("recreated".into());
+        assert!(checkpoint.pin_target(&database.into()).is_err());
+    }
 }

@@ -23,7 +23,7 @@ fn prepared_interval(root: &std::path::Path, backend: &Backend, contract: Contra
         }),
     };
     let source = CollectionDescription {
-        database: backend.database.lock().unwrap().clone(),
+        target: backend.database.lock().unwrap().clone().into(),
         source: "query_store".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::QueryHistory(QueryHistoryDescription {

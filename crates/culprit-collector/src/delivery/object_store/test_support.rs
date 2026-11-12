@@ -81,13 +81,14 @@ fn empty_range(contract: crate::delivery::contract::Contract, epoch: u64) -> cra
         }),
     };
     let source = CollectionDescription {
-        database: culprit_core::DatabaseIdentity::server(
+        target: culprit_core::DatabaseIdentity::server(
             culprit_core::Engine::Mssql,
             "db",
             "fixture.invalid",
             1433,
             None,
-        ),
+        )
+        .into(),
         source: "resources".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::RetainedSamples(SampleHistoryDescription {

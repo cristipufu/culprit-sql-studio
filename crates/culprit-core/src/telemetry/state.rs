@@ -104,7 +104,8 @@ mod paging_tests {
     use super::*;
     fn source() -> CollectionDescription {
         CollectionDescription {
-            database: crate::DatabaseIdentity::server(crate::Engine::Mssql, "sample", "fixture.invalid", 1433, None),
+            target: crate::DatabaseIdentity::server(crate::Engine::Mssql, "sample", "fixture.invalid", 1433, None)
+                .into(),
             source: "native-paged-state".into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::PagedSnapshot(PagedSnapshotDescription {
@@ -143,7 +144,7 @@ mod paging_tests {
     fn completion_adds_final_counts_and_times_without_changing_source_identity_or_scope() {
         let before = source();
         let completed = before.completed(SourceCompletion::Snapshot(completion())).unwrap().unwrap();
-        assert_eq!(before.database, completed.database);
+        assert_eq!(before.target, completed.target);
         assert_eq!(before.source, completed.source);
         assert_eq!(before.scoped_id("fixture", &"row").unwrap(), completed.scoped_id("fixture", &"row").unwrap());
         assert!(completed.observation.covers_request());

@@ -150,7 +150,7 @@ impl Drop for ActiveRead {
 
 fn description() -> CollectionDescription {
     CollectionDescription {
-        database: DatabaseIdentity::server(Engine::Postgres, "sample", "fixture.invalid", 5432, None),
+        target: DatabaseIdentity::server(Engine::Postgres, "sample", "fixture.invalid", 5432, None).into(),
         source: "fixture-statistics".into(),
         observation: culprit_core::telemetry::SourceObservation::QueryHistory(
             culprit_core::telemetry::QueryHistoryDescription {
@@ -1043,7 +1043,7 @@ fn resource_record(at: &str) -> TelemetryRecord {
 fn resource_description(scenario: Scenario) -> CollectionDescription {
     use culprit_core::telemetry::*;
     CollectionDescription {
-        database: description().database,
+        target: description().target,
         source: "fixture-resource-statistics".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::RetainedSamples(SampleHistoryDescription {
@@ -1187,7 +1187,7 @@ fn activity_description(scenario: Scenario, step: usize) -> CollectionDescriptio
     use culprit_core::telemetry::*;
     let count = if matches!(scenario, Scenario::ActivitySequence) && step >= 4 { 0 } else { 1 };
     CollectionDescription {
-        database: description().database,
+        target: description().target,
         source: "activity-fixture".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {

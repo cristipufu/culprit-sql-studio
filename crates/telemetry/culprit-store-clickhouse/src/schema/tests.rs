@@ -59,3 +59,50 @@ fn every_stream_has_one_physical_schema_without_adx_presence_columns() {
     }
     assert!(catalog.get(culprit_core::telemetry::TelemetryStream::ActivityCheckpoints).is_err());
 }
+
+#[tokio::test]
+async fn recovered_shared_resources_preserve_subject_and_scope_in_the_clickhouse_projection() {
+    use culprit_collector::{
+        analytical::{
+            envelope::Envelope,
+            test_support::{Recovery, shared_resource},
+        },
+        delivery::recovery::reopen,
+    };
+    use culprit_core::telemetry::{SharedResourceKind, TelemetryStream};
+    let catalog = crate::catalog::SchemaCatalog::new().unwrap();
+    let schema = catalog.get(TelemetryStream::ResourceSamples).unwrap();
+    for kind in
+        [SharedResourceKind::Instance, SharedResourceKind::Pool, SharedResourceKind::Cluster, SharedResourceKind::Node]
+    {
+        let (source, record) = shared_resource(kind, "namespace-a");
+        let recovery = Recovery::capture("clickhouse:test", catalog.digest(), source, vec![record.clone()], 2);
+        let range = reopen(&recovery, &recovery.manifest.range_id).await.unwrap();
+        let batch = &range.manifest().batches[0];
+        let row =
+            culprit_core::telemetry::ExportedRecord::new(&range.manifest().source, &range.manifest().capture, record)
+                .unwrap();
+        let input = Envelope::committed(&range, &batch.batch_id).unwrap().input(1, &row).unwrap();
+        let values = schema.project(&input).unwrap();
+        let encoded: Value = serde_json::from_slice(&schema.encode(&values).unwrap()).unwrap();
+        assert_eq!(encoded["ResourceId"], range.manifest().source.target.telemetry_id().unwrap());
+        assert_eq!(encoded["ResourceKind"], serde_json::to_value(kind).unwrap());
+        let metrics: Value = serde_json::from_str(encoded["Metrics"].as_str().unwrap()).unwrap();
+        assert_eq!(metrics[0]["describes_subject"], true);
+        let returned = schema
+            .columns()
+            .iter()
+            .zip(&values)
+            .map(|(column, value)| match column.kind {
+                ScalarType::Timestamp if !value.is_null() => json!(timestamp_nanos(value).unwrap().to_string()),
+                _ => encoded[&column.name].clone(),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(schema.returned_digest(&returned).unwrap(), projection::digest(&values).unwrap());
+        let (other, _) = shared_resource(kind, "namespace-b");
+        let resource = schema.columns().iter().position(|column| column.name == "ResourceId").unwrap();
+        let mut changed = returned;
+        changed[resource] = json!(other.target.telemetry_id().unwrap());
+        assert_ne!(schema.returned_digest(&changed).unwrap(), projection::digest(&values).unwrap());
+    }
+}

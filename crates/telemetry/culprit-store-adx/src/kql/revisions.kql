@@ -1,5 +1,5 @@
-.create function $TABLERows(contract:string,store:string,database:string,captured_from:datetime,asof:datetime) {
-let Rows=materialize($TABLEEligible(contract,store,database,captured_from,asof));
+.create function $TABLERows(contract:string,store:string,resource:string,captured_from:datetime,asof:datetime) {
+let Rows=materialize($TABLEEligible(contract,store,resource,captured_from,asof));
 let Epochs=Rows | summarize HeadEpoch=max(OwnerEpoch) by SourceId, RecordId;
 let Owned=materialize(Rows | join kind=inner Epochs on SourceId, RecordId | where OwnerEpoch == HeadEpoch);
 let Sequences=Owned | summarize HeadSequence=max(CaptureSequence) by SourceId, RecordId;

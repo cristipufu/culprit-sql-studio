@@ -160,7 +160,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             }
         }
         let description = CollectionDescription {
-            database,
+            target: database.into(),
             source: match dataset {
                 SnapshotDataset::Operational => "operational-state",
                 SnapshotDataset::WaitCounters => "wait-counter-state",
@@ -257,7 +257,7 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         self.progress = Progress::Finished;
         Ok(culprit_core::telemetry::SourceCompletion::verified_if(
             self.physical.as_ref() == Some(&physical)
-                && self.description.as_ref().is_some_and(|before| before.database == database),
+                && self.description.as_ref().is_some_and(|before| before.target.database() == Some(&database)),
         ))
     }
     async fn close(&mut self) -> SourceShutdown {

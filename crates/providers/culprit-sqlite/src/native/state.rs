@@ -71,7 +71,7 @@ pub(crate) fn capture(
     rollback?;
     Ok(Captured {
         description: CollectionDescription {
-            database: identity.database.clone(),
+            target: identity.database.clone().into(),
             source: source_name(dataset).into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::PagedSnapshot(PagedSnapshotDescription {

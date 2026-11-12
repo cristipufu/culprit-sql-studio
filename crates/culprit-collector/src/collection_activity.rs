@@ -124,13 +124,14 @@ mod tests {
         .unwrap();
         assert!(observation.is_valid());
         let source = CollectionDescription {
-            database: culprit_core::DatabaseIdentity::server(
+            target: culprit_core::DatabaseIdentity::server(
                 culprit_core::Engine::Mssql,
                 "db",
                 "fixture.invalid",
                 1433,
                 None,
-            ),
+            )
+            .into(),
             source: "activity".into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::Activity(ActivitySnapshotDescription {
@@ -148,7 +149,8 @@ mod tests {
             }),
         };
         let mut source = source;
-        source.database.incarnation = Some("native-database".into());
+        let CollectionTarget::Database(database) = &mut source.target else { panic!("database fixture") };
+        database.incarnation = Some("native-database".into());
         let state = ActivityIncidentState {
             status: culprit_core::telemetry::ActivityIncidentStatus::Current,
             id: digest(b"incident"),
@@ -183,9 +185,11 @@ mod tests {
     fn a_native_incarnation_survives_an_alias_change_but_a_different_database_cannot_inherit_state() {
         let before = baseline();
         let mut source = before.source.clone();
-        source.database.database = "renamed".into();
+        let CollectionTarget::Database(database) = &mut source.target else { panic!("database fixture") };
+        database.database = "renamed".into();
         assert_eq!(before.matching(&source).len(), 1);
-        source.database.incarnation = Some("different-native-database".into());
+        let CollectionTarget::Database(database) = &mut source.target else { panic!("database fixture") };
+        database.incarnation = Some("different-native-database".into());
         assert!(before.matching(&source).is_empty());
     }
     #[test]

@@ -33,8 +33,27 @@ fn activity() -> ActivityObservation {
 }
 fn input(record: &TelemetryRecord) -> Value {
     let mut input = json!({"record":record});
-    prepare(&mut input, record).unwrap();
+    let target = crate::analytical::test_support::fixture().0.source.target;
+    prepare(&mut input, record, &target).unwrap();
     input
+}
+
+#[test]
+fn resource_projection_distinguishes_subject_usage_from_shared_context_without_changing_native_evidence() {
+    let (_, row) = crate::analytical::test_support::fixture();
+    let TelemetryRecord::ResourceSample(mut sample) = row.record else { panic!("resource fixture") };
+    sample.metrics[0].limit_basis = ResourceLimitBasis::PoolLimit;
+    let mut shared = sample.metrics[0].clone();
+    shared.scope = culprit_core::MeasurementScope::Server;
+    shared.limit_basis = ResourceLimitBasis::InstanceLimit;
+    shared.value = Some(80.0);
+    sample.metrics.push(shared);
+    let record = TelemetryRecord::ResourceSample(sample);
+    let prepared = input(&record);
+    assert_eq!(prepared["_projection"]["resource_metrics"][0]["describes_subject"], true);
+    assert_eq!(prepared["_projection"]["resource_metrics"][1]["describes_subject"], false);
+    assert_eq!(prepared["record"], serde_json::to_value(&record).unwrap());
+    assert!(prepared["record"]["data"]["metrics"][0].get("describes_subject").is_none());
 }
 fn wire(schema: schema::LogicalSchema, input: &Value) -> Value {
     let values = schema.project(input).unwrap();

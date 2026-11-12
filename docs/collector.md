@@ -209,7 +209,7 @@ SELECT/INSERT access to the generated tables; use a separate deployment identity
 landing data. Ordinary collector startup
 never provisions or mutates schema. The schema contains 15 analytical landing tables and one publication table;
 recovery-only activity checkpoints have no analytical table. Landing tables sort by range, batch and ordinal for
-bounded readback. A publication-table projection supports database/time selection without duplicating every payload.
+bounded readback. A publication-table projection supports resource/time selection without duplicating every payload.
 
 `--store clickhouse --replicated` emits `ReplicatedMergeTree` tables using server-configured replication paths/macros.
 For that layout, configure a positive `insert_quorum` and a read/write endpoint with the required replica consistency.
@@ -415,6 +415,18 @@ The generated contract has 15 analytical tables and one completion table:
 
 Incident checkpoints are recovery-only. They are not duplicated into a seventeenth analytical table. Multiple logical
 datasets deliberately share a typed physical table; `Dataset`, native source and fact kind identify their meaning.
+
+Every capture declares its subject through `CollectionTarget`: a database, or a native instance, pool, cluster or
+node with an explicit namespace and identity. The connection used to read a subject does not establish its scope.
+Analytical rows and completion records carry its hashed `ResourceId` and typed `ResourceKind`; private identity
+details remain in recovery. These fields are included in exact readback verification. Native readers must establish
+their own subject; the shared contract does not make an unsupported scope available in a provider.
+
+Resource metrics preserve their own measured scope and capacity denominator separately. For example, a database's
+memory consumption can be relative to a pool limit without describing the pool's consumption. The prepared
+`Metrics` array adds `describes_subject` so shared context collected alongside database metrics cannot be charged to
+that database. This flag establishes measurement scope, not a causal link to any query. Query ownership and cause
+require their own native evidence; a high resource value or a concurrent query alone establishes neither.
 
 Structured JSON is stored as text so ingestion preserves nested timestamp strings, identifiers and exact counter
 digits. The generated analytical functions parse those fields after verification. Raw-table consumers can parse the

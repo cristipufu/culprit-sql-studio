@@ -81,13 +81,14 @@ fn definitions_keep_object_identity_while_versions_follow_native_properties() {
 #[test]
 fn definition_replay_keeps_ids_but_conflicting_versions_cannot_be_two_objects_in_one_capture() {
     let source = CollectionDescription {
-        database: culprit_core::DatabaseIdentity::server(
+        target: culprit_core::DatabaseIdentity::server(
             culprit_core::Engine::Mssql,
             "db",
             "fixture.invalid",
             1433,
             None,
-        ),
+        )
+        .into(),
         source: "foreign-key-state".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Snapshot(StateSnapshotDescription {

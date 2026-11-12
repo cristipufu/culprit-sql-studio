@@ -45,7 +45,7 @@ impl DeploymentAssets {
             commands.push(eligible(schema));
             let semantics = stream_semantics(stream)?;
             commands.push(if !semantics.latest_revision {
-                format!(".create function {}Rows(contract:string,store:string,database:string,captured_from:datetime,asof:datetime) {{ {}Eligible(contract,store,database,captured_from,asof) }}",schema.table(),schema.table())
+                format!(".create function {}Rows(contract:string,store:string,resource:string,captured_from:datetime,asof:datetime) {{ {}Eligible(contract,store,resource,captured_from,asof) }}",schema.table(),schema.table())
             } else {revisions(schema)});
             let current_heads = match semantics.current {
                 Some(CurrentScope::Activity) => Some("CulpritActivityHeadsV1"),
@@ -58,7 +58,7 @@ impl DeploymentAssets {
                 } else {
                     "RangeId, NativeSource"
                 };
-                commands.push(format!(".create function {}Current(contract:string,store:string,database:string,asof:datetime,max_age:timespan) {{\nlet Heads={} (contract,store,database,asof-max_age,asof) | where max_age > 0s and CollectedUntil >= asof-max_age | project {keys};\n{}Rows(contract,store,database,asof-max_age,asof) | join kind=leftsemi Heads on {keys}\n}}",schema.table(),heads,schema.table()));
+                commands.push(format!(".create function {}Current(contract:string,store:string,resource:string,asof:datetime,max_age:timespan) {{\nlet Heads={} (contract,store,resource,asof-max_age,asof) | where max_age > 0s and CollectedUntil >= asof-max_age | project {keys};\n{}Rows(contract,store,resource,asof-max_age,asof) | join kind=leftsemi Heads on {keys}\n}}",schema.table(),heads,schema.table()));
             }
         }
         Ok(Self { schema_digest: catalog.digest().into(), commands, routes })

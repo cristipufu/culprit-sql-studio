@@ -150,7 +150,7 @@ impl SnapshotReader for Reader {
         }
         self.notices = self.io.notices();
         let description = CollectionDescription {
-            database: meta.database.clone(),
+            target: meta.database.clone().into(),
             source: format!("ysql-{}-{}", self.recipe.source(), meta.node),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::PagedSnapshot(PagedSnapshotDescription {

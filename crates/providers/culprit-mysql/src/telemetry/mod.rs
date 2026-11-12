@@ -200,7 +200,7 @@ impl SnapshotReader for MysqlSnapshotReader {
             self.layout = Some(layout);
         }
         let description = CollectionDescription {
-            database: meta.database.clone(),
+            target: meta.database.clone().into(),
             source: format!("mysql-{}", self.declared[0].source()),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::PagedSnapshot(PagedSnapshotDescription {

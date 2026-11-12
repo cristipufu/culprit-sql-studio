@@ -76,7 +76,7 @@ impl ObservationReader for Reader {
             return Err(CollectionStop::SourceChanged.error());
         }
         let description = CollectionDescription {
-            database: meta.database.clone(),
+            target: meta.database.clone().into(),
             source: "innodb-latest-deadlock".into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::RetainedEvents(EventHistoryDescription {

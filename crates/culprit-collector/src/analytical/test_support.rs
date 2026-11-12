@@ -7,13 +7,14 @@ use culprit_core::telemetry::*;
 
 pub fn fixture() -> (RangeManifest, ExportedRecord) {
     let source = CollectionDescription {
-        database: culprit_core::DatabaseIdentity::server(
+        target: culprit_core::DatabaseIdentity::server(
             culprit_core::Engine::Mssql,
             "db",
             "fixture.invalid",
             1433,
             None,
-        ),
+        )
+        .into(),
         source: "resources".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::RetainedSamples(SampleHistoryDescription {
@@ -71,6 +72,21 @@ pub fn fixture() -> (RangeManifest, ExportedRecord) {
         advances: vec![],
     };
     (manifest, row)
+}
+
+/// A real export/recovery fixture for each shared scope; no database identity is invented for it.
+pub fn shared_resource(kind: SharedResourceKind, namespace: &str) -> (CollectionDescription, TelemetryRecord) {
+    let (mut manifest, mut row) = fixture();
+    manifest.source.target = CollectionTarget::Shared(SharedResourceIdentity {
+        engine: culprit_core::Engine::Postgres,
+        kind,
+        namespace: NativeIdentity::new(namespace),
+        native: NativeIdentity::new("resource"),
+    });
+    let TelemetryRecord::ResourceSample(sample) = &mut row.record else { unreachable!() };
+    sample.metrics[0].scope = manifest.source.target.measurement_scope();
+    sample.metrics[0].limit_basis = ResourceLimitBasis::Absolute;
+    (manifest.source, row.record)
 }
 
 use crate::delivery::{object_store::transport::*, recovery::*};
@@ -271,7 +287,8 @@ impl ObjectTransport for Blobs {
 
 pub fn interval_queries(destination: &str, schema: &str) -> Recovery {
     let (mut manifest, _) = fixture();
-    manifest.source.database.engine = culprit_core::Engine::Postgres;
+    let CollectionTarget::Database(database) = &mut manifest.source.target else { panic!("database fixture") };
+    database.engine = culprit_core::Engine::Postgres;
     manifest.source.source = "native-history-fixture".into();
     manifest.source.observation = SourceObservation::QueryHistory(QueryHistoryDescription {
         interval: TelemetryInterval {
@@ -329,7 +346,8 @@ pub fn interval_queries(destination: &str, schema: &str) -> Recovery {
 
 pub fn cumulative_queries(destination: &str, schema: &str) -> Recovery {
     let (mut manifest, _) = fixture();
-    manifest.source.database.engine = culprit_core::Engine::Postgres;
+    let CollectionTarget::Database(database) = &mut manifest.source.target else { panic!("database fixture") };
+    database.engine = culprit_core::Engine::Postgres;
     manifest.source.source = "statement-counters-fixture".into();
     manifest.source.observation = SourceObservation::Snapshot(StateSnapshotDescription {
         dataset: SnapshotDataset::Operational,

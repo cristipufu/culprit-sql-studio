@@ -15,7 +15,8 @@ pub const COMMON: &[Field] = &[
     Field::required("ContractId", "/_culprit/contract_id", String),
     Field::required("ManifestSha256", "/_culprit/manifest_sha256", String),
     Field::required("SchemaDigest", "/_culprit/schema_digest", String),
-    Field::required("DatabaseId", "/_culprit/database_id", String),
+    Field::required("ResourceId", "/_culprit/resource_id", String),
+    Field::required("ResourceKind", "/_culprit/resource_kind", String),
     Field::required("SourceId", "/_culprit/source_id", String),
     Field::required("LogicalSourceId", "/_culprit/logical_source_id", String),
     Field::required("SourceName", "/_culprit/source_name", String),
@@ -76,19 +77,23 @@ impl<'a> Envelope<'a> {
         context["native_digest"] = json!(receipt.payload_digest);
         let mut value = serde_json::to_value(row).map_err(|_| invalid())?;
         value["_culprit"] = context;
-        super::prepared::prepare(&mut value, &row.record)?;
+        super::prepared::prepare(&mut value, &row.record, &self.manifest.source.target)?;
         Ok(value)
     }
 }
 pub fn capture_context(manifest: &RangeManifest, manifest_digest: &str) -> Result<Value> {
     let source = &manifest.source;
     let captured = source.captured_range()?;
+    let resource_kind = match &source.target {
+        culprit_core::telemetry::CollectionTarget::Database(_) => json!("database"),
+        culprit_core::telemetry::CollectionTarget::Shared(resource) => json!(resource.kind),
+    };
     let mut context = json!({
         "contract_id": manifest.contract.id()?, "manifest_sha256": manifest_digest,
         "schema_digest": manifest.contract.schema_digest(),
-        "database_id": source.database.telemetry_id()?, "source_id": captured.scope_id,
+        "resource_id": source.target.telemetry_id()?, "resource_kind": resource_kind, "source_id": captured.scope_id,
         "logical_source_id": source.logical_source_id()?,
-        "source_name": source.source, "engine": source.database.engine, "range_id": manifest.range_id,
+        "source_name": source.source, "engine": source.target.engine(), "range_id": manifest.range_id,
         "continuity": source.continuity,
         "collected_from": manifest.collected_from, "collected_until": manifest.collected_until
     });

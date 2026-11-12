@@ -72,7 +72,7 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
         self.layout = self.recipe.layout(&mut self.io, &self.budget).await?;
         self.physical = Some(physical);
         Ok(CollectionDescription {
-            database,
+            target: database.into(),
             source: D::NAME.into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::PagedSnapshot(PagedSnapshotDescription {
@@ -108,7 +108,7 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
     }
     async fn recheck(&mut self, initial: &CollectionDescription) -> Result<culprit_read::SnapshotRecheck> {
         let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
-        if initial.database != database || self.physical.as_ref() != Some(&physical) {
+        if initial.target.database() != Some(&database) || self.physical.as_ref() != Some(&physical) {
             return Ok(culprit_read::SnapshotRecheck {
                 unchanged: false,
                 observed_until: String::new(),

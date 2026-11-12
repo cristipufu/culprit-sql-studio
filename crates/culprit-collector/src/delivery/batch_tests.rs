@@ -112,13 +112,14 @@ pub(super) fn quiet_activity(root: &Path) -> PreparedRange {
         revision: Some(CaptureRevision { outbox_id: "outbox".into(), owner_epoch: "1".into(), sequence: "1".into() }),
     };
     let source = CollectionDescription {
-        database: culprit_core::DatabaseIdentity::server(
+        target: culprit_core::DatabaseIdentity::server(
             culprit_core::Engine::Mssql,
             "db",
             "fixture.invalid",
             1433,
             None,
-        ),
+        )
+        .into(),
         source: "activity".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::Activity(ActivitySnapshotDescription {

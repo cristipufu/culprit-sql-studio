@@ -73,7 +73,7 @@ impl ObservationReader for ActivityReader {
         // Select again after native identity qualification so edges and observations share the same namespace.
         let selected = ActivityEvidence::select(&observations, policy)?;
         let description = CollectionDescription {
-            database: meta.database.clone(),
+            target: meta.database.clone().into(),
             source: format!("ysql-activity-{}", meta.node),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::Activity(ActivitySnapshotDescription {

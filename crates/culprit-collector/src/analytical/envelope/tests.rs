@@ -1,7 +1,35 @@
 use super::*;
 use crate::analytical::schema::LogicalSchema;
 use crate::analytical::test_support::fixture;
-use culprit_core::telemetry::TelemetryRecord;
+use culprit_core::telemetry::{
+    CollectionTarget, NativeIdentity, SharedResourceIdentity, SharedResourceKind, TelemetryRecord,
+};
+
+#[test]
+fn shared_capture_context_keeps_resource_identity_and_kind_without_exporting_private_namespace() {
+    for (kind, expected) in [
+        (SharedResourceKind::Instance, "instance"),
+        (SharedResourceKind::Pool, "pool"),
+        (SharedResourceKind::Cluster, "cluster"),
+        (SharedResourceKind::Node, "node"),
+    ] {
+        let (mut manifest, _) = fixture();
+        manifest.source.target = CollectionTarget::Shared(SharedResourceIdentity {
+            engine: culprit_core::Engine::Postgres,
+            kind,
+            namespace: NativeIdentity::new("private-namespace-canary"),
+            native: NativeIdentity::new("private-resource-canary"),
+        });
+        let context = capture_context(&manifest, &"a".repeat(64)).unwrap();
+        assert_eq!(context["resource_id"], manifest.source.target.telemetry_id().unwrap());
+        assert_eq!(context["resource_kind"], expected);
+        assert_eq!(context["engine"], "postgres");
+        assert!(context.get("database_id").is_none());
+        let wire = serde_json::to_string(&context).unwrap();
+        assert!(!wire.contains("private-namespace-canary"));
+        assert!(!wire.contains("private-resource-canary"));
+    }
+}
 
 #[test]
 fn envelope_keeps_collection_measurement_and_native_observation_times_distinct() {

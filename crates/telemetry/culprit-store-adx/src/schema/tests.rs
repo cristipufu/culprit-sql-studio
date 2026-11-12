@@ -288,15 +288,18 @@ fn resource_metrics_preserve_scope_units_aggregation_and_unknown_values() {
     };
     let native =
         ResourceMeasurement { at: "2026-11-11T06:00:00Z".into(), replica_id: "primary".into(), metrics: vec![metric] };
-    let projected = wire(
-        &Schema::from_logical(culprit_collector::analytical::schema::samples::resources(&[]).unwrap()).unwrap(),
-        native,
-    );
+    let record = TelemetryRecord::ResourceSample(native);
+    let mut input = json!({"record":record});
+    let (manifest, _) = culprit_collector::analytical::test_support::fixture();
+    culprit_collector::analytical::prepared::prepare(&mut input, &record, &manifest.source.target).unwrap();
+    let schema = Schema::from_logical(culprit_collector::analytical::schema::samples::resources(&[]).unwrap()).unwrap();
+    let projected: Value = serde_json::from_slice(&schema.encode(&schema.project(&input).unwrap()).unwrap()).unwrap();
     let metrics: Value = serde_json::from_str(projected["Metrics"].as_str().unwrap()).unwrap();
     assert_eq!(metrics[0]["scope"], "database");
     assert_eq!(metrics[0]["unit"], "percent");
     assert_eq!(metrics[0]["statistic"], "maximum");
     assert_eq!(metrics[0]["period_ms"], 15000);
+    assert_eq!(metrics[0]["describes_subject"], true);
     assert!(metrics[0]["value"].is_null());
 }
 

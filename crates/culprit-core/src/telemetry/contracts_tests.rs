@@ -75,7 +75,8 @@ fn source_dimensions_are_explicit_and_do_not_require_replica_groups() {
     assert!(history.is_valid());
     history.dimensions.insert("node".into(), vec!["primary".into(), "secondary".into()]);
     let source = CollectionDescription {
-        database: crate::DatabaseIdentity::server(crate::Engine::Postgres, "sample", "fixture.invalid", 5432, None),
+        target: crate::DatabaseIdentity::server(crate::Engine::Postgres, "sample", "fixture.invalid", 5432, None)
+            .into(),
         source: "fixture".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::QueryHistory(history.clone()),
@@ -92,7 +93,8 @@ fn source_dimensions_are_explicit_and_do_not_require_replica_groups() {
 #[test]
 fn query_only_records_get_stable_native_ids_but_unresolved_queries_do_not() {
     let source = CollectionDescription {
-        database: crate::DatabaseIdentity::server(crate::Engine::Postgres, "sample", "fixture.invalid", 5432, None),
+        target: crate::DatabaseIdentity::server(crate::Engine::Postgres, "sample", "fixture.invalid", 5432, None)
+            .into(),
         source: "fixture".into(),
         continuity: SourceContinuity::Unverified,
         observation: SourceObservation::QueryHistory(QueryHistoryDescription {

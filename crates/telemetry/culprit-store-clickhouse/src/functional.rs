@@ -86,7 +86,7 @@ impl Server {
         BTreeMap::from([
             ("contract".into(), range.manifest().contract.id().unwrap()),
             ("store".into(), range.store_id().into()),
-            ("database".into(), range.manifest().source.database.telemetry_id().unwrap()),
+            ("resource".into(), range.manifest().source.target.telemetry_id().unwrap()),
             ("from".into(), "2019-01-01 00:00:00".into()),
             ("until".into(), "2021-01-01 00:00:00".into()),
         ])
@@ -97,7 +97,7 @@ impl Server {
         } else {
             "captured_from={from:DateTime64(9, 'UTC')},asof={until:DateTime64(9, 'UTC')}"
         };
-        format!("{name}(contract={{contract:String}},store={{store:String}},database={{database:String}},{times})")
+        format!("{name}(contract={{contract:String}},store={{store:String}},resource={{resource:String}},{times})")
     }
     async fn count(&self, name: &str, range: &CommittedRange, current: bool) -> u64 {
         let mut parameters = self.scope(range);
@@ -172,6 +172,42 @@ async fn functional_contract_and_canonical_sets() {
     complete_current_sets(&server, &catalog).await;
     native_query_semantics(&server, &catalog).await;
     unexpected_members_and_missing_rows(&server, &catalog).await;
+    shared_resource_scopes(&server, &catalog).await;
+}
+
+async fn shared_resource_scopes(server: &Server, catalog: &SchemaCatalog) {
+    let mut sequence = 1_000;
+    for kind in
+        [SharedResourceKind::Instance, SharedResourceKind::Pool, SharedResourceKind::Cluster, SharedResourceKind::Node]
+    {
+        for namespace in ["native-namespace-a", "native-namespace-b"] {
+            let (source, record) = test_support::shared_resource(kind, namespace);
+            let scenario = Scenario::new(
+                server,
+                Recovery::capture(server.client.destination(), catalog.digest(), source, vec![record], sequence),
+            )
+            .await;
+            sequence += 1;
+            scenario.complete().await;
+            assert_eq!(server.count("CulpritResourceSamplesV1Rows", &scenario.range, false).await, 1);
+            let rows = server.values(format!("SELECT ResourceKind, toBool(JSONExtractBool(arrayElement(JSONExtractArrayRaw(Metrics),1),'describes_subject')) AS OwnsSubject FROM {}", server.view("CulpritResourceSamplesV1Rows", false)), server.scope(&scenario.range), &[("ResourceKind", "String"), ("OwnsSubject", "Bool")]).await;
+            assert_eq!(rows, vec![vec![serde_json::to_value(kind).unwrap(), json!(true)]]);
+            let published = server
+                .values(
+                    "SELECT SourceDescription FROM CulpritPublishedRangesV1 WHERE RangeId={range:String}".into(),
+                    BTreeMap::from([("range".into(), scenario.range.manifest().range_id.clone())]),
+                    &[("SourceDescription", "String")],
+                )
+                .await;
+            assert_eq!(published.len(), 1);
+            let coverage: Value = serde_json::from_str(published[0][0].as_str().unwrap()).unwrap();
+            assert!(coverage.get("target").is_none());
+            assert_eq!(
+                coverage["observation"],
+                serde_json::to_value(&scenario.range.manifest().source.observation).unwrap()
+            );
+        }
+    }
 }
 
 async fn native_scalar_roundtrip(server: &Server) {

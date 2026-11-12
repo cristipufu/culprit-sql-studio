@@ -18,9 +18,13 @@ struct Fixture {
 }
 impl Fixture {
     async fn new() -> Self {
+        let catalog = SchemaCatalog::new().unwrap();
+        Self::from_recovery(Recovery::new("adx:test", catalog.digest())).await
+    }
+    async fn from_recovery(recovery: Recovery) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let catalog = Arc::new(SchemaCatalog::new().unwrap());
-        let recovery = Arc::new(Recovery::new("adx:test", catalog.digest()));
+        let recovery = Arc::new(recovery);
         let range = reopen(recovery.as_ref(), &recovery.manifest.range_id).await.unwrap();
         let blobs = Arc::new(Blobs::default());
         let indexes = Arc::new(ProjectionIndexes::new(blobs.clone()));
@@ -76,6 +80,34 @@ impl Fixture {
     }
 }
 #[tokio::test]
+async fn shared_resources_survive_recovery_dispatch_and_exact_readback_without_database_attribution() {
+    use culprit_collector::analytical::test_support::shared_resource;
+    use culprit_core::telemetry::SharedResourceKind;
+    let catalog = SchemaCatalog::new().unwrap();
+    for kind in
+        [SharedResourceKind::Instance, SharedResourceKind::Pool, SharedResourceKind::Cluster, SharedResourceKind::Node]
+    {
+        let (source, record) = shared_resource(kind, "namespace-a");
+        let fixture =
+            Fixture::from_recovery(Recovery::capture("adx:test", catalog.digest(), source, vec![record], 2)).await;
+        let schema = fixture.catalog.get(fixture.range.manifest().batches[0].stream).unwrap();
+        let resource = schema.columns().iter().position(|column| column.name == "ResourceId").unwrap();
+        let resource_kind = schema.columns().iter().position(|column| column.name == "ResourceKind").unwrap();
+        assert_eq!(fixture.values[resource], fixture.range.manifest().source.target.telemetry_id().unwrap());
+        assert_eq!(fixture.values[resource_kind], serde_json::to_value(kind).unwrap());
+        let (reader, _) = fixture.reader(vec![Reply::Audit(0), Reply::Rows(vec![fixture.values.clone()])]);
+        assert_eq!(
+            reader.receipts(&fixture.range, None, 1000).await.unwrap().rows,
+            fixture.range.manifest().batches[0].rows
+        );
+        let (other, _) = shared_resource(kind, "namespace-b");
+        let mut changed = fixture.values.clone();
+        changed[resource] = json!(other.target.telemetry_id().unwrap());
+        let (reader, _) = fixture.reader(vec![Reply::Audit(0), Reply::Rows(vec![changed])]);
+        assert!(reader.receipts(&fixture.range, None, 1000).await.is_err());
+    }
+}
+#[tokio::test]
 async fn readback_compares_every_projected_field_and_only_then_releases_the_native_receipt() {
     let fixture = Fixture::new().await;
     let (reader, queries) = fixture.reader(vec![Reply::Audit(0), Reply::Rows(vec![fixture.values.clone()])]);
@@ -101,6 +133,8 @@ async fn count_matches_and_opaque_native_hashes_cannot_hide_wrong_typed_values_o
     let schema = fixture.catalog.get(fixture.range.manifest().batches[0].stream).unwrap();
     for (name, value) in [
         ("Metrics", json!(r#"[{"value":99}]"#)),
+        ("ResourceKind", json!("pool")),
+        ("ResourceId", json!("f".repeat(64))),
         ("RecordId", json!("f".repeat(64))),
         ("CollectedFrom", json!("2020-01-01T00:00:00Z")),
         ("HasDataset", json!(true)),

@@ -4,8 +4,8 @@ use ScalarType::*;
 const RESOURCES: &[Field] = &[
     Field::required("SampleAt", "/record/data/at", Timestamp),
     Field::required("ReplicaId", "/record/data/replica_id", String),
-    // Each metric retains its own unit, scope, statistic, period, limit basis and nullable value.
-    Field::required("Metrics", "/record/data/metrics", JsonContainer),
+    // Scope and capacity basis remain independent. Context cannot establish the subject's own pressure.
+    Field::required("Metrics", "/_projection/resource_metrics", JsonContainer),
 ];
 const WAITS: &[Field] = &[
     Field::required("NativeSource", "/record/data/source", String),

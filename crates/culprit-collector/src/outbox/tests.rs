@@ -18,7 +18,7 @@ fn source() -> CollectionDescription {
         culprit_core::DatabaseIdentity::server(culprit_core::Engine::Mssql, "fixture", "fixture.invalid", 1433, None);
     database.incarnation = Some("native-fixture-guid".into());
     CollectionDescription {
-        database,
+        target: database.into(),
         source: "query_store".into(),
         observation: culprit_core::telemetry::SourceObservation::QueryHistory(
             culprit_core::telemetry::QueryHistoryDescription {

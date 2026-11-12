@@ -75,7 +75,7 @@ impl<R: NativeRead> EventSource<R> {
         let events = native::read(
             &mut self.io,
             native::Origin::DatabaseSession,
-            &description.database.database,
+            &description.target.database().ok_or_else(invalid_data)?.database,
             &from.to_rfc3339(),
             &until.to_rfc3339(),
             self.request.budget.max_snapshot_rows as usize + 1,
@@ -122,7 +122,7 @@ impl<R: NativeRead> TelemetrySource for EventSource<R> {
         let at = canonical_time(&text(server.first().ok_or_else(invalid_data)?, "observed_at")?)?;
         let (from, until) = self.request.bounds()?;
         let value = CollectionDescription {
-            database,
+            target: database.into(),
             source: culprit_core::source_id::DEADLOCKS.into(),
             observation: SourceObservation::RetainedEvents(EventHistoryDescription {
                 from: from.to_rfc3339(),
@@ -157,7 +157,7 @@ impl<R: NativeRead> TelemetrySource for EventSource<R> {
         self.progress.verifying()?;
         let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
         if self.physical.as_ref() != Some(&physical)
-            || self.description.as_ref().is_none_or(|description| description.database != database)
+            || self.description.as_ref().is_none_or(|description| description.target.database() != Some(&database))
         {
             self.progress.verified();
             return Ok(culprit_core::telemetry::SourceCompletion::Changed);
