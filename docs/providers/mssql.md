@@ -47,7 +47,39 @@ Live and background activity capture use the same native reader and counter inte
 
 When query profiling is available, live progress shows measured operator activity. SQL Server offers **terminate** (`KILL`), not a separate cancel operation; Culprit exposes session actions outside production only.
 
-Deadlock history comes from the readable Extended Events history, such as `system_health`. A missing or truncated event source does not establish that no deadlocks happened.
+SQL Server and Managed Instance read the available `system_health` deadlock history. Azure SQL Database reads an explicitly configured database-scoped session, described below. A missing or truncated event source does not establish that no deadlocks happened.
+
+### Azure SQL deadlock events
+
+Culprit never reads Azure SQL's internal `dl` event session. Microsoft [advises against reading that session](https://learn.microsoft.com/en-us/azure/azure-sql/database/xevent-db-diff-from-svr#best-practices) because reading its retained events can affect database availability.
+
+An administrator can explicitly create this database-scoped session in the database being monitored. Scans and unattended collection only read its configuration and target; they never create, start or alter it.
+
+```sql
+CREATE EVENT SESSION [culprit_deadlocks] ON DATABASE
+ADD EVENT sqlserver.database_xml_deadlock_report
+(
+    ACTION(package0.event_sequence)
+)
+ADD TARGET package0.ring_buffer
+(
+    SET max_memory = 1024, max_events_limit = 256
+)
+WITH
+(
+    MAX_MEMORY = 2048 KB,
+    EVENT_RETENTION_MODE = ALLOW_SINGLE_EVENT_LOSS,
+    MAX_DISPATCH_LATENCY = 5 SECONDS,
+    STARTUP_STATE = ON
+);
+ALTER EVENT SESSION [culprit_deadlocks] ON DATABASE STATE = START;
+```
+
+Review this setup against the database and elastic pool's Extended Events limits before running it. The reader requires this exact session name, one deadlock event with `event_sequence`, one ring-buffer target, and explicit target limits of at most 1,024 KiB and 256 events. A missing, stopped or differently configured session is unavailable. See [Microsoft's ring-buffer guidance](https://learn.microsoft.com/en-us/sql/relational-databases/extended-events/targets-for-extended-events-in-sql-server#ring_buffer-target).
+
+The ring buffer keeps only recent events and is cleared when the session restarts. Older events can be overwritten; collection never claims complete history. Truncated XML, an oversized target, missing event identity or a changed session fails the observation. Native session generation and exact event sequence distinguish records across reads and restarts. An empty valid buffer is distinct from an unavailable source.
+
+This configured Azure source requires its own native and production-cost qualification. Unit fixtures validate configuration admission, graph decoding, identity, limits and collector verification; they do not establish Azure permissions or production overhead. Durable event-file and managed log feeds are separate source capabilities.
 
 ### Resource history
 

@@ -190,7 +190,8 @@ native unknowns, units and fractional timestamps. SQL text stays private for int
 
 Deadlock history uses one bounded native event reader and the existing graph parser. Native file/buffer positions,
 event digests and fractional timestamps identify exported events independently of redaction or retry. Interactive
-system_health reads can merge the ring buffer for freshness; Azure export reads retained database telemetry and
+system_health reads can merge the ring buffer for freshness; Azure export reads an explicitly configured, bounded
+database-scoped deadlock ring buffer through the same native reader and
 rechecks exact event membership before completing a capture. Unknown retention remains explicit; a complete bounded
 read never proves that no earlier events were lost.
 

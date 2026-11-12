@@ -88,7 +88,7 @@ fn deadlocks_say_how_often_and_who_was_rolled_back() {
         "deadlocks_info",
         &info("deadlocks"),
         r#"title: Deadlocks
-description: Deadlocks in the last day, grouped by pattern (key lookup, opposite order, read-then-update, lock escalation, parallelism) with the fix that removes them. SQL Server reads system_health (Azure SQL Database its deadlock telemetry), MySQL the latest InnoDB report, PostgreSQL only keeps a counter."#,
+description: Deadlocks in the last day, grouped by pattern (key lookup, opposite order, read-then-update, lock escalation, parallelism) with the fix that removes them. SQL Server reads system_health, Azure SQL Database an explicitly configured database-scoped event session, MySQL the latest InnoDB report, and PostgreSQL only keeps a counter."#,
     );
     // Six dated in the last day and one whose time is unknown; the victim named by session and application.
     let mut list: Vec<Deadlock> = (0..6).map(|i| key_lookup(Some(&format!("2026-10-11T1{i}:00:00Z")))).collect();

@@ -74,7 +74,7 @@ impl<R: NativeRead> EventSource<R> {
         let (from, until) = self.request.bounds()?;
         let events = native::read(
             &mut self.io,
-            native::Origin::AzureTelemetry,
+            native::Origin::DatabaseSession,
             &description.database.database,
             &from.to_rfc3339(),
             &until.to_rfc3339(),
@@ -205,14 +205,8 @@ mod tests {
             ("observed_at", Val::Text("2020-01-01T06:02:00Z".into())),
         ])
     }
-    fn event(offset: i64) -> Rec {
-        let xml = r#"<event><data name="database_name"><value>db</value></data><data name="xml_report"><value><deadlock><victim-list><victimProcess id="p1"/></victim-list><process-list><process id="p1" spid="20" loginname="private-user" hostname="private-host"><inputbuf>SELECT N'private-deadlock-canary'</inputbuf></process><process id="p2" spid="21"><inputbuf>SELECT 1</inputbuf></process></process-list><resource-list><keylock id="r1" objectname="dbo.orders"><owner-list><owner id="p2" mode="X"/></owner-list><waiter-list><waiter id="p1" mode="S"/></waiter-list></keylock></resource-list></deadlock></value></data></event>"#;
-        Rec::of(&[
-            ("event_xml", Val::Text(xml.into())),
-            ("file_name", Val::Text("file".into())),
-            ("file_offset", Val::Int(offset)),
-            ("at", Val::Text("2020-01-01T06:00:30.1533333Z".into())),
-        ])
+    fn event(offset: u64) -> String {
+        crate::deadlocks::database_test_support::event(offset)
     }
     fn pressure() -> Rec {
         replace(
@@ -224,16 +218,19 @@ mod tests {
             ],
         )
     }
-    fn replies(events: Vec<Rec>, verified: Vec<Rec>) -> FakeRead {
+    fn replies(events: Vec<String>, verified: Vec<String>) -> FakeRead {
+        use crate::deadlocks::database_test_support::{configuration, target};
         FakeRead::new(vec![
             Ok(vec![server()]),
             Ok(vec![identity()]),
             Ok(vec![server()]),
             Ok(vec![pressure()]),
-            Ok(events),
+            Ok(vec![configuration()]),
+            Ok(vec![target(&events)]),
             Ok(vec![identity()]),
             Ok(vec![pressure()]),
-            Ok(verified),
+            Ok(vec![configuration()]),
+            Ok(vec![target(&verified)]),
         ])
     }
     #[tokio::test]
@@ -295,5 +292,27 @@ mod tests {
         let error = source.read_page(TelemetryStream::DeadlockEvents, None).await.err().unwrap();
         assert_eq!(CollectionStop::from_error(&error), CollectionStop::RowLimit);
         assert!(source.finish().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_target_read_retains_the_native_owner_until_explicit_close() {
+        let io = replies(vec![event(1)], vec![]).pause_on_query(6);
+        let mut source = EventSource::with_io(io, &request(), "host".into(), 1433).unwrap();
+        source.describe().await.unwrap();
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(10),
+                source.read_page(TelemetryStream::DeadlockEvents, None),
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(source.io.calls.len(), 6);
+        assert_eq!(source.io.closed, 0);
+        source.io.shutdown = SourceShutdown::Unconfirmed;
+        assert_eq!(source.close().await, SourceShutdown::Unconfirmed);
+        assert_eq!(source.io.closed, 1);
+        assert!(source.read_page(TelemetryStream::DeadlockEvents, None).await.is_err());
+        assert_eq!(source.io.calls.len(), 6);
     }
 }

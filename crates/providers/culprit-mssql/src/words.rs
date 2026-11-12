@@ -337,11 +337,10 @@ WaitStats: This login lacks VIEW DATABASE STATE / VIEW SERVER STATE. | GRANT VIE
 #[test]
 fn deadlock_sources() {
     use crate::deadlocks::*;
-    assert_eq!(telemetry(), "Azure SQL deadlock telemetry");
+    assert_eq!(database_session(), "Database-scoped deadlock event session");
     assert_eq!(
-        telemetry_unreadable(&"Invalid object name"),
-        "Culprit couldn't read Azure SQL Database's deadlock telemetry (Invalid object name). Deadlocks are also in \
-         Azure Monitor (diagnostic setting \"Deadlocks\"), or paste a deadlock graph (.xdl) to have it explained."
+        database_session_unreadable(&"Invalid object name"),
+        "Culprit couldn't read the configured deadlock event session (Invalid object name). Check its setup or import a deadlock graph (.xdl)."
     );
     assert_eq!(origin(true, true), ("system_health event files and ring buffer".into(), None));
     assert_eq!(origin(true, false), ("system_health event files".into(), None));

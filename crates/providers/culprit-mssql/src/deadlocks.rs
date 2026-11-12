@@ -1,5 +1,5 @@
 //! What blocked sessions wait for, and recent deadlocks: from the built-in system_health session, or on Azure SQL
-//! Database from the deadlock telemetry it keeps per database. Both read DMVs and event targets only. The parser also
+//! Database from an explicitly configured database-scoped event session. Both read DMVs and event targets only. The parser also
 //! reads saved .xdl files; XML with a DTD is refused, so entities never resolve.
 
 use culprit_core::deadlock::classify;
@@ -10,7 +10,10 @@ use roxmltree::{Document, Node};
 
 use crate::read::rows as query;
 use crate::read::{NativeRead, ReadError, integer, invalid_data, text};
+mod database;
 pub(crate) mod native;
+#[cfg(test)]
+pub(crate) use database::tests as database_test_support;
 
 /// The lock each waiting task asked for. Objects in other databases are named only for whole-object locks; row and
 /// page locks resolve through this database's partitions.
@@ -57,14 +60,13 @@ pub(crate) async fn lock_waits(client: &mut impl NativeRead) -> Result<Vec<LockW
 
 const READ_LIMIT: usize = 50;
 
-/// Where Azure SQL Database's deadlocks come from, as a person reads it.
-pub(crate) fn telemetry() -> String {
-    t!("provider.mssql.deadlocks.telemetry")
+/// The explicitly configured, database-scoped source, as a person reads it.
+pub(crate) fn database_session() -> String {
+    t!("provider.mssql.deadlocks.database_session")
 }
 
-/// Azure SQL Database's deadlock telemetry couldn't be read (`error`): where else its deadlocks are.
-pub(crate) fn telemetry_unreadable(error: &dyn std::fmt::Display) -> String {
-    t!("provider.mssql.deadlocks.telemetry_unreadable", error = error.to_string())
+pub(crate) fn database_session_unreadable(error: &dyn std::fmt::Display) -> String {
+    t!("provider.mssql.deadlocks.database_session_unreadable", error = error.to_string())
 }
 
 /// Where system_health's deadlocks were read from (its event files, its in-memory ring buffer, either or neither), and
@@ -85,7 +87,7 @@ pub(crate) fn origin(files: bool, ring: bool) -> (String, Option<String>) {
 }
 
 /// Deadlocks in the last `since_hours`. On SQL Server from system_health: its event files first (they keep days), the
-/// in-memory ring buffer when files can't be read. On Azure SQL Database from its deadlock telemetry. Permission
+/// in-memory ring buffer when files can't be read. On Azure SQL Database from an explicit database event session. Permission
 /// problems come back as a note, not an error.
 pub(crate) async fn recent<R: NativeRead>(io: &mut R, since_hours: f64) -> Result<DeadlockReport> {
     let hours = since_hours.clamp(1.0, 24.0 * 30.0).round() as u32;
@@ -98,12 +100,14 @@ pub(crate) async fn recent<R: NativeRead>(io: &mut R, since_hours: f64) -> Resul
     let cutoff = now - chrono::Duration::hours(i64::from(hours));
     let from = cutoff.to_rfc3339();
     if integer(server, "edition")? == 5 {
-        report.source = telemetry();
-        match native::read(io, native::Origin::AzureTelemetry, &database, &from, &until, READ_LIMIT, true).await {
-            Ok(events) => report.deadlocks.extend(events.into_iter().flat_map(|event| event.graphs)),
+        report.source = database_session();
+        match native::read(io, native::Origin::DatabaseSession, &database, &from, &until, READ_LIMIT, true).await {
+            Ok(events) => {
+                report.deadlocks.extend(events.into_iter().flat_map(|event| event.graphs));
+                report.note = Some(t!("provider.mssql.deadlocks.database_session_recent"));
+            }
             Err(error) => {
-                report.source = "Azure SQL Database".into();
-                report.note = Some(telemetry_unreadable(&error));
+                report.note = Some(database_session_unreadable(&error));
             }
         }
         report.deadlocks.sort_by(|a, b| b.at.cmp(&a.at));
@@ -152,36 +156,6 @@ fn normalize_time(text: &str) -> String {
     let t = text.trim().trim_end_matches('Z');
     let t = t.split('.').next().unwrap_or(t);
     format!("{t}Z")
-}
-
-/// The deadlocks in one telemetry event, unless it names another database: the telemetry may be the logical server's,
-/// and deadlock graphs there name databases by their physical name, so the event's `database_name` is what tells.
-fn telemetry_deadlocks(xml: &str, database: &str, at: Option<String>) -> Result<Vec<Deadlock>> {
-    culprit_core::xml::read(xml, |doc| {
-        let doc = doc.map_err(|_| invalid_data())?;
-        telemetry_event(&doc, xml, database, at)
-    })
-}
-
-fn telemetry_event(doc: &Document, xml: &str, database: &str, at: Option<String>) -> Result<Vec<Deadlock>> {
-    let event_database = doc
-        .descendants()
-        .find(|node| node.has_tag_name("data") && node.attribute("name") == Some("database_name"))
-        .and_then(|data| child(data, "value"))
-        .and_then(text_of)
-        .ok_or_else(invalid_data)?;
-    if !event_database.eq_ignore_ascii_case(database) {
-        return Ok(Vec::new());
-    }
-    let mut found = parse_with_time(xml, &telemetry(), at)?;
-    if found.is_empty() {
-        return Err(invalid_data());
-    }
-    // A fix that names the database (ALTER DATABASE) needs the name people use.
-    for p in found.iter_mut().flat_map(|d| d.processes.iter_mut()) {
-        p.database = Some(database.to_string());
-    }
-    Ok(found)
 }
 
 fn parse_with_time(xml: &str, source: &str, at: Option<String>) -> Result<Vec<Deadlock>> {
@@ -387,32 +361,6 @@ mod tests {
             r#"<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><deadlock>&e;</deadlock>"#;
         assert!(parse_deadlock_xml(evil, "pasted").is_err());
         assert!(parse_deadlock_xml("<nothing/>", "pasted").is_err());
-    }
-
-    /// One event from Azure SQL Database's deadlock telemetry, as `event_data` holds it.
-    fn telemetry_event(database: &str) -> String {
-        let graph = KEY_LOOKUP_XDL
-            .replace("<deadlock-list>", "")
-            .replace("</deadlock-list>", "")
-            // The graph names the database by its physical name there.
-            .replace(r#"currentdbname="shop""#, r#"currentdbname="5f0c1e9a-7d2b-4c66-9e1f-3a8b2d4c6e10""#);
-        format!(
-            r#"<event name="database_xml_deadlock_report" package="sqlserver" timestamp="2026-10-11T12:05:01.123Z"><data name="xml_report"><type name="xml" package="package0"/><value>{graph}</value></data><data name="database_name"><type name="unicode_string" package="package0"/><value>{database}</value></data></event>"#
-        )
-    }
-
-    #[test]
-    fn azure_sql_telemetry_events_are_read_for_this_database_only() {
-        let found = telemetry_deadlocks(&telemetry_event("shop"), "Shop", Some("2026-10-11T12:05:01Z".into())).unwrap();
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].pattern, DeadlockPattern::KeyLookup);
-        assert_eq!(found[0].at.as_deref(), Some("2026-10-11T12:05:01Z"));
-        assert_eq!(found[0].source, "Azure SQL deadlock telemetry");
-        assert_eq!(found[0].objects, vec!["shop.customers".to_string()]);
-        assert!(found[0].processes.iter().all(|p| p.database.as_deref() == Some("Shop")));
-        // Another database on the same logical server.
-        assert!(telemetry_deadlocks(&telemetry_event("billing"), "shop", None).unwrap().is_empty());
-        assert!(telemetry_deadlocks("not xml", "shop", None).is_err());
     }
 }
 

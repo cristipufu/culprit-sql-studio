@@ -14,22 +14,8 @@ const FILE_TARGET: &str = "SELECT TOP(1) /* culprit */ CAST(t.target_data AS xml
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Origin {
-    AzureTelemetry,
+    DatabaseSession,
     SystemHealth,
-}
-impl Origin {
-    fn relation(self) -> &'static str {
-        match self {
-            Self::AzureTelemetry => "sys.fn_xe_telemetry_blob_target_read_file('dl',NULL,NULL,NULL)",
-            Self::SystemHealth => "sys.fn_xe_file_target_read_file(@P4,NULL,NULL,NULL)",
-        }
-    }
-    fn event(self) -> &'static str {
-        match self {
-            Self::AzureTelemetry => "database_xml_deadlock_report",
-            Self::SystemHealth => "xml_deadlock_report",
-        }
-    }
 }
 /// Kept private and never serialized. The source graph may contain identities and SQL literals.
 pub(crate) struct Event {
@@ -49,18 +35,19 @@ pub(crate) async fn read<R: NativeRead>(
     limit: usize,
     newest_first: bool,
 ) -> Result<Vec<Event>> {
-    let sql = read_sql(origin, newest_first);
+    if origin == Origin::DatabaseSession {
+        return super::database::read(io, database, from, until, limit, newest_first).await;
+    }
+    let sql = read_sql(newest_first);
     let mut parameters =
         vec![Parameter::Integer(limit as i64), Parameter::Text(from.into()), Parameter::Text(until.into())];
-    if origin == Origin::SystemHealth {
-        // Resolve the active target rather than relying on the process's default directory. A relative
-        // system_health wildcard can return an empty set even while the configured target contains events.
-        let target = io.query(FILE_TARGET, vec![], 1).await.map_err(ReadError::into_error)?;
-        let path = text(target.first().ok_or_else(invalid_data)?, "file_path")?;
-        parameters.push(Parameter::Text(file_pattern(&path)?));
-    }
+    // Resolve the active target rather than relying on the process's default directory. A relative
+    // system_health wildcard can return an empty set even while the configured target contains events.
+    let target = io.query(FILE_TARGET, vec![], 1).await.map_err(ReadError::into_error)?;
+    let path = text(target.first().ok_or_else(invalid_data)?, "file_path")?;
+    parameters.push(Parameter::Text(file_pattern(&path)?));
     let rows = io.query(&sql, parameters, limit).await.map_err(ReadError::into_error)?;
-    rows.iter().map(|row| decode(row, origin, database)).collect()
+    rows.iter().map(|row| decode(row, database)).collect()
 }
 fn file_pattern(path: &str) -> Result<String> {
     let (stem, extension) = path.rsplit_once('.').ok_or_else(invalid_data)?;
@@ -77,19 +64,17 @@ fn file_pattern(path: &str) -> Result<String> {
     }
     Ok(format!("{prefix}_*.{extension}"))
 }
-pub(super) fn read_sql(origin: Origin, newest_first: bool) -> String {
+pub(super) fn read_sql(newest_first: bool) -> String {
     let direction = if newest_first { "DESC" } else { "ASC" };
     // SQL Server 2022 can discard real events when a timestamp predicate is pushed into the XEL reader.
     // Convert the returned timestamp explicitly, as Microsoft's documented system_health example does:
     // https://learn.microsoft.com/sql/relational-databases/system-functions/sys-fn-xe-file-target-read-file-transact-sql
     let timestamp = "CAST(x.timestamp_utc AS datetime2(7))";
     format!(
-        "SELECT TOP (@P1) /* culprit */ x.file_name,x.file_offset,CONVERT(varchar(40),{timestamp},127)+'Z' AS at,CAST(x.event_data AS nvarchar(max)) AS event_xml FROM {} x WHERE x.object_name=N'{}' AND {timestamp}>=CONVERT(datetime2(7),@P2,127) AND {timestamp}<CONVERT(datetime2(7),@P3,127) ORDER BY {timestamp} {direction},x.file_name {direction},x.file_offset {direction},HASHBYTES('SHA2_256',CAST(x.event_data AS nvarchar(max))) {direction} OPTION(MAXDOP 1)",
-        origin.relation(),
-        origin.event()
+        "SELECT TOP (@P1) /* culprit */ x.file_name,x.file_offset,CONVERT(varchar(40),{timestamp},127)+'Z' AS at,CAST(x.event_data AS nvarchar(max)) AS event_xml FROM sys.fn_xe_file_target_read_file(@P4,NULL,NULL,NULL) x WHERE x.object_name=N'xml_deadlock_report' AND {timestamp}>=CONVERT(datetime2(7),@P2,127) AND {timestamp}<CONVERT(datetime2(7),@P3,127) ORDER BY {timestamp} {direction},x.file_name {direction},x.file_offset {direction},HASHBYTES('SHA2_256',CAST(x.event_data AS nvarchar(max))) {direction} OPTION(MAXDOP 1)"
     )
 }
-fn decode(row: &Rec, origin: Origin, database: &str) -> Result<Event> {
+fn decode(row: &Rec, database: &str) -> Result<Event> {
     let xml = text(row, "event_xml")?;
     let at = canonical_time(&text(row, "at")?)?;
     let offset = integer(row, "file_offset")?;
@@ -98,14 +83,11 @@ fn decode(row: &Rec, origin: Origin, database: &str) -> Result<Event> {
     }
     let file = text(row, "file_name")?;
     let position =
-        digest(&serde_json::to_vec(&(origin.event(), &file, offset, &at, &xml)).map_err(|_| invalid_data())?);
-    let graphs = match origin {
-        Origin::AzureTelemetry => super::telemetry_deadlocks(&xml, database, Some(at.clone()))?,
-        Origin::SystemHealth => super::parse_with_time(&xml, "system_health", Some(at.clone()))?
-            .into_iter()
-            .filter(|graph| super::involves(graph, database))
-            .collect(),
-    };
+        digest(&serde_json::to_vec(&("xml_deadlock_report", &file, offset, &at, &xml)).map_err(|_| invalid_data())?);
+    let graphs = super::parse_with_time(&xml, "system_health", Some(at.clone()))?
+        .into_iter()
+        .filter(|graph| super::involves(graph, database))
+        .collect();
     // Invalid/unparseable native XML must not look like an empty successful event.
     culprit_core::xml::read(&xml, |doc| doc.map(|_| ()).map_err(|_| invalid_data()))?;
     Ok(Event { position, file_id: digest(file.as_bytes()), offset: offset.to_string(), at, graphs })
@@ -115,27 +97,6 @@ fn decode(row: &Rec, origin: Origin, database: &str) -> Result<Event> {
 mod tests {
     use super::*;
     use crate::{resources::test_support::FakeRead, value::Val};
-    #[tokio::test]
-    async fn native_event_identity_keeps_fractional_time_and_file_position() {
-        let xml = "<event><data name=\"database_name\"><value>other</value></data></event>";
-        let row = Rec::of(&[
-            ("event_xml", Val::Text(xml.into())),
-            ("file_name", Val::Text("native-file".into())),
-            ("file_offset", Val::Int(9007199254740993)),
-            ("at", Val::Text("2020-01-01T06:00:00.1533333Z".into())),
-        ]);
-        let mut io = FakeRead::new(vec![Ok(vec![row])]);
-        let events =
-            read(&mut io, Origin::AzureTelemetry, "db", "2020-01-01T06:00:00Z", "2020-01-01T07:00:00Z", 10, false)
-                .await
-                .unwrap();
-        let event = &events[0];
-        assert_eq!(event.at, "2020-01-01T06:00:00.153333300Z");
-        assert_eq!(event.offset, "9007199254740993");
-        assert_eq!(event.position.len(), 64);
-        assert!(event.graphs.is_empty());
-        assert_eq!(io.calls.len(), 1);
-    }
     #[tokio::test]
     async fn system_health_uses_its_observed_target_and_binds_the_rollover_pattern_as_data() {
         for path in [

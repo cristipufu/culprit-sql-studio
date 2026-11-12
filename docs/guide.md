@@ -255,8 +255,9 @@ per-replica plan-forcing locations or establish complete tuning-event history.
 
 ### Export retained deadlock events
 
-`--collection deadlock-history` reads a past timestamp window from Azure SQL's built-in deadlock telemetry, using
-the same native reader and graph parser as interactive investigation:
+`--collection deadlock-history` selects a past timestamp window from Azure SQL's explicitly configured,
+[database-scoped deadlock session](providers/mssql.md#azure-sql-deadlock-events), using the same native reader
+and graph parser as interactive investigation:
 
 ```sh
 culprit collect once shop-staging --collection deadlock-history \
@@ -264,7 +265,7 @@ culprit collect once shop-staging --collection deadlock-history \
   --outbox ./telemetry-outbox --json
 ```
 
-The capture contains `deadlocks.ndjson` and `manifest.json`. Events retain native file/buffer identity, precise time,
+The capture contains `deadlocks.ndjson` and `manifest.json`. Events retain native session generation and event sequence, precise time,
 victims, redacted statements, participants, resource edges and a typed pattern. Login, host and application identities
 are omitted. The source is read under pressure and work budgets and rechecked before completion; changing membership
 or a result exceeding `--max-snapshot-rows` leaves the capture incomplete. Choose smaller windows for a busy source.

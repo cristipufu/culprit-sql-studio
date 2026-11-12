@@ -21,7 +21,7 @@ async fn retained_event_reads_are_measured_with_large_unrelated_event_history() 
     let path = format!("/var/opt/mssql/log/system_health_{session}");
     batch(&mut admin,&format!("CREATE EVENT SESSION [{session}] ON SERVER ADD EVENT sqlserver.error_reported(WHERE(error_number=50000)) ADD TARGET package0.event_file(SET filename=N'{path}.xel',max_file_size=(128),max_rollover_files=(4)) WITH(MAX_DISPATCH_LATENCY=1 SECONDS,MAX_MEMORY=65536 KB,EVENT_RETENTION_MODE=ALLOW_SINGLE_EVENT_LOSS); ALTER EVENT SESSION [{session}] ON SERVER STATE=START")).await;
     let from = (chrono::Utc::now() - chrono::Duration::seconds(5)).to_rfc3339();
-    let native_sql = crate::statement_origin::monitoring_batch(&native::read_sql(native::Origin::SystemHealth, false));
+    let native_sql = crate::statement_origin::monitoring_batch(&native::read_sql(false));
     let mut expected = 0_i64;
     for added in [0, 1000, 9000] {
         if added > 0 {

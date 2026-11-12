@@ -54,7 +54,7 @@ multixact-age     MultiXact wraparound risk
 config            Configuration
                   SQL Server, PostgreSQL, MySQL/MariaDB, SQLite · Database and server settings that commonly hurt performance or hide the data needed to diagnose it.
 deadlocks         Deadlocks
-                  SQL Server, PostgreSQL, MySQL/MariaDB · Deadlocks in the last day, grouped by pattern (key lookup, opposite order, read-then-update, lock escalation, parallelism) with the fix that removes them. SQL Server reads system_health (Azure SQL Database its deadlock telemetry), MySQL the latest InnoDB report, PostgreSQL only keeps a counter.
+                  SQL Server, PostgreSQL, MySQL/MariaDB · Deadlocks in the last day, grouped by pattern (key lookup, opposite order, read-then-update, lock escalation, parallelism) with the fix that removes them. SQL Server reads system_health, Azure SQL Database an explicitly configured database-scoped event session, MySQL the latest InnoDB report, and PostgreSQL only keeps a counter.
 memory-grant      Queries that reserve far more memory than they use
                   SQL Server · Statements whose memory grant (reserved before they run, for sorts and hashes) is many times what they use, so other queries queue for memory.
 memory-queue      Queries waiting in line for memory
