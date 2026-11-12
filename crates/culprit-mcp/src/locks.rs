@@ -37,22 +37,39 @@ fn node(live: &LiveState, n: &BlockNode) -> Value {
 }
 
 pub fn blocking(live: &LiveState) -> Value {
-    let Some(b) = live.blocking.as_ref() else {
-        return json!({ "taken_at": live.taken_at, "waiting": 0, "chains": [], "summary": "Nothing is blocked." });
-    };
-    json!({
+    let incomplete = live.blocking_incomplete();
+    let chains: Vec<_> = live
+        .blocking
+        .as_ref()
+        .into_iter()
+        .flat_map(|blocking| &blocking.chains)
+        .map(|c| {
+            json!({
+                "head": c.head,
+                "head_kind": c.head_kind,
+                "headline": c.headline,
+                "advice": c.advice,
+                "waiters": c.waiters,
+                "longest_wait_ms": c.longest_wait_ms.map(round),
+                "tree": node(live, &c.tree),
+            })
+        })
+        .collect();
+    let mut response = json!({
         "taken_at": live.taken_at,
-        "waiting": b.waiting,
-        "chains": b.chains.iter().map(|c| json!({
-            "head": c.head,
-            "head_kind": c.head_kind,
-            "headline": c.headline,
-            "advice": c.advice,
-            "waiters": c.waiters,
-            "longest_wait_ms": c.longest_wait_ms.map(round),
-            "tree": node(live, &c.tree),
-        })).collect::<Vec<_>>(),
-    })
+        "waiting": live.blocking.as_ref().map_or(0, |blocking| blocking.waiting),
+        "chains": chains,
+        "incomplete": incomplete,
+        "notes": live.notes,
+    });
+    if live.blocking.is_none() {
+        response["summary"] = json!(if incomplete {
+            culprit_core::t!("cli.blocking.incomplete")
+        } else {
+            "Nothing is blocked.".to_string()
+        });
+    }
+    response
 }
 
 pub fn deadlocks(report: &DeadlockReport) -> Value {
@@ -88,4 +105,60 @@ pub fn deadlocks(report: &DeadlockReport) -> Value {
             "fixes": d.fixes,
         })).collect::<Vec<_>>(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn live() -> LiveState {
+        LiveState {
+            taken_at: "2026-11-12T00:00:00Z".into(),
+            notes: vec![],
+            sessions: vec![],
+            waits: vec![],
+            session_actions: vec![],
+            session_actions_note: None,
+            blocking: None,
+        }
+    }
+    fn session(id: &str, blocked_by: Option<&str>) -> culprit_core::Session {
+        serde_json::from_value(json!({"id":id,"state":"waiting","blocked_by":blocked_by,"waiting_on_lock":true}))
+            .unwrap()
+    }
+    #[test]
+    fn complete_empty_observation_is_distinct_from_missing_permissions() {
+        culprit_core::i18n::scope("en", || {
+            let mut live = live();
+            let known = blocking(&live);
+            assert_eq!(known["incomplete"], false);
+            assert_eq!(known["notes"], json!([]));
+            assert_eq!(known["summary"], "Nothing is blocked.");
+            live.notes.push("Lock permissions are missing.".into());
+            let incomplete = blocking(&live);
+            assert_eq!(incomplete["incomplete"], true);
+            assert_eq!(incomplete["notes"], json!(live.notes));
+            assert_eq!(incomplete["waiting"], 0);
+            assert_ne!(incomplete["summary"], known["summary"]);
+        });
+    }
+    #[test]
+    fn an_unresolved_wait_does_not_report_a_healthy_empty_graph() {
+        let mut live = live();
+        live.sessions.push(session("51", None));
+        let response = blocking(&live);
+        assert_eq!(response["incomplete"], true);
+        assert_ne!(response["summary"], "Nothing is blocked.");
+    }
+    #[test]
+    fn established_chains_keep_partial_coverage_and_notes() {
+        let mut live = live();
+        live.sessions = vec![session("51", Some("52")), session("52", None)];
+        live.notes.push("Other lock owners are not visible.".into());
+        live.blocking = culprit_core::blocking::analyze(culprit_core::Engine::Mssql, &live.sessions, &[]);
+        let response = blocking(&live);
+        assert_eq!(response["waiting"], 1);
+        assert_eq!(response["chains"].as_array().unwrap().len(), 1);
+        assert_eq!(response["incomplete"], true);
+        assert_eq!(response["notes"], json!(live.notes));
+    }
 }
