@@ -5467,6 +5467,7 @@
   "ui.beyond_time.compiles": "{n, plural, one {{count} compile · {duration}} other {{count} compiles · {duration}}}",
   "ui.beyond_time.compiles_unmeasured": "not measured for this period",
   "ui.beyond_time.constraints.count": "{n, plural, one {# constraint} other {# constraints}}",
+  "ui.beyond_time.constraints.deferred": "Validation deferred",
   "ui.beyond_time.constraints.not_validated": "Not validated",
   "ui.beyond_time.constraints.untrusted": "Untrusted",
   "ui.beyond_time.docdb.colocated": "Shared with its colocated tablegroup",

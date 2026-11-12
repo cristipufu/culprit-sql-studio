@@ -6,7 +6,7 @@ import type { QueryStat } from "../gen/QueryStat";
 import type { Replica } from "../gen/Replica";
 import type { Report } from "../gen/Report";
 import type { TableStat } from "../gen/TableStat";
-import { serverName, statementMetrics } from "../lib/engines";
+import { constraintLabel, serverName, statementMetrics } from "../lib/engines";
 import { bytes, count, duration, percent, rowCount, when } from "../lib/format";
 import { key, t } from "../lib/i18n";
 import { waitKey } from "../lib/waits";
@@ -443,7 +443,7 @@ export function TableSignalFacts({ report, table }: { report: Report; table: Tab
     facts.push(
       <Fact
         key="constraints"
-        label={snapshot.server.engine === "postgres" ? t("ui.beyond_time.constraints.not_validated") : t("ui.beyond_time.constraints.untrusted")}
+        label={constraintLabel(snapshot.server.engine)}
         value={t("ui.beyond_time.constraints.count", { n: untrusted.length })}
         warn
         detail={untrusted.map((c) => c.name).join(", ")}

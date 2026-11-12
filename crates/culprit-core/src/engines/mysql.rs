@@ -57,6 +57,9 @@ impl EngineSpec for Mysql {
         let state = index_hiding(server)?;
         Some(format!("ALTER TABLE {} ALTER INDEX {} {state};", self.qualified(&[schema, table]), self.quote(index)))
     }
+    fn constraint_validation(&self) -> ConstraintValidation {
+        ConstraintValidation::Unsupported
+    }
     fn statement_metrics(&self) -> StatementMetrics {
         StatementMetrics {
             lock_time: true,

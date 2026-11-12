@@ -72,8 +72,11 @@ impl EngineSpec for Postgres {
     fn session_advice(&self, command: &str) -> Option<String> {
         session_reset_advice(command)
     }
+    fn constraint_validation(&self) -> ConstraintValidation {
+        ConstraintValidation::CheckExclusion
+    }
     fn statement_metrics(&self) -> StatementMetrics {
-        StatementMetrics::pg_stat_statements(WriteLog::Wal)
+        StatementMetrics { io_wait_within_statement_time: true, ..StatementMetrics::pg_stat_statements(WriteLog::Wal) }
     }
     fn signal_scope(&self, _server: &ServerInfo, key: &str) -> crate::MeasurementScope {
         if matches!(key, "connections" | "checkpoints" | "checkpoints-requested") {

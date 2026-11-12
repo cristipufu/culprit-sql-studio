@@ -18,6 +18,9 @@ impl EngineSpec for Sqlite {
     fn unused_index_advice(&self, _server: &ServerInfo, _table_kind: Option<&str>) -> String {
         t!("core.engines.sqlite.unused_index")
     }
+    fn constraint_validation(&self) -> ConstraintValidation {
+        ConstraintValidation::Unsupported
+    }
     fn statement_metrics(&self) -> StatementMetrics {
         StatementMetrics {
             runtime_note: key!("core.engines.sqlite.runtime_note").into(),

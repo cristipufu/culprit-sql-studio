@@ -28,6 +28,9 @@ impl EngineSpec for Mssql {
     fn session_advice(&self, _command: &str) -> Option<String> {
         Some(t!("core.engines.mssql.session_advice"))
     }
+    fn constraint_validation(&self) -> ConstraintValidation {
+        ConstraintValidation::OptimizerTrust
+    }
     fn statement_metrics(&self) -> StatementMetrics {
         StatementMetrics {
             compilation_history: true,

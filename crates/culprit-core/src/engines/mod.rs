@@ -56,6 +56,21 @@ pub enum PartitionTail {
     Unknown,
 }
 
+/// What a collected constraint issue means to the engine, independently of SQL grammar.
+#[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum ConstraintValidation {
+    /// SQL Server's trusted constraints may inform optimization.
+    OptimizerTrust,
+    /// PostgreSQL CHECK constraints may inform constraint exclusion when its settings permit it.
+    CheckExclusion,
+    /// YSQL records deferred validation without establishing a planner consequence.
+    Deferred,
+    /// This provider does not collect constraint validation issues.
+    Unsupported,
+}
+
 /// One engine, as checks and every surface see it.
 pub trait EngineSpec: Send + Sync {
     /// TLS policy and native option names; file engines have no network security settings.
@@ -78,6 +93,7 @@ pub trait EngineSpec: Send + Sync {
     fn sql_syntax(&self) -> SqlSyntax;
     /// Meaning and presentation of statement counters, independently of SQL grammar or storage.
     fn statement_metrics(&self) -> StatementMetrics;
+    fn constraint_validation(&self) -> ConstraintValidation;
     /// How a live wait sample is collected. Required so a new engine cannot inherit another engine's description.
     fn wait_sampling(&self) -> Option<WaitSampling>;
     /// Whether a health counter measures this database or a shared server, independently of its temporal scope.
@@ -320,6 +336,9 @@ pub struct StatementMetrics {
     #[ts(skip)]
     pub write_rows_label: Option<Cow<'static, str>>,
     pub lock_time: bool,
+    /// The collected I/O wait time is a component of the same statement execution time.
+    /// Shared I/O counters and activity samples do not establish this bound.
+    pub io_wait_within_statement_time: bool,
     pub log: WriteLog,
     /// Message key: [`StatementMetrics::log`] in a sentence ("WAL").
     pub log_name: Cow<'static, str>,
@@ -346,6 +365,7 @@ impl StatementMetrics {
             write_rows,
             write_rows_label: write_rows.map(|rows| i18n::t(rows.per_run_key(), &[]).into()),
             lock_time: false,
+            io_wait_within_statement_time: false,
             log,
             log_name: log.name_key().into(),
             log_label: log.written_key().into(),
@@ -425,6 +445,7 @@ pub struct EngineFacts {
     pub refusals: BTreeMap<String, Refusal>,
     pub sql_syntax: SqlSyntax,
     pub statement_metrics: StatementMetrics,
+    pub constraint_validation: ConstraintValidation,
     pub wait_sampling: Option<WaitSampling>,
     pub connection_security: Option<crate::ConnectionSecuritySpec>,
 }
@@ -481,6 +502,7 @@ impl Engine {
             partition_tail: spec.partition_tail(),
             products: spec.products().iter().map(|product| product.facts()).collect(),
             statement_metrics: spec.statement_metrics(),
+            constraint_validation: spec.constraint_validation(),
             wait_sampling: spec.wait_sampling(),
             sql_syntax: spec.sql_syntax(),
             label: spec.label().into(),

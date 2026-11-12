@@ -447,6 +447,9 @@ lock timing, log terminology and missing measurements. The UI consumes these gen
 an engine by name. `wait_sampling` describes session sampling versus counter deltas. Each engine must declare both;
 cross-engine tests cover the declarations and query-cost rendering. Shared statement statistics do not imply shared
 WAL, heap or server-wide measurement semantics.
+`constraint_validation` separately identifies optimizer trust, CHECK exclusion and deferred validation. The UI and
+constraint checks consume that fact. Statement metrics also declare whether collected I/O waits must fit within
+statement execution time; YSQL's PostgreSQL grammar does not imply that bound for its native activity measurements.
 Database product identity is separate from the execution provider: MariaDB uses the MySQL provider and TimescaleDB
 uses PostgreSQL. Each engine file declares its products, stable `DatabaseProduct` identifiers, labels and recognition
 rules through `EngineSpec::products`. `ServerInfo` resolves those facts without allocating; generated `EngineFacts`

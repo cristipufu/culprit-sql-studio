@@ -18,7 +18,7 @@
 
 use std::sync::Arc;
 
-use culprit_core::{Check, CollectorNote, Engine, Finding, LockedCheck, Report, Snapshot, WaitStat, t};
+use culprit_core::{Check, CollectorNote, Finding, LockedCheck, Report, Snapshot, WaitStat, t};
 
 /// A step that corrects the snapshot before any check reads it. It changes what the data says only where the data
 /// contradicts itself or the database (a plan older than the table it describes), never to hide a problem.
@@ -171,7 +171,7 @@ fn is_lock_time(w: &WaitStat) -> bool {
 /// counters with a different coverage, can't be shown as exclusive shares of execution time. Then the breakdown goes,
 /// with a note; per-query I/O totals remain.
 fn io_within_statement_time(snapshot: &mut Snapshot) {
-    if snapshot.server.engine != Engine::Postgres {
+    if !snapshot.server.engine.spec().statement_metrics().io_wait_within_statement_time {
         return;
     }
     let io: f64 = snapshot.waits.iter().filter(|w| w.category == "IO").map(|w| w.wait_ms).sum();
@@ -384,4 +384,43 @@ fn rank(findings: &mut [Finding]) {
             .then(b.severity.cmp(&a.severity))
             .then(b.impact.score.total_cmp(&a.impact.score))
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use culprit_core::{Capability, Engine};
+
+    #[test]
+    fn io_bounds_follow_measurement_semantics_instead_of_shared_sql_syntax() {
+        let original: Snapshot = serde_json::from_str(include_str!("../../../fixtures/postgres-demo.json")).unwrap();
+        let cases = [
+            (Engine::Mssql, false),
+            (Engine::Postgres, true),
+            (Engine::Yugabyte, false),
+            (Engine::Mysql, false),
+            (Engine::Sqlite, false),
+        ];
+        assert_eq!(cases.map(|c| c.0), Engine::ALL);
+        for (engine, bounded) in cases {
+            for exceeds in [false, true] {
+                let mut s = original.clone();
+                s.server.engine = engine;
+                s.server.capabilities.push(Capability::WaitStats);
+                s.notes.clear();
+                let total = s.workload.as_ref().unwrap().total_time_ms;
+                s.waits = vec![WaitStat {
+                    category: "IO".into(),
+                    wait_type: None,
+                    wait_ms: total * if exceeds { 2.0 } else { 0.5 },
+                    tasks: None,
+                }];
+                io_within_statement_time(&mut s);
+                let rejected = bounded && exceeds;
+                assert_eq!(s.waits.is_empty(), rejected, "{engine:?}, exceeds={exceeds}");
+                assert_eq!(!s.server.has(Capability::WaitStats), rejected);
+                assert_eq!(!s.notes.is_empty(), rejected);
+            }
+        }
+    }
 }

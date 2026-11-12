@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import demo from "../../../fixtures/pg-demo.report.json";
 import type { Engine } from "../gen/Engine";
 import type { Report } from "../gen/Report";
-import { QueryCostsPanel } from "../components/BeyondTime";
+import { QueryCostsPanel, TableSignalFacts } from "../components/BeyondTime";
 import { PlanCatalog } from "../components/PlanCatalog";
 import { RuntimeSpread } from "../components/RuntimeSpread";
 import { engineLimitations, refusal } from "./engines";
@@ -104,4 +104,20 @@ test("Run-time notes, plan formats, limitations and refusals read in English", (
   check(plan.message === "PostgreSQL doesn't keep the actual plan of past runs", plan.message);
   check(refusal("mysql", "operator_progress").hint === "Its plan doesn't change while it runs: ask for the plan once.", "MySQL's progress hint");
   check(refusal("sqlite", "sign_in").hint === null, "SQLite's sign-in has no hint");
+});
+
+
+test("Constraint labels follow native validation semantics on every engine", () => {
+  for (const [engine, label] of [
+    ["mssql", "Untrusted"], ["postgres", "Not validated"], ["yugabyte", "Validation deferred"],
+    ["mysql", "Constraints"], ["sqlite", "Constraints"],
+  ] as const) {
+    const report = fromRust<Report>(demo);
+    report.snapshot.server.engine = engine;
+    const table = report.snapshot.tables[0]!;
+    report.snapshot.constraints = [{ schema: table.schema, table: table.name, name: "check_total", kind: "check", disabled: false, inheritance_child: false }];
+    const html = renderToStaticMarkup(createElement(TableSignalFacts, { report, table }));
+    check(html.includes(`>${label}<`), `${engine}: ${html}`);
+    if (engine !== "mssql") check(!html.includes(">Untrusted<"), `${engine} must not inherit SQL Server terminology`);
+  }
 });

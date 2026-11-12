@@ -47,6 +47,9 @@ impl EngineSpec for Yugabyte {
     fn session_advice(&self, command: &str) -> Option<String> {
         super::postgres::session_reset_advice(command)
     }
+    fn constraint_validation(&self) -> ConstraintValidation {
+        ConstraintValidation::Deferred
+    }
     fn statement_metrics(&self) -> StatementMetrics {
         StatementMetrics {
             runtime_note: key!("core.engines.yugabyte.runtime_note").into(),

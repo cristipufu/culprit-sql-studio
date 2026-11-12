@@ -18,6 +18,15 @@ export const ENGINES = Object.keys(FACTS) as Engine[];
 export const PRODUCTS = ENGINES.flatMap((engine) => FACTS[engine].products.map((product) => ({ ...product, engine })));
 export const sqlSyntax = (engine: Engine) => FACTS[engine].sql_syntax;
 export const statementMetrics = (engine: Engine) => FACTS[engine].statement_metrics;
+/** The meaning of a collected constraint issue comes from the engine, independently of its SQL grammar. */
+export function constraintLabel(engine: Engine): string {
+  switch (FACTS[engine].constraint_validation) {
+    case "optimizer-trust": return t("ui.beyond_time.constraints.untrusted");
+    case "check-exclusion": return t("ui.beyond_time.constraints.not_validated");
+    case "deferred": return t("ui.beyond_time.constraints.deferred");
+    case "unsupported": return t("check.untrusted_constraint.metric.constraints");
+  }
+}
 export const connectionSecurityFacts = (engine: Engine) => FACTS[engine].connection_security;
 export const waitSampling = (engine: Engine) => FACTS[engine].wait_sampling;
 

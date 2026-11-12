@@ -62,10 +62,12 @@ fn untrusted_tables(snapshot: &Snapshot) -> Vec<UntrustedTable<'_>> {
     by_table
         .into_iter()
         .map(|((schema, table), list)| {
-            let engine = match snapshot.server.engine {
-                Engine::Mssql => Unvalidated::Untrusted,
-                Engine::Yugabyte => Unvalidated::Deferred,
-                _ if planner_reads_checks(snapshot, &list) => {
+            let engine = match snapshot.server.engine.spec().constraint_validation() {
+                culprit_core::engines::ConstraintValidation::OptimizerTrust => Unvalidated::Untrusted,
+                culprit_core::engines::ConstraintValidation::Deferred => Unvalidated::Deferred,
+                culprit_core::engines::ConstraintValidation::CheckExclusion
+                    if planner_reads_checks(snapshot, &list) =>
+                {
                     Unvalidated::PlannerReads { inheritance_child: list.iter().any(|c| c.inheritance_child) }
                 }
                 _ => Unvalidated::DataOnly,
