@@ -1,3 +1,4 @@
+pub use culprit_core::collected_analysis::{EvidenceGap, EvidenceGapReason};
 use culprit_core::{Result, telemetry::*};
 use serde::{Deserialize, Serialize};
 
@@ -6,12 +7,29 @@ use serde::{Deserialize, Serialize};
 pub enum EvidenceFamily {
     ResourceSamples,
     OperationalSamples,
+    QueryDefinitions,
+    PlanDefinitions,
+    QueryRuntime,
+    QueryWaits,
 }
 impl EvidenceFamily {
+    pub const ALL: &[Self] = &[
+        Self::ResourceSamples,
+        Self::OperationalSamples,
+        Self::QueryDefinitions,
+        Self::PlanDefinitions,
+        Self::QueryRuntime,
+        Self::QueryWaits,
+    ];
+
     pub fn stream(self) -> TelemetryStream {
         match self {
             Self::ResourceSamples => TelemetryStream::ResourceSamples,
             Self::OperationalSamples => TelemetryStream::OperationalSamples,
+            Self::QueryDefinitions => TelemetryStream::QueryDefinitions,
+            Self::PlanDefinitions => TelemetryStream::PlanDefinitions,
+            Self::QueryRuntime => TelemetryStream::QueryRuntime,
+            Self::QueryWaits => TelemetryStream::QueryWaits,
         }
     }
 }
@@ -58,25 +76,6 @@ impl EvidenceReadBudget {
         }
         Ok(())
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum EvidenceGapReason {
-    NotPublished,
-    FamilyNotCaptured,
-    ProjectionProofUnavailable,
-    MissingRows,
-    DetailInRecovery,
-    NativeRepresentationRequired,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct EvidenceGap {
-    pub stream: Option<TelemetryStream>,
-    pub batch_id: Option<String>,
-    pub row_ordinal: Option<u32>,
-    pub reason: EvidenceGapReason,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]

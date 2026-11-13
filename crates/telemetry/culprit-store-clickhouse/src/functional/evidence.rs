@@ -87,4 +87,106 @@ async fn typed_evidence_reads_keep_nanoseconds_unknowns_scope_and_native_counter
         }
     }
     assert_eq!(kinds, std::collections::BTreeSet::from(["counter-set", "counter", "space"]));
+
+    let (source, mut records) = test_support::query_evidence();
+    let TelemetryRecord::QueryRuntime(runtime) = &mut records[2] else { panic!() };
+    runtime.first_execution_at = Some("2020-01-01T06:00:00.123456001Z".into());
+    let scenario = Scenario::new(
+        &server,
+        Recovery::capture(server.client.destination(), catalog.digest(), source.clone(), records.clone(), 90_000),
+    )
+    .await;
+    scenario.complete().await;
+    *scenario.recovery.fault.lock().unwrap() = Fault::Stall;
+    let reader =
+        crate::evidence::new(server.client.clone(), Arc::new(ProjectionIndexes::new(scenario.indexes.clone())))
+            .unwrap();
+    let families = [
+        EvidenceFamily::QueryDefinitions,
+        EvidenceFamily::PlanDefinitions,
+        EvidenceFamily::QueryRuntime,
+        EvidenceFamily::QueryWaits,
+    ];
+    let result =
+        reader.read_capture(&scenario.range, &families, EvidenceReadBudget { page_rows: 1, ..budget }).await.unwrap();
+    assert!(result.is_read_complete());
+    assert_eq!(result.source(), &source);
+    assert_eq!(result.records().len(), records.len());
+    for record in records {
+        let expected = ExportedRecord::new(&source, result.capture(), record).unwrap();
+        assert_eq!(
+            result.records().iter().find(|record| record.row().record_id == expected.record_id).unwrap().row(),
+            &expected
+        );
+    }
+    let table = crate::schema::quote(catalog.get(TelemetryStream::PlanDefinitions).unwrap().table());
+    server.execute(&format!(
+        "INSERT INTO {table} SELECT * REPLACE('{}' AS QueryDefinitionId) FROM {table} WHERE RangeId='{}' LIMIT 1",
+        digest(b"another-native-query-parent"),
+        scenario.range.manifest().range_id,
+    ));
+    let error = reader.read_capture(&scenario.range, &families, budget).await.unwrap_err();
+    assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+
+    let sql =
+        DefinitionPayload::sql("SELECT payload FROM dbo.orders WHERE customer_id=9264", culprit_core::Engine::Mssql);
+    for (index, (source, records)) in [
+        test_support::request_memory_evidence(sql, true),
+        test_support::request_memory_evidence(
+            DefinitionPayload::Unavailable { reason: PayloadUnavailable::Restricted },
+            true,
+        ),
+        test_support::request_memory_evidence(
+            DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
+            false,
+        ),
+        test_support::retention_evidence(),
+        test_support::retention_coverage_only_evidence(vec![CleanupHorizon::Data, CleanupHorizon::Catalog]),
+        test_support::retention_coverage_only_evidence(vec![]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let scenario = Scenario::new(
+            &server,
+            Recovery::capture(
+                server.client.destination(),
+                catalog.digest(),
+                source.clone(),
+                records.clone(),
+                110_000 + index as u64,
+            ),
+        )
+        .await;
+        scenario.complete().await;
+        *scenario.recovery.fault.lock().unwrap() = Fault::Stall;
+        let reader =
+            crate::evidence::new(server.client.clone(), Arc::new(ProjectionIndexes::new(scenario.indexes.clone())))
+                .unwrap();
+        let result = reader.read_capture(&scenario.range, &[EvidenceFamily::OperationalSamples], budget).await.unwrap();
+        assert!(result.is_read_complete(), "{:?}", result.gaps());
+        assert_eq!(result.source(), &source);
+        assert_eq!(result.records().len(), records.len());
+        for native in &records {
+            let expected = ExportedRecord::new(&source, result.capture(), native.clone()).unwrap();
+            assert!(result.records().iter().any(|record| record.row() == &expected));
+        }
+    }
+    let sql = format!("SELECT {}last_column FROM dbo.orders", "column_name,".repeat(200));
+    let (source, records) =
+        test_support::request_memory_evidence(DefinitionPayload::sql(&sql, culprit_core::Engine::Mssql), true);
+    let scenario = Scenario::new(
+        &server,
+        Recovery::capture(server.client.destination(), catalog.digest(), source, records, 110_100),
+    )
+    .await;
+    scenario.complete().await;
+    *scenario.recovery.fault.lock().unwrap() = Fault::Stall;
+    let reader =
+        crate::evidence::new(server.client.clone(), Arc::new(ProjectionIndexes::new(scenario.indexes.clone())))
+            .unwrap();
+    let result = reader.read_capture(&scenario.range, &[EvidenceFamily::OperationalSamples], budget).await.unwrap();
+    assert!(!result.is_read_complete());
+    assert!(result.records().is_empty());
+    assert_eq!(result.gaps()[0].reason, EvidenceGapReason::DetailInRecovery);
 }

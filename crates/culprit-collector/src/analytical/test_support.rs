@@ -5,6 +5,11 @@ use crate::delivery::{
 };
 use culprit_core::telemetry::*;
 
+mod queries;
+pub use queries::query_evidence;
+mod observations;
+pub use observations::{request_memory_evidence, retention_coverage_only_evidence, retention_evidence};
+
 pub fn fixture() -> (RangeManifest, ExportedRecord) {
     let source = CollectionDescription {
         target: culprit_core::DatabaseIdentity::server(
@@ -318,25 +323,13 @@ impl ObjectTransport for Blobs {
 }
 
 pub fn interval_queries(destination: &str, schema: &str) -> Recovery {
-    let (mut manifest, _) = fixture();
-    let CollectionTarget::Database(database) = &mut manifest.source.target else { panic!("database fixture") };
-    database.engine = culprit_core::Engine::Postgres;
-    manifest.source.source = "native-history-fixture".into();
-    manifest.source.observation = SourceObservation::QueryHistory(QueryHistoryDescription {
-        interval: TelemetryInterval {
-            native_id: "native-period".into(),
-            from: "2020-01-01T06:00:00Z".into(),
-            until: "2020-01-01T07:00:00Z".into(),
-        },
-        dimensions: Default::default(),
-        native_properties: Default::default(),
-    });
+    let source = queries::source();
     let identity =
         NativeQueryIdentity { query_id: "opaque-query".into(), qualifiers: [("userid".into(), "17".into())].into() };
     let references = StatementReferences {
         query: Some(NativeDefinitionReference {
             native: identity.native(),
-            definition_id: Some(identity.definition_id(&manifest.source).unwrap()),
+            definition_id: Some(identity.definition_id(&source).unwrap()),
         }),
         plan: None,
     };
@@ -364,7 +357,7 @@ pub fn interval_queries(destination: &str, schema: &str) -> Recovery {
         maximum: None,
     });
     let query = TelemetryRecord::QueryDefinition(QueryDefinition {
-        id: identity.definition_id(&manifest.source).unwrap(),
+        id: identity.definition_id(&source).unwrap(),
         identity,
         origin: StatementOrigin::Application,
         monitoring_template_id: None,
@@ -373,7 +366,7 @@ pub fn interval_queries(destination: &str, schema: &str) -> Recovery {
         source_text_bytes: None,
         sql: DefinitionPayload::Unavailable { reason: PayloadUnavailable::NotCollected },
     });
-    Recovery::capture(destination, schema, manifest.source, vec![runtime, waits, query], 9)
+    Recovery::capture(destination, schema, source, vec![runtime, waits, query], 9)
 }
 
 pub fn cumulative_queries(destination: &str, schema: &str) -> Recovery {

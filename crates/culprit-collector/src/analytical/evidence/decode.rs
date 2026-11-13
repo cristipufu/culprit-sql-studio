@@ -3,8 +3,11 @@ use crate::delivery::{evidence::RowReceipt, recovery::CommittedRange};
 use culprit_core::{Result, telemetry::*};
 use serde_json::{Map, Value, json};
 
-pub(super) enum Decoded {
-    Record(Box<ExportedRecord>),
+mod payloads;
+mod queries;
+
+pub(super) enum Decoded<T> {
+    Record(Box<T>),
     Unavailable(EvidenceGapReason),
 }
 
@@ -13,34 +16,47 @@ pub(super) fn record(
     stream: TelemetryStream,
     values: &Map<String, Value>,
     expected: &RowReceipt,
-) -> Result<Decoded> {
+) -> Result<Decoded<ExportedRecord>> {
     if text(values, "BatchId")? != expected.key.batch_id
         || text(values, "RecordId")? != expected.key.record_id
         || text(values, "NativePayloadDigest")? != expected.payload_digest
     {
         return Err(invalid());
     }
-    let record = match stream {
-        TelemetryStream::ResourceSamples => resources(values)?,
+    let payloads = payloads::references(values)?;
+    let native = match stream {
+        TelemetryStream::ResourceSamples => Decoded::Record(Box::new(resources(values)?)),
         TelemetryStream::OperationalSamples => {
             if text(values, "DetailState")? != "inline" {
                 return Ok(Decoded::Unavailable(EvidenceGapReason::DetailInRecovery));
             }
-            let details = values.get("Details").ok_or_else(invalid)?;
+            let details = match payloads::details(values, &payloads)? {
+                Decoded::Record(details) => details,
+                Decoded::Unavailable(reason) => return Ok(Decoded::Unavailable(reason)),
+            };
             let fact = match serde_json::from_value::<OperationalFact>(json!({
                 "kind": text(values, "FactKind")?, "data": details,
             })) {
                 Ok(fact) => fact,
                 Err(_) => return Ok(Decoded::Unavailable(EvidenceGapReason::NativeRepresentationRequired)),
             };
-            TelemetryRecord::Operational(OperationalObservation {
+            Decoded::Record(Box::new(TelemetryRecord::Operational(OperationalObservation {
                 source: text(values, "NativeSource")?.into(),
                 key: text(values, "FactKey")?.into(),
                 fact,
-            })
+            })))
         }
+        TelemetryStream::QueryDefinitions
+        | TelemetryStream::PlanDefinitions
+        | TelemetryStream::QueryRuntime
+        | TelemetryStream::QueryWaits => queries::record(stream, values, &payloads)?,
         _ => return Err(DeliveryProblem::UnsupportedSchema.error()),
     };
+    let record = match native {
+        Decoded::Record(record) => *record,
+        Decoded::Unavailable(reason) => return Ok(Decoded::Unavailable(reason)),
+    };
+    payloads::validate_inventory(&payloads, &record)?;
     let row = ExportedRecord::new(&range.manifest().source, &range.manifest().capture, record)?;
     if RowReceipt::from_export(&row)? != *expected {
         // Projection proof was checked first. A native precision/representation unavailable in that projection

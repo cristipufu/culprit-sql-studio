@@ -33,7 +33,7 @@ impl EvidenceReader {
         budget.validate()?;
         range.manifest().validate()?;
         if families.is_empty()
-            || families.len() > 2
+            || families.len() > EvidenceFamily::ALL.len()
             || families.iter().enumerate().any(|(index, family)| families[..index].contains(family))
         {
             return Err(DeliveryProblem::InvalidContract.error());

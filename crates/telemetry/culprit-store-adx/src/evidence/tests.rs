@@ -7,6 +7,9 @@ use culprit_collector::{
 use culprit_core::telemetry::*;
 use serde_json::json;
 
+mod observations;
+mod queries;
+
 struct Fixture {
     query: Arc<Queries>,
     catalog: Arc<SchemaCatalog>,
@@ -49,6 +52,22 @@ impl Fixture {
         replies.push_back(Reply::Rows(vec![self.publication.clone()]));
         replies.push_back(Reply::Audit(0));
         replies.extend(pages.into_iter().map(Reply::Rows));
+    }
+    fn rows_for(&self, family: EvidenceFamily) -> Vec<Vec<Value>> {
+        let Some(batch) = self.range.manifest().batches.iter().find(|batch| batch.stream == family.stream()) else {
+            return vec![];
+        };
+        let schema = self.catalog.get(batch.stream).unwrap();
+        let column = schema.columns().iter().position(|column| column.name == "BatchId").unwrap();
+        self.rows.iter().filter(|row| row[column].as_str() == Some(batch.batch_id.as_str())).cloned().collect()
+    }
+    fn reply_families(&self, families: &[EvidenceFamily], page_rows: usize) {
+        self.replies(
+            families
+                .iter()
+                .flat_map(|family| self.rows_for(*family).chunks(page_rows).map(<[_]>::to_vec).collect::<Vec<_>>())
+                .collect(),
+        );
     }
 }
 fn budget() -> EvidenceReadBudget {
