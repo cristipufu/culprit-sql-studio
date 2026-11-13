@@ -3,6 +3,8 @@ import type { AnalysisProvenance } from "./AnalysisProvenance";
 import type { CheckAssessment } from "./CheckAssessment";
 import type { Finding } from "./Finding";
 import type { LockedCheck } from "./LockedCheck";
+import type { MemoryParticipantsReport } from "./MemoryParticipantsReport";
+import type { PageWaitReport } from "./PageWaitReport";
 import type { RefinementDecision } from "./RefinementDecision";
 import type { ReportEvidence } from "./ReportEvidence";
 import type { RetainedFailureReport } from "./RetainedFailureReport";
@@ -20,4 +22,16 @@ memory_failures?: RetainedFailureReport,
 /**
  * Explanations refer to retained native diagnostic rows in the input snapshot.
  */
-native_failures?: RetainedFailureReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };
+native_failures?: RetainedFailureReport, 
+/**
+ * Native current-request reservations, explained without inferring their allocating statement.
+ */
+request_memory?: MemoryParticipantsReport, 
+/**
+ * Native tracked session allocations remain separate from execution reservations and process RSS.
+ */
+session_memory?: MemoryParticipantsReport, 
+/**
+ * Observed waiting participants and bounded page metadata remain separate from latch-owner evidence.
+ */
+page_waits?: PageWaitReport, snapshot: Snapshot, findings: Array<Finding>, locked: Array<LockedCheck>, summary: Summary, assessments: Array<CheckAssessment>, refinement?: Array<RefinementDecision>, provenance?: AnalysisProvenance, evidence?: ReportEvidence, };

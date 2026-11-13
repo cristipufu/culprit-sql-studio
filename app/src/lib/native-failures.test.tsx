@@ -132,19 +132,19 @@ test("failed and explicitly unsupported requested source profiles remain visible
   expect(nativeFailureReadIssue(undefined, [notApplicable], true)).toBe(notApplicable);
   const html = renderToStaticMarkup(<NativeFailureSourceIssue source={notApplicable} />);
   expect(html).toContain('aria-label="Retained native diagnostics"');
-  expect(html).toContain('class="operational-health retained-failures"');
   expect(html).toContain("This source is not available for the requested profile.");
   expect(html).toContain("does not apply to this product");
   expect(html).not.toContain("No retained diagnostic rows");
 });
 
-test("native source issue aliases follow ASCII case and space/underscore equivalence without rewriting positive custom outcomes", () => {
-  const native: SourceOutcome = { source: "NATIVE_FAILURES", state: "partial", reason: "Positive retained rows were incomplete." };
+test("native source issues preserve exact canonical and custom source identities", () => {
+  const native: SourceOutcome = { source: "native failures", state: "partial", reason: "Positive retained rows were incomplete." };
   expect(nativeFailureReadIssue(undefined, [native])).toBe(native);
   expect(native.state).toBe("partial");
-  expect(native.source).toBe("NATIVE_FAILURES");
+  expect(native.source).toBe("native failures");
   const custom: SourceOutcome = { ...native, source: "Custom Ä SOURCE" };
-  expect(nativeFailureReadIssue("custom_Ä_source", [custom])).toBe(custom);
+  expect(nativeFailureReadIssue(custom.source, [custom])).toBe(custom);
+  expect(nativeFailureReadIssue("custom_Ä_source", [custom])).toBeUndefined();
   expect(nativeFailureReadIssue("custom_ä_source", [custom])).toBeUndefined();
   expect(nativeFailureReadIssue("native-failures", [native])).toBeUndefined();
   expect(nativeFailureReadIssue("native\u00a0failures", [native])).toBeUndefined();

@@ -1,7 +1,7 @@
 //! Explicit local-file intake does not open a workspace, source connection or telemetry destination.
 use crate::{
     bounded_output,
-    output::{Format, Out, retained},
+    output::{Format, Out, observations},
 };
 use clap::{Args, ValueEnum};
 use culprit_core::{Error, NativeLogFormat, NativeLogLimits, Result, t};
@@ -68,7 +68,7 @@ pub(crate) async fn run(args: LogsArgs, out: &Out) -> Result<u8> {
         let bytes = bounded_output::json(&analysis, output_limit)?;
         std::io::stdout().lock().write_all(&bytes).map_err(|_| Error::internal(t!("cli.output_failed")))?;
     } else {
-        println!("{}", retained::summary(&analysis.report));
+        println!("{}", observations::retained(&analysis.report));
         if !analysis.is_read_complete() {
             println!("{}", t!("native_logs.cli.incomplete"));
         }

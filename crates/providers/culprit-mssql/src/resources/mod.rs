@@ -1,4 +1,5 @@
 //! Provider-owned Azure SQL resource evidence, shared by snapshots and collection adapters.
+mod admission;
 mod inventory;
 pub(crate) mod pool;
 mod sample;
@@ -9,6 +10,7 @@ use crate::{
     read::{NativeRead, Parameter, ReadError, ReadResult, ReadSession, invalid_data, text},
     value::Rec,
 };
+pub(crate) use admission::admit_resources;
 use chrono::{DateTime, Utc};
 use culprit_core::{Result, telemetry::*};
 pub(crate) use inventory::Inventory;

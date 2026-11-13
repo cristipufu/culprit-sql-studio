@@ -7,9 +7,11 @@ import type { MemoryFailureSnapshot } from "./MemoryFailureSnapshot";
 import type { NativeFailureSnapshot } from "./NativeFailureSnapshot";
 import type { NodeResources } from "./NodeResources";
 import type { OperationalCounter } from "./OperationalCounter";
+import type { PageWaitSnapshot } from "./PageWaitSnapshot";
 import type { SequenceCapacity } from "./SequenceCapacity";
+import type { SessionMemorySnapshot } from "./SessionMemorySnapshot";
 import type { SpaceUsage } from "./SpaceUsage";
 import type { SqliteFileHealth } from "./SqliteFileHealth";
 import type { TerminationHistory } from "./TerminationHistory";
 
-export type OperationalStats = { log_failures: Array<LoggedFailure>, spaces: Array<SpaceUsage>, counters: Array<OperationalCounter>, sequences: Array<SequenceCapacity>, multixacts: Array<FreezeAge>, sqlite: SqliteFileHealth | null, cluster: ClusterHealth | null, activity_history?: ActivityHistory, termination_history?: TerminationHistory, memory_failures?: MemoryFailureSnapshot, native_failures?: NativeFailureSnapshot, node_resources?: NodeResources, };
+export type OperationalStats = { log_failures: Array<LoggedFailure>, spaces: Array<SpaceUsage>, counters: Array<OperationalCounter>, sequences: Array<SequenceCapacity>, multixacts: Array<FreezeAge>, sqlite: SqliteFileHealth | null, cluster: ClusterHealth | null, activity_history?: ActivityHistory, termination_history?: TerminationHistory, memory_failures?: MemoryFailureSnapshot, native_failures?: NativeFailureSnapshot, session_memory?: SessionMemorySnapshot, page_waits?: PageWaitSnapshot, node_resources?: NodeResources, };

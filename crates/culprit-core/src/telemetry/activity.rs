@@ -201,6 +201,13 @@ pub struct ActivityObservation {
     pub statement: DefinitionPayload,
 }
 impl ActivityObservation {
+    /// Reject a conflicting label on claimed request-database context. Other scope bases remain unowned context;
+    /// accepting them here does not establish membership in the selected database.
+    pub fn database_context_is_consistent(&self, database: &str) -> bool {
+        self.scope != ActivityScopeBasis::RequestDatabase
+            || self.database.as_deref().is_none_or(|observed| observed == database)
+    }
+
     pub fn is_valid(&self) -> bool {
         self.key.is_valid()
             && (!self.idle || self.key.request.is_none())

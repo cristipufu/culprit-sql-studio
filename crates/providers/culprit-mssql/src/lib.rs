@@ -31,6 +31,7 @@ mod missing_indexes;
 mod oom_events;
 mod open_transactions;
 mod operations;
+mod page_waits;
 mod partition_storage;
 mod partitions;
 mod performance;

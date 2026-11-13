@@ -1,10 +1,15 @@
 use super::*;
-use crate::{native::error_log::tests::Read, rows::Rec};
+use crate::{read::test_support::Read, rows::Rec};
+use culprit_core::{Engine, telemetry::*};
 use mysql_async::Value;
 
 pub(crate) const UUID: &str = "f54a461c-0001-4000-8000-000000000001";
 
 pub(crate) fn platform(version: &str, instrumentation: bool) -> Rec {
+    platform_at(version, instrumentation, "2026-11-13T10:00:00.123456Z")
+}
+
+pub(crate) fn platform_at(version: &str, instrumentation: bool, at: &str) -> Rec {
     Rec::from_values(vec![
         ("version", Value::from(version)),
         ("performance_schema", Value::UInt(u64::from(instrumentation))),
@@ -12,7 +17,7 @@ pub(crate) fn platform(version: &str, instrumentation: bool) -> Rec {
         ("login", Value::from("monitor@%")),
         ("server_id", Value::UInt(9)),
         ("server_name", Value::from("native-host")),
-        ("observed_at", Value::from("2026-11-13T10:00:00.123456Z")),
+        ("observed_at", Value::from(at)),
     ])
 }
 
@@ -45,8 +50,8 @@ pub(crate) fn resource() -> SharedResourceIdentity {
 async fn native_context_is_instance_owned_and_never_uses_the_selected_database_or_route_alias() {
     let mut reader = Read::with(rows());
     let (context, at) = read(&mut reader).await.unwrap();
-    assert_eq!(context.resource, resource());
-    assert_eq!(context.started_second, 9_900);
+    assert_eq!(context.instance.resource, resource());
+    assert_eq!(context.instance.started_second, 9_900);
     assert_eq!(at, "2026-11-13T10:00:00.123456Z");
     assert_eq!(reader.queries.len(), 3);
     assert!(reader.queries.iter().all(|(sql, _, _)| !sql.contains("SCHEMATA")));

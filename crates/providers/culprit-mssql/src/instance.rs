@@ -26,6 +26,13 @@ impl Context {
     pub(crate) fn engine_edition(&self) -> i64 {
         self.edition
     }
+
+    /// A local capture guard, not a resource ID or a global host/database identity.
+    pub(crate) fn capture_epoch(&self) -> Result<String> {
+        serde_json::to_vec(&(&self.identity, self.edition, self.major, self.process_id, self.started_at_ticks))
+            .map(|bytes| digest(&bytes))
+            .map_err(|_| invalid_data())
+    }
 }
 
 pub(crate) async fn read<R: NativeRead>(reader: &mut R) -> Result<(Context, String)> {

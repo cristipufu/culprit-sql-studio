@@ -1,9 +1,10 @@
 use super::*;
 use crate::native::error_log::{
-    context::tests::{self as context_rows, UUID},
-    tests::{AT, Read, row},
+    context::tests as context_rows,
+    tests::{AT, row},
 };
-use culprit_core::{SourceState, telemetry::CollectionRead};
+use crate::read::test_support::Read;
+use culprit_core::{Engine, SourceState, telemetry::CollectionRead};
 use mysql_async::Value;
 
 fn request() -> CollectionRequest {
@@ -117,39 +118,4 @@ async fn a_terminal_native_failure_cannot_run_final_metadata_rechecks_or_a_sourc
     assert!(source.finish().await.is_err());
     assert_eq!(source.query_count(), 4);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
-}
-
-#[tokio::test]
-async fn native_resource_discovery_closes_and_never_advertises_a_database_or_an_unverified_route() {
-    let request = ResourceDiscoveryRequest { kind: SharedResourceKind::Instance, budget: Default::default() };
-    let mut replies = context_rows::rows();
-    replies.extend(context_rows::rows());
-    let mut reader = Read::with(replies);
-    let discovered = discover_from(&mut reader, &request).await.unwrap();
-    assert_eq!(discovered.len(), 1);
-    assert_eq!(discovered[0].identity, context_rows::resource());
-    assert_eq!(discovered[0].collections, [TelemetryCollection::Snapshot(SnapshotDataset::NativeFailures)]);
-    assert_eq!(reader.queries.len(), 6);
-    assert_eq!(reader.closed, 1);
-
-    let mut replies = context_rows::rows();
-    replies.extend(context_rows::rows());
-    replies[4] = Ok(vec![context_rows::configuration(
-        "f54a461c-0001-4000-8000-000000000002",
-        "log_filter_internal; log_sink_internal",
-    )]);
-    let mut reader = Read::with(replies);
-    assert_eq!(
-        discover_from(&mut reader, &request).await.err().unwrap().detail,
-        CollectionStop::SourceChanged.error().detail
-    );
-    assert_eq!(reader.closed, 1);
-
-    let mut replies = context_rows::rows();
-    replies.extend(context_rows::rows());
-    let mut reader = Read::with(replies);
-    reader.shutdown = Some(SourceShutdown::Unconfirmed);
-    assert!(discover_from(&mut reader, &request).await.is_err());
-    assert_eq!(reader.closed, 1);
-    assert_eq!(UUID, discovered[0].identity.native.id);
 }

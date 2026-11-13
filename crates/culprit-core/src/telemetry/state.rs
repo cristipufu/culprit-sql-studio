@@ -18,6 +18,8 @@ pub enum SnapshotDataset {
     Tuning,
     StatementGrants,
     CurrentRequestMemory,
+    SessionMemory,
+    PageWaitTargets,
     MemoryFailures,
     NativeFailures,
     IndexOperations,
@@ -49,6 +51,8 @@ impl SnapshotDataset {
             | Self::PlanCacheSummary
             | Self::StatementGrants
             | Self::CurrentRequestMemory
+            | Self::SessionMemory
+            | Self::PageWaitTargets
             | Self::MemoryFailures
             | Self::NativeFailures
             | Self::IndexOperations
@@ -298,6 +302,8 @@ pub enum OperationalFact {
     Retention(Box<RetentionObservation>),
     RetentionCoverage(RetentionCoverage),
     ExecutionGrant(Box<ExecutionGrantObservation>),
+    SessionMemory(Box<SessionMemoryObservation>),
+    PageWait(Box<PageWaitObservation>),
     MssqlOutOfMemory(Box<MssqlOutOfMemoryObservation>),
     MysqlErrorLog(Box<MysqlErrorLogObservation>),
     PostgresLog(Box<PostgresLogFailureObservation>),
@@ -328,6 +334,8 @@ impl OperationalFact {
             Self::Retention(retainer) => retainer.key(),
             Self::RetentionCoverage(coverage) => coverage.key(),
             Self::ExecutionGrant(grant) => grant.key(),
+            Self::SessionMemory(observation) => observation.key(),
+            Self::PageWait(observation) => observation.key(),
             Self::MssqlOutOfMemory(observation) => observation.key(),
             Self::MysqlErrorLog(observation) => observation.key(),
             Self::PostgresLog(observation) => observation.key(),
@@ -361,6 +369,8 @@ impl OperationalFact {
             Self::MssqlOutOfMemory(_) => {}
             Self::MysqlErrorLog(observation) => observation.redact(),
             Self::PostgresLog(observation) => observation.redact(),
+            Self::SessionMemory(_) => {}
+            Self::PageWait(observation) => observation.redact(engine),
             Self::Space(_)
             | Self::Sequence(_)
             | Self::FileIo(_)
@@ -413,6 +423,8 @@ impl OperationalFact {
             Self::Retention(retainer) => retainer.is_valid(),
             Self::RetentionCoverage(coverage) => coverage.is_valid(),
             Self::ExecutionGrant(grant) => grant.is_valid(),
+            Self::SessionMemory(observation) => observation.is_valid(),
+            Self::PageWait(observation) => observation.is_valid(),
             Self::MssqlOutOfMemory(observation) => observation.is_valid(),
             Self::MysqlErrorLog(observation) => observation.is_valid(),
             Self::PostgresLog(observation) => observation.is_valid(),
@@ -458,6 +470,8 @@ impl OperationalObservation {
                 OperationalFact::Retention(retainer) => retainer.source == self.source,
                 OperationalFact::RetentionCoverage(_) => self.source == RetentionCoverage::SOURCE,
                 OperationalFact::ExecutionGrant(grant) => grant.source == self.source,
+                OperationalFact::SessionMemory(observation) => observation.source == self.source,
+                OperationalFact::PageWait(observation) => observation.source == self.source,
                 _ => true,
             }
     }

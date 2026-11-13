@@ -384,6 +384,18 @@ pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub native_failures: Option<crate::retained_failure_report::RetainedFailureReport>,
+    /// Native current-request reservations, explained without inferring their allocating statement.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub request_memory: Option<crate::MemoryParticipantsReport>,
+    /// Native tracked session allocations remain separate from execution reservations and process RSS.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub session_memory: Option<crate::MemoryParticipantsReport>,
+    /// Observed waiting participants and bounded page metadata remain separate from latch-owner evidence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub page_waits: Option<crate::PageWaitReport>,
     pub snapshot: Snapshot,
     pub findings: Vec<Finding>,
     pub locked: Vec<LockedCheck>,

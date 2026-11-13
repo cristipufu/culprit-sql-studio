@@ -105,6 +105,77 @@ impl Fixture {
 }
 
 #[tokio::test]
+async fn page_wait_reads_preserve_original_requests_mapping_failures_and_exact_native_references() {
+    for (source, records) in test_support::page_wait_evidence_cases() {
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        fixture.replies(fixture.rows.iter().map(|row| vec![row.clone()]).collect());
+        let result = fixture
+            .reader
+            .read_capture(
+                &fixture.range,
+                &[EvidenceFamily::OperationalSamples],
+                EvidenceReadBudget { page_rows: 1, ..Default::default() },
+            )
+            .await
+            .unwrap();
+        test_support::assert_page_wait_capture(&result, &source, &records);
+        assert_eq!(result.metrics().pages as usize, records.len());
+        assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
+        let schema = fixture.catalog.get(TelemetryStream::OperationalSamples).unwrap();
+        assert_eq!(schema.table(), "CulpritOperationalV1");
+        if let Some(first) = fixture.rows.first() {
+            let column = schema.columns().iter().position(|column| column.name == "Details").unwrap();
+            let mut tampered = first.clone();
+            let mut details: Value = serde_json::from_str(tampered[column].as_str().unwrap()).unwrap();
+            details["target"]["header"]["page_id"] = json!(999);
+            tampered[column] = json!(serde_json::to_string(&details).unwrap());
+            fixture.replies(vec![vec![tampered]]);
+            let error = fixture
+                .reader
+                .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default())
+                .await
+                .unwrap_err();
+            assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+        }
+    }
+}
+
+#[tokio::test]
+async fn memory_participants_preserve_scope_exact_values_unknowns_and_zero_row_coverage() {
+    for (source, records) in
+        test_support::request_memory_evidence_cases().into_iter().chain(test_support::session_memory_evidence_cases())
+    {
+        let fixture = Fixture::new(source.clone(), records.clone()).await;
+        fixture.replies(fixture.rows.iter().map(|row| vec![row.clone()]).collect());
+        let result = fixture
+            .reader
+            .read_capture(
+                &fixture.range,
+                &[EvidenceFamily::OperationalSamples],
+                EvidenceReadBudget { page_rows: 1, ..Default::default() },
+            )
+            .await
+            .unwrap();
+        test_support::assert_memory_participants_capture(&result, &source, &records);
+        assert_eq!(result.metrics().pages as usize, records.len());
+        assert!(matches!(*fixture.recovery.fault.lock().unwrap(), Fault::Stall));
+        let schema = fixture.catalog.get(TelemetryStream::OperationalSamples).unwrap();
+        if let Some(first) = fixture.rows.first() {
+            let column = schema.columns().iter().position(|column| column.name == "FactKind").unwrap();
+            let mut tampered = first.clone();
+            tampered[column] = json!("unproven-request-owner");
+            fixture.replies(vec![vec![tampered]]);
+            let error = fixture
+                .reader
+                .read_capture(&fixture.range, &[EvidenceFamily::OperationalSamples], EvidenceReadBudget::default())
+                .await
+                .unwrap_err();
+            assert_eq!(error.detail, Some(culprit_core::ErrorDetail::Delivery(DeliveryProblem::Integrity)));
+        }
+    }
+}
+
+#[tokio::test]
 async fn native_failure_formats_keep_exact_context_partial_coverage_and_proof_membership() {
     for (source, records) in test_support::native_failure_evidence_cases() {
         let fixture = Fixture::new(source.clone(), records.clone()).await;

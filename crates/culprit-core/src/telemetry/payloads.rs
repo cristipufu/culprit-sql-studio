@@ -114,8 +114,12 @@ impl OperationalFact {
                 .request
                 .as_ref()
                 .map(|request| reference("/record/data/fact/data/request/statement", &request.statement)),
+            Self::PageWait(value) => {
+                Some(reference("/record/data/fact/data/request/statement", &value.request.statement))
+            }
             Self::PostgresLog(value) => Some(reference("/record/data/fact/data/statement", &value.statement)),
             Self::Space(_)
+            | Self::SessionMemory(_)
             | Self::Sequence(_)
             | Self::FileIo(_)
             | Self::Counter(_)

@@ -89,6 +89,30 @@ fn grant_context_validation_rejects_invalid_scope_counts_time_and_column_presenc
 }
 
 #[test]
+fn request_memory_capture_keeps_empty_source_identity_and_rejects_mixed_or_duplicate_rows() {
+    let row = grant();
+    let mut captured = RequestMemorySnapshot {
+        source: row.source.clone(),
+        observed_at: row.observed_at.clone(),
+        observations: Vec::new(),
+    };
+    assert!(captured.is_valid());
+    captured.observations.push(row.clone());
+    assert!(captured.is_valid());
+    captured.observations.push(row);
+    assert!(!captured.is_valid());
+    captured.observations.pop();
+    captured.observations[0].source = "another-native-source".into();
+    assert!(!captured.is_valid());
+    captured.observations[0].source = captured.source.clone();
+    captured.observations[0].observed_at = "2020-01-01T08:01:00.001Z".into();
+    assert!(!captured.is_valid(), "a point capture cannot move a row to another sample clock");
+    captured.observations.clear();
+    captured.observed_at = "2020-01-01T08:01:00".into();
+    assert!(!captured.is_valid(), "an empty capture still requires an established UTC clock");
+}
+
+#[test]
 fn resource_ids_remain_native_and_export_payloads_and_redaction_use_the_existing_activity_contract() {
     let mut value = grant();
     let raw = "SELECT * FROM t WHERE id=42";
@@ -140,17 +164,21 @@ fn sharing_request_memory_removes_client_identity_and_literals_without_changing_
         user: Some("private-user-canary".into()),
         host: Some("private-host-canary".into()),
     });
-    snapshot.pressure.get_or_insert_default().request_memory = Some(vec![value.clone()]);
+    snapshot.pressure.get_or_insert_default().request_memory = Some(RequestMemorySnapshot {
+        source: value.source.clone(),
+        observed_at: value.observed_at.clone(),
+        observations: vec![value.clone()],
+    });
 
     let shared = crate::redact::redact_snapshot(&snapshot);
     let serialized = serde_json::to_string(&shared).unwrap();
     assert!(!serialized.contains("-canary"));
-    let shared_grant = &shared.pressure.as_ref().unwrap().request_memory.as_ref().unwrap()[0];
+    let shared_grant = &shared.pressure.as_ref().unwrap().request_memory.as_ref().unwrap().observations[0];
     assert!(shared_grant.request.as_ref().unwrap().client.is_none());
     assert_eq!(shared_grant.identity, value.identity);
     assert_eq!(shared_grant.scope, value.scope);
     assert_eq!(shared_grant.requested_kibibytes, value.requested_kibibytes);
-    assert_eq!(snapshot.pressure.as_ref().unwrap().request_memory.as_ref().unwrap()[0], value);
+    assert_eq!(snapshot.pressure.as_ref().unwrap().request_memory.as_ref().unwrap().observations[0], value);
     assert_eq!(
         serde_json::to_value(&shared).unwrap(),
         serde_json::to_value(crate::redact::redact_snapshot(&shared)).unwrap()

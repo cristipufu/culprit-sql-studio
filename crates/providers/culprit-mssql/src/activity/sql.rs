@@ -6,12 +6,14 @@ pub(super) enum QueryPolicy {
     Activity,
     /// This diagnostic must not request execution workspace memory while investigating grant pressure.
     MemoryDiagnostic,
+    /// Bounded opt-in metadata lookup avoids the diagnostic itself requesting hash/sort workspace memory.
+    SerialMetadata,
 }
 impl QueryPolicy {
     pub fn hints(self) -> &'static str {
         match self {
             Self::Activity => "OPTION(MAXDOP 1)",
-            Self::MemoryDiagnostic => "OPTION(MAXDOP 1, LOOP JOIN)",
+            Self::MemoryDiagnostic | Self::SerialMetadata => "OPTION(MAXDOP 1, LOOP JOIN)",
         }
     }
 }

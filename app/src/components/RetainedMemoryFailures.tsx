@@ -6,12 +6,12 @@ import type { MssqlOutOfMemoryObservation } from "../gen/MssqlOutOfMemoryObserva
 import type { SourceOutcome } from "../gen/SourceOutcome";
 import { digits } from "../lib/format";
 import { key, t } from "../lib/i18n";
-import { RetainedFailures, RetainedFailureSourceIssue, retainedFailureReadIssue } from "./RetainedFailures";
+import { ObservationList, ObservationSourceIssue, observationReadIssue } from "./ObservationList";
 
 /** The backend explains the source's classifications. The UI preserves native values and independently read bounds. */
 export function RetainedMemoryFailures({ evidence, report }: { evidence: MemoryFailureSnapshot; report: RetainedFailureReport }) {
   const observations = new Map(evidence.observations.map((observation) => [observation.position, observation]));
-  return <RetainedFailures evidence={evidence} report={report} scope={memoryScope(evidence.scope)} renderEntry={(entry) => {
+  return <ObservationList source={evidence.source} time={t("ui.memory_failures.read_between", { from: evidence.observed_from, until: evidence.observed_until })} report={report} scope={memoryScope(evidence.scope)} renderEntry={(entry) => {
     const observation = observations.get(entry.position);
     return observation
       ? <MemoryFailureRow key={entry.position} explanation={entry} observation={observation} />
@@ -21,11 +21,11 @@ export function RetainedMemoryFailures({ evidence, report }: { evidence: MemoryF
 
 /** A rejected read must remain visible even when it could not admit a native wrapper or a derived explanation. */
 export function memoryFailureReadIssue(source: string | undefined, sources: SourceOutcome[], requested = false): SourceOutcome | undefined {
-  return retainedFailureReadIssue(source ?? "memory failures", sources, requested);
+  return observationReadIssue(source ?? "memory failures", sources, requested);
 }
 
 export function MemoryFailureSourceIssue({ source }: { source: SourceOutcome }) {
-  return <RetainedFailureSourceIssue source={source} title={t("view.memory_failures.title")} />;
+  return <ObservationSourceIssue source={source} title={t("view.memory_failures.title")} />;
 }
 
 function memoryScope(scope: MemoryFailureSnapshot["scope"]): string {

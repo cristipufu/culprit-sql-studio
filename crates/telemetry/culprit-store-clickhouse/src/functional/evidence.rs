@@ -147,6 +147,9 @@ async fn typed_evidence_reads_keep_nanoseconds_unknowns_scope_and_native_counter
     ]
     .into_iter()
     .chain(test_support::native_failure_evidence_cases())
+    .chain(test_support::request_memory_evidence_cases())
+    .chain(test_support::session_memory_evidence_cases())
+    .chain(test_support::page_wait_evidence_cases())
     .enumerate()
     {
         let scenario = Scenario::new(

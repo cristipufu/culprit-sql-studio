@@ -3677,7 +3677,9 @@
     "options": {
       "collect_memory_failures": false,
       "collect_native_failures": false,
+      "collect_page_wait_targets": false,
       "collect_request_memory": false,
+      "collect_session_memory": false,
       "collect_shared_resources": false,
       "plans": 25,
       "top_queries": 60,

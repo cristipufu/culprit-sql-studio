@@ -29,9 +29,11 @@ pub mod insights;
 mod label_tests;
 pub mod limits;
 pub mod measurement;
+pub mod memory_participants;
 pub mod model;
 pub mod native_log_analysis;
 pub mod operations;
+pub mod page_wait_report;
 pub mod plan;
 pub mod plan_compare;
 pub mod plan_diff;
@@ -92,6 +94,7 @@ pub use events::{ChangeEvent, EventAction, EventKind, EventLink, EventSource};
 pub use finding::*;
 pub use finding_facts::*;
 pub use measurement::*;
+pub use memory_participants::{MemoryParticipantExplanation, MemoryParticipantsReport};
 pub use model::*;
 pub use native_log_analysis::{
     NativeLogAnalysis, NativeLogArtifact, NativeLogFormat, NativeLogIssue, NativeLogLimits, NativeLogProblem,
@@ -99,6 +102,7 @@ pub use native_log_analysis::{
 pub use operations::{
     MemoryLimit, NodeResource, NodeResources, ProcessMemory, QueryTermination, TerminationHistory, TerminationReason,
 };
+pub use page_wait_report::{PageWaitExplanation, PageWaitReport};
 pub use plan::*;
 pub use plan_compare::{CompareContext, Scenario, ScenarioKind};
 pub use plan_diff::{

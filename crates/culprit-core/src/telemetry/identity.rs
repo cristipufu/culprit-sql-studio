@@ -194,6 +194,24 @@ pub fn canonical_time(value: &str) -> Result<String> {
     parse_utc_instant(value).map(|time| time.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true))
 }
 
+/// Local acquisition bounds qualify observation clocks, never native event times or an atomic source snapshot.
+pub struct ObservationBounds {
+    from: chrono::DateTime<chrono::Utc>,
+    until: chrono::DateTime<chrono::Utc>,
+}
+
+impl ObservationBounds {
+    pub fn new(from: &str, until: &str) -> Option<Self> {
+        let from = parse_utc_instant(from).ok()?;
+        let until = parse_utc_instant(until).ok()?;
+        (from <= until).then_some(Self { from, until })
+    }
+
+    pub fn contains(&self, instant: &str) -> bool {
+        parse_utc_instant(instant).is_ok_and(|instant| self.from <= instant && instant <= self.until)
+    }
+}
+
 pub(super) fn valid_utc_instant(value: &str) -> bool {
     parse_utc_instant(value).is_ok()
 }

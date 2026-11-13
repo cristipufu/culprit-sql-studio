@@ -36,7 +36,7 @@ fn archive_commands_need_only_query_configuration_exact_capture_and_explicit_sel
         panic!()
     };
     assert_eq!(args.analysis.families().len(), 4);
-    for name in ["memory-failures", "native-failures"] {
+    for name in ["memory-failures", "native-failures", "request-memory", "session-memory", "page-waits"] {
         let parsed = crate::Cli::try_parse_from([
             "culprit",
             "collect",

@@ -774,7 +774,7 @@ async fn live_native_catalog_workload_sessions_and_stale_identity_guards() {
     let unsupported = snapshot
         .sources
         .iter()
-        .find(|source| source.source == culprit_core::source_id::REQUEST_MEMORY_DETAILS)
+        .find(|source| source.source == culprit_core::source_id::CURRENT_REQUEST_MEMORY)
         .unwrap();
     assert_eq!(unsupported.state, culprit_core::SourceState::Unavailable);
     assert!(unsupported.reason_message.is_some());

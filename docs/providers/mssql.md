@@ -60,6 +60,38 @@ When query profiling is available, live progress shows measured operator activit
 
 SQL Server and Managed Instance read the available `system_health` deadlock history. Azure SQL Database reads an explicitly configured database-scoped session, described below. A missing or truncated event source does not establish that no deadlocks happened.
 
+### Observed page-wait targets
+
+`culprit scan shop --collect-page-wait-targets` opts into native page mapping. The collector exposes the same
+reader through `--collection page-wait-targets`; ordinary scans and Live do not read page headers.
+
+The reader retains up to 64 coordinator request observations and maps at most eight distinct pages through two
+`sys.dm_db_page_info(..., 'LIMITED')` reads. It checks native source, database/file, request generation, statement
+and catalog identity around the reads. Visible rowstore metadata can identify the current table/index and leaf
+or branch page; allocation pages, heap pages and unqualified layouts stay distinct. Changed requests, missing
+permissions, outside-database addresses and unresolved metadata retain the original wait with an explicit reason.
+
+`PAGELATCH` is in-memory synchronization; `PAGEIOLATCH` concerns page I/O. Waiting SQL identifies an affected
+participant, not the latch holder, allocation owner or query that caused the I/O. Equal metadata at both bounds
+does not exclude page reuse between reads. Request-level observations omit parallel-task waits, so even an empty
+capture remains partial. The app keeps the explanation brief and puts native details behind disclosure.
+
+The scan's native-read budget allows at most 16 query batches, with a one-second statement deadline and a five-second total budget.
+Azure SQL admission checks native resource pressure before each header phase and stops immediately when pressure
+is high or unavailable. Page headers can still require I/O and latching: these limits do not establish a CPU/I/O
+quota or justify frequent production polling. Local SQL Server 2022 schema and quiet-capture tests pass;
+contended-request, cold-page, managed-service and representative-load qualification remain required.
+
+### Current execution-memory participants
+
+`culprit scan shop --collect-request-memory` and `--collection current-request-memory` share one native reader.
+They retain exact reservation/usage values, queue state, worker counts, native source visibility and the point
+capture clock. Native grant times without an offset remain separate from UTC read times.
+
+A generation-checked request supplies current SQL context. It does not prove that statement acquired the grant,
+that every granted reservation is used, or that a waiting request owns memory. Unresolved associations remain
+unowned evidence. Historical peaks, compilation memory and tracked session allocations are separate measurements.
+
 ### Azure SQL deadlock events
 
 Culprit never reads Azure SQL's internal `dl` event session. Microsoft [advises against reading that session](https://learn.microsoft.com/en-us/azure/azure-sql/database/xevent-db-diff-from-svr#best-practices) because reading its retained events can affect database availability.

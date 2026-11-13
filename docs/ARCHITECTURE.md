@@ -344,6 +344,22 @@ Current capture configuration does not qualify historical coverage or invalidate
 pure retained-failure explanations used by scans. They require the explicit dataset and matching source coverage, keep
 capture-local positions rather than inventing occurrence IDs, and distinguish missing warehouse rows from native
 source loss. The result references its original rows without duplicating diagnostic JSON or constructing a database.
+`collected_resources::{request_memory,session_memory}` explain two distinct native participant families through
+shared proof admission, source qualification and presentation contracts. Execution reservations retain their native
+request/statement association; tracked session allocations retain an independent current-event clock and do not
+become grants, process RSS or database demand. `MemoryParticipantsReport` carries small exact native references so
+the UI finds original facts without hashing identities or relying on row ordering. Strict `ObservationBounds`
+validation is shared by native wrappers and authenticated readers. Unknown source visibility and lost warehouse
+rows remain different conditions.
+
+Page-wait captures follow the same proof admission and pure-view boundary through
+`collected_resources::page_waits` and `culprit_checks::page_waits`. `PageWaitSnapshot` preserves the source and UTC
+read bounds even when no coordinator request is visible. Each original waiting request and its native resource
+remain the owner of their raw facts; `PageWaitReport` contains small references for presentation. Native mapped
+targets require qualified request/database scope, while unresolved observations retain their original unowned
+context. Mapping a current page, table or index never establishes the transient latch holder or the statement
+that allocated the page. SQL Server reuses its activity reader and source-pressure admission; no generic consumer
+decodes SQL Server page addresses or opens a database to explain an archive capture.
 MySQL scans and background collection share one bounded metadata reader for its retained error-log buffer. They
 omit free-form messages and keep connection IDs distinct from Performance Schema thread IDs. A bounded prefix of
 that buffer can omit newer records; successful retrieval establishes neither a complete incident history nor the

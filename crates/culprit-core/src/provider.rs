@@ -33,6 +33,14 @@ pub struct SnapshotOptions {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub collect_native_failures: bool,
+    /// Explicit opt-in to native tracked session allocations, distinct from per-request execution grants.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub collect_session_memory: bool,
+    /// Explicit opt-in to bounded page-header metadata for already observed waits; separate cost qualification.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub collect_page_wait_targets: bool,
 }
 
 impl Default for SnapshotOptions {
@@ -45,6 +53,8 @@ impl Default for SnapshotOptions {
             collect_request_memory: false,
             collect_memory_failures: false,
             collect_native_failures: false,
+            collect_session_memory: false,
+            collect_page_wait_targets: false,
         }
     }
 }

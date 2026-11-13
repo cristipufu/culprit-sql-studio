@@ -30,6 +30,12 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         memory_failures: &'a Option<culprit_core::RetainedFailureReport>,
         #[serde(skip_serializing_if = "Option::is_none")]
         native_failures: &'a Option<culprit_core::RetainedFailureReport>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request_memory: &'a Option<culprit_core::MemoryParticipantsReport>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session_memory: &'a Option<culprit_core::MemoryParticipantsReport>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        page_waits: &'a Option<culprit_core::PageWaitReport>,
     }
     let Report {
         snapshot,
@@ -41,9 +47,25 @@ pub fn display(report: &Report) -> impl Serialize + '_ {
         provenance,
         memory_failures,
         native_failures,
+        request_memory,
+        session_memory,
+        page_waits,
         evidence: _,
     } = report;
-    View { snapshot, findings, locked, summary, assessments, refinement, provenance, memory_failures, native_failures }
+    View {
+        snapshot,
+        findings,
+        locked,
+        summary,
+        assessments,
+        refinement,
+        provenance,
+        memory_failures,
+        native_failures,
+        request_memory,
+        session_memory,
+        page_waits,
+    }
 }
 
 #[derive(Serialize, Deserialize, TS, Clone, Debug)]

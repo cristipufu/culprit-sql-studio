@@ -208,6 +208,11 @@ pub const CURRENT_REQUEST_MEMORY: Source = Source {
     reads: culprit_core::key!("provider.mssql.source.current_request_memory"),
     delivers: &[],
 };
+pub const PAGE_WAIT_TARGETS: Source = Source {
+    name: source_id::PAGE_WAIT_TARGETS,
+    reads: culprit_core::key!("provider.mssql.source.page_wait_targets"),
+    delivers: &[],
+};
 pub const WORKER_QUEUE: Source = Source {
     name: source_id::WORKER_QUEUE,
     reads: culprit_core::key!("provider.mssql.source.worker_queue"),
@@ -357,6 +362,7 @@ pub const SIGNAL_READS: &[Source] = &[
 pub const ALL: &[Source] = &[
     MEMORY_FAILURES,
     CURRENT_REQUEST_MEMORY,
+    PAGE_WAIT_TARGETS,
     REPLICATION,
     LOG_CAPACITY,
     FILE_CAPACITY,

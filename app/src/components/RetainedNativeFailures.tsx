@@ -6,11 +6,11 @@ import type { RetainedFailureExplanation } from "../gen/RetainedFailureExplanati
 import type { RetainedFailureReport } from "../gen/RetainedFailureReport";
 import type { SourceOutcome } from "../gen/SourceOutcome";
 import { t } from "../lib/i18n";
-import { RetainedFailures, RetainedFailureSourceIssue, retainedFailureReadIssue } from "./RetainedFailures";
+import { ObservationList, ObservationSourceIssue, observationReadIssue } from "./ObservationList";
 
 export function RetainedNativeFailures({ evidence, report }: { evidence: NativeFailureSnapshot; report: RetainedFailureReport }) {
   const observations = new Map(evidence.observations.map((row) => [row.observation.position, row]));
-  return <RetainedFailures collapseEntries evidence={evidence} report={report} scope={t(evidence.resource?.kind === "instance" ? "ui.memory_failures.scope.server" : "ui.memory_failures.scope.unqualified")} renderEntry={(entry) => {
+  return <ObservationList collapseEntries source={evidence.source} time={t("ui.memory_failures.read_between", { from: evidence.observed_from, until: evidence.observed_until })} report={report} scope={t(evidence.resource?.kind === "instance" ? "ui.memory_failures.scope.server" : "ui.memory_failures.scope.unqualified")} renderEntry={(entry) => {
     const observation = observations.get(entry.position);
     return observation
       ? <NativeFailureRow key={entry.position} row={observation} explanation={entry} />
@@ -19,11 +19,11 @@ export function RetainedNativeFailures({ evidence, report }: { evidence: NativeF
 }
 
 export function nativeFailureReadIssue(source: string | undefined, sources: SourceOutcome[], requested = false): SourceOutcome | undefined {
-  return retainedFailureReadIssue(source ?? "native failures", sources, requested);
+  return observationReadIssue(source ?? "native failures", sources, requested);
 }
 
 export function NativeFailureSourceIssue({ source }: { source: SourceOutcome }) {
-  return <RetainedFailureSourceIssue source={source} title={t("view.native_failures.title")} />;
+  return <ObservationSourceIssue source={source} title={t("view.native_failures.title")} />;
 }
 
 function NativeFailureRow({ row, explanation }: { row: NativeFailureRecord; explanation: RetainedFailureExplanation }) {

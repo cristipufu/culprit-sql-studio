@@ -3,6 +3,8 @@ pub(crate) mod accounting;
 #[cfg(test)]
 mod native_tests;
 mod owned;
+#[cfg(test)]
+pub(crate) mod test_support;
 use accounting::Accounting;
 
 use crate::{
@@ -37,6 +39,15 @@ pub(crate) trait OwnedRead: QueryRead {
     fn query_count(&self) -> u32;
     fn read_metrics(&self) -> Option<ReadWorkMetrics>;
     async fn close(&mut self) -> SourceShutdown;
+}
+
+/// Provisional evidence is usable only after its native owner confirms that no work remains.
+pub(crate) async fn confirmed_result<R: OwnedRead, T>(reader: &mut R, result: Result<T>) -> Result<T> {
+    if reader.close().await == SourceShutdown::Unconfirmed {
+        Err(CollectionStop::CancellationUnconfirmed.error())
+    } else {
+        result
+    }
 }
 
 /// Borrowed reads share layouts/decoders without claiming ownership of an interactive caller's connection.

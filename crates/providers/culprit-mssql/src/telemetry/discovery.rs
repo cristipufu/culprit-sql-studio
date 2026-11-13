@@ -1,5 +1,5 @@
 //! Bounded scheduler discovery uses the same native interval owner as history capture.
-use super::{admit_resources, description};
+use super::description;
 use crate::{
     conn::Pool,
     query_store::intervals::{self, Position},
@@ -74,7 +74,7 @@ async fn read<R: NativeRead>(
     request: &IntervalDiscoveryRequest,
 ) -> Result<IntervalDiscoveryPage> {
     description::ensure_supported(reader).await?;
-    admit_resources(reader).await.map_err(ReadError::into_error)?;
+    crate::resources::admit_resources(reader).await.map_err(ReadError::into_error)?;
     description::settings(reader).await?;
     let (database, physical) = description::identity(reader, host, port).await?;
     let (now, metadata_from) = intervals::clock(reader).await?;

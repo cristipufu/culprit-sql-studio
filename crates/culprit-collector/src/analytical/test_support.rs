@@ -12,10 +12,59 @@ pub use observations::{
     memory_failure_evidence, memory_failure_observation, request_memory_evidence, retention_coverage_only_evidence,
     retention_evidence,
 };
+mod request_memory;
+pub use request_memory::request_memory_evidence_cases;
+mod session_memory;
+pub use session_memory::session_memory_evidence_cases;
+mod page_waits;
+pub use page_waits::page_wait_evidence_cases;
 mod projection;
 pub use projection::JsonProjection;
 mod native_failures;
 pub use native_failures::native_failure_evidence_cases;
+
+pub fn assert_memory_participants_capture(
+    capture: &crate::analytical::evidence::EvidenceCapture,
+    source: &CollectionDescription,
+    records: &[TelemetryRecord],
+) {
+    assert_operational_capture(capture, source, records);
+    let dataset = source.observation.snapshot().expect("native memory snapshot").dataset;
+    match &source.target {
+        CollectionTarget::Database(_) => assert_eq!(dataset, SnapshotDataset::CurrentRequestMemory),
+        CollectionTarget::Shared(resource) => {
+            assert_eq!(dataset, SnapshotDataset::SessionMemory);
+            assert_eq!(resource.kind, SharedResourceKind::Instance);
+        }
+    }
+}
+
+pub fn assert_page_wait_capture(
+    capture: &crate::analytical::evidence::EvidenceCapture,
+    source: &CollectionDescription,
+    records: &[TelemetryRecord],
+) {
+    assert_operational_capture(capture, source, records);
+    assert!(source.target.database().is_some());
+    assert_eq!(source.observation.snapshot().unwrap().dataset, SnapshotDataset::PageWaitTargets);
+}
+
+fn assert_operational_capture(
+    capture: &crate::analytical::evidence::EvidenceCapture,
+    source: &CollectionDescription,
+    records: &[TelemetryRecord],
+) {
+    assert!(capture.is_read_complete(), "{:?}", capture.gaps());
+    assert_eq!(capture.source(), source);
+    assert_eq!(capture.records().len(), records.len());
+    let mut identities = std::collections::BTreeSet::new();
+    for record in records {
+        let expected = ExportedRecord::new(source, capture.capture(), record.clone()).unwrap();
+        let actual = capture.records().iter().find(|row| row.row() == &expected).expect("exact native participant");
+        assert!(identities.insert(actual.row().record_id.as_ref()));
+    }
+    assert!(!serde_json::to_string(capture.records()).unwrap().contains("9264"));
+}
 
 pub fn fixture() -> (RangeManifest, ExportedRecord) {
     let source = CollectionDescription {

@@ -7,6 +7,57 @@ mod fixture;
 use fixture::Fixture;
 
 #[tokio::test]
+async fn committed_request_memory_investigation_keeps_participants_and_native_source_qualification() {
+    for (source, records) in culprit_collector::analytical::test_support::request_memory_evidence_cases() {
+        let expected_state = source.observation.snapshot().unwrap().sources[0].state;
+        let fixture = Fixture::capture(source.clone(), records.clone()).await;
+        let before = fixture.objects.snapshot();
+        let capture = fixture.service.read(&fixture.request, &CollectionCancellation::default()).await.unwrap();
+        assert!(capture.is_read_complete(), "{:?}", capture.gaps());
+        let analysis = crate::collected_resources::request_memory(&capture).unwrap();
+        assert_eq!(analysis.context.source, source);
+        assert_eq!(analysis.context.records.len(), records.len());
+        assert_eq!(analysis.report.entries.len(), records.len());
+        assert_eq!(analysis.report.source_state, Some(expected_state));
+        assert_eq!(fixture.objects.snapshot(), before, "investigation does not acquire a writer or change history");
+        assert!(fixture.objects.reads.lock().unwrap().iter().all(|key| !key.starts_with("payloads/")));
+    }
+}
+
+#[tokio::test]
+async fn committed_session_memory_investigation_keeps_instance_scope_and_tracking_unknowns() {
+    for (source, records) in culprit_collector::analytical::test_support::session_memory_evidence_cases() {
+        let expected_state = source.observation.snapshot().unwrap().sources[0].state;
+        let fixture = Fixture::capture(source.clone(), records.clone()).await;
+        let before = fixture.objects.snapshot();
+        let capture = fixture.service.read(&fixture.request, &CollectionCancellation::default()).await.unwrap();
+        let analysis = crate::collected_resources::session_memory(&capture).unwrap();
+        assert_eq!(analysis.context.source, source);
+        assert!(analysis.context.source.target.database().is_none());
+        assert_eq!(analysis.report.source_state, Some(expected_state));
+        assert_eq!(analysis.report.entries.len(), records.len());
+        assert_eq!(before, fixture.objects.snapshot());
+        assert!(fixture.objects.reads.lock().unwrap().iter().all(|key| !key.starts_with("payloads/")));
+    }
+}
+
+#[tokio::test]
+async fn committed_page_wait_investigation_reads_only_authenticated_original_waiters_and_targets() {
+    for (source, records) in culprit_collector::analytical::test_support::page_wait_evidence_cases() {
+        let expected_state = source.observation.snapshot().unwrap().sources[0].state;
+        let fixture = Fixture::capture(source.clone(), records.clone()).await;
+        let before = fixture.objects.snapshot();
+        let capture = fixture.service.read(&fixture.request, &CollectionCancellation::default()).await.unwrap();
+        let analysis = crate::collected_resources::page_waits(&capture).unwrap();
+        assert_eq!(analysis.context.source, source);
+        assert_eq!(analysis.report.source_state, Some(expected_state));
+        assert_eq!(analysis.report.entries.len(), records.len());
+        assert_eq!(before, fixture.objects.snapshot());
+        assert!(fixture.objects.reads.lock().unwrap().iter().all(|key| !key.starts_with("payloads/")));
+    }
+}
+
+#[tokio::test]
 async fn committed_query_capture_reaches_the_existing_offline_analysis_with_exact_native_references() {
     let (source, mut records) = culprit_collector::analytical::test_support::query_evidence();
     for record in &mut records {

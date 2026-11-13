@@ -17,7 +17,7 @@ pub(crate) async fn collect(
     requested: bool,
     host: String,
     port: u16,
-) -> (Option<Vec<ExecutionGrantObservation>>, Coverage) {
+) -> (Option<RequestMemorySnapshot>, Coverage) {
     if !requested {
         let mut coverage = Coverage::default();
         coverage.not_applicable(
@@ -51,9 +51,7 @@ async fn staged<R: NativeRead>(reader: &mut ActivityReader<R>) -> Result<crate::
     }
     Ok(captured)
 }
-async fn collect_from<R: NativeRead>(
-    reader: &mut ActivityReader<R>,
-) -> (Option<Vec<ExecutionGrantObservation>>, Coverage) {
+async fn collect_from<R: NativeRead>(reader: &mut ActivityReader<R>) -> (Option<RequestMemorySnapshot>, Coverage) {
     let result = staged(reader).await;
     let result = if reader.close().await == SourceShutdown::Unconfirmed {
         Err(CollectionStop::CancellationUnconfirmed.error())
@@ -61,16 +59,21 @@ async fn collect_from<R: NativeRead>(
         result
     };
     let mut coverage = Coverage::default();
-    let (result, complete_scope) = match result {
-        Ok(captured) => (Ok(captured.observations), captured.complete_scope),
-        Err(error) => (Err(error), true),
+    let (result, complete_scope, observed_at) = match result {
+        Ok(captured) => (Ok(captured.observations), captured.complete_scope, Some(captured.context.at)),
+        Err(error) => (Err(error), true, None),
     };
     let rows = coverage.read_rows(&sources::CURRENT_REQUEST_MEMORY, result);
     if !complete_scope {
         coverage
             .partial(&sources::CURRENT_REQUEST_MEMORY, culprit_core::message!("provider.mssql.request_memory.partial"));
     }
-    (rows, coverage)
+    let snapshot = rows.zip(observed_at).map(|(observations, observed_at)| RequestMemorySnapshot {
+        source: sources::CURRENT_REQUEST_MEMORY.name.into(),
+        observed_at,
+        observations,
+    });
+    (snapshot, coverage)
 }
 
 #[cfg(test)]

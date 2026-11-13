@@ -257,6 +257,10 @@ struct ScanArgs {
     collect_memory_failures: bool,
     #[arg(long, help = t!("cli.scan.native_failures"))]
     collect_native_failures: bool,
+    #[arg(long, help = t!("cli.scan.session_memory"))]
+    collect_session_memory: bool,
+    #[arg(long, help = t!("cli.scan.page_wait_targets"))]
+    collect_page_wait_targets: bool,
     /// Exit with code 3 if any finding is at least this severe (for CI).
     #[arg(long, value_enum)]
     fail_on: Option<SeverityArg>,
@@ -279,6 +283,8 @@ impl ScanArgs {
             collect_request_memory: self.collect_request_memory,
             collect_memory_failures: self.collect_memory_failures,
             collect_native_failures: self.collect_native_failures,
+            collect_session_memory: self.collect_session_memory,
+            collect_page_wait_targets: self.collect_page_wait_targets,
             ..SnapshotOptions::default()
         }
         .with_window_minutes(window)

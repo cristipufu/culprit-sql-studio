@@ -42,7 +42,7 @@ impl<'a> Scan<'a> {
         if snapshot.options.is_none() {
             snapshot.options = Some(options.clone());
         }
-        record_missing_retained_source_outcomes(&mut snapshot, options);
+        record_unreported_optional_sources(&mut snapshot, options);
         if let Some(log) = log {
             query_log::attach(provider, &mut snapshot, log.path, options, log.discovered).await?;
         }
@@ -106,17 +106,24 @@ impl<'a> Scan<'a> {
 
 /// A provider may omit an optional reader. An explicit request must still explain the missing qualification,
 /// without guessing support or replacing native evidence and coverage supplied by an embedding provider.
-fn record_missing_retained_source_outcomes(snapshot: &mut Snapshot, options: &SnapshotOptions) {
-    use culprit_core::{SourceOutcome, SourceState, coverage::same_source, source_id};
+fn record_unreported_optional_sources(snapshot: &mut Snapshot, options: &SnapshotOptions) {
+    use culprit_core::{SourceOutcome, SourceState, source_id};
     let requested_sources = [
+        (
+            options.collect_request_memory,
+            snapshot.pressure.as_ref().is_some_and(|pressure| pressure.request_memory.is_some()),
+            source_id::CURRENT_REQUEST_MEMORY,
+        ),
+        (options.collect_session_memory, snapshot.operations.session_memory.is_some(), source_id::SESSION_MEMORY),
+        (options.collect_page_wait_targets, snapshot.operations.page_waits.is_some(), source_id::PAGE_WAIT_TARGETS),
         (options.collect_memory_failures, snapshot.operations.memory_failures.is_some(), source_id::MEMORY_FAILURES),
         (options.collect_native_failures, snapshot.operations.native_failures.is_some(), source_id::NATIVE_FAILURES),
     ];
     for (requested, has_evidence, source) in requested_sources {
-        if !requested || has_evidence || snapshot.sources.iter().any(|outcome| same_source(&outcome.source, source)) {
+        if !requested || has_evidence || snapshot.sources.iter().any(|outcome| outcome.source == source) {
             continue;
         }
-        let reason = culprit_core::message!("provider.retained_failures.unreported");
+        let reason = culprit_core::message!("provider.optional_source.unreported");
         snapshot.notes.push(CollectorNote::recorded(source, reason.clone()));
         snapshot.sources.push(SourceOutcome {
             source: source.into(),
@@ -198,13 +205,25 @@ mod tests {
     fn an_ignored_diagnostic_opt_in_reports_unknown_coverage_without_inventing_an_empty_read() {
         let mut snapshot = recorded();
         let original = snapshot.sources.clone();
-        record_missing_retained_source_outcomes(&mut snapshot, &SnapshotOptions::default());
+        record_unreported_optional_sources(&mut snapshot, &SnapshotOptions::default());
         assert_eq!(snapshot.sources, original, "default scans acquire no new diagnostic source");
-        let options =
-            SnapshotOptions { collect_memory_failures: true, collect_native_failures: true, ..Default::default() };
-        record_missing_retained_source_outcomes(&mut snapshot, &options);
+        let options = SnapshotOptions {
+            collect_request_memory: true,
+            collect_session_memory: true,
+            collect_page_wait_targets: true,
+            collect_memory_failures: true,
+            collect_native_failures: true,
+            ..Default::default()
+        };
+        record_unreported_optional_sources(&mut snapshot, &options);
         let expected = snapshot.sources.clone();
-        for source in [culprit_core::source_id::MEMORY_FAILURES, culprit_core::source_id::NATIVE_FAILURES] {
+        for source in [
+            culprit_core::source_id::CURRENT_REQUEST_MEMORY,
+            culprit_core::source_id::SESSION_MEMORY,
+            culprit_core::source_id::PAGE_WAIT_TARGETS,
+            culprit_core::source_id::MEMORY_FAILURES,
+            culprit_core::source_id::NATIVE_FAILURES,
+        ] {
             let outcome = snapshot.sources.iter().find(|outcome| outcome.source == source).unwrap();
             assert_eq!(outcome.state, culprit_core::SourceState::Unavailable);
             assert!(outcome.reason_message.as_ref().unwrap().is_translatable());
@@ -214,7 +233,7 @@ mod tests {
             );
         }
         let note_count = snapshot.notes.len();
-        record_missing_retained_source_outcomes(&mut snapshot, &options);
+        record_unreported_optional_sources(&mut snapshot, &options);
         assert_eq!(snapshot.sources, expected, "qualification is recorded only once");
         assert_eq!(snapshot.notes.len(), note_count, "repeated qualification must not duplicate notes");
     }
@@ -232,7 +251,7 @@ mod tests {
                 reason_message: None,
             });
             let original = snapshot.sources.clone();
-            record_missing_retained_source_outcomes(&mut snapshot, &options);
+            record_unreported_optional_sources(&mut snapshot, &options);
             assert_eq!(snapshot.sources, original);
         }
         let mut snapshot = recorded();
@@ -244,8 +263,27 @@ mod tests {
             observations: vec![],
         });
         let original = snapshot.sources.clone();
-        record_missing_retained_source_outcomes(&mut snapshot, &options);
+        record_unreported_optional_sources(&mut snapshot, &options);
         assert_eq!(snapshot.sources, original, "an embedding provider owns its native source qualification");
+    }
+
+    #[test]
+    fn an_unrelated_source_spelling_cannot_qualify_a_missing_native_observation() {
+        use culprit_core::{SourceOutcome, SourceState, source_id};
+        let mut snapshot = recorded();
+        let unrelated = SourceOutcome {
+            source: "SESSION_MEMORY".into(),
+            state: SourceState::Collected,
+            reason: None,
+            reason_message: None,
+        };
+        snapshot.sources.push(unrelated.clone());
+        let options = SnapshotOptions { collect_session_memory: true, ..Default::default() };
+        record_unreported_optional_sources(&mut snapshot, &options);
+        assert!(snapshot.sources.contains(&unrelated));
+        let native = snapshot.sources.iter().find(|outcome| outcome.source == source_id::SESSION_MEMORY).unwrap();
+        assert_eq!(native.state, SourceState::Unavailable);
+        assert!(native.reason_message.is_some());
     }
 
     #[test]

@@ -22,7 +22,7 @@ async fn default_scan_policy_does_not_open_a_session_or_read_current_grants() {
 async fn an_explicit_scan_stages_grants_through_identity_verification_and_confirmed_shutdown() {
     let mut reader = successful();
     let (rows, coverage) = collect_from(&mut reader).await;
-    assert_eq!(rows.unwrap().len(), 1);
+    assert_eq!(rows.unwrap().observations.len(), 1);
     assert_eq!(state(&coverage), SourceState::Collected);
     assert_eq!(reader.query_count(), MAX_SCAN_QUERIES);
     assert_eq!(closed(&reader), 1);
@@ -33,7 +33,7 @@ async fn unassigned_grants_remain_visible_as_partial_evidence_without_a_database
     let unassigned = replace(&row(), &[("request_generation", Val::Text("2020-01-01T07:59:00".into()))]);
     let mut reader = reader(vec![Ok(vec![context()]), Ok(columns()), Ok(vec![unassigned]), Ok(vec![context()])]);
     let (rows, coverage) = collect_from(&mut reader).await;
-    let rows = rows.unwrap();
+    let rows = rows.unwrap().observations;
     assert_eq!(rows.len(), 1);
     assert!(rows[0].request.is_none() && rows[0].scope.is_none());
     assert_eq!(rows[0].granted_kibibytes.as_deref(), Some("65536"));

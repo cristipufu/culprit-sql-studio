@@ -125,6 +125,7 @@ $ culprit --format text sources
 SQL Server
   memory failures           retained database-engine out-of-memory observations · adds detail
   current request memory    current query memory requests and reservations · adds detail
+  page wait targets         observed page waits and bounded current page/object metadata · adds detail
   replication               availability replicas and geo-replication links · adds detail
   log_capacity              database log space and log reuse reason · adds detail
   file_capacity             data file space and growth limits · adds detail
@@ -228,6 +229,7 @@ YugabyteDB
   settings                  YSQL and DocDB supported configuration · adds detail
   docdb-index-usage         complete cluster-wide index usage and its reset epochs · Index usage statistics
 MySQL
+  session memory            instrumented session allocations and native statement-event context from Performance Schema · adds detail
   native failures           retained native error-log metadata · adds detail
   redo_pressure             shared InnoDB redo buffer wait counter · adds detail
   cluster_health            Galera readiness and flow control (where enabled) · adds detail

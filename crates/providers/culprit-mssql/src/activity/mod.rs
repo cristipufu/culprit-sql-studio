@@ -1,5 +1,6 @@
 //! One native activity reader. Consumers choose scope, enrichment and presentation after reading the same facts.
 pub(crate) mod memory;
+pub(crate) mod page_targets;
 mod resources;
 mod rows;
 mod sql;
@@ -33,6 +34,8 @@ pub(crate) struct ReadOptions {
 }
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct ActivityContext {
+    pub edition: i64,
+    pub major: u32,
     pub database: DatabaseIdentity,
     pub epoch: Option<String>,
     pub at: String,
@@ -41,16 +44,13 @@ pub(crate) struct ActivityContext {
 impl ActivityContext {
     fn decode(row: &Rec, host: &str, port: u16, identity: IdentityDetail) -> Result<Self> {
         let edition = integer(row, "edition")?;
+        let major = u32::try_from(integer(row, "major")?).map_err(|_| invalid_data())?;
         if identity == IdentityDetail::AzureDatabase && edition != 5 {
             return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.azure_sql_only")));
         }
         if !crate::read::boolean(row, "database_wide")? {
-            let grant = crate::probe::monitoring_grant(
-                edition,
-                integer(row, "major")?.try_into().map_err(|_| invalid_data())?,
-                &text(row, "reader_login")?,
-                &text(row, "reader_user")?,
-            );
+            let grant =
+                crate::probe::monitoring_grant(edition, major, &text(row, "reader_login")?, &text(row, "reader_user")?);
             return Err(Error::new(
                 ErrorCode::PermissionDenied,
                 culprit_core::t!("provider.mssql.activity.visibility", grant = grant),
@@ -73,6 +73,8 @@ impl ActivityContext {
             None
         };
         Ok(Self {
+            edition,
+            major,
             database,
             epoch,
             at: canonical_time(&text(row, "observed_at")?)?,
@@ -169,21 +171,25 @@ impl<R: NativeRead> ActivityReader<R> {
         self.io.close().await
     }
     pub(crate) async fn observe(&mut self) -> Result<ActivityFrame> {
-        if self.observed {
-            return Err(invalid_data());
-        }
-        self.observed = true;
-        let limit = self.options.budget.max_snapshot_rows;
         let sql = sql::metadata(self.options.identity);
         let scope = match self.options.scope {
             ActivityScope::Visible => 0,
             ActivityScope::CurrentDatabase => 1,
         };
-        let rows = self
-            .io
-            .query(&sql, vec![Parameter::Integer(i64::from(limit) + 1), Parameter::Integer(scope)], limit as usize + 1)
-            .await
-            .map_err(ReadError::into_error)?;
+        self.read_frame(
+            &sql,
+            vec![Parameter::Integer(i64::from(self.options.budget.max_snapshot_rows) + 1), Parameter::Integer(scope)],
+        )
+        .await
+    }
+
+    async fn read_frame(&mut self, sql: &str, parameters: Vec<Parameter>) -> Result<ActivityFrame> {
+        if self.observed {
+            return Err(invalid_data());
+        }
+        self.observed = true;
+        let limit = self.options.budget.max_snapshot_rows;
+        let rows = self.io.query(sql, parameters, limit as usize + 1).await.map_err(ReadError::into_error)?;
         let context = ActivityContext::decode(
             rows.first().ok_or_else(invalid_data)?,
             &self.host,
@@ -320,25 +326,35 @@ fn selectors(frame: &ActivityFrame, targets: &[usize], previous: bool) -> Result
     let mut xml = String::from("<activity>");
     for &index in targets {
         let record = &frame.records[index];
-        let key = &record.facts.key;
-        let session = key.session.id.parse::<i32>().map_err(|_| invalid_data())?;
-        let login = crate::sql_time::native_time(&key.session.generation)?;
         if previous {
+            let key = &record.facts.key;
+            let session = key.session.id.parse::<i32>().map_err(|_| invalid_data())?;
+            let login = crate::sql_time::native_time(&key.session.generation)?;
             let locator = record.previous_locator.as_ref().ok_or_else(invalid_data)?;
             xml.push_str(&format!(
                 "<row session=\"{session}\" login=\"{login}\" last_start=\"{}\" last_end=\"{}\"/>",
                 locator.start, locator.end
             ));
         } else {
-            let request = key.request.as_ref().ok_or_else(invalid_data)?;
-            let request_id = request.id.parse::<i32>().map_err(|_| invalid_data())?;
-            let started = crate::sql_time::native_time(&request.generation)?;
-            let locator = record.current_locator.as_ref().ok_or_else(invalid_data)?;
-            xml.push_str(&format!("<row session=\"{session}\" login=\"{login}\" request=\"{request_id}\" started=\"{started}\" handle=\"{}\" begin=\"{}\" end=\"{}\" database=\"{}\"/>",locator.handle,locator.start,locator.end,locator.database));
+            xml.push_str(&format!("<row {}/>", current_selector_attributes(record)?));
         }
     }
     xml.push_str("</activity>");
     Ok(xml)
+}
+
+fn current_selector_attributes(record: &ActivityRecord) -> Result<String> {
+    let key = &record.facts.key;
+    let session = key.session.id.parse::<i32>().map_err(|_| invalid_data())?;
+    let login = crate::sql_time::native_time(&key.session.generation)?;
+    let request = key.request.as_ref().ok_or_else(invalid_data)?;
+    let request_id = request.id.parse::<i32>().map_err(|_| invalid_data())?;
+    let started = crate::sql_time::native_time(&request.generation)?;
+    let locator = record.current_locator.as_ref().ok_or_else(invalid_data)?;
+    Ok(format!(
+        "session=\"{session}\" login=\"{login}\" request=\"{request_id}\" started=\"{started}\" handle=\"{}\" begin=\"{}\" end=\"{}\" database=\"{}\"",
+        locator.handle, locator.start, locator.end, locator.database
+    ))
 }
 
 #[cfg(test)]

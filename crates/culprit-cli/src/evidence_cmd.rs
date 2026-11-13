@@ -1,7 +1,7 @@
 //! Archive investigation resolves only query and recovery profiles; source databases and delivery stay out of scope.
 use crate::{
     bounded_output,
-    output::{Format, Out, retained},
+    output::{Format, Out, observations},
 };
 use clap::{Args, Subcommand, ValueEnum};
 use culprit_collector::{
@@ -108,6 +108,9 @@ enum Analysis {
     Queries,
     MemoryFailures,
     NativeFailures,
+    RequestMemory,
+    SessionMemory,
+    PageWaits,
 }
 impl Analysis {
     fn families(self) -> Vec<EvidenceFamily> {
@@ -118,7 +121,13 @@ impl Analysis {
                 EvidenceFamily::QueryRuntime,
                 EvidenceFamily::QueryWaits,
             ],
-            Self::MemoryFailures | Self::NativeFailures => vec![EvidenceFamily::OperationalSamples],
+            Self::MemoryFailures
+            | Self::NativeFailures
+            | Self::RequestMemory
+            | Self::SessionMemory
+            | Self::PageWaits => {
+                vec![EvidenceFamily::OperationalSamples]
+            }
         }
     }
 }
@@ -169,11 +178,23 @@ pub(crate) async fn run(command: EvidenceCommand, out: &Out) -> Result<u8> {
         }
         Some(Analysis::MemoryFailures) => {
             let analysis = culprit_engine::collected_resources::memory_failures(&capture)?;
-            emit(out, &analysis, common.max_output_bytes, || retained::summary(&analysis.report))?;
+            emit(out, &analysis, common.max_output_bytes, || observations::retained(&analysis.report))?;
         }
         Some(Analysis::NativeFailures) => {
             let analysis = culprit_engine::collected_resources::native_failures(&capture)?;
-            emit(out, &analysis, common.max_output_bytes, || retained::summary(&analysis.report))?;
+            emit(out, &analysis, common.max_output_bytes, || observations::retained(&analysis.report))?;
+        }
+        Some(Analysis::RequestMemory) => {
+            let analysis = culprit_engine::collected_resources::request_memory(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::participants(&analysis.report))?;
+        }
+        Some(Analysis::SessionMemory) => {
+            let analysis = culprit_engine::collected_resources::session_memory(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::participants(&analysis.report))?;
+        }
+        Some(Analysis::PageWaits) => {
+            let analysis = culprit_engine::collected_resources::page_waits(&capture)?;
+            emit(out, &analysis, common.max_output_bytes, || observations::page_waits(&analysis.report))?;
         }
     }
     if !complete && out.format() == Format::Text {

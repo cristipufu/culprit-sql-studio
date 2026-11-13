@@ -59,6 +59,30 @@ establish historical session thresholds, other logging filters, or that every st
 zero. See the [MySQL slow-log rules](https://dev.mysql.com/doc/refman/8.0/en/slow-query-log.html) and
 [MariaDB's native statement timers](https://mariadb.com/docs/server/reference/system-tables/performance-schema/performance-schema-tables/performance-schema-events_statements_current-table).
 
+## Tracked session allocations
+
+`culprit scan shop --collect-session-memory` requests native thread-allocation counters on MySQL 8.0.31+.
+Default scans skip them. The shared-instance collector's `session-memory` profile uses the same reader and decoder.
+It reads the current and high-water values of total and controlled tracked allocations, preserving exact integer
+bytes and unknown values. These are neither execution grants nor process resident memory. Present instrumentation
+settings cannot prove that tracking covered the session's earlier lifetime. See the native
+[thread columns](https://dev.mysql.com/doc/refman/8.0/en/performance-schema-threads-table.html).
+
+Current-event context has its own observation clock and native event generation. It does not identify the statement
+that made an allocation. Running-statement memory peaks are not used as current allocation measurements. Native
+SQL text, client labels and connection attributes are not selected by this profile. Only the data connection whose
+native identity was verified is excluded; other monitoring sessions remain unclassified.
+
+The reader makes one unsorted thread projection and, when available, one separate current-event projection. It
+joins exact thread identities in memory, with no server-side join or per-thread queries. Disabled tracking leaves
+measurements unknown; missing current-event permission preserves readable allocation observations with partial
+coverage. Source identity and instrumentation settings are rechecked before confirmed close and publication.
+
+Performance Schema's native container iteration is not an index seek, and a row limit does not bound all its work.
+The profile has statement, overall, row and byte admission limits and defaults off; representative high-volume
+qualification remains required. MariaDB has no qualified route for this profile. Culprit does not fall back to its
+process-list memory view, which can enumerate and lock threads before applying a filter or limit.
+
 ## Retained native diagnostics
 
 `culprit scan shop --collect-native-failures` explicitly requests metadata from MySQL 8.0.22+'s native

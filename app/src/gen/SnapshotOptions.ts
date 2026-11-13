@@ -29,4 +29,12 @@ collect_memory_failures?: boolean,
 /**
  * Explicit opt-in to retained native error metadata; free-form diagnostic messages remain omitted.
  */
-collect_native_failures?: boolean, };
+collect_native_failures?: boolean, 
+/**
+ * Explicit opt-in to native tracked session allocations, distinct from per-request execution grants.
+ */
+collect_session_memory?: boolean, 
+/**
+ * Explicit opt-in to bounded page-header metadata for already observed waits; separate cost qualification.
+ */
+collect_page_wait_targets?: boolean, };

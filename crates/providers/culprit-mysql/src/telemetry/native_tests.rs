@@ -385,7 +385,7 @@ async fn scans_and_live_share_the_owned_reader_and_native_catalog_queries() {
     let unsupported = snapshot
         .sources
         .iter()
-        .find(|source| source.source == culprit_core::source_id::REQUEST_MEMORY_DETAILS)
+        .find(|source| source.source == culprit_core::source_id::CURRENT_REQUEST_MEMORY)
         .unwrap();
     assert_eq!(unsupported.state, culprit_core::SourceState::Unavailable);
     assert!(unsupported.reason_message.is_some());
@@ -559,9 +559,12 @@ async fn retained_error_log_metadata_is_shared_bounded_and_message_free() {
         }
     };
     let identity = native::one(&mut reader, "SELECT @@GLOBAL.server_uuid AS uuid", vec![]).await.unwrap();
-    assert_eq!(context.resource.native.id, native::text(&identity, "uuid").unwrap().to_ascii_lowercase());
-    assert_eq!(context.resource.kind, SharedResourceKind::Instance);
-    assert_eq!(context.resource.namespace.qualifiers.get("server_uuid"), Some(&context.resource.native.id));
+    assert_eq!(context.instance.resource.native.id, native::text(&identity, "uuid").unwrap().to_ascii_lowercase());
+    assert_eq!(context.instance.resource.kind, SharedResourceKind::Instance);
+    assert_eq!(
+        context.instance.resource.namespace.qualifiers.get("server_uuid"),
+        Some(&context.instance.resource.native.id)
+    );
 
     let rows = reader
         .read(
@@ -599,10 +602,14 @@ async fn retained_error_log_metadata_is_shared_bounded_and_message_free() {
         .await
         .unwrap();
     assert_eq!(discovered.len(), 1);
-    assert_eq!(discovered[0].identity, context.resource);
-    assert_eq!(discovered[0].collections, [TelemetryCollection::Snapshot(SnapshotDataset::NativeFailures)]);
+    assert_eq!(discovered[0].identity, context.instance.resource);
+    assert!(discovered[0].collections.contains(&TelemetryCollection::Snapshot(SnapshotDataset::NativeFailures)));
+    assert_eq!(
+        discovered[0].collections.contains(&TelemetryCollection::Snapshot(SnapshotDataset::SessionMemory)),
+        culprit_core::version_at_least(provider.connector.version().expect("qualified native version"), [8, 0, 31]),
+    );
     let request = CollectionRequest {
-        subject: CollectionSubject::Shared { resource: context.resource },
+        subject: CollectionSubject::Shared { resource: context.instance.resource },
         selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::NativeFailures },
         budget: CollectionBudget { page_rows: error_log::MAX_ROWS as u32, ..Default::default() },
     };
@@ -644,4 +651,173 @@ async fn retained_error_log_metadata_is_shared_bounded_and_message_free() {
     let error = source.describe().await.expect_err("unreadable source cannot become an empty native buffer");
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
     assert_eq!(error.code, ErrorCode::PermissionDenied);
+}
+
+#[tokio::test]
+#[ignore = "requires the owned MySQL/MariaDB fixture"]
+async fn session_allocations_are_shared_bounded_and_context_only() {
+    use crate::native::session_memory as memory;
+    use mysql_async::prelude::Queryable;
+    use std::{
+        future::{Future, poll_fn},
+        panic::AssertUnwindSafe,
+        task::Poll,
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    };
+
+    let provider = fixture();
+    let mut reader = ReadSession::new(provider.connector.clone(), crate::session_memory::budget(), Scope::Server);
+    let context = memory::context(&mut reader).await;
+    let (context, _) = match context {
+        Ok(context) => context,
+        Err(error) => {
+            assert_eq!(reader.query_count(), 8, "seven owned setup statements plus the native platform guard");
+            assert_eq!(reader.close().await, SourceShutdown::Quiescent);
+            assert_eq!(error.code, ErrorCode::Unsupported);
+            return;
+        }
+    };
+    assert_eq!(context.instance.resource.kind, SharedResourceKind::Instance);
+    let observed = memory::read(&mut reader, &context, memory::MAX_ROWS).await;
+    let metrics = reader.read_metrics();
+    let shutdown = reader.close().await;
+    let observed = observed.unwrap();
+    assert_eq!(shutdown, SourceShutdown::Quiescent);
+    assert!(metrics.unwrap().is_valid());
+    assert!(observed.sessions.iter().all(|row| row.session.id != context.instance.connection_id.to_string()));
+
+    // The nonce lock keeps this owned actor current until capture finishes. Its finite native wait is a cleanup
+    // backstop, not an assumption that a sleep happens to overlap a slower capture on an emulated server.
+    let nonce = format!(
+        "culprit_memory_{}_{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_micros()
+    );
+    let mut holder = provider.connector.connect_unconfigured().await.unwrap();
+    let mut actor = provider.connector.connect_unconfigured().await.unwrap();
+    let actor_id = actor.id().to_string();
+    let acquired = tokio::time::timeout(
+        Duration::from_secs(2),
+        holder.exec_first::<u64, _, _>("/* culprit */ SELECT GET_LOCK(?,0)", (&nonce,)),
+    )
+    .await;
+    if !matches!(acquired, Ok(Ok(Some(1)))) {
+        // Drop closes a possibly uncertain holder socket; no followup SQL is sent after an uncertain response.
+        drop(holder);
+        let _ = tokio::time::timeout(Duration::from_secs(2), actor.disconnect()).await;
+        panic!("the owned fixture could not acquire its nonce lock");
+    }
+    let actor_nonce = nonce.clone();
+    let actor_task = tokio::spawn(async move {
+        let result = actor.exec_first::<u64, _, _>("/* culprit */ SELECT GET_LOCK(?,30)", (&actor_nonce,)).await;
+        let closed = actor.disconnect().await;
+        (result, closed)
+    });
+    let mut ready_reader = ReadSession::new(
+        provider.connector.clone(),
+        CollectionBudget {
+            statement_timeout_ms: 1_000,
+            total_timeout_ms: 5_000,
+            max_queries: 64,
+            ..Default::default()
+        },
+        Scope::Server,
+    );
+    let mut capture_reader =
+        ReadSession::new(provider.connector.clone(), crate::session_memory::budget(), Scope::Server);
+    let mut capture_work = Box::pin(async {
+        session_memory_actor_ready(&mut ready_reader, &actor_id, &nonce).await?;
+        if ready_reader.close().await == SourceShutdown::Unconfirmed {
+            return Err(CollectionStop::CancellationUnconfirmed.error());
+        }
+        crate::session_memory::capture(&mut capture_reader, memory::MAX_ROWS, Some(&context.instance.resource)).await
+    });
+    // Catch a test/provider panic while retaining the native readers, so close still owns any in-flight query.
+    let captured = poll_fn(|cx| match std::panic::catch_unwind(AssertUnwindSafe(|| capture_work.as_mut().poll(cx))) {
+        Ok(Poll::Ready(value)) => Poll::Ready(Ok(value)),
+        Ok(Poll::Pending) => Poll::Pending,
+        Err(panic) => Poll::Ready(Err(panic)),
+    })
+    .await;
+    drop(capture_work);
+    let queries = capture_reader.query_count();
+    let capture_metrics = capture_reader.read_metrics();
+    let readiness_shutdown = ready_reader.close().await;
+    let capture_shutdown = capture_reader.close().await;
+    // Cleanup precedes every assertion, source error and resumed panic. Disconnecting the holder releases the
+    // nonce lock, so the actor completes and disconnects itself; no named lock or fixture session is retained.
+    let released = tokio::time::timeout(Duration::from_secs(2), holder.disconnect()).await;
+    let mut actor_task = actor_task;
+    let actor_result = tokio::time::timeout(Duration::from_secs(35), &mut actor_task).await;
+    if actor_result.is_err() {
+        actor_task.abort();
+        let _ = actor_task.await;
+    }
+    let captured = match captured {
+        Ok(captured) => captured,
+        Err(panic) => std::panic::resume_unwind(panic),
+    };
+    released.expect("owned holder disconnect deadline").expect("owned holder disconnected");
+    let actor_result = actor_result.expect("owned actor exceeded its finite native lock deadline").unwrap();
+    assert_eq!(actor_result.0.unwrap(), Some(1));
+    actor_result.1.unwrap();
+    assert_eq!(readiness_shutdown, SourceShutdown::Quiescent);
+    assert_eq!(capture_shutdown, SourceShutdown::Quiescent);
+    let captured = captured.unwrap();
+    assert!(captured.snapshot.is_valid());
+    assert!(queries <= crate::session_memory::budget().max_queries);
+    assert!(!capture_metrics.unwrap().has_unconfirmed_work());
+    let participant = captured
+        .snapshot
+        .observations
+        .iter()
+        .find(|row| row.session.id == actor_id)
+        .expect("owned actor session was retained");
+    assert_eq!(participant.identity.id, participant.session.generation);
+    assert_eq!(participant.identity.qualifiers["server_uuid"], captured.snapshot.resource.native.id);
+    assert!(participant.tracking_enabled);
+    assert!(participant.current_bytes.is_some());
+    let event = participant.current_context.as_ref().expect("the owned lock actor was current throughout capture");
+    assert!(!event.request.id.is_empty());
+    assert!(!event.request.generation.is_empty());
+    assert!(canonical_time(&event.observed_at).is_ok());
+
+    let request = CollectionRequest {
+        subject: CollectionSubject::Shared { resource: captured.snapshot.resource },
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::SessionMemory },
+        budget: crate::session_memory::budget(),
+    };
+    let (description, records, queries) = capture_requested(&provider, &request).await;
+    assert!(description.matches_request(&request));
+    assert!(queries <= request.budget.max_queries);
+    assert!(records.iter().all(|record| matches!(record,
+        TelemetryRecord::Operational(OperationalObservation { fact: OperationalFact::SessionMemory(row), .. })
+        if row.is_valid() && row.source == crate::sources::SESSION_MEMORY.name)));
+    assert_eq!(provider.connector.source_shutdown(), SourceShutdown::Quiescent);
+}
+
+async fn session_memory_actor_ready(reader: &mut ReadSession, actor_id: &str, nonce: &str) -> Result<()> {
+    use crate::read::QueryRead;
+    use mysql_async::Value;
+    use std::time::Duration;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let rows = reader
+            .read(
+                "SELECT COUNT(*) AS waiting FROM performance_schema.metadata_locks l
+            JOIN performance_schema.threads t ON t.THREAD_ID=l.OWNER_THREAD_ID
+            WHERE t.PROCESSLIST_ID=? AND l.OBJECT_TYPE='USER LEVEL LOCK'
+              AND l.OBJECT_NAME=? AND l.LOCK_STATUS='PENDING'",
+                vec![Value::from(actor_id), Value::from(nonce)],
+                1,
+            )
+            .await?;
+        if rows.first().is_some_and(|row| matches!(row.unsigned("waiting"), Ok(Some(1)))) {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(Error::new(ErrorCode::Timeout, "the owned actor never established its pending nonce lock"));
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }

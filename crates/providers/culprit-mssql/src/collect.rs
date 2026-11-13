@@ -494,6 +494,15 @@ pub(crate) async fn snapshot(
             .await;
     snapshot.operations.memory_failures = memory_failures;
     memory_failure_coverage.append_to(&mut snapshot);
+    let (page_waits, page_wait_coverage) = crate::page_waits::collect(
+        provider.pool.clone(),
+        options.collect_page_wait_targets,
+        provider.endpoint_host.clone(),
+        provider.endpoint_port,
+    )
+    .await;
+    snapshot.operations.page_waits = page_waits;
+    page_wait_coverage.append_to(&mut snapshot);
     provider.pool.ensure_available()?;
     snapshot.bind_identity(culprit_core::DatabaseIdentity::server(
         Engine::Mssql,

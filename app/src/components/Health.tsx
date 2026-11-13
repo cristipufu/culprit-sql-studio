@@ -16,9 +16,11 @@ import { Replication, StorageLatency } from "./BeyondTime";
 import { OperationalHealth, hasOperationalHealth } from "./OperationalHealth";
 import { MemoryFailureSourceIssue, RetainedMemoryFailures, memoryFailureReadIssue } from "./RetainedMemoryFailures";
 import { NativeFailureSourceIssue, RetainedNativeFailures, nativeFailureReadIssue } from "./RetainedNativeFailures";
+import { RequestMemoryParticipants, SessionMemoryParticipants } from "./MemoryParticipants";
+import { ObservationSourceIssue, observationReadIssue } from "./ObservationList";
+import { PageWaitTargets } from "./PageWaitTargets";
 
 const RANK: Record<Signal["status"], number> = { bad: 0, watch: 1, good: 2, info: 3 };
-
 
 /** A signal: label, value, when it was measured, and what healthy looks like, in words. */
 export function SignalTile({ signal }: { signal: Signal }) {
@@ -85,7 +87,16 @@ export function HealthTab({
   const nativeFailures = report.snapshot.operations.native_failures;
   const nativeReport = report.native_failures;
   const nativeIssue = nativeFailureReadIssue(nativeFailures?.source, report.snapshot.sources ?? [], report.snapshot.options?.collect_native_failures === true);
-  if (!signals.length && !resources.length && !hasOperationalHealth(report) && !(memoryFailures && memoryReport) && !memoryIssue && !(nativeFailures && nativeReport) && !nativeIssue) {
+  const requests = report.snapshot.pressure?.request_memory;
+  const requestReport = report.request_memory;
+  const requestIssue = observationReadIssue(requests?.source ?? "current request memory", report.snapshot.sources ?? [], report.snapshot.options?.collect_request_memory === true);
+  const sessions = report.snapshot.operations.session_memory;
+  const sessionReport = report.session_memory;
+  const sessionIssue = observationReadIssue(sessions?.source ?? "session memory", report.snapshot.sources ?? [], report.snapshot.options?.collect_session_memory === true);
+  const pageWaits = report.snapshot.operations.page_waits;
+  const pageReport = report.page_waits;
+  const pageIssue = observationReadIssue(pageWaits?.source ?? "page wait targets", report.snapshot.sources ?? [], report.snapshot.options?.collect_page_wait_targets === true);
+  if (!signals.length && !resources.length && !hasOperationalHealth(report) && !(memoryFailures && memoryReport) && !memoryIssue && !(nativeFailures && nativeReport) && !nativeIssue && !(requests && requestReport) && !requestIssue && !(sessions && sessionReport) && !sessionIssue && !(pageWaits && pageReport) && !pageIssue) {
     return (
       <div className="waits-empty">
         <h3>{t("ui.health.empty")}</h3>
@@ -128,6 +139,12 @@ export function HealthTab({
       {!(memoryFailures && memoryReport) && memoryIssue && <MemoryFailureSourceIssue source={memoryIssue} />}
       {nativeFailures && nativeReport && <RetainedNativeFailures key={nativeFailures.observed_until} evidence={nativeFailures} report={nativeReport} />}
       {!(nativeFailures && nativeReport) && nativeIssue && <NativeFailureSourceIssue source={nativeIssue} />}
+      {requests && requestReport && <RequestMemoryParticipants key={requests.observed_at} evidence={requests} report={requestReport} />}
+      {!(requests && requestReport) && requestIssue && <ObservationSourceIssue source={requestIssue} title={t("view.request_memory.title")} />}
+      {sessions && sessionReport && <SessionMemoryParticipants key={sessions.observed_until} evidence={sessions} report={sessionReport} />}
+      {!(sessions && sessionReport) && sessionIssue && <ObservationSourceIssue source={sessionIssue} title={t("view.session_memory.title")} />}
+      {pageWaits && pageReport && <PageWaitTargets key={pageWaits.observed_until} evidence={pageWaits} report={pageReport} />}
+      {!(pageWaits && pageReport) && pageIssue && <ObservationSourceIssue source={pageIssue} title={t("view.page_waits.title")} />}
       {resources.length >= 4 && <ResourceCharts samples={resources} signals={signals} />}
     </div>
   );

@@ -13309,12 +13309,13 @@ li code,
 .actual-triggers li > span { min-width: 0; overflow-wrap: anywhere; }
 
 .operational-health { margin-top: 24px; min-width: 0; }
-.retained-failures { overflow-wrap: anywhere; }
+.observation-list { overflow-wrap: anywhere; }
+.observation-statement { max-height: 18rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .operational-health > details { margin-top: 16px; }
 .operational-health summary { cursor: pointer; }
 .operational-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; margin-top: 12px; }
-.memory-failure-grid { align-items: start; }
-.memory-failure-grid > article:has(> details[open]) { grid-column: 1 / -1; }
+.observation-grid { align-items: start; }
+.observation-grid > article:has(> details[open]) { grid-column: 1 / -1; }
 .operational-card { min-width: 0; border: 1px solid var(--border); border-radius: 8px; padding: 14px; overflow-wrap: anywhere; }
 .operational-card h4 { margin: 0 0 8px; font-size: var(--fs-ui); }
 .operational-card p { font-size: var(--fs-ui-sm); line-height: 1.6; margin: 6px 0; }

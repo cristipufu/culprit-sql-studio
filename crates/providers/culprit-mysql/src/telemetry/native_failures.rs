@@ -1,4 +1,5 @@
 //! The explicit shared-instance route freezes one bounded retained buffer before delivering pages.
+use super::shared_instance;
 use crate::{
     connect::{Connector, Scope},
     native::{self, error_log, error_log::context},
@@ -6,28 +7,17 @@ use crate::{
     read::{OwnedRead, ReadSession},
     sources,
 };
-use culprit_core::{Engine, Error, ErrorCode, Result, telemetry::*};
+use culprit_core::{Result, telemetry::*};
 use culprit_read::{FrozenObservation, FrozenSource, ObservationReader};
 use std::sync::Arc;
 
 pub(super) fn source(connector: Arc<Connector>, request: &CollectionRequest) -> Result<Box<dyn TelemetrySource>> {
     request.validate()?;
-    expected_resource(request)?;
+    shared_instance(request, SnapshotDataset::NativeFailures)?;
     Ok(Box::new(FrozenSource::new(
         Reader { io: ReadSession::new(connector, request.budget.clone(), Scope::Server), context: None },
         request,
     )?))
-}
-
-fn expected_resource(request: &CollectionRequest) -> Result<&SharedResourceIdentity> {
-    if request.collection() == TelemetryCollection::Snapshot(SnapshotDataset::NativeFailures)
-        && let CollectionSubject::Shared { resource } = &request.subject
-        && resource.engine == Engine::Mysql
-        && resource.kind == SharedResourceKind::Instance
-    {
-        return Ok(resource);
-    }
-    Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")))
 }
 
 struct Reader<R: OwnedRead> {
@@ -38,12 +28,12 @@ struct Reader<R: OwnedRead> {
 #[async_trait::async_trait]
 impl<R: OwnedRead> ObservationReader for Reader<R> {
     async fn observe(&mut self, request: &CollectionRequest) -> Result<FrozenObservation> {
-        let resource = expected_resource(request)?;
+        let resource = shared_instance(request, SnapshotDataset::NativeFailures)?;
         let limit = error_log::MAX_ROWS.min(request.budget.max_snapshot_rows as usize);
         let captured = native_failures::capture(&mut self.io, limit, Some(resource)).await?;
         let source_name = sources::NATIVE_FAILURES.name;
         let description = CollectionDescription {
-            target: CollectionTarget::Shared(captured.context.resource.clone()),
+            target: CollectionTarget::Shared(captured.context.instance.resource.clone()),
             source: "mysql-error-log".into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::Snapshot(StateSnapshotDescription {
@@ -91,43 +81,6 @@ impl<R: OwnedRead> ObservationReader for Reader<R> {
     async fn close(&mut self) -> SourceShutdown {
         self.io.close().await
     }
-}
-
-pub(crate) async fn discover(
-    connector: Arc<Connector>,
-    request: &ResourceDiscoveryRequest,
-) -> Result<Vec<CollectionResource>> {
-    request.budget.validate()?;
-    if request.kind != SharedResourceKind::Instance {
-        return Err(Error::new(ErrorCode::Unsupported, culprit_core::t!("collection.unsupported")));
-    }
-    let mut reader = ReadSession::new(connector, request.budget.clone(), Scope::Server);
-    discover_from(&mut reader, request).await
-}
-
-async fn discover_from<R: OwnedRead>(
-    reader: &mut R,
-    request: &ResourceDiscoveryRequest,
-) -> Result<Vec<CollectionResource>> {
-    let result = async {
-        let (before, _) = context::read(reader).await?;
-        let (after, observed_at) = context::read(reader).await?;
-        if before != after {
-            return Err(CollectionStop::SourceChanged.error());
-        }
-        let resources = vec![CollectionResource {
-            identity: before.resource,
-            collections: vec![TelemetryCollection::Snapshot(SnapshotDataset::NativeFailures)],
-            observed_at,
-        }];
-        request.validate_result(&resources)?;
-        Ok(resources)
-    }
-    .await;
-    if reader.close().await == SourceShutdown::Unconfirmed {
-        return Err(CollectionStop::CancellationUnconfirmed.error());
-    }
-    result
 }
 
 #[cfg(test)]

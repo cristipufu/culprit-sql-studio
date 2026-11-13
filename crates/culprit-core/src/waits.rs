@@ -501,7 +501,7 @@ pub struct Pressure {
     /// Explicitly requested current execution-memory participants. Missing is never a measured empty source.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub request_memory: Option<Vec<crate::telemetry::ExecutionGrantObservation>>,
+    pub request_memory: Option<crate::telemetry::RequestMemorySnapshot>,
     /// Read and write latency per database file (or kind of I/O), since startup.
     pub files: Vec<crate::signals::FileIo>,
     /// Replicas and replication slots, and how far behind they are.

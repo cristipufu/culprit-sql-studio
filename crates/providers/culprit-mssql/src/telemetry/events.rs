@@ -69,7 +69,7 @@ impl<R: NativeRead> EventSource<R> {
     }
 
     async fn read_native(&mut self) -> Result<Vec<native::Event>> {
-        super::admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
+        crate::resources::admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
         let description = self.description.as_ref().ok_or_else(invalid_data)?;
         let (from, until) = self.request.bounds()?;
         let events = native::read(

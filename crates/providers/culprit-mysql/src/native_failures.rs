@@ -3,7 +3,7 @@ use crate::{
     connect::{Connector, Scope},
     native::{self, error_log, error_log::context},
     probe::Probe,
-    read::{OwnedRead, QueryRead, ReadSession},
+    read::{OwnedRead, QueryRead, ReadSession, confirmed_result},
     sources,
 };
 use culprit_core::{Coverage, Error, ErrorCode, Result, telemetry::*};
@@ -39,7 +39,7 @@ impl Capture {
             source: sources::NATIVE_FAILURES.name.into(),
             observed_from: self.observed_from,
             observed_until: self.observed_until,
-            resource: Some(self.context.resource),
+            resource: Some(self.context.instance.resource),
             observations: self.observations.rows.into_iter().map(NativeFailureRecord::MysqlErrorLog).collect(),
         }
     }
@@ -51,7 +51,7 @@ pub(crate) async fn capture<R: QueryRead>(
     expected: Option<&SharedResourceIdentity>,
 ) -> Result<Capture> {
     let (context, observed_from) = context::read(reader).await?;
-    if expected.is_some_and(|expected| expected != &context.resource) {
+    if expected.is_some_and(|expected| expected != &context.instance.resource) {
         return Err(CollectionStop::SourceChanged.error());
     }
     let observations = error_log::read(reader, limit).await.map_err(source_error)?;
@@ -112,11 +112,7 @@ async fn collect_from<R: OwnedRead>(
         return (None, coverage);
     }
     let result = capture(reader, error_log::MAX_ROWS, None).await;
-    let result = if reader.close().await == SourceShutdown::Unconfirmed {
-        Err(CollectionStop::CancellationUnconfirmed.error())
-    } else {
-        result
-    };
+    let result = confirmed_result(reader, result).await;
     match result {
         Ok(captured) => {
             if captured.observations.truncated {

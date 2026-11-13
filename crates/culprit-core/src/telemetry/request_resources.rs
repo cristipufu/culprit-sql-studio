@@ -7,6 +7,30 @@ use std::collections::BTreeSet;
 
 pub const MAX_REQUEST_MEMORY_OBSERVATIONS: usize = 4096;
 
+/// The source and its native point clock remain available for empty reads and embedding-provider sources.
+#[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
+#[ts(export)]
+pub struct RequestMemorySnapshot {
+    pub source: String,
+    pub observed_at: String,
+    pub observations: Vec<ExecutionGrantObservation>,
+}
+
+impl RequestMemorySnapshot {
+    pub fn is_valid(&self) -> bool {
+        let Ok(at) = canonical_time(&self.observed_at) else { return false };
+        let mut keys = BTreeSet::new();
+        valid_key(&self.source)
+            && self.observations.len() <= MAX_REQUEST_MEMORY_OBSERVATIONS
+            && self.observations.iter().all(|row| {
+                row.is_valid()
+                    && row.source == self.source
+                    && canonical_time(&row.observed_at).is_ok_and(|observed| observed == at)
+                    && row.key().is_ok_and(|key| keys.insert(key))
+            })
+    }
+}
+
 #[derive(Serialize, Deserialize, TS, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
@@ -78,6 +102,17 @@ fn local_time(value: &str) -> bool {
 }
 
 impl ExecutionGrantObservation {
+    /// Database captures retain unresolved native reservations without claiming them as database demand.
+    pub fn fits_database_capture(&self, database: &str) -> bool {
+        match self.scope {
+            None => true,
+            Some(MeasurementScope::Database) => self.request.as_ref().is_some_and(|request| {
+                request.scope == ActivityScopeBasis::RequestDatabase && request.database_context_is_consistent(database)
+            }),
+            Some(_) => false,
+        }
+    }
+
     pub fn key(&self) -> Result<String> {
         serde_json::to_vec(&self.identity).map(|value| digest(&value)).map_err(|_| CollectionStop::InvalidPage.error())
     }

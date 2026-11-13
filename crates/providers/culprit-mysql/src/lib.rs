@@ -21,6 +21,7 @@ mod progress;
 mod read;
 mod recorded;
 mod rows;
+mod session_memory;
 mod sessions;
 mod signals;
 mod slowlog;
@@ -189,7 +190,7 @@ impl Provider for MysqlProvider {
         &self,
         request: &culprit_core::telemetry::ResourceDiscoveryRequest,
     ) -> Result<Vec<culprit_core::telemetry::CollectionResource>> {
-        telemetry::native_failures::discover(self.connector.clone(), request).await
+        telemetry::discover(self.connector.clone(), request).await
     }
 
     async fn probe(&self) -> Result<ServerInfo> {

@@ -6,6 +6,9 @@ use culprit_engine::collected_evidence;
 mod fixture;
 mod memory_failures;
 mod native_failures;
+mod page_waits;
+mod request_memory;
+mod session_memory;
 mod waits;
 use fixture::Fixture;
 

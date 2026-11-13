@@ -252,6 +252,9 @@ impl Pipeline {
         }
         let memory_failures = explained_memory_failures(&mut snapshot);
         let native_failures = explained_native_failures(&mut snapshot);
+        let request_memory = explained_request_memory(&mut snapshot);
+        let session_memory = explained_session_memory(&mut snapshot);
+        let page_waits = explained_page_waits(&mut snapshot);
         let mut findings = Vec::new();
         let mut locked = Vec::new();
         let mut assessments = Vec::new();
@@ -356,6 +359,9 @@ impl Pipeline {
             evidence,
             memory_failures,
             native_failures,
+            request_memory,
+            session_memory,
+            page_waits,
         }
     }
 }
@@ -365,12 +371,7 @@ fn explained_memory_failures(snapshot: &mut Snapshot) -> Option<culprit_core::Re
     let source = snapshot.sources.iter().find(|source| source.source == captured.source);
     let result = crate::memory_failures::explain(captured, source);
     let source_id = captured.source.clone();
-    admit_retained_explanation(
-        snapshot,
-        source_id,
-        culprit_core::message!("view.memory_failures.invalid_capture"),
-        result,
-    )
+    admit_explanation(snapshot, source_id, culprit_core::message!("view.memory_failures.invalid_capture"), result)
 }
 
 fn explained_native_failures(snapshot: &mut Snapshot) -> Option<culprit_core::RetainedFailureReport> {
@@ -378,20 +379,58 @@ fn explained_native_failures(snapshot: &mut Snapshot) -> Option<culprit_core::Re
     let source = snapshot.sources.iter().find(|source| source.source == captured.source);
     let result = crate::native_failures::explain(captured, source);
     let source_id = captured.source.clone();
-    admit_retained_explanation(
-        snapshot,
-        source_id,
-        culprit_core::message!("view.native_failures.invalid_capture"),
-        result,
-    )
+    admit_explanation(snapshot, source_id, culprit_core::message!("view.native_failures.invalid_capture"), result)
 }
 
-fn admit_retained_explanation(
+fn explained_request_memory(snapshot: &mut Snapshot) -> Option<culprit_core::MemoryParticipantsReport> {
+    let captured = snapshot.pressure.as_ref()?.request_memory.as_ref()?;
+    let source = snapshot.sources.iter().find(|source| source.source == captured.source);
+    let result = if captured.is_valid()
+        && captured.observations.iter().all(|row| row.fits_database_capture(&snapshot.server.database))
+    {
+        let rows: Vec<_> = captured.observations.iter().collect();
+        crate::request_memory::explain(&rows, source)
+    } else {
+        Err(culprit_core::Error::invalid(culprit_core::t!("view.request_memory.invalid_capture")))
+    };
+    let source_id = captured.source.clone();
+    admit_explanation(snapshot, source_id, culprit_core::message!("view.request_memory.invalid_capture"), result)
+}
+
+fn explained_session_memory(snapshot: &mut Snapshot) -> Option<culprit_core::MemoryParticipantsReport> {
+    let captured = snapshot.operations.session_memory.as_ref()?;
+    let source = snapshot.sources.iter().find(|source| source.source == captured.source);
+    let result = if captured.is_valid() {
+        let rows: Vec<_> = captured.observations.iter().collect();
+        crate::session_memory::explain(&rows, source)
+    } else {
+        Err(culprit_core::Error::invalid(culprit_core::t!("view.session_memory.invalid_capture")))
+    };
+    let source_id = captured.source.clone();
+    admit_explanation(snapshot, source_id, culprit_core::message!("view.session_memory.invalid_capture"), result)
+}
+
+fn explained_page_waits(snapshot: &mut Snapshot) -> Option<culprit_core::PageWaitReport> {
+    let captured = snapshot.operations.page_waits.as_ref()?;
+    let source = snapshot.sources.iter().find(|source| source.source == captured.source);
+    let result = if captured.is_valid()
+        && captured.observations.iter().all(|row| row.fits_database_capture(&snapshot.server.database))
+    {
+        let rows: Vec<_> = captured.observations.iter().collect();
+        crate::page_waits::explain(&rows, source)
+    } else {
+        Err(culprit_core::Error::invalid(culprit_core::t!("view.page_waits.invalid_capture")))
+    };
+    let source_id = captured.source.clone();
+    admit_explanation(snapshot, source_id, culprit_core::message!("view.page_waits.invalid_capture"), result)
+}
+
+fn admit_explanation<R>(
     snapshot: &mut Snapshot,
     source_id: String,
     message: culprit_core::i18n::Message,
-    explained: culprit_core::Result<culprit_core::RetainedFailureReport>,
-) -> Option<culprit_core::RetainedFailureReport> {
+    explained: culprit_core::Result<R>,
+) -> Option<R> {
     match explained {
         Ok(report) => Some(report),
         Err(_) => {
@@ -457,5 +496,109 @@ mod tests {
                 assert!(s.waits.iter().all(|wait| wait.category != "Other"));
             }
         }
+    }
+
+    #[test]
+    fn page_wait_replay_preserves_native_coverage_and_withholds_invalid_capture_explanations() {
+        use culprit_core::{SourceOutcome, SourceState, telemetry::PageWaitSnapshot};
+        let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
+        let source = "embedded.page-observations";
+        let capture = PageWaitSnapshot {
+            source: source.into(),
+            observed_from: "2026-11-13T10:00:00Z".into(),
+            observed_until: "2026-11-13T10:00:01Z".into(),
+            observations: Vec::new(),
+        };
+        snapshot.operations.page_waits = Some(capture.clone());
+        snapshot.sources.push(SourceOutcome {
+            source: source.into(),
+            state: SourceState::Partial,
+            reason: Some("bounded coordinator observations".into()),
+            reason_message: None,
+        });
+        let report = crate::analyze(snapshot.clone());
+        let explanation = report.page_waits.as_ref().unwrap();
+        assert_eq!(explanation.source_state, Some(SourceState::Partial));
+        assert_eq!(explanation.source_reason.as_deref(), Some("bounded coordinator observations"));
+        assert!(explanation.entries.is_empty());
+        assert_eq!(report.snapshot.operations.page_waits, Some(capture));
+
+        snapshot.operations.page_waits.as_mut().unwrap().observed_until = "2026-11-13T09:59:59Z".into();
+        let report = crate::analyze(snapshot);
+        assert!(report.page_waits.is_none());
+        let unavailable = report.snapshot.sources.iter().find(|outcome| outcome.source == source).unwrap();
+        assert_eq!(unavailable.state, SourceState::Unavailable);
+        assert_eq!(unavailable.reason.as_deref(), Some(t!("view.page_waits.invalid_capture").as_str()));
+        assert!(report.snapshot.notes.iter().any(|note| note.collector == source));
+        assert!(report.snapshot.operations.page_waits.is_some(), "invalid input remains available for diagnosis");
+    }
+
+    #[test]
+    fn database_reports_reject_conflicting_claimed_membership_but_keep_unowned_native_context() {
+        use culprit_core::{SourceOutcome, SourceState, WaitResourceKind, telemetry::*};
+        let mut snapshot: Snapshot = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.json")).unwrap();
+        let mut grant = crate::views::request_memory::tests::observation("61", ExecutionGrantState::Granted);
+        crate::views::request_memory::tests::associated(&mut grant);
+        grant.request.as_mut().unwrap().database = Some(snapshot.server.database.clone());
+        snapshot.pressure.get_or_insert_default().request_memory = Some(RequestMemorySnapshot {
+            source: grant.source.clone(),
+            observed_at: grant.observed_at.clone(),
+            observations: vec![grant.clone()],
+        });
+        let mut page = crate::views::page_waits::tests::observation("61", WaitResourceKind::MemoryPage);
+        page.request.database = Some(snapshot.server.database.clone());
+        snapshot.operations.page_waits = Some(PageWaitSnapshot {
+            source: page.source.clone(),
+            observed_from: page.observed_from.clone(),
+            observed_until: page.observed_until.clone(),
+            observations: vec![page.clone()],
+        });
+        for source in [&grant.source, &page.source] {
+            snapshot.sources.push(SourceOutcome {
+                source: source.clone(),
+                state: SourceState::Partial,
+                reason: None,
+                reason_message: None,
+            });
+        }
+        let valid = crate::analyze(snapshot.clone());
+        assert!(valid.request_memory.is_some() && valid.page_waits.is_some());
+
+        let mut foreign = snapshot.clone();
+        foreign.pressure.as_mut().unwrap().request_memory.as_mut().unwrap().observations[0]
+            .request
+            .as_mut()
+            .unwrap()
+            .database = Some("foreign-database-canary".into());
+        foreign.operations.page_waits.as_mut().unwrap().observations[0].request.database =
+            Some("foreign-database-canary".into());
+        let rejected = crate::analyze(foreign);
+        assert!(rejected.request_memory.is_none() && rejected.page_waits.is_none());
+        for source in [&grant.source, &page.source] {
+            assert_eq!(
+                rejected.snapshot.sources.iter().find(|outcome| &outcome.source == source).unwrap().state,
+                SourceState::Unavailable
+            );
+        }
+        assert_eq!(
+            rejected.snapshot.operations.page_waits.unwrap().observations[0].request.database.as_deref(),
+            Some("foreign-database-canary")
+        );
+
+        let grant = &mut snapshot.pressure.as_mut().unwrap().request_memory.as_mut().unwrap().observations[0];
+        grant.request = None;
+        grant.scope = None;
+        grant.request_association = RequestGrantAssociation::InsufficientEvidence;
+        grant.statement_relationship = GrantStatementRelationship::Unresolved;
+        let page = &mut snapshot.operations.page_waits.as_mut().unwrap().observations[0];
+        page.request.scope = ActivityScopeBasis::OtherDatabase;
+        page.request.database = Some("foreign-database-canary".into());
+        page.target = None;
+        page.statement_identity = None;
+        page.plan_identity = None;
+        page.resolution = PageWaitResolution::OutsideDatabase;
+        let unowned = crate::analyze(snapshot);
+        assert!(unowned.request_memory.is_some() && unowned.page_waits.is_some());
+        assert_eq!(unowned.page_waits.unwrap().entries.len(), 1);
     }
 }

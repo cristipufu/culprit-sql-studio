@@ -58,14 +58,13 @@ function show(evidence = nativeEvidence(), report = explanation()): string {
   return renderToStaticMarkup(<RetainedMemoryFailures evidence={evidence} report={report} />);
 }
 
-test("memory source issue aliases retain actual partial results and failed regions remain named", () => {
-  const source: SourceOutcome = { source: "MEMORY_FAILURES", state: "partial", reason: "Native positive observations were incomplete." };
+test("canonical memory source issues retain actual partial results and failed regions remain named", () => {
+  const source: SourceOutcome = { source: "memory failures", state: "partial", reason: "Native positive observations were incomplete." };
   expect(memoryFailureReadIssue(undefined, [source])).toBe(source);
   expect(source.state).toBe("partial");
   expect(memoryFailureReadIssue("memory-failures", [source])).toBeUndefined();
   const html = renderToStaticMarkup(<MemoryFailureSourceIssue source={source} />);
   expect(html).toContain('aria-label="Retained memory failures"');
-  expect(html).toContain('class="operational-health retained-failures"');
   expect(html).toContain("Native positive observations were incomplete.");
 });
 

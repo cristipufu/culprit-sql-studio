@@ -1,5 +1,5 @@
 //! Bounded current facts. Each native source retains its own availability and visibility contract.
-use super::{admit_resources, point, progress::Progress, subject};
+use super::{point, progress::Progress, subject};
 use crate::{
     conn::Pool,
     read::{NativeRead, ReadError, ReadSession, integer, invalid_data, stops_remaining_reads, text},
@@ -117,7 +117,7 @@ impl<R: NativeRead> StateSource<R> {
         // Ordinary instance statistics are an explicitly selected bounded source family. They do not execute
         // application work or optional enrichment; Azure database reads retain their native pressure guard.
         if self.identity.as_ref().ok_or_else(invalid_data)?.azure_guarded() {
-            admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
+            crate::resources::admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
         }
         Ok(remaining)
     }
@@ -195,7 +195,10 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
                     | SnapshotDataset::CurrentRequestMemory => {
                         return Err(invalid_data());
                     }
-                    SnapshotDataset::MemoryFailures | SnapshotDataset::NativeFailures => return Err(invalid_data()),
+                    SnapshotDataset::MemoryFailures
+                    | SnapshotDataset::NativeFailures
+                    | SnapshotDataset::SessionMemory
+                    | SnapshotDataset::PageWaitTargets => return Err(invalid_data()),
                 }
             }
             .into(),

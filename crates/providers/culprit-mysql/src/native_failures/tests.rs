@@ -1,8 +1,9 @@
 use super::*;
 use crate::native::error_log::{
     context::tests::{self as context_rows, UUID},
-    tests::{AT, Read, row},
+    tests::{AT, row},
 };
+use crate::read::test_support::Read;
 use culprit_core::{SourceState, telemetry::SourceShutdown};
 use mysql_async::Value;
 

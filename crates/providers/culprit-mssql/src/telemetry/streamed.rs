@@ -1,5 +1,5 @@
 //! Owns one streamed snapshot lifecycle. Recipes supply only native layout, query and decoding.
-use super::{admit_resources, description, state};
+use super::{description, state};
 use crate::{
     conn::Pool,
     read::{NativeStreamRead, Parameter, ReadError, ReadSession, invalid_data},
@@ -68,7 +68,7 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
         if D::REQUIRES_FULL_METADATA && !metadata_visible {
             return Err(crate::catalog_visibility::unavailable());
         }
-        admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
+        crate::resources::admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
         self.layout = self.recipe.layout(&mut self.io, &self.budget).await?;
         self.physical = Some(physical);
         Ok(CollectionDescription {
@@ -84,7 +84,7 @@ impl<D: SnapshotRecipe, R: NativeStreamRead> culprit_read::SnapshotReader for Na
     }
     async fn begin(&mut self, request: &CollectionRequest) -> Result<()> {
         let Some(layout) = &self.layout else { return Ok(()) };
-        admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
+        crate::resources::admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
         let limit = request.budget.max_snapshot_rows as usize + 1;
         self.io
             .begin_stream(&self.recipe.query(layout), vec![Parameter::Integer(limit as i64)], limit)

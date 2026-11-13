@@ -122,12 +122,35 @@ culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE
   --analysis queries --json
 culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
   --analysis native-failures
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis request-memory --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis session-memory --json
+culprit collect evidence analyze --config archive.json --range "$CULPRIT_CAPTURE_RANGE" \
+  --analysis page-waits --json
 ```
 
 `memory-failures` selects the retained SQL Server OOM analysis; `native-failures` selects native structured
 diagnostics. Both call the scan's existing pure explanation functions, reference original native rows once, and
 retain source qualifications separately from warehouse read gaps. Query analysis requests its four definition,
 runtime and wait families. No mode invents current server metadata or query ownership.
+
+`request-memory` explains native execution reservations from a database-target `current-request-memory` capture.
+Waiting requests are affected participants; granted and used amounts are separate measurements. A matching current
+statement or native resource ID does not establish which statement acquired a reservation or caused another wait.
+Unassigned observations remain unassigned rather than becoming the selected database's demand.
+
+`session-memory` explains tracked allocations from a shared-instance `session-memory` capture. Current allocations,
+controlled allocations and session high-water marks remain distinct, with exact integer byte values. A separately
+observed event, digest or database label is context, not the allocating statement or database ownership. Neither
+mode sums unrelated amounts, derives a rate from one observation, constructs a synthetic database snapshot or
+reconnects to the monitored server. Their report entries reference the original native facts by key and identity.
+
+`page-waits` explains a database-target `page-wait-targets` capture through the scan's pure view. It distinguishes
+memory-page contention from page I/O and references the original request and wait resource. Changed, missing or
+unverified checks retain historical waiter context while withholding mapped targets and checked statement/plan
+references. Unresolved context outside the database remains unowned. Metadata observed at both checks does not
+establish a continuous page identity, a latch holder or an exact causal share.
 
 For ADX, select warehouse provider `adx`, its query endpoint/database and an independently named bearer profile.
 Azure recovery uses the existing recovery adapter and profile shape. Neither route needs an ingestion identity.

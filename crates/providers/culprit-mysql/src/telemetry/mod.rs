@@ -4,6 +4,8 @@ mod events;
 pub(crate) mod native_failures;
 #[cfg(test)]
 mod native_tests;
+mod resources;
+mod session_memory;
 use crate::{
     connect::{Connector, Scope},
     native::{
@@ -123,6 +125,9 @@ pub(crate) fn source(connector: Arc<Connector>, request: &CollectionRequest) -> 
     if request.collection() == TelemetryCollection::Snapshot(SnapshotDataset::NativeFailures) {
         return native_failures::source(connector, request);
     }
+    if request.collection() == TelemetryCollection::Snapshot(SnapshotDataset::SessionMemory) {
+        return session_memory::source(connector, request);
+    }
     request.subject.require_database()?;
     if request.collection() == TelemetryCollection::Activity {
         return activity::source(connector, request);
@@ -178,6 +183,19 @@ pub(crate) fn source(connector: Arc<Connector>, request: &CollectionRequest) -> 
     };
     Ok(Box::new(SnapshotSource::new(reader, request)?))
 }
+
+fn shared_instance(request: &CollectionRequest, dataset: SnapshotDataset) -> Result<&SharedResourceIdentity> {
+    if request.collection() == TelemetryCollection::Snapshot(dataset)
+        && let CollectionSubject::Shared { resource } = &request.subject
+        && resource.engine == culprit_core::Engine::Mysql
+        && resource.kind == SharedResourceKind::Instance
+    {
+        return Ok(resource);
+    }
+    Err(Error::new(ErrorCode::Unsupported, culprit_core::message!("collection.unsupported")))
+}
+
+pub(crate) use resources::discover;
 struct MysqlSnapshotReader {
     io: ReadSession,
     connector: Arc<Connector>,

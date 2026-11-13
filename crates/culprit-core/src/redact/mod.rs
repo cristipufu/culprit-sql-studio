@@ -71,10 +71,15 @@ pub fn redact_identity(identity: &mut crate::DatabaseIdentity) {
 /// Keep a shared resource's kind and equality relationships without publishing its physical native identity.
 pub fn redact_resource_identity(identity: &mut crate::telemetry::SharedResourceIdentity) {
     for native in [&mut identity.namespace, &mut identity.native] {
-        native.id = opaque(&native.id);
-        for value in native.qualifiers.values_mut() {
-            *value = opaque(value);
-        }
+        redact_native_identity(native);
+    }
+}
+
+/// Keep equality and repeat-sharing stability without publishing a physical source's native identity.
+fn redact_native_identity(identity: &mut crate::telemetry::NativeIdentity) {
+    identity.id = opaque(&identity.id);
+    for value in identity.qualifiers.values_mut() {
+        *value = opaque(value);
     }
 }
 
@@ -187,6 +192,22 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
         evidence.redact();
         if let Some(resource) = &mut evidence.resource {
             redact_resource_identity(resource);
+        }
+    }
+    if let Some(evidence) = &mut s.operations.session_memory {
+        redact_resource_identity(&mut evidence.resource);
+        for row in &mut evidence.observations {
+            redact_native_identity(&mut row.identity);
+        }
+    }
+    if let Some(evidence) = &mut s.operations.page_waits {
+        for observation in &mut evidence.observations {
+            observation.redact(engine);
+            observation.request.client = None;
+            if let Some(target) = &mut observation.target {
+                redact_native_identity(&mut target.database);
+                redact_native_identity(&mut target.file);
+            }
         }
     }
     if let Some(resources) = &mut s.operations.node_resources {
@@ -351,7 +372,7 @@ pub fn redact_snapshot(snapshot: &Snapshot) -> Snapshot {
             }
         }
         if let Some(grants) = &mut p.request_memory {
-            for grant in grants {
+            for grant in &mut grants.observations {
                 grant.redact(engine);
                 if let Some(request) = &mut grant.request {
                     request.client = None;

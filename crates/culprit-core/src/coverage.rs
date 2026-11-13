@@ -99,7 +99,8 @@ pub mod source_id {
     pub const SHARED_MEMORY_ALLOCATIONS: &str = "shared memory allocations";
     pub const SHARED_RESOURCE_DETAILS: &str = "shared-resource-details";
     pub const CURRENT_REQUEST_MEMORY: &str = "current request memory";
-    pub const REQUEST_MEMORY_DETAILS: &str = "request-memory-details";
+    pub const SESSION_MEMORY: &str = "session memory";
+    pub const PAGE_WAIT_TARGETS: &str = "page wait targets";
     pub const PERFORMANCE_COUNTERS: &str = "performance counters";
     pub const DATABASE_STATS: &str = "database statistics";
     pub const RESOURCES: &str = "resources";
@@ -201,7 +202,8 @@ pub mod source_id {
         SHARED_MEMORY_ALLOCATIONS,
         SHARED_RESOURCE_DETAILS,
         CURRENT_REQUEST_MEMORY,
-        REQUEST_MEMORY_DETAILS,
+        SESSION_MEMORY,
+        PAGE_WAIT_TARGETS,
         PERFORMANCE_COUNTERS,
         DATABASE_STATS,
         RESOURCES,
@@ -299,8 +301,8 @@ impl Source {
         reads: crate::key!("provider.shared_resources.details"),
         delivers: &[],
     };
-    pub const REQUEST_MEMORY_DETAILS: Self = Self {
-        name: source_id::REQUEST_MEMORY_DETAILS,
+    pub const CURRENT_REQUEST_MEMORY: Self = Self {
+        name: source_id::CURRENT_REQUEST_MEMORY,
         reads: crate::key!("provider.request_memory.details"),
         delivers: &[],
     };
@@ -343,7 +345,7 @@ impl Coverage {
     /// Native per-request memory is a capability; an unsupported explicit request never becomes a measured zero.
     pub fn request_memory_unavailable(&mut self, engine: crate::Engine) {
         self.source_failed(
-            &Source::REQUEST_MEMORY_DETAILS,
+            &Source::CURRENT_REQUEST_MEMORY,
             &Error::new(
                 ErrorCode::Unsupported,
                 crate::message!("provider.request_memory.unsupported", engine = engine.label()),
@@ -663,7 +665,7 @@ mod tests {
         coverage.request_memory_unavailable(crate::Engine::Postgres);
         let outcomes = coverage.outcomes();
         assert_eq!(outcomes.len(), 1);
-        assert_eq!(outcomes[0].source, source_id::REQUEST_MEMORY_DETAILS);
+        assert_eq!(outcomes[0].source, source_id::CURRENT_REQUEST_MEMORY);
         assert_eq!(outcomes[0].state, SourceState::Unavailable);
         assert!(outcomes[0].reason_message.as_ref().is_some_and(crate::i18n::Message::is_translatable));
         let (have, missing, notes) = coverage.finish();
