@@ -113,6 +113,11 @@ pub const FILE_LATENCY: Source = Source {
     reads: culprit_core::key!("provider.postgres.source.file_latency"),
     delivers: &[],
 };
+pub const SHARED_MEMORY_ALLOCATIONS: Source = Source {
+    name: source_id::SHARED_MEMORY_ALLOCATIONS,
+    reads: culprit_core::key!("provider.postgres.source.shared_memory_allocations"),
+    delivers: &[],
+};
 /// Sessions opened and abandoned (14+).
 pub const SESSIONS: Source =
     Source { name: source_id::SESSIONS, reads: culprit_core::key!("provider.postgres.source.sessions"), delivers: &[] };
@@ -169,6 +174,7 @@ pub const ALL: &[Source] = &[
     CONSTRAINTS,
     ADVICE_SETTINGS,
     FILE_LATENCY,
+    SHARED_MEMORY_ALLOCATIONS,
     SESSIONS,
     REPLICATION,
 ];

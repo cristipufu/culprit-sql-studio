@@ -111,6 +111,16 @@ pub const POOL_RESOURCES: Source = Source {
     reads: culprit_core::key!("provider.mssql.source.pool_resources"),
     delivers: &[],
 };
+pub const MEMORY_CLERKS: Source = Source {
+    name: crate::memory_clerks::SOURCE_NAME,
+    reads: culprit_core::key!("provider.mssql.source.memory_clerks"),
+    delivers: &[],
+};
+pub const SCHEDULERS: Source = Source {
+    name: source_id::SCHEDULERS,
+    reads: culprit_core::key!("provider.mssql.source.schedulers"),
+    delivers: &[],
+};
 /// Heaps' forwarded fetches, for the index advisor.
 pub const FORWARDED_FETCHES: Source = Source {
     name: source_id::FORWARDED_FETCHES,
@@ -358,6 +368,8 @@ pub const ALL: &[Source] = &[
     WAITS,
     RESOURCES,
     POOL_RESOURCES,
+    MEMORY_CLERKS,
+    SCHEDULERS,
     FORWARDED_FETCHES,
     QUERY_FAMILIES,
     PLAN_CACHE_USE,

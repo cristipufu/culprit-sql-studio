@@ -28,6 +28,7 @@ mod resources;
 pub(crate) use resources::discover_resources;
 mod state;
 mod statistics;
+mod subject;
 mod tables;
 
 pub(crate) fn source(
@@ -43,6 +44,12 @@ pub(crate) fn source(
         && request.collection() == culprit_core::telemetry::TelemetryCollection::ResourceHistory
     {
         return resources::pool_source(pool, request);
+    }
+    if matches!(request.subject, culprit_core::telemetry::CollectionSubject::Shared { .. })
+        && request.collection() == culprit_core::telemetry::TelemetryCollection::Snapshot(SnapshotDataset::Operational)
+    {
+        subject::is_shared(&request.subject)?;
+        return Ok(Box::new(state::StateSource::new(pool, request, host, port)?));
     }
     request.subject.require_database()?;
     match request.collection() {

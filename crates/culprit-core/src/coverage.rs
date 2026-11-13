@@ -92,6 +92,10 @@ pub mod source_id {
     pub const WAIT_TOTALS: &str = "wait totals";
     pub const GLOBAL_STATUS: &str = "global status";
     pub const PROCESSOR_TOPOLOGY: &str = "processor topology";
+    pub const MEMORY_CLERKS: &str = "memory clerks";
+    pub const SCHEDULERS: &str = "schedulers";
+    pub const SHARED_MEMORY_ALLOCATIONS: &str = "shared memory allocations";
+    pub const SHARED_RESOURCE_DETAILS: &str = "shared-resource-details";
     pub const PERFORMANCE_COUNTERS: &str = "performance counters";
     pub const DATABASE_STATS: &str = "database statistics";
     pub const RESOURCES: &str = "resources";
@@ -186,6 +190,10 @@ pub mod source_id {
         WAIT_TOTALS,
         GLOBAL_STATUS,
         PROCESSOR_TOPOLOGY,
+        MEMORY_CLERKS,
+        SCHEDULERS,
+        SHARED_MEMORY_ALLOCATIONS,
+        SHARED_RESOURCE_DETAILS,
         PERFORMANCE_COUNTERS,
         DATABASE_STATS,
         RESOURCES,
@@ -278,6 +286,11 @@ pub struct Source {
 }
 
 impl Source {
+    pub const SHARED_RESOURCE_DETAILS: Self = Self {
+        name: source_id::SHARED_RESOURCE_DETAILS,
+        reads: crate::key!("provider.shared_resources.details"),
+        delivers: &[],
+    };
     pub fn description(&self) -> String {
         crate::i18n::t(self.reads, &[])
     }
@@ -304,6 +317,16 @@ pub struct Coverage {
 }
 
 impl Coverage {
+    /// A requested profile with no native implementation is unavailable, never healthy absence or a failed scan.
+    pub fn shared_resource_details_unavailable(&mut self, engine: crate::Engine) {
+        self.source_failed(
+            &Source::SHARED_RESOURCE_DETAILS,
+            &Error::new(
+                ErrorCode::Unsupported,
+                crate::message!("provider.shared_resources.unsupported", engine = engine.label()),
+            ),
+        );
+    }
     /// Start from what a probe already found: the capabilities the login and server settings allow, and what they
     /// don't. Sources then confirm them, or [`Coverage::lost`] one they couldn't read after all.
     pub fn with(have: Vec<Capability>, missing: Vec<MissingCapability>) -> Self {
@@ -593,6 +616,23 @@ impl crate::Snapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unimplemented_requested_shared_details_stay_unavailable_without_withdrawing_other_evidence() {
+        for engine in crate::Engine::ALL.iter().copied() {
+            let mut coverage = Coverage::with(vec![Capability::TableStats], vec![]);
+            coverage.shared_resource_details_unavailable(engine);
+            let outcomes = coverage.outcomes();
+            assert_eq!(outcomes.len(), 1);
+            assert_eq!(outcomes[0].source, source_id::SHARED_RESOURCE_DETAILS);
+            assert_eq!(outcomes[0].state, SourceState::Unavailable);
+            assert!(outcomes[0].reason_message.as_ref().is_some_and(crate::i18n::Message::is_translatable));
+            let (have, missing, notes) = coverage.finish();
+            assert!(have.contains(&Capability::TableStats));
+            assert!(missing.is_empty());
+            assert_eq!(notes.len(), 1);
+        }
+    }
 
     const INDEXES: Source = Source {
         name: "indexes",

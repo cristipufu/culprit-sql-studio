@@ -13,4 +13,8 @@ top_queries: number,
 /**
  * How many of the heaviest queries to fetch and parse plans for.
  */
-plans: number, };
+plans: number, 
+/**
+ * Explicit opt-in to detailed shared-resource readers that require separate production load qualification.
+ */
+collect_shared_resources?: boolean, };

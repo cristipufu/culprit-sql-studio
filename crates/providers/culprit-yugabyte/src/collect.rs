@@ -22,6 +22,9 @@ async fn observe(
     let started = Instant::now();
     let probe = probe::read_from(session).await?;
     let mut coverage = Coverage::default();
+    if options.collect_shared_resources {
+        coverage.shared_resource_details_unavailable(culprit_core::Engine::Yugabyte);
+    }
     let tables = coverage.read_rows(&sources::TABLES, catalog::tables(session).await).unwrap_or_default();
     let indexes = coverage.read_rows(&sources::INDEXES, catalog::indexes(session, &probe).await).unwrap_or_default();
     let columns = coverage.read_rows(&sources::COLUMNS, catalog::columns(session, &probe).await).unwrap_or_default();

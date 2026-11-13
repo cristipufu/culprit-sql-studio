@@ -330,6 +330,7 @@ class Database:
             self.test("culprit-engine", "live_providers::native_telemetry_", library=False)
             self.test("culprit-postgres", "read::native_tests::")
             self.test("culprit-postgres", "telemetry::native_tests::")
+            self.test("culprit-postgres", "native::memory::tests::live_")
             self.test("culprit-postgres", "wire::tests::live_table_preview")
             if fixture.name == "timescale":
                 self.test("culprit-postgres", "timescale::tests::live_")
@@ -342,6 +343,8 @@ class Database:
             self.test("culprit-mysql", "preview::tests::live_")
         elif fixture.engine == "mssql":
             self.test("culprit-mssql", "statement::tests::live_")
+            self.test("culprit-mssql", "memory_clerks::tests::live_")
+            # Includes scheduler fields, telemetry and protocol/cancellation native tests, without a duplicate run.
             self.test("culprit-mssql", "native_tests::")
         else:
             self.test("culprit-engine", "live_providers::native_telemetry_", library=False)

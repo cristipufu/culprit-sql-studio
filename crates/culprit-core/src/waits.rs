@@ -433,6 +433,11 @@ pub struct Pressure {
     pub cpus: Option<f64>,
     /// NUMA nodes those processors are split into (SQL Server), when the engine says.
     pub numa_nodes: Option<f64>,
+    /// Native shared-resource measurements. Missing means unavailable or not measured; size or fullness alone
+    /// does not establish pressure, a query owner or a cause. Source coverage retains partial reads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub resource_counters: Option<Vec<crate::telemetry::NativeCounterSet>>,
 }
 
 impl Pressure {

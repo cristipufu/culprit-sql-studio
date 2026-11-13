@@ -14,6 +14,9 @@ pub(crate) fn sources(meta: &Metadata) -> Vec<&'static str> {
     if meta.version >= 140_000 {
         sources.push("pg_stat_wal");
     }
+    if super::memory::supported(meta.version) {
+        sources.push(super::memory::SOURCE_NAME);
+    }
     if meta.version >= 150_000 {
         sources.push("pg_stat_subscription_stats");
     }
@@ -52,8 +55,14 @@ fn source_scope(source: &str) -> MeasurementScope {
         MeasurementScope::Server
     }
 }
-pub(crate) fn selected_query(meta: &Metadata, limit: usize, selection: Selection) -> String {
-    let branches=selected_sources(meta, selection).iter().map(|name| {
+pub(crate) fn selected_query(
+    meta: &Metadata,
+    limit: usize,
+    selection: Selection,
+    memory_access: super::memory::Access,
+) -> String {
+    let branches=selected_sources(meta, selection).iter().filter(|name| **name != super::memory::SOURCE_NAME || memory_access==super::memory::Access::Available).map(|name| {
+        if *name==super::memory::SOURCE_NAME { return super::memory::branch_sql(); }
         let values=if *name=="pg_database" {
             "pg_catalog.jsonb_build_object('datname',s.datname,'xid_age',pg_catalog.age(s.datfrozenxid),'mxid_age',pg_catalog.mxid_age(s.datminmxid))".to_owned()
         } else {"pg_catalog.to_jsonb(s)".to_owned()};
@@ -72,6 +81,10 @@ pub(crate) fn decode(row: &Row, meta: &Metadata, selection: Selection) -> Result
     let source = text(row, "native_source")?;
     if !sources(meta).contains(&source.as_str()) || !selection.includes(&source) {
         return Err(invalid());
+    }
+    if source == super::memory::SOURCE_NAME {
+        let counters = super::memory::decode_values(&text(row, "native_values")?, &meta.started_at)?;
+        return OperationalObservation::from_counters(&source, counters).map(TelemetryRecord::Operational);
     }
     let values: Value = serde_json::from_str(&text(row, "native_values")?).map_err(|_| invalid())?;
     let fields = values.as_object().ok_or_else(invalid)?;

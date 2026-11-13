@@ -344,6 +344,12 @@ async fn collect_misc(
     } else {
         server_state_unreadable(&mut part.outcome, probe);
     }
+    let (shared_resources, shared_coverage) =
+        crate::resource_counters::collect(provider.pool.clone(), probe, options.collect_shared_resources).await;
+    part.outcome.merge(shared_coverage);
+    if let Some(counters) = shared_resources {
+        part.pressure.get_or_insert_with(Default::default).resource_counters = Some(counters);
+    }
     if dmv {
         // The index advisor and tuning checks: each adds detail, and a failure is a note.
         let out = &mut part.outcome;

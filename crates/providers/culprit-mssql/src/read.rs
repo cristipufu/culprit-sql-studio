@@ -6,7 +6,7 @@ pub(crate) use output::ReadBatch;
 use std::{sync::Arc, time::Duration};
 
 use culprit_core::{
-    Error, Result,
+    Error, ErrorCode, ErrorDetail, Result,
     telemetry::{CollectionBudget, CollectionStop},
 };
 use futures_util::TryStreamExt;
@@ -46,6 +46,27 @@ impl ReadError {
 
 pub(crate) type ReadResult<T> = std::result::Result<T, ReadError>;
 type OwnedRead = tokio::task::JoinHandle<ReadResult<(MsClient, Vec<Rec>)>>;
+
+/// Safety, ownership and whole-read budget failures forbid follow-up SQL. A completed source-specific error
+/// remains an independent coverage gap. RowLimit can be a per-source overflow witness; the enclosing owner must
+/// separately stop when its total snapshot row budget is exhausted.
+pub(crate) fn stops_remaining_reads(error: &Error) -> bool {
+    matches!(error.code, ErrorCode::Timeout | ErrorCode::ConnectionFailed | ErrorCode::AuthFailed)
+        || matches!(
+            error.detail,
+            Some(ErrorDetail::CollectionStopped(
+                CollectionStop::Cancelled
+                    | CollectionStop::CancellationUnconfirmed
+                    | CollectionStop::TimedOut
+                    | CollectionStop::QueryLimit
+                    | CollectionStop::ByteLimit
+                    | CollectionStop::PageLimit
+                    | CollectionStop::Pressure
+                    | CollectionStop::PressureUnavailable
+                    | CollectionStop::SourceChanged
+            ))
+        )
+}
 
 struct ReadQuery {
     sql: String,

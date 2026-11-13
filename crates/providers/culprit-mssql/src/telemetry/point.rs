@@ -16,6 +16,8 @@ pub(super) enum Family {
     PersistentVersions,
     ProcessorTopology,
     CompilationGateways,
+    MemoryClerks,
+    Schedulers,
     PlanCacheSummary,
     MissingIndexes,
     Tuning(crate::query_store::tuning::Kind),
@@ -46,16 +48,11 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
     Ok(match dataset {
         SnapshotDataset::Operational => native::Kind::ALL
             .into_iter()
+            .filter(|kind| *kind != native::Kind::Temp)
             .map(Family::Operation)
-            .chain([Family::FileIo, Family::PerformanceCounters])
+            .chain([Family::FileIo])
             .chain(crate::queues::KINDS.into_iter().map(Family::Queue))
-            .chain([
-                Family::VersionStore,
-                Family::CleanupHorizon,
-                Family::PersistentVersions,
-                Family::ProcessorTopology,
-                Family::CompilationGateways,
-            ])
+            .chain([Family::VersionStore, Family::CleanupHorizon, Family::PersistentVersions])
             .collect(),
         SnapshotDataset::PlanCacheSummary => vec![Family::PlanCacheSummary],
         SnapshotDataset::MissingIndexes => vec![Family::MissingIndexes],
@@ -86,6 +83,20 @@ pub(super) fn families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
         }
     })
 }
+
+pub(super) fn shared_families(dataset: SnapshotDataset) -> Result<Vec<Family>> {
+    if dataset != SnapshotDataset::Operational {
+        return Err(crate::read::invalid_data());
+    }
+    Ok(vec![
+        Family::Operation(native::Kind::Temp),
+        Family::MemoryClerks,
+        Family::Schedulers,
+        Family::PerformanceCounters,
+        Family::ProcessorTopology,
+        Family::CompilationGateways,
+    ])
+}
 impl Family {
     pub fn source(self) -> &'static Source {
         use crate::sources;
@@ -99,6 +110,8 @@ impl Family {
             Self::PersistentVersions => &sources::PERSISTENT_VERSION_STORE,
             Self::ProcessorTopology => &sources::PROCESSOR_TOPOLOGY,
             Self::CompilationGateways => &sources::COMPILATION_GATEWAYS,
+            Self::MemoryClerks => &sources::MEMORY_CLERKS,
+            Self::Schedulers => &sources::SCHEDULERS,
             Self::PlanCacheSummary => &sources::PLAN_CACHE_USE,
             Self::MissingIndexes => &sources::MISSING_INDEXES,
             Self::Tuning(kind) => kind.source(),
@@ -137,6 +150,8 @@ impl Family {
         tuning_layout: Option<&Result<crate::query_store::tuning::Layout>>,
     ) -> Result<ReadOutcome> {
         let records = match self {
+            Self::MemoryClerks => counter_sets(self.source().name, crate::memory_clerks::read(reader, limit).await?)?,
+            Self::Schedulers => counter_sets(self.source().name, crate::schedulers::read(reader, limit).await?)?,
             Self::Tuning(kind) => {
                 let layout = tuning_layout.ok_or_else(crate::read::invalid_data)?.as_ref().map_err(Clone::clone)?;
                 let Some(facts) = crate::query_store::tuning::read_kind(reader, kind, layout, limit).await? else {
@@ -253,4 +268,11 @@ impl Family {
         };
         Ok(ReadOutcome::Observed(Records::complete(records)))
     }
+}
+
+fn counter_sets(source: &str, counters: Vec<NativeCounterSet>) -> Result<Vec<TelemetryRecord>> {
+    counters
+        .into_iter()
+        .map(|counters| OperationalObservation::from_counters(source, counters).map(TelemetryRecord::Operational))
+        .collect()
 }

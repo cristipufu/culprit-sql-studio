@@ -104,6 +104,31 @@ async fn native_instance_discovery_and_capture_share_identity_across_database_ro
         visible[0].identity, first[0].identity,
         "native identity does not require granting an administrator role"
     );
+    let partial = collect_once(
+        &SourceGate::default(),
+        &Factory(crate::PostgresProvider::new(&limited_specification).unwrap()),
+        manifest.request.clone(),
+        &directory.path().join("restricted-memory"),
+        &CollectionCancellation::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        partial.status,
+        CollectionStatus::Complete,
+        "an unavailable allocation view must not erase readable instance counters"
+    );
+    let SourceObservation::Snapshot(scope) = &partial.description.as_ref().unwrap().observation else { panic!() };
+    let memory = scope.sources.iter().find(|source| source.source == native::memory::SOURCE_NAME).unwrap();
+    assert_eq!(memory.state, culprit_core::SourceState::Unavailable);
+    assert_eq!(memory.error_code, Some(ErrorCode::PermissionDenied));
+    assert_eq!(memory.records, 0);
+    assert!(
+        scope
+            .sources
+            .iter()
+            .any(|source| source.source == "pg_stat_bgwriter" && source.records > 0 && source.complete_scope)
+    );
     let admin = factory.0.connector.connect_unconfigured().await.unwrap().client;
     admin.batch_execute("REVOKE EXECUTE ON FUNCTION pg_catalog.pg_control_system() FROM PUBLIC").await.unwrap();
     let denied = limited.telemetry_resources(&discovery).await;

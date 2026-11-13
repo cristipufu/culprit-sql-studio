@@ -42,6 +42,16 @@ async fn the_provider_admits_only_its_supported_shared_route_without_opening_a_c
     assert_eq!(source.query_count(), 0);
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
     wanted.selection = CollectionSelection::Snapshot { dataset: SnapshotDataset::Operational };
+    assert!(
+        provider.telemetry_source(&wanted).is_err(),
+        "instance/host statistics do not prove elastic-pool ownership"
+    );
+    let CollectionSubject::Shared { resource } = &mut wanted.subject else { unreachable!() };
+    resource.kind = SharedResourceKind::Instance;
+    let mut shared_state = provider.telemetry_source(&wanted).unwrap();
+    assert_eq!(shared_state.query_count(), 0);
+    assert_eq!(shared_state.close().await, SourceShutdown::Quiescent);
+    wanted.selection = CollectionSelection::Snapshot { dataset: SnapshotDataset::WaitCounters };
     assert!(provider.telemetry_source(&wanted).is_err());
     wanted = request();
     let CollectionSubject::Shared { resource } = &mut wanted.subject else { unreachable!() };
@@ -50,7 +60,7 @@ async fn the_provider_admits_only_its_supported_shared_route_without_opening_a_c
     assert_eq!(
         provider
             .telemetry_resources(&ResourceDiscoveryRequest {
-                kind: SharedResourceKind::Instance,
+                kind: SharedResourceKind::Node,
                 budget: CollectionBudget::default()
             })
             .await

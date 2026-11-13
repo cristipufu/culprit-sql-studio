@@ -37,7 +37,7 @@ pub(crate) async fn read<R: QueryRead>(reader: &mut R, host: &str, port: u16) ->
       pg_catalog.current_setting('server_version_num') AS version,
       pg_catalog.current_setting('block_size') AS block_bytes, pg_catalog.pg_is_in_recovery() AS standby, {} AS started_at, {} AS observed_at,
       (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname=current_user)
-        OR pg_catalog.pg_has_role(current_user, 'pg_read_all_stats', 'MEMBER') AS full_visibility,
+        OR pg_catalog.pg_has_role(current_user, 'pg_read_all_stats', 'USAGE') AS full_visibility,
       (SELECT n.nspname FROM pg_catalog.pg_extension e JOIN pg_catalog.pg_namespace n ON n.oid=e.extnamespace WHERE e.extname='pg_stat_statements') AS pgss_schema,
       (SELECT pg_catalog.array_to_json(pg_catalog.array_agg(a.attname ORDER BY a.attnum))::text
          FROM pg_catalog.pg_extension e JOIN pg_catalog.pg_namespace n ON n.oid=e.extnamespace

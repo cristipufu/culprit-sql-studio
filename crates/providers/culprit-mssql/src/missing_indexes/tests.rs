@@ -4,6 +4,7 @@ use crate::{
     resources::test_support::{FakeRead, replace},
     value::{Rec, Val},
 };
+use culprit_core::ErrorCode;
 
 pub(crate) fn row() -> Rec {
     Rec::of(&[
@@ -66,13 +67,21 @@ async fn optional_association_failures_are_explicit_and_uncertain_native_work_fa
     let read = application(&mut reader).await.unwrap();
     assert_eq!(read.indexes.len(), 1);
     assert_eq!(read.query_link_failure.unwrap().code, culprit_core::ErrorCode::PermissionDenied);
-    let mut reader =
-        FakeRead::new(vec![Ok(vec![row()]), Err(ReadError::Stopped(CollectionStop::CancellationUnconfirmed))]);
-    assert_eq!(
-        application(&mut reader).await.err().unwrap().detail,
-        Some(ErrorDetail::CollectionStopped(CollectionStop::CancellationUnconfirmed))
-    );
-    assert_eq!(reader.calls.len(), 2);
+    let failures = [CollectionStop::CancellationUnconfirmed, CollectionStop::TimedOut, CollectionStop::QueryLimit]
+        .into_iter()
+        .map(CollectionStop::error)
+        .chain(
+            [ErrorCode::AuthFailed, ErrorCode::ConnectionFailed]
+                .into_iter()
+                .map(|code| Error::new(code, "fixture native failure")),
+        );
+    for failure in failures {
+        let mut reader = FakeRead::new(vec![Ok(vec![row()]), Err(failure.clone().into())]);
+        let error = application(&mut reader).await.err().unwrap();
+        assert_eq!(error.code, failure.code);
+        assert_eq!(error.detail, failure.detail);
+        assert_eq!(reader.calls.len(), 2);
+    }
 }
 #[tokio::test]
 async fn raw_advice_keeps_native_identity_exact_counters_and_unknown_associations() {

@@ -14,7 +14,13 @@ fn identity() -> Rec {
         ("updateability", Val::Text("READ_WRITE".into())),
     ])
 }
-fn clock(metadata: bool, at: &str) -> Rec {
+fn database_context() -> subject::Identity {
+    let mut database =
+        culprit_core::DatabaseIdentity::server(culprit_core::Engine::Mssql, "sample", "fixture.invalid", 1433, None);
+    database.incarnation = Some("logical-guid".into());
+    subject::Identity::Database { database, physical: "physical-guid".into() }
+}
+pub(super) fn clock(metadata: bool, at: &str) -> Rec {
     Rec::of(&[("observed_at", Val::Text(at.into())), ("metadata_visibility", Val::Int(i64::from(metadata)))])
 }
 fn pressure(high: bool) -> Rec {
@@ -28,7 +34,7 @@ fn pressure(high: bool) -> Rec {
         ],
     )
 }
-fn space_row() -> Rec {
+pub(super) fn space_row() -> Rec {
     Rec::of(&[
         ("native_id", Val::Int(1)),
         ("name", Val::Text("PRIMARY".into())),
@@ -68,7 +74,9 @@ fn source(metadata: bool, fail_files: bool, final_identity: Rec) -> StateSource<
         Ok(vec![clock(metadata, "2020-01-01T06:02:00Z")]),
     ];
     for kind in native::Kind::ALL {
-        if kind == native::Kind::SuspectPages || (kind == native::Kind::Sequences && !metadata) {
+        if matches!(kind, native::Kind::SuspectPages | native::Kind::Temp)
+            || (kind == native::Kind::Sequences && !metadata)
+        {
             continue;
         }
         replies.push(Ok(vec![pressure(false)]));
@@ -79,7 +87,6 @@ fn source(metadata: bool, fail_files: bool, final_identity: Rec) -> StateSource<
         });
     }
     replies.extend([Ok(vec![pressure(false)]), Ok(vec![crate::storage_io::tests::row()])]);
-    replies.extend([Ok(vec![pressure(false)]), Ok(vec![crate::performance::tests::row()])]);
     for _ in crate::queues::KINDS {
         replies.extend([Ok(vec![pressure(false)]), Ok(vec![crate::queues::tests::row()])]);
     }
@@ -90,8 +97,6 @@ fn source(metadata: bool, fail_files: bool, final_identity: Rec) -> StateSource<
         Ok(vec![crate::version_store::persistent::tests::layout(5, 12, 1, 1)]),
         Ok(vec![Rec::of(&[("adr", Val::Int(0))])]),
     ]);
-    replies.extend([Ok(vec![pressure(false)]), Ok(vec![crate::processors::tests::row()])]);
-    replies.extend([Ok(vec![pressure(false)]), Ok(vec![crate::compiler_gateways::tests::row()])]);
     replies.extend([Ok(vec![clock(metadata, "2020-01-01T06:02:01Z")]), Ok(vec![final_identity])]);
     StateSource::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap()
 }
@@ -162,8 +167,19 @@ async fn bounded_operational_pages_retain_units_exact_sequence_values_and_unknow
     let mut source = source(true, false, identity());
     let description = source.describe().await.unwrap();
     let snapshot = description.observation.snapshot().unwrap();
-    assert_eq!(snapshot.records, 15);
-    assert_eq!(snapshot.sources[4].state, SourceState::NotApplicable);
+    assert_eq!(snapshot.records, 9);
+    assert_eq!(
+        snapshot.sources.iter().find(|source| source.source == crate::sources::SUSPECT_PAGES.name).unwrap().state,
+        SourceState::NotApplicable
+    );
+    for shared in [
+        crate::sources::TEMP_CAPACITY.name,
+        crate::sources::PERFORMANCE_COUNTERS.name,
+        crate::sources::PROCESSOR_TOPOLOGY.name,
+        crate::sources::COMPILATION_GATEWAYS.name,
+    ] {
+        assert!(!snapshot.sources.iter().any(|source| source.source == shared));
+    }
     let mut cursor = None;
     let mut records = vec![];
     loop {
@@ -179,7 +195,7 @@ async fn bounded_operational_pages_retain_units_exact_sequence_values_and_unknow
         }
         cursor = next_cursor;
     }
-    assert_eq!(records.len(), 15);
+    assert_eq!(records.len(), 9);
     assert_eq!(source.finish().await.unwrap(), culprit_core::telemetry::SourceCompletion::Verified);
     for record in &records {
         let exported = ExportedRecord::new(
@@ -190,12 +206,15 @@ async fn bounded_operational_pages_retain_units_exact_sequence_values_and_unknow
         .unwrap();
         assert!(exported.record_id.is_some());
     }
-    let TelemetryRecord::Operational(row) = &records[2] else { panic!("state") };
-    let OperationalFact::Space(space) = &row.fact else { panic!("space") };
-    assert_eq!(space.scope, culprit_core::FileScope::Server);
-    assert_eq!(space.parts[1].bytes, None);
-    let TelemetryRecord::Operational(row) = &records[3] else { panic!("state") };
-    let OperationalFact::Sequence(sequence) = &row.fact else { panic!("sequence") };
+    let sequence = records
+        .iter()
+        .find_map(|record| match record {
+            TelemetryRecord::Operational(OperationalObservation {
+                fact: OperationalFact::Sequence(sequence), ..
+            }) => Some(sequence),
+            _ => None,
+        })
+        .expect("exact sequence evidence");
     assert_eq!(sequence.current, "9007199254740993");
     assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }
@@ -205,36 +224,41 @@ async fn missing_permissions_and_restricted_metadata_are_never_reported_as_empty
     let mut source = source(false, true, identity());
     let description = source.describe().await.unwrap();
     let sources = &description.observation.snapshot().unwrap().sources;
-    for index in [1, 3] {
-        assert_eq!(sources[index].state, SourceState::Unavailable);
-        assert_eq!(sources[index].records, 0);
-        assert_eq!(sources[index].error_code, Some(ErrorCode::PermissionDenied));
-        assert!(!sources[index].complete_scope);
+    for source in [crate::sources::FILE_CAPACITY.name, crate::sources::SEQUENCE_CAPACITY.name] {
+        let source = sources.iter().find(|item| item.source == source).unwrap();
+        assert_eq!(source.state, SourceState::Unavailable);
+        assert_eq!(source.records, 0);
+        assert_eq!(source.error_code, Some(ErrorCode::PermissionDenied));
+        assert!(!source.complete_scope);
     }
     assert_eq!(sources[0].state, SourceState::Collected);
-    assert_eq!(sources[2].state, SourceState::Collected);
+    assert_eq!(
+        sources.iter().find(|source| source.source == crate::sources::LOG_CAPACITY.name).unwrap().state,
+        SourceState::Collected
+    );
 }
 
 #[tokio::test]
-async fn source_pressure_suppresses_remaining_operational_reads_without_repeated_probes() {
-    for sample in [pressure(true), replace(&pressure(false), &[("avg_cpu_percent", Val::Float(95.0))])] {
+async fn source_pressure_stops_before_further_statistics_clocks_or_verification_queries() {
+    for (sample, reason) in [
+        (pressure(true), CollectionStop::Pressure),
+        (replace(&pressure(false), &[("avg_cpu_percent", Val::Float(95.0))]), CollectionStop::Pressure),
+        (replace(&pressure(false), &[("avg_cpu_percent", Val::Null)]), CollectionStop::PressureUnavailable),
+    ] {
         let replies = vec![
             Ok(vec![Rec::of(&[("edition", Val::Int(5))])]),
             Ok(vec![identity()]),
             Ok(vec![clock(true, "2020-01-01T06:02:00Z")]),
             Ok(vec![sample]),
-            Ok(vec![clock(true, "2020-01-01T06:02:01Z")]),
         ];
         let mut source =
             StateSource::with_io(FakeRead::new(replies), &request(), "fixture.invalid".into(), 1433).unwrap();
-        let description = source.describe().await.unwrap();
-        let snapshot = description.observation.snapshot().unwrap();
-        assert_eq!(snapshot.records, 0);
-        for source in &snapshot.sources[..4] {
-            assert_eq!(source.state, SourceState::Unavailable);
-            assert_eq!(source.stopped, Some(CollectionStop::Pressure));
-        }
-        assert_eq!(source.query_count(), 5);
+        assert_eq!(CollectionStop::from_error(&source.describe().await.unwrap_err()), reason);
+        assert!(source.description.is_none());
+        assert!(source.finish().await.is_err());
+        assert!(source.read_page(TelemetryStream::OperationalSamples, None).await.is_err());
+        assert_eq!(source.query_count(), 4);
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
     }
 }
 
@@ -430,6 +454,7 @@ async fn unassigned_queue_scope_preserves_raw_work_without_publishing_complete_d
         1433,
     )
     .unwrap();
+    source.identity = Some(database_context());
     let coverage = source.read_families(&[point::Family::Queue(QueueKind::WorkerTasks)], true).await.unwrap();
     let coverage = &coverage[0];
     assert_eq!(coverage.state, SourceState::Partial);
@@ -499,12 +524,14 @@ async fn settings_flattened_from_one_native_row_cannot_overrun_the_total_snapsho
         1433,
     )
     .unwrap();
+    source.identity = Some(database_context());
     let coverage =
         source.read_families(&[point::Family::Settings(crate::settings::Kind::Database)], true).await.unwrap();
     assert!(source.rows.is_empty());
     assert_eq!(coverage[0].state, SourceState::Unavailable);
     assert_eq!(coverage[0].stopped, Some(CollectionStop::RowLimit));
     assert!(!coverage[0].complete_scope);
+    assert_eq!(source.query_count(), 2);
 }
 
 #[tokio::test]
@@ -622,4 +649,155 @@ async fn failed_tuning_layout_never_retries_metadata_or_runs_unusable_source_or_
     );
     assert_eq!(source.finish().await.unwrap(), culprit_core::telemetry::SourceCompletion::Verified);
     assert_eq!(source.io.calls.len(), 7);
+}
+
+fn terminal_failures() -> Vec<culprit_core::Error> {
+    [
+        CollectionStop::TimedOut,
+        CollectionStop::Cancelled,
+        CollectionStop::CancellationUnconfirmed,
+        CollectionStop::QueryLimit,
+        CollectionStop::ByteLimit,
+        CollectionStop::PageLimit,
+        CollectionStop::Pressure,
+        CollectionStop::PressureUnavailable,
+        CollectionStop::SourceChanged,
+    ]
+    .into_iter()
+    .map(CollectionStop::error)
+    .chain(
+        [ErrorCode::Timeout, ErrorCode::AuthFailed, ErrorCode::ConnectionFailed]
+            .into_iter()
+            .map(|code| culprit_core::Error::new(code, "fixture native read failed")),
+    )
+    .collect()
+}
+
+#[tokio::test]
+async fn terminal_instance_reads_stop_before_sibling_sources_and_cannot_publish_staged_records() {
+    use crate::instance::test_support::{epoch, metadata};
+    let request = CollectionRequest {
+        subject: CollectionSubject::Shared {
+            resource: SharedResourceIdentity {
+                engine: culprit_core::Engine::Mssql,
+                kind: SharedResourceKind::Instance,
+                namespace: NativeIdentity::new("fixture-machine").qualified("kind", "sql-server-network-machine"),
+                native: NativeIdentity::new("fixture-machine\\NATIVE").qualified("kind", "sql-server-instance"),
+            },
+        },
+        ..request()
+    };
+    for error in terminal_failures() {
+        let mut source = StateSource::with_io(
+            FakeRead::new(vec![
+                Ok(vec![metadata()]),
+                Ok(vec![epoch(100)]),
+                Ok(vec![clock(false, "2020-01-01T06:02:00Z")]),
+                Ok(vec![space_row()]),
+                Err(ReadError::Source(error.clone())),
+            ]),
+            &request,
+            "unused-member-route.invalid".into(),
+            1433,
+        )
+        .unwrap();
+        let actual = source.describe().await.unwrap_err();
+        assert_eq!(actual.code, error.code);
+        assert_eq!(actual.detail, error.detail);
+        assert_eq!(source.rows.len(), 1, "the earlier native fact remains provisional");
+        assert!(source.description.is_none());
+        assert!(source.describe().await.is_err());
+        assert!(source.finish().await.is_err());
+        assert!(source.read_page(TelemetryStream::OperationalSamples, None).await.is_err());
+        assert_eq!(source.query_count(), 5, "no sibling, clock, pressure or identity query follows the stop");
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+        assert_eq!(source.io.closed, 1);
+    }
+}
+
+#[tokio::test]
+async fn terminal_tuning_layout_reads_stop_before_follow_up_sources_or_verification_queries() {
+    let request = CollectionRequest {
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::Tuning },
+        ..request()
+    };
+    for error in terminal_failures() {
+        let mut source = StateSource::with_io(
+            FakeRead::new(vec![
+                Ok(vec![Rec::of(&[("edition", Val::Int(5))])]),
+                Ok(vec![identity()]),
+                Ok(vec![clock(true, "2020-01-01T06:02:00Z")]),
+                Ok(vec![pressure(false)]),
+                Err(ReadError::Source(error.clone())),
+            ]),
+            &request,
+            "fixture.invalid".into(),
+            1433,
+        )
+        .unwrap();
+        let actual = source.describe().await.unwrap_err();
+        assert_eq!(actual.code, error.code);
+        assert_eq!(actual.detail, error.detail);
+        assert!(source.description.is_none());
+        assert!(source.finish().await.is_err());
+        assert_eq!(source.query_count(), 5);
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
+}
+
+#[tokio::test]
+async fn terminal_optional_index_associations_stop_before_the_final_clock_and_identity_queries() {
+    let request = CollectionRequest {
+        selection: CollectionSelection::Snapshot { dataset: SnapshotDataset::MissingIndexes },
+        ..request()
+    };
+    for error in terminal_failures() {
+        let mut source = StateSource::with_io(
+            FakeRead::new(vec![
+                Ok(vec![Rec::of(&[("edition", Val::Int(5))])]),
+                Ok(vec![identity()]),
+                Ok(vec![clock(true, "2020-01-01T06:02:00Z")]),
+                Ok(vec![pressure(false)]),
+                Ok(vec![crate::missing_indexes::tests::row()]),
+                Err(ReadError::Source(error.clone())),
+            ]),
+            &request,
+            "fixture.invalid".into(),
+            1433,
+        )
+        .unwrap();
+        let actual = source.describe().await.unwrap_err();
+        assert_eq!(actual.code, error.code);
+        assert_eq!(actual.detail, error.detail);
+        assert!(source.description.is_none());
+        assert!(source.finish().await.is_err());
+        assert_eq!(source.query_count(), 6);
+        assert_eq!(source.close().await, SourceShutdown::Quiescent);
+    }
+}
+
+#[tokio::test]
+async fn total_snapshot_row_exhaustion_stops_without_another_native_probe_or_final_clock() {
+    let request =
+        CollectionRequest { budget: CollectionBudget { max_snapshot_rows: 1, ..Default::default() }, ..request() };
+    let mut source = StateSource::with_io(
+        FakeRead::new(vec![
+            Ok(vec![Rec::of(&[("edition", Val::Int(5))])]),
+            Ok(vec![identity()]),
+            Ok(vec![clock(true, "2020-01-01T06:02:00Z")]),
+            Ok(vec![pressure(false)]),
+            Ok(vec![space_row()]),
+        ]),
+        &request,
+        "fixture.invalid".into(),
+        1433,
+    )
+    .unwrap();
+    assert_eq!(CollectionStop::from_error(&source.describe().await.unwrap_err()), CollectionStop::RowLimit);
+    assert_eq!(source.rows.len(), 1);
+    assert!(source.description.is_none());
+    assert!(source.finish().await.is_err());
+    assert!(source.read_page(TelemetryStream::OperationalSamples, None).await.is_err());
+    assert_eq!(source.query_count(), 5);
+    assert_eq!(source.close().await, SourceShutdown::Quiescent);
 }

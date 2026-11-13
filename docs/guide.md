@@ -75,6 +75,12 @@ culprit plan diff shop-staging:42:7 shop-staging:42:9   # compare two Query Stor
 culprit update --check                         # is there a newer release? `culprit update` installs it
 ```
 
+Shared-resource profiling is an explicit option on supported SQL Server/Managed Instance and PostgreSQL scans:
+`culprit scan CONNECTION --collect-shared-resources`. It defaults off while the new native allocation/scheduler
+readers await production load qualification. Leaving it off sends no SQL from those readers and records that
+shared collection was not requested. The captured facts retain broader scope; size or fullness alone does not
+create a database pressure warning. See [shared resource collection](collector.md#shared-allocation-and-scheduler-facts).
+
 Or open the desktop app: saved connections are listed in the sidebar, grouped by environment. A connection opens on its **dashboard**: one sentence that says what needs a look first, then fourteen tiles (database time and its trend, findings, top queries, where time goes, sessions right now, health, deadlocks, indexes, plans, storage, connections, replication, failing queries, query statistics), each a plain takeaway, a small picture and a click into the view that explains it. Every engine gets every tile; one it can't fill says why. The ranked findings are one key away (`2`). Pick the engine and paste its connection string, or pick **SQLite** and choose the file (then **Add query log** if its framework's log isn't found beside it), use **Find Azure databases** / **Find AWS databases**, or **Import from other tools** (names, hosts and user names only; passwords are asked for once), and the first scan appears in seconds. Reopening a connection shows its last report instantly while a fresh scan runs. Rename a connection's alias with the pencil on its card or `culprit conn rename`.
 
 Entra ID connections use your `az login`. Without the Azure CLI (or when it's signed out), Culprit signs in with a device code instead: the app shows the code, the CLI prints it when you're at a terminal. Access tokens stay in memory, the refresh token in the OS keychain; `culprit auth logout` forgets it. Scripts and agents never block on a sign-in: they get an error with a hint.
@@ -160,17 +166,53 @@ Collection profiles and stream metadata are independent of database-provider and
 
 `--collection query-compilation` captures retained Query Store compilation facts into `operations.ndjson`, without a historical window. Counts remain exact decimal strings; average duration is in microseconds. Native first/last compile timestamps and the clock comparison remain separate facts. The profile includes Culprit's own retained queries and uses the same decoder as scan diagnostics. A query ID and its initial compile time identify the retained lifetime; these totals must not be assigned to a runtime interval or summed across repeated captures. Unknown reset continuity remains explicit.
 
-`--collection operational` captures current log space, writable filegroup capacity, tempdb allocations, sequence/identity limits and native file I/O counters, without a historical window:
+`--collection operational` on the default Azure SQL database subject captures current log space, writable
+filegroup capacity, sequence/identity limits, database file I/O and database-attributed queues, without a historical window:
 
 ```sh
 culprit collect once shop-staging --collection operational --outbox ./telemetry-outbox --json
 ```
 
-The capture contains `operations.ndjson` and its manifest. Spaces retain bytes, scope, configured file limits, growth settings and native reuse reasons. Sequence values remain decimal strings. Unknown measurements remain `null`; shared tempdb measurements have no established cross-database identity and must not be summed across databases. The app and background collection use the same bounded native operational reader; names are localized only for application display.
+The capture contains `operations.ndjson` and its manifest. Spaces retain bytes, scope, configured file limits,
+growth settings and native reuse reasons. Sequence values remain decimal strings; unknown measurements remain
+`null`. Database captures exclude instance performance counters, processor topology, compiler gateways and shared
+tempdb capacity. Shared resources have their own explicit owner, rather than repeating their readings per database.
 
-File I/O facts preserve native database/file IDs, logical names and type when visible, exact read/write counts, bytes and stall milliseconds, on-disk bytes and native uptime ticks. An unavailable name or type does not remove the native counter row. Reset history stays unknown; uptime ticks do not establish a reset epoch. The export keeps zero-I/O files and the complete bounded native file set; the app separately ranks its display. Both use the same targeted reader. Azure reads this database's files only and excludes unattributed Hyperscale page-server rows; interactive SQL Server scans also read shared tempdb explicitly. Shared observations have no proven instance identity and must not be added across database captures. [Native file statistics](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-io-virtual-file-stats-transact-sql).
+File I/O facts preserve native database/file IDs, logical names and type when visible, exact read/write counts, bytes and stall milliseconds, on-disk bytes and native uptime ticks. An unavailable name or type does not remove the native counter row. Reset history stays unknown; uptime ticks do not establish a reset epoch. The export keeps zero-I/O files and the complete bounded native file set; the app separately ranks its display. Both use the same targeted reader. Azure reads this database's files only and excludes unattributed Hyperscale page-server rows. Broader tempdb capacity belongs to an explicit shared-resource observation and must not be charged to the connecting database. [Native file statistics](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-io-virtual-file-stats-transact-sql).
 
-Performance facts retain batches, compilations/recompilations, page-life expectancy, logins and connection resets from one shared native read. Values remain exact decimal strings with native object/name/instance/type, scope, unit, gauge/cumulative meaning and unknown reset evidence. Unknown native counter types preserve their raw value with unknown meaning and unit; they cannot become derived application ratios or rates. Instance rows never replace a global counter. Empty native results mean unavailable counters, not a measured zero. Short samples subtract exact integers before conversion and require both readings of the same counter. Missing recompilation counts cannot be substituted with zero when computing compilation ratios. [Native performance counters](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-os-performance-counters-transact-sql).
+Discover an existing shared resource and save its returned native identity before collecting it:
+
+```sh
+culprit collect resources shop-sqlserver --kind instance --json > resources.json
+jq -e '.[0].identity' resources.json > instance.json
+culprit collect once shop-sqlserver --resource ./instance.json --collection operational \
+  --output ./instance-capture --json
+```
+
+SQL Server and Managed Instance use `--kind instance`. Azure SQL uses `--kind pool` through a writable member
+connection for retained `resource-history`; generic instance/host current-state families are unavailable through
+that pool route because their ownership is not established. PostgreSQL's `--kind instance` operational route retains the server-wide statistics and
+main shared-memory allocations its native version and permissions expose. Unsupported subjects are explicit errors.
+
+| Shared observation | What it retains |
+|---|---|
+| SQL Server memory clerks | Component type/name/node groups, native clerk counts and separate allocation dimensions; no pointer export or guessed query owner |
+| SQL Server schedulers | Scheduler/node/CPU identity, status, workers, runnable tasks, queues, pending I/O and available CPU/delay counters |
+| SQL Server performance/topology/compiler admission | Native object/instance/type, unit, scope and meaning, with unknown resets preserved |
+| PostgreSQL 13+ memory allocations | Main shared-segment names/offsets, byte sizes and padding; private backend/query memory and dynamic shared memory are outside this source |
+
+These are component and scheduling facts. They do not identify a responsible query or establish memory pressure
+from size alone. Missing fields stay unknown, denied families retain their own coverage, and readable sibling
+sources survive a restricted allocation view. SQL Server 2022+ uses `VIEW SERVER PERFORMANCE STATE` for memory
+clerks and schedulers; earlier SQL Server uses `VIEW SERVER STATE`, with Azure-specific requirements by service
+objective. PostgreSQL checks effective statistics privileges and native view/function access. Culprit changes no permissions.
+Result limits do not bound every step of native metadata grouping: qualify source cost before production scheduling.
+See [the shared-source details](collector.md#shared-allocation-and-scheduler-facts).
+
+Shared performance facts include batches, compilations/recompilations, page-life expectancy, logins and connection
+resets. Unknown native counter types retain unknown meaning/unit; missing recompilation counts never become zero
+in a compilation ratio. Short samples subtract exact counters only when both matching readings exist. Native
+instance rows cannot replace global counters. [Native performance counters](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-os-performance-counters-transact-sql).
 
 Current queue facts count memory grants and worker tasks separately, preserving exact counts, maximum observed waits and the selection threshold (100 ms for worker tasks). Database counts require the native request's database; session defaults are insufficient. Unattributed members of shared native queues remain coverage metadata and cannot be added to a database count or summed across captures. Unknown attribution makes that source partial, with no healthy zero in the app. Native task/request identity prevents MARS requests from multiplying wait rows. App and background reads use the same bounded implementation. [Native waiting tasks](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-os-waiting-tasks-transact-sql), [native task/request identity](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-views/sys-dm-os-tasks-transact-sql).
 
@@ -178,7 +220,10 @@ The tempdb version-store gauge preserves this database’s reserved space as exa
 
 The snapshot description records each native source separately: collected, empty, partial, unavailable or not applicable, its record count and scope completeness. File completion confirms the exported observation; native source availability is reported separately. Restricted metadata cannot establish an empty sequence catalog. Current absence requires a complete source; unavailable or incomplete observations preserve its earlier evidence. Pressure suppresses remaining reads after one failed admission probe. Azure SQL does not expose msdb suspect-page history; that source is explicitly not applicable. The native model carries an offset-free reported timestamp with unknown reset semantics, without assigning a UTC event time or a server-start counter epoch.
 
-Operational capture keeps host logical processors, online SQL user schedulers and visible NUMA nodes as separate server-scoped gauges. These are shared context, rather than a database CPU quota; Azure resource history carries the database's native CPU limit separately. The app uses the available online schedulers for parallelism context. [Native scheduler meanings](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-os-schedulers-transact-sql).
+Shared instance capture keeps reported host logical CPU metadata, online SQL user schedulers and visible NUMA nodes
+separate. Host CPU counts establish neither instance entitlement nor a database CPU quota; Azure
+resource history carries the database's native CPU limit separately. When captured, online schedulers provide
+parallelism context. [Native scheduler meanings](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-os-schedulers-transact-sql).
 
 On databases with ADR enabled, operational capture also keeps persistent version-store statistics separately: off-row and online-index kibibytes, aborted transaction counts, transaction watermarks and native cleanup timestamps. Off-row size excludes versions stored within data rows. The app displays it as information rather than grading every database by one size threshold. Known disabled ADR or unsupported server versions are not applicable; unreadable or missing measurements are unavailable, never a zero. Tempdb allocation is labelled explicitly and cannot measure ADR's persistent store. See [the native PVS statistics](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-tran-persistent-version-store-stats).
 

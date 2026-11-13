@@ -161,7 +161,7 @@ pub(crate) async fn discover_resources(
     request: &ResourceDiscoveryRequest,
 ) -> Result<Vec<CollectionResource>> {
     request.budget.validate()?;
-    if request.kind != SharedResourceKind::Pool {
+    if !matches!(request.kind, SharedResourceKind::Pool | SharedResourceKind::Instance) {
         return Err(culprit_core::Error::new(
             culprit_core::ErrorCode::Unsupported,
             culprit_core::t!("collection.unsupported"),
@@ -176,16 +176,33 @@ async fn discover_with_io<R: NativeRead>(
     reader: &mut R,
     request: &ResourceDiscoveryRequest,
 ) -> Result<Vec<CollectionResource>> {
-    description::ensure_supported(reader).await?;
-    let (pool, observed_at) = resources::pool::identity(reader).await?;
-    let resources = pool
-        .into_iter()
-        .map(|pool| CollectionResource {
-            identity: pool.identity,
-            observed_at: observed_at.clone(),
-            collections: vec![TelemetryCollection::ResourceHistory],
-        })
-        .collect::<Vec<_>>();
+    let resources = match request.kind {
+        SharedResourceKind::Pool => {
+            description::ensure_supported(reader).await?;
+            let (pool, observed_at) = resources::pool::identity(reader).await?;
+            pool.into_iter()
+                .map(|pool| CollectionResource {
+                    identity: pool.identity,
+                    observed_at: observed_at.clone(),
+                    collections: vec![TelemetryCollection::ResourceHistory],
+                })
+                .collect::<Vec<_>>()
+        }
+        SharedResourceKind::Instance => {
+            let (instance, observed_at) = crate::instance::read(reader).await?;
+            vec![CollectionResource {
+                identity: instance.identity,
+                observed_at,
+                collections: vec![TelemetryCollection::Snapshot(SnapshotDataset::Operational)],
+            }]
+        }
+        _ => {
+            return Err(culprit_core::Error::new(
+                culprit_core::ErrorCode::Unsupported,
+                culprit_core::t!("collection.unsupported"),
+            ));
+        }
+    };
     request.validate_result(&resources)?;
     Ok(resources)
 }

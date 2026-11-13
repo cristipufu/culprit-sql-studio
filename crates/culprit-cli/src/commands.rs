@@ -2,13 +2,13 @@
 
 use std::path::PathBuf;
 
-use culprit_core::{Error, ExplainMode, Result, SessionAction, Severity, SnapshotOptions, t};
+use culprit_core::{Error, ExplainMode, Result, SessionAction, Severity, t};
 use culprit_engine::Workspace;
 
 use crate::output::Out;
 use crate::{
     ChangesArgs, ExplainArgs, FindingsArgs, LiveArgs, RunArgs, SavedCommand, ScanArgs, TopArgs, fail_code, load,
-    report_file, window_minutes,
+    report_file,
 };
 
 pub(super) async fn doctor(ws: &Workspace, connection: &str, out: &Out) -> Result<u8> {
@@ -20,9 +20,7 @@ pub(super) async fn doctor(ws: &Workspace, connection: &str, out: &Out) -> Resul
 }
 
 pub(super) async fn scan(ws: &Workspace, args: ScanArgs, out: &Out) -> Result<u8> {
-    let window = window_minutes(args.window, Some(args.window_days)).unwrap_or_default();
-    let options = SnapshotOptions { top_queries: args.top, plans: args.plans, ..SnapshotOptions::default() }
-        .with_window_minutes(window);
+    let options = args.snapshot_options();
     out.progress(&t!("cli.scanning", connection = &args.connection));
     let report = ws.scan_with_log(&args.connection, &options, args.query_log.as_deref()).await?;
     out.scan(&report, args.full, &ws.paths().reports_dir(&args.connection));

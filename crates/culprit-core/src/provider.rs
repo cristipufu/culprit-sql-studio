@@ -17,11 +17,20 @@ pub struct SnapshotOptions {
     pub top_queries: u32,
     /// How many of the heaviest queries to fetch and parse plans for.
     pub plans: u32,
+    /// Explicit opt-in to detailed shared-resource readers that require separate production load qualification.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub collect_shared_resources: bool,
 }
 
 impl Default for SnapshotOptions {
     fn default() -> Self {
-        SnapshotOptions { window_minutes: 7 * crate::MINUTES_PER_DAY, top_queries: 60, plans: 25 }
+        SnapshotOptions {
+            window_minutes: 7 * crate::MINUTES_PER_DAY,
+            top_queries: 60,
+            plans: 25,
+            collect_shared_resources: false,
+        }
     }
 }
 
@@ -234,5 +243,17 @@ mod tests {
         assert_eq!(SnapshotOptions::default().window_in_minutes(), 7 * crate::MINUTES_PER_DAY);
         assert_eq!(SnapshotOptions::default().with_window_minutes(0).window_in_minutes(), 1);
         assert_eq!(SnapshotOptions { window_minutes: 0, ..Default::default() }.window_in_minutes(), 1);
+    }
+    #[test]
+    fn shared_resource_collection_requires_an_explicit_request() {
+        assert!(!SnapshotOptions::default().collect_shared_resources);
+        let request = serde_json::json!({"window_minutes":60,"top_queries":20,"plans":0});
+        let options: SnapshotOptions = serde_json::from_value(request.clone()).unwrap();
+        assert!(!options.collect_shared_resources);
+        let mut request = request;
+        request["collect_shared_resources"] = true.into();
+        let options: SnapshotOptions = serde_json::from_value(request).unwrap();
+        assert!(options.with_window_minutes(90).collect_shared_resources);
+        assert!(SnapshotOptions::decl(&ts_rs::Config::default()).contains("collect_shared_resources?: boolean"));
     }
 }

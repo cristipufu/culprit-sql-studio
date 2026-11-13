@@ -5,6 +5,7 @@ mod collect;
 mod connect;
 pub mod deadlocks;
 mod generic;
+mod memory;
 mod native;
 mod operations;
 pub mod plan_json;

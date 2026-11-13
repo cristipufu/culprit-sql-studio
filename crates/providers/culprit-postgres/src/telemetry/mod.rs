@@ -79,18 +79,29 @@ impl Recipe {
             Self::Catalog(kind) => vec![kind.source().into()],
         }
     }
-    fn query(self, meta: &Metadata, budget: &CollectionBudget) -> Result<String> {
+    fn query(
+        self,
+        meta: &Metadata,
+        budget: &CollectionBudget,
+        memory_access: native::memory::Access,
+    ) -> Result<String> {
         let limit = budget.max_snapshot_rows as usize + 1;
         match self {
             Self::Statements | Self::Definitions => {
                 native::statements::query(meta, matches!(self, Self::Definitions), limit, budget.max_sql_bytes as usize)
             }
-            Self::Operational => {
-                Ok(native::operational::selected_query(meta, limit, native::operational::Selection::Database))
-            }
-            Self::InstanceOperational => {
-                Ok(native::operational::selected_query(meta, limit, native::operational::Selection::Instance))
-            }
+            Self::Operational => Ok(native::operational::selected_query(
+                meta,
+                limit,
+                native::operational::Selection::Database,
+                memory_access,
+            )),
+            Self::InstanceOperational => Ok(native::operational::selected_query(
+                meta,
+                limit,
+                native::operational::Selection::Instance,
+                memory_access,
+            )),
             Self::Settings => Ok(native::settings::capture_query(limit)),
             Self::Catalog(kind) => Ok(native::catalog::query(kind, meta.version, false, limit)),
             Self::Sequences => Ok(native::sequences::query(Some(limit))),
@@ -312,6 +323,7 @@ fn snapshot_source(
         recipe,
         metadata: None,
         instance: None,
+        memory_access: native::memory::Access::Unsupported,
     };
     Ok(Box::new(SnapshotSource::new(reader, request)?))
 }
@@ -323,6 +335,7 @@ struct PostgresSnapshotReader {
     port: u16,
     metadata: Option<Metadata>,
     instance: Option<SharedResourceIdentity>,
+    memory_access: native::memory::Access,
 }
 #[async_trait::async_trait]
 impl SnapshotReader for PostgresSnapshotReader {
@@ -334,8 +347,17 @@ impl SnapshotReader for PostgresSnapshotReader {
         } else {
             None
         };
+        let target = instance.clone().map(CollectionTarget::Shared).unwrap_or_else(|| meta.database.clone().into());
+        if !request.subject.accepts(&target) {
+            return Err(CollectionStop::SourceChanged.error());
+        }
+        let memory_access = if matches!(self.recipe, Recipe::InstanceOperational) {
+            native::memory::access(&mut self.io, meta.version).await?
+        } else {
+            native::memory::Access::Unsupported
+        };
         // Validate native support and permissions before admitting the statistics statement.
-        self.recipe.query(&meta, &request.budget)?;
+        self.recipe.query(&meta, &request.budget, memory_access)?;
         if matches!(self.recipe, Recipe::Replication | Recipe::Cleanup) && !meta.full_visibility {
             return Err(Error::new(ErrorCode::PermissionDenied, culprit_core::t!("collection.invalid_source")));
         }
@@ -345,7 +367,7 @@ impl SnapshotReader for PostgresSnapshotReader {
             return Err(Error::new(ErrorCode::PermissionDenied, culprit_core::t!("collection.invalid_source")));
         }
         let description = CollectionDescription {
-            target: instance.clone().map(CollectionTarget::Shared).unwrap_or_else(|| meta.database.clone().into()),
+            target,
             source: self.recipe.name().into(),
             continuity: SourceContinuity::Unverified,
             observation: SourceObservation::PagedSnapshot(PagedSnapshotDescription {
@@ -358,12 +380,13 @@ impl SnapshotReader for PostgresSnapshotReader {
             return Err(CollectionStop::SourceChanged.error());
         }
         self.instance = instance;
+        self.memory_access = memory_access;
         self.metadata = Some(meta);
         Ok(description)
     }
     async fn begin(&mut self, request: &CollectionRequest) -> Result<()> {
         let meta = self.metadata.as_ref().ok_or_else(native::invalid)?;
-        let query = self.recipe.query(meta, &request.budget)?;
+        let query = self.recipe.query(meta, &request.budget, self.memory_access)?;
         self.io.begin_stream(&query, request.budget.max_snapshot_rows as usize + 1).await
     }
     async fn next_batch(&mut self) -> Result<ReadBatch<Row>> {
@@ -386,6 +409,11 @@ impl SnapshotReader for PostgresSnapshotReader {
         } else {
             true
         };
+        let memory_after = if matches!(self.recipe, Recipe::InstanceOperational) {
+            native::memory::access(&mut self.io, after.version).await?
+        } else {
+            native::memory::Access::Unsupported
+        };
         Ok(SnapshotRecheck {
             unchanged: before.same_source(&after) && same_instance,
             observed_until: after.at,
@@ -393,10 +421,26 @@ impl SnapshotReader for PostgresSnapshotReader {
                 .recipe
                 .sources(before)
                 .into_iter()
-                .map(|source| SnapshotScope::Available {
-                    source,
-                    complete: complete_scope,
-                    error_code: (!complete_scope).then_some(ErrorCode::PermissionDenied),
+                .map(|source| {
+                    if source == native::memory::SOURCE_NAME {
+                        return match self.memory_access {
+                            native::memory::Access::Available => SnapshotScope::Available {
+                                source,
+                                complete: memory_after == native::memory::Access::Available,
+                                error_code: (memory_after != native::memory::Access::Available)
+                                    .then_some(ErrorCode::PermissionDenied),
+                            },
+                            native::memory::Access::Restricted => {
+                                SnapshotScope::Unavailable { source, error_code: ErrorCode::PermissionDenied }
+                            }
+                            native::memory::Access::Unsupported => SnapshotScope::NotApplicable { source },
+                        };
+                    }
+                    SnapshotScope::Available {
+                        source,
+                        complete: complete_scope,
+                        error_code: (!complete_scope).then_some(ErrorCode::PermissionDenied),
+                    }
                 })
                 .collect(),
         })

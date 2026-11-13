@@ -4,6 +4,7 @@ pub(crate) mod catalog;
 pub(crate) mod cleanup;
 pub(crate) mod indexes;
 pub(crate) mod instance;
+pub(crate) mod memory;
 pub(crate) mod metadata;
 pub(crate) mod operational;
 pub(crate) mod relations;

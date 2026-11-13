@@ -406,6 +406,14 @@ pub struct OperationalObservation {
     pub fact: OperationalFact,
 }
 impl OperationalObservation {
+    pub fn from_counters(source: impl Into<String>, counters: NativeCounterSet) -> Result<Self> {
+        let observation =
+            Self { source: source.into(), key: counters.key()?, fact: OperationalFact::CounterSet(Box::new(counters)) };
+        if !observation.is_valid() {
+            return Err(CollectionStop::InvalidPage.error());
+        }
+        Ok(observation)
+    }
     pub fn stream(&self) -> TelemetryStream {
         SnapshotDataset::Operational.stream()
     }

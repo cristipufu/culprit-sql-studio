@@ -18,14 +18,7 @@ pub(crate) async fn read<R: NativeRead>(reader: &mut R) -> Collected {
             (Ok(layout), None) => read_kind(reader, kind, layout, 10_000).await,
         };
         if let Err(error) = &result
-            && matches!(
-                CollectionStop::from_error(error),
-                CollectionStop::TimedOut
-                    | CollectionStop::Cancelled
-                    | CollectionStop::CancellationUnconfirmed
-                    | CollectionStop::QueryLimit
-                    | CollectionStop::ByteLimit
-            )
+            && crate::read::stops_remaining_reads(error)
         {
             stopped = Some(error.clone());
         }
@@ -146,29 +139,47 @@ mod tests {
     use super::*;
     use native::{forced_plans_sql, recommendations_sql};
     #[tokio::test]
-    async fn tuning_command_failure_is_not_retried_or_hidden_as_feature_absence() {
-        use crate::{
-            read::ReadError,
-            resources::test_support::FakeRead,
-            value::{Rec, Val},
-        };
-        use culprit_core::telemetry::CollectionStop;
-        let mut reader = super::super::Reader::new(FakeRead::new(vec![
-            Ok(vec![Rec::of(&[
-                ("automatic_tuning", Val::Int(1)),
-                ("recommendations", Val::Int(0)),
-                ("forcing_type", Val::Int(0)),
-                ("hints", Val::Int(0)),
-                ("hint_replica", Val::Int(0)),
-                ("hint_source", Val::Int(0)),
-                ("query_store", Val::Int(1)),
-                ("metadata_visibility", Val::Bool(true)),
-            ])]),
-            Err(ReadError::Stopped(CollectionStop::TimedOut)),
-        ]));
+    async fn terminal_tuning_failures_stop_siblings_without_retry_or_claiming_feature_absence() {
+        use crate::resources::test_support::FakeRead;
+        use culprit_core::{Error, ErrorCode};
+        let failures = [CollectionStop::TimedOut, CollectionStop::Cancelled, CollectionStop::Pressure]
+            .into_iter()
+            .map(CollectionStop::error)
+            .chain(
+                [ErrorCode::AuthFailed, ErrorCode::ConnectionFailed]
+                    .into_iter()
+                    .map(|code| Error::new(code, "fixture native failure")),
+            );
+        for failure in failures {
+            let mut reader = FakeRead::new(vec![Ok(vec![native::tests::layout_row()]), Err(failure.clone().into())]);
+            let report = read(&mut reader).await;
+            assert_eq!(report.parts.len(), Kind::ALL.len());
+            for (_, result) in report.parts {
+                let error = result.unwrap_err();
+                assert_eq!(error.code, failure.code);
+                assert_eq!(error.detail, failure.detail);
+            }
+            assert_eq!(reader.calls.len(), 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_completed_tuning_permission_error_keeps_independent_native_sources_available() {
+        use crate::resources::test_support::FakeRead;
+        use culprit_core::{Error, ErrorCode};
+        let mut reader = FakeRead::new(vec![
+            Ok(vec![native::tests::layout_row()]),
+            Err(Error::new(ErrorCode::PermissionDenied, "fixture denied").into()),
+            Ok(vec![]),
+            Ok(vec![native::tests::forced_row()]),
+            Ok(vec![]),
+        ]);
         let report = read(&mut reader).await;
-        let error = report.parts[0].1.as_ref().err().unwrap();
-        assert_eq!(CollectionStop::from_error(error), CollectionStop::TimedOut);
+        assert_eq!(report.parts[0].1.as_ref().unwrap_err().code, ErrorCode::PermissionDenied);
+        assert!(matches!(&report.parts[1].1, Ok(Some(values)) if values.is_empty()));
+        assert!(matches!(&report.parts[2].1, Ok(Some(values)) if values.len() == 1));
+        assert!(matches!(&report.parts[3].1, Ok(Some(values)) if values.is_empty()));
+        assert_eq!(reader.calls.len(), 5);
     }
     #[test]
     fn query_store_times_are_switched_to_utc_not_shifted_again() {

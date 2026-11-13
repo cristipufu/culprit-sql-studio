@@ -1,8 +1,8 @@
 //! Bounded current facts. Each native source retains its own availability and visibility contract.
-use super::{admit_resources, description, point, progress::Progress};
+use super::{admit_resources, point, progress::Progress, subject};
 use crate::{
     conn::Pool,
-    read::{NativeRead, ReadError, ReadSession, integer, invalid_data, text},
+    read::{NativeRead, ReadError, ReadSession, integer, invalid_data, stops_remaining_reads, text},
 };
 use culprit_core::{ErrorCode, Result, telemetry::*};
 use std::sync::Arc;
@@ -23,7 +23,7 @@ pub(super) struct StateSource<R = ReadSession> {
     port: u16,
     io: R,
     description: Option<CollectionDescription>,
-    physical: Option<String>,
+    identity: Option<subject::Identity>,
     rows: Vec<TelemetryRecord>,
     offset: usize,
     progress: Progress,
@@ -42,7 +42,7 @@ impl<R: NativeRead> StateSource<R> {
             port,
             io,
             description: None,
-            physical: None,
+            identity: None,
             rows: vec![],
             offset: 0,
             progress: Progress::New,
@@ -57,12 +57,15 @@ impl<R: NativeRead> StateSource<R> {
         metadata_visible: bool,
     ) -> Result<Vec<StateSourceCoverage>> {
         let mut outcomes = Vec::new();
-        let mut blocked = None;
         let tuning_layout = if families.iter().any(|family| matches!(family, point::Family::Tuning(_))) {
-            Some(match self.admit(&mut blocked).await {
-                Ok(_) => crate::query_store::tuning::Layout::read(&mut self.io).await,
-                Err(error) => Err(error),
-            })
+            self.admit().await?;
+            let result = crate::query_store::tuning::Layout::read(&mut self.io).await;
+            if let Err(error) = &result
+                && stops_remaining_reads(error)
+            {
+                return Err(error.clone());
+            }
+            Some(result)
         } else {
             None
         };
@@ -83,22 +86,15 @@ impl<R: NativeRead> StateSource<R> {
                 }
                 Ok(point::Availability::Available) => {}
             }
-            let result = match self.admit(&mut blocked).await {
-                Ok(remaining) => family
-                    .read(&mut self.io, remaining.min(MAX_BUFFERED_FAMILY_ROWS), tuning_layout.as_ref())
-                    .await
-                    .and_then(|batch| {
-                        if matches!(&batch, point::ReadOutcome::Observed(records) if records.values.len() > remaining) {
-                            Err(CollectionStop::RowLimit.error())
-                        } else {
-                            Ok(batch)
-                        }
-                    }),
-                Err(error) => Err(error),
-            };
+            let remaining = self.admit().await?;
+            let result =
+                family.read(&mut self.io, remaining.min(MAX_BUFFERED_FAMILY_ROWS), tuning_layout.as_ref()).await;
             let outcome = match result {
                 Ok(point::ReadOutcome::NotApplicable) => StateSourceCoverage::not_applicable(source),
                 Ok(point::ReadOutcome::Observed(batch)) => {
+                    if batch.values.len() > remaining {
+                        return Err(CollectionStop::RowLimit.error());
+                    }
                     let count = batch.values.len().try_into().map_err(|_| invalid_data())?;
                     let mut outcome = StateSourceCoverage::observed(source, count, batch.complete_scope);
                     outcome.error_code = batch.error_code;
@@ -111,25 +107,22 @@ impl<R: NativeRead> StateSource<R> {
         }
         Ok(outcomes)
     }
-    async fn admit(&mut self, blocked: &mut Option<culprit_core::Error>) -> Result<usize> {
-        if let Some(error) = blocked {
-            return Err(error.clone());
-        }
+    async fn admit(&mut self) -> Result<usize> {
         let remaining = (self.request.budget.max_snapshot_rows as usize).saturating_sub(self.rows.len());
         if remaining == 0 {
             return Err(CollectionStop::RowLimit.error());
         }
-        if let Err(error) = admit_resources(&mut self.io).await {
-            let error = error.into_error();
-            *blocked = Some(error.clone());
-            return Err(error);
+        // Ordinary instance statistics are an explicitly selected bounded source family. They do not execute
+        // application work or optional enrichment; Azure database reads retain their native pressure guard.
+        if self.identity.as_ref().ok_or_else(invalid_data)?.azure_guarded() {
+            admit_resources(&mut self.io).await.map_err(ReadError::into_error)?;
         }
         Ok(remaining)
     }
 }
 fn source_failure(source: String, error: culprit_core::Error) -> Result<StateSourceCoverage> {
     let stopped = CollectionStop::from_error(&error);
-    if stopped == CollectionStop::CancellationUnconfirmed {
+    if stops_remaining_reads(&error) {
         return Err(error);
     }
     Ok(StateSourceCoverage::unavailable(source, error.code, Some(stopped)))
@@ -142,9 +135,11 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         }
         self.progress = Progress::Failed;
         let CollectionSelection::Snapshot { dataset } = self.request.selection else { return Err(invalid_data()) };
-        let families = point::families(dataset)?;
-        description::ensure_supported(&mut self.io).await?;
-        let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
+        let shared = subject::is_shared(&self.request.subject)?;
+        let families = if shared { point::shared_families(dataset)? } else { point::families(dataset)? };
+        let identity = subject::read(&mut self.io, &self.request.subject, &self.host, self.port).await?;
+        let target = identity.target();
+        self.identity = Some(identity);
         let (observed_from, metadata_visible) = self.clock().await?;
         let mut sources = self.read_families(&families, metadata_visible).await?;
         let (observed_until, final_metadata_visible) = self.clock().await?;
@@ -160,35 +155,39 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             }
         }
         let description = CollectionDescription {
-            target: database.into(),
-            source: match dataset {
-                SnapshotDataset::Operational => "operational-state",
-                SnapshotDataset::WaitCounters => "wait-counter-state",
-                SnapshotDataset::Replication => "replication-state",
-                SnapshotDataset::Settings => "settings-state",
-                SnapshotDataset::PlanCacheSummary => "plan-cache-state",
-                SnapshotDataset::MissingIndexes => "missing-index-state",
-                SnapshotDataset::Tuning => "tuning-state",
-                SnapshotDataset::StatementCounters
-                | SnapshotDataset::StatementDefinitions
-                | SnapshotDataset::Sequences
-                | SnapshotDataset::Cleanup
-                | SnapshotDataset::StatementGrants
-                | SnapshotDataset::IndexOperations
-                | SnapshotDataset::Tables
-                | SnapshotDataset::ForeignKeys
-                | SnapshotDataset::Columns
-                | SnapshotDataset::Statistics
-                | SnapshotDataset::Indexes
-                | SnapshotDataset::CheckConstraints
-                | SnapshotDataset::QueryCompilation
-                | SnapshotDataset::CachedRuntime
-                | SnapshotDataset::Objects
-                | SnapshotDataset::Triggers
-                | SnapshotDataset::Partitions
-                | SnapshotDataset::CachedDefinitions
-                | SnapshotDataset::RetainedPlans => {
-                    return Err(invalid_data());
+            target,
+            source: if shared {
+                "shared-operational-state"
+            } else {
+                match dataset {
+                    SnapshotDataset::Operational => "operational-state",
+                    SnapshotDataset::WaitCounters => "wait-counter-state",
+                    SnapshotDataset::Replication => "replication-state",
+                    SnapshotDataset::Settings => "settings-state",
+                    SnapshotDataset::PlanCacheSummary => "plan-cache-state",
+                    SnapshotDataset::MissingIndexes => "missing-index-state",
+                    SnapshotDataset::Tuning => "tuning-state",
+                    SnapshotDataset::StatementCounters
+                    | SnapshotDataset::StatementDefinitions
+                    | SnapshotDataset::Sequences
+                    | SnapshotDataset::Cleanup
+                    | SnapshotDataset::StatementGrants
+                    | SnapshotDataset::IndexOperations
+                    | SnapshotDataset::Tables
+                    | SnapshotDataset::ForeignKeys
+                    | SnapshotDataset::Columns
+                    | SnapshotDataset::Statistics
+                    | SnapshotDataset::Indexes
+                    | SnapshotDataset::CheckConstraints
+                    | SnapshotDataset::QueryCompilation
+                    | SnapshotDataset::CachedRuntime
+                    | SnapshotDataset::Objects
+                    | SnapshotDataset::Triggers
+                    | SnapshotDataset::Partitions
+                    | SnapshotDataset::CachedDefinitions
+                    | SnapshotDataset::RetainedPlans => {
+                        return Err(invalid_data());
+                    }
                 }
             }
             .into(),
@@ -204,7 +203,6 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
         if !description.matches_request(&self.request) {
             return Err(invalid_data());
         }
-        self.physical = Some(physical);
         self.description = Some(description.clone());
         self.progress = Progress::Ready;
         Ok(description)
@@ -253,12 +251,10 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
             return Err(invalid_data());
         }
         self.progress = Progress::Failed;
-        let (database, physical) = description::identity(&mut self.io, &self.host, self.port).await?;
+        let identity =
+            self.identity.as_ref().ok_or_else(invalid_data)?.recheck(&mut self.io, &self.host, self.port).await?;
         self.progress = Progress::Finished;
-        Ok(culprit_core::telemetry::SourceCompletion::verified_if(
-            self.physical.as_ref() == Some(&physical)
-                && self.description.as_ref().is_some_and(|before| before.target.database() == Some(&database)),
-        ))
+        Ok(culprit_core::telemetry::SourceCompletion::verified_if(self.identity.as_ref() == Some(&identity)))
     }
     async fn close(&mut self) -> SourceShutdown {
         self.progress = Progress::Closed;
@@ -266,5 +262,9 @@ impl<R: NativeRead> TelemetrySource for StateSource<R> {
     }
 }
 
+#[cfg(test)]
+mod native_tests;
+#[cfg(test)]
+mod shared_tests;
 #[cfg(test)]
 mod tests;

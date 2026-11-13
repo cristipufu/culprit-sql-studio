@@ -146,6 +146,8 @@ SQL Server
   waits                     wait statistics · Wait statistics
   resources                 resource statistics · Resource usage
   pool resources            Elastic-pool resource history · adds detail
+  memory clerks             database engine memory allocations by component · adds detail
+  schedulers                native scheduler tasks, worker queues and CPU counters · adds detail
   forwarded_fetches         forwarded fetches · adds detail
   query_families            query families · adds detail
   plan cache use            plan cache use · adds detail
@@ -203,6 +205,7 @@ PostgreSQL
   constraints               constraints · adds detail
   advice settings           the settings advice depends on · adds detail
   file latency              file latency · adds detail
+  shared memory allocations allocations in PostgreSQL’s main shared-memory segment · adds detail
   sessions                  session statistics · adds detail
   replication               replication · adds detail
 YugabyteDB

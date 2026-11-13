@@ -1,6 +1,6 @@
 //! Database-scoped recommendations and optional query associations share strict native decoding.
 use crate::read::{integer, invalid_data, optional_text, required_nonnegative_number, text};
-use culprit_core::{Error, ErrorDetail, MissingIndex, Result, telemetry::*};
+use culprit_core::{Error, MissingIndex, Result, telemetry::*};
 
 use crate::sql_time::utc_local_iso;
 use crate::{
@@ -126,14 +126,7 @@ pub(crate) async fn read(reader: &mut impl NativeRead, limit: usize) -> Result<N
     }
     let links = match query(reader, MISSING_INDEX_QUERIES_SQL).await {
         Ok(links) => links,
-        Err(error)
-            if matches!(
-                error.detail,
-                Some(ErrorDetail::CollectionStopped(CollectionStop::CancellationUnconfirmed))
-            ) =>
-        {
-            return Err(error);
-        }
+        Err(error) if crate::read::stops_remaining_reads(&error) => return Err(error),
         Err(error) => return Ok(NativeRecommendations { indexes, query_link_failure: Some(error) }),
     };
     let mut hashes = vec![Vec::new(); indexes.len()];

@@ -25,7 +25,7 @@ use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use culprit_auth::SignInEvent;
-use culprit_core::{Error, Report, Severity, t};
+use culprit_core::{Error, Report, Severity, SnapshotOptions, t};
 use culprit_engine::Workspace;
 use output::{Format, Out};
 
@@ -244,6 +244,8 @@ struct ScanArgs {
     /// How many of the heaviest queries to collect plans for.
     #[arg(long, default_value_t = 25)]
     plans: u32,
+    #[arg(long, help = t!("cli.scan.shared_resources"))]
+    collect_shared_resources: bool,
     /// Exit with code 3 if any finding is at least this severe (for CI).
     #[arg(long, value_enum)]
     fail_on: Option<SeverityArg>,
@@ -255,6 +257,18 @@ struct ScanArgs {
     /// Rails, Django, Entity Framework Core, Phoenix/Ecto, or JSON lines.
     #[arg(long, value_name = "FILE")]
     query_log: Option<std::path::PathBuf>,
+}
+impl ScanArgs {
+    fn snapshot_options(&self) -> SnapshotOptions {
+        let window = window_minutes(self.window, Some(self.window_days)).unwrap_or_default();
+        SnapshotOptions {
+            top_queries: self.top,
+            plans: self.plans,
+            collect_shared_resources: self.collect_shared_resources,
+            ..SnapshotOptions::default()
+        }
+        .with_window_minutes(window)
+    }
 }
 
 #[derive(Args)]
@@ -658,6 +672,16 @@ mod tests {
         assert_eq!(window_minutes(scan.window, Some(scan.window_days)), Some(2 * culprit_core::MINUTES_PER_DAY));
         let scan = scan_args(&[]).expect("defaults parse");
         assert_eq!(window_minutes(scan.window, Some(scan.window_days)), Some(7 * culprit_core::MINUTES_PER_DAY));
+    }
+    #[test]
+    fn scan_shared_resource_reads_require_an_explicit_flag_and_preserve_other_options() {
+        assert!(!scan_args(&[]).unwrap().snapshot_options().collect_shared_resources);
+        let scan = scan_args(&["--collect-shared-resources", "--window", "6h", "--top", "20", "--plans", "3"]).unwrap();
+        let options = scan.snapshot_options();
+        assert!(options.collect_shared_resources);
+        assert_eq!(options.window_minutes, 360);
+        assert_eq!(options.top_queries, 20);
+        assert_eq!(options.plans, 3);
     }
 
     #[test]

@@ -24,7 +24,7 @@ pub async fn snapshot(
     let primary = connector.connect(COLLECTOR).await?;
     let probe = probe(&primary, &connector.host).await?;
 
-    let (workload, schema, misc) = tokio::join!(
+    let (workload, schema, misc, shared_resources) = tokio::join!(
         collect_workload(&primary, &probe, options),
         async {
             let client = connector.connect(COLLECTOR).await?;
@@ -38,6 +38,18 @@ pub async fn snapshot(
         async {
             let client = connector.connect(COLLECTOR).await?;
             Ok::<_, culprit_core::Error>((settings(&client).await, crate::pressure::collect(&client, &probe).await))
+        },
+        async {
+            if options.collect_shared_resources {
+                crate::memory::collect(connector, probe.version_num).await
+            } else {
+                let mut coverage = Coverage::default();
+                coverage.not_applicable(
+                    &sources::SHARED_MEMORY_ALLOCATIONS,
+                    culprit_core::message!("provider.shared_resources.not_requested"),
+                );
+                (None, coverage)
+            }
         },
     );
 
@@ -109,7 +121,7 @@ pub async fn snapshot(
         }
     };
 
-    let (mut settings_out, pressure_out) = match misc {
+    let (mut settings_out, mut pressure_out) = match misc {
         Ok((settings, (pressure, read))) => {
             coverage.merge(read);
             (coverage.read_rows(&sources::SETTINGS, settings).unwrap_or_default(), Some(pressure))
@@ -119,6 +131,11 @@ pub async fn snapshot(
             (Vec::new(), None)
         }
     };
+    let (resource_counters, resource_coverage) = shared_resources;
+    coverage.merge(resource_coverage);
+    if let Some(counters) = resource_counters {
+        pressure_out.get_or_insert_with(Default::default).resource_counters = Some(counters);
+    }
     settings_out.extend(statement_status);
     // A standby's usage counters are its own reads, next to the primary's statement history: say what it is, and the
     // engine sets its usage counters aside.

@@ -350,13 +350,24 @@ async fn latest_deadlock_buffer_keeps_stable_native_evidence_without_claiming_fu
 async fn scans_and_live_share_the_owned_reader_and_native_catalog_queries() {
     let provider = fixture();
     let snapshot = provider
-        .snapshot("owned-native-fixture", &culprit_core::SnapshotOptions { plans: 2, ..Default::default() })
+        .snapshot(
+            "owned-native-fixture",
+            &culprit_core::SnapshotOptions { plans: 2, collect_shared_resources: true, ..Default::default() },
+        )
         .await
         .unwrap();
     assert!(snapshot.tables.iter().any(|table| table.name == "smoke_rows"));
     assert!(snapshot.columns.iter().any(|column| column.table == "smoke_rows"));
     assert!(snapshot.indexes.iter().any(|index| index.table == "smoke_rows"));
     assert!(snapshot.workload.is_some());
+    let unsupported = snapshot
+        .sources
+        .iter()
+        .find(|source| source.source == culprit_core::source_id::SHARED_RESOURCE_DETAILS)
+        .unwrap();
+    assert_eq!(unsupported.state, culprit_core::SourceState::Unavailable);
+    assert!(unsupported.reason_message.is_some());
+    assert!(snapshot.pressure.as_ref().is_none_or(|pressure| pressure.resource_counters.is_none()));
     let live = provider.live().await.unwrap();
     assert!(!live.taken_at.is_empty());
     assert_eq!(provider.source_shutdown(), SourceShutdown::Quiescent);

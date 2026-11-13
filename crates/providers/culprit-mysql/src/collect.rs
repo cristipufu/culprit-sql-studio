@@ -46,6 +46,9 @@ pub async fn snapshot(
     let mut server = probe.server_info();
     // What the sources could read, starting from what the probe found (`culprit_core::Coverage`).
     let mut coverage = Coverage::with(std::mem::take(&mut server.capabilities), std::mem::take(&mut server.missing));
+    if options.collect_shared_resources {
+        coverage.shared_resource_details_unavailable(Engine::Mysql);
+    }
 
     let mut source_waits = Vec::new();
     let workload = match workload {

@@ -274,7 +274,25 @@ lower history bound permits a native-retention gap. Waiting does not count as a 
 | Native route | Discovery | Capture | Meaning and limits |
 |---|---|---|---|
 | Azure SQL elastic pool, through a writable member database | `--kind pool` | `--resource pool.json --collection resource-history` | Pool demand/storage with explicitly broader instance context; no fabricated replica identity or fixed sampling period |
-| PostgreSQL instance, through a TCP database connection | `--kind instance` | `--resource instance.json --collection operational` | Shared archive, writer, WAL, I/O, checkpointer and available statistics-eviction counters; database counters stay on database captures |
+| SQL Server or Managed Instance, through an existing database connection | `--kind instance` | `--resource instance.json --collection operational` | Memory, schedulers, performance/topology, compiler admission and tempdb context tied to the verified native instance |
+| PostgreSQL instance, through a TCP database connection | `--kind instance` | `--resource instance.json --collection operational` | Shared archive, writer, WAL, I/O, checkpointer, available statistics-eviction counters and main shared-memory allocations; database counters stay on database captures |
+
+Use the same discovery workflow for an instance, then capture its current state without historical bounds:
+
+```sh
+culprit collect resources shop-sqlserver --kind instance --json > resources.json
+jq -e '.[0].identity' resources.json > instance.json
+culprit collect once shop-sqlserver --resource ./instance.json --collection operational \
+  --output ./instance-capture --json
+```
+
+SQL Server instance identities use native server/machine names in their observed network namespace; process identity
+and startup ticks verify a capture, rather than becoming a fabricated permanent host ID. Azure SQL Database uses
+the pool route for retained pool resource history. Generic current-state memory, schedulers, performance counters,
+processor topology, compiler admission and tempdb capacity are not exposed through that pool route: their native
+instance/host/resource-governor scope does not establish elastic-pool ownership. Database operational captures
+exclude instance performance counters, processor topology, compiler
+gateways and shared tempdb capacity. The shared resource is assigned once instead of reread for every database.
 
 Azure pool history uses `sys.dm_elastic_pool_resource_stats`, whose documented retention is approximately
 40 minutes. It is distinct from the 14-day `sys.elastic_pool_resource_stats` history in `master`. The native
@@ -284,8 +302,10 @@ Membership is rechecked before each page. A pool move or changed member storage 
 The source does not prove a pool incarnation, so continuity remains unverified. See Microsoft's
 [pool-history reference](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-elastic-pool-resource-stats-azure-sql-database?view=azuresqldb-current).
 
-PostgreSQL uses its native system identifier and server address/port, independently of the connection's database.
-This identifies system lineage and the observed network endpoint, rather than a globally unique physical host.
+PostgreSQL uses its native system lineage and observed server address/port, independently of the connection's
+database. This tuple is not a globally unique host identifier: physical replicas share lineage, and loopback or
+overlapping networks can make endpoints ambiguous across deployments. Those topologies need separate identity
+qualification before sharing an analytical namespace.
 Discovery requires access to `pg_control_system()`; unavailable permissions or a Unix-socket connection without a
 native network address cannot produce a guessed identity. The instance route reads `pg_stat_statements_info`
 only when that route's database exposes the extension's view. Select an appropriate existing route when this
@@ -298,6 +318,37 @@ A database target and a shared target may use the same connection, with independ
 health. Assign the shared resource once in the complete inventory: duplicate native shared identities are rejected
 even through different member aliases or shards. Keep related targets in the same `admission_group` and shard. That group enforces scheduling policy; it
 does not establish native scope. Separate deployments still need coordinated assignments and state ownership.
+
+### Shared allocation and scheduler facts
+
+The explicit instance `operational` route includes these observations where supported and readable:
+
+| Source | Preserved facts | Attribution limit |
+|---|---|---|
+| SQL Server memory clerks | Native type/name/memory-node groups, exact clerk counts, separate page/virtual/shared/locked memory dimensions in KiB, allocation-granularity bounds in bytes | Component allocations on the engine instance; no query owner or per-database charge |
+| SQL Server schedulers | Scheduler/node/CPU identities, visible/hidden and online/idle state, worker-creation state, runnable tasks, workers, work queues, pending I/O and available CPU/delay counters | Shared scheduling context; a queue or counter alone does not identify the responsible statement |
+| PostgreSQL 13+ shared allocations | Native allocation name/offset, size and padded size in bytes, scoped to the observed postmaster epoch | Main shared-memory segment only; excludes dynamic shared memory and private backend/query memory |
+
+Allocation sizes and current queue depths are gauges. Native cumulative counters retain unknown reset evidence;
+an unknown unit or internal counter meaning cannot establish a rate. NULL and absent columns remain unknown, and
+an unavailable clerk view never becomes healthy zero memory. Host CPU metadata is separate from SQL-visible
+schedulers and does not establish instance CPU entitlement or a database quota. The PostgreSQL instance capture declares restricted
+allocation metadata as unavailable while preserving its readable sibling sources. Effective role privileges are
+checked; a role membership without effective privileges does not establish access.
+
+SQL Server 2022+ requires `VIEW SERVER PERFORMANCE STATE` for these native views; earlier SQL Server uses
+`VIEW SERVER STATE`. Azure SQL requirements vary by service objective and pool. PostgreSQL allocation access
+requires the relevant `pg_read_all_stats` privileges and access to its view/function. Culprit changes no permissions.
+See the native [memory-clerk](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-os-memory-clerks-transact-sql),
+[scheduler](https://learn.microsoft.com/en-us/sql/relational-databases/system-dynamic-management-objects/sys-dm-os-schedulers-transact-sql) and
+[shared-allocation](https://www.postgresql.org/docs/current/view-pg-shmem-allocations.html) references.
+
+Read limits bound returned rows, bytes, queries and time. Grouping clerks or selecting scheduler metadata still
+visits native engine metadata; a small result is not proof of low source cost. Load qualification is required
+before production scheduling. Scans can request these observations with
+`culprit scan CONNECTION --collect-shared-resources`; the option defaults off until that qualification. With it off, these new readers send
+no SQL and record that shared collection was not requested. These facts do not create pressure warnings solely
+from size or fullness.
 
 ## PostgreSQL source coverage
 
@@ -333,8 +384,9 @@ session, including its safety overrides; they do not reveal every application's 
 
 Full statistics visibility is required for complete activity and restricted native sources. Planner statistics also
 need visibility of the selected relations. Activity capture requires PostgreSQL 14+ for native lock-wait start times;
-other version-dependent fields are detected explicitly. The complete native capture and cancellation tests run
-against an owned PostgreSQL 18.6 fixture. Managed-service permissions, TimescaleDB-specific storage and production
+other version-dependent fields are detected explicitly. Native tests run against owned fixtures; optional package
+setup can upgrade PostgreSQL's base-image minor version, and the runner logs the actual restarted server version.
+Managed-service permissions, TimescaleDB-specific storage and production
 source cost require their own qualification.
 
 PostgreSQL supplies a deadlock counter, not retained SQL-accessible deadlock graphs. The counter is included in

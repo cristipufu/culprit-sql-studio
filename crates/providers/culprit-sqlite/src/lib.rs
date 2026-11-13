@@ -135,13 +135,20 @@ impl Provider for SqliteProvider {
             .await
     }
 
-    async fn snapshot(&self, connection: &str, _options: &SnapshotOptions) -> Result<Snapshot> {
+    async fn snapshot(&self, connection: &str, options: &SnapshotOptions) -> Result<Snapshot> {
         let (connection, environment) = (connection.to_string(), self.spec.environment);
-        self.reader
+        let mut snapshot = self
+            .reader
             .with_handle(culprit_core::limits::OBSERVE_TIMEOUT, move |conn, path, handle| {
                 collect::snapshot_with_handle(conn, path, &connection, environment, Instant::now(), handle)
             })
-            .await
+            .await?;
+        if options.collect_shared_resources {
+            let mut coverage = culprit_core::Coverage::default();
+            coverage.shared_resource_details_unavailable(Engine::Sqlite);
+            coverage.append_to(&mut snapshot);
+        }
+        Ok(snapshot)
     }
 
     async fn explain(&self, sql: &str, mode: ExplainMode) -> Result<Plan> {
@@ -182,6 +189,41 @@ mod tests {
         let path = std::env::temp_dir().join(format!("culprit-query-{name}-{}.sqlite", std::process::id()));
         drop(Connection::open(&path).unwrap());
         path
+    }
+
+    #[tokio::test]
+    async fn a_requested_shared_profile_is_explicitly_unsupported_while_file_evidence_stays_readable() {
+        let path = query_file("shared-profile");
+        let connection = Connection::open(&path).unwrap();
+        connection.execute_batch("CREATE TABLE profile_fixture(id INTEGER PRIMARY KEY,value TEXT);INSERT INTO profile_fixture(value) VALUES('owned fixture');").unwrap();
+        drop(connection);
+        let original = std::fs::read(&path).unwrap();
+        let provider = SqliteProvider::new(&ConnectionSpec {
+            engine: Some(Engine::Sqlite),
+            database: Some(path.to_str().unwrap().into()),
+            ..Default::default()
+        })
+        .unwrap();
+        let ordinary = provider.snapshot("file", &SnapshotOptions::default()).await.unwrap();
+        assert!(
+            ordinary.sources.iter().all(|source| source.source != culprit_core::source_id::SHARED_RESOURCE_DETAILS)
+        );
+        let options = SnapshotOptions { collect_shared_resources: true, ..Default::default() };
+        let requested = provider.snapshot("file", &options).await.unwrap();
+        let outcome = requested
+            .sources
+            .iter()
+            .find(|source| source.source == culprit_core::source_id::SHARED_RESOURCE_DETAILS)
+            .unwrap();
+        assert_eq!(outcome.state, culprit_core::SourceState::Unavailable);
+        assert!(outcome.reason_message.is_some());
+        assert!(requested.tables.iter().any(|table| table.name == "profile_fixture"));
+        assert_eq!(ordinary.tables.len(), requested.tables.len());
+        assert!(requested.pressure.is_none() && requested.resources.is_empty());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_eq!(provider.source_shutdown(), culprit_core::telemetry::SourceShutdown::Quiescent);
+        drop(provider);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[tokio::test]
