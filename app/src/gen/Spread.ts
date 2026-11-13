@@ -11,5 +11,7 @@ export type Spread = { min_ms: number | null, p50_ms: number | null, p95_ms: num
 histogram: Array<[number, number, number]>, 
 /**
  * Time spent waiting for locks across all runs (MySQL).
+ * Native accumulated lock timer. Its source may cover only table-lock acquisition and may use a different
+ * clock from statement execution; a scalar value establishes neither all lock classes nor an elapsed share.
  */
 lock_ms: number | null, };

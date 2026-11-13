@@ -44,6 +44,21 @@ Live combines `PROCESSLIST`, transaction metadata and available lock-wait views.
 
 Historical waits are performance-schema totals, with lock timing attributable to statements where supplied. Live samples normally compare instrument counters and fall back to process-list sampling when those instruments provide nothing. InnoDB retains the latest detected deadlock, not a complete deadlock history; imported reports explain the captured pattern.
 
+Statement lock timers retain their native provenance. Digest `SUM_LOCK_TIME` is in picoseconds; the collector exports
+that exact counter and scans present its millisecond subtotal. MySQL's [8.0.28 release notes](https://dev.mysql.com/doc/relnotes/mysql/8.0/en/news-8-0-28.html)
+document corrected SQL table and data-lock accounting, although the [column reference](https://dev.mysql.com/doc/refman/8.0/en/performance-schema-events-statements-current-table.html)
+still describes table locks. This does not establish the same coverage for older MySQL or MariaDB. A positive timer
+does not distinguish row, table or metadata locking, identify a blocker, or establish a complete canonical lock-wait
+history. Zero and unavailable timers do not prove that row-lock waiting was absent. Running-query progress shows the
+native waiting state without presenting the statement's cumulative lock timer as the duration of its current wait.
+
+The slow-log `lock_time` field is retained separately for the logged runs read between the selected native bounds.
+Its `TIME(6)` value is converted to milliseconds; NULL remains unknown. These are recorded subtotals, without an
+assumed fraction of execution time or an execution-plus-lock-time sum. The current `long_query_time` value does not
+establish historical session thresholds, other logging filters, or that every statement was captured even when it is
+zero. See the [MySQL slow-log rules](https://dev.mysql.com/doc/refman/8.0/en/slow-query-log.html) and
+[MariaDB's native statement timers](https://mariadb.com/docs/server/reference/system-tables/performance-schema/performance-schema-tables/performance-schema-events_statements_current-table).
+
 ## Schema and indexes
 
 `information_schema`, `performance_schema` and `sys` provide the catalog, table activity, index usage and available column histograms. Missing-index candidates are derived from workload, plans and foreign keys rather than a native missing-index DMV.
@@ -67,6 +82,7 @@ Digest, histogram, table and index counters can have different reset histories. 
 Culprit does not attribute shared redo or host observations to this database's query delays without matching evidence. Transaction age does not establish when a consistent read view was acquired. Missing lock instrumentation leaves unresolved blocking rather than a clean bill of health.
 
 A slow-log workload covers only logged runs and its own timestamps. Rates and unused-index conclusions follow the shared [evidence rules](coverage.md).
+The table's returned-row limit does not bound its unindexed native scan or sort; the owned read timeout still applies.
 
 ### Operational evidence
 

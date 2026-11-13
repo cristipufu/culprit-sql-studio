@@ -235,14 +235,14 @@
         "metrics": [
           {
             "key": "total",
-            "label": "Waiting since start",
+            "label": "Recorded time since start",
             "text": "8 min",
             "value": 463670.206726155
           }
         ],
         "next": "culprit waits mariadb-demo",
         "status": "info",
-        "takeaway": "Most time goes to row access (99%).",
+        "takeaway": "Largest recorded category: row access (99% of recorded totals).",
         "title": "Where time goes"
       },
       {
@@ -642,7 +642,7 @@
     "database": "culprit_demo",
     "engine": "mssql",
     "environment": "local",
-    "headline": "20 opportunities; the top ones touch 5 min of database time over the last 5 hours (83%).",
+    "headline": "23 opportunities; the top ones touch 3 min of database time over the last 5 hours (61%).",
     "product": "SQL Server 2022",
     "report_id": "20261011T121347.162Z",
     "taken_at": "2026-10-11T12:13:47Z",
@@ -689,6 +689,17 @@
         "items": [
           {
             "at": null,
+            "finding_id": "heavy-query:138",
+            "id": "heavy-query:138",
+            "kind": "finding",
+            "label": "An update of orders takes 2 min of database time over the last 5 hours (34%), with at least 2 min of recorded waiting (Lock)",
+            "query_id": null,
+            "share": 0.34120252699679854,
+            "status": "bad",
+            "value": "2 min of database time over the last 5 hours (34%)"
+          },
+          {
+            "at": null,
             "finding_id": "failing-query:263",
             "id": "failing-query:263",
             "kind": "finding",
@@ -708,17 +719,6 @@
             "share": 2.7041685060225765e-05,
             "status": "bad",
             "value": "25% of runs fail"
-          },
-          {
-            "at": null,
-            "finding_id": "hot-rows:shop.orders",
-            "id": "hot-rows:shop.orders",
-            "kind": "finding",
-            "label": "Queries on orders recorded lock waits in the last 5 hours",
-            "query_id": null,
-            "share": 0.561121078462286,
-            "status": "watch",
-            "value": "3 min waiting on locks"
           }
         ],
         "key": "findings",
@@ -726,14 +726,14 @@
           {
             "key": "high",
             "label": "High",
-            "text": "2",
-            "value": 2.0
+            "text": "3",
+            "value": 3.0
           },
           {
             "key": "medium",
             "label": "Medium",
-            "text": "7",
-            "value": 7.0
+            "text": "9",
+            "value": 9.0
           },
           {
             "key": "low",
@@ -744,13 +744,13 @@
           {
             "key": "context",
             "label": "Information and history",
-            "text": "3",
-            "value": 3.0
+            "text": "4",
+            "value": 4.0
           }
         ],
         "next": "culprit findings mssql-demo",
         "status": "bad",
-        "takeaway": "20 opportunities; the top ones touch 5 min of database time over the last 5 hours (83%).",
+        "takeaway": "23 opportunities; the top ones touch 3 min of database time over the last 5 hours (61%).",
         "title": "Findings"
       },
       {
@@ -840,7 +840,7 @@
         "title": "Top queries"
       },
       {
-        "detail": "A read from orders accounts for 45% of it.",
+        "detail": "A read from orders recorded 1 min in this category.",
         "fix_sql": null,
         "items": [
           {
@@ -903,14 +903,14 @@
         "metrics": [
           {
             "key": "total",
-            "label": "Waiting",
+            "label": "Recorded category time",
             "text": "2 min",
             "value": 106491.0
           }
         ],
         "next": "culprit waits mssql-demo",
         "status": "watch",
-        "takeaway": "Most time goes to in-memory contention (77%), then parallel queries (17%).",
+        "takeaway": "Largest recorded categories: in-memory contention (77%), then parallel queries (17%).",
         "title": "Where time goes"
       },
       {
@@ -1584,14 +1584,14 @@
         "metrics": [
           {
             "key": "total",
-            "label": "Waiting since start",
+            "label": "Recorded time since start",
             "text": "2 min",
             "value": 106491.0
           }
         ],
         "next": "culprit waits mssql-demo-staging",
         "status": "info",
-        "takeaway": "Most time goes to in-memory contention (77%), then parallel queries (17%).",
+        "takeaway": "Largest recorded categories: in-memory contention (77%), then parallel queries (17%).",
         "title": "Where time goes"
       },
       {
@@ -1889,7 +1889,7 @@
     "database": "shop",
     "engine": "mysql",
     "environment": "local",
-    "headline": "10 opportunities; the top ones touch 4 min of database time over the 2 minutes since statistics were reset (85%).",
+    "headline": "13 opportunities; the top ones touch 4 min of database time over the 2 minutes since statistics were reset (84%).",
     "product": "MySQL 8.4.11",
     "report_id": "20261011T120900.394Z",
     "taken_at": "2026-10-11T12:09:00Z",
@@ -1941,25 +1941,25 @@
           },
           {
             "at": null,
-            "finding_id": "lock-time:4167fe7f2c20deb7",
-            "id": "lock-time:4167fe7f2c20deb7",
+            "finding_id": "heavy-query:4167fe7f2c20deb7",
+            "id": "heavy-query:4167fe7f2c20deb7",
             "kind": "finding",
-            "label": "A read from orders spends nearly all its time waiting on locks, 28.8 s per run",
+            "label": "A read from orders takes 2 min of database time over the 2 minutes since statistics were reset (40%), with at least 2 min of recorded waiting (Locks)",
             "query_id": null,
-            "share": 0.8018117839760446,
-            "status": "info",
-            "value": "4 min waiting on locks"
+            "share": 0.40090612964473693,
+            "status": "watch",
+            "value": "2 min of database time over the 2 minutes since statistics were reset (40%)"
           },
           {
             "at": null,
-            "finding_id": "chatty-query:9b30e6ad79d940fe",
-            "id": "chatty-query:9b30e6ad79d940fe",
+            "finding_id": "heavy-query:fc709554a9248878",
+            "id": "heavy-query:fc709554a9248878",
             "kind": "finding",
-            "label": "A read from products runs 30K times in 2 minutes, one key at a time",
+            "label": "An update of orders takes 2 min of database time over the 2 minutes since statistics were reset (40%), with at least 2 min of recorded waiting (Locks)",
             "query_id": null,
-            "share": 0.003693135616982355,
-            "status": "info",
-            "value": "1.1 s of database time over the 2 minutes since statistics were reset (<1%)"
+            "share": 0.4009056543313076,
+            "status": "watch",
+            "value": "2 min of database time over the 2 minutes since statistics were reset (40%)"
           }
         ],
         "key": "findings",
@@ -1973,19 +1973,19 @@
           {
             "key": "medium",
             "label": "Medium",
-            "text": "0",
-            "value": 0.0
+            "text": "2",
+            "value": 2.0
           },
           {
             "key": "low",
             "label": "Low",
-            "text": "9",
-            "value": 9.0
+            "text": "10",
+            "value": 10.0
           }
         ],
         "next": "culprit findings mysql-demo",
         "status": "bad",
-        "takeaway": "10 opportunities; the top ones touch 4 min of database time over the 2 minutes since statistics were reset (85%).",
+        "takeaway": "13 opportunities; the top ones touch 4 min of database time over the 2 minutes since statistics were reset (84%).",
         "title": "Findings"
       },
       {
@@ -2116,14 +2116,14 @@
         "metrics": [
           {
             "key": "total",
-            "label": "Waiting since start",
+            "label": "Recorded time since start",
             "text": "1 min",
             "value": 82095.7673703
           }
         ],
         "next": "culprit waits mysql-demo",
         "status": "info",
-        "takeaway": "Most time goes to row access (61%), then disk reads (39%).",
+        "takeaway": "Largest recorded categories: row access (61%), then disk reads (39%).",
         "title": "Where time goes"
       },
       {
@@ -2767,20 +2767,9 @@
         "title": "Top queries"
       },
       {
-        "detail": "Statement timing from pg_stat_statements, the 5 hours since statistics were reset. This is recorded statement execution time, including CPU and unclassified time; it is not a measurement of time spent waiting.",
+        "detail": "An update of wide recorded 23 ms in this category, with 11K native page reads per execution. Compare file-read latency under comparable work before choosing a change.",
         "fix_sql": null,
         "items": [
-          {
-            "at": null,
-            "finding_id": null,
-            "id": "other",
-            "kind": "wait",
-            "label": "Everything else",
-            "query_id": null,
-            "share": 0.9497011666319195,
-            "status": null,
-            "value": "95%"
-          },
           {
             "at": null,
             "finding_id": null,
@@ -2788,23 +2777,23 @@
             "kind": "wait",
             "label": "Disk reads",
             "query_id": "-463560455567765064",
-            "share": 0.05029883336808056,
+            "share": 1.0,
             "status": null,
-            "value": "5%"
+            "value": "100%"
           }
         ],
         "key": "waits",
         "metrics": [
           {
             "key": "total",
-            "label": "Statement execution time",
-            "text": "4 min",
-            "value": 249580.2417549999
+            "label": "Recorded category time",
+            "text": "12.6 s",
+            "value": 12553.594992000002
           }
         ],
         "next": "culprit waits pg-demo",
         "status": "info",
-        "takeaway": "Disk reads take 5%; the other 95% isn't broken down by PostgreSQL.",
+        "takeaway": "Largest recorded category: disk reads (100% of recorded totals).",
         "title": "Where time goes"
       },
       {

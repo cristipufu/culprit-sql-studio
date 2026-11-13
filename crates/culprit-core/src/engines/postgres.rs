@@ -93,7 +93,7 @@ impl EngineSpec for Postgres {
         ConstraintValidation::CheckExclusion
     }
     fn statement_metrics(&self) -> StatementMetrics {
-        StatementMetrics { io_wait_within_statement_time: true, ..StatementMetrics::pg_stat_statements(WriteLog::Wal) }
+        StatementMetrics::pg_stat_statements(WriteLog::Wal)
     }
     fn signal_scope(&self, _server: &ServerInfo, key: &str) -> crate::MeasurementScope {
         if matches!(key, "connections" | "checkpoints" | "checkpoints-requested") {

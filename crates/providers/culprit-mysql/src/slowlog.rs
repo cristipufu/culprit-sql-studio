@@ -1,8 +1,8 @@
 //! The slow query log table (`mysql.slow_log`, written when `log_output` includes TABLE) as a workload source: every
 //! logged run with its time, lock time and rows, grouped by statement fingerprint. It is the statistics source that
 //! needs no restart on servers running without performance_schema (MariaDB's default), and it keeps each run's text
-//! and time, so plans, percentiles, a timeline and period comparisons all come from it directly. Only statements
-//! slower than `long_query_time` are logged, which the workload says.
+//! and time, so plans, percentiles, a timeline and period comparisons all come from it directly. These are logged
+//! runs only: current settings cannot establish historical session thresholds or other logging filters.
 
 use std::collections::HashMap;
 
@@ -14,19 +14,20 @@ use crate::connect::TAG;
 use crate::fingerprint::{self, fingerprint};
 use crate::rows::query_with;
 
-/// The most runs one scan reads (newest first): the table has no index, so this bounds the work.
-const MAX_ROWS: u32 = 50_000;
+/// Bounds returned runs, newest first. The native table has no index, so scanning/sorting still needs the read timeout.
+const MAX_ROWS: usize = culprit_core::limits::MAX_RESULT_ROWS;
 const MAX_BUCKETS: f64 = 120.0;
 const BUCKET_MINUTES: [u32; 10] = [15, 30, 60, 120, 180, 240, 360, 480, 720, 1440];
 
 pub const SOURCE: &str = "slow query log";
+const LOCK_TIME_FIELD: &str = "mysql.slow_log.lock_time";
 
 /// One logged run.
 pub struct Run {
     pub at: f64,
     pub at_text: String,
     pub ms: f64,
-    pub lock_ms: f64,
+    pub lock_ms: Option<f64>,
     pub rows_sent: f64,
     pub rows_examined: f64,
     pub sql: String,
@@ -71,26 +72,45 @@ pub async fn read_runs(
         params.push(Value::from(until));
     }
     let rows = query_with(conn, &sql, params).await?;
-    let truncated = rows.len() >= MAX_ROWS as usize;
-    let runs = rows
-        .into_iter()
-        .filter_map(|r| {
-            let sql = r.text("sql_text")?;
-            if ignored(&sql) {
-                return None;
-            }
-            Some(Run {
-                at: r.number("epoch")?,
-                at_text: r.string("at"),
-                ms: r.number("ms").unwrap_or(0.0),
-                lock_ms: r.number("lock_ms").unwrap_or(0.0),
-                rows_sent: r.number("rows_sent").unwrap_or(0.0),
-                rows_examined: r.number("rows_examined").unwrap_or(0.0),
-                sql,
-            })
-        })
-        .collect();
+    let truncated = rows.len() >= MAX_ROWS;
+    let runs = rows.iter().map(decode_run).collect::<Result<Vec<_>>>()?.into_iter().flatten().collect();
     Ok((runs, truncated))
+}
+
+fn decode_run(row: &crate::rows::Rec) -> Result<Option<Run>> {
+    let Some(sql) = row.text("sql_text").filter(|sql| !ignored(sql)) else { return Ok(None) };
+    Ok(Some(Run {
+        at: row.number("epoch").ok_or_else(crate::native::invalid)?,
+        at_text: row.string("at"),
+        ms: milliseconds(row, "ms")?.ok_or_else(crate::native::invalid)?,
+        lock_ms: milliseconds(row, "lock_ms")?,
+        rows_sent: row.number("rows_sent").unwrap_or(0.0),
+        rows_examined: row.number("rows_examined").unwrap_or(0.0),
+        sql,
+    }))
+}
+
+/// SQL NULL is unavailable; missing, malformed or negative timers cannot become a measured zero.
+fn milliseconds(row: &crate::rows::Rec, name: &str) -> Result<Option<f64>> {
+    match row.number(name) {
+        Some(value) if value.is_finite() && value >= 0.0 => Ok(Some(value)),
+        Some(_) => Err(crate::native::invalid()),
+        None if row.native_text(name)?.is_none() => Ok(None),
+        None => Err(crate::native::invalid()),
+    }
+}
+
+pub(crate) fn lock_waits(milliseconds: Option<f64>) -> Vec<WaitStat> {
+    milliseconds
+        .filter(|ms| *ms > 0.0)
+        .map(|wait_ms| WaitStat {
+            category: "Lock".into(),
+            wait_type: Some(LOCK_TIME_FIELD.into()),
+            wait_ms,
+            tasks: None,
+        })
+        .into_iter()
+        .collect()
 }
 
 /// Culprit's own statements, plans, and the driver handshakes nobody can act on.
@@ -110,7 +130,7 @@ struct Group {
     display: String,
     sample: String,
     runs: Vec<f64>,
-    lock_ms: f64,
+    lock_ms: Option<f64>,
     rows_sent: f64,
     rows_examined: f64,
     first: (f64, String),
@@ -129,7 +149,7 @@ fn group(runs: &[Run], prints: &[fingerprint::Fingerprint]) -> Vec<Group> {
                 // Runs arrive newest first: the first one seen is the latest text.
                 sample: run.sql.clone(),
                 runs: Vec::new(),
-                lock_ms: 0.0,
+                lock_ms: None,
                 rows_sent: 0.0,
                 rows_examined: 0.0,
                 first: at.clone(),
@@ -139,7 +159,9 @@ fn group(runs: &[Run], prints: &[fingerprint::Fingerprint]) -> Vec<Group> {
         });
         let g = &mut groups[i];
         g.runs.push(run.ms);
-        g.lock_ms += run.lock_ms;
+        if let Some(ms) = run.lock_ms {
+            g.lock_ms = Some(g.lock_ms.unwrap_or(0.0) + ms);
+        }
         g.rows_sent += run.rows_sent;
         g.rows_examined += run.rows_examined;
         if at.0 < g.first.0 {
@@ -182,8 +204,8 @@ fn histogram(sorted: &[f64]) -> Vec<[f64; 3]> {
 
 pub struct Collected {
     pub workload: Workload,
-    /// Lock time of every logged run: the one wait the log records.
-    pub lock_ms: f64,
+    /// Observed native lock-time subtotal for these logged runs; unknown values do not become zero.
+    pub lock_ms: Option<f64>,
     /// A real statement for each kept query, to plan it.
     pub samples: Vec<(String, String)>,
     pub threshold_note: culprit_core::i18n::Message,
@@ -192,7 +214,7 @@ pub struct Collected {
 /// The workload from logged runs, keeping the heaviest `top` statement shapes by time. The window is the one asked for
 /// (`window_start` to `now`): the log was read over all of it, and a quiet stretch with no slow run is still part of
 /// it. Only when the read stopped at [`MAX_ROWS`] (`truncated`) does it start at the oldest run read. Totals are of
-/// logged runs only (`min_logged_ms`).
+/// logged runs only. A current `long_query_time` value does not establish their historical logging threshold.
 pub fn workload(
     runs: &[Run],
     window_start: &str,
@@ -252,15 +274,7 @@ pub fn workload(
                 last_seen: Some(g.last.1),
                 plans: Vec::new(),
                 plan: None,
-                waits: (g.lock_ms > 0.0)
-                    .then(|| WaitStat {
-                        category: "Lock".into(),
-                        wait_type: Some("lock time".into()),
-                        wait_ms: g.lock_ms,
-                        tasks: None,
-                    })
-                    .into_iter()
-                    .collect(),
+                waits: lock_waits(g.lock_ms),
                 waits_coverage: None,
                 trend,
                 costs: None,
@@ -272,19 +286,20 @@ pub fn workload(
                     p95_ms: percentile(&sorted, 0.95),
                     p99_ms: percentile(&sorted, 0.99),
                     histogram: histogram(&sorted),
-                    lock_ms: Some(g.lock_ms),
+                    lock_ms: g.lock_ms,
                 }),
             }
         })
         .collect();
     let threshold_note = match threshold_s {
-        Some(s) if s > 0.0 => {
+        Some(s) if s.is_finite() && s > 0.0 => {
             culprit_core::message!("provider.mysql.slow_log.threshold", threshold = seconds_message(s))
         }
-        _ => culprit_core::message!("provider.mysql.slow_log.every_statement"),
+        Some(0.0) => culprit_core::message!("provider.mysql.slow_log.every_statement"),
+        _ => culprit_core::message!("provider.mysql.slow_log.threshold_unknown"),
     };
     Collected {
-        lock_ms: runs.iter().map(|r| r.lock_ms).sum(),
+        lock_ms: runs.iter().filter_map(|r| r.lock_ms).reduce(|a, b| a + b),
         workload: Workload {
             source_label: None,
             source_message: None,
@@ -304,7 +319,7 @@ pub fn workload(
             timeline: timeline.map(|(t, _)| t),
             untracked_time_ms: None,
             hourly_time_ms: None,
-            min_logged_ms: threshold_s.filter(|s| *s > 0.0).map(|s| s * 1000.0),
+            min_logged_ms: None,
             log: None,
         },
         samples,
@@ -445,8 +460,110 @@ pub fn periods(runs: &[Run], baseline: &Period, recent: &Period, logged_since: O
 mod tests {
     use super::*;
 
+    fn native_run(lock_time: Value) -> crate::rows::Rec {
+        crate::rows::Rec::from_values(vec![
+            ("at", Value::from("2026-11-13T08:00:00Z")),
+            ("epoch", Value::UInt(1_794_556_800)),
+            ("ms", Value::from("12.345")),
+            ("lock_ms", lock_time),
+            ("sql_text", Value::from("SELECT value FROM t WHERE id=1")),
+        ])
+    }
+
+    #[test]
+    fn logged_lock_time_preserves_native_unknown_zero_and_fractional_subtotals() {
+        use culprit_core::telemetry::WaitClass;
+        let decode = |value| decode_run(&native_run(value)).unwrap().unwrap();
+        let mut runs = vec![decode(Value::NULL)];
+        let collected = workload(&runs, "2026-11-13T07:00:00Z", "2026-11-13T09:00:00Z", None, 10, false);
+        let q = &collected.workload.queries[0];
+        assert_eq!(collected.lock_ms, None);
+        assert_eq!(q.spread.as_ref().unwrap().lock_ms, None);
+        assert!(q.waits.is_empty());
+        assert_eq!(q.measured_wait_ms(WaitClass::Lock), None);
+
+        runs.push(decode(Value::from("0.000")));
+        let collected = workload(&runs, "2026-11-13T07:00:00Z", "2026-11-13T09:00:00Z", Some(0.0), 10, false);
+        let q = &collected.workload.queries[0];
+        assert_eq!(q.spread.as_ref().unwrap().lock_ms, Some(0.0));
+        assert!(q.waits.is_empty());
+        assert_eq!(q.measured_wait_ms(WaitClass::Lock), None, "native zero is not complete canonical Lock coverage");
+
+        runs.push(decode(Value::from("19.876")));
+        let collected = workload(&runs, "2026-11-13T07:00:00Z", "2026-11-13T09:00:00Z", Some(10.0), 10, false);
+        let q = &collected.workload.queries[0];
+        assert_eq!(q.spread.as_ref().unwrap().lock_ms, Some(19.876));
+        assert_eq!(q.waits[0].wait_ms, 19.876);
+        assert_eq!(q.waits[0].wait_type.as_deref(), Some("mysql.slow_log.lock_time"));
+        assert_eq!(q.waits_coverage, None);
+        assert_eq!(q.measured_wait_ms(WaitClass::Lock), None);
+        assert_eq!(
+            collected.workload.min_logged_ms, None,
+            "a present-day setting cannot manufacture a historical floor"
+        );
+    }
+
+    #[test]
+    fn malformed_native_log_timers_cannot_become_zero() {
+        for malformed in [Value::Int(-1), Value::Double(f64::INFINITY), Value::Double(f64::NAN), Value::from("broken")]
+        {
+            assert!(decode_run(&native_run(malformed)).is_err());
+        }
+        assert!(milliseconds(&crate::rows::Rec::from_values(vec![]), "lock_ms").is_err());
+        let row = crate::rows::Rec::from_values(vec![("ms", Value::NULL)]);
+        assert_eq!(milliseconds(&row, "ms").unwrap(), None);
+    }
+
+    struct LoggedRead {
+        rows: Vec<crate::rows::Rec>,
+        parameters: Vec<Value>,
+        sql: String,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::read::QueryRead for LoggedRead {
+        async fn read(&mut self, sql: &str, parameters: Vec<Value>, row_limit: usize) -> Result<Vec<crate::rows::Rec>> {
+            assert!(sql.ends_with(&format!("LIMIT {row_limit}")), "the SQL limit must fit its owned reader budget");
+            self.sql = sql.into();
+            self.parameters = parameters;
+            Ok(std::mem::take(&mut self.rows))
+        }
+        async fn explain(&mut self, _: &str) -> Result<Option<crate::rows::Rec>> {
+            panic!("log reads cannot plan user SQL")
+        }
+    }
+
+    #[tokio::test]
+    async fn logged_runs_bind_the_database_and_both_requested_native_bounds() {
+        let mut reader = LoggedRead { rows: vec![native_run(Value::NULL)], parameters: vec![], sql: String::new() };
+        let (runs, truncated) =
+            read_runs(&mut reader, "shop", "2026-11-13 07:00:00", Some("2026-11-13 09:00:00")).await.unwrap();
+        assert_eq!(
+            reader.parameters,
+            [Value::from("shop"), Value::from("2026-11-13 07:00:00"), Value::from("2026-11-13 09:00:00")]
+        );
+        assert!(reader.sql.contains("start_time >= ? AND start_time < ?"));
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].ms, 12.345);
+        assert_eq!(runs[0].lock_ms, None);
+        assert!(!truncated);
+    }
+
+    #[tokio::test]
+    async fn reaching_the_owned_row_limit_retains_a_truncated_population() {
+        let mut reader = LoggedRead {
+            rows: (0..MAX_ROWS).map(|_| native_run(Value::UInt(0))).collect(),
+            parameters: vec![],
+            sql: String::new(),
+        };
+        let (runs, truncated) =
+            read_runs(&mut reader, "shop", "2026-11-13 07:00:00", Some("2026-11-13 09:00:00")).await.unwrap();
+        assert_eq!(runs.len(), culprit_core::limits::MAX_RESULT_ROWS);
+        assert!(truncated, "reaching the native LIMIT cannot prove the entire requested range was read");
+    }
+
     fn run(at: f64, ms: f64, sql: &str) -> Run {
-        Run { at, at_text: iso(at), ms, lock_ms: 0.5, rows_sent: 1.0, rows_examined: 100.0, sql: sql.into() }
+        Run { at, at_text: iso(at), ms, lock_ms: Some(0.5), rows_sent: 1.0, rows_examined: 100.0, sql: sql.into() }
     }
 
     #[test]
@@ -484,7 +601,7 @@ mod tests {
         assert_eq!(trend.executions.iter().flatten().sum::<f64>(), 40.0);
         assert_eq!(c.samples[0].1, "SELECT * FROM t WHERE id = 39", "the newest run is the sample");
         assert!(c.threshold_note.render().contains("100 ms"));
-        assert_eq!(w.min_logged_ms, Some(100.0), "totals are of runs slower than long_query_time");
+        assert_eq!(w.min_logged_ms, None, "today's global threshold cannot prove a historical floor");
     }
 
     #[test]
@@ -503,7 +620,7 @@ mod tests {
         let c = workload(&runs, &week, &iso(now), Some(1.0), 10, true);
         assert_eq!(c.workload.window_start, Some(iso(now - 1200.0)));
         assert!((c.workload.window_hours - 1200.0 / 3600.0).abs() < 1e-6);
-        // Every statement logged: nothing left out.
+        // A zero threshold still does not establish that every session and statement was logged.
         assert_eq!(workload(&runs, &week, &iso(now), Some(0.0), 10, false).workload.min_logged_ms, None);
     }
 
@@ -535,26 +652,34 @@ mod tests {
         };
         assert_eq!(
             note(Some(0.1)),
-            "The slow query log only keeps statements that ran longer than long_query_time (100 ms), so fast, frequent \
-             statements are missing from these totals."
+            "These totals include only runs read from the slow query log. The current long_query_time setting is \
+             100 ms; historical session thresholds and other logging filters are not established."
         );
         assert_eq!(
             note(Some(2.5)),
-            "The slow query log only keeps statements that ran longer than long_query_time (2.5 s), so fast, frequent \
-             statements are missing from these totals."
+            "These totals include only runs read from the slow query log. The current long_query_time setting is \
+             2.5 s; historical session thresholds and other logging filters are not established."
         );
         assert_eq!(
             note(Some(10.0)),
-            "The slow query log only keeps statements that ran longer than long_query_time (10 s), so fast, frequent \
-             statements are missing from these totals."
+            "These totals include only runs read from the slow query log. The current long_query_time setting is \
+             10 s; historical session thresholds and other logging filters are not established."
         );
-        assert_eq!(note(Some(0.0)), "long_query_time is 0, so the slow query log keeps every statement.");
-        assert_eq!(note(None), "long_query_time is 0, so the slow query log keeps every statement.");
+        assert_eq!(
+            note(Some(0.0)),
+            "long_query_time is currently 0. These totals include only logged runs; this setting does not establish that every statement was recorded."
+        );
+        assert_eq!(
+            note(None),
+            "These totals include only runs read from the slow query log. Historical timing thresholds and other logging filters are not established."
+        );
         let baseline = Period { start: iso(t0), end: iso(t0 + 3600.0) };
         let recent = Period { start: iso(t0 + 3600.0), end: iso(t0 + 7200.0) };
         assert_eq!(
             periods(&runs, &baseline, &recent, Some(t0)).notes,
-            ["From the slow query log: only runs slower than long_query_time are counted, in both periods alike."]
+            [
+                "Both periods count only runs read from the slow query log; logging filters and thresholds may have differed."
+            ]
         );
     }
 }

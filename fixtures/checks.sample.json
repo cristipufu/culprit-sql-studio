@@ -436,13 +436,17 @@
   },
   {
     "category": "queries",
-    "description": "Queries that spend much of their time waiting for the application to take results (ASYNC_NETWORK_IO), usually because they return large result sets.",
+    "description": "Statements with material recorded network waits. These totals do not by themselves identify a slow client, transport problem or responsible component.",
     "engines": [
-      "mssql"
+      "mssql",
+      "postgres",
+      "yugabyte",
+      "mysql",
+      "sqlite"
     ],
     "id": "network-wait",
     "requires": [],
-    "title": "Results the application reads slowly"
+    "title": "Queries with recorded network waits"
   },
   {
     "category": "configuration",
@@ -573,14 +577,17 @@
   },
   {
     "category": "queries",
-    "description": "Statements that spend a large part of their time waiting for locks other sessions hold: Query Store's lock waits per query, MySQL and MariaDB lock time per digest. PostgreSQL keeps no lock time per statement; Live shows blocking as it happens.",
+    "description": "Statements with material recorded lock waits. Totals can accumulate across workers and do not identify the lock resource or blocking request.",
     "engines": [
       "mssql",
-      "mysql"
+      "postgres",
+      "yugabyte",
+      "mysql",
+      "sqlite"
     ],
     "id": "lock-time",
     "requires": [],
-    "title": "Queries that spend their time waiting for locks"
+    "title": "Queries with material recorded lock waits"
   },
   {
     "category": "queries",

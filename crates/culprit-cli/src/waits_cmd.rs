@@ -172,9 +172,9 @@ fn print_report(name: &str, snapshot: &Snapshot, waits: Option<&WaitsReport>) {
                     println!("{:>29}{detail}", "");
                 }
                 for q in c.queries.iter().take(3) {
-                    let share = t!("cli.waits.of_it", share = format!("{:>5}", format::percent(q.share_of_category)));
+                    let recorded = t!("cli.waits.recorded", time = format::duration(q.wait_ms));
                     let query = t!("cli.waits.query", id = format!("{:<8}", q.id));
-                    println!("{:>29}{share}  {query} {}", "", short(&q.text, 70));
+                    println!("{:>29}{recorded}  {query} {}", "", short(&q.text, 70));
                 }
             }
             for note in &w.notes {

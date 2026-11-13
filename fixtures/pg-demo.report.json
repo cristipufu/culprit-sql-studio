@@ -193,6 +193,12 @@
       "title": "A long open transaction holds cleanup back"
     },
     {
+      "check": "network-wait",
+      "reason": "This scan did not record the measurements this check needs.",
+      "status": "insufficient-evidence",
+      "title": "Queries with recorded network waits"
+    },
+    {
       "check": "checkpoint-pressure",
       "reason": "This pressure measurement's scope or observation period does not support a health assessment.",
       "status": "insufficient-evidence",
@@ -239,6 +245,12 @@
       "reason": "Some statements lack the measurements this check needs; only measured statements were assessed.",
       "status": "insufficient-evidence",
       "title": "Writes that produce most of the log"
+    },
+    {
+      "check": "lock-time",
+      "reason": "This scan did not record the measurements this check needs.",
+      "status": "insufficient-evidence",
+      "title": "Queries with material recorded lock waits"
     },
     {
       "assessed_queries": [
@@ -333,7 +345,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -426,7 +437,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null,
@@ -512,7 +522,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -639,7 +648,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -738,7 +746,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -815,7 +822,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null,
@@ -901,7 +907,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -978,7 +983,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -1064,7 +1068,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -1136,7 +1139,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -1200,7 +1202,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -1342,7 +1343,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -1433,7 +1433,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -1607,7 +1606,6 @@
         "MySQL's possible keys named with their columns",
         "plan operators marked with their index's kind",
         "health counters graded only on the evidence",
-        "PostgreSQL's I/O time within its statement time",
         "MariaDB's lock time unknown where it counts the whole run",
         "a scan's filter judged by what its runs measured"
       ],
@@ -1626,12 +1624,9 @@
         "dead rows are the table's empty space",
         "updates that aren't HOT explain their WAL",
         "large values explain the log their writes make",
-        "one lock episode on a table",
-        "one blocking chain on a table",
         "the plan cache finding carries the compile load",
         "dead rows absorb the table's stale statistics",
         "a replication slot's finding carries the cleanup it holds back",
-        "waiting on the application explains a heavy query",
         "a heavy query another finding explains",
         "statements that stopped running",
         "nothing is created for statements that stopped",
@@ -3502,12 +3497,6 @@
     "taken_at": "2026-10-11T11:54:21Z",
     "tuning": null,
     "waits": [
-      {
-        "category": "other",
-        "tasks": null,
-        "wait_ms": 237026.6467629999,
-        "wait_type": "CPU, locks and untimed waits"
-      },
       {
         "category": "io",
         "tasks": null,

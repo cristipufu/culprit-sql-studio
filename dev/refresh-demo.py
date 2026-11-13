@@ -41,13 +41,17 @@ def main():
             report["snapshot"]["connection"]: cli(command, path)
             for path, report in reports
         })
-    # Retained activity is projected by Rust. Keep the older live captures, but refresh this derived view together
-    # with its snapshot so the browser never substitutes durations or another period for native task samples.
+    # Historical wait views are projections of these reports, including accumulated native timing and activity.
+    # Refresh them together; independent live samples below are retained as captured.
     waits_path = FIXTURES / "waits.sample.json"
     waits = json.loads(waits_path.read_text())
     for path, report in reports:
-        if report["snapshot"].get("operations", {}).get("activity_history") is not None:
-            waits["reports"][report["snapshot"]["connection"]] = cli("waits", "--file", path)["waits"]
+        connection = report["snapshot"]["connection"]
+        projected = cli("waits", "--file", path)["waits"]
+        if projected is None:
+            waits["reports"].pop(connection, None)
+        else:
+            waits["reports"][connection] = projected
     # Preserve the captured sidecar's existing order and one-space indentation.
     waits_path.write_text(json.dumps(waits, indent=1, ensure_ascii=False) + "\n")
     run("cargo", "run", "--locked", "-p", "culprit-engine", "--example", "insights_sample")

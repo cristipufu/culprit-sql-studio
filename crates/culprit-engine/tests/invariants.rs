@@ -242,7 +242,8 @@ fn briefs_keep_lock_holders_as_the_fix_when_their_sql_only_logs_waits() {
                 Some("ALTER SYSTEM SET log_lock_waits = 'on';\nSELECT pg_reload_conf();".into());
             let brief = culprit_checks::agent_brief(&report, &diagnostic);
             let code = brief_section(&brief, "What to do in the codebase");
-            assert!(code.contains("keep those transactions short"), "{name} {}: {code}", f.id);
+            assert!(code.contains("Capture the native lock resource"), "{name} {}: {code}", f.id);
+            assert!(code.contains("Keep investigating the waiting query's own work"), "{name} {}: {code}", f.id);
             assert!(!code.contains("an ORM change or a query rewrite"), "{name} {}: {code}", f.id);
         }
     }
@@ -1173,6 +1174,15 @@ fn a_burst_is_said_and_graded_as_a_burst_whatever_the_window_around_it() {
             }
         }
         for f in report.findings.iter().filter(|f| burst_statements(report, f).is_some()) {
+            // Statement activity does not establish when an accumulated native wait subtotal occurred. Those
+            // findings use the complete native capture window and never project lifetime waits onto burst cadence.
+            if f.facts.lock_wait.is_some()
+                || f.metrics.iter().any(|metric| metric.is("check.network_wait.metric.recorded"))
+            {
+                assert_eq!(f.impact.time_ms_per_day, None);
+                assert_eq!(f.impact.db_time_share, None);
+                continue;
+            }
             for (h, other) in windows[1..].iter().zip(&others) {
                 let same = other.findings.iter().find(|o| o.id == f.id);
                 let same = same.unwrap_or_else(|| panic!("{name}: {} in 2 h, none in {h} h: {}", f.id, f.title));
@@ -1580,48 +1590,34 @@ fn a_lock_holder_is_found_live_only_where_its_waits_come_often() {
     assert!(seen > 0, "the demos have lock waits whose holder is to be found");
 }
 
-// MS-12a: statements that waited on locks on one table in the same hours waited in one episode: one lock-time finding
-// lists them all.
+// A common table and overlapping timestamps do not establish a native blocking episode.
 #[test]
-fn one_lock_episode_on_a_table_is_one_finding() {
+fn lock_observations_keep_their_native_query_without_inventing_a_shared_holder() {
     let mut seen = 0;
     for (name, report) in demo_reports() {
-        let s = &report.snapshot;
-        let locks: Vec<(&culprit_core::Finding, &culprit_core::QueryStat)> = report
-            .findings
-            .iter()
-            .filter(|f| f.check == "lock-time")
-            .filter_map(|f| Some((f, *listed(&report, f).first()?)))
-            .collect();
-        seen += locks.len();
-        let span = |q: &culprit_core::QueryStat| {
-            Some((
-                culprit_core::format::epoch_seconds(q.first_seen.as_deref()?)?,
-                culprit_core::format::epoch_seconds(q.last_seen.as_deref()?)?,
-            ))
-        };
-        let names = |q: &culprit_core::QueryStat, table: &str| {
-            let text = q.text.to_ascii_lowercase().replace(['[', ']', '`', '"'], "");
-            text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).any(|w| w == table)
-        };
-        for (i, (f, a)) in locks.iter().enumerate() {
-            for (g, b) in &locks[i + 1..] {
-                let (Some((a1, a2)), Some((b1, b2))) = (span(a), span(b)) else { continue };
-                let shared = s.tables.iter().find(|t| {
-                    let t = t.name.to_ascii_lowercase();
-                    names(a, &t) && names(b, &t)
-                });
-                assert!(
-                    !(a1 <= b2 && b1 <= a2) || shared.is_none(),
-                    "{name}: {} and {} waited on {} in the same hours, as two findings",
-                    f.id,
-                    g.id,
-                    shared.map(|t| t.name.as_str()).unwrap_or_default()
-                );
-            }
+        for finding in report.findings.iter().filter(|finding| finding.check == "lock-time") {
+            seen += 1;
+            let queries = listed(&report, finding);
+            assert_eq!(queries.len(), 1, "{name}: no native episode links these observations");
+            assert_eq!(finding.queries.len(), 1);
+            assert_eq!(
+                Some(finding.facts.lock_wait.as_ref().unwrap().ms),
+                queries[0].observed_wait_ms(culprit_core::telemetry::WaitClass::Lock)
+            );
+            assert!(!finding.title.contains('%'), "{name}: {}", finding.title);
+            assert_eq!(finding.impact.db_time_share, None);
+            assert!(
+                finding.fix.as_ref().unwrap().sql.as_deref().is_none_or(|sql| !sql.contains("READ_COMMITTED_SNAPSHOT"))
+            );
         }
+        assert!(
+            report
+                .refinement
+                .iter()
+                .all(|decision| !matches!(decision.rule.as_str(), "one-lock-episode" | "one-blocking-chain"))
+        );
     }
-    assert!(seen > 0, "the demos have lock-time findings");
+    assert!(seen > 0, "the demos have native lock observations");
 }
 
 // CX-13: a fix that forces a plan by hand says what SQL Server's automatic plan correction does where it is on, and

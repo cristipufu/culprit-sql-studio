@@ -99,11 +99,11 @@ pub struct WaitQuery {
     pub id: String,
     /// The statement on one line, shortened.
     pub text: String,
+    /// Accumulated recorded category time; parallel worker timers can exceed query elapsed time.
     pub wait_ms: f64,
-    /// Its share of the category.
-    pub share_of_category: f64,
-    /// How much of the query's own time this category takes.
-    pub share_of_query: f64,
+    /// Recorded category time divided by executions, not an elapsed run duration or a maximum.
+    /// Absent when the execution count is unknown, nonpositive or cannot produce a finite average.
+    pub mean_recorded_ms: Option<f64>,
     pub executions: f64,
     pub rows_per_run: Option<f64>,
 }
@@ -552,13 +552,7 @@ pub fn category_info(key: &str, engine: Engine) -> (String, String) {
         "parallelism" => (t!("core.waits.category.parallelism.label"), t!("core.waits.category.parallelism.meaning")),
         "memory" => (t!("core.waits.category.memory.label"), t!("core.waits.category.memory.meaning")),
         "compilation" => (t!("core.waits.category.compilation.label"), t!("core.waits.category.compilation.meaning")),
-        _ => (
-            t!("core.waits.category.other.label"),
-            match engine {
-                Engine::Postgres => t!("core.waits.category.other.meaning_postgres"),
-                _ => t!("core.waits.category.other.meaning", engine = name),
-            },
-        ),
+        _ => (t!("core.waits.category.other.label"), t!("core.waits.category.other.meaning", engine = name)),
     }
 }
 
@@ -790,7 +784,7 @@ Postgres network: Sending results | PostgreSQL has results ready but the applica
 Postgres parallelism: Parallel queries | Threads of a parallel query waiting for each other. Often a big scan that an index would avoid, or work split unevenly across threads.
 Postgres memory: Memory | Waiting for memory: a grant to sort or hash before a query can start (RESOURCE_SEMAPHORE), or an allocation inside the server (CMEMTHREAD, MEMORY_ALLOCATION_EXT). Grant waits usually mean a few queries reserve far more than they use; allocation waits mean many sessions contend for one of the server's memory objects.
 Postgres compilation: Compiling plans | Building query plans. A lot of it means the application sends one-off statements instead of parameterized ones.
-Postgres other: Everything else | Statement time PostgreSQL doesn't break down: running on CPU, or waiting on locks and events it doesn't time per statement.
+Postgres other: Everything else | Everything PostgreSQL doesn't break down further.
 Yugabyte rpc: Distributed RPCs | Waiting for remote DocDB operations or catalog requests. Native session events identify these waits; statement RPC timings can overlap and are not exclusive wait shares.
 Yugabyte storage: Storage I/O | Waiting for native storage reads or writes, including RocksDB operations. These are session observations, not PostgreSQL heap-page or buffer measurements.
 Yugabyte cpu: CPU | Running on a processor, or queued for one. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row.

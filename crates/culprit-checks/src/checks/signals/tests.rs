@@ -186,7 +186,7 @@ fn set(s: &mut Snapshot, name: &str, value: &str) {
 }
 
 #[test]
-fn lock_time_share_of_the_query() {
+fn lock_time_keeps_the_native_total_and_recorded_mean() {
     let mut s = snapshot_with(Engine::Mysql);
     let q = first_query(&mut s);
     q.text = "UPDATE `stock` SET `qty` = `qty` - ? WHERE `sku` = ?".into();
@@ -195,8 +195,11 @@ fn lock_time_share_of_the_query() {
     q.waits =
         vec![WaitStat { category: "Lock".into(), wait_type: Some("lock time".into()), wait_ms: 60_000.0, tasks: None }];
     let f = LockTimeCheck.run(&s);
-    assert_eq!(f[0].title, "An update of stock waits on locks for 60% of its time, 60 ms per run");
-    assert!(f[0].summary.contains("8.0.28"));
+    assert_eq!(f[0].title, "An update of stock has at least 1 min of recorded lock waits");
+    assert_eq!(f[0].facts.lock_wait.as_ref().unwrap().ms, 60_000.0);
+    assert_eq!(f[0].metrics.iter().find(|metric| metric.is("check.lock_time.metric.per_run")).unwrap().value, 60.0);
+    assert!(f[0].metrics.iter().all(|metric| !matches!(metric.unit, Unit::Ratio)));
+    assert!(f[0].summary.contains("do not identify the lock resource or blocker"));
 }
 
 #[test]

@@ -284,21 +284,19 @@ fn bloat_made_of_dead_rows_is_vacuumed_not_rewritten() {
     assert!(of(&r, "table-bloat")[0].fix.clone().unwrap().sql.unwrap().contains("pgstattuple"));
 }
 
-// Two statements waiting on orders' locks and orders' own lock waits are one blocking chain.
+// Index counters and statements that reference the table do not identify a native blocking chain.
 #[test]
-fn a_blocking_chain_is_one_finding() {
+fn table_lock_counters_do_not_identify_a_query_blocking_chain() {
     let r = analyze(demo("mssql-demo"));
-    assert!(of(&r, "lock-time").is_empty(), "{:?}", of(&r, "lock-time").iter().map(|f| &f.id).collect::<Vec<_>>());
+    let locks = of(&r, "lock-time");
+    assert!(!locks.is_empty(), "query lock evidence must remain visible");
+    assert!(locks.iter().all(|finding| finding.queries.len() == 1));
     let hot = of(&r, "hot-rows");
     assert_eq!(hot.len(), 1);
     assert_eq!(hot[0].id, "hot-rows:shop.orders");
-    let notes: Vec<_> = hot[0].queries.iter().filter_map(|q| q.note.as_deref()).collect();
-    assert!(notes.iter().any(|n| n.starts_with("Waited 2 min on locks, nearly all of its time")), "{notes:?}");
-    assert!(hot[0].summary.contains("waited 2 min for these locks"), "{}", hot[0].summary);
-    let note = |id: &str| hot[0].queries.iter().find(|q| q.id == id).and_then(|q| q.note.as_deref()).unwrap();
-    assert!(note("138").starts_with("Waited 2 min on locks"), "{}", note("138"));
-    assert!(note("143").starts_with("Waited 1 min on locks"), "{}", note("143"));
-    assert!(hot[0].summary.contains("A read from orders waited 1 min for these locks"), "{}", hot[0].summary);
+    assert!(hot[0].fix.as_ref().unwrap().sql.is_none());
+    assert!(hot[0].queries.iter().all(|q| q.note.as_deref().unwrap().contains("does not identify the lock resource")));
+    assert!(r.refinement.iter().all(|d| !matches!(d.rule.as_str(), "one-blocking-chain" | "one-lock-episode")));
 }
 
 // Lock waits on two indexes of one table are one table's rows fought over.
@@ -789,11 +787,9 @@ fn aggregate_read_lock_waits_require_resource_proof_before_row_versioning() {
     }
 }
 
-// The SQL Server demo's fresh reading: an update and a read of orders waited on locks between 13:56 and 14:19, as two
-// lock-time findings with the same fix. Statements that waited on one table in the same hours are one episode of
-// blocking: one finding lists both and says what each waited; one that waited at another time stays its own.
+// Overlapping statement lifetimes and a common table do not establish a shared lock resource or holder.
 #[test]
-fn one_lock_episode_on_a_table_is_one_finding() {
+fn overlapping_lock_totals_keep_each_query_without_a_native_episode() {
     let mut s = fixture("mssql-demo");
     s.settings.retain(|x| x.name != "is_read_committed_snapshot_on");
     s.settings.push(Setting {
@@ -838,24 +834,19 @@ fn one_lock_episode_on_a_table_is_one_finding() {
     );
     let report = analyze(s);
     let locks: Vec<&Finding> = report.findings.iter().filter(|f| f.check == "lock-time").collect();
-    let episode = locks.iter().find(|f| f.id == "lock-time:7").expect("the longest wait keeps the finding");
-    let ids: Vec<&str> = episode.queries.iter().map(|q| q.id.as_str()).collect();
-    assert_eq!(ids, vec!["7", "9"], "{:?}", episode.queries);
-    assert_eq!(episode.impact.label, "3 min waiting on locks", "both statements' waits are counted");
-    assert!(
-        episode.summary.contains(
-            "A read from orders (query 9) waited on locks on shop.orders on Oct 11, 10:57–11:19 UTC too, 1 min (nearly all of its time): likely the same episode of blocking, behind the same holder or one another."
-        ),
-        "{}",
-        episode.summary
-    );
-    // The read's candidate remains conditional after deduplication; no native lock resource was collected.
-    let fix = &episode.fix.as_ref().unwrap().summary;
-    assert!(fix.contains("Query 9 recorded lock waits while READ_COMMITTED_SNAPSHOT is off."), "{fix}");
-    assert!(fix.contains("Row versioning is a candidate; confirm read-committed data-lock waits"), "{fix}");
-    assert!(episode.fix.as_ref().unwrap().sql.as_deref().is_none_or(|sql| !sql.contains("READ_COMMITTED_SNAPSHOT")));
-    assert!(locks.iter().all(|f| f.id != "lock-time:9"), "folded in");
-    assert!(locks.iter().any(|f| f.id == "lock-time:10"), "another hour, another episode");
+    for (id, ms) in [("7", 115_000.0), ("9", 72_000.0), ("10", 20_000.0)] {
+        let finding =
+            locks.iter().find(|f| f.id == format!("lock-time:{id}")).expect("each query retains its evidence");
+        assert_eq!(finding.queries.iter().map(|q| q.id.as_str()).collect::<Vec<_>>(), vec![id]);
+        assert_eq!(finding.facts.lock_wait.as_ref().unwrap().ms, ms);
+        assert!(finding.metrics.iter().all(|metric| metric.unit != culprit_core::Unit::Ratio));
+        assert!(
+            finding.fix.as_ref().unwrap().sql.as_deref().is_none_or(|sql| !sql.contains("READ_COMMITTED_SNAPSHOT"))
+        );
+    }
+    let read = locks.iter().find(|f| f.id == "lock-time:9").unwrap();
+    assert!(read.facts.lock_wait.as_ref().unwrap().versioning_candidate);
+    assert!(report.refinement.iter().all(|d| !matches!(d.rule.as_str(), "one-blocking-chain" | "one-lock-episode")));
 }
 
 // ── 17. advice that can be applied ─────────────────────────────────────────────────────────────────

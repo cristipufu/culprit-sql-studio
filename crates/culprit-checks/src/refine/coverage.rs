@@ -8,7 +8,6 @@ pub(super) enum Policy {
     SpillSort,
     ForeignKey,
     Regression,
-    Network,
     Heavy,
 }
 impl Policy {
@@ -18,7 +17,6 @@ impl Policy {
             Self::SpillSort => "spill-covers-sort",
             Self::ForeignKey => "index-covers-foreign-key",
             Self::Regression => "regression-covers-plan-change",
-            Self::Network => "network-covers-heavy-query",
             Self::Heavy => "cause-covers-heavy-query",
         }
     }
@@ -28,7 +26,6 @@ impl Policy {
             Self::SpillSort => "a spill explains the big sort",
             Self::ForeignKey => "an index to add covers the foreign key",
             Self::Regression => "a regression carries its plan change",
-            Self::Network => "waiting on the application explains a heavy query",
             Self::Heavy => "a heavy query another finding explains",
         }
     }
@@ -138,16 +135,6 @@ fn decide(policy: Policy, s: &Snapshot, findings: &[Finding]) -> Vec<Decision> {
                 .filter(|(_, g)| g.check == "regression" && shares_query(f, g))
                 .map(|(at, _)| at)
                 .collect(),
-            Policy::Network if f.check == "heavy-query" => findings
-                .iter()
-                .enumerate()
-                .filter(|(_, g)| {
-                    g.check == "network-wait"
-                        && g.facts.network_wait_share.is_some_and(|share| share >= 0.5)
-                        && shares_query(f, g)
-                })
-                .map(|(at, _)| at)
-                .collect(),
             Policy::Heavy if f.check == "heavy-query" => {
                 let Some(own) = f.impact.db_time_share else {
                     continue;
@@ -213,7 +200,7 @@ pub(super) fn explained_heavy_query(s: &Snapshot, findings: &mut Vec<Finding>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use culprit_core::{Category, Fix, Metric, QueryRef, Unit};
+    use culprit_core::{Category, Fix, QueryRef};
 
     fn snapshot() -> Snapshot {
         let mut s: Snapshot = serde_json::from_str(include_str!("../../../../fixtures/mssql-demo.json")).unwrap();
@@ -331,9 +318,6 @@ mod tests {
     fn translating_human_text_does_not_change_coverage() {
         let s = snapshot();
         let id = &s.queries()[0].id;
-        let mut network = finding("network-wait", id, id);
-        network.metrics.push(Metric::new("Waiting on the app", 0.75, Unit::Ratio));
-        network.facts.network_wait_share = Some(0.75);
         let mut rewrite = finding("plan-insights", "non-sargable:shop.orders", id);
         rewrite.facts.cause = Some(FindingCause::PredicateRewrite);
         rewrite.subject = support::subject(SubjectKind::Table, "shop.orders");
@@ -342,7 +326,6 @@ mod tests {
         let pairs = [
             (Policy::Rewrite, vec![finding("filtered-scan", "shop.orders", id), rewrite]),
             (Policy::Heavy, vec![finding("heavy-query", id, id), finding("temp-spill", id, id)]),
-            (Policy::Network, vec![finding("heavy-query", id, id), network]),
             (Policy::ForeignKey, index_pair(&s)),
             (Policy::Regression, vec![finding("plan-regression", id, id), finding("regression", id, id)]),
             (Policy::SpillSort, vec![sort, finding("temp-spill", id, id)]),

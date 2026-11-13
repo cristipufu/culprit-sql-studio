@@ -10,6 +10,14 @@ pub struct Rec {
 }
 
 impl Rec {
+    #[cfg(test)]
+    pub(crate) fn from_values(values: Vec<(&str, Value)>) -> Self {
+        Self {
+            columns: values.iter().map(|(name, _)| name.to_ascii_lowercase()).collect(),
+            values: values.into_iter().map(|(_, value)| value).collect(),
+        }
+    }
+
     pub(crate) fn from_row(row: Row) -> Rec {
         let columns = row.columns_ref().iter().map(|c| c.name_str().to_ascii_lowercase()).collect();
         Rec { columns, values: row.unwrap() }
@@ -179,16 +187,9 @@ mod tests {
         assert_eq!(value_text(&Value::UInt(7)), "7");
     }
 
-    fn native(values: Vec<(&str, Value)>) -> Rec {
-        Rec {
-            columns: values.iter().map(|(name, _)| name.to_string()).collect(),
-            values: values.into_iter().map(|(_, value)| value).collect(),
-        }
-    }
-
     #[test]
     fn native_counters_preserve_unsigned_precision_in_both_protocols() {
-        let row = native(vec![
+        let row = Rec::from_values(vec![
             ("binary", Value::UInt(u64::MAX)),
             ("text", Value::Bytes(b"18446744073709551615".to_vec())),
             ("above_js", Value::Bytes(b"9007199254740993".to_vec())),
@@ -200,7 +201,7 @@ mod tests {
 
     #[test]
     fn native_null_is_distinct_from_missing_malformed_negative_or_rounded_counters() {
-        let row = native(vec![("unknown", Value::NULL), ("zero", Value::UInt(0))]);
+        let row = Rec::from_values(vec![("unknown", Value::NULL), ("zero", Value::UInt(0))]);
         assert_eq!(row.unsigned("unknown").unwrap(), None);
         assert_eq!(row.unsigned("zero").unwrap(), Some(0));
         assert!(row.unsigned("missing").is_err());
@@ -211,13 +212,13 @@ mod tests {
             Value::Bytes(b"42.0".to_vec()),
             Value::Bytes(b"18446744073709551616".to_vec()),
         ] {
-            assert!(native(vec![("value", value)]).unsigned("value").is_err());
+            assert!(Rec::from_values(vec![("value", value)]).unsigned("value").is_err());
         }
     }
 
     #[test]
     fn native_text_rejects_corrupt_identities_and_accounts_for_decoded_values() {
-        let row = native(vec![
+        let row = Rec::from_values(vec![
             ("text", Value::Bytes(b"native".to_vec())),
             ("null", Value::NULL),
             ("bad", Value::Bytes(vec![0xff])),

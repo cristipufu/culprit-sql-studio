@@ -8478,8 +8478,8 @@ button.health-pill:hover {
 .wq-row {
   position: relative;
   display: grid;
-  grid-template-columns: 92px 1fr 14px;
-  grid-template-areas: "share text go" "share meta go";
+  grid-template-columns: 92px minmax(0, 1fr) 14px;
+  grid-template-areas: "leading text go" "leading meta go";
   column-gap: 12px;
   row-gap: 2px;
   align-items: center;
@@ -8498,26 +8498,14 @@ button.health-pill:hover {
   background: var(--hover);
 }
 
+.wq-time,
 .wq-share {
-  grid-area: share;
+  grid-area: leading;
   display: flex;
   flex-direction: column;
   gap: 4px;
   font-variant-numeric: tabular-nums;
   font-size: var(--fs-ui);
-}
-
-.wq-track {
-  height: 4px;
-  border-radius: 2px;
-  background: var(--sunken);
-  overflow: hidden;
-}
-
-.wq-track span {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
 }
 
 .wq-text {
@@ -8533,9 +8521,7 @@ button.health-pill:hover {
   grid-area: meta;
   font-size: var(--fs-ui-sm);
   color: var(--text-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .wq-go {

@@ -330,10 +330,20 @@ fn query_lock_evidence_does_not_inherit_lifetime_wait_totals() {
     w.total_time_ms = q.total_time_ms;
     w.total_executions = q.executions;
     let r = culprit_checks::analyze(s);
-    let f = r.findings.iter().find(|f| f.check == "hot-rows").expect("merged lock evidence");
-    assert!(f.is_actionable());
+    let f = r.findings.iter().find(|f| f.check == "hot-rows").expect("native index assessment");
+    assert_eq!(f.actionability, Actionability::Information);
+    assert!(!f.is_actionable(), "query waits do not qualify the index counter's native window");
     assert_eq!(
-        f.impact.label, "20.0 s waiting on locks",
+        f.metrics.iter().find(|metric| metric.is("check.hot_rows.metric.historical_time")).unwrap().value,
+        360_000_000.0
+    );
+    assert!(f.fix.as_ref().unwrap().sql.is_none());
+    let lock = r.findings.iter().find(|finding| finding.check == "lock-time").expect("separate native query waits");
+    assert_ne!(f.id, lock.id);
+    assert_eq!(lock.facts.lock_wait.as_ref().unwrap().ms, 20_000.0);
+    assert_eq!(lock.impact.db_time_share, None);
+    assert_eq!(
+        lock.impact.label, "Recorded lock waits: 20.0 s",
         "the workload measured 20 seconds, independently of 100 hours in historical counters"
     );
 }

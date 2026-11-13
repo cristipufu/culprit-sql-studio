@@ -67,9 +67,9 @@ fn over_sized_grants_are_named_with_their_query() {
     assert!(memory_grant(&s).is_empty());
 }
 
-// C10: a grant or a slow reader claims only the time it explains, not the whole query's.
+// Grant impact and accumulated network waits keep their distinct accounting.
 #[test]
-fn grants_and_network_waits_claim_only_their_own_time() {
+fn network_wait_totals_are_reported_independently_of_grant_impact() {
     let mut s = with_signals(Engine::Mssql, vec![]);
     let total = s.workload.as_ref().unwrap().total_time_ms;
     let q = &mut s.workload.as_mut().unwrap().queries[0];
@@ -90,12 +90,16 @@ fn grants_and_network_waits_claim_only_their_own_time() {
     assert!((share - query_ms * 0.1 / total).abs() < 1e-9, "{share}");
 
     let mut s = snapshot_with(Engine::Mssql);
-    let total = s.workload.as_ref().unwrap().total_time_ms;
     let q = &mut s.workload.as_mut().unwrap().queries[0];
     let network = q.total_time_ms * 0.3;
     q.waits = vec![WaitStat { category: "Network".into(), wait_type: None, wait_ms: network, tasks: None }];
     let f = network_wait(&s);
-    assert!((f[0].impact.db_time_share.unwrap() - network / total).abs() < 1e-9);
+    assert_eq!(f[0].impact.db_time_share, None);
+    assert_eq!(f[0].impact.time_ms_per_day, None);
+    assert_eq!(
+        f[0].metrics.iter().find(|metric| metric.is("check.network_wait.metric.recorded")).unwrap().value,
+        network
+    );
 }
 
 // C4: the demo's 5.9 s of Memory waits over 4.6 hours is a share of almost nothing.
@@ -360,7 +364,7 @@ fn threadpool_waits_since_startup_are_totals_not_rates() {
 }
 
 #[test]
-fn network_waits_name_big_result_sets() {
+fn network_waits_preserve_counted_rows_without_inferring_result_consumption() {
     let mut s = snapshot_with(Engine::Mssql);
     let q = &mut s.workload.as_mut().unwrap().queries[0];
     q.waits = vec![WaitStat {
@@ -371,7 +375,9 @@ fn network_waits_name_big_result_sets() {
     }];
     q.rows = Some(q.executions * 80_000.0);
     let f = network_wait(&s);
-    assert!(f[0].title.contains("60% of its time while sending 80K rows per call"), "{}", f[0].title);
+    assert!(f[0].title.contains("80K counted rows per execution"), "{}", f[0].title);
+    assert!(!f[0].title.contains('%') && !f[0].title.contains("while sending"), "{}", f[0].title);
+    assert_eq!(f[0].metrics.iter().find(|metric| metric.is("check.network_wait.metric.rows")).unwrap().value, 80_000.0);
 }
 
 fn samples(pick: impl Fn(usize) -> (f64, f64)) -> Vec<ResourceSample> {

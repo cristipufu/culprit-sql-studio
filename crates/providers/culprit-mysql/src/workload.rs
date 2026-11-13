@@ -53,7 +53,7 @@ pub(crate) async fn collect_workload(
     let sql = format!(
         "SELECT DIGEST AS digest, DIGEST_TEXT AS digest_text, COUNT_STAR AS calls, SUM_TIMER_WAIT AS total_ps,
                 MAX_TIMER_WAIT AS max_ps, MIN_TIMER_WAIT AS min_ps, SUM_ROWS_SENT AS rows_sent, SUM_ROWS_EXAMINED AS rows_examined,
-                SUM_CREATED_TMP_DISK_TABLES AS tmp_disk, SUM_NO_INDEX_USED AS no_index, SUM_LOCK_TIME AS lock_ps,
+                SUM_CREATED_TMP_DISK_TABLES AS tmp_disk, SUM_NO_INDEX_USED AS no_index, {lock},
                 {cpu}, {sample}, {p95}, {p99}, {affected},
                 DATE_FORMAT(FIRST_SEEN, '%Y-%m-%dT%H:%i:%sZ') AS first_seen,
                 DATE_FORMAT(LAST_SEEN, '%Y-%m-%dT%H:%i:%sZ') AS last_seen
@@ -66,6 +66,7 @@ pub(crate) async fn collect_workload(
         p95 = optional("QUANTILE_95"),
         p99 = optional("QUANTILE_99"),
         affected = optional("SUM_ROWS_AFFECTED"),
+        lock = optional(crate::native::statements::LOCK_TIME_COLUMN),
     );
     let rows = query_with(conn, &sql, vec![Value::from(probe.database.clone())]).await?;
     let all: Vec<Digest> = rows
@@ -76,7 +77,7 @@ pub(crate) async fn collect_workload(
             })
         })
         .map(|r| digest(r, has("SUM_CPU_TIME")))
-        .collect();
+        .collect::<Result<_>>()?;
     let total_time_ms: f64 = all.iter().map(|d| d.stat.total_time_ms).sum();
     // SUM_CPU_TIME stays 0 unless CPU instrumentation is on; all zeros means unknown, not free.
     let total_cpu_ms: Option<f64> = has("SUM_CPU_TIME")
@@ -175,9 +176,11 @@ async fn slow_log_workload(
     probe: &Probe,
     options: &SnapshotOptions,
 ) -> Result<Option<CollectedWorkload>> {
-    let now = culprit_core::changes::epoch(&probe.now).unwrap_or(0.0);
+    let now = culprit_core::changes::epoch(&probe.now).ok_or_else(crate::native::invalid)?;
     let since = slowlog::iso(now - f64::from(options.window_in_minutes()) * 60.0);
-    let (runs, truncated) = slowlog::read_runs(conn, &probe.database, &slowlog::sql_time(&since), None).await?;
+    let (runs, truncated) =
+        slowlog::read_runs(conn, &probe.database, &slowlog::sql_time(&since), Some(&slowlog::sql_time(&probe.now)))
+            .await?;
     if runs.is_empty() {
         return Ok(None);
     }
@@ -208,24 +211,17 @@ async fn slow_log_workload(
     }
     let mut workload = collected.workload;
     workload.queries = kept.into_iter().map(|d| d.stat).collect();
-    let waits = (collected.lock_ms > 0.0)
-        .then(|| WaitStat {
-            category: "Lock".into(),
-            wait_type: Some("lock time (slow query log)".into()),
-            wait_ms: collected.lock_ms,
-            tasks: None,
-        })
-        .into_iter()
-        .collect();
+    let waits = slowlog::lock_waits(collected.lock_ms);
     Ok(Some(CollectedWorkload { workload, waits, notes, no_plans }))
 }
 
-fn digest(r: &Rec, has_cpu: bool) -> Digest {
+fn digest(r: &Rec, has_cpu: bool) -> Result<Digest> {
     let ms = |key: &str| r.number(key).map(|p| p / PICOS_PER_MS);
     let executions = r.number("calls").unwrap_or(0.0);
     let total = r.number("total_ps").unwrap_or(0.0) / PICOS_PER_MS;
     let digest = r.string("digest");
-    Digest {
+    let lock_ms = crate::native::statements::lock_time_ms(r)?;
+    Ok(Digest {
         stat: QueryStat {
             plan_history: None,
             resolved_write_target: None,
@@ -249,19 +245,7 @@ fn digest(r: &Rec, has_cpu: bool) -> Digest {
             last_seen: r.text("last_seen"),
             plans: Vec::new(),
             plan: None,
-            // Lock time (table, metadata and, since 8.0.28, InnoDB row locks) is the wait MySQL attributes to statements.
-            waits: r
-                .number("lock_ps")
-                .map(|p| p / PICOS_PER_MS)
-                .map(|ms| {
-                    vec![WaitStat {
-                        category: "Lock".into(),
-                        wait_type: Some("lock time".into()),
-                        wait_ms: ms,
-                        tasks: None,
-                    }]
-                })
-                .unwrap_or_default(),
+            waits: crate::native::statements::lock_waits(lock_ms),
             waits_coverage: None,
             trend: None,
             // Percentiles exist from 8.0.31; the histogram, attached later, from 8.0.19.
@@ -269,7 +253,7 @@ fn digest(r: &Rec, has_cpu: bool) -> Digest {
                 min_ms: ms("min_ps"),
                 p95_ms: ms("quantile_95"),
                 p99_ms: ms("quantile_99"),
-                lock_ms: ms("lock_ps"),
+                lock_ms,
                 ..Default::default()
             }),
             costs: None,
@@ -280,7 +264,7 @@ fn digest(r: &Rec, has_cpu: bool) -> Digest {
         sample: r.text("query_sample_text"),
         sample_from: SampleFrom::Digest,
         rows_examined: r.number("rows_examined").unwrap_or(0.0),
-    }
+    })
 }
 
 /// MySQL 8.0.19+ keeps a run-time histogram per digest: enough to tell a long tail from a uniformly slow statement.
@@ -655,6 +639,74 @@ fn epoch(text: &str) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn native_digest(lock_time: Value) -> Rec {
+        Rec::from_values(vec![
+            ("digest", Value::from("0123456789abcdef0123456789abcdef")),
+            ("schema_name", Value::from("shop")),
+            ("observed_at", Value::from("2026-11-13T08:00:00.123456Z")),
+            ("calls", Value::UInt(2)),
+            ("COUNT_STAR", Value::UInt(2)),
+            ("total_ps", Value::UInt(1_000_000_000)),
+            ("SUM_TIMER_WAIT", Value::UInt(1_000_000_000)),
+            (crate::native::statements::LOCK_TIME_COLUMN, lock_time),
+        ])
+    }
+
+    #[test]
+    fn scan_and_export_preserve_the_same_native_lock_counter_without_complete_lock_coverage() {
+        use crate::native::statements::{self, LOCK_TIME_COLUMN, LOCK_TIME_METRIC};
+        use culprit_core::telemetry::{MeasurementValue, RuntimeMetricKey, RuntimeMetricUnit, WaitClass};
+        let raw = 9_007_199_254_740_993_u64;
+        let row = native_digest(Value::UInt(raw));
+        let q = super::digest(&row, false).unwrap().stat;
+        let layout = statements::Layout {
+            columns: ["SCHEMA_NAME", "DIGEST", "DIGEST_TEXT", "COUNT_STAR", "SUM_TIMER_WAIT", LOCK_TIME_COLUMN]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            cpu_enabled: false,
+            digest_enabled: true,
+            overflow_calls: 0,
+        };
+        let exported = statements::counters(&row, &layout, "shop").unwrap();
+        let counter = exported
+            .totals
+            .iter()
+            .find(|counter| counter.key == RuntimeMetricKey::Native(LOCK_TIME_METRIC.into()))
+            .unwrap();
+        assert_eq!(counter.unit, RuntimeMetricUnit::Picoseconds);
+        assert_eq!(
+            counter.total,
+            MeasurementValue::Integer(raw.to_string()),
+            "export never rounds a native counter through f64"
+        );
+        assert_eq!(q.spread.as_ref().unwrap().lock_ms, Some(raw as f64 / PICOS_PER_MS));
+        assert_eq!(
+            q.waits[0].wait_type.as_deref(),
+            Some("performance_schema.events_statements_summary_by_digest.SUM_LOCK_TIME")
+        );
+        assert_eq!(q.waits[0].wait_ms, raw as f64 / PICOS_PER_MS, "do not clamp a native subtotal to elapsed time");
+        assert_eq!(q.waits_coverage, None);
+        assert_eq!(q.measured_wait_ms(WaitClass::Lock), None);
+    }
+
+    #[test]
+    fn unknown_and_zero_native_lock_timers_do_not_establish_absent_row_lock_waits() {
+        use culprit_core::telemetry::WaitClass;
+        for (native, expected) in [(Value::NULL, None), (Value::UInt(0), Some(0.0))] {
+            let q = super::digest(&native_digest(native), false).unwrap().stat;
+            assert_eq!(q.spread.as_ref().unwrap().lock_ms, expected);
+            assert!(q.waits.is_empty());
+            assert_eq!(q.measured_wait_ms(WaitClass::Lock), None);
+        }
+        for malformed in
+            [Value::Int(-1), Value::Double(2.0), Value::from("not-a-counter"), Value::from("18446744073709551616")]
+        {
+            assert!(super::digest(&native_digest(malformed), false).is_err());
+        }
+        assert!(super::digest(&Rec::from_values(vec![]), false).is_err());
+    }
 
     fn digest(id: &str, time: f64, calls: f64, examined: f64) -> Digest {
         Digest {

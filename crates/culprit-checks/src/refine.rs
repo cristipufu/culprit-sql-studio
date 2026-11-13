@@ -16,7 +16,6 @@ use crate::{signals, support};
 mod coverage;
 mod indexes;
 mod lifecycle;
-mod locks;
 mod maintenance;
 mod merge;
 mod presentation;
@@ -49,12 +48,9 @@ pub(crate) fn rules() -> Vec<Arc<dyn Refine>> {
         Arc::new(writes::Rule(writes::Policy::DeadRows)),
         Arc::new(writes::Rule(writes::Policy::ColdUpdates)),
         Arc::new(writes::Rule(writes::Policy::LargeValues)),
-        Arc::new(locks::Rule(locks::Policy::Episode)),
-        Arc::new(locks::Rule(locks::Policy::Chain)),
         Arc::new(maintenance::Rule(maintenance::Policy::Compiles)),
         Arc::new(maintenance::Rule(maintenance::Policy::Statistics)),
         Arc::new(maintenance::Rule(maintenance::Policy::Slot)),
-        Arc::new(coverage::Rule(coverage::Policy::Network)),
         Arc::new(coverage::Rule(coverage::Policy::Heavy)),
         // Statements whose cost is behind them.
         Arc::new(lifecycle::Rule(lifecycle::Policy::Stopped)),

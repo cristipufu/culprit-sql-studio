@@ -39,7 +39,6 @@ pub struct FindingFacts {
     pub cleanup_tied_holders: Option<u32>,
     pub histogram_columns: Vec<String>,
     pub index_keys: Vec<String>,
-    pub network_wait_share: Option<f64>,
     pub lock_wait: Option<FindingLockWait>,
     pub plan_change: Option<FindingPlanChange>,
     // A retained fast-plan baseline for verifying recovery after it leaves the selected window.
@@ -131,8 +130,8 @@ impl FindingFacts {
 #[derive(Serialize, Deserialize, TS, Clone, Debug, PartialEq)]
 #[ts(export)]
 pub struct FindingLockWait {
+    /// Accumulated native lock waiting, not an exclusive part of statement elapsed time.
     pub ms: f64,
-    pub share: f64,
     /// SQL shape and the current setting make row versioning worth investigating; lock resources are unproven.
     pub versioning_candidate: bool,
 }

@@ -1,7 +1,60 @@
 reading: SQL Server 2022 · database culprit_demo · scanned 2026-10-11T12:13:47Z
-headline: 20 opportunities. The top ones touch 5 min of database time over the last 5 hours (83%).
-top share: 83%
-findings: 23
+headline: 23 opportunities. The top ones touch 3 min of database time over the last 5 hours (61%).
+top share: 61%
+findings: 27
+
+=== finding heavy-query:138
+Needs attention · high severity · high confidence · queries
+title: An update of orders takes 2 min of database time over the last 5 hours (34%), with at least 2 min of recorded waiting (Lock)
+summary: 2 min of database time over the last 5 hours (34%). It ran 4 times in 5 hours at 28.7 s on average: 34% of all database time in the last 5 hours. Query Store recorded at least 2 min of waiting (Lock); measured CPU time is 4.5 ms.
+impact: 2 min of database time over the last 5 hours (34%) · 34.1% of database time
+metrics:
+  - Share of DB time: 34%
+  - Average duration: 28.7 s
+  - Pages read per run: 5.2
+  - Rows per run: 1
+  - CPU share of its time: <1%
+fix: It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. After identifying the holder and lock resource, inspect transaction duration and access paths; shorter transactions, an index or a rewrite may reduce contention.
+verify:
+  1. Compare recorded wait totals and execution time for equivalent useful work, parameters and load after the change.
+queries:
+  - 138: 34% of database time
+brief:
+    # An update of orders takes 2 min of database time over the last 5 hours (34%), with at least 2 min of recorded waiting (Lock)
+
+    Database: **mssql-demo** (SQL Server 2022, database `culprit_demo`, local environment). Finding `heavy-query:138`: Needs attention, high impact, high confidence. Scanned 2026-10-11T12:13:47Z.
+
+    ## What's happening
+
+    2 min of database time over the last 5 hours (34%). It ran 4 times in 5 hours at 28.7 s on average: 34% of all database time in the last 5 hours. Query Store recorded at least 2 min of waiting (Lock); measured CPU time is 4.5 ms.
+
+    ## Evidence
+
+    - Share of DB time: 34%
+    - Average duration: 28.7 s
+    - Pages read per run: 5.2
+    - Rows per run: 1
+    - CPU share of its time: <1%
+
+    ## Queries involved
+
+    Query `138` — 34% of DB time, 4 runs over the last 5 hours, 28.7 s average:
+
+    ```sql
+    UPDATE [shop].[orders] set [status] = [status]  WHERE [id]=@1
+    ```
+
+    ## Suggested fix
+
+    It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. After identifying the holder and lock resource, inspect transaction duration and access paths; shorter transactions, an index or a rewrite may reduce contention.
+
+    ## How to verify
+
+    - Compare recorded wait totals and execution time for equivalent useful work, parameters and load after the change.
+
+    ## What to do in the codebase
+
+    The finding records lock waiting without identifying its resource or holder, or proving that waiting explains every slow call. Capture the native lock resource, blocked request and blocking transaction before assigning a cause. Trace the holder's SQL to application code; shorten its transaction if it holds data locks across slow work, or test a narrower access path if its plan locks excess rows. Keep investigating the waiting query's own work as the evidence requires. After any change is live, run `culprit scan mssql-demo` and check `heavy-query:138` the way *How to verify* says.
 
 === finding failing-query:263
 Needs attention · high severity · high confidence · queries
@@ -127,40 +180,34 @@ brief:
 
     The fix's SQL starts an event session on the database: run it there, not in the application's code; it changes nothing by itself. Once it has caught what you need, remove it with the DROP in the SQL's last line. The statement to change is the one it catches: find the code that sends that one (the application, a job or a migration) and change it the way the fix says. After any change is live, run `culprit scan mssql-demo` and check `failing-query:246` the way *How to verify* says.
 
-=== finding hot-rows:shop.orders
-Needs attention · medium severity · high confidence · indexes
-title: Queries on orders recorded lock waits in the last 5 hours
-summary: The associated statements used 3 min of database time over the last 5 hours (56%). Since its index pk_orders was loaded into memory, sessions waited 5 times for locks on the rows and pages of orders, 3 min 7 s in all, 37.3 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change. No comparable earlier counters place these waits in the selected window or establish that contention continues. An update of orders waited 2 min for these locks in the last 5 hours, nearly all of its time. A read from orders waited 1 min for these locks in the last 5 hours, nearly all of its time.
-impact: 3 min waiting on locks · 56.1% of database time
+=== finding lock-time:138
+Needs attention · medium severity · high confidence · queries
+title: An update of orders has at least 2 min of recorded lock waits
+summary: At least 2 min of lock waits were recorded over the last 5 hours. Accumulated waits can overlap across workers and do not identify the lock resource or blocker.
+impact: Recorded lock waits: 2 min
 metrics:
-  - Historical lock waits: 5
-  - Historical time waiting: 3 min
-  - Historical average wait: 37.3 s
-fix: It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere. Query 143 recorded lock waits while READ_COMMITTED_SNAPSHOT is off. Row versioning is a candidate; confirm read-committed data-lock waits before changing isolation.
+  - Recorded lock waits: 2 min
+  - Recorded lock waits per execution: 28.7 s
+fix: It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Identify the lock resource, mode and blocking request before choosing a change. Then inspect transaction duration, access paths and locking requirements; these totals alone do not establish which change will help.
 verify:
-  1. Compare new lock waits and their time between scans under comparable load on orders. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
+  1. After identifying the cause and applying a justified change, compare recorded lock waits and execution time under equivalent useful work, parameters and load.
 caveats:
-  - These counters cover each index metadata entry’s lifetime, which can end without a server restart.
+  - Wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown.
 queries:
   - 138: 34% of database time
-    note: Waited 2 min on locks, nearly all of its time in the last 5 hours.
-  - 143: 21% of database time
-    note: Waited 1 min on locks, nearly all of its time in the last 5 hours.
-  - 161: <1% of database time
 brief:
-    # Queries on orders recorded lock waits in the last 5 hours
+    # An update of orders has at least 2 min of recorded lock waits
 
-    Database: **mssql-demo** (SQL Server 2022, database `culprit_demo`, local environment). Finding `hot-rows:shop.orders`: Needs attention, medium impact, high confidence. Scanned 2026-10-11T12:13:47Z.
+    Database: **mssql-demo** (SQL Server 2022, database `culprit_demo`, local environment). Finding `lock-time:138`: Needs attention, medium impact, high confidence. Scanned 2026-10-11T12:13:47Z.
 
     ## What's happening
 
-    The associated statements used 3 min of database time over the last 5 hours (56%). Since its index pk_orders was loaded into memory, sessions waited 5 times for locks on the rows and pages of orders, 3 min 7 s in all, 37.3 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change. No comparable earlier counters place these waits in the selected window or establish that contention continues. An update of orders waited 2 min for these locks in the last 5 hours, nearly all of its time. A read from orders waited 1 min for these locks in the last 5 hours, nearly all of its time.
+    At least 2 min of lock waits were recorded over the last 5 hours. Accumulated waits can overlap across workers and do not identify the lock resource or blocker.
 
     ## Evidence
 
-    - Historical lock waits: 5
-    - Historical time waiting: 3 min
-    - Historical average wait: 37.3 s
+    - Recorded lock waits: 2 min
+    - Recorded lock waits per execution: 28.7 s
 
     ## Queries involved
 
@@ -170,33 +217,21 @@ brief:
     UPDATE [shop].[orders] set [status] = [status]  WHERE [id]=@1
     ```
 
-    Query `143` — 21% of DB time, 3 runs over the last 5 hours, 23.9 s average:
-
-    ```sql
-    SELECT [status] FROM [shop].[orders] WHERE [id]=@1
-    ```
-
-    Query `161` — <1% of DB time, 4 runs over the last 5 hours, 601 ms average:
-
-    ```sql
-    UPDATE [shop].[orders] set [total] = [total]+@1  WHERE [id]=@2
-    ```
-
     ## Suggested fix
 
-    It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere. Query 143 recorded lock waits while READ_COMMITTED_SNAPSHOT is off. Row versioning is a candidate; confirm read-committed data-lock waits before changing isolation.
+    It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Identify the lock resource, mode and blocking request before choosing a change. Then inspect transaction duration, access paths and locking requirements; these totals alone do not establish which change will help.
 
     ## How to verify
 
-    - Compare new lock waits and their time between scans under comparable load on orders. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
+    - After identifying the cause and applying a justified change, compare recorded lock waits and execution time under equivalent useful work, parameters and load.
 
     ## Caveats
 
-    - These counters cover each index metadata entry’s lifetime, which can end without a server restart.
+    - Wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown.
 
     ## What to do in the codebase
 
-    Find where the application sends the statements above (search for their table and column names) and apply the fix in that calling code. Where it changes SQL, use the way this project ships query changes (an ORM change or a query rewrite). After any change is live, run `culprit scan mssql-demo` and check `hot-rows:shop.orders` the way *How to verify* says.
+    The finding records lock waiting without identifying its resource or holder, or proving that waiting explains every slow call. Capture the native lock resource, blocked request and blocking transaction before assigning a cause. Trace the holder's SQL to application code; shorten its transaction if it holds data locks across slow work, or test a narrower access path if its plan locks excess rows. Keep investigating the waiting query's own work as the evidence requires. After any change is live, run `culprit scan mssql-demo` and check `lock-time:138` the way *How to verify* says.
 
 === finding plan-insights:nested-loops:query-263
 Needs attention · medium severity · medium confidence · queries
@@ -313,6 +348,112 @@ brief:
     ## What to do in the codebase
 
     Find where the application sends the statements above (search for their table and column names) and apply the fix in that calling code. Where it changes SQL, use the way this project ships query changes (an ORM change or a query rewrite). After any change is live, run `culprit scan mssql-demo` and check `plan-insights:parallelism-blocked:query-263` the way *How to verify* says.
+
+=== finding heavy-query:143
+Needs attention · medium severity · high confidence · queries
+title: A read from orders takes 1 min of database time over the last 5 hours (21%), with at least 1 min of recorded waiting (Lock)
+summary: 1 min of database time over the last 5 hours (21%). It ran 3 times in 5 hours at 23.9 s on average: 21% of all database time in the last 5 hours. Query Store recorded at least 1 min of waiting (Lock); measured CPU time is 5.9 ms.
+impact: 1 min of database time over the last 5 hours (21%) · 21.3% of database time
+metrics:
+  - Share of DB time: 21%
+  - Average duration: 23.9 s
+  - Pages read per run: 5
+  - Rows returned per run: 1
+  - CPU share of its time: <1%
+fix: It ran 3 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. After identifying the holder and lock resource, inspect transaction duration and access paths; shorter transactions, an index or a rewrite may reduce contention.
+verify:
+  1. Compare recorded wait totals and execution time for equivalent useful work, parameters and load after the change.
+queries:
+  - 143: 21% of database time
+brief:
+    # A read from orders takes 1 min of database time over the last 5 hours (21%), with at least 1 min of recorded waiting (Lock)
+
+    Database: **mssql-demo** (SQL Server 2022, database `culprit_demo`, local environment). Finding `heavy-query:143`: Needs attention, medium impact, high confidence. Scanned 2026-10-11T12:13:47Z.
+
+    ## What's happening
+
+    1 min of database time over the last 5 hours (21%). It ran 3 times in 5 hours at 23.9 s on average: 21% of all database time in the last 5 hours. Query Store recorded at least 1 min of waiting (Lock); measured CPU time is 5.9 ms.
+
+    ## Evidence
+
+    - Share of DB time: 21%
+    - Average duration: 23.9 s
+    - Pages read per run: 5
+    - Rows returned per run: 1
+    - CPU share of its time: <1%
+
+    ## Queries involved
+
+    Query `143` — 21% of DB time, 3 runs over the last 5 hours, 23.9 s average:
+
+    ```sql
+    SELECT [status] FROM [shop].[orders] WHERE [id]=@1
+    ```
+
+    ## Suggested fix
+
+    It ran 3 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. After identifying the holder and lock resource, inspect transaction duration and access paths; shorter transactions, an index or a rewrite may reduce contention.
+
+    ## How to verify
+
+    - Compare recorded wait totals and execution time for equivalent useful work, parameters and load after the change.
+
+    ## What to do in the codebase
+
+    The finding records lock waiting without identifying its resource or holder, or proving that waiting explains every slow call. Capture the native lock resource, blocked request and blocking transaction before assigning a cause. Trace the holder's SQL to application code; shorten its transaction if it holds data locks across slow work, or test a narrower access path if its plan locks excess rows. Keep investigating the waiting query's own work as the evidence requires. After any change is live, run `culprit scan mssql-demo` and check `heavy-query:143` the way *How to verify* says.
+
+=== finding lock-time:143
+Needs attention · medium severity · high confidence · queries
+title: A read from orders has at least 1 min of recorded lock waits
+summary: At least 1 min of lock waits were recorded over the last 5 hours. Accumulated waits can overlap across workers and do not identify the lock resource or blocker.
+impact: Recorded lock waits: 1 min
+metrics:
+  - Recorded lock waits: 1 min
+  - Recorded lock waits per execution: 23.9 s
+fix: It ran 3 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Row versioning is a candidate because this read recorded lock waits while READ_COMMITTED_SNAPSHOT is off. It can avoid read-committed data-lock waits, but not schema locks or explicit locking. Confirm the lock resource and the application's isolation requirements before changing this setting.
+verify:
+  1. After identifying the cause and applying a justified change, compare recorded lock waits and execution time under equivalent useful work, parameters and load.
+caveats:
+  - Wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown.
+queries:
+  - 143: 21% of database time
+brief:
+    # A read from orders has at least 1 min of recorded lock waits
+
+    Database: **mssql-demo** (SQL Server 2022, database `culprit_demo`, local environment). Finding `lock-time:143`: Needs attention, medium impact, high confidence. Scanned 2026-10-11T12:13:47Z.
+
+    ## What's happening
+
+    At least 1 min of lock waits were recorded over the last 5 hours. Accumulated waits can overlap across workers and do not identify the lock resource or blocker.
+
+    ## Evidence
+
+    - Recorded lock waits: 1 min
+    - Recorded lock waits per execution: 23.9 s
+
+    ## Queries involved
+
+    Query `143` — 21% of DB time, 3 runs over the last 5 hours, 23.9 s average:
+
+    ```sql
+    SELECT [status] FROM [shop].[orders] WHERE [id]=@1
+    ```
+
+    ## Suggested fix
+
+    It ran 3 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Row versioning is a candidate because this read recorded lock waits while READ_COMMITTED_SNAPSHOT is off. It can avoid read-committed data-lock waits, but not schema locks or explicit locking. Confirm the lock resource and the application's isolation requirements before changing this setting.
+
+    ## How to verify
+
+    - After identifying the cause and applying a justified change, compare recorded lock waits and execution time under equivalent useful work, parameters and load.
+
+    ## Caveats
+
+    - Wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown.
+
+    ## What to do in the codebase
+
+    The finding records lock waiting without identifying its resource or holder, or proving that waiting explains every slow call. Capture the native lock resource, blocked request and blocking transaction before assigning a cause. Trace the holder's SQL to application code; shorten its transaction if it holds data locks across slow work, or test a narrower access path if its plan locks excess rows. Keep investigating the waiting query's own work as the evidence requires. After any change is live, run `culprit scan mssql-demo` and check `lock-time:143` the way *How to verify* says.
 
 === finding chatty-query:6
 Needs attention · medium severity · medium confidence · queries
@@ -1081,6 +1222,78 @@ brief:
     ## What to do in the codebase
 
     The fix is a setting kept in this database alone: run its SQL once against the database as its owner, by hand or shipped as a migration. It isn't a change to the application's code, nor to the server's configuration (infrastructure as code, the platform's parameter group, a configuration file), which is for settings of the whole server. After any change is live, run `culprit scan mssql-demo` and check `last-actual-plans:last-query-plan-stats` the way *How to verify* says.
+
+=== finding hot-rows:shop.orders
+Information · low severity · high confidence · indexes
+title: orders has 5 recorded historical lock waits
+summary: Since its index pk_orders was loaded into memory, sessions waited 5 times for locks on the rows and pages of orders, 3 min 7 s in all, 37.3 s each on average. These counters identify lock waiting on the table, but do not identify the blocked request, blocker or SQL responsible. No comparable earlier counters place these waits in the selected window or establish that contention continues.
+impact: 3 min 7 s waiting on locks
+metrics:
+  - Historical lock waits: 5
+  - Historical time waiting: 3 min
+  - Historical average wait: 37.3 s
+fix: These counters alone justify no change. If the application experiences blocking, capture the current blocked statement and its blocker under representative load before changing transactions or indexes.
+verify:
+  1. Compare new lock waits and their time between scans under comparable load on orders. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
+caveats:
+  - These counters cover each index metadata entry’s lifetime, which can end without a server restart.
+queries:
+  - 138: 34% of database time
+    note: Recorded 2 min of lock waiting and references orders; this capture does not identify the lock resource or its owner.
+  - 143: 21% of database time
+    note: Recorded 1 min of lock waiting and references orders; this capture does not identify the lock resource or its owner.
+  - 161: <1% of database time
+    note: Recorded 2.4 s of lock waiting and references orders; this capture does not identify the lock resource or its owner.
+brief:
+    # orders has 5 recorded historical lock waits
+
+    Database: **mssql-demo** (SQL Server 2022, database `culprit_demo`, local environment). Finding `hot-rows:shop.orders`: Information, low impact, high confidence. Scanned 2026-10-11T12:13:47Z.
+
+    ## What's happening
+
+    Since its index pk_orders was loaded into memory, sessions waited 5 times for locks on the rows and pages of orders, 3 min 7 s in all, 37.3 s each on average. These counters identify lock waiting on the table, but do not identify the blocked request, blocker or SQL responsible. No comparable earlier counters place these waits in the selected window or establish that contention continues.
+
+    ## Evidence
+
+    - Historical lock waits: 5
+    - Historical time waiting: 3 min
+    - Historical average wait: 37.3 s
+
+    ## Queries involved
+
+    Query `138` — 34% of DB time, 4 runs over the last 5 hours, 28.7 s average:
+
+    ```sql
+    UPDATE [shop].[orders] set [status] = [status]  WHERE [id]=@1
+    ```
+
+    Query `143` — 21% of DB time, 3 runs over the last 5 hours, 23.9 s average:
+
+    ```sql
+    SELECT [status] FROM [shop].[orders] WHERE [id]=@1
+    ```
+
+    Query `161` — <1% of DB time, 4 runs over the last 5 hours, 601 ms average:
+
+    ```sql
+    UPDATE [shop].[orders] set [total] = [total]+@1  WHERE [id]=@2
+    ```
+
+    ## Suggested fix
+
+    These counters alone justify no change. If the application experiences blocking, capture the current blocked statement and its blocker under representative load before changing transactions or indexes.
+
+    ## How to verify
+
+    - Compare new lock waits and their time between scans under comparable load on orders. An unchanged counter reports no new waits; an idle interval alone does not verify a fix.
+
+    ## Caveats
+
+    - These counters cover each index metadata entry’s lifetime, which can end without a server restart.
+
+    ## What to do in the codebase
+
+    Information: inspect the evidence and follow its verification guidance if the workload warrants it. This observation requests no immediate database change. Use `culprit scan mssql-demo` for a later comparison if needed, as *How to verify* describes.
 
 === finding lock-escalations:shop.support_tickets
 Information · low severity · high confidence · indexes

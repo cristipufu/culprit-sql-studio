@@ -86,9 +86,9 @@ pub async fn snapshot(
             );
             None
         }
-        // The digests' grant is the fix whatever the error said.
         Err(e) => {
-            coverage.source_failed(&sources::STATEMENTS, &e.with_hint(format!("{PS_GRANT} {};", probe.grant_target())));
+            let error = statement_error(e, probe.performance_schema, &probe.grant_target());
+            coverage.source_failed(&sources::STATEMENTS, &error);
             None
         }
     };
@@ -170,4 +170,77 @@ pub async fn snapshot(
     reader.close().await;
     snapshot.duration_ms = started.elapsed().as_secs_f64() * 1000.0;
     Ok(snapshot)
+}
+
+fn statement_error(error: culprit_core::Error, performance_schema: bool, grant_target: &str) -> culprit_core::Error {
+    if error.code != culprit_core::ErrorCode::PermissionDenied
+        || matches!(error.detail, Some(culprit_core::ErrorDetail::CollectionStopped(_)))
+    {
+        return error;
+    }
+    let grant = if performance_schema { PS_GRANT } else { "GRANT SELECT ON mysql.slow_log TO" };
+    error.with_hint(format!("{grant} {grant_target};"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use culprit_core::{Error, ErrorCode, SourceState, telemetry::CollectionStop};
+
+    #[test]
+    fn workload_permission_guidance_names_the_source_that_actually_failed() {
+        for (instrumented, source) in [(true, "performance_schema.*"), (false, "mysql.slow_log")] {
+            let error = statement_error(
+                Error::new(ErrorCode::PermissionDenied, "native permission denied"),
+                instrumented,
+                "'monitor'@'%'",
+            );
+            let mut coverage = Coverage::with(vec![Capability::PerformanceSchema], vec![]);
+            coverage.source_failed(&sources::STATEMENTS, &error);
+            let outcome =
+                coverage.outcomes().into_iter().find(|outcome| outcome.source == sources::STATEMENTS.name).unwrap();
+            assert_eq!(outcome.state, SourceState::Unavailable);
+            assert_eq!(outcome.reason.as_deref(), Some("native permission denied"));
+            let (_, missing, _) = coverage.finish();
+            assert_eq!(missing[0].fix.as_deref(), Some(format!("GRANT SELECT ON {source} TO 'monitor'@'%';").as_str()));
+        }
+    }
+
+    #[test]
+    fn timeout_fence_and_invalid_data_outcomes_preserve_their_cause_instead_of_suggesting_a_grant() {
+        let mut errors = [
+            CollectionStop::TimedOut,
+            CollectionStop::Cancelled,
+            CollectionStop::CancellationUnconfirmed,
+            CollectionStop::RowLimit,
+            CollectionStop::InvalidPage,
+        ]
+        .into_iter()
+        .map(CollectionStop::error)
+        .collect::<Vec<_>>();
+        errors.extend(
+            [ErrorCode::ConnectionFailed, ErrorCode::AuthFailed, ErrorCode::QueryFailed, ErrorCode::Timeout]
+                .into_iter()
+                .map(|code| Error::new(code, "native source failed")),
+        );
+        errors.push(
+            Error::new(ErrorCode::PermissionDenied, "typed terminal stop")
+                .with_detail(culprit_core::ErrorDetail::CollectionStopped(CollectionStop::Cancelled)),
+        );
+        for original in errors {
+            let original = original.with_hint("native recovery guidance");
+            let error = statement_error(original.clone(), true, "'monitor'@'%'");
+            assert_eq!(
+                (error.code, error.detail, &error.message, &error.hint),
+                (original.code, original.detail, &original.message, &original.hint)
+            );
+            let mut coverage = Coverage::with(vec![Capability::PerformanceSchema], vec![]);
+            coverage.source_failed(&sources::STATEMENTS, &error);
+            let outcome =
+                coverage.outcomes().into_iter().find(|outcome| outcome.source == sources::STATEMENTS.name).unwrap();
+            assert_eq!(outcome.state, SourceState::Unavailable);
+            let (_, missing, _) = coverage.finish();
+            assert_eq!(missing[0].fix.as_deref(), Some("native recovery guidance"));
+        }
+    }
 }

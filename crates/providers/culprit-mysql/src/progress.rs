@@ -41,7 +41,7 @@ fn mariadb_phase(state: Option<&str>, stage: f64, stages: f64) -> String {
 /// TIMER_* columns are picoseconds; for a statement still running, TIMER_WAIT is the time so far.
 const STATEMENT_SQL: &str = r#"
 SELECT t.PROCESSLIST_STATE AS state, t.PROCESSLIST_COMMAND AS command, t.PROCESSLIST_DB AS db,
-       s.SQL_TEXT AS sql_text, s.TIMER_WAIT / 1000000000 AS elapsed_ms, s.LOCK_TIME / 1000000000 AS lock_ms,
+       s.SQL_TEXT AS sql_text, s.TIMER_WAIT / 1000000000 AS elapsed_ms,
        s.ROWS_EXAMINED AS rows_examined, s.ROWS_SENT AS rows_sent, s.CREATED_TMP_DISK_TABLES AS tmp_disk,
        g.EVENT_NAME AS stage, g.WORK_COMPLETED AS work_completed, g.WORK_ESTIMATED AS work_estimated
   FROM performance_schema.threads t
@@ -58,6 +58,25 @@ const MARIADB_SQL: &str =
     "SELECT STATE AS state, COMMAND AS command, DB AS db, INFO AS sql_text, TIME_MS AS elapsed_ms,
        EXAMINED_ROWS AS rows_examined, PROGRESS AS progress, STAGE AS stage, MAX_STAGE AS max_stage
   FROM information_schema.PROCESSLIST WHERE ID = {id}";
+
+async fn current_statement(conn: &mut impl crate::read::QueryRead, id: u64) -> Result<Option<crate::rows::Rec>> {
+    match query_one(conn, &STATEMENT_SQL.replace("{id}", &id.to_string())).await {
+        // Without the current-statement consumer the thread is there but its statement isn't.
+        Ok(Some(row)) if row.text("command").is_some() && row.text("sql_text").is_some() => Ok(Some(row)),
+        Ok(Some(row)) if row.text("command").is_some_and(|c| c != "Query") => Ok(Some(row)),
+        Ok(_) => query_one(conn, &PROCESSLIST_SQL.replace("{id}", &id.to_string())).await,
+        Err(error)
+            if error.detail.is_none()
+                && matches!(
+                    error.code,
+                    culprit_core::ErrorCode::PermissionDenied | culprit_core::ErrorCode::Unsupported
+                ) =>
+        {
+            query_one(conn, &PROCESSLIST_SQL.replace("{id}", &id.to_string())).await
+        }
+        Err(error) => Err(error),
+    }
+}
 
 /// What a MariaDB before 10.9 can say about a running statement.
 fn mariadb_no_analyze() -> String {
@@ -81,45 +100,21 @@ pub(crate) async fn query_progress(
         conn.close().await;
         return result;
     }
-    let detailed = query_one(&mut conn, &STATEMENT_SQL.replace("{id}", &id.to_string())).await;
-    let row = match detailed {
-        // Without the current-statement consumer the thread is there but its statement isn't.
-        Ok(Some(row)) if row.text("command").is_some() && row.text("sql_text").is_some() => Some(row),
-        Ok(Some(row)) if row.text("command").is_some_and(|c| c != "Query") => Some(row),
-        _ => query_one(&mut conn, &PROCESSLIST_SQL.replace("{id}", &id.to_string())).await?,
+    let row = match current_statement(&mut conn, id).await {
+        Ok(row) => row,
+        Err(error) => {
+            conn.close().await;
+            return Err(error);
+        }
     };
     let Some(row) = row else {
         conn.close().await;
         return Ok(progress);
     };
-    let statement = row.text("sql_text").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    progress.running = statement.is_some() && row.text("command").as_deref() == Some("Query");
-    progress.state = row.text("state").filter(|s| !s.is_empty()).or_else(|| row.text("command"));
-    progress.statement = statement;
+    apply_mysql_statement(&mut progress, &row);
     if !progress.running {
         conn.close().await;
         return Ok(progress);
-    }
-    progress.elapsed_ms = row.number("elapsed_ms");
-    // MySQL fills ROWS_EXAMINED in as the statement goes for some plans and only at the end for others: 0 means unknown.
-    progress.rows_examined = row.number("rows_examined").filter(|r| *r > 0.0);
-    // The thread state names a lock it is waiting for ("Waiting for table metadata lock"); LOCK_TIME is how long the
-    // statement has waited for locks so far.
-    if let Some(state) = progress.state.as_deref().filter(|s| s.to_ascii_lowercase().contains("lock")) {
-        progress.wait = Some(state.to_string());
-        progress.wait_ms = row.number("lock_ms").filter(|ms| *ms >= 1.0);
-    }
-    if let Some(stage) = row.text("stage") {
-        let name = stage.trim_start_matches("stage/").replace('/', ": ");
-        progress.phase = Some(name);
-        if let (Some(done), Some(total)) = (row.number("work_completed"), row.number("work_estimated"))
-            && total > 0.0
-        {
-            let fraction = (done / total).clamp(0.0, 1.0);
-            progress.phase_percent = Some(fraction);
-            progress.percent = Some(fraction);
-            progress.percent_basis = Some(stage_progress_basis());
-        }
     }
     if with_plan {
         // The session id is digits only (session_number), so splicing it in is safe.
@@ -146,6 +141,32 @@ pub(crate) async fn query_progress(
     }
     conn.close().await;
     Ok(progress)
+}
+
+fn apply_mysql_statement(progress: &mut QueryProgress, row: &crate::rows::Rec) {
+    progress.statement = row.text("sql_text").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    progress.running = progress.statement.is_some() && row.text("command").as_deref() == Some("Query");
+    progress.state = row.text("state").filter(|s| !s.is_empty()).or_else(|| row.text("command"));
+    if !progress.running {
+        return;
+    }
+    progress.elapsed_ms = row.number("elapsed_ms");
+    // Some plans fill this counter only on completion; zero does not prove that no rows were examined.
+    progress.rows_examined = row.number("rows_examined").filter(|r| *r > 0.0);
+    progress.wait = progress.state.as_ref().filter(|state| state.to_ascii_lowercase().contains("lock")).cloned();
+    // Statement LOCK_TIME is a cumulative native subtotal, not the duration of this current wait.
+    progress.wait_ms = None;
+    if let Some(stage) = row.text("stage") {
+        progress.phase = Some(stage.trim_start_matches("stage/").replace('/', ": "));
+        if let (Some(done), Some(total)) = (row.number("work_completed"), row.number("work_estimated"))
+            && total > 0.0
+        {
+            let fraction = (done / total).clamp(0.0, 1.0);
+            progress.phase_percent = Some(fraction);
+            progress.percent = Some(fraction);
+            progress.percent_basis = Some(stage_progress_basis());
+        }
+    }
 }
 
 async fn mariadb(
@@ -210,6 +231,108 @@ async fn mariadb(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use culprit_core::{Error, ErrorCode, telemetry::CollectionStop};
+    use mysql_async::Value;
+    use std::collections::VecDeque;
+
+    fn running_row(sql: Value) -> crate::rows::Rec {
+        crate::rows::Rec::from_values(vec![
+            ("command", Value::from("Query")),
+            ("state", Value::from("Waiting for table metadata lock")),
+            ("sql_text", sql),
+            ("elapsed_ms", Value::UInt(1500)),
+            ("lock_ms", Value::UInt(900)),
+        ])
+    }
+
+    struct ProgressRead {
+        responses: VecDeque<Result<Vec<crate::rows::Rec>>>,
+        calls: usize,
+    }
+    #[async_trait::async_trait]
+    impl crate::read::QueryRead for ProgressRead {
+        async fn read(&mut self, _: &str, _: Vec<Value>, limit: usize) -> Result<Vec<crate::rows::Rec>> {
+            assert_eq!(limit, 1);
+            self.calls += 1;
+            self.responses.pop_front().expect("no unplanned query after an error")
+        }
+        async fn explain(&mut self, _: &str) -> Result<Option<crate::rows::Rec>> {
+            panic!("statement observations cannot execute or plan SQL")
+        }
+    }
+
+    #[test]
+    fn accumulated_statement_lock_time_is_not_the_current_wait_duration() {
+        let row = running_row(Value::from("SELECT value FROM t WHERE id=1"));
+        let mut progress = QueryProgress::idle("42", Engine::Mysql, "2026-11-13T08:00:00Z".into());
+        apply_mysql_statement(&mut progress, &row);
+        assert!(progress.running);
+        assert_eq!(progress.elapsed_ms, Some(1500.0));
+        assert_eq!(progress.wait.as_deref(), Some("Waiting for table metadata lock"));
+        assert_eq!(progress.wait_ms, None);
+    }
+
+    #[tokio::test]
+    async fn only_known_source_unavailability_can_fall_back_to_processlist() {
+        for code in [ErrorCode::PermissionDenied, ErrorCode::Unsupported] {
+            let mut reader = ProgressRead {
+                responses: VecDeque::from([
+                    Err(Error::new(code, "native source unavailable")),
+                    Ok(vec![running_row(Value::from("SELECT 1"))]),
+                ]),
+                calls: 0,
+            };
+            assert!(current_statement(&mut reader, 42).await.unwrap().is_some());
+            assert_eq!(reader.calls, 2);
+        }
+        let mut reader = ProgressRead {
+            responses: VecDeque::from([
+                Ok(vec![running_row(Value::NULL)]),
+                Ok(vec![running_row(Value::from("SELECT 1"))]),
+            ]),
+            calls: 0,
+        };
+        assert!(current_statement(&mut reader, 42).await.unwrap().is_some());
+        assert_eq!(reader.calls, 2, "an unreadable current-statement consumer may use the independent process list");
+    }
+
+    #[tokio::test]
+    async fn terminal_or_ambiguous_source_errors_never_issue_a_fallback_read() {
+        let mut errors = [
+            CollectionStop::TimedOut,
+            CollectionStop::Cancelled,
+            CollectionStop::CancellationUnconfirmed,
+            CollectionStop::QueryLimit,
+            CollectionStop::RowLimit,
+            CollectionStop::ByteLimit,
+            CollectionStop::Pressure,
+            CollectionStop::SourceChanged,
+        ]
+        .into_iter()
+        .map(CollectionStop::error)
+        .collect::<Vec<_>>();
+        errors.extend(
+            [
+                ErrorCode::Timeout,
+                ErrorCode::AuthFailed,
+                ErrorCode::ConnectionFailed,
+                ErrorCode::Internal,
+                ErrorCode::QueryFailed,
+            ]
+            .into_iter()
+            .map(|code| Error::new(code, "native read failed")),
+        );
+        errors.push(
+            Error::new(ErrorCode::PermissionDenied, "typed terminal failure")
+                .with_detail(culprit_core::ErrorDetail::CollectionStopped(CollectionStop::Cancelled)),
+        );
+        for expected in errors {
+            let mut reader = ProgressRead { responses: VecDeque::from([Err(expected.clone())]), calls: 0 };
+            let actual = current_statement(&mut reader, 42).await.err().expect("the original error must be retained");
+            assert_eq!((actual.code, actual.detail), (expected.code, expected.detail));
+            assert_eq!(reader.calls, 1);
+        }
+    }
 
     // What a running statement's progress says, word for word: its messages come from locales/en.json.
     #[test]

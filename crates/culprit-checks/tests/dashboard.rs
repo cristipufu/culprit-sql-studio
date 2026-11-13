@@ -348,6 +348,7 @@ fn slow_log_lock_time_is_not_called_where_time_goes() {
     r.snapshot.server.product = "MariaDB 10.5.29".into();
     r.snapshot.server.capabilities.retain(|c| *c != culprit_core::Capability::PerformanceSchema);
     let workload = r.snapshot.workload.as_mut().expect("workload");
+    workload.kind = Some(culprit_core::WorkloadKind::SlowLog);
     workload.source = "slow query log".into();
     workload.windowed = true;
     r.snapshot.waits = vec![culprit_core::WaitStat {
@@ -358,9 +359,10 @@ fn slow_log_lock_time_is_not_called_where_time_goes() {
     }];
     let d = dashboard(&r);
     let waits = tile(&d, TileKey::Waits);
-    assert!(waits.takeaway.starts_with("MariaDB times no waits without performance_schema"), "{}", waits.takeaway);
+    assert!(waits.takeaway.starts_with("MariaDB logged 9 ms of native lock time"), "{}", waits.takeaway);
     assert!(!waits.takeaway.contains("Most time goes to"), "{}", waits.takeaway);
-    assert_eq!(waits.status, TileStatus::Info, "9 ms of lock time is a sliver of database time");
+    assert!(!waits.takeaway.contains('%'), "{}", waits.takeaway);
+    assert_eq!(waits.status, TileStatus::Info, "a native lock timer alone establishes no pressure grade");
 }
 
 #[test]
@@ -591,8 +593,11 @@ fn postgres_storage_waits_and_plan_counts_keep_their_own_meaning() {
     assert!(coverage.contains("2026-10-19") && coverage.contains("2026-10-18"), "{coverage}");
     assert!(storage.items.iter().any(|i| i.value.as_deref().is_some_and(|v| v.contains("per flush"))));
     let waits = tile(&d, TileKey::Waits);
-    assert!(waits.metrics.iter().any(|m| m.label == "Statement execution time"));
-    assert!(waits.detail.as_deref().unwrap().contains("not a measurement of time spent waiting"));
+    let io_ms: f64 =
+        r.snapshot.waits.iter().filter(|wait| wait.category.eq_ignore_ascii_case("io")).map(|wait| wait.wait_ms).sum();
+    assert!(waits.metrics.iter().any(|m| m.label == "Recorded category time" && m.value == Some(io_ms)));
+    assert!(!waits.detail.as_deref().unwrap_or_default().contains("including CPU and unclassified time"));
+    assert!(!r.snapshot.waits.iter().any(|wait| wait.category.eq_ignore_ascii_case("other")));
     assert!(tile(&d, TileKey::Plans).detail.as_deref().unwrap().contains("past or one-off"));
     assert!(tile(&d, TileKey::Statistics).metrics.iter().any(|m| m.label == "All queries with plans"));
 }
@@ -602,7 +607,10 @@ fn saved_postgres_io_that_exceeds_execution_time_is_not_an_exclusive_share() {
     use culprit_core::{Capability, WaitStat};
     let mut s = report("pg-demo").snapshot;
     let w = s.workload.as_mut().unwrap();
+    w.queries.truncate(1);
     w.total_time_ms = 100.0;
+    w.queries[0].total_time_ms = 100.0;
+    w.queries[0].mean_time_ms = 100.0 / w.queries[0].executions;
     w.queries[0].waits = vec![WaitStat {
         category: "IO".into(),
         wait_type: Some("data file reads and writes".into()),
@@ -610,12 +618,17 @@ fn saved_postgres_io_that_exceeds_execution_time_is_not_an_exclusive_share() {
         tasks: None,
     }];
     s.waits = w.queries[0].waits.clone();
+    if !s.server.capabilities.contains(&Capability::WaitStats) {
+        s.server.capabilities.push(Capability::WaitStats);
+    }
     let r = culprit_checks::analyze(s);
-    assert!(r.snapshot.waits.is_empty());
-    assert!(!r.snapshot.server.capabilities.contains(&Capability::WaitStats));
+    assert_eq!(r.snapshot.waits.len(), 1);
+    assert_eq!(r.snapshot.waits[0].wait_ms, 150.0);
+    assert!(r.snapshot.server.capabilities.contains(&Capability::WaitStats));
+    assert_eq!(r.snapshot.workload.as_ref().unwrap().total_time_ms, 100.0);
     assert_eq!(r.snapshot.workload.as_ref().unwrap().queries[0].waits[0].wait_ms, 150.0);
     assert!(
-        r.snapshot
+        !r.snapshot
             .notes
             .iter()
             .any(|n| n.collector == "waits" && n.message.contains("exceeds statement execution time"))

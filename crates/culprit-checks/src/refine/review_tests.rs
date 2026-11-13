@@ -186,24 +186,6 @@ fn write_merges_keep_schemas_distinct_and_leave_ambiguous_names_alone() {
 }
 
 #[test]
-fn blocking_chain_must_cover_the_whole_lock_episode() {
-    let mut s = snapshot();
-    for q in &mut s.workload.as_mut().unwrap().queries {
-        q.waits =
-            vec![culprit_core::WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 100_000.0, tasks: None }];
-    }
-    let (id, other) = (&s.queries()[0].id, &s.queries()[1].id);
-    let lock = finding("lock-time", "episode", &[id, other]);
-    let hot = finding("hot-rows", "shop.orders", &[id]);
-    let mut findings = vec![hot.clone(), lock.clone()];
-    assert!(locks::Rule(locks::Policy::Chain).refine_traced(&s, &mut findings).is_empty());
-    let mut hot = hot;
-    hot.queries.push(QueryRef { id: other.clone(), plan_node: None, note: None });
-    let mut findings = vec![hot, lock];
-    assert_eq!(locks::Rule(locks::Policy::Chain).refine_traced(&s, &mut findings).len(), 1);
-}
-
-#[test]
 fn absorption_keeps_each_querys_recorded_note() {
     let s = snapshot();
     let (id, other) = (&s.queries()[0].id, &s.queries()[1].id);

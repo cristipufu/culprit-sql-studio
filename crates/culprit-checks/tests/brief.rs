@@ -762,7 +762,7 @@ fn slow_runs_that_waited_change_no_statement() {
         "{section}"
     );
     assert!(!section.contains("updates or deletes"), "{section}");
-    assert!(section.contains("keep those transactions short"), "{section}");
+    assert!(section.contains("Where they waited for another transaction"), "{section}");
     assert!(!section.contains("Find where the application sends the statements above"), "{section}");
     assert!(!section.contains("with this scan"), "{section}");
     assert!(section.contains("can't show the change"), "{section}");
@@ -829,16 +829,15 @@ fn a_statement_that_waited_is_not_rewritten() {
     update.waits.clear();
     update.spread = Some(culprit_core::Spread { lock_ms: Some(4500.0), ..Default::default() });
     let section = codebase(&agent_brief(&mysql, &about_query(&mysql, "update")));
-    assert!(section.contains("waiting for locks other transactions hold"), "{section}");
-    assert!(section.contains("so no rewrite or index of it shortens it"), "{section}");
+    assert!(section.contains("records lock waiting without identifying its resource or holder"), "{section}");
+    assert!(section.contains("Keep investigating the waiting query's own work"), "{section}");
     assert!(!section.contains("Find where the application sends the statements above"), "{section}");
 
     // The same statement doing work is changed in the application.
     let section = codebase(&agent_brief(&mysql, &with_fix(finding(&mysql, "heavy-query:"), "Read less.", None)));
     assert!(section.contains("Find where the application sends the statements above"), "{section}");
 
-    // lock-time is a statement's time spent waiting, whichever statement: its fix says making it faster won't help, so
-    // its brief sends the agent to the transactions that hold the locks, not to a rewrite.
+    // Recorded lock totals route the agent to native evidence gathering without excluding the query's own work.
     let saved =
         std::fs::read_to_string(format!("{}/../../fixtures/mysql-demo.report.json", env!("CARGO_MANIFEST_DIR")))
             .expect("fixture");
@@ -846,7 +845,7 @@ fn a_statement_that_waited_is_not_rewritten() {
     for f in demo.findings.iter().filter(|f| f.check == "lock-time") {
         let section = codebase(&agent_brief(&demo, f));
         assert!(!section.contains("an ORM change or a query rewrite"), "{}: {section}", f.id);
-        assert!(section.contains("keep those transactions short"), "{}: {section}", f.id);
+        assert!(section.contains("Capture the native lock resource"), "{}: {section}", f.id);
     }
     assert!(demo.findings.iter().any(|f| f.check == "lock-time"), "the demo's lock-time finding");
     // Settings-only SQL catches the next wait; it doesn't turn the fix into a rewrite of the waiting statement.
@@ -855,7 +854,7 @@ fn a_statement_that_waited_is_not_rewritten() {
     {
         f.fix.as_mut().unwrap().sql = Some(sql.into());
         let section = codebase(&agent_brief(&demo, &f));
-        assert!(section.contains("keep those transactions short"), "{section}");
+        assert!(section.contains("Capture the native lock resource"), "{section}");
         assert!(!section.contains("an ORM change or a query rewrite"), "{section}");
         assert!(section.contains("setting in the fix's SQL belongs to the database server"), "{section}");
     }

@@ -1,14 +1,20 @@
 === mssql-demo.report.json
-**1 of 20 fixed; 19 still present. 1 new finding.**
+**1 of 23 fixed; 22 still present. 1 new finding.**
 
-- ✅ Fixed: A read from order\_items times out on every run, at about 15 s (was 100% of runs fail)
+- ✅ Fixed: An update of orders takes 2 min of database time over the last 5 hours (34%), with at least 2 min of recorded waiting (Lock) (was 2 min of database time over the last 5 hours (34%))
+- ⏳ Still present: A read from order\_items times out on every run, at about 15 s (100% of runs fail)
+  It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
 - ⏳ Still present: A read from orders fails 25% of the time (25% of runs fail)
   It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
-- ⏳ Still present: Queries on orders recorded lock waits in the last 5 hours (3 min waiting on locks)
+- ⏳ Still present: An update of orders has at least 2 min of recorded lock waits (Recorded lock waits: 2 min)
   It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
 - ⏳ Still present: Compares each of 1.5M rows of order\_items with 999 rows the Table Spool replays (1.5B pairs) (27% of DB time)
   It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
 - ⏳ Still present: This plan runs on one CPU because its statement says OPTION (MAXDOP 1) (27% of DB time)
+  It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
+- ⏳ Still present: A read from orders takes 1 min of database time over the last 5 hours (21%), with at least 1 min of recorded waiting (Lock) (1 min of database time over the last 5 hours (21%))
+  It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
+- ⏳ Still present: A read from orders has at least 1 min of recorded lock waits (Recorded lock waits: 1 min)
   It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
 - ⏳ Still present: A read from products runs 60K times in 5 hours, one key at a time (822 ms of database time over the last 5 hours (&lt;1%))
   It is measured over the last 4 h 34 min of workload, which still includes runs from before the change. Check again once that window has moved past it, or scan with a shorter window.
@@ -33,7 +39,7 @@
 - ⏳ Still present: LAST\_QUERY\_PLAN\_STATS is off for this database (Diagnostics)
 - ❔ Can't tell: Something unknown (was 12 ms)
   A note about it.
-- 🆕 New: A new finding (25% of runs fail)
+- 🆕 New: A new finding (100% of runs fail)
 
 <sub>Scans Sun 12:13 UTC → Sun 13:13 UTC.</sub>
 

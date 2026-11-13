@@ -59,8 +59,8 @@ pub fn report(report: &Report) -> Value {
                         "detail": c.detail,
                         "queries": c.queries.iter().take(5).map(|q| json!({
                             "id": q.id,
-                            "share_of_category": format::percent(q.share_of_category),
-                            "share_of_query_time": format::percent(q.share_of_query),
+                            "recorded_ms": q.wait_ms,
+                            "mean_recorded_ms": q.mean_recorded_ms,
                             "text": q.text.chars().take(140).collect::<String>(),
                         })).collect::<Vec<_>>(),
                         "not_attributed": c.attribution,
@@ -138,6 +138,29 @@ pub fn sample(s: &WaitSample) -> Value {
 mod tests {
     use super::*;
     use culprit_core::{Engine, SignalScope, SignalUnit};
+
+    #[test]
+    fn accumulated_parallel_waits_keep_native_totals_without_an_elapsed_share() {
+        let mut data: Report = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.report.json")).unwrap();
+        let workload = data.snapshot.workload.as_mut().unwrap();
+        workload.queries.truncate(1);
+        let query = &mut workload.queries[0];
+        query.text = "SELECT id FROM shop.orders".into();
+        query.total_time_ms = 1000.0;
+        query.executions = 2.0;
+        query.waits =
+            vec![culprit_core::WaitStat { category: "Lock".into(), wait_type: None, wait_ms: 4000.0, tasks: None }];
+        let rendered = report(&data);
+        let category = rendered["categories"].as_array().unwrap().iter().find(|c| c["key"] == "lock").unwrap();
+        let query = &category["queries"][0];
+        assert_eq!(query["recorded_ms"], 4000.0);
+        assert_eq!(query["mean_recorded_ms"], 2000.0);
+        assert!(query.get("share_of_query_time").is_none());
+        assert!(
+            query.get("share_of_category").is_none(),
+            "independently captured category totals are not a denominator"
+        );
+    }
 
     #[test]
     fn file_averages_share_storage_precision_and_leave_untimed_operations_unknown() {

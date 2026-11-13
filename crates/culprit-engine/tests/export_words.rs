@@ -154,6 +154,19 @@ fn shortened(name: &str, keep: usize) -> Report {
     r
 }
 
+/// Formatter coverage must survive ranking changes. Missing cases require an explicit fixture review.
+fn finding_samples<'a>(report: &'a Report, ids: &[&str]) -> Vec<&'a culprit_core::Finding> {
+    ids.iter()
+        .map(|id| {
+            report
+                .findings
+                .iter()
+                .find(|finding| finding.id == *id)
+                .unwrap_or_else(|| panic!("{}: expected export sample {id} is missing", report.snapshot.connection))
+        })
+        .collect()
+}
+
 #[test]
 fn report_exports_say_what_they_said() {
     for (file, name, raws) in [("mssql-demo.report.json", "mssql", true), ("pg-demo.report.json", "pg", false)] {
@@ -188,9 +201,18 @@ fn report_exports_say_what_they_said() {
 fn finding_exports_with_their_values_say_what_they_said() {
     let options = ExportOptions { redact: false, ..Default::default() };
     let mut out = Vec::new();
-    for file in ["mssql-demo.report.json", "pg-demo.report.json", "mysql-demo.report.json", "sqlite-demo.report.json"] {
+    let samples: &[(&str, &[&str])] = &[
+        ("mssql-demo.report.json", &["failing-query:263", "failing-query:246", "heavy-query:138", "lock-time:143"]),
+        ("pg-demo.report.json", &["temp-spill:9065391607317686058", "filtered-scan:public.orders(customer_id)"]),
+        (
+            "mysql-demo.report.json",
+            &["failing-query:4515abd524a46f37", "lock-time:4167fe7f2c20deb7", "heavy-query:4167fe7f2c20deb7"],
+        ),
+        ("sqlite-demo.report.json", &["unindexed-fk:main.orders(customer_id)"]),
+    ];
+    for &(file, ids) in samples {
         let r = report(file);
-        for f in r.findings.iter().filter(|f| !f.queries.is_empty()).take(2) {
+        for f in finding_samples(&r, ids) {
             out.push(format!("=== {file} {}\n{}", f.id, unstamped(&export::finding_markdown(&r, f, &options))));
             out.push(unstamped(&export::finding_html(&r, f, &options)));
         }
@@ -201,9 +223,42 @@ fn finding_exports_with_their_values_say_what_they_said() {
 #[test]
 fn digest_details_say_what_they_said() {
     let mut out = Vec::new();
-    for file in ["mssql-demo.report.json", "pg-demo.report.json", "mysql-demo.report.json"] {
+    let samples: &[(&str, &[&str])] = &[
+        (
+            "mssql-demo.report.json",
+            &[
+                "failing-query:263",
+                "failing-query:246",
+                "hot-rows:shop.orders",
+                "plan-insights:nested-loops:query-263",
+                "heavy-query:138",
+                "lock-time:138",
+                "lock-time:143",
+            ],
+        ),
+        (
+            "pg-demo.report.json",
+            &[
+                "temp-spill:9065391607317686058",
+                "filtered-scan:public.orders(customer_id)",
+                "planning-time:-967240904657798800",
+                "replica-lag:analytics_slot",
+            ],
+        ),
+        (
+            "mysql-demo.report.json",
+            &[
+                "failing-query:4515abd524a46f37",
+                "lock-time:4167fe7f2c20deb7",
+                "chatty-query:9b30e6ad79d940fe",
+                "temp-spill:04cd7be9c366fadc",
+                "heavy-query:4167fe7f2c20deb7",
+            ],
+        ),
+    ];
+    for &(file, ids) in samples {
         let r = report(file);
-        for f in r.findings.iter().take(4) {
+        for f in finding_samples(&r, ids) {
             let detail = export::finding_detail(&r, f);
             out.push(format!("=== {file} {}", f.id));
             out.push(serde_json::to_string_pretty(&detail).unwrap());

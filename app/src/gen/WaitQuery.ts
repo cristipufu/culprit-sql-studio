@@ -7,12 +7,13 @@ export type WaitQuery = { id: string,
 /**
  * The statement on one line, shortened.
  */
-text: string, wait_ms: number, 
+text: string, 
 /**
- * Its share of the category.
+ * Accumulated recorded category time; parallel worker timers can exceed query elapsed time.
  */
-share_of_category: number, 
+wait_ms: number, 
 /**
- * How much of the query's own time this category takes.
+ * Recorded category time divided by executions, not an elapsed run duration or a maximum.
+ * Absent when the execution count is unknown, nonpositive or cannot produce a finite average.
  */
-share_of_query: number, executions: number, rows_per_run: number | null, };
+mean_recorded_ms: number | null, executions: number, rows_per_run: number | null, };

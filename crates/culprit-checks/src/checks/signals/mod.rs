@@ -5,7 +5,6 @@
 
 use std::collections::BTreeMap;
 
-use culprit_core::waits::category_key;
 use culprit_core::{
     Category, CheckInfo, Confidence, ConstraintIssue, ConstraintKind, Engine, FileIo, FileKind, Finding, Fix,
     IndexStat, Metric, QueryRef, QueryStat, Replica, ReplicaCondition, ReplicaRole, Severity, Snapshot, SubjectKind,
@@ -250,7 +249,7 @@ fn is_write(q: &QueryStat) -> bool {
 }
 
 pub(crate) fn lock_ms(q: &QueryStat) -> f64 {
-    q.waits.iter().filter(|w| category_key(&w.category) == "lock").map(|w| w.wait_ms).sum()
+    q.observed_wait_ms(culprit_core::telemetry::WaitClass::Lock).unwrap_or(0.0)
 }
 
 /// A total wait to the second under an hour: "1 min 29 s", where `format::duration` would round 88,960 ms down to

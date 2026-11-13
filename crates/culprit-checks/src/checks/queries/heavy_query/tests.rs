@@ -697,7 +697,10 @@ fn embedded_native_timers_and_declared_read_units_do_not_require_a_provider_iden
         let query = snapshot.queries().iter().find(|query| query.id == "10").unwrap();
         let scalar = idle_time(&snapshot, query).expect("an embedding source supplied an explicit native lock timer");
         assert_eq!(scalar.kind(), IdleKind::Locks);
-        assert!(scalar.evidence(&snapshot, query).contains("counts 80%"));
+        let evidence = scalar.evidence(&snapshot, query);
+        assert!(evidence.contains(&format::duration(query.spread.as_ref().unwrap().lock_ms.unwrap())), "{evidence}");
+        assert!(!evidence.contains('%'), "a scalar timer does not qualify an elapsed share: {evidence}");
+        assert_eq!(scalar.verify(), Expect::RecordedWait);
 
         let query = query_mut(&mut snapshot, "10");
         query.spread = None;
@@ -864,6 +867,17 @@ fn slow_log(mut s: Snapshot) -> Snapshot {
         scope: "server".into(),
     });
     s
+}
+
+#[test]
+fn current_zero_logging_threshold_does_not_establish_full_database_coverage() {
+    let mut snapshot = slow_log(mysql_demo());
+    snapshot.workload.as_mut().unwrap().min_logged_ms = None;
+    for value in ["0", "0.100000", "unknown"] {
+        snapshot.settings.iter_mut().find(|setting| setting.name == "long_query_time").unwrap().value = value.into();
+        assert!(slow_log_only(&snapshot), "current setting {value} cannot establish historical population");
+        assert!(crate::queries::time_noun(&snapshot).contains("logged-run time"));
+    }
 }
 
 /// A residual filter in an estimated plan beside many recorded pages and no returned row.
@@ -1715,14 +1729,14 @@ verify: performance_schema keeps running totals, so a later scan's runs, share a
     ),
     (
         "idle/lock-time",
-        r#"title: An update of orders takes 100% of database time, most of it waiting for locks
-summary: It ran 30K times in 2 minutes at 2.0 s on average: 100% of all database time in the 2 minutes since statistics were reset. MySQL counts 80% of its 16 h 40 min waiting for locks.
+        r#"title: An update of orders takes 100% of database time, with at least 13 h 20 min of recorded waiting (Locks)
+summary: It ran 30K times in 2 minutes at 2.0 s on average: 100% of all database time in the 2 minutes since statistics were reset. performance_schema recorded at least 13 h 20 min of waiting (Locks) for this statement.
 impact: 100% of DB time
 metric: Share of DB time
 metric: Average duration
 metric: Rows examined per run
 fix: Find what holds the locks while it waits (Live shows the blocking chain). After identifying the holder and lock resource, inspect transaction duration and access paths; shorter transactions, an index or a rewrite may reduce contention.
-verify: performance_schema keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there its time per run should drop toward what its reads take. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running."#,
+verify: performance_schema keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there recorded wait totals and execution time should improve under equivalent useful work, parameters and load. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running."#,
     ),
     (
         "idle/qs-locks-most",
@@ -1883,15 +1897,15 @@ verify: performance_schema keeps running totals, so a later scan's runs, share a
     ),
     (
         "idle/lock-time-over-totals",
-        r#"title: An update of orders takes 95% of database time, most of it waiting for locks
-summary: It ran 40 times at 1.9 s on average, on Oct 11 at 12:07 UTC: 95% of all database time in 36 hours of Culprit's own scans. Over the 40 days since statistics were reset, MySQL counts 80% of its 1 min waiting for locks.
+        r#"title: An update of orders takes 95% of database time, with at least 1 min of recorded waiting (Locks)
+summary: It ran 40 times at 1.9 s on average, on Oct 11 at 12:07 UTC: 95% of all database time in 36 hours of Culprit's own scans. Over the 40 days since statistics were reset, performance_schema recorded at least 1 min of waiting (Locks) for this statement.
 impact: 95% of DB time
 metric: Share of DB time over Culprit's scans
 metric: Runs over Culprit's scans
 metric: Average duration over Culprit's scans
 metric: Rows examined per run over the 40 days since statistics were reset
 fix: It ran 40 times on Oct 11 at 12:07 UTC, too seldom to count on catching it while it waits. Have the next ones logged instead. Set slow_query_log to ON and long_query_time to 1; SET PERSIST keeps it across restarts. The slow query log then keeps each statement slower than 1 s with its lock time and when it ran; MySQL keeps no record of who held the lock, so match those times with what the application ran then. After identifying the holder and lock resource, inspect transaction duration and access paths; shorter transactions, an index or a rewrite may reduce contention.
-verify: performance_schema keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there its time per run should drop toward what its reads take. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running."#,
+verify: performance_schema keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there recorded wait totals and execution time should improve under equivalent useful work, parameters and load. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running."#,
     ),
     (
         "idle/little-cpu-over-totals",
@@ -2162,15 +2176,15 @@ verify: After the change ships, re-scan: this query should run fewer times and t
     ),
     (
         "summary/slow-log",
-        r#"title: A read from orders takes 9% of logged slow-run time
-summary: It ran 2.0K times in 2 minutes at 2.1 ms on average: 9% of all logged slow-run time in the last 2 minutes. 100% of its estimated cost is an index range scan of shop.orders that examines 11K rows a run.
-impact: 9% of logged slow-run time
-metric: Share of logged slow-run time
+        r#"title: A read from orders takes 9% of logged-run time
+summary: It ran 2.0K times in 2 minutes at 2.1 ms on average: 9% of all logged-run time in the last 2 minutes. 100% of its estimated cost is an index range scan of shop.orders that examines 11K rows a run.
+impact: 9% of logged-run time
+metric: Share of logged-run time
 metric: Average duration
 metric: Rows examined per run
 metric: Rows returned per run
 fix: Find this statement in the application and check whether it aggregates more rows than it needs, or whether the result could be kept up to date instead of recomputed on every run.
-verify: After the change ships, re-scan: this query's rows examined and time per run should drop, and its share of logged slow-run time with them."#,
+verify: After the change ships, re-scan: this query's rows examined and time per run should drop, and its share of logged-run time with them."#,
     ),
     (
         "wait/storage",
@@ -2972,8 +2986,8 @@ time-or-stops: Re-scan after the change: this statement's time drops or it stops
         r#"measure: Use an actual plan to check row counts, and collect IO measurements for the same run to locate the reads. After a change supported by that evidence, compare equivalent runs: rows examined and time per run should fall without changing the result.
 storage: Compare I/O measurements and execution time for equivalent useful work, parameters and load before and after a justified change; retain it only when the measurements show an improvement without changing results.
 recorded-wait: Compare recorded wait totals and execution time for equivalent useful work, parameters and load after the change.
-cheaper-runs: After the change ships, re-scan: this query's rows examined and time per run should drop, and its share of logged slow-run time with them.
-fewer-runs: After the change ships, re-scan: this query should run fewer times and take a smaller share of logged slow-run time, while what one run reads and takes can stay as it is, or rise.
+cheaper-runs: After the change ships, re-scan: this query's rows examined and time per run should drop, and its share of logged-run time with them.
+fewer-runs: After the change ships, re-scan: this query should run fewer times and take a smaller share of logged-run time, while what one run reads and takes can stay as it is, or rise.
 counter: Compare time and any avoidable calls under equivalent workload, checking that numbering, metadata updates, returned values and transaction guarantees remain correct. Required atomic calls need not decrease.
 session: Compare avoidable session-call overhead for equivalent useful work. Verify transaction guarantees and session isolation; required calls need not decrease.
 average: Re-scan after the change: its average duration drops toward what its reads take.

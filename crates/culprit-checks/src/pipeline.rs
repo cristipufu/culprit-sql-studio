@@ -18,7 +18,7 @@
 
 use std::sync::Arc;
 
-use culprit_core::{Check, CollectorNote, Finding, LockedCheck, Report, Snapshot, WaitStat, t};
+use culprit_core::{Check, CollectorNote, Finding, LockedCheck, Report, Snapshot, t};
 
 /// A step that corrects the snapshot before any check reads it. It changes what the data says only where the data
 /// contradicts itself or the database (a plan older than the table it describes), never to hide a problem.
@@ -100,7 +100,6 @@ fn preparation() -> Vec<Arc<dyn Prepare>> {
         step("MySQL's possible keys named with their columns", culprit_core::insights::mark_snapshot_keys),
         step("plan operators marked with their index's kind", culprit_core::insights::mark_snapshot_index_kinds),
         step("health counters graded only on the evidence", crate::pressure::grade_on_evidence),
-        step("PostgreSQL's I/O time within its statement time", io_within_statement_time),
         step("MariaDB's lock time unknown where it counts the whole run", lock_time_that_counts_the_run),
         step("a scan's filter judged by what its runs measured", crate::indexes::mark_measured_kept),
     ]
@@ -135,11 +134,12 @@ fn measurement_context(snapshot: &mut Snapshot) {
 /// on, how long reads waited on writes). The slow log's own total of lock time is made of such runs too. A note says so.
 fn lock_time_that_counts_the_run(snapshot: &mut Snapshot) {
     let Some(workload) = snapshot.workload.as_ref() else { return };
+    let logged_runs = workload.kind() == Some(culprit_core::WorkloadKind::SlowLog);
     let inflated: Vec<String> = workload
         .queries
         .iter()
         .filter(|q| crate::signals::lock_time_counts_the_run(snapshot, q))
-        .filter(|q| q.spread.as_ref().is_some_and(|s| s.lock_ms.is_some()) || q.waits.iter().any(is_lock_time))
+        .filter(|q| q.observed_wait_ms(culprit_core::telemetry::WaitClass::Lock).is_some())
         .map(|q| q.id.clone())
         .collect();
     if inflated.is_empty() {
@@ -150,38 +150,15 @@ fn lock_time_that_counts_the_run(snapshot: &mut Snapshot) {
             q.invalidate_wait_class(culprit_core::telemetry::WaitClass::Lock);
         }
     }
-    snapshot.waits.retain(|w| w.wait_type.as_deref() != Some("lock time (slow query log)"));
+    if logged_runs {
+        snapshot.waits.retain(|w| culprit_core::waits::known_category_key(&w.category) != Some("lock"));
+    }
     snapshot.notes.push(CollectorNote {
         message_source: None,
         collector: "workload".into(),
         message: t!("pipeline.note.mariadb_lock_time", n = inflated.len(), count = inflated.len().to_string()),
         table: None,
     });
-}
-
-/// The lock time MySQL and MariaDB report for a statement (its digest's, or the slow log's), kept as a Lock wait.
-fn is_lock_time(w: &WaitStat) -> bool {
-    w.category == "Lock" && w.wait_type.as_deref().is_some_and(|t| t.starts_with("lock time"))
-}
-
-/// PostgreSQL's disk I/O time is a share of statement time only when it fits inside it: parallel I/O timings, or
-/// counters with a different coverage, can't be shown as exclusive shares of execution time. Then the breakdown goes,
-/// with a note; per-query I/O totals remain.
-fn io_within_statement_time(snapshot: &mut Snapshot) {
-    if !snapshot.server.engine.spec().statement_metrics().io_wait_within_statement_time {
-        return;
-    }
-    let io: f64 = snapshot.waits.iter().filter(|w| w.category == "IO").map(|w| w.wait_ms).sum();
-    if snapshot.workload.as_ref().is_some_and(|w| io > w.total_time_ms) {
-        snapshot.waits.clear();
-        snapshot.server.capabilities.retain(|c| *c != culprit_core::Capability::WaitStats);
-        snapshot.notes.push(CollectorNote {
-            message_source: None,
-            collector: "waits".into(),
-            message: t!("pipeline.note.io_exceeds_statement_time"),
-            table: None,
-        });
-    }
 }
 
 /// The stages and what runs in each.
@@ -386,37 +363,27 @@ fn rank(findings: &mut [Finding]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use culprit_core::{Capability, Engine};
+    use culprit_core::{Capability, Engine, WaitStat};
 
     #[test]
-    fn io_bounds_follow_measurement_semantics_instead_of_shared_sql_syntax() {
+    fn preparation_preserves_worker_io_totals_above_or_below_statement_elapsed_time() {
         let original: Snapshot = serde_json::from_str(include_str!("../../../fixtures/postgres-demo.json")).unwrap();
-        let cases = [
-            (Engine::Mssql, false),
-            (Engine::Postgres, true),
-            (Engine::Yugabyte, false),
-            (Engine::Mysql, false),
-            (Engine::Sqlite, false),
-        ];
-        assert_eq!(cases.map(|c| c.0), Engine::ALL);
-        for (engine, bounded) in cases {
-            for exceeds in [false, true] {
+        for engine in Engine::ALL {
+            for ratio in [0.5, 2.0] {
                 let mut s = original.clone();
                 s.server.engine = engine;
                 s.server.capabilities.push(Capability::WaitStats);
                 s.notes.clear();
                 let total = s.workload.as_ref().unwrap().total_time_ms;
-                s.waits = vec![WaitStat {
-                    category: "IO".into(),
-                    wait_type: None,
-                    wait_ms: total * if exceeds { 2.0 } else { 0.5 },
-                    tasks: None,
-                }];
-                io_within_statement_time(&mut s);
-                let rejected = bounded && exceeds;
-                assert_eq!(s.waits.is_empty(), rejected, "{engine:?}, exceeds={exceeds}");
-                assert_eq!(!s.server.has(Capability::WaitStats), rejected);
-                assert_eq!(!s.notes.is_empty(), rejected);
+                s.waits =
+                    vec![WaitStat { category: "IO".into(), wait_type: None, wait_ms: total * ratio, tasks: None }];
+                for step in preparation() {
+                    step.prepare(&mut s);
+                }
+                assert_eq!(s.waits.len(), 1, "{engine:?}, ratio={ratio}");
+                assert_eq!(s.waits[0].wait_ms, total * ratio);
+                assert!(s.server.has(Capability::WaitStats));
+                assert!(s.waits.iter().all(|wait| wait.category != "Other"));
             }
         }
     }

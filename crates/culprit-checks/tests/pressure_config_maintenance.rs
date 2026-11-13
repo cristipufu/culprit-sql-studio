@@ -424,10 +424,9 @@ fn a_slot_holding_vacuum_back_joins_its_replica_finding() {
     assert!(lag.summary.contains("It also holds VACUUM back by 5.0M transactions"), "{}", lag.summary);
 }
 
-// C10: waiting on the application explains a heavy query only when it is most of its time; an over-sized grant slows
-// other queries, not its own, so the heavy-query finding stays.
+// Accumulated network waits and oversized grants do not establish the exclusive cause of a query's elapsed time.
 #[test]
-fn a_heavy_query_stays_unless_another_finding_explains_most_of_it() {
+fn network_waits_do_not_hide_a_heavy_query_without_an_exclusive_causal_measurement() {
     let base = snapshot("mssql-demo.json");
     let heavy = analyze(base.clone());
     let Some(h) = heavy.findings.iter().find(|f| f.check == "heavy-query") else {
@@ -446,11 +445,15 @@ fn a_heavy_query_stays_unless_another_finding_explains_most_of_it() {
         analyze(s)
     };
     let r = with_network(0.3);
-    assert!(find(&r.findings, &format!("heavy-query:{id}")).is_some(), "30% waiting on the app: the rest is its own");
+    assert!(find(&r.findings, &format!("heavy-query:{id}")).is_some(), "network timing does not exclude query work");
     let r = with_network(0.8);
-    assert!(find(&r.findings, &format!("heavy-query:{id}")).is_none(), "80%: the network finding explains it");
+    assert!(
+        find(&r.findings, &format!("heavy-query:{id}")).is_some(),
+        "accumulated network waits do not explain elapsed query time"
+    );
     let net = find(&r.findings, &format!("network-wait:{id}")).expect("the network finding");
-    assert!(net.metrics.iter().any(|m| m.label == "Waiting on the app" && m.value >= 0.5));
+    assert!(net.metrics.iter().any(|m| m.unit == culprit_core::Unit::Ms && m.value > 0.0));
+    assert!(net.impact.db_time_share.is_none(), "worker wait time is not a share of database elapsed time");
 }
 
 fn set_with_default(s: &mut Snapshot, name: &str, value: &str, default: &str) {

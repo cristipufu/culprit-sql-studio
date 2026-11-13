@@ -71,6 +71,8 @@ test("MySQL and MariaDB runtime coverage follows collected data and preserves th
     const measured = renderToStaticMarkup(createElement(RuntimeSpread, props));
     check(measured.includes("keeps a run-time histogram per statement"), `${product}: collected histogram was ignored`);
     const logged = renderToStaticMarkup(createElement(RuntimeSpread, { ...props, kind: "slow-log" }));
-    check(logged.includes("only runs slower than long_query_time"), `${product}: slow-log scope was lost`);
+    check(logged.includes("retained logged runs"), `${product}: retained-run scope was lost`);
+    check(logged.includes("may omit other executions"), `${product}: incomplete logging coverage was lost`);
+    check(!logged.includes("only runs slower than long_query_time"), `${product}: current threshold became a historical guarantee`);
   }
 });

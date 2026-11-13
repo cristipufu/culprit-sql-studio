@@ -77,7 +77,7 @@
 === mssql-demo.report.json hot-rows:shop.orders
 {
   "confidence": "high",
-  "summary": "The associated statements used 3 min of database time over the last 5 hours (56%). Since its index pk_orders was loaded into memory, sessions waited 5 times for locks on the rows and pages of orders, 3 min 7 s in all, 37.3 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change. No comparable earlier counters place these waits in the selected window or establish that contention continues. An update of orders waited 2 min for these locks in the last 5 hours, nearly all of its time. A read from orders waited 1 min for these locks in the last 5 hours, nearly all of its time.",
+  "summary": "Since its index pk_orders was loaded into memory, sessions waited 5 times for locks on the rows and pages of orders, 3 min 7 s in all, 37.3 s each on average. These counters identify lock waiting on the table, but do not identify the blocked request, blocker or SQL responsible. No comparable earlier counters place these waits in the selected window or establish that contention continues.",
   "metrics": [
     {
       "label": "Historical lock waits",
@@ -97,17 +97,17 @@
       "stats": "34% of database time · 4 runs over the last 5 hours · 28.7 s on average",
       "sql": "UPDATE [shop].[orders] set [status] = [status]  WHERE [id]=@1",
       "plan": null,
-      "note": "Waited 2 min on locks, nearly all of its time in the last 5 hours."
+      "note": "Recorded 2 min of lock waiting and references orders; this capture does not identify the lock resource or its owner."
     },
     {
       "stats": "21% of database time · 3 runs over the last 5 hours · 23.9 s on average",
       "sql": "SELECT [status] FROM [shop].[orders] WHERE [id]=@1",
       "plan": null,
-      "note": "Waited 1 min on locks, nearly all of its time in the last 5 hours."
+      "note": "Recorded 1 min of lock waiting and references orders; this capture does not identify the lock resource or its owner."
     }
   ],
   "fix": {
-    "summary": "It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere. Query 143 recorded lock waits while READ_COMMITTED_SNAPSHOT is off. Row versioning is a candidate; confirm read-committed data-lock waits before changing isolation.",
+    "summary": "These counters alone justify no change. If the application experiences blocking, capture the current blocked statement and its blocker under representative load before changing transactions or indexes.",
     "sql": null,
     "cost": null
   },
@@ -155,6 +155,118 @@
   ],
   "caveats": [
     "Based on the estimated plan; actual row counts can tell a different story."
+  ]
+}
+=== mssql-demo.report.json heavy-query:138
+{
+  "confidence": "high",
+  "summary": "2 min of database time over the last 5 hours (34%). It ran 4 times in 5 hours at 28.7 s on average: 34% of all database time in the last 5 hours. Query Store recorded at least 2 min of waiting (Lock); measured CPU time is 4.5 ms.",
+  "metrics": [
+    {
+      "label": "Share of DB time",
+      "value": "34%"
+    },
+    {
+      "label": "Average duration",
+      "value": "28.7 s"
+    },
+    {
+      "label": "Pages read per run",
+      "value": "5.2"
+    },
+    {
+      "label": "Rows per run",
+      "value": "1"
+    },
+    {
+      "label": "CPU share of its time",
+      "value": "<1%"
+    }
+  ],
+  "queries": [
+    {
+      "stats": "34% of database time · 4 runs over the last 5 hours · 28.7 s on average",
+      "sql": "UPDATE [shop].[orders] set [status] = [status]  WHERE [id]=@1",
+      "plan": null,
+      "note": null
+    }
+  ],
+  "fix": {
+    "summary": "It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. After identifying the holder and lock resource, inspect transaction duration and access paths; shorter transactions, an index or a rewrite may reduce contention.",
+    "sql": null,
+    "cost": null
+  },
+  "verify": [
+    "Compare recorded wait totals and execution time for equivalent useful work, parameters and load after the change."
+  ],
+  "caveats": []
+}
+=== mssql-demo.report.json lock-time:138
+{
+  "confidence": "high",
+  "summary": "At least 2 min of lock waits were recorded over the last 5 hours. Accumulated waits can overlap across workers and do not identify the lock resource or blocker.",
+  "metrics": [
+    {
+      "label": "Recorded lock waits",
+      "value": "2 min"
+    },
+    {
+      "label": "Recorded lock waits per execution",
+      "value": "28.7 s"
+    }
+  ],
+  "queries": [
+    {
+      "stats": "34% of database time · 4 runs over the last 5 hours · 28.7 s on average",
+      "sql": "UPDATE [shop].[orders] set [status] = [status]  WHERE [id]=@1",
+      "plan": null,
+      "note": null
+    }
+  ],
+  "fix": {
+    "summary": "It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Identify the lock resource, mode and blocking request before choosing a change. Then inspect transaction duration, access paths and locking requirements; these totals alone do not establish which change will help.",
+    "sql": null,
+    "cost": null
+  },
+  "verify": [
+    "After identifying the cause and applying a justified change, compare recorded lock waits and execution time under equivalent useful work, parameters and load."
+  ],
+  "caveats": [
+    "Wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown."
+  ]
+}
+=== mssql-demo.report.json lock-time:143
+{
+  "confidence": "high",
+  "summary": "At least 1 min of lock waits were recorded over the last 5 hours. Accumulated waits can overlap across workers and do not identify the lock resource or blocker.",
+  "metrics": [
+    {
+      "label": "Recorded lock waits",
+      "value": "1 min"
+    },
+    {
+      "label": "Recorded lock waits per execution",
+      "value": "23.9 s"
+    }
+  ],
+  "queries": [
+    {
+      "stats": "21% of database time · 3 runs over the last 5 hours · 23.9 s on average",
+      "sql": "SELECT [status] FROM [shop].[orders] WHERE [id]=@1",
+      "plan": null,
+      "note": null
+    }
+  ],
+  "fix": {
+    "summary": "It ran 3 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Row versioning is a candidate because this read recorded lock waits while READ_COMMITTED_SNAPSHOT is off. It can avoid read-committed data-lock waits, but not schema locks or explicit locking. Confirm the lock resource and the application's isolation requirements before changing this setting.",
+    "sql": null,
+    "cost": null
+  },
+  "verify": [
+    "After identifying the cause and applying a justified change, compare recorded lock waits and execution time under equivalent useful work, parameters and load."
+  ],
+  "caveats": [
+    "Wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown."
   ]
 }
 === pg-demo.report.json temp-spill:9065391607317686058
@@ -341,18 +453,14 @@
 === mysql-demo.report.json lock-time:4167fe7f2c20deb7
 {
   "confidence": "high",
-  "summary": "The associated statements used 4 min of database time over the 2 minutes since statistics were reset (80%). Of its 2 min since its statistics began 2 minutes ago, 2 min went to waiting for locks other sessions held. That time belongs to the sessions holding the locks: making this statement faster won't help, shortening the transactions that hold the rows will. MySQL counts row-lock waits in a statement's lock time from 8.0.28; earlier versions count table locks only. An update of orders (query fc709554a9248878) waited on locks on shop.orders on Oct 11, 13:48–14:19 UTC too, 2 min (nearly all of its time): likely the same episode of blocking, behind the same holder or one another.",
+  "summary": "At least 2 min of lock waits were recorded over the 2 minutes since statistics were reset. Accumulated waits can overlap across workers and do not identify the lock resource or blocker.",
   "metrics": [
     {
-      "label": "Lock wait",
+      "label": "Recorded lock waits",
       "value": "2 min"
     },
     {
-      "label": "Share of its time",
-      "value": "100%"
-    },
-    {
-      "label": "Per run",
+      "label": "Recorded lock waits per execution",
       "value": "28.8 s"
     }
   ],
@@ -362,24 +470,19 @@
       "sql": "SELECT `id` FROM `orders` WHERE `id` = ? FOR UPDATE",
       "plan": null,
       "note": null
-    },
-    {
-      "stats": "40% of database time · 8 runs over the 2 minutes since statistics were reset · 14.4 s on average",
-      "sql": "UPDATE `orders` SET `id` = `id` WHERE `id` = ?",
-      "plan": null,
-      "note": "Waited 2 min (nearly all of its time) on locks on shop.orders in the same hours; the holder isn't recorded."
     }
   ],
   "fix": {
-    "summary": "Find what holds the locks while it waits (Live shows the blocking chain). Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere.",
+    "summary": "Find what holds the locks while it waits (Live shows the blocking chain). Identify the lock resource, mode and blocking request before choosing a change. Then inspect transaction duration, access paths and locking requirements; these totals alone do not establish which change will help.",
     "sql": null,
     "cost": null
   },
   "verify": [
-    "Between two scans, its lock time per run should drop: performance_schema keeps running totals, so compare its lock time and runs in a scan taken once the change is live and one a day or more later (2 min over 4 runs in this scan)."
+    "Compare two captures after the justified change using equivalent useful work, parameters and load. performance_schema keeps running totals, so compare compatible counter deltas and execution counts rather than lifetime totals (at least 2 min of recorded lock waits in this capture)."
   ],
   "caveats": [
-    "The statistics don't cover enough time (an hour or more from a known start) to say how many minutes of waiting a day this is, so it isn't raised on its share alone."
+    "The capture period does not establish a native wait rate over an hour or more, so this total is not raised on relative size alone.",
+    "Wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown."
   ]
 }
 === mysql-demo.report.json chatty-query:9b30e6ad79d940fe
@@ -445,6 +548,46 @@
   },
   "verify": [
     "Once the application's connections use the new limits, its on-disk temporary tables should stop growing while its runs go on: performance_schema keeps running totals, so compare its on-disk temporary tables and runs in a scan taken once the change is live and one a day or more later (20 in 20 runs in this scan)."
+  ],
+  "caveats": []
+}
+=== mysql-demo.report.json heavy-query:4167fe7f2c20deb7
+{
+  "confidence": "high",
+  "summary": "2 min of database time over the 2 minutes since statistics were reset (40%). It ran 4 times in 2 minutes at 28.8 s on average: 40% of all database time in the 2 minutes since statistics were reset. performance_schema recorded at least 2 min of waiting (Locks) for this statement.",
+  "metrics": [
+    {
+      "label": "Share of DB time",
+      "value": "40%"
+    },
+    {
+      "label": "Average duration",
+      "value": "28.8 s"
+    },
+    {
+      "label": "Rows examined per run",
+      "value": "1"
+    },
+    {
+      "label": "Rows returned per run",
+      "value": "1"
+    }
+  ],
+  "queries": [
+    {
+      "stats": "40% of database time · 4 runs over the 2 minutes since statistics were reset · 28.8 s on average",
+      "sql": "SELECT `id` FROM `orders` WHERE `id` = ? FOR UPDATE",
+      "plan": null,
+      "note": null
+    }
+  ],
+  "fix": {
+    "summary": "Find what holds the locks while it waits (Live shows the blocking chain). After identifying the holder and lock resource, inspect transaction duration and access paths; shorter transactions, an index or a rewrite may reduce contention.",
+    "sql": null,
+    "cost": null
+  },
+  "verify": [
+    "performance_schema keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there recorded wait totals and execution time should improve under equivalent useful work, parameters and load. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running."
   ],
   "caveats": []
 }

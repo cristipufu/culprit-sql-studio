@@ -1163,6 +1163,10 @@ fn mysql_performance_schema_says_what_is_missing() {
     all.extend(only(&s, "config:performance_schema"));
     s.workload.as_mut().unwrap().kind = Some(culprit_core::WorkloadKind::SlowLog);
     all.extend(only(&s, "config:performance_schema"));
+    let retained = all.last().expect("retained log coverage remains available");
+    assert_eq!(retained.severity, culprit_core::Severity::Medium);
+    assert!(retained.summary.contains("using retained slow-log runs"));
+    assert!(retained.summary.contains("does not establish complete statement or wait statistics"));
     pin(
         "config_mysql_performance_schema",
         &all,
@@ -1204,7 +1208,7 @@ verify: Re-scan after the server has restarted with the change: this finding is 
 
 id: config:performance_schema · Medium · High · score 17.6 · share None
 title: performance_schema is off
-summary: Culprit reads the slow query log, so statements slower than long_query_time are covered. Without performance_schema, MySQL keeps no statistics for faster statements and no wait statistics.
+summary: Culprit analyzes MySQL using retained slow-log runs. Logging thresholds, filters and retention can limit coverage; this source does not establish complete statement or wait statistics.
 impact: Setting
 fix: Turn it on (it can't be changed at runtime). Set it in the server configuration (my.cnf) and restart.
 sql: -- In the server configuration (my.cnf), then restart:

@@ -125,7 +125,7 @@ fn where_the_change_is(
              pool options)."
                 .into(),
         );
-    } else if let Some(waited) = waited_rather_than_worked(s, finding, app).filter(|_| !app.is_empty()) {
+    } else if let Some(waited) = wait_investigation(s, finding, app).filter(|_| !app.is_empty()) {
         said.push(waited.sentence(s, app));
     } else if sql.fallback {
         said.push(format!(
@@ -690,13 +690,13 @@ fn advises_no_change(finding: &Finding) -> bool {
     finding.facts.advice.disposition == AdviceDisposition::NoChange || finding.facts.nothing_to_check.is_some()
 }
 
-/// Where a finding's time went when it wasn't work, with a fix that changes no statement.
+/// The investigation supported by a finding whose current fix has no application SQL edit.
 #[derive(Clone, Copy)]
 enum Waited {
     /// Run-time spread with no SQL to run: the slow runs may have waited (for a lock, another transaction, storage)
     /// rather than done more work.
     SlowRuns,
-    /// A statement whose time is waiting for locks other transactions hold.
+    /// A recorded lock total, without assigning a holder or excluding other query work.
     Locks,
     /// A statement whose time is waiting for an application lock (GET_LOCK, pg_advisory_lock, sp_getapplock).
     AppLock,
@@ -704,10 +704,8 @@ enum Waited {
     Sleep,
 }
 
-/// How the finding's statements spent the time its fix is about when it wasn't work, where the fix changes no
-/// statement: the slow runs of unstable-query and parameter-sensitive, and a heavy query that waited for locks, for an
-/// application lock or on a pause of its own (`queries::idle_kind`, the way heavy-query read it).
-fn waited_rather_than_worked(s: &Snapshot, finding: &Finding, app: &[&QueryStat]) -> Option<Waited> {
+/// Route recorded or candidate waits to evidence gathering before proposing an application edit.
+fn wait_investigation(s: &Snapshot, finding: &Finding, app: &[&QueryStat]) -> Option<Waited> {
     finding.fix.as_ref()?;
     let sql = FixSql::read(finding, s.server.engine);
     if sql.upkeep || sql.schema || sql.plan_pin || sql.local || sql.other || sql.in_the_application {
@@ -715,7 +713,7 @@ fn waited_rather_than_worked(s: &Snapshot, finding: &Finding, app: &[&QueryStat]
     }
     match finding.check.as_str() {
         "unstable-query" | "parameter-sensitive" => Some(Waited::SlowRuns),
-        // Its time is waiting on locks other transactions hold: the fix says making it faster won't help.
+        // A lock total establishes waiting, not its resource, holder or exclusive cause.
         "lock-time" => Some(Waited::Locks),
         "heavy-query" => match crate::queries::idle_kind(s, app.first()?)? {
             IdleKind::Locks => Some(Waited::Locks),
@@ -749,12 +747,12 @@ impl Waited {
                     }
                 )
             }
-            Waited::Locks => format!(
-                "The fix changes no statement: the finding reads its time as waiting for locks other transactions hold \
-                 (the summary says how sure it is), not as work, so no rewrite or index of it shortens it. Find the \
-                 code that changes or locks rows of {} inside a transaction, and {short}.",
-                written_tables(s, app)
-            ),
+            Waited::Locks => "The finding records lock waiting without identifying its resource or holder, or proving \
+                 that waiting explains every slow call. Capture the native lock resource, blocked request and blocking \
+                 transaction before assigning a cause. Trace the holder's SQL to application code; shorten its \
+                 transaction if it holds data locks across slow work, or test a narrower access path if its plan locks \
+                 excess rows. Keep investigating the waiting query's own work as the evidence requires."
+                .into(),
             Waited::AppLock => "The fix changes no statement: its time is waiting for an application lock another \
                  session holds, not work. Find the code that takes the same lock and shorten the work it does while it \
                  holds it, or have this statement take the lock without waiting (a try-lock or a lock timeout) and retry \

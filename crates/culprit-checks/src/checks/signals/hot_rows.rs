@@ -234,7 +234,14 @@ fn hot_rows_finding(_: &Snapshot, hot: ContendedTable<'_>) -> Finding {
         summary.push(t!("check.hot_rows.summary.no_earlier"));
     }
     f.summary = summary.join(" ");
+    // Query-level lock totals and a table reference do not identify the lock resource or its owner. These links
+    // are investigation context; the index's own counters establish the finding independently of those queries.
+    f.facts.workload_dependency = Some(culprit_core::WorkloadDependency::Independent);
     f.queries = query_refs(&hot.locked);
+    for (reference, query) in f.queries.iter_mut().zip(&hot.locked) {
+        reference.note =
+            Some(t!("check.hot_rows.query_context", time = format::duration(lock_ms(query)), table = &table));
+    }
     f.severity = hot.severity;
     severity_score(&mut f);
     f.actionability = hot.actionability;
@@ -263,11 +270,7 @@ fn hot_rows_finding(_: &Snapshot, hot: ContendedTable<'_>) -> Finding {
     f.fix = Some(if !f.is_actionable() {
         Fix { summary: t!("check.hot_rows.fix.no_change"), sql: None, cost: None }
     } else if hot.rcsi_off {
-        Fix {
-            summary: t!("check.hot_rows.fix.short_transactions_rcsi", table = &table),
-            sql: Some("-- Readers stop waiting for writers; test first\nALTER DATABASE CURRENT SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;".into()),
-            cost: None,
-        }
+        Fix { summary: t!("check.hot_rows.fix.short_transactions_rcsi", table = &table), sql: None, cost: None }
     } else {
         Fix { summary: t!("check.hot_rows.fix.short_transactions", table = &table), sql: None, cost: None }
     });

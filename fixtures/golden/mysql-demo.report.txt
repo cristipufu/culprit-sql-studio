@@ -1,7 +1,7 @@
 reading: MySQL 8.4.11 · database shop · scanned 2026-10-11T12:09:00Z
-headline: 10 opportunities. The top ones touch 4 min of database time over the 2 minutes since statistics were reset (85%).
-top share: 85%
-findings: 10
+headline: 13 opportunities. The top ones touch 4 min of database time over the 2 minutes since statistics were reset (84%).
+top share: 84%
+findings: 13
 
 === finding failing-query:4515abd524a46f37
 Needs attention · high severity · high confidence · queries
@@ -70,38 +70,36 @@ brief:
 
     The fix's query only reads: run it against the database and act on what it shows, the way the fix says; it changes nothing by itself. After any change is live, run `culprit scan mysql-demo` and check `failing-query:4515abd524a46f37` the way *How to verify* says.
 
-=== finding lock-time:4167fe7f2c20deb7
-Optional improvement · low severity · high confidence · queries
-title: A read from orders spends nearly all its time waiting on locks, 28.8 s per run
-summary: The associated statements used 4 min of database time over the 2 minutes since statistics were reset (80%). Of its 2 min since its statistics began 2 minutes ago, 2 min went to waiting for locks other sessions held. That time belongs to the sessions holding the locks: making this statement faster won't help, shortening the transactions that hold the rows will. MySQL counts row-lock waits in a statement's lock time from 8.0.28; earlier versions count table locks only. An update of orders (query fc709554a9248878) waited on locks on shop.orders on Oct 11, 13:48–14:19 UTC too, 2 min (nearly all of its time): likely the same episode of blocking, behind the same holder or one another.
-impact: 4 min waiting on locks · 80.2% of database time
+=== finding heavy-query:4167fe7f2c20deb7
+Needs attention · medium severity · high confidence · queries
+title: A read from orders takes 2 min of database time over the 2 minutes since statistics were reset (40%), with at least 2 min of recorded waiting (Locks)
+summary: 2 min of database time over the 2 minutes since statistics were reset (40%). It ran 4 times in 2 minutes at 28.8 s on average: 40% of all database time in the 2 minutes since statistics were reset. performance_schema recorded at least 2 min of waiting (Locks) for this statement.
+impact: 2 min of database time over the 2 minutes since statistics were reset (40%) · 40.1% of database time
 metrics:
-  - Lock wait: 2 min
-  - Share of its time: 100%
-  - Per run: 28.8 s
-fix: Find what holds the locks while it waits (Live shows the blocking chain). Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere.
+  - Share of DB time: 40%
+  - Average duration: 28.8 s
+  - Rows examined per run: 1
+  - Rows returned per run: 1
+fix: Find what holds the locks while it waits (Live shows the blocking chain). After identifying the holder and lock resource, inspect transaction duration and access paths; shorter transactions, an index or a rewrite may reduce contention.
 verify:
-  1. Between two scans, its lock time per run should drop: performance_schema keeps running totals, so compare its lock time and runs in a scan taken once the change is live and one a day or more later (2 min over 4 runs in this scan).
-caveats:
-  - The statistics don't cover enough time (an hour or more from a known start) to say how many minutes of waiting a day this is, so it isn't raised on its share alone.
+  1. performance_schema keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there recorded wait totals and execution time should improve under equivalent useful work, parameters and load. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running.
 queries:
   - 4167fe7f2c20deb7: 40% of database time
-  - fc709554a9248878: 40% of database time
-    note: Waited 2 min (nearly all of its time) on locks on shop.orders in the same hours; the holder isn't recorded.
 brief:
-    # A read from orders spends nearly all its time waiting on locks, 28.8 s per run
+    # A read from orders takes 2 min of database time over the 2 minutes since statistics were reset (40%), with at least 2 min of recorded waiting (Locks)
 
-    Database: **mysql-demo** (MySQL 8.4.11, database `shop`, local environment). Finding `lock-time:4167fe7f2c20deb7`: Optional improvement, low impact, high confidence. Scanned 2026-10-11T12:09:00Z.
+    Database: **mysql-demo** (MySQL 8.4.11, database `shop`, local environment). Finding `heavy-query:4167fe7f2c20deb7`: Needs attention, medium impact, high confidence. Scanned 2026-10-11T12:09:00Z.
 
     ## What's happening
 
-    The associated statements used 4 min of database time over the 2 minutes since statistics were reset (80%). Of its 2 min since its statistics began 2 minutes ago, 2 min went to waiting for locks other sessions held. That time belongs to the sessions holding the locks: making this statement faster won't help, shortening the transactions that hold the rows will. MySQL counts row-lock waits in a statement's lock time from 8.0.28; earlier versions count table locks only. An update of orders (query fc709554a9248878) waited on locks on shop.orders on Oct 11, 13:48–14:19 UTC too, 2 min (nearly all of its time): likely the same episode of blocking, behind the same holder or one another.
+    2 min of database time over the 2 minutes since statistics were reset (40%). It ran 4 times in 2 minutes at 28.8 s on average: 40% of all database time in the 2 minutes since statistics were reset. performance_schema recorded at least 2 min of waiting (Locks) for this statement.
 
     ## Evidence
 
-    - Lock wait: 2 min
-    - Share of its time: 100%
-    - Per run: 28.8 s
+    - Share of DB time: 40%
+    - Average duration: 28.8 s
+    - Rows examined per run: 1
+    - Rows returned per run: 1
 
     ## Queries involved
 
@@ -111,6 +109,49 @@ brief:
     SELECT `id` FROM `orders` WHERE `id` = ? FOR UPDATE
     ```
 
+    ## Suggested fix
+
+    Find what holds the locks while it waits (Live shows the blocking chain). After identifying the holder and lock resource, inspect transaction duration and access paths; shorter transactions, an index or a rewrite may reduce contention.
+
+    ## How to verify
+
+    - performance_schema keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes mysql-demo --since <ship time>`): there recorded wait totals and execution time should improve under equivalent useful work, parameters and load. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running.
+
+    ## What to do in the codebase
+
+    The finding records lock waiting without identifying its resource or holder, or proving that waiting explains every slow call. Capture the native lock resource, blocked request and blocking transaction before assigning a cause. Trace the holder's SQL to application code; shorten its transaction if it holds data locks across slow work, or test a narrower access path if its plan locks excess rows. Keep investigating the waiting query's own work as the evidence requires. After any change is live, run `culprit scan mysql-demo` and check `heavy-query:4167fe7f2c20deb7` the way *How to verify* says.
+
+=== finding heavy-query:fc709554a9248878
+Needs attention · medium severity · high confidence · queries
+title: An update of orders takes 2 min of database time over the 2 minutes since statistics were reset (40%), with at least 2 min of recorded waiting (Locks)
+summary: 2 min of database time over the 2 minutes since statistics were reset (40%). It ran 8 times in 2 minutes at 14.4 s on average: 40% of all database time in the 2 minutes since statistics were reset. performance_schema recorded at least 2 min of waiting (Locks) for this statement.
+impact: 2 min of database time over the 2 minutes since statistics were reset (40%) · 40.1% of database time
+metrics:
+  - Share of DB time: 40%
+  - Average duration: 14.4 s
+  - Rows examined per run: 0.9
+fix: Find what holds the locks while it waits (Live shows the blocking chain). After identifying the holder and lock resource, inspect transaction duration and access paths; shorter transactions, an index or a rewrite may reduce contention.
+verify:
+  1. performance_schema keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there recorded wait totals and execution time should improve under equivalent useful work, parameters and load. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running.
+queries:
+  - fc709554a9248878: 40% of database time
+brief:
+    # An update of orders takes 2 min of database time over the 2 minutes since statistics were reset (40%), with at least 2 min of recorded waiting (Locks)
+
+    Database: **mysql-demo** (MySQL 8.4.11, database `shop`, local environment). Finding `heavy-query:fc709554a9248878`: Needs attention, medium impact, high confidence. Scanned 2026-10-11T12:09:00Z.
+
+    ## What's happening
+
+    2 min of database time over the 2 minutes since statistics were reset (40%). It ran 8 times in 2 minutes at 14.4 s on average: 40% of all database time in the 2 minutes since statistics were reset. performance_schema recorded at least 2 min of waiting (Locks) for this statement.
+
+    ## Evidence
+
+    - Share of DB time: 40%
+    - Average duration: 14.4 s
+    - Rows examined per run: 0.9
+
+    ## Queries involved
+
     Query `fc709554a9248878` — 40% of DB time, 8 runs over the 2 minutes since statistics were reset, 14.4 s average:
 
     ```sql
@@ -119,19 +160,125 @@ brief:
 
     ## Suggested fix
 
-    Find what holds the locks while it waits (Live shows the blocking chain). Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere.
+    Find what holds the locks while it waits (Live shows the blocking chain). After identifying the holder and lock resource, inspect transaction duration and access paths; shorter transactions, an index or a rewrite may reduce contention.
 
     ## How to verify
 
-    - Between two scans, its lock time per run should drop: performance_schema keeps running totals, so compare its lock time and runs in a scan taken once the change is live and one a day or more later (2 min over 4 runs in this scan).
-
-    ## Caveats
-
-    - The statistics don't cover enough time (an hour or more from a known start) to say how many minutes of waiting a day this is, so it isn't raised on its share alone.
+    - performance_schema keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes mysql-demo --since <ship time>`): there recorded wait totals and execution time should improve under equivalent useful work, parameters and load. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running.
 
     ## What to do in the codebase
 
-    The fix changes no statement: the finding reads its time as waiting for locks other transactions hold (the summary says how sure it is), not as work, so no rewrite or index of it shortens it. Find the code that changes or locks rows of `orders` inside a transaction, and keep those transactions short: commit right after the write, with no network calls or other slow work before the commit. After any change is live, run `culprit scan mysql-demo` and check `lock-time:4167fe7f2c20deb7` the way *How to verify* says.
+    The finding records lock waiting without identifying its resource or holder, or proving that waiting explains every slow call. Capture the native lock resource, blocked request and blocking transaction before assigning a cause. Trace the holder's SQL to application code; shorten its transaction if it holds data locks across slow work, or test a narrower access path if its plan locks excess rows. Keep investigating the waiting query's own work as the evidence requires. After any change is live, run `culprit scan mysql-demo` and check `heavy-query:fc709554a9248878` the way *How to verify* says.
+
+=== finding lock-time:4167fe7f2c20deb7
+Optional improvement · low severity · high confidence · queries
+title: A read from orders has at least 2 min of recorded lock waits
+summary: At least 2 min of lock waits were recorded over the 2 minutes since statistics were reset. Accumulated waits can overlap across workers and do not identify the lock resource or blocker.
+impact: Recorded lock waits: 2 min
+metrics:
+  - Recorded lock waits: 2 min
+  - Recorded lock waits per execution: 28.8 s
+fix: Find what holds the locks while it waits (Live shows the blocking chain). Identify the lock resource, mode and blocking request before choosing a change. Then inspect transaction duration, access paths and locking requirements; these totals alone do not establish which change will help.
+verify:
+  1. Compare two captures after the justified change using equivalent useful work, parameters and load. performance_schema keeps running totals, so compare compatible counter deltas and execution counts rather than lifetime totals (at least 2 min of recorded lock waits in this capture).
+caveats:
+  - The capture period does not establish a native wait rate over an hour or more, so this total is not raised on relative size alone.
+  - Wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown.
+queries:
+  - 4167fe7f2c20deb7: 40% of database time
+brief:
+    # A read from orders has at least 2 min of recorded lock waits
+
+    Database: **mysql-demo** (MySQL 8.4.11, database `shop`, local environment). Finding `lock-time:4167fe7f2c20deb7`: Optional improvement, low impact, high confidence. Scanned 2026-10-11T12:09:00Z.
+
+    ## What's happening
+
+    At least 2 min of lock waits were recorded over the 2 minutes since statistics were reset. Accumulated waits can overlap across workers and do not identify the lock resource or blocker.
+
+    ## Evidence
+
+    - Recorded lock waits: 2 min
+    - Recorded lock waits per execution: 28.8 s
+
+    ## Queries involved
+
+    Query `4167fe7f2c20deb7` — 40% of DB time, 4 runs over the 2 minutes since statistics were reset, 28.8 s average:
+
+    ```sql
+    SELECT `id` FROM `orders` WHERE `id` = ? FOR UPDATE
+    ```
+
+    ## Suggested fix
+
+    Find what holds the locks while it waits (Live shows the blocking chain). Identify the lock resource, mode and blocking request before choosing a change. Then inspect transaction duration, access paths and locking requirements; these totals alone do not establish which change will help.
+
+    ## How to verify
+
+    - Compare two captures after the justified change using equivalent useful work, parameters and load. performance_schema keeps running totals, so compare compatible counter deltas and execution counts rather than lifetime totals (at least 2 min of recorded lock waits in this capture).
+
+    ## Caveats
+
+    - The capture period does not establish a native wait rate over an hour or more, so this total is not raised on relative size alone.
+    - Wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown.
+
+    ## What to do in the codebase
+
+    The finding records lock waiting without identifying its resource or holder, or proving that waiting explains every slow call. Capture the native lock resource, blocked request and blocking transaction before assigning a cause. Trace the holder's SQL to application code; shorten its transaction if it holds data locks across slow work, or test a narrower access path if its plan locks excess rows. Keep investigating the waiting query's own work as the evidence requires. After any change is live, run `culprit scan mysql-demo` and check `lock-time:4167fe7f2c20deb7` the way *How to verify* says.
+
+=== finding lock-time:fc709554a9248878
+Optional improvement · low severity · high confidence · queries
+title: An update of orders has at least 2 min of recorded lock waits
+summary: At least 2 min of lock waits were recorded over the 2 minutes since statistics were reset. Accumulated waits can overlap across workers and do not identify the lock resource or blocker.
+impact: Recorded lock waits: 2 min
+metrics:
+  - Recorded lock waits: 2 min
+  - Recorded lock waits per execution: 14.4 s
+fix: Find what holds the locks while it waits (Live shows the blocking chain). Identify the lock resource, mode and blocking request before choosing a change. Then inspect transaction duration, access paths and locking requirements; these totals alone do not establish which change will help.
+verify:
+  1. Compare two captures after the justified change using equivalent useful work, parameters and load. performance_schema keeps running totals, so compare compatible counter deltas and execution counts rather than lifetime totals (at least 2 min of recorded lock waits in this capture).
+caveats:
+  - The capture period does not establish a native wait rate over an hour or more, so this total is not raised on relative size alone.
+  - Wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown.
+queries:
+  - fc709554a9248878: 40% of database time
+brief:
+    # An update of orders has at least 2 min of recorded lock waits
+
+    Database: **mysql-demo** (MySQL 8.4.11, database `shop`, local environment). Finding `lock-time:fc709554a9248878`: Optional improvement, low impact, high confidence. Scanned 2026-10-11T12:09:00Z.
+
+    ## What's happening
+
+    At least 2 min of lock waits were recorded over the 2 minutes since statistics were reset. Accumulated waits can overlap across workers and do not identify the lock resource or blocker.
+
+    ## Evidence
+
+    - Recorded lock waits: 2 min
+    - Recorded lock waits per execution: 14.4 s
+
+    ## Queries involved
+
+    Query `fc709554a9248878` — 40% of DB time, 8 runs over the 2 minutes since statistics were reset, 14.4 s average:
+
+    ```sql
+    UPDATE `orders` SET `id` = `id` WHERE `id` = ?
+    ```
+
+    ## Suggested fix
+
+    Find what holds the locks while it waits (Live shows the blocking chain). Identify the lock resource, mode and blocking request before choosing a change. Then inspect transaction duration, access paths and locking requirements; these totals alone do not establish which change will help.
+
+    ## How to verify
+
+    - Compare two captures after the justified change using equivalent useful work, parameters and load. performance_schema keeps running totals, so compare compatible counter deltas and execution counts rather than lifetime totals (at least 2 min of recorded lock waits in this capture).
+
+    ## Caveats
+
+    - The capture period does not establish a native wait rate over an hour or more, so this total is not raised on relative size alone.
+    - Wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown.
+
+    ## What to do in the codebase
+
+    The finding records lock waiting without identifying its resource or holder, or proving that waiting explains every slow call. Capture the native lock resource, blocked request and blocking transaction before assigning a cause. Trace the holder's SQL to application code; shorten its transaction if it holds data locks across slow work, or test a narrower access path if its plan locks excess rows. Keep investigating the waiting query's own work as the evidence requires. After any change is live, run `culprit scan mysql-demo` and check `lock-time:fc709554a9248878` the way *How to verify* says.
 
 === finding chatty-query:9b30e6ad79d940fe
 Optional improvement · low severity · medium confidence · queries

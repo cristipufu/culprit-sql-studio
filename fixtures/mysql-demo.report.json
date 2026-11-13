@@ -61,7 +61,7 @@
     {
       "check": "heavy-query",
       "reason": null,
-      "status": "assessed",
+      "status": "findings",
       "title": "Queries that dominate database time"
     },
     {
@@ -155,6 +155,12 @@
       "title": "A long open transaction holds cleanup back"
     },
     {
+      "check": "network-wait",
+      "reason": "This scan did not record the measurements this check needs.",
+      "status": "insufficient-evidence",
+      "title": "Queries with recorded network waits"
+    },
+    {
       "check": "row-lock-waits",
       "reason": "This pressure measurement's scope or observation period does not support a health assessment.",
       "status": "findings",
@@ -200,7 +206,7 @@
       "check": "lock-time",
       "reason": "This scan did not record the measurements this check needs.",
       "status": "findings",
-      "title": "Queries that spend their time waiting for locks"
+      "title": "Queries with material recorded lock waits"
     },
     {
       "assessed_queries": [
@@ -270,7 +276,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -339,10 +344,179 @@
       ]
     },
     {
+      "actionability": "needs-attention",
+      "category": "queries",
+      "caveats": [],
+      "check": "heavy-query",
+      "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": true,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
+      "fix": {
+        "cost": null,
+        "sql": null,
+        "summary": "Find what holds the locks while it waits (Live shows the blocking chain). After identifying the holder and lock resource, inspect transaction duration and access paths; shorter transactions, an index or a rewrite may reduce contention."
+      },
+      "id": "heavy-query:4167fe7f2c20deb7",
+      "impact": {
+        "db_time_share": 0.40090612964473693,
+        "label": "2 min of database time over the 2 minutes since statistics were reset (40%)",
+        "label_key": "support.impact.share",
+        "score": 63.31714851797552,
+        "time_ms_per_day": null
+      },
+      "inactive": false,
+      "last_seen": "2026-10-11T16:00:37Z",
+      "metrics": [
+        {
+          "label": "Share of DB time",
+          "text": null,
+          "unit": "ratio",
+          "value": 0.40090612964473693
+        },
+        {
+          "key": "common.metric.average_duration",
+          "label": "Average duration",
+          "text": null,
+          "unit": "ms",
+          "value": 28825.12072125
+        },
+        {
+          "label": "Rows examined per run",
+          "text": null,
+          "unit": "rows",
+          "value": 1.0
+        },
+        {
+          "label": "Rows returned per run",
+          "text": null,
+          "unit": "rows",
+          "value": 1.0
+        }
+      ],
+      "queries": [
+        {
+          "id": "4167fe7f2c20deb7",
+          "note": null,
+          "plan_node": null
+        }
+      ],
+      "severity": "medium",
+      "subject": {
+        "kind": "query",
+        "name": "4167fe7f2c20deb7"
+      },
+      "summary": "2 min of database time over the 2 minutes since statistics were reset (40%). It ran 4 times in 2 minutes at 28.8 s on average: 40% of all database time in the 2 minutes since statistics were reset. performance_schema recorded at least 2 min of waiting (Locks) for this statement.",
+      "title": "A read from orders takes 2 min of database time over the 2 minutes since statistics were reset (40%), with at least 2 min of recorded waiting (Locks)",
+      "verification_basis": "rescan",
+      "verify": [
+        "performance_schema keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there recorded wait totals and execution time should improve under equivalent useful work, parameters and load. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running."
+      ]
+    },
+    {
+      "actionability": "needs-attention",
+      "category": "queries",
+      "caveats": [],
+      "check": "heavy-query",
+      "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": true,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
+      "fix": {
+        "cost": null,
+        "sql": null,
+        "summary": "Find what holds the locks while it waits (Live shows the blocking chain). After identifying the holder and lock resource, inspect transaction duration and access paths; shorter transactions, an index or a rewrite may reduce contention."
+      },
+      "id": "heavy-query:fc709554a9248878",
+      "impact": {
+        "db_time_share": 0.4009056543313076,
+        "label": "2 min of database time over the 2 minutes since statistics were reset (40%)",
+        "label_key": "support.impact.share",
+        "score": 63.317110983628076,
+        "time_ms_per_day": null
+      },
+      "inactive": false,
+      "last_seen": "2026-10-11T14:19:09Z",
+      "metrics": [
+        {
+          "label": "Share of DB time",
+          "text": null,
+          "unit": "ratio",
+          "value": 0.4009056543313076
+        },
+        {
+          "key": "common.metric.average_duration",
+          "label": "Average duration",
+          "text": null,
+          "unit": "ms",
+          "value": 14412.543273125
+        },
+        {
+          "label": "Rows examined per run",
+          "text": null,
+          "unit": "rows",
+          "value": 0.875
+        }
+      ],
+      "queries": [
+        {
+          "id": "fc709554a9248878",
+          "note": null,
+          "plan_node": null
+        }
+      ],
+      "severity": "medium",
+      "subject": {
+        "kind": "query",
+        "name": "fc709554a9248878"
+      },
+      "summary": "2 min of database time over the 2 minutes since statistics were reset (40%). It ran 8 times in 2 minutes at 14.4 s on average: 40% of all database time in the 2 minutes since statistics were reset. performance_schema recorded at least 2 min of waiting (Locks) for this statement.",
+      "title": "An update of orders takes 2 min of database time over the 2 minutes since statistics were reset (40%), with at least 2 min of recorded waiting (Locks)",
+      "verification_basis": "rescan",
+      "verify": [
+        "performance_schema keeps running totals, so a later scan's runs, share and averages for this query still hold every run from before the change. Scan when the change ships and again a day or more later, then compare the two in What changed, with Since at the ship time (`culprit changes <connection> --since <ship time>`): there recorded wait totals and execution time should improve under equivalent useful work, parameters and load. A rewritten statement is a new entry with an id of its own, and this one then shows as stopped running."
+      ]
+    },
+    {
       "actionability": "optional-improvement",
       "category": "queries",
       "caveats": [
-        "The statistics don't cover enough time (an hour or more from a known start) to say how many minutes of waiting a day this is, so it isn't raised on its share alone."
+        "The capture period does not establish a native wait rate over an hour or more, so this total is not raised on relative size alone.",
+        "Wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown."
       ],
       "check": "lock-time",
       "confidence": "high",
@@ -362,11 +536,9 @@
         "large_rows": null,
         "lock_wait": {
           "ms": 115298.819,
-          "share": 0.9999855691410966,
           "versioning_candidate": false
         },
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -374,13 +546,13 @@
       "fix": {
         "cost": null,
         "sql": null,
-        "summary": "Find what holds the locks while it waits (Live shows the blocking chain). Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere."
+        "summary": "Find what holds the locks while it waits (Live shows the blocking chain). Identify the lock resource, mode and blocking request before choosing a change. Then inspect transaction duration, access paths and locking requirements; these totals alone do not establish which change will help."
       },
       "id": "lock-time:4167fe7f2c20deb7",
       "impact": {
-        "db_time_share": 0.8018117839760446,
-        "label": "4 min waiting on locks",
-        "score": 89.54394362412484,
+        "db_time_share": null,
+        "label": "Recorded lock waits: 2 min",
+        "score": 63.316691655909075,
         "time_ms_per_day": null
       },
       "inactive": false,
@@ -388,21 +560,14 @@
       "metrics": [
         {
           "key": "check.lock_time.metric.lock_wait",
-          "label": "Lock wait",
+          "label": "Recorded lock waits",
           "text": null,
           "unit": "ms",
           "value": 115298.819
         },
         {
-          "key": "check.lock_time.metric.share",
-          "label": "Share of its time",
-          "text": null,
-          "unit": "ratio",
-          "value": 0.9999855691410966
-        },
-        {
           "key": "check.lock_time.metric.per_run",
-          "label": "Per run",
+          "label": "Recorded lock waits per execution",
           "text": null,
           "unit": "ms",
           "value": 28824.70475
@@ -413,11 +578,6 @@
           "id": "4167fe7f2c20deb7",
           "note": null,
           "plan_node": null
-        },
-        {
-          "id": "fc709554a9248878",
-          "note": "Waited 2 min (nearly all of its time) on locks on shop.orders in the same hours; the holder isn't recorded.",
-          "plan_node": null
         }
       ],
       "severity": "low",
@@ -425,11 +585,92 @@
         "kind": "query",
         "name": "4167fe7f2c20deb7"
       },
-      "summary": "The associated statements used 4 min of database time over the 2 minutes since statistics were reset (80%). Of its 2 min since its statistics began 2 minutes ago, 2 min went to waiting for locks other sessions held. That time belongs to the sessions holding the locks: making this statement faster won't help, shortening the transactions that hold the rows will. MySQL counts row-lock waits in a statement's lock time from 8.0.28; earlier versions count table locks only. An update of orders (query fc709554a9248878) waited on locks on shop.orders on Oct 11, 13:48–14:19 UTC too, 2 min (nearly all of its time): likely the same episode of blocking, behind the same holder or one another.",
-      "title": "A read from orders spends nearly all its time waiting on locks, 28.8 s per run",
+      "summary": "At least 2 min of lock waits were recorded over the 2 minutes since statistics were reset. Accumulated waits can overlap across workers and do not identify the lock resource or blocker.",
+      "title": "A read from orders has at least 2 min of recorded lock waits",
       "verification_basis": "rescan",
       "verify": [
-        "Between two scans, its lock time per run should drop: performance_schema keeps running totals, so compare its lock time and runs in a scan taken once the change is live and one a day or more later (2 min over 4 runs in this scan)."
+        "Compare two captures after the justified change using equivalent useful work, parameters and load. performance_schema keeps running totals, so compare compatible counter deltas and execution counts rather than lifetime totals (at least 2 min of recorded lock waits in this capture)."
+      ]
+    },
+    {
+      "actionability": "optional-improvement",
+      "category": "queries",
+      "caveats": [
+        "The capture period does not establish a native wait rate over an hour or more, so this total is not raised on relative size alone.",
+        "Wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown."
+      ],
+      "check": "lock-time",
+      "confidence": "high",
+      "facts": {
+        "advice": {
+          "application": "unspecified",
+          "diagnostic_cleanup": false,
+          "disappears_after_rescan": false,
+          "disposition": "change",
+          "running_totals_explained": true,
+          "statement_quote": null,
+          "upkeep_on_connection_close": false
+        },
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": {
+          "ms": 115296.687,
+          "versioning_candidate": false
+        },
+        "log_write": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
+      "fix": {
+        "cost": null,
+        "sql": null,
+        "summary": "Find what holds the locks while it waits (Live shows the blocking chain). Identify the lock resource, mode and blocking request before choosing a change. Then inspect transaction duration, access paths and locking requirements; these totals alone do not establish which change will help."
+      },
+      "id": "lock-time:fc709554a9248878",
+      "impact": {
+        "db_time_share": null,
+        "label": "Recorded lock waits: 2 min",
+        "score": 63.316106256111304,
+        "time_ms_per_day": null
+      },
+      "inactive": false,
+      "last_seen": "2026-10-11T14:19:09Z",
+      "metrics": [
+        {
+          "key": "check.lock_time.metric.lock_wait",
+          "label": "Recorded lock waits",
+          "text": null,
+          "unit": "ms",
+          "value": 115296.687
+        },
+        {
+          "key": "check.lock_time.metric.per_run",
+          "label": "Recorded lock waits per execution",
+          "text": null,
+          "unit": "ms",
+          "value": 14412.085875
+        }
+      ],
+      "queries": [
+        {
+          "id": "fc709554a9248878",
+          "note": null,
+          "plan_node": null
+        }
+      ],
+      "severity": "low",
+      "subject": {
+        "kind": "query",
+        "name": "fc709554a9248878"
+      },
+      "summary": "At least 2 min of lock waits were recorded over the 2 minutes since statistics were reset. Accumulated waits can overlap across workers and do not identify the lock resource or blocker.",
+      "title": "An update of orders has at least 2 min of recorded lock waits",
+      "verification_basis": "rescan",
+      "verify": [
+        "Compare two captures after the justified change using equivalent useful work, parameters and load. performance_schema keeps running totals, so compare compatible counter deltas and execution counts rather than lifetime totals (at least 2 min of recorded lock waits in this capture)."
       ]
     },
     {
@@ -456,7 +697,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -531,7 +771,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -609,7 +848,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null,
@@ -697,7 +935,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -761,7 +998,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -889,7 +1125,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -1084,7 +1319,6 @@
         "MySQL's possible keys named with their columns",
         "plan operators marked with their index's kind",
         "health counters graded only on the evidence",
-        "PostgreSQL's I/O time within its statement time",
         "MariaDB's lock time unknown where it counts the whole run",
         "a scan's filter judged by what its runs measured"
       ],
@@ -1103,12 +1337,9 @@
         "dead rows are the table's empty space",
         "updates that aren't HOT explain their WAL",
         "large values explain the log their writes make",
-        "one lock episode on a table",
-        "one blocking chain on a table",
         "the plan cache finding carries the compile load",
         "dead rows absorb the table's stale statistics",
         "a replication slot's finding carries the cleanup it holds back",
-        "waiting on the application explains a heavy query",
         "a heavy query another finding explains",
         "statements that stopped running",
         "nothing is created for statements that stopped",
@@ -1128,46 +1359,6 @@
     }
   },
   "refinement": [
-    {
-      "finding": "lock-time:fc709554a9248878",
-      "outcome": {
-        "into": "lock-time:4167fe7f2c20deb7",
-        "kind": "absorbed"
-      },
-      "queries": [
-        "fc709554a9248878"
-      ],
-      "rule": "one-lock-episode",
-      "tables": []
-    },
-    {
-      "finding": "heavy-query:4167fe7f2c20deb7",
-      "outcome": {
-        "by": [
-          "lock-time:4167fe7f2c20deb7"
-        ],
-        "kind": "covered"
-      },
-      "queries": [
-        "4167fe7f2c20deb7"
-      ],
-      "rule": "cause-covers-heavy-query",
-      "tables": []
-    },
-    {
-      "finding": "heavy-query:fc709554a9248878",
-      "outcome": {
-        "by": [
-          "lock-time:4167fe7f2c20deb7"
-        ],
-        "kind": "covered"
-      },
-      "queries": [
-        "fc709554a9248878"
-      ],
-      "rule": "cause-covers-heavy-query",
-      "tables": []
-    },
     {
       "finding": "heavy-query:04cd7be9c366fadc",
       "outcome": {
@@ -1190,6 +1381,30 @@
       },
       "queries": [
         "19bd4ff468839ea3"
+      ],
+      "rule": "stopped-running",
+      "tables": []
+    },
+    {
+      "finding": "heavy-query:4167fe7f2c20deb7",
+      "outcome": {
+        "kind": "last-execution",
+        "last_seen": "2026-10-11T16:00:37Z"
+      },
+      "queries": [
+        "4167fe7f2c20deb7"
+      ],
+      "rule": "stopped-running",
+      "tables": []
+    },
+    {
+      "finding": "heavy-query:fc709554a9248878",
+      "outcome": {
+        "kind": "last-execution",
+        "last_seen": "2026-10-11T14:19:09Z"
+      },
+      "queries": [
+        "fc709554a9248878"
       ],
       "rule": "stopped-running",
       "tables": []
@@ -1237,7 +1452,18 @@
         "last_seen": "2026-10-11T16:00:37Z"
       },
       "queries": [
-        "4167fe7f2c20deb7",
+        "4167fe7f2c20deb7"
+      ],
+      "rule": "stopped-running",
+      "tables": []
+    },
+    {
+      "finding": "lock-time:fc709554a9248878",
+      "outcome": {
+        "kind": "last-execution",
+        "last_seen": "2026-10-11T14:19:09Z"
+      },
+      "queries": [
         "fc709554a9248878"
       ],
       "rule": "stopped-running",
@@ -1263,6 +1489,30 @@
       },
       "queries": [
         "19bd4ff468839ea3"
+      ],
+      "rule": "absolute-query-cost",
+      "tables": []
+    },
+    {
+      "finding": "heavy-query:4167fe7f2c20deb7",
+      "outcome": {
+        "aspect": "absolute-cost",
+        "kind": "presentation"
+      },
+      "queries": [
+        "4167fe7f2c20deb7"
+      ],
+      "rule": "absolute-query-cost",
+      "tables": []
+    },
+    {
+      "finding": "heavy-query:fc709554a9248878",
+      "outcome": {
+        "aspect": "absolute-cost",
+        "kind": "presentation"
+      },
+      "queries": [
+        "fc709554a9248878"
       ],
       "rule": "absolute-query-cost",
       "tables": []
@@ -1299,19 +1549,6 @@
       },
       "queries": [
         "4515abd524a46f37"
-      ],
-      "rule": "absolute-query-cost",
-      "tables": []
-    },
-    {
-      "finding": "lock-time:4167fe7f2c20deb7",
-      "outcome": {
-        "aspect": "absolute-cost",
-        "kind": "presentation"
-      },
-      "queries": [
-        "4167fe7f2c20deb7",
-        "fc709554a9248878"
       ],
       "rule": "absolute-query-cost",
       "tables": []
@@ -6240,7 +6477,7 @@
       },
       {
         "category": "queries",
-        "count": 6
+        "count": 9
       },
       {
         "category": "configuration",
@@ -6253,7 +6490,11 @@
         "severity": "high"
       },
       {
-        "count": 9,
+        "count": 2,
+        "severity": "medium"
+      },
+      {
+        "count": 10,
         "severity": "low"
       }
     ],
@@ -6277,7 +6518,7 @@
         "table": "orders"
       }
     ],
-    "headline": "10 opportunities. The top ones touch 4 min of database time over the 2 minutes since statistics were reset (85%).",
+    "headline": "13 opportunities. The top ones touch 4 min of database time over the 2 minutes since statistics were reset (84%).",
     "headline_message": {
       "kind": "sequence",
       "messages": [
@@ -6285,11 +6526,11 @@
           "arguments": {
             "count": {
               "kind": "digits",
-              "value": "10"
+              "value": "13"
             },
             "n": {
               "kind": "number",
-              "value": 10.0
+              "value": 13.0
             }
           },
           "key": "summary.headline.opportunities",
@@ -6307,7 +6548,7 @@
                   },
                   "share": {
                     "kind": "percent",
-                    "value": 0.8473893165714874
+                    "value": 0.8436961809545049
                   },
                   "span": {
                     "kind": "message",
@@ -6328,7 +6569,7 @@
                   },
                   "time": {
                     "kind": "duration",
-                    "value": 243708.913802
+                    "value": 242646.769104
                   }
                 },
                 "key": "support.cost.time_over",
@@ -6386,10 +6627,10 @@
       }
     ],
     "no_workload": null,
-    "opportunities": 10,
+    "opportunities": 13,
     "over_scans": [],
     "runs_said": [],
-    "takeaway": "The top ones touch 4 min of database time over the 2 minutes since statistics were reset (85%).",
+    "takeaway": "The top ones touch 4 min of database time over the 2 minutes since statistics were reset (84%).",
     "takeaway_message": {
       "kind": "sequence",
       "messages": [
@@ -6405,7 +6646,7 @@
                   },
                   "share": {
                     "kind": "percent",
-                    "value": 0.8473893165714874
+                    "value": 0.8436961809545049
                   },
                   "span": {
                     "kind": "message",
@@ -6426,7 +6667,7 @@
                   },
                   "time": {
                     "kind": "duration",
-                    "value": 243708.913802
+                    "value": 242646.769104
                   }
                 },
                 "key": "support.cost.time_over",
@@ -6440,6 +6681,6 @@
       ],
       "separator": " "
     },
-    "top_share": 0.8473893165714874
+    "top_share": 0.8436961809545049
   }
 }

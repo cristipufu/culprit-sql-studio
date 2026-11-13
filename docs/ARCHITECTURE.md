@@ -332,6 +332,18 @@ their assessments and withhold executable fix SQL while preserving supported fin
 Native wait categories are interpreted through the bounded, authenticated vocabulary declared by the source.
 Unknown categories remain unknown, and workers, CPU, compilation and memory waits stay distinct.
 Current capture configuration does not qualify historical coverage or invalidate retained positive observations.
+Recorded worker waits are accumulated native durations, not exclusive portions of statement elapsed time. Keep their
+totals when parallel workers overlap, including when the sum exceeds elapsed time. A mean divides that recorded total
+by its matching execution count; it identifies neither a particular slow execution nor the longest execution's wait.
+Category totals and query totals can be independently captured. Timed query rows retain their measured durations
+without claiming a percentage of a different population. Native activity-sample shares retain their own common
+sample denominator.
+PostgreSQL's executor adds parallel worker buffer timing to the leader's measured I/O, independently of the leader's
+execution timer. Subtracting that I/O from execution time cannot establish CPU or unclassified time. The provider
+retains measured I/O alone; scans, collected analysis and wait views never manufacture the remainder.
+Table references and overlapping statement lifetimes do not establish a common lock resource or blocker. Keep these
+observations as investigation context until native request/resource evidence supports a causal relationship. Index
+lock counters alone do not authorize an isolation change or forced transaction rollback.
 
 Capture and outbox code have no ADX or Blob dependencies. Destinations consume immutable validated evidence and keep
 their registration, authentication and delivery state separate from database providers. Adding a destination must not
@@ -560,8 +572,7 @@ an engine by name. `wait_sampling` describes session sampling versus counter del
 cross-engine tests cover the declarations and query-cost rendering. Shared statement statistics do not imply shared
 WAL, heap or server-wide measurement semantics.
 `constraint_validation` separately identifies optimizer trust, CHECK exclusion and deferred validation. The UI and
-constraint checks consume that fact. Statement metrics also declare whether collected I/O waits must fit within
-statement execution time; YSQL's PostgreSQL grammar does not imply that bound for its native activity measurements.
+constraint checks consume that fact. Shared grammar never establishes how an engine accumulates worker timing.
 Database product identity is separate from the execution provider: MariaDB uses the MySQL provider and TimescaleDB
 uses PostgreSQL. Each engine file declares its products, stable `DatabaseProduct` identifiers, labels and recognition
 rules through `EngineSpec::products`. `ServerInfo` resolves those facts without allocating; generated `EngineFacts`

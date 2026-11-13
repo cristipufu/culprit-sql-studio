@@ -352,9 +352,6 @@ pub struct StatementMetrics {
     #[ts(skip)]
     pub write_rows_label: Option<Cow<'static, str>>,
     pub lock_time: bool,
-    /// The collected I/O wait time is a component of the same statement execution time.
-    /// Shared I/O counters and activity samples do not establish this bound.
-    pub io_wait_within_statement_time: bool,
     pub log: WriteLog,
     /// Message key: [`StatementMetrics::log`] in a sentence ("WAL").
     pub log_name: Cow<'static, str>,
@@ -381,7 +378,6 @@ impl StatementMetrics {
             write_rows,
             write_rows_label: write_rows.map(|rows| i18n::t(rows.per_run_key(), &[]).into()),
             lock_time: false,
-            io_wait_within_statement_time: false,
             log,
             log_name: log.name_key().into(),
             log_label: log.written_key().into(),

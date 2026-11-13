@@ -863,22 +863,10 @@ pub(super) fn rows_labels(engine: Engine, kind: StatementKind) -> Option<(String
     }
 }
 
-/// Whether the workload adds up only the runs the slow query log kept (those over long_query_time), so a share is of
-/// the logged slow runs' time, not of all database time.
+/// Shares on a log describe its retained runs. A current zero threshold does not establish historical coverage or
+/// override per-session logging, other filters and retention.
 pub(crate) fn slow_log_only(snapshot: &Snapshot) -> bool {
-    snapshot.workload.as_ref().is_some_and(|w| {
-        // The collector says so; scans before it did are read from the setting.
-        w.min_logged_ms.is_some()
-            || (w.kind() == Some(culprit_core::WorkloadKind::SlowLog) && logs_slow_runs_only(snapshot))
-    })
-}
-
-/// Whether the slow query log keeps only runs over long_query_time: unless it is 0, which logs every run.
-pub(crate) fn logs_slow_runs_only(snapshot: &Snapshot) -> bool {
-    !snapshot
-        .setting("long_query_time")
-        .and_then(|s| s.value.trim().parse::<f64>().ok())
-        .is_some_and(|seconds| seconds <= 0.0)
+    snapshot.workload.as_ref().is_some_and(|w| w.kind() == Some(culprit_core::WorkloadKind::SlowLog))
 }
 
 /// A fix in words only: what the application changes.

@@ -21,12 +21,7 @@ reads_label: string,
 /**
  * What a write's row count means; `None` where the engine counts no rows for a write (MySQL).
  */
-write_rows: WriteRows | null, lock_time: boolean, 
-/**
- * The collected I/O wait time is a component of the same statement execution time.
- * Shared I/O counters and activity samples do not establish this bound.
- */
-io_wait_within_statement_time: boolean, log: WriteLog, 
+write_rows: WriteRows | null, lock_time: boolean, log: WriteLog, 
 /**
  * Message key: [`StatementMetrics::log`] in a sentence ("WAL").
  */

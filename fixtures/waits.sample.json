@@ -5,26 +5,32 @@
    "categories": [
     {
      "attribution": null,
-     "detail": "A read from order_items accounts for 57% of it.",
+     "detail": "A read from orders recorded 1 min in this category.",
      "key": "latch",
      "label": "In-memory contention",
      "meaning": "Short waits on the server's own memory structures (page latches, mutexes). Hot spots such as an ever-increasing key or busy temporary space cause most of it.",
      "queries": [
       {
+       "executions": 300.0,
+       "id": "249",
+       "mean_recorded_ms": 223.14666666666668,
+       "rows_per_run": 1.0,
+       "text": "SELECT COUNT(*) FROM shop.orders o1 JOIN shop.customers c1 ON c1.id = o1.customer_id JOIN shop.order_items i1 ON i1.order_id = o1.id JOIN shop.products p1 ON p…",
+       "wait_ms": 66944.0
+      },
+      {
        "executions": 600.0,
        "id": "9",
+       "mean_recorded_ms": 78.435,
        "rows_per_run": 1.51,
-       "share_of_category": 0.5708446040198445,
-       "share_of_query": 1.0,
        "text": "SELECT [product_id], [quantity], [unit_price] FROM [shop].[order_items] WHERE [order_id] = @P1",
        "wait_ms": 47061.0
       },
       {
        "executions": 300.0,
        "id": "8",
+       "mean_recorded_ms": 117.32666666666667,
        "rows_per_run": 3283.2,
-       "share_of_category": 0.4269477565774311,
-       "share_of_query": 1.0,
        "text": "SELECT [id], [total] FROM [shop].[orders] WHERE [shipped_at] >= DATEADD(day, @P1, '2026-01-01') AND [shipped_at] < DATEADD(day, @P2, '2026-01-01')",
        "wait_ms": 35198.0
       }
@@ -35,26 +41,32 @@
     },
     {
      "attribution": null,
-     "detail": "A read from order_items accounts for 48% of it. Check its plan for a large scan an index would avoid.",
+     "detail": "A read from orders recorded 2 min in this category. Inspect measured worker activity and the actual plan before attributing the delay or changing indexes.",
      "key": "parallelism",
      "label": "Parallel queries",
      "meaning": "Threads of a parallel query waiting for each other. Often a big scan that an index would avoid, or work split unevenly across threads.",
      "queries": [
       {
+       "executions": 300.0,
+       "id": "249",
+       "mean_recorded_ms": 454.11,
+       "rows_per_run": 1.0,
+       "text": "SELECT COUNT(*) FROM shop.orders o1 JOIN shop.customers c1 ON c1.id = o1.customer_id JOIN shop.order_items i1 ON i1.order_id = o1.id JOIN shop.products p1 ON p…",
+       "wait_ms": 136233.0
+      },
+      {
        "executions": 600.0,
        "id": "9",
+       "mean_recorded_ms": 14.275,
        "rows_per_run": 1.51,
-       "share_of_category": 0.4848570619869799,
-       "share_of_query": 1.0,
        "text": "SELECT [product_id], [quantity], [unit_price] FROM [shop].[order_items] WHERE [order_id] = @P1",
        "wait_ms": 8565.0
       },
       {
        "executions": 300.0,
        "id": "8",
+       "mean_recorded_ms": 19.253333333333334,
        "rows_per_run": 3283.2,
-       "share_of_category": 0.32697424285309934,
-       "share_of_query": 1.0,
        "text": "SELECT [id], [total] FROM [shop].[orders] WHERE [shipped_at] >= DATEADD(day, @P1, '2026-01-01') AND [shipped_at] < DATEADD(day, @P2, '2026-01-01')",
        "wait_ms": 5776.0
       }
@@ -65,19 +77,58 @@
     },
     {
      "attribution": null,
-     "detail": "A read from order_items accounts for 27% of it.",
+     "detail": "A read from order_items recorded 1.6 s in this category.",
      "key": "memory",
-     "label": "Memory grants",
-     "meaning": "Queries waiting for memory to sort or hash. A few queries that reserve far more than they use can make everyone else queue.",
+     "label": "Memory",
+     "meaning": "Waiting for memory: a grant to sort or hash before a query can start (RESOURCE_SEMAPHORE), or an allocation inside the server (CMEMTHREAD, MEMORY_ALLOCATION_EXT). Grant waits usually mean a few queries reserve far more than they use; allocation waits mean many sessions contend for one of the server's memory objects.",
      "queries": [
       {
        "executions": 600.0,
        "id": "9",
+       "mean_recorded_ms": 2.716666666666667,
        "rows_per_run": 1.51,
-       "share_of_category": 0.27408777534891543,
-       "share_of_query": 0.24174672240387007,
        "text": "SELECT [product_id], [quantity], [unit_price] FROM [shop].[order_items] WHERE [order_id] = @P1",
        "wait_ms": 1630.0
+      },
+      {
+       "executions": 300.0,
+       "id": "249",
+       "mean_recorded_ms": 1.7966666666666666,
+       "rows_per_run": 1.0,
+       "text": "SELECT COUNT(*) FROM shop.orders o1 JOIN shop.customers c1 ON c1.id = o1.customer_id JOIN shop.order_items i1 ON i1.order_id = o1.id JOIN shop.products p1 ON p…",
+       "wait_ms": 539.0
+      },
+      {
+       "executions": 4000.0,
+       "id": "5",
+       "mean_recorded_ms": 0.0055,
+       "rows_per_run": 5.004,
+       "text": "SELECT TOP (20) [id], [status], [total], [created_at] FROM [shop].[orders] WHERE [customer_id] = @P1 ORDER BY [created_at] DESC",
+       "wait_ms": 22.0
+      },
+      {
+       "executions": 4010.0,
+       "id": "10",
+       "mean_recorded_ms": 0.004987531172069825,
+       "rows_per_run": 972.5685785536159,
+       "text": "SELECT [id], [subject], [opened_at], [status] FROM [shop].[support_tickets] WHERE [priority] = @P1",
+       "wait_ms": 20.0
+      },
+      {
+       "executions": 300.0,
+       "id": "8",
+       "mean_recorded_ms": 0.04666666666666667,
+       "rows_per_run": 3283.2,
+       "text": "SELECT [id], [total] FROM [shop].[orders] WHERE [shipped_at] >= DATEADD(day, @P1, '2026-01-01') AND [shipped_at] < DATEADD(day, @P2, '2026-01-01')",
+       "wait_ms": 14.0
+      },
+      {
+       "executions": 771.0,
+       "id": "146",
+       "mean_recorded_ms": 0.018158236057068743,
+       "rows_per_run": 1.0,
+       "text": "SELECT @c = COUNT(*) FROM telemetry.events WHERE tenant = @t AND payload <> 'y'",
+       "wait_ms": 14.0
       }
      ],
      "share": 0.05584509489064804,
@@ -86,37 +137,26 @@
     },
     {
      "attribution": null,
-     "detail": "A read from orders accounts for 8% of it.",
+     "detail": "A read from order_items recorded 15.2 s in this category.",
      "key": "cpu",
      "label": "CPU",
      "meaning": "Running on a processor, or queued for one. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row.",
      "queries": [
       {
+       "executions": 6.0,
+       "id": "263",
+       "mean_recorded_ms": 2531.5,
+       "rows_per_run": 0.0,
+       "text": "SELECT COUNT_BIG(*) FROM shop.order_items a JOIN shop.order_items b ON a.id % 1000 = b.id % 999 OPTION (LOOP JOIN, MAXDOP 1)",
+       "wait_ms": 15189.0
+      },
+      {
        "executions": 300.0,
-       "id": "8",
-       "rows_per_run": 3283.2,
-       "share_of_category": 0.08274231678486997,
-       "share_of_query": 0.00702843423353519,
-       "text": "SELECT [id], [total] FROM [shop].[orders] WHERE [shipped_at] >= DATEADD(day, @P1, '2026-01-01') AND [shipped_at] < DATEADD(day, @P2, '2026-01-01')",
-       "wait_ms": 35.0
-      },
-      {
-       "executions": 1200.0,
-       "id": "7",
+       "id": "249",
+       "mean_recorded_ms": 0.6333333333333333,
        "rows_per_run": 1.0,
-       "share_of_category": 0.026004728132387706,
-       "share_of_query": 0.0004962736167591059,
-       "text": "SELECT [id], [name], [segment] FROM [shop].[customers] WHERE [email] = @P1",
-       "wait_ms": 11.0
-      },
-      {
-       "executions": 600.0,
-       "id": "9",
-       "rows_per_run": 1.51,
-       "share_of_category": 0.01182033096926714,
-       "share_of_query": 0.0007415543632020555,
-       "text": "SELECT [product_id], [quantity], [unit_price] FROM [shop].[order_items] WHERE [order_id] = @P1",
-       "wait_ms": 5.0
+       "text": "SELECT COUNT(*) FROM shop.orders o1 JOIN shop.customers c1 ON c1.id = o1.customer_id JOIN shop.order_items i1 ON i1.order_id = o1.id JOIN shop.products p1 ON p…",
+       "wait_ms": 190.0
       }
      ],
      "share": 0.003972166661971434,
@@ -124,19 +164,48 @@
      "wait_ms": 423.0
     },
     {
-     "attribution": "Query Store didn't record this wait for individual queries in the window.",
-     "detail": null,
+     "attribution": null,
+     "detail": "An update of orders recorded 2 min of lock waiting. Use Live to capture the blocked request, native resource and holder before choosing a change.",
      "key": "lock",
      "label": "Locks",
      "meaning": "Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.",
-     "queries": [],
+     "queries": [
+      {
+       "executions": 4.0,
+       "id": "138",
+       "mean_recorded_ms": 28741.5,
+       "rows_per_run": 1.0,
+       "text": "UPDATE [shop].[orders] set [status] = [status] WHERE [id]=@1",
+       "wait_ms": 114966.0
+      },
+      {
+       "executions": 3.0,
+       "id": "143",
+       "mean_recorded_ms": 23897.333333333332,
+       "rows_per_run": 1.0,
+       "text": "SELECT [status] FROM [shop].[orders] WHERE [id]=@1",
+       "wait_ms": 71692.0
+      },
+      {
+       "executions": 4.0,
+       "id": "161",
+       "mean_recorded_ms": 600.0,
+       "rows_per_run": 0.75,
+       "text": "UPDATE [shop].[orders] set [total] = [total]+@1 WHERE [id]=@2",
+       "wait_ms": 2400.0
+      }
+     ],
      "share": 0.00014085697382877426,
      "top_wait": "Lock",
      "wait_ms": 15.0
     }
    ],
    "engine": "mssql",
-   "notes": [],
+   "notes": [
+    "Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.",
+    "Category totals and per-query totals may cover different populations; they are not compared as percentages.",
+    "Query attribution includes observed totals; missing categories are not measured zeroes."
+   ],
    "scope": "window",
    "source": "Query Store, last 5 hours",
    "total_ms": 106491.0
@@ -144,81 +213,52 @@
   "pg-demo": {
    "categories": [
     {
-     "attribution": "PostgreSQL doesn't time this per statement. Right now samples what sessions wait on.",
-     "detail": null,
-     "key": "other",
-     "label": "Everything else",
-     "meaning": "Statement time PostgreSQL doesn't break down: running on CPU, or waiting on locks and events it doesn't time per statement.",
-     "queries": [],
-     "share": 0.9497011666319195,
-     "top_wait": "CPU, locks and untimed waits",
-     "wait_ms": 237026.6467629999
-    },
-    {
      "attribution": null,
-     "detail": "A read from orders accounts for 56% of it, reading 16K pages from disk per run.",
+     "detail": "An update of wide recorded 23 ms in this category, with 11K native page reads per execution. Compare file-read latency under comparable work before choosing a change.",
      "key": "io",
      "label": "Disk reads",
      "meaning": "Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.",
      "queries": [
       {
-       "executions": 852.0,
-       "id": "5308963031944094559",
-       "rows_per_run": 10.13849765258216,
-       "share_of_category": 0.5642463164148575,
-       "share_of_query": 0.18799375058993675,
-       "text": "SELECT id, status, total, created_at FROM orders WHERE customer_id = $1 ORDER BY created_at DESC LIMIT $2",
-       "wait_ms": 7083.319732000004
+       "executions": 1.0,
+       "id": "-463560455567765064",
+       "mean_recorded_ms": 23.284315,
+       "rows_per_run": 21428.0,
+       "text": "UPDATE archive.wide SET touched = touched + $1 WHERE id % $2 = $3",
+       "wait_ms": 23.284315
       },
       {
-       "executions": 214.0,
-       "id": "9065391607317686058",
-       "rows_per_run": 246582.89719626168,
-       "share_of_category": 0.31100436412741006,
-       "share_of_query": 0.05497177507411115,
-       "text": "SELECT id, note FROM orders WHERE created_at > now() - interval $1 ORDER BY note",
-       "wait_ms": 3904.222828
-      },
-      {
-       "executions": 397.0,
-       "id": "-3722457391793582113",
+       "executions": 300.0,
+       "id": "-967240904657798800",
+       "mean_recorded_ms": 0.0013424766666666667,
        "rows_per_run": 1.0,
-       "share_of_category": 0.05498390576084947,
-       "share_of_query": 0.1016885321716194,
-       "text": "SELECT count(*), sum(quantity * price) FROM order_items WHERE product_id = $1",
-       "wait_ms": 690.245684
+       "text": "SELECT o12.status FROM orders o1 JOIN orders o2 ON o2.id = o1.id JOIN orders o3 ON o3.id = o2.id JOIN orders o4 ON o4.id = o3.id JOIN orders o5 ON o5.id = o4.i…",
+       "wait_ms": 0.402743
       },
       {
-       "executions": 1738.0,
-       "id": "2885972271926804069",
-       "rows_per_run": 1.7238204833141542,
-       "share_of_category": 0.007632440751916847,
-       "share_of_query": 0.7378423420169006,
-       "text": "SELECT kind, count(*) FROM events WHERE customer_id = $1 GROUP BY kind",
-       "wait_ms": 95.81457000000006
-      },
-      {
-       "executions": 204.0,
-       "id": "2004611025554862962",
-       "rows_per_run": 5.0,
-       "share_of_category": 0.007473040277289838,
-       "share_of_query": 0.03947208911756852,
-       "text": "SELECT status, count(*), sum(total) FROM orders WHERE created_at > now() - interval $1 GROUP BY status",
-       "wait_ms": 93.81352100000002
+       "executions": 120.0,
+       "id": "6425265648074738764",
+       "mean_recorded_ms": 0.0011732416666666667,
+       "rows_per_run": 1.0,
+       "text": "SELECT count(*), sum(price * $1), max(length(name)) FROM products WHERE price > $2",
+       "wait_ms": 0.140789
       }
      ],
-     "share": 0.05029883336808056,
+     "share": 1.0,
      "top_wait": "data file reads and writes",
      "wait_ms": 12553.594992000002
     }
    ],
    "engine": "postgres",
    "notes": [
-    "PostgreSQL keeps no history of what sessions waited on. These totals come from per-statement timing; use Right now to sample what sessions wait on at this moment."
+    "Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.",
+    "Category totals and per-query totals may cover different populations; they are not compared as percentages.",
+    "Query attribution includes observed totals; missing categories are not measured zeroes.",
+    "PostgreSQL records per-statement I/O totals, which can overlap across parallel workers. CPU and lock waits remain unknown; use Right now to sample current sessions."
    ],
    "scope": "statements",
-   "source": "Statement timing from pg_stat_statements, the 7 hours since statistics were reset",
-   "total_ms": 249580.2417549999
+   "source": "Statement timing from pg_stat_statements, the 5 hours since statistics were reset",
+   "total_ms": 12553.594992000002
   },
   "mysql-demo": {
    "categories": [
@@ -229,9 +269,9 @@
      "label": "Row access",
      "meaning": "Time inside InnoDB fetching and changing rows. MySQL's table I/O instrument counts rows served from memory too, so this is storage-engine work, not only disk.",
      "queries": [],
-     "share": 0.8488149541458491,
-     "top_wait": "wait/io/table/sql/handler",
-     "wait_ms": 137212.516776522
+     "share": 0.613696015860944,
+     "top_wait": null,
+     "wait_ms": 50381.8453542
     },
     {
      "attribution": "MySQL doesn't attribute this wait to statements; it is a server-wide total.",
@@ -240,59 +280,57 @@
      "label": "Disk reads",
      "meaning": "Waiting for data to come from disk because it wasn't in memory. Usually scans of large tables, or memory too small for the data the workload keeps touching.",
      "queries": [],
-     "share": 0.14544064895999675,
-     "top_wait": "wait/io/file/innodb/innodb_temp_file",
-     "wait_ms": 23510.751534170995
-    },
-    {
-     "attribution": "MySQL doesn't attribute this wait to statements; it is a server-wide total.",
-     "detail": null,
-     "key": "log",
-     "label": "Log writes",
-     "meaning": "Commits waiting for InnoDB's redo log to reach disk. Many tiny transactions, or slow log storage.",
-     "queries": [],
-     "share": 0.005696412274777469,
-     "top_wait": "wait/io/file/innodb/innodb_log_file",
-     "wait_ms": 920.83564386
+     "share": 0.3862258762891582,
+     "top_wait": null,
+     "wait_ms": 31707.509692225
     },
     {
      "attribution": null,
-     "detail": "A read from orders accounts for 50% of it. Live shows who blocks whom right now.",
+     "detail": "A read from orders recorded 2 min of lock waiting. Use Live to capture the blocked request, native resource and holder before choosing a change.",
      "key": "lock",
      "label": "Locks",
      "meaning": "Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.",
      "queries": [
       {
-       "executions": 1.0,
+       "executions": 4.0,
        "id": "4167fe7f2c20deb7",
+       "mean_recorded_ms": 28824.70475,
        "rows_per_run": 1.0,
-       "share_of_category": 0.4980427125376354,
-       "share_of_query": 0.9999880263418839,
        "text": "SELECT `id` FROM `orders` WHERE `id` = ? FOR UPDATE",
-       "wait_ms": 43406.432
+       "wait_ms": 115298.819
       },
       {
-       "executions": 5.0,
+       "executions": 8.0,
        "id": "fc709554a9248878",
+       "mean_recorded_ms": 14412.085875,
        "rows_per_run": 0.0,
-       "share_of_category": 0.49800187679205,
-       "share_of_query": 0.9999628922667694,
        "text": "UPDATE `orders` SET `id` = `id` WHERE `id` = ?",
-       "wait_ms": 43402.873
+       "wait_ms": 115296.687
+      },
+      {
+       "executions": 43.0,
+       "id": "4515abd524a46f37",
+       "mean_recorded_ms": 279.8762325581395,
+       "rows_per_run": 0.0,
+       "text": "UPDATE `orders` SET STATUS = STATUS WHERE `id` = ?",
+       "wait_ms": 12034.678
       }
      ],
-     "share": 4.798461937678062e-05,
-     "top_wait": "wait/lock/table/sql/handler",
-     "wait_ms": 7.75680301
+     "share": 7.810784989775007e-05,
+     "top_wait": null,
+     "wait_ms": 6.412323875
     }
    ],
    "engine": "mysql",
    "notes": [
+    "Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.",
+    "Category totals and per-query totals may cover different populations; they are not compared as percentages.",
+    "Query attribution includes observed totals; missing categories are not measured zeroes.",
     "MySQL counts waits since it started, only for enabled performance_schema instruments. Lock time is attributed to statements; the rest is a server-wide total."
    ],
    "scope": "since-startup",
    "source": "performance_schema totals since MySQL started 80 minutes ago",
-   "total_ms": 161651.860757563
+   "total_ms": 82095.7673703
   },
   "mariadb-demo": {
    "categories": [
@@ -320,28 +358,42 @@
     },
     {
      "attribution": null,
-     "detail": "A read from orders accounts for 95% of it. Live shows who blocks whom right now.",
+     "detail": "A read from products recorded 177 ms of lock waiting. Use Live to capture the blocked request, native resource and holder before choosing a change.",
      "key": "lock",
      "label": "Locks",
      "meaning": "Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.",
      "queries": [
       {
-       "executions": 20.0,
-       "id": "375c64398248650e",
-       "rows_per_run": 20.0,
-       "share_of_category": 0.9514944756647208,
-       "share_of_query": 0.9999880831459015,
-       "text": "SELECT `customer_id` , CHANNEL , SUM ( `total` ) AS `spent` , COUNT ( * ) AS `orders` FROM `orders` GROUP BY `customer_id` , CHANNEL ORDER BY `spent` DESC LIMI…",
-       "wait_ms": 49963.346
+       "executions": 30000.0,
+       "id": "a92bb0be330ac53a",
+       "mean_recorded_ms": 0.005915333333333333,
+       "rows_per_run": 1.0,
+       "text": "SELECT ID , NAME , `price` FROM `products` WHERE ID = ?",
+       "wait_ms": 177.46
       },
       {
-       "executions": 60.0,
-       "id": "258e3c9b580f1ecc",
-       "rows_per_run": 5.0,
-       "share_of_category": 0.04287688588867841,
-       "share_of_query": 0.9988538589378342,
-       "text": "SELECT `o` . `id` , `o` . `customer_id` , `o` . `total` FROM `orders` `o` WHERE `o` . `promo_code` = ? ORDER BY `o` . `total` DESC LIMIT ?",
-       "wait_ms": 2251.482
+       "executions": 4000.0,
+       "id": "d1f45c9664edccf9",
+       "mean_recorded_ms": 0.0131915,
+       "rows_per_run": 1.5995,
+       "text": "SELECT `oi` . `quantity` , `oi` . `price` , `p` . `name` FROM `order_items` `oi` JOIN `products` `p` ON `p` . `id` = `oi` . `product_id` WHERE `oi` . `order_id…",
+       "wait_ms": 52.766
+      },
+      {
+       "executions": 4000.0,
+       "id": "46db559fdff712fd",
+       "mean_recorded_ms": 0.011075749999999999,
+       "rows_per_run": 2.49775,
+       "text": "SELECT ID , STATUS , `total` , `created_at` FROM `orders` WHERE `customer_id` = ? ORDER BY `created_at` DESC LIMIT ?",
+       "wait_ms": 44.303
+      },
+      {
+       "executions": 2000.0,
+       "id": "decf59629e790076",
+       "mean_recorded_ms": 0.0105165,
+       "rows_per_run": 1.0,
+       "text": "SELECT COUNT ( * ) FROM `orders` WHERE STATUS = ? AND `created_at` >= ?",
+       "wait_ms": 21.033
       }
      ],
      "share": 4.0298532683243014e-05,
@@ -351,6 +403,9 @@
    ],
    "engine": "mysql",
    "notes": [
+    "Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.",
+    "Category totals and per-query totals may cover different populations; they are not compared as percentages.",
+    "Query attribution includes observed totals; missing categories are not measured zeroes.",
     "MariaDB counts waits since it started, only for enabled performance_schema instruments. Lock time is attributed to statements; the rest is a server-wide total."
    ],
    "scope": "since-startup",
@@ -3046,6 +3101,73 @@
    "scope": "sampled",
    "source": "yb_active_session_history (node 3d2d9e10555b4ae2a683a8402505e416); retained observations 2026-10-23T21:02:32.797443Z to 2026-10-24T06:47:07.261143Z",
    "total_ms": null
+  },
+  "mssql-demo-staging": {
+   "categories": [
+    {
+     "attribution": "Query Store didn't record this wait for individual queries in the window.",
+     "detail": null,
+     "key": "latch",
+     "label": "In-memory contention",
+     "meaning": "Short waits on the server's own memory structures (page latches, mutexes). Hot spots such as an ever-increasing key or busy temporary space cause most of it.",
+     "queries": [],
+     "share": 0.7741593186278652,
+     "top_wait": "Latch",
+     "wait_ms": 82441.0
+    },
+    {
+     "attribution": "Query Store didn't record this wait for individual queries in the window.",
+     "detail": null,
+     "key": "parallelism",
+     "label": "Parallel queries",
+     "meaning": "Threads of a parallel query waiting for each other. Often a big scan that an index would avoid, or work split unevenly across threads.",
+     "queries": [],
+     "share": 0.16588256284568648,
+     "top_wait": "Parallelism",
+     "wait_ms": 17665.0
+    },
+    {
+     "attribution": "Query Store didn't record this wait for individual queries in the window.",
+     "detail": null,
+     "key": "memory",
+     "label": "Memory",
+     "meaning": "Waiting for memory: a grant to sort or hash before a query can start (RESOURCE_SEMAPHORE), or an allocation inside the server (CMEMTHREAD, MEMORY_ALLOCATION_EXT). Grant waits usually mean a few queries reserve far more than they use; allocation waits mean many sessions contend for one of the server's memory objects.",
+     "queries": [],
+     "share": 0.05584509489064804,
+     "top_wait": "Memory",
+     "wait_ms": 5947.0
+    },
+    {
+     "attribution": "Query Store didn't record this wait for individual queries in the window.",
+     "detail": null,
+     "key": "cpu",
+     "label": "CPU",
+     "meaning": "Running on a processor, or queued for one. When CPU dominates, queries usually do more work than they need to: scans, conversions, functions evaluated on every row.",
+     "queries": [],
+     "share": 0.003972166661971434,
+     "top_wait": "CPU",
+     "wait_ms": 423.0
+    },
+    {
+     "attribution": "Query Store didn't record this wait for individual queries in the window.",
+     "detail": null,
+     "key": "lock",
+     "label": "Locks",
+     "meaning": "Waiting for another transaction to release a row or table lock. Long transactions, and missing indexes on the columns updates filter by, make it worse.",
+     "queries": [],
+     "share": 0.00014085697382877426,
+     "top_wait": "Lock",
+     "wait_ms": 15.0
+    }
+   ],
+   "engine": "mssql",
+   "notes": [
+    "Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.",
+    "Query Store recorded no waits for this database's queries in the window. These are server totals since startup and can't be tied to queries."
+   ],
+   "scope": "since-startup",
+   "source": "Server totals since SQL Server started",
+   "total_ms": 106491.0
   }
  },
  "samples": {

@@ -66,20 +66,17 @@ pub(super) fn waits(s: &Snapshot) -> Tile {
     let Some(r) = report else { return waits_missing(s) };
     let top = &r.categories[0];
     let named = r.categories.iter().find(|c| c.key != "other");
-    // Without performance_schema, MySQL and MariaDB time no waits: the slow query log keeps only each statement's lock
-    // time, so "100% locks" would be 100% of the little that was measured. Say what is known, against database time.
-    if r.scope == WaitScope::Statements && s.server.engine == Engine::Mysql {
-        let database_ms = s.workload.as_ref().map(|w| w.total_time_ms).unwrap_or(0.0);
+    // The slow log's native lock timer is a recorded total, not a measured portion of query elapsed time.
+    if r.scope == WaitScope::Statements
+        && s.workload.as_ref().and_then(|workload| workload.kind()) == Some(culprit_core::WorkloadKind::SlowLog)
+    {
         let total_ms = r.total_ms.unwrap_or(0.0);
-        let share = if database_ms > 0.0 { total_ms / database_ms } else { 0.0 };
         let takeaway = t!(
             "view.dashboard.waits.mysql_lock_time",
             family = family(&s.server),
-            duration = format::duration(total_ms),
-            share = format::percent(share)
+            duration = format::duration(total_ms)
         );
-        let watch = share >= 0.25 && material(s, r.scope, total_ms);
-        let mut tile = Tile::new(TileKey::Waits, if watch { TileStatus::Watch } else { TileStatus::Info }, takeaway);
+        let mut tile = Tile::new(TileKey::Waits, TileStatus::Info, takeaway);
         tile.detail = top.detail.clone();
         tile.metrics = vec![TileMetric::new(
             "total",
@@ -139,16 +136,12 @@ pub(super) fn waits(s: &Snapshot) -> Tile {
     let lead = if top.key == "other" { named.unwrap_or(top) } else { top };
     // Totals since startup cover a different stretch than database time: say which, rather than set them side by side.
     let since_start = r.scope == WaitScope::SinceStartup;
-    tile.detail = if s.server.engine == Engine::Postgres {
-        Some(t!("view.dashboard.waits.postgres_detail", source = &r.source))
-    } else if since_start {
+    tile.detail = if since_start {
         Some(format!("{}.", r.source.trim_end_matches('.')))
     } else {
         lead.detail.clone().or_else(|| Some(culprit_core::waits::category_gist(&lead.key, s.server.engine)))
     };
-    let label = if s.server.engine == Engine::Postgres {
-        t!("view.dashboard.waits.metric.statement_time")
-    } else if since_start {
+    let label = if since_start {
         t!("view.dashboard.waits.metric.since_start")
     } else {
         t!("view.dashboard.waits.metric.waiting")
@@ -181,6 +174,7 @@ pub(super) fn in_sentence(key: &str) -> String {
         "rpc" => t!("view.dashboard.waits.category.rpc"),
         "storage" => t!("view.dashboard.waits.category.storage"),
         "cpu" => t!("view.dashboard.waits.category.cpu"),
+        "workers" => t!("view.dashboard.waits.category.workers"),
         "io" => t!("view.dashboard.waits.category.io"),
         "rows" => t!("view.dashboard.waits.category.rows"),
         "lock" => t!("view.dashboard.waits.category.lock"),
@@ -249,4 +243,48 @@ pub(super) fn waits_missing(s: &Snapshot) -> Tile {
         tile.detail = Some(t!("view.dashboard.waits.sample_instead"));
     }
     tile
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slow_log_native_lock_totals_do_not_become_elapsed_shares_or_pressure_grades() {
+        for product in ["MySQL 8.0.28", "MariaDB 11.8.9"] {
+            let mut snapshot = crate::waits::snapshot_with(Engine::Mysql);
+            snapshot.server.product = product.into();
+            snapshot.server.capabilities.retain(|capability| *capability != Capability::PerformanceSchema);
+            let workload = snapshot.workload.as_mut().unwrap();
+            workload.kind = Some(culprit_core::WorkloadKind::SlowLog);
+            workload.total_time_ms = 1_000.0;
+            snapshot.waits = vec![culprit_core::WaitStat {
+                category: "Lock".into(),
+                wait_type: Some("native lock time".into()),
+                wait_ms: 6_000.0,
+                tasks: None,
+            }];
+            let tile = waits(&snapshot);
+            assert_eq!(tile.status, TileStatus::Info);
+            assert_eq!(tile.metrics[0].value, Some(6_000.0));
+            assert!(tile.takeaway.contains("6.0 s of native lock time"), "{}", tile.takeaway);
+            assert!(!tile.takeaway.contains('%') && !tile.takeaway.contains("of their time"), "{}", tile.takeaway);
+        }
+    }
+
+    #[test]
+    fn native_category_totals_never_become_statement_elapsed_or_cpu_time() {
+        for engine in Engine::ALL {
+            let mut snapshot = crate::waits::snapshot_with(Engine::Mssql);
+            snapshot.server.engine = engine;
+            snapshot.waits =
+                vec![culprit_core::WaitStat { category: "IO".into(), wait_type: None, wait_ms: 6_000.0, tasks: None }];
+            let tile = waits(&snapshot);
+            assert_ne!(tile.metrics[0].label, "Statement execution time", "{engine:?}");
+            assert!(
+                !tile.detail.as_deref().is_some_and(|detail| detail.contains("including CPU and unclassified time")),
+                "{engine:?}"
+            );
+        }
+    }
 }

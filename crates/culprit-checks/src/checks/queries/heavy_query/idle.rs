@@ -33,7 +33,7 @@ enum Shown {
     Sleep(&'static str),
     /// It calls this application lock.
     AppLock(&'static str),
-    /// The source's explicit scalar lock timer, this share of its execution time.
+    /// The source's explicit scalar lock total; its accounting is not an elapsed-time guarantee.
     LockTime(f64),
     /// A recorded native wait and its declared source, beside the measured CPU total.
     RecordedWait { source: WaitSource, cpu_ms: f64, wait_ms: f64, class: WaitClass, native_name: Option<String> },
@@ -60,7 +60,11 @@ impl Idle {
         match &self.shown {
             Shown::Sleep(_) => t!("check.heavy_query.idle.title.sleep"),
             Shown::AppLock(_) => t!("check.heavy_query.idle.title.app_lock"),
-            Shown::LockTime(_) => t!("check.heavy_query.idle.title.locks", part = "most", share = ""),
+            Shown::LockTime(wait_ms) => t!(
+                "check.heavy_query.idle.title.recorded_wait",
+                wait_time = format::duration(*wait_ms),
+                wait = wait_name(None, WaitClass::Lock, engine)
+            ),
             Shown::RecordedWait { wait_ms, class, native_name, .. } => t!(
                 "check.heavy_query.idle.title.recorded_wait",
                 wait_time = format::duration(*wait_ms),
@@ -93,21 +97,8 @@ impl Idle {
         match &self.shown {
             Shown::Sleep(name) => t!("check.heavy_query.idle.evidence.sleep", name = *name),
             Shown::AppLock(name) => t!("check.heavy_query.idle.evidence.app_lock", name = *name),
-            Shown::LockTime(share) => {
-                let (engine, share, time) =
-                    (snapshot.server.name(), format::percent(*share), format::duration(q.total_time_ms));
-                match basis {
-                    Some(basis) => t!(
-                        "check.heavy_query.idle.evidence.lock_time_over",
-                        basis = basis,
-                        engine = engine,
-                        share = share,
-                        time = time
-                    ),
-                    None => {
-                        t!("check.heavy_query.idle.evidence.lock_time", engine = engine, share = share, time = time)
-                    }
-                }
+            Shown::LockTime(wait_ms) => {
+                DominantWait { on: WaitOn::Locks, wait_ms: *wait_ms, native_name: None }.sentence(snapshot, q)
             }
             Shown::RecordedWait { source, cpu_ms, wait_ms, class, native_name } => {
                 let (cpu_time, wait_time) = (format::duration(*cpu_ms), format::duration(*wait_ms));
@@ -150,7 +141,7 @@ impl Idle {
     pub(super) fn verify(&self) -> Expect {
         match self.shown {
             Shown::Sleep(_) | Shown::AppLock(_) => Expect::TimeOrStops,
-            Shown::RecordedWait { .. } => Expect::RecordedWait,
+            Shown::RecordedWait { .. } | Shown::LockTime(_) => Expect::RecordedWait,
             _ => Expect::Average,
         }
     }
@@ -347,14 +338,15 @@ pub(in crate::checks::queries) fn idle_time(snapshot: &Snapshot, q: &QueryStat) 
     let cpu_ms = q.cpu_time_ms.filter(|cpu| cpu.is_finite() && *cpu >= 0.0);
     let cpu_share = cpu_ms.map(|cpu| cpu / q.total_time_ms);
 
-    // Only the native scalar timer establishes this bound. Wait vectors may accumulate across parallel workers.
+    // A scalar's storage shape does not establish exclusive elapsed-time accounting either. The comparison is a
+    // materiality threshold only; retain its exact native total without clamping or assigning it to individual runs.
     if let Some(lock) = q
         .spread
         .as_ref()
         .and_then(|spread| spread.lock_ms)
         .filter(|lock| lock.is_finite() && *lock > 0.0 && *lock >= q.total_time_ms * 0.5)
     {
-        return Some(Idle { shown: Shown::LockTime((lock / q.total_time_ms).min(1.0)), confidence: Confidence::High });
+        return Some(Idle { shown: Shown::LockTime(lock), confidence: Confidence::High });
     }
 
     // Declared canonical wait classes carry meaning across sources. Current configuration and engine identity do

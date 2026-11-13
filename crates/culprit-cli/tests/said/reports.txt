@@ -1,60 +1,68 @@
 $ culprit --format text findings x --report <repo>/fixtures/mssql-demo.report.json
-20 opportunities. The top ones touch 5 min of database time over the last 5 hours (83%).
+23 opportunities. The top ones touch 3 min of database time over the last 5 hours (61%).
 
-  1  ●  A read from order_items times out on every run, at about 15 s  · 100% of runs fail
+  1  ●  An update of orders takes 2 min of database time over the last 5 hours (34%), with at least 2 min of recorded waiting (Lock)  · 2 min of database time over the last 5 hours (34%)
+       heavy-query:138
+  2  ●  A read from order_items times out on every run, at about 15 s  · 100% of runs fail
        failing-query:263
-  2  ●  A read from orders fails 25% of the time  · 25% of runs fail
+  3  ●  A read from orders fails 25% of the time  · 25% of runs fail
        failing-query:246
-  3  ●  Queries on orders recorded lock waits in the last 5 hours  · 3 min waiting on locks
-       hot-rows:shop.orders
-  4  ●  Compares each of 1.5M rows of order_items with 999 rows the Table Spool replays (1.5B pairs)  · 27% of DB time
+  4  ●  An update of orders has at least 2 min of recorded lock waits  · Recorded lock waits: 2 min
+       lock-time:138
+  5  ●  Compares each of 1.5M rows of order_items with 999 rows the Table Spool replays (1.5B pairs)  · 27% of DB time
        plan-insights:nested-loops:query-263
-  5  ●  This plan runs on one CPU because its statement says OPTION (MAXDOP 1)  · 27% of DB time
+  6  ●  This plan runs on one CPU because its statement says OPTION (MAXDOP 1)  · 27% of DB time
        plan-insights:parallelism-blocked:query-263
-  6  ●  A read from products runs 60K times in 5 hours, one key at a time  · 822 ms of database time over the last 5 hours (<1%)
+  7  ●  A read from orders takes 1 min of database time over the last 5 hours (21%), with at least 1 min of recorded waiting (Lock)  · 1 min of database time over the last 5 hours (21%)
+       heavy-query:143
+  8  ●  A read from orders has at least 1 min of recorded lock waits  · Recorded lock waits: 1 min
+       lock-time:143
+  9  ●  A read from products runs 60K times in 5 hours, one key at a time  · 822 ms of database time over the last 5 hours (<1%)
        chatty-query:6
-  7  ●  A type mismatch on customers.email stops a read from customers from seeking an index  · 7% of DB time
+ 10  ●  A type mismatch on customers.email stops a read from customers from seeking an index  · 7% of DB time
        plan-warnings:implicit-conversion:customers.email
-  8  ●  order_items is searched by order_id without a supporting index  · 20.3 s of database time over the last 5 hours (6%)
+ 11  ●  order_items is searched by order_id without a supporting index  · 20.3 s of database time over the last 5 hours (6%)
        missing-index:shop.order_items(order_id)
-  9  ●  Captured reads have lock waits; investigate the blocking resource  · Setting
+ 12  ●  Captured reads have lock waits; investigate the blocking resource  · Setting
        config:read-committed-snapshot
- 10  ●  A read from orders got 3.4× slower on Oct 11 at 10:45 UTC, when its plan changed  · 3.4× slower
+ 13  ●  A read from orders got 3.4× slower on Oct 11 at 10:45 UTC, when its plan changed  · 3.4× slower
        regression:8
- 11  ●  ticket_events has no index on ticket_id, its foreign key to support_tickets  · 800K rows unindexed
+ 14  ●  ticket_events has no index on ticket_id, its foreign key to support_tickets  · 800K rows unindexed
        unindexed-fk:shop.ticket_events(ticket_id)
- 12  ●  orders is searched by shipped_at without a supporting index  · 5.0 s of database time over the last 5 hours (1%)
+ 15  ●  orders is searched by shipped_at without a supporting index  · 5.0 s of database time over the last 5 hours (1%)
        missing-index:shop.orders(shipped_at)
- 13  ●  Two queries deadlocked once in the last 6 hours (key-lookup deadlock on shop.customers)  · 1 deadlock
+ 16  ●  Two queries deadlocked once in the last 6 hours (key-lookup deadlock on shop.customers)  · 1 deadlock
        deadlocks:key-lookup:shop.customers
- 14  ●  ix_orders_status is covered by the wider ix_orders_status_created on orders  · 26.5 MB redundant
+ 17  ●  ix_orders_status is covered by the wider ix_orders_status_created on orders  · 26.5 MB redundant
        duplicate-index:shop.orders.ix_orders_status
- 15  ●  ix_products_sku duplicates uq_products_sku on products  · 648 KB redundant
+ 18  ●  ix_products_sku duplicates uq_products_sku on products  · 648 KB redundant
        duplicate-index:shop.products.ix_products_sku
- 16  ●  A read from order_items returns 20K rows per run  · 20K rows per run
+ 19  ●  A read from order_items returns 20K rows per run  · 20K rows per run
        big-result:264
- 17  ●  SQL Server doesn't trust 2 constraints on child  · 2 untrusted
+ 20  ●  SQL Server doesn't trust 2 constraints on child  · 2 untrusted
        untrusted-constraint:archive.child
- 18  ●  Cost threshold for parallelism is still the 1990s default of 5  · Setting
+ 21  ●  Cost threshold for parallelism is still the 1990s default of 5  · Setting
        config:cost-threshold-for-parallelism
- 19  ●  Query Store records every statement, including one-off ones  · Setting
+ 22  ●  Query Store records every statement, including one-off ones  · Setting
        config:query-store-capture
- 20  ●  LAST_QUERY_PLAN_STATS is off for this database  · Diagnostics
+ 23  ●  LAST_QUERY_PLAN_STATS is off for this database  · Diagnostics
        last-actual-plans:last-query-plan-stats
 
-Information and history (3)
- 21  ○  Row locks on support_tickets escalated to a table lock 5 times since its indexes were loaded into memory
+Information and history (4)
+ 24  ○  orders has 5 recorded historical lock waits
+       hot-rows:shop.orders
+ 25  ○  Row locks on support_tickets escalated to a table lock 5 times since its indexes were loaded into memory
        lock-escalations:shop.support_tickets
- 22  ○  Page-latch waits on pk_hot
+ 26  ○  Page-latch waits on pk_hot
        last-page-insert:archive.hot.pk_hot
- 23  ○  An update of wide writes 7.9 KB of transaction log per row it changes
+ 27  ○  An update of wide writes 7.9 KB of transaction log per row it changes
        log-volume:255
 
-Check coverage: 9 assessed without a finding; 25 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 8 assessed without a finding; 25 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 ! 1 check is locked (Repeated statements within logged requests). See `culprit doctor mssql-demo`.
 
-Next: culprit show mssql-demo 'failing-query:263'
+Next: culprit show mssql-demo 'heavy-query:138'
 $ culprit --format text top x --report <repo>/fixtures/mssql-demo.report.json
 Query Store · the last 5 hours · share of DB time · runs · avg
   34%         4     28.7 s  138       UPDATE [shop].[orders] set [status] = [status] WHERE [id]=@1
@@ -109,17 +117,17 @@ $ culprit --format text dashboard <repo>/fixtures/mssql-demo.report.json
 mssql-demo · SQL Server 2022 · culprit_demo
 Query Store, the last 5 hours · local · scanned <age>
 
-Needs a look: 20 opportunities; the top ones touch 5 min of database time over the last 5 hours (83%).
+Needs a look: 23 opportunities; the top ones touch 3 min of database time over the last 5 hours (61%).
 
 ● Database time     Database time is steady: 6 min over the last 5 hours.
                     Database time 6 min · Runs 71K · On CPU 27% · Covers 5 hours
                     → culprit changes mssql-demo
 
-● Findings          20 opportunities; the top ones touch 5 min of database time over the last 5 hours (83%).
-                    High 2 · Medium 7 · Low 11 · Information and history 3
+● Findings          23 opportunities; the top ones touch 3 min of database time over the last 5 hours (61%).
+                    High 3 · Medium 9 · Low 11 · Information and history 4
+                    ● An update of orders takes 2 min of database time over the last 5 hours (34%), with at least 2 min of recorded waiting (Lock)  2 min of database time over the last 5 hours (34%)
                     ● A read from order_items times out on every run, at about 15 s  100% of runs fail
                     ● A read from orders fails 25% of the time  25% of runs fail
-                    ● Queries on orders recorded lock waits in the last 5 hours  3 min waiting on locks
                     → culprit findings mssql-demo
 
 ○ Top queries       One query is 34% of database time: an update of orders.
@@ -130,9 +138,9 @@ Needs a look: 20 opportunities; the top ones touch 5 min of database time over t
                     · a read from orders  21%  id 143
                     → culprit top mssql-demo
 
-● Where time goes   Most time goes to in-memory contention (77%), then parallel queries (17%).
-                    A read from orders accounts for 45% of it.
-                    Waiting 2 min
+● Where time goes   Largest recorded categories: in-memory contention (77%), then parallel queries (17%).
+                    A read from orders recorded 1 min in this category.
+                    Recorded category time 2 min
                     · In-memory contention  77%  id 249
                     · Parallel queries  17%  id 249
                     · Memory  6%  id 9
@@ -203,28 +211,35 @@ $ culprit --format text waits --file <repo>/fixtures/mssql-demo.report.json
 Where mssql-demo's database time goes · Query Store, last 5 hours
 
   77%  ███████████████·····  In-memory contention       1 min   Latch
-                             A read from orders accounts for 45% of it.
-                               45% of it  query 249      SELECT COUNT(*) FROM shop.orders o1 JOIN shop.customers c1 ON c1.id =…
-                               32% of it  query 9        SELECT [product_id], [quantity], [unit_price] FROM [shop].[order_item…
-                               24% of it  query 8        SELECT [id], [total] FROM [shop].[orders] WHERE [shipped_at] >= DATEA…
+                             A read from orders recorded 1 min in this category.
+                             1 min recorded  query 249      SELECT COUNT(*) FROM shop.orders o1 JOIN shop.customers c1 ON c1.id =…
+                             47.1 s recorded  query 9        SELECT [product_id], [quantity], [unit_price] FROM [shop].[order_item…
+                             35.2 s recorded  query 8        SELECT [id], [total] FROM [shop].[orders] WHERE [shipped_at] >= DATEA…
   17%  ███·················  Parallel queries          17.7 s   Parallelism
-                             A read from orders accounts for 90% of it. Check its plan for a large scan an index would avoid.
-                               90% of it  query 249      SELECT COUNT(*) FROM shop.orders o1 JOIN shop.customers c1 ON c1.id =…
-                                6% of it  query 9        SELECT [product_id], [quantity], [unit_price] FROM [shop].[order_item…
-                                4% of it  query 8        SELECT [id], [total] FROM [shop].[orders] WHERE [shipped_at] >= DATEA…
+                             A read from orders recorded 2 min in this category. Inspect measured worker activity and the actual plan before attributing the delay or changing indexes.
+                             2 min recorded  query 249      SELECT COUNT(*) FROM shop.orders o1 JOIN shop.customers c1 ON c1.id =…
+                             8.6 s recorded  query 9        SELECT [product_id], [quantity], [unit_price] FROM [shop].[order_item…
+                             5.8 s recorded  query 8        SELECT [id], [total] FROM [shop].[orders] WHERE [shipped_at] >= DATEA…
    6%  █···················  Memory                     5.9 s   Memory
-                             A read from order_items accounts for 27% of it.
-                               27% of it  query 9        SELECT [product_id], [quantity], [unit_price] FROM [shop].[order_item…
-                                9% of it  query 249      SELECT COUNT(*) FROM shop.orders o1 JOIN shop.customers c1 ON c1.id =…
+                             A read from order_items recorded 1.6 s in this category.
+                             1.6 s recorded  query 9        SELECT [product_id], [quantity], [unit_price] FROM [shop].[order_item…
+                             539 ms recorded  query 249      SELECT COUNT(*) FROM shop.orders o1 JOIN shop.customers c1 ON c1.id =…
+                             22 ms recorded  query 5        SELECT TOP (20) [id], [status], [total], [created_at] FROM [shop].[or…
   <1%  ····················  CPU                       423 ms   CPU
-                             A read from order_items accounts for 98% of it.
-                               98% of it  query 263      SELECT COUNT_BIG(*) FROM shop.order_items a JOIN shop.order_items b O…
-                                1% of it  query 249      SELECT COUNT(*) FROM shop.orders o1 JOIN shop.customers c1 ON c1.id =…
+                             A read from order_items recorded 15.2 s in this category.
+                             15.2 s recorded  query 263      SELECT COUNT_BIG(*) FROM shop.order_items a JOIN shop.order_items b O…
+                             190 ms recorded  query 249      SELECT COUNT(*) FROM shop.orders o1 JOIN shop.customers c1 ON c1.id =…
   <1%  ····················  Locks                      15 ms   Lock
-                             An update of orders accounts for 61% of it. Live shows who blocks whom right now.
-                               61% of it  query 138      UPDATE [shop].[orders] set [status] = [status] WHERE [id]=@1
-                               38% of it  query 143      SELECT [status] FROM [shop].[orders] WHERE [id]=@1
-                                1% of it  query 161      UPDATE [shop].[orders] set [total] = [total]+@1 WHERE [id]=@2
+                             An update of orders recorded 2 min of lock waiting. Use Live to capture the blocked request, native resource and holder before choosing a change.
+                             2 min recorded  query 138      UPDATE [shop].[orders] set [status] = [status] WHERE [id]=@1
+                             1 min recorded  query 143      SELECT [status] FROM [shop].[orders] WHERE [id]=@1
+                             2.4 s recorded  query 161      UPDATE [shop].[orders] set [total] = [total]+@1 WHERE [id]=@2
+
+Note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
+
+Note: Category totals and per-query totals may cover different populations; they are not compared as percentages.
+
+Note: Query attribution includes observed totals; missing categories are not measured zeroes.
 
 Health ("since start" covers 1 h 7 min)
     Batch requests (whole server)             0.2/s  since start
@@ -287,7 +302,7 @@ Information and history (2)
  16  ○  A call to pg_sleep takes 20.0 s of database time over the 5 hours since statistics were reset (12%), sleeping
        heavy-query:-8886085649470066503
 
-Check coverage: 10 assessed without a finding; 20 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 10 assessed without a finding; 22 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 ! 1 check is locked (Repeated statements within logged requests). See `culprit doctor pg-demo`.
 
@@ -365,11 +380,10 @@ Needs a look: 14 opportunities; the top ones touch 2 min of database time over t
                     · a read from order_items  4%  id -3722457391793582113
                     → culprit top pg-demo
 
-○ Where time goes   Disk reads take 5%; the other 95% isn't broken down by PostgreSQL.
-                    Statement timing from pg_stat_statements, the 5 hours since statistics were reset. This is recorded statement execution time, including CPU and unclassified time; it is not a measurement of time spent waiting.
-                    Statement execution time 4 min
-                    · Everything else  95%
-                    · Disk reads  5%  id -463560455567765064
+○ Where time goes   Largest recorded category: disk reads (100% of recorded totals).
+                    An update of wide recorded 23 ms in this category, with 11K native page reads per execution. Compare file-read latency under comparable work before choosing a change.
+                    Recorded category time 12.6 s
+                    · Disk reads  100%  id -463560455567765064
                     → culprit waits pg-demo
 
 ○ Right now         Sessions weren't read for this dashboard.
@@ -430,12 +444,19 @@ Needs a look: 14 opportunities; the top ones touch 2 min of database time over t
 $ culprit --format text waits --file <repo>/fixtures/pg-demo.report.json
 Where pg-demo's database time goes · Statement timing from pg_stat_statements, the 5 hours since statistics were reset
 
-  95%  ███████████████████·  Everything else            4 min   CPU, locks and untimed waits
-   5%  █···················  Disk reads                12.6 s   data file reads and writes
-                             An update of wide accounts for <1% of it, reading 11K pages from disk per run.
-                               <1% of it  query -463560455567765064 UPDATE archive.wide SET touched = touched + $1 WHERE id % $2 = $3
+ 100%  ████████████████████  Disk reads                12.6 s   data file reads and writes
+                             An update of wide recorded 23 ms in this category, with 11K native page reads per execution. Compare file-read latency under comparable work before choosing a change.
+                             23 ms recorded  query -463560455567765064 UPDATE archive.wide SET touched = touched + $1 WHERE id % $2 = $3
+                             0.40 ms recorded  query -967240904657798800 SELECT o12.status FROM orders o1 JOIN orders o2 ON o2.id = o1.id JOIN…
+                             0.14 ms recorded  query 6425265648074738764 SELECT count(*), sum(price * $1), max(length(name)) FROM products WHE…
 
-Note: PostgreSQL keeps no history of what sessions waited on. These totals come from per-statement timing; use Right now to sample what sessions wait on at this moment.
+Note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
+
+Note: Category totals and per-query totals may cover different populations; they are not compared as percentages.
+
+Note: Query attribution includes observed totals; missing categories are not measured zeroes.
+
+Note: PostgreSQL records per-statement I/O totals, which can overlap across parallel workers. CPU and lock waits remain unknown; use Right now to sample current sessions.
 
 Health ("since start" covers 6 h 59 min)
     Reads served from shared_buffers         55.29%  since start Reads served by PostgreSQL's shared_buffers; misses may be served by the operating system cache. The ratio alone does not establish slow storage or a memory shortage.
@@ -458,30 +479,36 @@ Storage (average per operation, since start)
 Replication
   slot        analytics_slot               inactive · physical · 1.1 GB kept
 $ culprit --format text findings x --report <repo>/fixtures/mysql-demo.report.json
-10 opportunities. The top ones touch 4 min of database time over the 2 minutes since statistics were reset (85%).
+13 opportunities. The top ones touch 4 min of database time over the 2 minutes since statistics were reset (84%).
 
   1  ●  An update of orders fails 28% of the time (1205 lock wait timeout)  · 28% of runs fail
        failing-query:4515abd524a46f37
-  2  ●  A read from orders spends nearly all its time waiting on locks, 28.8 s per run  · 4 min waiting on locks
+  2  ●  A read from orders takes 2 min of database time over the 2 minutes since statistics were reset (40%), with at least 2 min of recorded waiting (Locks)  · 2 min of database time over the 2 minutes since statistics were reset (40%)
+       heavy-query:4167fe7f2c20deb7
+  3  ●  An update of orders takes 2 min of database time over the 2 minutes since statistics were reset (40%), with at least 2 min of recorded waiting (Locks)  · 2 min of database time over the 2 minutes since statistics were reset (40%)
+       heavy-query:fc709554a9248878
+  4  ●  A read from orders has at least 2 min of recorded lock waits  · Recorded lock waits: 2 min
        lock-time:4167fe7f2c20deb7
-  3  ●  A read from products runs 30K times in 2 minutes, one key at a time  · 1.1 s of database time over the 2 minutes since statistics were reset (<1%)
+  5  ●  An update of orders has at least 2 min of recorded lock waits  · Recorded lock waits: 2 min
+       lock-time:fc709554a9248878
+  6  ●  A read from products runs 30K times in 2 minutes, one key at a time  · 1.1 s of database time over the 2 minutes since statistics were reset (<1%)
        chatty-query:9b30e6ad79d940fe
-  4  ●  A read from orders builds an on-disk temporary table about once per run  · 12% of DB time
+  7  ●  A read from orders builds an on-disk temporary table about once per run  · 12% of DB time
        temp-spill:04cd7be9c366fadc
-  5  ●  orders is read in full 81 times since the server started or its performance_schema counters were last reset (40.5M rows)  · 1% of DB time
+  8  ●  orders is read in full 81 times since the server started or its performance_schema counters were last reset (40.5M rows)  · 1% of DB time
        scan-heavy:shop.orders
-  6  ●  ix_orders_status is covered by the wider ix_orders_status_created on orders  · 10.5 MB redundant
+  9  ●  ix_orders_status is covered by the wider ix_orders_status_created on orders  · 10.5 MB redundant
        duplicate-index:shop.orders.ix_orders_status
-  7  ●  ix_products_sku duplicates uq_products_sku on products  · 432 KB redundant
+ 10  ●  ix_products_sku duplicates uq_products_sku on products  · 432 KB redundant
        duplicate-index:shop.products.ix_products_sku
-  8  ●  Transactions on this server waited 1 min 27 s for row locks since MySQL started 80 minutes ago, 14.5 s each on average  · 1 min/h lock waits
+ 11  ●  Transactions on this server waited 1 min 27 s for row locks since MySQL started 80 minutes ago, 14.5 s each on average  · 1 min/h lock waits
        row-lock-waits:server
-  9  ●  A read from order_items returns 20K rows per run  · 20K rows per run
+ 12  ●  A read from order_items returns 20K rows per run  · 20K rows per run
        big-result:7f47c8550af0c644
- 10  ●  The slow query log is off  · Setting
+ 13  ●  The slow query log is off  · Setting
        config:slow_query_log
 
-Check coverage: 7 assessed without a finding; 17 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 6 assessed without a finding; 18 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 ! 1 check is locked (Repeated statements within logged requests). See `culprit doctor mysql-demo`.
 
@@ -519,18 +546,18 @@ $ culprit --format text dashboard <repo>/fixtures/mysql-demo.report.json
 mysql-demo · MySQL 8.4.11 · shop
 performance_schema, the 2 minutes since statistics were reset · local · scanned <age>
 
-Needs a look: 10 opportunities; the top ones touch 4 min of database time over the 2 minutes since statistics were reset (85%).
+Needs a look: 13 opportunities; the top ones touch 4 min of database time over the 2 minutes since statistics were reset (84%).
 
 ○ Database time     5 min of database time over the 2 minutes since statistics were reset.
                     performance_schema keeps running totals only, so the trend comes from Culprit's own scans; it appears after the next scan.
                     Database time 5 min · Runs 40K · Covers 2 minutes
                     → culprit changes mysql-demo
 
-● Findings          10 opportunities; the top ones touch 4 min of database time over the 2 minutes since statistics were reset (85%).
-                    High 1 · Medium 0 · Low 9
+● Findings          13 opportunities; the top ones touch 4 min of database time over the 2 minutes since statistics were reset (84%).
+                    High 1 · Medium 2 · Low 10
                     ● An update of orders fails 28% of the time (1205 lock wait timeout)  28% of runs fail
-                    ○ A read from orders spends nearly all its time waiting on locks, 28.8 s per run  4 min waiting on locks
-                    ○ A read from products runs 30K times in 2 minutes, one key at a time  1.1 s of database time over the 2 minutes since statistics were reset (<1%)
+                    ● A read from orders takes 2 min of database time over the 2 minutes since statistics were reset (40%), with at least 2 min of recorded waiting (Locks)  2 min of database time over the 2 minutes since statistics were reset (40%)
+                    ● An update of orders takes 2 min of database time over the 2 minutes since statistics were reset (40%), with at least 2 min of recorded waiting (Locks)  2 min of database time over the 2 minutes since statistics were reset (40%)
                     → culprit findings mysql-demo
 
 ○ Top queries       One query is 40% of database time: a read from orders.
@@ -541,9 +568,9 @@ Needs a look: 10 opportunities; the top ones touch 4 min of database time over t
                     · a read from orders  12%  id 04cd7be9c366fadc
                     → culprit top mysql-demo
 
-○ Where time goes   Most time goes to row access (61%), then disk reads (39%).
+○ Where time goes   Largest recorded categories: row access (61%), then disk reads (39%).
                     performance_schema totals since MySQL started 80 minutes ago.
-                    Waiting since start 1 min
+                    Recorded time since start 1 min
                     · Row access  61%
                     · Disk reads  39%
                     · Locks  <1%  id 4167fe7f2c20deb7
@@ -609,10 +636,16 @@ Where mysql-demo's database time goes · performance_schema totals since MySQL s
   61%  ████████████········  Row access                50.4 s   
   39%  ████████············  Disk reads                31.7 s   
   <1%  ····················  Locks                     6.4 ms   
-                             A read from orders accounts for 48% of it. Live shows who blocks whom right now.
-                               48% of it  query 4167fe7f2c20deb7 SELECT `id` FROM `orders` WHERE `id` = ? FOR UPDATE
-                               48% of it  query fc709554a9248878 UPDATE `orders` SET `id` = `id` WHERE `id` = ?
-                                5% of it  query 4515abd524a46f37 UPDATE `orders` SET STATUS = STATUS WHERE `id` = ?
+                             A read from orders recorded 2 min of lock waiting. Use Live to capture the blocked request, native resource and holder before choosing a change.
+                             2 min recorded  query 4167fe7f2c20deb7 SELECT `id` FROM `orders` WHERE `id` = ? FOR UPDATE
+                             2 min recorded  query fc709554a9248878 UPDATE `orders` SET `id` = `id` WHERE `id` = ?
+                             12.0 s recorded  query 4515abd524a46f37 UPDATE `orders` SET STATUS = STATUS WHERE `id` = ?
+
+Note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
+
+Note: Category totals and per-query totals may cover different populations; they are not compared as percentages.
+
+Note: Query attribution includes observed totals; missing categories are not measured zeroes.
 
 Note: MySQL counts waits since it started, only for enabled performance_schema instruments. Lock time is attributed to statements; the rest is a server-wide total.
 
@@ -659,7 +692,7 @@ $ culprit --format text findings x --report <repo>/fixtures/sqlite-demo.report.j
   5  ●  47.0 MB of the file is free pages (71% of it)  · 47.0 MB free
        config:sqlite-free-pages
 
-Check coverage: 1 assessed without a finding; 5 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 1 assessed without a finding; 7 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 Next: culprit show sqlite-demo 'unindexed-fk:main.orders(customer_id)'
 $ culprit --format text top x --report <repo>/fixtures/sqlite-demo.report.json
@@ -769,7 +802,7 @@ Information and history (1)
   5  ○  orders is read in full to find rows by customer_id
        filtered-scan:public.orders(customer_id)
 
-Check coverage: 5 assessed without a finding; 7 limited by missing or incomplete evidence. JSON includes each check's reason.
+Check coverage: 5 assessed without a finding; 9 limited by missing or incomplete evidence. JSON includes each check's reason.
 
 ! 3 checks are locked (Unused indexes, Overlapping indexes and Repeated statements within logged requests). See `culprit doctor yugabyte-demo`.
 
@@ -963,38 +996,42 @@ $ culprit --format md findings x --report <repo>/fixtures/mssql-demo.report.json
 
 SQL Server 2022 · database `culprit_demo` · Sun Oct 11 12:13 UTC
 
-**20 opportunities. The top ones touch 5 min of database time over the last 5 hours (83%).**
+**23 opportunities. The top ones touch 3 min of database time over the last 5 hours (61%).**
 
 | # | Status | Finding | Impact | Id |
 |---|---|---|---|---|
-| 1 | Needs attention | A read from order_items times out on every run, at about 15 s | 100% of runs fail | `failing-query:263` |
-| 2 | Needs attention | A read from orders fails 25% of the time | 25% of runs fail | `failing-query:246` |
-| 3 | Needs attention | Queries on orders recorded lock waits in the last 5 hours | 3 min waiting on locks | `hot-rows:shop.orders` |
-| 4 | Needs attention | Compares each of 1.5M rows of order_items with 999 rows the Table Spool replays (1.5B pairs) | 27% of DB time | `plan-insights:nested-loops:query-263` |
-| 5 | Needs attention | This plan runs on one CPU because its statement says OPTION (MAXDOP 1) | 27% of DB time | `plan-insights:parallelism-blocked:query-263` |
-| 6 | Needs attention | A read from products runs 60K times in 5 hours, one key at a time | 822 ms of database time over the last 5 hours (&lt;1%) | `chatty-query:6` |
-| 7 | Needs attention | A type mismatch on customers.email stops a read from customers from seeking an index | 7% of DB time | `plan-warnings:implicit-conversion:customers.email` |
-| 8 | Needs attention | order_items is searched by order_id without a supporting index | 20.3 s of database time over the last 5 hours (6%) | `missing-index:shop.order_items(order_id)` |
-| 9 | Needs attention | Captured reads have lock waits; investigate the blocking resource | Setting | `config:read-committed-snapshot` |
-| 10 | Optional improvement | A read from orders got 3.4× slower on Oct 11 at 10:45 UTC, when its plan changed | 3.4× slower | `regression:8` |
-| 11 | Optional improvement | ticket_events has no index on ticket_id, its foreign key to support_tickets | 800K rows unindexed | `unindexed-fk:shop.ticket_events(ticket_id)` |
-| 12 | Optional improvement | orders is searched by shipped_at without a supporting index | 5.0 s of database time over the last 5 hours (1%) | `missing-index:shop.orders(shipped_at)` |
-| 13 | Optional improvement | Two queries deadlocked once in the last 6 hours (key-lookup deadlock on shop.customers) | 1 deadlock | `deadlocks:key-lookup:shop.customers` |
-| 14 | Optional improvement | ix_orders_status is covered by the wider ix_orders_status_created on orders | 26.5 MB redundant | `duplicate-index:shop.orders.ix_orders_status` |
-| 15 | Optional improvement | ix_products_sku duplicates uq_products_sku on products | 648 KB redundant | `duplicate-index:shop.products.ix_products_sku` |
-| 16 | Optional improvement | A read from order_items returns 20K rows per run | 20K rows per run | `big-result:264` |
-| 17 | Optional improvement | SQL Server doesn't trust 2 constraints on child | 2 untrusted | `untrusted-constraint:archive.child` |
-| 18 | Optional improvement | Cost threshold for parallelism is still the 1990s default of 5 | Setting | `config:cost-threshold-for-parallelism` |
-| 19 | Optional improvement | Query Store records every statement, including one-off ones | Setting | `config:query-store-capture` |
-| 20 | Optional improvement | LAST_QUERY_PLAN_STATS is off for this database | Diagnostics | `last-actual-plans:last-query-plan-stats` |
+| 1 | Needs attention | An update of orders takes 2 min of database time over the last 5 hours (34%), with at least 2 min of recorded waiting (Lock) | 2 min of database time over the last 5 hours (34%) | `heavy-query:138` |
+| 2 | Needs attention | A read from order_items times out on every run, at about 15 s | 100% of runs fail | `failing-query:263` |
+| 3 | Needs attention | A read from orders fails 25% of the time | 25% of runs fail | `failing-query:246` |
+| 4 | Needs attention | An update of orders has at least 2 min of recorded lock waits | Recorded lock waits: 2 min | `lock-time:138` |
+| 5 | Needs attention | Compares each of 1.5M rows of order_items with 999 rows the Table Spool replays (1.5B pairs) | 27% of DB time | `plan-insights:nested-loops:query-263` |
+| 6 | Needs attention | This plan runs on one CPU because its statement says OPTION (MAXDOP 1) | 27% of DB time | `plan-insights:parallelism-blocked:query-263` |
+| 7 | Needs attention | A read from orders takes 1 min of database time over the last 5 hours (21%), with at least 1 min of recorded waiting (Lock) | 1 min of database time over the last 5 hours (21%) | `heavy-query:143` |
+| 8 | Needs attention | A read from orders has at least 1 min of recorded lock waits | Recorded lock waits: 1 min | `lock-time:143` |
+| 9 | Needs attention | A read from products runs 60K times in 5 hours, one key at a time | 822 ms of database time over the last 5 hours (&lt;1%) | `chatty-query:6` |
+| 10 | Needs attention | A type mismatch on customers.email stops a read from customers from seeking an index | 7% of DB time | `plan-warnings:implicit-conversion:customers.email` |
+| 11 | Needs attention | order_items is searched by order_id without a supporting index | 20.3 s of database time over the last 5 hours (6%) | `missing-index:shop.order_items(order_id)` |
+| 12 | Needs attention | Captured reads have lock waits; investigate the blocking resource | Setting | `config:read-committed-snapshot` |
+| 13 | Optional improvement | A read from orders got 3.4× slower on Oct 11 at 10:45 UTC, when its plan changed | 3.4× slower | `regression:8` |
+| 14 | Optional improvement | ticket_events has no index on ticket_id, its foreign key to support_tickets | 800K rows unindexed | `unindexed-fk:shop.ticket_events(ticket_id)` |
+| 15 | Optional improvement | orders is searched by shipped_at without a supporting index | 5.0 s of database time over the last 5 hours (1%) | `missing-index:shop.orders(shipped_at)` |
+| 16 | Optional improvement | Two queries deadlocked once in the last 6 hours (key-lookup deadlock on shop.customers) | 1 deadlock | `deadlocks:key-lookup:shop.customers` |
+| 17 | Optional improvement | ix_orders_status is covered by the wider ix_orders_status_created on orders | 26.5 MB redundant | `duplicate-index:shop.orders.ix_orders_status` |
+| 18 | Optional improvement | ix_products_sku duplicates uq_products_sku on products | 648 KB redundant | `duplicate-index:shop.products.ix_products_sku` |
+| 19 | Optional improvement | A read from order_items returns 20K rows per run | 20K rows per run | `big-result:264` |
+| 20 | Optional improvement | SQL Server doesn't trust 2 constraints on child | 2 untrusted | `untrusted-constraint:archive.child` |
+| 21 | Optional improvement | Cost threshold for parallelism is still the 1990s default of 5 | Setting | `config:cost-threshold-for-parallelism` |
+| 22 | Optional improvement | Query Store records every statement, including one-off ones | Setting | `config:query-store-capture` |
+| 23 | Optional improvement | LAST_QUERY_PLAN_STATS is off for this database | Diagnostics | `last-actual-plans:last-query-plan-stats` |
 
-## Information and history (3)
+## Information and history (4)
 
 | # | Status | Finding | Impact | Id |
 |---|---|---|---|---|
-| 21 | Information | Row locks on support_tickets escalated to a table lock 5 times since its indexes were loaded into memory | 5 table locks | `lock-escalations:shop.support_tickets` |
-| 22 | Information | Page-latch waits on pk_hot | 53.6 s latch waits | `last-page-insert:archive.hot.pk_hot` |
-| 23 | History | An update of wide writes 7.9 KB of transaction log per row it changes | 232 MB of transaction log | `log-volume:255` |
+| 24 | Information | orders has 5 recorded historical lock waits | 3 min 7 s waiting on locks | `hot-rows:shop.orders` |
+| 25 | Information | Row locks on support_tickets escalated to a table lock 5 times since its indexes were loaded into memory | 5 table locks | `lock-escalations:shop.support_tickets` |
+| 26 | Information | Page-latch waits on pk_hot | 53.6 s latch waits | `last-page-insert:archive.hot.pk_hot` |
+| 27 | History | An update of wide writes 7.9 KB of transaction log per row it changes | 232 MB of transaction log | `log-volume:255` |
 $ culprit --format md analyze <repo>/fixtures/pg-demo.report.json
 # Culprit report: pg-demo
 
@@ -1042,10 +1079,9 @@ _pg_stat_statements, the 5 hours since statistics were reset; scanned Sun Oct 11
   - a read from orders — 44%
   - a read from orders — 23%
   - a read from order_items — 4%
-- **Where time goes** (for context): Disk reads take 5%; the other 95% isn't broken down by PostgreSQL.
-  Statement timing from pg_stat_statements, the 5 hours since statistics were reset. This is recorded statement execution time, including CPU and unclassified time; it is not a measurement of time spent waiting.
-  - Everything else — 95%
-  - Disk reads — 5%
+- **Where time goes** (for context): Largest recorded category: disk reads (100% of recorded totals).
+  An update of wide recorded 23 ms in this category, with 11K native page reads per execution. Compare file-read latency under comparable work before choosing a change.
+  - Disk reads — 100%
 - **Right now** (for context): Sessions weren't read for this dashboard.
   The app reads them every few seconds; `culprit live` reads them once.
 - **Health** (for context): 12 signals recorded; none has a threshold to grade.

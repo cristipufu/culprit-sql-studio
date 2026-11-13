@@ -338,14 +338,22 @@ fn a_regression_says_when_and_how_much_in_english() {
     let mut one_plan = snapshot("mssql-demo.json");
     query(&mut one_plan, "8").plans.retain(|p| p.id == "8");
     one_plan.workload.as_mut().unwrap().timeline.as_mut().unwrap().source = culprit_core::TimelineSource::Scans;
-    let mut slow_log = snapshot("mssql-demo.json");
-    slow_log.workload.as_mut().unwrap().min_logged_ms = Some(100.0);
+    let mut with_logging_floor = snapshot("mssql-demo.json");
+    with_logging_floor.workload.as_mut().unwrap().min_logged_ms = Some(100.0);
+    assert_eq!(with_logging_floor.workload.as_ref().unwrap().kind, Some(culprit_core::WorkloadKind::QueryStore));
     let said = |s: Snapshot| {
         let found = crate::run("regression", &s);
         crate::words(found.iter().find(|f| f.id == "regression:8").expect("query 8 got slower"))
     };
     assert_eq!(
-        [said(stretched(1.0)), said(automatic), said(unforceable), said(no_new_plan), said(one_plan), said(slow_log),],
+        [
+            said(stretched(1.0)),
+            said(automatic),
+            said(unforceable),
+            said(no_new_plan),
+            said(one_plan),
+            said(with_logging_floor),
+        ],
         [
             "A read from orders got 3.4× slower on Oct 11 at 20:30 UTC, when its plan changed · Low · High\n\
                 Until Oct 11, 20:30 UTC it averaged 9.5 ms per run; since then 32 ms, over 93 runs: 2.1 s of extra database time in 6 hours. Plan 47 first ran on Oct 11 at 20:31 UTC and averages 32 ms; plan 8 averaged 9.5 ms.\n\
@@ -399,17 +407,17 @@ fn a_regression_says_when_and_how_much_in_english() {
                 fix: Find what changed on Oct 11 at 10:45 UTC: a deploy touching this statement, its parameters or its indexes; data growth in the tables it reads; a statistics update; or blocking (Live shows current waits). Open the query to compare its plan with what you expect.\n\
                 verify: Re-scan after the fix: this query's trend in Queries should drop back to about 9.5 ms per run.\n\
                 caveat: Culprit built this trend from its own scans. Each point covers the time between two scans, so the start time is only as precise as how often you scan.",
-            "A read from orders got 3.4× slower on Oct 11 at 10:45 UTC, when its plan changed · Low · High\n\
-                Until Oct 11, 10:45 UTC it averaged 9.5 ms per run; since then 32 ms, over 93 runs: 2.1 s of extra logged slow-run time in 89 minutes. Plan 47 first ran on Oct 11 at 10:46 UTC and averages 32 ms; plan 8 averaged 9.5 ms.\n\
-                impact: 3.4× slower\n\
-                metric: Before\n\
-                metric: Since then\n\
-                metric: Extra time\n\
-                metric: Started: Oct 11, 10:45 UTC\n\
-                metric: Plan change: 8 → 47\n\
-                fix: Force plan 8 to stop the bleeding, then find out why the optimizer switched (statistics, parameter values, schema). Unforce once the cause is fixed.\n\
-                sql: EXEC sp_query_store_force_plan @query_id = 8, @plan_id = 8;\n\
-                verify: Re-scan after the fix: this query's trend in Queries should drop back to about 9.5 ms per run.",
+            r#"A read from orders got 3.4× slower on Oct 11 at 10:45 UTC, when its plan changed · Low · High
+Until Oct 11, 10:45 UTC it averaged 9.5 ms per run; since then 32 ms, over 93 runs: 2.1 s of extra database time in 89 minutes. Plan 47 first ran on Oct 11 at 10:46 UTC and averages 32 ms; plan 8 averaged 9.5 ms.
+impact: 3.4× slower
+metric: Before
+metric: Since then
+metric: Extra time
+metric: Started: Oct 11, 10:45 UTC
+metric: Plan change: 8 → 47
+fix: Force plan 8 to stop the bleeding, then find out why the optimizer switched (statistics, parameter values, schema). Unforce once the cause is fixed.
+sql: EXEC sp_query_store_force_plan @query_id = 8, @plan_id = 8;
+verify: Re-scan after the fix: this query's trend in Queries should drop back to about 9.5 ms per run."#,
         ]
     );
 }
@@ -1231,17 +1239,17 @@ fn unstable_queries_say_what_their_slow_runs_waited_for_in_english() {
                 sql: -- Give the optimizer the distribution of an uneven column:\n\
                 ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;\n\
                 verify: Capture slow runs in the slow query log before the change and again after it, with the same logging threshold and a representative workload. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent. performance_schema keeps running totals, so its historical maximum and standard deviation do not isolate runs after the change; use the new log samples to judge it.",
-            "A read from orders averages 102 ms per run, but some runs take far longer (up to 10.0 s) · Medium · Medium\n\
-                Same statement, very different run times: the slow runs took at least 3 min more than the average, together. At least 1.0 s of lock waits were recorded by MySQL, against at least 3 min of extra time in the slow runs; blocking is a candidate, but these totals do not identify which calls waited or rule out parameter-sensitive plans. Compare the parameter values of the slow runs with those of the fast ones.\n\
-                impact: 81% of logged slow-run time in slow runs\n\
-                metric: Average\n\
-                metric: Slowest\n\
-                metric: Std deviation\n\
-                metric: Slow runs' extra time (at least)\n\
-                fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help. Compare a slow and a fast value with EXPLAIN ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MySQL choose a better plan for each.\n\
-                sql: -- Give the optimizer the distribution of an uneven column:\n\
-                ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;\n\
-                verify: Collect equal-length query-log samples before and after the change, keeping the same logging threshold and a representative workload. Include only runs whose timestamps fall in their respective period. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent.",
+            r#"A read from orders averages 102 ms per run, but some runs take far longer (up to 10.0 s) · Medium · Medium
+Same statement, very different run times: the slow runs took at least 3 min more than the average, together. At least 1.0 s of lock waits were recorded by MySQL, against at least 3 min of extra time in the slow runs; blocking is a candidate, but these totals do not identify which calls waited or rule out parameter-sensitive plans. Compare the parameter values of the slow runs with those of the fast ones.
+impact: 81% of logged-run time in slow runs
+metric: Average
+metric: Slowest
+metric: Std deviation
+metric: Slow runs' extra time (at least)
+fix: Find what the slow runs wait for while they happen (Live shows each session's wait and any blocking chain). Inspect the blocking transaction and any trigger or constraint work before deciding whether a query, index or transaction change will help. Compare a slow and a fast value with EXPLAIN ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MySQL choose a better plan for each.
+sql: -- Give the optimizer the distribution of an uneven column:
+ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;
+verify: Collect equal-length query-log samples before and after the change, keeping the same logging threshold and a representative workload. Include only runs whose timestamps fall in their respective period. Compare their durations and any recorded lock waits: runs with comparable parameter values should be faster; if locks caused the slow runs, those waits should be shorter or absent."#,
             "A read from orders averages 108 ms per run, but some runs take far longer (up to 10.0 s) · Medium · Medium\n\
                 Same statement, very different run times: the slow runs took at least 3 min more than the average, together. Wait coverage is incomplete, so the observations cannot rule out locks or establish which runs were slow. Compare the parameter values of the slow runs with those of the fast ones.\n\
                 impact: 91% of DB time in slow runs\n\
@@ -2633,16 +2641,18 @@ fn slow_log(mut s: Snapshot) -> Snapshot {
 }
 
 #[test]
-fn shares_from_the_slow_log_are_of_logged_slow_runs() {
+fn slow_log_shares_remain_of_logged_runs_even_with_a_current_zero_threshold() {
     let report = analyze(slow_log(snapshot("mysql-demo.json")));
     let f = find(&report.findings, "heavy-query:c7b5ac9bb4bcecfe").unwrap();
-    assert!(f.title.contains("of logged slow-run time over"), "{}", f.title);
-    assert!(f.impact.label.contains("of logged slow-run time over"), "{}", f.impact.label);
-    // A log that keeps every statement covers all of the time.
+    assert!(f.title.contains("of logged-run time over"), "{}", f.title);
+    assert!(f.impact.label.contains("of logged-run time over"), "{}", f.impact.label);
+    // The current threshold cannot establish that historical records contain every database execution.
     let mut s = slow_log(snapshot("mysql-demo.json"));
     set(&mut s, "long_query_time", "0.000000");
     let f = find(&analyze(s).findings, "heavy-query:c7b5ac9bb4bcecfe").cloned().unwrap();
-    assert!(f.title.contains("of database time over"), "{}", f.title);
+    assert!(f.title.contains("of logged-run time over"), "{}", f.title);
+    assert!(f.impact.label.contains("of logged-run time over"), "{}", f.impact.label);
+    assert!(!f.title.contains("of database time"));
 }
 
 #[test]
@@ -2659,7 +2669,13 @@ fn a_slow_log_tail_says_it_is_of_logged_runs_and_needs_several() {
     let report = analyze(s.clone());
     let f = find(&report.findings, "parameter-sensitive:c7b5ac9bb4bcecfe").expect("three slow logged runs");
     assert!(f.title.starts_with("Logged runs of a read from orders usually take 150 ms"), "{}", f.title);
-    assert!(f.summary.contains("the slow query log kept (only those over long_query_time, 100 ms"), "{}", f.summary);
+    assert!(
+        f.summary.contains(
+            "long_query_time is currently 100 ms; historical thresholds, filters and coverage are not established"
+        ),
+        "{}",
+        f.summary
+    );
     assert!(!f.summary.contains("99 in 100"), "80 runs have no 1-in-100: {}", f.summary);
     // Two slow runs are not a tail.
     query(&mut s, "c7b5ac9bb4bcecfe").spread.as_mut().unwrap().histogram[2][2] = 2.0;
@@ -2864,8 +2880,8 @@ fn parameter_sensitivity_says_what_the_values_do_in_english() {
         s.pressure.get_or_insert_with(Default::default).uptime_hours = Some(72.0);
         s
     };
-    let mut every_run = slow_log(tail(mysql(), 1000.0, true));
-    set(&mut every_run, "long_query_time", "0.000000");
+    let mut current_zero_threshold = slow_log(tail(mysql(), 1000.0, true));
+    set(&mut current_zero_threshold, "long_query_time", "0.000000");
     let mut no_threshold = slow_log(tail(mysql(), 1000.0, true));
     no_threshold.settings.retain(|s| s.name != "long_query_time");
     let mut locked = tail(mysql(), 1000.0, true);
@@ -2882,7 +2898,7 @@ fn parameter_sensitivity_says_what_the_values_do_in_english() {
         [
             said(tail(mysql(), 1000.0, true), id),
             said(tail(mysql(), 400.0, false), id),
-            said(every_run, id),
+            said(current_zero_threshold, id),
             said(no_threshold, id),
             said(locked, id),
             said(mariadb, id),
@@ -2910,19 +2926,19 @@ fn parameter_sensitivity_says_what_the_values_do_in_english() {
                 ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;\n\
                 verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
                 verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
-            "A read from orders usually takes 2.0 ms but 3% of its runs take over 20 ms · Low · High\n\
-                The slow query log's runs of this statement (it keeps every run): half finished within 2.0 ms, 99 in 100 within 900 ms, the slowest took 8.3 ms. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.\n\
-                impact: 450× slower for some runs\n\
-                metric: Typical run\n\
-                metric: 1 in 100 runs\n\
-                metric: Slow runs\n\
-                fix: Compare a slow and a fast value with EXPLAIN ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MySQL choose a better plan for each.\n\
-                sql: -- Give the optimizer the distribution of an uneven column:\n\
-                ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;\n\
-                verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
-                verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
+            r#"Logged runs of a read from orders usually take 2.0 ms but 3% of them take over 20 ms · Low · Medium
+Among the retained logged runs of this statement (long_query_time is currently 0 ms; historical thresholds, filters and coverage are not established): half finished within 2.0 ms, 99 in 100 within 900 ms, the slowest took 8.3 ms. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.
+impact: 450× slower for some runs
+metric: Typical logged run
+metric: 1 in 100 runs
+metric: Slow runs
+fix: Compare a slow and a fast value with EXPLAIN ANALYZE (outside production). If some values match far more rows, an index that narrows them, or a histogram on the uneven column, lets MySQL choose a better plan for each.
+sql: -- Give the optimizer the distribution of an uneven column:
+ANALYZE TABLE <table> UPDATE HISTOGRAM ON <column> WITH 64 BUCKETS;
+verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).
+verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one."#,
             "Logged runs of a read from orders usually take 2.0 ms but 3% of them take over 20 ms · Low · Medium\n\
-                Of the runs of this statement the slow query log kept (only those over long_query_time, so faster runs aren't counted): half finished within 2.0 ms, 99 in 100 within 900 ms, the slowest took 8.3 ms. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.\n\
+                Among the retained logged runs of this statement (logging thresholds, filters and retention may omit other executions): half finished within 2.0 ms, 99 in 100 within 900 ms, the slowest took 8.3 ms. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.\n\
                 impact: 450× slower for some runs\n\
                 metric: Typical logged run\n\
                 metric: 1 in 100 runs\n\
@@ -2981,7 +2997,7 @@ fn parameter_sensitivity_says_what_the_values_do_in_english() {
     assert_eq!(
         said(slow_log(tail(mysql(), 400.0, false)), id),
         "Logged runs of a read from orders usually take 2.0 ms but 1 in 100 takes over 900 ms · Low · Medium\n\
-        Of the runs of this statement the slow query log kept (only those over long_query_time, 100 ms, so faster runs aren't counted): half finished within 2.0 ms, 99 in 100 within 900 ms, the slowest took 8.3 ms. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.\n\
+        Among the retained logged runs of this statement (long_query_time is currently 100 ms; historical thresholds, filters and coverage are not established): half finished within 2.0 ms, 99 in 100 within 900 ms, the slowest took 8.3 ms. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.\n\
         impact: 450× slower for some runs\n\
         metric: Typical logged run\n\
         metric: 1 in 100 runs\n\
@@ -3012,7 +3028,7 @@ fn parameter_sensitivity_says_what_the_values_do_in_english() {
                 verify: Run the statement with a value from a slow call and one from a fast call and compare the plans (Editor → Explain, or Analyze outside production).\n\
                 verify: Re-scan after the change: Queries → Runtime spread should show the slow lane gone or close to the fast one.",
             "Logged runs of a read from orders usually take 150 ms but 4% of them take over 1.5 s · Low · Medium\n\
-                Of the runs of this statement the slow query log kept (only those over long_query_time, 100 ms, so faster runs aren't counted): half finished within 150 ms, the slowest took 8.3 ms. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.\n\
+                Among the retained logged runs of this statement (long_query_time is currently 100 ms; historical thresholds, filters and coverage are not established): half finished within 150 ms, the slowest took 8.3 ms. MySQL plans every call afresh, so slow calls usually touch far more rows for some values (skewed data) or wait for locks.\n\
                 impact: 27× slower for some runs\n\
                 metric: Typical logged run\n\
                 metric: Slow runs\n\

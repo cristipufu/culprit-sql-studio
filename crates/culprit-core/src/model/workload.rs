@@ -67,8 +67,8 @@ pub struct Workload {
     /// sum of every entry's time an hour of its own life, in ms. Shares are then weighed by it ([`Workload::share_of`])
     /// so a plan cached for a month doesn't outweigh one compiled an hour ago by its age alone. `None` elsewhere.
     pub hourly_time_ms: Option<f64>,
-    /// Only runs slower than this were recorded (the slow query log's `long_query_time`), so totals, shares and run
-    /// counts are of logged slow runs, not of everything the database ran. `None` when every run is counted.
+    /// A lower duration bound established for the captured population. The current logging setting alone does not
+    /// establish a historical bound. `None` means the floor is unknown, not that every database run was counted.
     pub min_logged_ms: Option<f64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub history_inputs: Vec<crate::BaselineReference>,
@@ -1092,6 +1092,8 @@ pub struct Spread {
     /// `[low_ms, high_ms, runs]` per bucket, fastest first (MySQL).
     pub histogram: Vec<[f64; 3]>,
     /// Time spent waiting for locks across all runs (MySQL).
+    /// Native accumulated lock timer. Its source may cover only table-lock acquisition and may use a different
+    /// clock from statement execution; a scalar value establishes neither all lock classes nor an elapsed share.
     pub lock_ms: Option<f64>,
 }
 

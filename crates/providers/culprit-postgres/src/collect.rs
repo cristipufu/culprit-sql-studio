@@ -62,10 +62,7 @@ pub async fn snapshot(
 
     let mut families = Vec::new();
     let mut statement_status = Vec::new();
-    let (statements_ms, statements_io_ms) = match &workload {
-        Ok(Some(c)) => (c.workload.total_time_ms, c.io_ms),
-        _ => (0.0, 0.0),
-    };
+    let statements_io_ms = workload.as_ref().ok().and_then(Option::as_ref).map_or(0.0, |collected| collected.io_ms);
     let workload = match workload {
         Ok(Some(collected)) => {
             coverage.completed(&sources::STATEMENTS, collected.workload.queries.len());
@@ -150,11 +147,8 @@ pub async fn snapshot(
             scope: "server".into(),
         });
     }
-    // PostgreSQL keeps no wait history: time by category comes from statement and WAL timing, when they are on.
-    let waits_out = crate::pressure::history_waits(&primary, &probe, statements_ms, statements_io_ms).await;
-    if statements_io_ms > statements_ms {
-        coverage.note("waits", culprit_core::message!("provider.postgres.coverage.io_exceeds_execution"));
-    }
+    // Per-statement native I/O may accumulate across workers. It neither partitions elapsed time nor measures CPU.
+    let waits_out = crate::pressure::statement_io_waits(statements_io_ms);
 
     if waits_out.is_empty() {
         coverage.withdraw(Capability::WaitStats);

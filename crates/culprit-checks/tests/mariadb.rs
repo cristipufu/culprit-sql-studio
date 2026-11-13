@@ -101,10 +101,18 @@ fn without_performance_schema_the_slow_log_is_offered_first() {
         w.kind = Some(culprit_core::WorkloadKind::SlowLog);
         w.windowed = true;
     }
-    let report = analyze(logged);
-    let f = report.findings.iter().find(|f| f.id == "config:performance_schema").expect("finding");
-    assert_eq!(f.severity, Severity::Medium);
-    assert!(f.summary.contains("Culprit reads the slow query log"), "{}", f.summary);
+    // Neither a nonzero threshold nor its current zero value establishes complete historical capture.
+    for threshold in ["10.000000", "0.000000"] {
+        set(&mut logged, "long_query_time", threshold);
+        let report = analyze(logged.clone());
+        assert!(!report.snapshot.queries().is_empty(), "retained runs still provide positive evidence");
+        assert!(!report.snapshot.server.capabilities.contains(&Capability::PerformanceSchema));
+        let f = report.findings.iter().find(|f| f.id == "config:performance_schema").expect("finding");
+        assert_eq!(f.severity, Severity::Medium);
+        assert!(f.summary.contains("using retained slow-log runs"), "{}", f.summary);
+        assert!(f.summary.contains("Logging thresholds, filters and retention can limit coverage"), "{}", f.summary);
+        assert!(f.summary.contains("does not establish complete statement or wait statistics"), "{}", f.summary);
+    }
 }
 
 // The saved demo: lock-time:375c "spends nearly all its time waiting on locks, 2.5 s per run" for a GROUP BY that reads

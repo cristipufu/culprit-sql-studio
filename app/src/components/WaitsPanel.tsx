@@ -13,7 +13,7 @@ import { ActivityHistoryView } from "./ActivityHistory";
 import { HealthTab, SignalTile } from "./Health";
 import type { WaitsTab } from "./Waits";
 import type { Engine } from "../gen/Engine";
-import { statementMetrics, can, isMariadb, serverName, waitSampling } from "../lib/engines";
+import { can, isMariadb, serverName, waitSampling } from "../lib/engines";
 import { t, useLanguage } from "../lib/i18n";
 import { slot, withElements } from "../lib/message-parts";
 
@@ -199,7 +199,7 @@ function Bar({ items }: { items: { key: string; label: string; share: number }[]
   );
 }
 
-function WaitsView({
+export function WaitsView({
   report,
   current,
   onSelect,
@@ -273,20 +273,17 @@ function WaitsView({
           <div className="wq-list">
             {current.queries.map((q) => (
               <button type="button" key={q.id} className="wq-row" onClick={() => openQuery(q.id)} title={t("ui.common.open_in_queries")}>
-                <span className="wq-share">
-                  <span className="wq-track">
-                    <span style={{ width: `${Math.max(2, q.share_of_category * 100)}%`, background: waitColor(current.key) }} />
-                  </span>
-                  <b>{percent(q.share_of_category)}</b>
+                <span className="wq-time">
+                  <b>{duration(q.wait_ms)}</b>
                 </span>
                 <span className="wq-text mono">{q.text}</span>
                 <span className="wq-meta">
-                  {/* Waits of a parallel query's threads add up, so they can exceed its elapsed time: per run is always true. */}
-                  {q.share_of_query < 0.95
-                    ? t("ui.waits_panel.per_run_share", { kind: statementMetrics(report.engine).io_wait_within_statement_time && current.key === "other" ? "recorded" : "waits", time: duration(q.executions > 0 ? q.wait_ms / q.executions : q.wait_ms), share: percent(q.share_of_query) })
-                    : t("ui.waits_panel.per_run", { kind: statementMetrics(report.engine).io_wait_within_statement_time && current.key === "other" ? "recorded" : "waits", time: duration(q.executions > 0 ? q.wait_ms / q.executions : q.wait_ms) })}
-                  {" · "}
-                  {t("ui.waits_panel.runs", { n: q.executions, runs: count(q.executions) })}
+                  {q.mean_recorded_ms != null
+                    ? t("ui.waits_panel.query.accumulated_average", { total: duration(q.wait_ms), average: duration(q.mean_recorded_ms) })
+                    : t("ui.waits_panel.query.recorded_total", { total: duration(q.wait_ms) })}
+                  {q.executions > 0 && Number.isFinite(q.executions)
+                    ? ` · ${t("ui.waits_panel.runs", { n: q.executions, runs: count(q.executions) })}`
+                    : ""}
                   {q.rows_per_run != null ? ` · ${t("ui.waits_panel.rows_per_run", { n: q.rows_per_run, rows: count(q.rows_per_run) })}` : ""}
                 </span>
                 <ArrowUpRight className="wq-go" size={13} />

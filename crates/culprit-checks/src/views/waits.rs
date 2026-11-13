@@ -14,6 +14,8 @@ use crate::support::{app_queries, setting_change};
 
 /// Queries listed per category.
 const MAX_QUERIES: usize = 12;
+/// Internal list selection only; native aggregate and query-attributed populations need not be comparable.
+const MIN_QUERY_WEIGHT: f64 = 0.005;
 /// "Big result sets" for the network explanation.
 const BIG_RESULT_ROWS: f64 = 10_000.0;
 
@@ -82,7 +84,16 @@ pub fn explain(snapshot: &Snapshot) -> Option<WaitsReport> {
         .collect();
     categories.sort_by(|a, b| b.wait_ms.total_cmp(&a.wait_ms));
 
-    let mut notes = Vec::new();
+    let mut notes = vec![t!("view.waits.note.accumulated_totals")];
+    if !attributed.is_empty() {
+        notes.push(t!("view.waits.note.independent_totals"));
+    }
+    if queries.iter().any(|query| {
+        query.waits.iter().any(|wait| wait.wait_ms.is_finite() && wait.wait_ms > 0.0)
+            && !query.waits_coverage.as_ref().is_some_and(|coverage| coverage.complete && coverage.is_valid())
+    }) {
+        notes.push(t!("view.waits.note.observed_attribution"));
+    }
     match engine {
         Engine::Yugabyte => {
             notes.push(t!("view.waits.note.yugabyte"));
@@ -325,33 +336,38 @@ fn attribute<'a>(queries: &[&'a QueryStat]) -> BTreeMap<&'static str, Vec<(&'a Q
 
 fn fill_queries(category: &mut WaitCategory, contributors: &[(&QueryStat, f64)]) {
     let attributed: f64 = contributors.iter().map(|(_, ms)| ms).sum();
-    // Shares are of the category's attributed time; Query Store attributes everything, MySQL only some categories.
-    let denominator = category.wait_ms.max(attributed);
-    // Contributors under half a percent are noise next to the ones that matter; keep at least the biggest.
+    // This ratio only selects a bounded list. It establishes no relationship to an independently captured category.
     category.queries = contributors
         .iter()
         .enumerate()
-        .filter(|(i, (_, ms))| *i == 0 || denominator <= 0.0 || ms / denominator >= 0.005)
+        .filter(|(i, (_, ms))| *i == 0 || attributed <= 0.0 || ms / attributed >= MIN_QUERY_WEIGHT)
         .map(|(_, c)| c)
         .take(MAX_QUERIES)
         .map(|(q, ms)| WaitQuery {
             id: q.id.clone(),
             text: one_line(&q.text, 160),
             wait_ms: *ms,
-            share_of_category: if denominator > 0.0 { (ms / denominator).clamp(0.0, 1.0) } else { 0.0 },
-            share_of_query: if q.total_time_ms > 0.0 { (ms / q.total_time_ms).clamp(0.0, 1.0) } else { 0.0 },
+            mean_recorded_ms: mean_recorded_ms(*ms, q.executions),
             executions: q.executions,
             rows_per_run: q.rows.filter(|_| q.executions > 0.0).map(|r| r / q.executions),
         })
         .collect();
 }
 
+fn mean_recorded_ms(recorded_ms: f64, executions: f64) -> Option<f64> {
+    if !executions.is_finite() || executions <= 0.0 {
+        return None;
+    }
+    let mean = recorded_ms / executions;
+    (mean.is_finite() && mean >= 0.0).then_some(mean)
+}
+
 /// One sentence about what this database's numbers say for the category.
 fn detail(snapshot: &Snapshot, category: &WaitCategory, contributors: &[(&QueryStat, f64)]) -> Option<String> {
     let top = category.queries.first();
-    // The statement that waited most here, and its share of the category: the start of each sentence about it.
+    // Native query and category totals retain their independent populations; only exact observed time is stated.
     let query = |q: &WaitQuery| capitalize(&handle(snapshot, &q.id));
-    let share = |q: &WaitQuery| format::percent(q.share_of_category);
+    let time = |q: &WaitQuery| format::duration(q.wait_ms);
     match category.key.as_str() {
         "network" => {
             let big: Vec<f64> =
@@ -360,7 +376,7 @@ fn detail(snapshot: &Snapshot, category: &WaitCategory, contributors: &[(&QueryS
                 (0, Some(q)) => Some(t!(
                     "view.waits.detail.rows_per_call",
                     query = query(q),
-                    share = share(q),
+                    time = time(q),
                     rows = q.rows_per_run.map(format::count).unwrap_or_else(|| "?".into())
                 )),
                 (n, _) if n > 0 => {
@@ -375,7 +391,7 @@ fn detail(snapshot: &Snapshot, category: &WaitCategory, contributors: &[(&QueryS
                 _ => None,
             }
         }
-        "lock" => top.map(|q| t!("view.waits.detail.lock", query = query(q), share = share(q))),
+        "lock" => top.map(|q| t!("view.waits.detail.lock", query = query(q), time = time(q))),
         "memory" => {
             let grant = top.and_then(|q| {
                 let hash = contributors.iter().find(|(s, _)| s.id == q.id).and_then(|(s, _)| s.query_hash.clone())?;
@@ -385,11 +401,11 @@ fn detail(snapshot: &Snapshot, category: &WaitCategory, contributors: &[(&QueryS
                 (Some(q), Some(g)) => Some(t!(
                     "view.waits.detail.grant",
                     query = query(q),
-                    share = share(q),
+                    time = time(q),
                     granted = format::bytes(g.avg_granted_kb * 1024.0),
                     used = format::bytes(g.avg_used_kb * 1024.0)
                 )),
-                (Some(q), None) => Some(t!("view.waits.detail.share", query = query(q), share = share(q))),
+                (Some(q), None) => Some(t!("view.waits.detail.recorded_time", query = query(q), time = time(q))),
                 _ => pending_grants(snapshot),
             }
         }
@@ -400,17 +416,17 @@ fn detail(snapshot: &Snapshot, category: &WaitCategory, contributors: &[(&QueryS
                 .and_then(|(s, _)| (s.executions > 0.0).then(|| s.physical_reads.map(|p| p / s.executions)).flatten());
             match reads {
                 Some(r) if r >= 1.0 => {
-                    t!("view.waits.detail.disk_reads", query = query(q), share = share(q), pages = format::count(r))
+                    t!("view.waits.detail.disk_reads", query = query(q), time = time(q), pages = format::count(r))
                 }
-                _ => t!("view.waits.detail.share", query = query(q), share = share(q)),
+                _ => t!("view.waits.detail.recorded_time", query = query(q), time = time(q)),
             }
         }),
-        "parallelism" => top.map(|q| t!("view.waits.detail.parallelism", query = query(q), share = share(q))),
+        "parallelism" => top.map(|q| t!("view.waits.detail.parallelism", query = query(q), time = time(q))),
         "compilation" => match top {
-            Some(q) => Some(t!("view.waits.detail.share", query = query(q), share = share(q))),
+            Some(q) => Some(t!("view.waits.detail.recorded_time", query = query(q), time = time(q))),
             None => Some(t!("view.waits.detail.compiling")),
         },
-        _ => top.map(|q| t!("view.waits.detail.share", query = query(q), share = share(q))),
+        _ => top.map(|q| t!("view.waits.detail.recorded_time", query = query(q), time = time(q))),
     }
 }
 
@@ -567,6 +583,107 @@ mod tests {
     }
 
     #[test]
+    fn accumulated_waits_above_elapsed_keep_exact_totals_and_a_named_average_on_every_engine() {
+        for engine in Engine::ALL {
+            let mut snapshot = snapshot_with(Engine::Mssql);
+            snapshot.server.engine = engine;
+            snapshot.waits = vec![wait("Lock", "native-lock", 6_000.0)];
+            let query = &mut snapshot.workload.as_mut().unwrap().queries[0];
+            query.executions = 2.0;
+            query.total_time_ms = 1_000.0;
+            query.waits = snapshot.waits.clone();
+            query.waits_coverage = Some(culprit_core::QueryWaitCoverage {
+                classes: vec![culprit_core::telemetry::WaitClass::Lock],
+                complete: true,
+            });
+            let report = explain(&snapshot).unwrap();
+            assert_eq!(report.total_ms, Some(6_000.0), "{engine:?}");
+            let category = &report.categories[0];
+            assert_eq!((category.wait_ms, category.share), (6_000.0, 1.0));
+            let row = &category.queries[0];
+            assert_eq!((row.wait_ms, row.mean_recorded_ms), (6_000.0, Some(3_000.0)));
+            let fields = serde_json::to_value(row).unwrap();
+            assert!(fields.get("share_of_query").is_none() && fields.get("share_of_category").is_none());
+            assert!(report.notes.iter().any(|note| note.contains("parallel workers")));
+        }
+    }
+
+    #[test]
+    fn observed_partial_attribution_keeps_positives_without_asserting_absent_classes_are_zero() {
+        for coverage in [
+            None,
+            Some(culprit_core::QueryWaitCoverage {
+                classes: vec![culprit_core::telemetry::WaitClass::Lock],
+                complete: false,
+            }),
+        ] {
+            let mut snapshot = snapshot_with(Engine::Mssql);
+            snapshot.waits = vec![wait("Lock", "native-lock", 6_000.0)];
+            let query = &mut snapshot.workload.as_mut().unwrap().queries[0];
+            query.waits = snapshot.waits.clone();
+            query.waits_coverage = coverage;
+            let report = explain(&snapshot).unwrap();
+            assert_eq!(report.categories.len(), 1);
+            assert_eq!(report.categories[0].queries.len(), 1);
+            assert_eq!(report.categories[0].queries[0].wait_ms, 6_000.0);
+            assert!(report.notes.iter().any(|note| note.contains("not measured zeroes")), "{:?}", report.notes);
+        }
+    }
+
+    #[test]
+    fn unknown_execution_denominators_never_turn_a_total_into_a_per_execution_average() {
+        for executions in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::MIN_POSITIVE] {
+            assert_eq!(mean_recorded_ms(6_000.0, executions), None);
+        }
+        let mut snapshot = snapshot_with(Engine::Mssql);
+        snapshot.waits = vec![wait("Lock", "native-lock", 6_000.0)];
+        let query = &mut snapshot.workload.as_mut().unwrap().queries[0];
+        query.executions = 0.0;
+        query.waits = snapshot.waits.clone();
+        let report = explain(&snapshot).unwrap();
+        let row = &report.categories[0].queries[0];
+        assert_eq!(row.wait_ms, 6_000.0);
+        assert_eq!(row.mean_recorded_ms, None);
+    }
+
+    #[test]
+    fn postgres_native_io_never_becomes_cpu_or_an_elapsed_residual() {
+        let mut snapshot = snapshot_with(Engine::Postgres);
+        snapshot.waits = vec![wait("IO", "data files", 6_000.0)];
+        let query = &mut snapshot.workload.as_mut().unwrap().queries[0];
+        query.executions = 2.0;
+        query.total_time_ms = 1_000.0;
+        query.cpu_time_ms = None;
+        query.waits = snapshot.waits.clone();
+        let report = explain(&snapshot).unwrap();
+        assert_eq!(report.total_ms, Some(6_000.0));
+        assert_eq!(report.categories.len(), 1);
+        assert!(!report.categories.iter().any(|category| category.key == "cpu" || category.key == "other"));
+        let io = report.categories.iter().find(|category| category.key == "io").unwrap();
+        assert_eq!(io.queries[0].mean_recorded_ms, Some(3_000.0));
+        assert_eq!(snapshot.queries()[0].cpu_time_ms, None);
+    }
+
+    #[test]
+    fn native_category_and_query_totals_keep_independent_populations_without_an_inferred_contribution() {
+        let mut snapshot = snapshot_with(Engine::Mssql);
+        snapshot.waits = vec![wait("Parallelism", "native-workers", 17_700.0)];
+        let query = &mut snapshot.workload.as_mut().unwrap().queries[0];
+        query.executions = 2.0;
+        query.waits = vec![wait("Parallelism", "native-workers", 120_000.0)];
+        let report = explain(&snapshot).unwrap();
+        assert_eq!(report.total_ms, Some(17_700.0));
+        let category = &report.categories[0];
+        assert_eq!(category.wait_ms, 17_700.0);
+        assert_eq!(category.queries[0].wait_ms, 120_000.0);
+        assert_eq!(category.queries[0].mean_recorded_ms, Some(60_000.0));
+        let detail = category.detail.as_deref().unwrap();
+        assert!(detail.contains("recorded 2 min"), "{detail}");
+        assert!(!detail.contains('%') && !detail.contains("accounts for"), "{detail}");
+        assert!(report.notes.iter().any(|note| note.contains("different populations")));
+    }
+
+    #[test]
     fn categories_carry_queries_and_plain_detail() {
         let mut snapshot = snapshot_with(Engine::Mssql);
         snapshot.waits =
@@ -580,13 +697,19 @@ mod tests {
         assert_eq!(report.categories[0].key, "network");
         assert_eq!(report.categories[0].label, "Sending results");
         assert_eq!(report.categories[0].queries.len(), 2);
-        assert!((report.categories[0].queries[0].share_of_category - 500.0 / 600.0).abs() < 1e-9);
+        assert_eq!(report.categories[0].queries[0].wait_ms, 500.0);
         assert!(
             report.categories[0].detail.as_deref().unwrap().contains("80K+ rows per call"),
             "{:?}",
             report.categories[0].detail
         );
-        assert!(report.categories[1].detail.as_deref().unwrap().contains("Live shows who blocks whom"));
+        assert!(
+            report.categories[1]
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("capture the blocked request, native resource and holder")
+        );
         assert!(report.categories[2].attribution.is_some(), "CPU has no attributed queries");
     }
 

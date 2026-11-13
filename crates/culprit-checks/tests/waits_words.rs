@@ -70,13 +70,16 @@ fn sql_server_categories_say_what_their_queries_did() {
     same(
         &said(&explain(&s).unwrap()),
         r#"source: Query Store, last 5 hours
-network: 1 query returns 80K+ rows per call: page or filter them, or stream them without per-row work in the application.
-lock: A read from order_items accounts for 83% of it. Live shows who blocks whom right now.
-memory: A read from support_tickets accounts for 100% of it; it reserves 200 MB per run and uses 1.0 MB.
-io: A read from order_items accounts for 100% of it, reading 13.1 pages from disk per run.
-parallelism: A read from order_items accounts for 83% of it. Check its plan for a large scan an index would avoid.
-compilation: A read from support_tickets accounts for 80% of it.
-latch: A read from support_tickets accounts for 75% of it.
+note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
+note: Category totals and per-query totals may cover different populations; they are not compared as percentages.
+note: Query attribution includes observed totals; missing categories are not measured zeroes.
+network: 1 query returns 80K+ rows per call. If result handling is slow, test paging, filtering or streaming while preserving required results.
+lock: A read from order_items recorded 750 ms of lock waiting. Use Live to capture the blocked request, native resource and holder before choosing a change.
+memory: A read from support_tickets recorded 800 ms in this category. A captured grant with the same query hash averaged 200 MB reserved and 1.0 MB used; confirm the request and native wait before linking them.
+io: A read from order_items recorded 700 ms in this category, with 13.1 native page reads per execution. Compare file-read latency under comparable work before choosing a change.
+parallelism: A read from order_items recorded 500 ms in this category. Inspect measured worker activity and the actual plan before attributing the delay or changing indexes.
+compilation: A read from support_tickets recorded 400 ms in this category.
+latch: A read from support_tickets recorded 300 ms in this category.
 cpu: -"#,
     );
 }
@@ -96,10 +99,13 @@ fn sql_server_categories_say_what_else_their_numbers_show() {
     same(
         &said(&explain(&s).unwrap()),
         r#"source: Query Store, last 5 hours
-network: A read from customers accounts for 90% of it; it returns 12 rows per call, so look at how the application reads them.
-memory: A read from customers accounts for 88% of it.
-io: A read from orders accounts for 100% of it.
-compilation: Compiling is a sign of one-off statements; see the compile findings."#,
+note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
+note: Category totals and per-query totals may cover different populations; they are not compared as percentages.
+note: Query attribution includes observed totals; missing categories are not measured zeroes.
+network: A read from customers recorded 900 ms in this category and returned 12 rows per call. If consuming results contributes to the delay, review the caller’s result handling.
+memory: A read from customers recorded 700 ms in this category.
+io: A read from orders recorded 700 ms in this category.
+compilation: Inspect compilation counts, plan reuse and native cache evidence before attributing this recorded category to one-off statements."#,
     );
 
     let mut s = snapshot("mssql-demo.json");
@@ -119,7 +125,10 @@ compilation: Compiling is a sign of one-off statements; see the compile findings
     same(
         &said(&explain(&s).unwrap()),
         r#"source: Query Store, last 5 hours
-network: 2 queries return 50K+ rows per call: page or filter them, or stream them without per-row work in the application.
+note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
+note: Category totals and per-query totals may cover different populations; they are not compared as percentages.
+note: Query attribution includes observed totals; missing categories are not measured zeroes.
+network: 2 queries return 50K+ rows per call. If result handling is slow, test paging, filtering or streaming while preserving required results.
 memory: 3 queries were waiting for memory when the scan ran."#,
     );
 }
@@ -142,18 +151,22 @@ fn sql_server_totals_say_why_they_are_not_per_query() {
     same(
         &out.join("\n--\n"),
         r#"source: Server totals since SQL Server started
+note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
 note: Query Store recorded no waits for this database's queries in the window. These are server totals since startup and can't be tied to queries.
 cpu: -
 --
 source: Server totals since SQL Server started 13 days ago
+note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
 note: Query Store isn't capturing waits. These are server totals since startup and can't be tied to queries. Turn it on: ALTER DATABASE CURRENT SET QUERY_STORE (WAIT_STATS_CAPTURE_MODE = ON);
 cpu: -
 --
 source: Server totals since SQL Server started 13 days ago
+note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
 note: These are server totals since startup and can't be tied to queries. Query Store is off; with it on (and recording waits, the default from SQL Server 2017), Culprit can tie waits to queries: ALTER DATABASE CURRENT SET QUERY_STORE = ON (OPERATION_MODE = READ_WRITE, WAIT_STATS_CAPTURE_MODE = ON);
 cpu: -
 --
 source: Server totals since SQL Server started 13 days ago
+note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
 note: These are server totals since startup and can't be tied to queries. Query Store on SQL Server 2016 doesn't record waits per query; SQL Server 2017 and later do.
 cpu: -"#,
     );
@@ -162,7 +175,8 @@ cpu: -"#,
 #[test]
 fn postgres_says_where_its_timing_comes_from() {
     let mut s = snapshot("postgres-demo.json");
-    s.waits = vec![wait("Other", 1000.0)];
+    // Recorded native I/O survives a current timing setting change; no elapsed-minus-I/O residual is invented.
+    s.waits = vec![wait("IO", 1000.0)];
     let mut out = vec![said(&explain(&s).unwrap())];
     set(&mut s, "track_io_timing", "off");
     out.push(said(&explain(&s).unwrap()));
@@ -173,23 +187,27 @@ fn postgres_says_where_its_timing_comes_from() {
     same(
         &out.join("\n--\n"),
         r#"source: Statement timing from pg_stat_statements, the 5 hours since statistics were reset
-note: PostgreSQL keeps no history of what sessions waited on. These totals come from per-statement timing; use Right now to sample what sessions wait on at this moment.
-other: -
+note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
+note: PostgreSQL records per-statement I/O totals, which can overlap across parallel workers. CPU and lock waits remain unknown; use Right now to sample current sessions.
+io: -
 --
 source: Statement timing from pg_stat_statements, the 5 hours since statistics were reset
-note: PostgreSQL keeps no history of what sessions waited on. These totals come from per-statement timing; use Right now to sample what sessions wait on at this moment.
+note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
+note: PostgreSQL records per-statement I/O totals, which can overlap across parallel workers. CPU and lock waits remain unknown; use Right now to sample current sessions.
 note: Turn on track_io_timing so time spent reading from disk is measured per statement. Set track_io_timing to on and reload the configuration (settings marked as needing a restart take effect after one). (ALTER SYSTEM SET track_io_timing = 'on'; SELECT pg_reload_conf();)
-other: -
+io: -
 --
 source: Statement timing from pg_stat_statements, the 5 hours since statistics were reset
-note: PostgreSQL keeps no history of what sessions waited on. These totals come from per-statement timing; use Right now to sample what sessions wait on at this moment.
+note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
+note: PostgreSQL records per-statement I/O totals, which can overlap across parallel workers. CPU and lock waits remain unknown; use Right now to sample current sessions.
 note: Turn on track_io_timing so time spent reading from disk is measured per statement. Set track_io_timing to on in the instance's DB parameter group.
-other: -
+io: -
 --
 source: Statement timing from pg_stat_statements
-note: PostgreSQL keeps no history of what sessions waited on. These totals come from per-statement timing; use Right now to sample what sessions wait on at this moment.
+note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
+note: PostgreSQL records per-statement I/O totals, which can overlap across parallel workers. CPU and lock waits remain unknown; use Right now to sample current sessions.
 note: Turn on track_io_timing so time spent reading from disk is measured per statement. Set track_io_timing to on in the instance's DB parameter group.
-other: -"#,
+io: -"#,
     );
 }
 
@@ -205,16 +223,19 @@ fn mysql_says_what_performance_schema_counts() {
     same(
         &out.join("\n--\n"),
         r#"source: performance_schema totals since MySQL started
+note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
 note: MySQL counts waits since it started, only for enabled performance_schema instruments. Lock time is attributed to statements; the rest is a server-wide total.
 rows: -
 lock: -
 --
 source: performance_schema totals since MySQL started 5 hours ago
+note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
 note: MySQL counts waits since it started, only for enabled performance_schema instruments. Lock time is attributed to statements; the rest is a server-wide total.
 rows: -
 lock: -
 --
 source: Lock time per statement from the slow query log, the last 2 minutes
+note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
 note: performance_schema is off, so MySQL times no waits; the slow query log keeps each statement's lock time. Right now samples what sessions are doing.
 rows: -
 lock: -"#,
@@ -233,10 +254,12 @@ fn yugabyte_and_sqlite_say_what_they_keep() {
     same(
         &out.join("\n--\n"),
         r#"source: YSQL native metrics in their recorded node/cluster scope
+note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
 note: DocDB storage timings and RPC times can overlap; they are not exclusive shares of statement time. Use native metrics or sample YSQL sessions.
 rpc: -
 --
 source: SQLite keeps no waits
+note: Recorded totals may accumulate across parallel workers; their per-execution averages are not elapsed run durations.
 other: -"#,
     );
 }

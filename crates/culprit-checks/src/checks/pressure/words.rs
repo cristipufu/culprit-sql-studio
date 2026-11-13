@@ -501,7 +501,7 @@ compile-pressure: Instance compilation context: Shared compilation counters prov
 compile-queue: Compiler admission: Requests in this database delayed by compiler admission, with recent per-query compile-memory evidence where available.
 worker-pressure: Running out of workers or connections: SQL Server sessions waiting for a worker thread (THREADPOOL), or PostgreSQL/MySQL connections close to max_connections.
 held-cleanup: A long open transaction holds cleanup back: The transaction that holds this database's cleanup back: one with uncommitted changes or row versions here (SQL Server), the oldest snapshot, replication slot or prepared transaction behind VACUUM's horizon (PostgreSQL), or the oldest read view behind InnoDB's purge (MySQL).
-network-wait: Results the application reads slowly: Queries that spend much of their time waiting for the application to take results (ASYNC_NETWORK_IO), usually because they return large result sets.
+network-wait: Queries with recorded network waits: Statements with material recorded network waits. These totals do not by themselves identify a slow client, transport problem or responsible component.
 tier-limit: Resource use near the cloud tier's limits: Azure SQL Database resources (CPU, data IO, log writes, workers) persistently near their limits in the available selected-period samples.
 checkpoint-pressure: Requested checkpoints: The server's requested checkpoints, with the possible causes and the evidence needed before changing WAL settings.
 row-lock-waits: Transactions waiting for row locks: InnoDB row-lock waits add up to real time (a minute an hour or more across the server), from long transactions or updates that scan instead of using an index."#,
@@ -674,55 +674,60 @@ const NETWORK_WAIT: &[(&str, &str)] = &[
     (
         "rows",
         r#"network-wait:7 · Medium · High · OptionalImprovement · score 57.13
-title: A read from customers waits on the application 60% of its time while sending 80K rows per call
-summary: SQL Server had its results ready but the application took them slowly (ASYNC_NETWORK_IO), so each run holds its locks and memory longer. That is 60% of this query's time. Usually the result set is bigger than needed, or the application does work for each row before reading the next.
-impact: 33% of DB time
-metric: Waiting on the app
-metric: Rows per call
-fix: Return fewer rows (filter, or page with OFFSET/FETCH or keyset pagination), or read them faster: stream the results and do per-row work after the read, not while the result set is open.
-verify: Re-scan: this query's Sending results (network) share should drop."#,
+title: A read from customers has at least 13.3 s of recorded network waits; 80K counted rows per execution
+summary: At least 13.3 s of network waits were recorded over the last 5 hours. The total can accumulate across workers and does not by itself identify a slow client or the responsible component.
+impact: Recorded network waits: 13.3 s
+metric: Recorded network waits
+metric: Recorded rows per execution
+fix: Inspect the native wait and a representative request, then measure result size, fetch timing and network behavior. Reduce unnecessary results or move per-row processing after fetch only when that evidence identifies the bottleneck.
+verify: After identifying the cause, compare recorded network waits, fetch timing and execution time under equivalent useful work, parameters and load. Use compatible counter deltas for cumulative sources.
+caveat: Network-wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown."#,
     ),
     (
         "few-rows",
         r#"network-wait:7 · Medium · High · OptionalImprovement · score 57.13
-title: A read from customers waits on the application 60% of its time
-summary: SQL Server had its results ready but the application took them slowly (ASYNC_NETWORK_IO), so each run holds its locks and memory longer. That is 60% of this query's time. Usually the result set is bigger than needed, or the application does work for each row before reading the next.
-impact: 33% of DB time
-metric: Waiting on the app
-metric: Rows per call
-fix: Return fewer rows (filter, or page with OFFSET/FETCH or keyset pagination), or read them faster: stream the results and do per-row work after the read, not while the result set is open.
-verify: Re-scan: this query's Sending results (network) share should drop."#,
+title: A read from customers has at least 13.3 s of recorded network waits
+summary: At least 13.3 s of network waits were recorded over the last 5 hours. The total can accumulate across workers and does not by itself identify a slow client or the responsible component.
+impact: Recorded network waits: 13.3 s
+metric: Recorded network waits
+metric: Recorded rows per execution
+fix: Inspect the native wait and a representative request, then measure result size, fetch timing and network behavior. Reduce unnecessary results or move per-row processing after fetch only when that evidence identifies the bottleneck.
+verify: After identifying the cause, compare recorded network waits, fetch timing and execution time under equivalent useful work, parameters and load. Use compatible counter deltas for cumulative sources.
+caveat: Network-wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown."#,
     ),
     (
         "no-rows",
         r#"network-wait:7 · Medium · High · OptionalImprovement · score 57.13
-title: A read from customers waits on the application 60% of its time
-summary: SQL Server had its results ready but the application took them slowly (ASYNC_NETWORK_IO), so each run holds its locks and memory longer. That is 60% of this query's time. Usually the result set is bigger than needed, or the application does work for each row before reading the next.
-impact: 33% of DB time
-metric: Waiting on the app
-fix: Return fewer rows (filter, or page with OFFSET/FETCH or keyset pagination), or read them faster: stream the results and do per-row work after the read, not while the result set is open.
-verify: Re-scan: this query's Sending results (network) share should drop."#,
+title: A read from customers has at least 13.3 s of recorded network waits
+summary: At least 13.3 s of network waits were recorded over the last 5 hours. The total can accumulate across workers and does not by itself identify a slow client or the responsible component.
+impact: Recorded network waits: 13.3 s
+metric: Recorded network waits
+fix: Inspect the native wait and a representative request, then measure result size, fetch timing and network behavior. Reduce unnecessary results or move per-row processing after fetch only when that evidence identifies the bottleneck.
+verify: After identifying the cause, compare recorded network waits, fetch timing and execution time under equivalent useful work, parameters and load. Use compatible counter deltas for cumulative sources.
+caveat: Network-wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown."#,
     ),
     (
         "stopped-rows",
         r#"network-wait:7 · Low · High · OptionalImprovement · score 57.13
-title: A read from customers waited on the application 60% of its time while sending 80K rows per call
-summary: SQL Server had its results ready but the application took them slowly (ASYNC_NETWORK_IO), so each run holds its locks and memory longer. That is 60% of this query's time. Usually the result set is bigger than needed, or the application does work for each row before reading the next.
-impact: 33% of DB time
-metric: Waiting on the app
-metric: Rows per call
-fix: Return fewer rows (filter, or page with OFFSET/FETCH or keyset pagination), or read them faster: stream the results and do per-row work after the read, not while the result set is open.
-verify: Re-scan: this query's Sending results (network) share should drop."#,
+title: A read from customers had at least 13.3 s of recorded network waits; 80K counted rows per execution
+summary: At least 13.3 s of network waits were recorded over the last 2 days. The total can accumulate across workers and does not by itself identify a slow client or the responsible component.
+impact: Recorded network waits: 13.3 s
+metric: Recorded network waits
+metric: Recorded rows per execution
+fix: Inspect the native wait and a representative request, then measure result size, fetch timing and network behavior. Reduce unnecessary results or move per-row processing after fetch only when that evidence identifies the bottleneck.
+verify: After identifying the cause, compare recorded network waits, fetch timing and execution time under equivalent useful work, parameters and load. Use compatible counter deltas for cumulative sources.
+caveat: Network-wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown."#,
     ),
     (
         "stopped",
         r#"network-wait:7 · Low · High · OptionalImprovement · score 57.13
-title: A read from customers waited on the application 60% of its time
-summary: SQL Server had its results ready but the application took them slowly (ASYNC_NETWORK_IO), so each run holds its locks and memory longer. That is 60% of this query's time. Usually the result set is bigger than needed, or the application does work for each row before reading the next.
-impact: 33% of DB time
-metric: Waiting on the app
-fix: Return fewer rows (filter, or page with OFFSET/FETCH or keyset pagination), or read them faster: stream the results and do per-row work after the read, not while the result set is open.
-verify: Re-scan: this query's Sending results (network) share should drop."#,
+title: A read from customers had at least 13.3 s of recorded network waits
+summary: At least 13.3 s of network waits were recorded over the last 2 days. The total can accumulate across workers and does not by itself identify a slow client or the responsible component.
+impact: Recorded network waits: 13.3 s
+metric: Recorded network waits
+fix: Inspect the native wait and a representative request, then measure result size, fetch timing and network behavior. Reduce unnecessary results or move per-row processing after fetch only when that evidence identifies the bottleneck.
+verify: After identifying the cause, compare recorded network waits, fetch timing and execution time under equivalent useful work, parameters and load. Use compatible counter deltas for cumulative sources.
+caveat: Network-wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown."#,
     ),
 ];
 const ROW_LOCK_WAITS: &[(&str, &str)] = &[

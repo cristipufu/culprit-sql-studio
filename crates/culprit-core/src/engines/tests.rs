@@ -26,23 +26,21 @@ fn cleanup_evidence_semantics_are_required_for_every_engine_and_shared_with_fron
 }
 
 #[test]
-fn constraint_and_io_semantics_are_explicit_for_every_engine() {
+fn constraint_semantics_are_explicit_for_every_engine() {
     use ConstraintValidation::*;
     let cases = [
-        (Engine::Mssql, OptimizerTrust, false),
-        (Engine::Postgres, CheckExclusion, true),
-        (Engine::Yugabyte, Deferred, false),
-        (Engine::Mysql, Unsupported, false),
-        (Engine::Sqlite, Unsupported, false),
+        (Engine::Mssql, OptimizerTrust),
+        (Engine::Postgres, CheckExclusion),
+        (Engine::Yugabyte, Deferred),
+        (Engine::Mysql, Unsupported),
+        (Engine::Sqlite, Unsupported),
     ];
     assert_eq!(cases.map(|c| c.0), Engine::ALL, "Declare native semantics for each new engine");
-    for (engine, constraints, io_is_component) in cases {
+    for (engine, constraints) in cases {
         let spec = engine.spec();
         assert_eq!(spec.constraint_validation(), constraints, "{engine:?}");
-        assert_eq!(spec.statement_metrics().io_wait_within_statement_time, io_is_component, "{engine:?}");
         let facts = engine.facts();
         assert_eq!(facts.constraint_validation, constraints);
-        assert_eq!(facts.statement_metrics.io_wait_within_statement_time, io_is_component);
     }
 }
 

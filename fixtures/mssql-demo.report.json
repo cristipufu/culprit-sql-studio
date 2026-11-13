@@ -78,7 +78,7 @@
     {
       "check": "heavy-query",
       "reason": null,
-      "status": "assessed",
+      "status": "findings",
       "title": "Queries that dominate database time"
     },
     {
@@ -220,7 +220,7 @@
       "check": "network-wait",
       "reason": "This scan did not record the measurements this check needs.",
       "status": "insufficient-evidence",
-      "title": "Results the application reads slowly"
+      "title": "Queries with recorded network waits"
     },
     {
       "check": "tier-limit",
@@ -289,8 +289,8 @@
     {
       "check": "lock-time",
       "reason": "This scan did not record the measurements this check needs.",
-      "status": "insufficient-evidence",
-      "title": "Queries that spend their time waiting for locks"
+      "status": "findings",
+      "title": "Queries with material recorded lock waits"
     },
     {
       "assessed_queries": [
@@ -372,6 +372,80 @@
     }
   ],
   "findings": [
+    {
+      "actionability": "needs-attention",
+      "category": "queries",
+      "caveats": [],
+      "check": "heavy-query",
+      "confidence": "high",
+      "fix": {
+        "cost": null,
+        "sql": null,
+        "summary": "It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. After identifying the holder and lock resource, inspect transaction duration and access paths; shorter transactions, an index or a rewrite may reduce contention."
+      },
+      "id": "heavy-query:138",
+      "impact": {
+        "db_time_share": 0.34120252699679854,
+        "label": "2 min of database time over the last 5 hours (34%)",
+        "label_key": "support.impact.share",
+        "score": 58.412543772446554,
+        "time_ms_per_day": null
+      },
+      "inactive": false,
+      "last_seen": "2026-10-11T14:19:10Z",
+      "metrics": [
+        {
+          "label": "Share of DB time",
+          "text": null,
+          "unit": "ratio",
+          "value": 0.34120252699679854
+        },
+        {
+          "key": "common.metric.average_duration",
+          "label": "Average duration",
+          "text": null,
+          "unit": "ms",
+          "value": 28743.0075
+        },
+        {
+          "label": "Pages read per run",
+          "text": null,
+          "unit": "pages",
+          "value": 5.25
+        },
+        {
+          "label": "Rows per run",
+          "text": null,
+          "unit": "rows",
+          "value": 1.0
+        },
+        {
+          "key": "common.metric.cpu_share",
+          "label": "CPU share of its time",
+          "text": null,
+          "unit": "ratio",
+          "value": 3.902688332109992e-05
+        }
+      ],
+      "queries": [
+        {
+          "id": "138",
+          "note": null,
+          "plan_node": null
+        }
+      ],
+      "severity": "high",
+      "subject": {
+        "kind": "query",
+        "name": "138"
+      },
+      "summary": "2 min of database time over the last 5 hours (34%). It ran 4 times in 5 hours at 28.7 s on average: 34% of all database time in the last 5 hours. Query Store recorded at least 2 min of waiting (Lock); measured CPU time is 4.5 ms.",
+      "title": "An update of orders takes 2 min of database time over the last 5 hours (34%), with at least 2 min of recorded waiting (Lock)",
+      "verification_basis": "rescan",
+      "verify": [
+        "Compare recorded wait totals and execution time for equivalent useful work, parameters and load after the change."
+      ]
+    },
     {
       "actionability": "needs-attention",
       "category": "queries",
@@ -463,7 +537,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -526,89 +599,73 @@
     },
     {
       "actionability": "needs-attention",
-      "category": "indexes",
+      "category": "queries",
       "caveats": [
-        "These counters cover each index metadata entry’s lifetime, which can end without a server restart."
+        "Wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown."
       ],
-      "check": "hot-rows",
+      "check": "lock-time",
       "confidence": "high",
       "facts": {
         "bloat": null,
         "histogram_columns": [],
         "index_keys": [],
         "large_rows": null,
-        "lock_wait": null,
+        "lock_wait": {
+          "ms": 114966.0,
+          "versioning_candidate": false
+        },
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
-        "table": "shop.orders",
         "usual_fast_plan": null
       },
       "fix": {
         "cost": null,
         "sql": null,
-        "summary": "It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Keep the holding transactions short and commit before slow work; make UPDATE and DELETE filter on an index so they lock only the rows they change; touch rows in the same order everywhere. Query 143 recorded lock waits while READ_COMMITTED_SNAPSHOT is off. Row versioning is a candidate; confirm read-committed data-lock waits before changing isolation."
+        "summary": "It ran 4 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Identify the lock resource, mode and blocking request before choosing a change. Then inspect transaction duration, access paths and locking requirements; these totals alone do not establish which change will help."
       },
-      "id": "hot-rows:shop.orders",
+      "id": "lock-time:138",
       "impact": {
-        "db_time_share": 0.561121078462286,
-        "label": "3 min waiting on locks",
-        "score": 74.90801548981831,
+        "db_time_share": null,
+        "label": "Recorded lock waits: 2 min",
+        "score": 58.41101195528443,
         "time_ms_per_day": null
       },
       "inactive": false,
       "last_seen": "2026-10-11T14:19:10Z",
       "metrics": [
         {
-          "key": "check.hot_rows.metric.historical_waits",
-          "label": "Historical lock waits",
-          "text": null,
-          "unit": "count",
-          "value": 5.0
-        },
-        {
-          "key": "check.hot_rows.metric.historical_time",
-          "label": "Historical time waiting",
+          "key": "check.lock_time.metric.lock_wait",
+          "label": "Recorded lock waits",
           "text": null,
           "unit": "ms",
-          "value": 186660.0
+          "value": 114966.0
         },
         {
-          "key": "check.hot_rows.metric.historical_average",
-          "label": "Historical average wait",
+          "key": "check.lock_time.metric.per_run",
+          "label": "Recorded lock waits per execution",
           "text": null,
           "unit": "ms",
-          "value": 37332.0
+          "value": 28741.5
         }
       ],
       "queries": [
         {
           "id": "138",
-          "note": "Waited 2 min on locks, nearly all of its time in the last 5 hours.",
-          "plan_node": null
-        },
-        {
-          "id": "143",
-          "note": "Waited 1 min on locks, nearly all of its time in the last 5 hours.",
-          "plan_node": null
-        },
-        {
-          "id": "161",
           "note": null,
           "plan_node": null
         }
       ],
       "severity": "medium",
       "subject": {
-        "kind": "index",
-        "name": "shop.orders.pk_orders"
+        "kind": "query",
+        "name": "138"
       },
-      "summary": "The associated statements used 3 min of database time over the last 5 hours (56%). Since its index pk_orders was loaded into memory, sessions waited 5 times for locks on the rows and pages of orders, 3 min 7 s in all, 37.3 s each on average. Waits like these come from transactions that hold rows for long, or from writes whose filter isn't indexed and so lock more rows than they change. No comparable earlier counters place these waits in the selected window or establish that contention continues. An update of orders waited 2 min for these locks in the last 5 hours, nearly all of its time. A read from orders waited 1 min for these locks in the last 5 hours, nearly all of its time.",
-      "title": "Queries on orders recorded lock waits in the last 5 hours",
-      "verification_basis": "counter-change",
+      "summary": "At least 2 min of lock waits were recorded over the last 5 hours. Accumulated waits can overlap across workers and do not identify the lock resource or blocker.",
+      "title": "An update of orders has at least 2 min of recorded lock waits",
+      "verification_basis": "rescan",
       "verify": [
-        "Compare new lock waits and their time between scans under comparable load on orders. An unchanged counter reports no new waits; an idle interval alone does not verify a fix."
+        "After identifying the cause and applying a justified change, compare recorded lock waits and execution time under equivalent useful work, parameters and load."
       ]
     },
     {
@@ -626,7 +683,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null,
@@ -705,7 +761,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null,
@@ -760,6 +815,151 @@
       "verify": [
         "Explain again: no NonParallelPlanReason, and Parallelism operators appear.",
         "Re-scan: this finding is gone."
+      ]
+    },
+    {
+      "actionability": "needs-attention",
+      "category": "queries",
+      "caveats": [],
+      "check": "heavy-query",
+      "confidence": "high",
+      "fix": {
+        "cost": null,
+        "sql": null,
+        "summary": "It ran 3 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. After identifying the holder and lock resource, inspect transaction duration and access paths; shorter transactions, an index or a rewrite may reduce contention."
+      },
+      "id": "heavy-query:143",
+      "impact": {
+        "db_time_share": 0.21278048143517983,
+        "label": "1 min of database time over the last 5 hours (21%)",
+        "label_key": "support.impact.share",
+        "score": 46.12813473740076,
+        "time_ms_per_day": null
+      },
+      "inactive": false,
+      "last_seen": "2026-10-11T14:19:10Z",
+      "metrics": [
+        {
+          "label": "Share of DB time",
+          "text": null,
+          "unit": "ratio",
+          "value": 0.21278048143517983
+        },
+        {
+          "key": "common.metric.average_duration",
+          "label": "Average duration",
+          "text": null,
+          "unit": "ms",
+          "value": 23899.592333333338
+        },
+        {
+          "label": "Pages read per run",
+          "text": null,
+          "unit": "pages",
+          "value": 5.0
+        },
+        {
+          "label": "Rows returned per run",
+          "text": null,
+          "unit": "rows",
+          "value": 1.0
+        },
+        {
+          "key": "common.metric.cpu_share",
+          "label": "CPU share of its time",
+          "text": null,
+          "unit": "ratio",
+          "value": 8.25537093889342e-05
+        }
+      ],
+      "queries": [
+        {
+          "id": "143",
+          "note": null,
+          "plan_node": null
+        }
+      ],
+      "severity": "medium",
+      "subject": {
+        "kind": "query",
+        "name": "143"
+      },
+      "summary": "1 min of database time over the last 5 hours (21%). It ran 3 times in 5 hours at 23.9 s on average: 21% of all database time in the last 5 hours. Query Store recorded at least 1 min of waiting (Lock); measured CPU time is 5.9 ms.",
+      "title": "A read from orders takes 1 min of database time over the last 5 hours (21%), with at least 1 min of recorded waiting (Lock)",
+      "verification_basis": "rescan",
+      "verify": [
+        "Compare recorded wait totals and execution time for equivalent useful work, parameters and load after the change."
+      ]
+    },
+    {
+      "actionability": "needs-attention",
+      "category": "queries",
+      "caveats": [
+        "Wait capture or class coverage is incomplete. The recorded total is a lower bound; missing waits remain unknown."
+      ],
+      "check": "lock-time",
+      "confidence": "high",
+      "facts": {
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": {
+          "ms": 71692.0,
+          "versioning_candidate": true
+        },
+        "log_write": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "usual_fast_plan": null
+      },
+      "fix": {
+        "cost": null,
+        "sql": null,
+        "summary": "It ran 3 times in 5 hours, too seldom to count on catching it while it waits. Have the next ones reported instead: SQL Server's blocked process report names the session holding the lock, with its statement, for each wait longer than the server's blocked process threshold (s) (0, off, by default; sp_configure sets it). Capture sqlserver.blocked_process_report in an event session to keep them. Row versioning is a candidate because this read recorded lock waits while READ_COMMITTED_SNAPSHOT is off. It can avoid read-committed data-lock waits, but not schema locks or explicit locking. Confirm the lock resource and the application's isolation requirements before changing this setting."
+      },
+      "id": "lock-time:143",
+      "impact": {
+        "db_time_share": null,
+        "label": "Recorded lock waits: 1 min",
+        "score": 46.12595466007194,
+        "time_ms_per_day": null
+      },
+      "inactive": false,
+      "last_seen": "2026-10-11T14:19:10Z",
+      "metrics": [
+        {
+          "key": "check.lock_time.metric.lock_wait",
+          "label": "Recorded lock waits",
+          "text": null,
+          "unit": "ms",
+          "value": 71692.0
+        },
+        {
+          "key": "check.lock_time.metric.per_run",
+          "label": "Recorded lock waits per execution",
+          "text": null,
+          "unit": "ms",
+          "value": 23897.333333333332
+        }
+      ],
+      "queries": [
+        {
+          "id": "143",
+          "note": null,
+          "plan_node": null
+        }
+      ],
+      "severity": "medium",
+      "subject": {
+        "kind": "query",
+        "name": "143"
+      },
+      "summary": "At least 1 min of lock waits were recorded over the last 5 hours. Accumulated waits can overlap across workers and do not identify the lock resource or blocker.",
+      "title": "A read from orders has at least 1 min of recorded lock waits",
+      "verification_basis": "rescan",
+      "verify": [
+        "After identifying the cause and applying a justified change, compare recorded lock waits and execution time under equivalent useful work, parameters and load."
       ]
     },
     {
@@ -831,7 +1031,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null,
@@ -910,7 +1109,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null,
@@ -1043,7 +1241,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": {
           "from": "8",
           "to": "47"
@@ -1145,7 +1342,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -1210,7 +1406,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null,
@@ -1303,7 +1498,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -1382,7 +1576,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -1446,7 +1639,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -1633,7 +1825,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -1704,6 +1895,93 @@
       "actionability": "information",
       "category": "indexes",
       "caveats": [
+        "These counters cover each index metadata entry’s lifetime, which can end without a server restart."
+      ],
+      "check": "hot-rows",
+      "confidence": "high",
+      "facts": {
+        "bloat": null,
+        "histogram_columns": [],
+        "index_keys": [],
+        "large_rows": null,
+        "lock_wait": null,
+        "log_write": null,
+        "plan_change": null,
+        "recommended_plan": null,
+        "table": "shop.orders",
+        "usual_fast_plan": null,
+        "workload_dependency": "independent"
+      },
+      "fix": {
+        "cost": null,
+        "sql": null,
+        "summary": "These counters alone justify no change. If the application experiences blocking, capture the current blocked statement and its blocker under representative load before changing transactions or indexes."
+      },
+      "id": "hot-rows:shop.orders",
+      "impact": {
+        "db_time_share": null,
+        "label": "3 min 7 s waiting on locks",
+        "score": 8.0,
+        "time_ms_per_day": null
+      },
+      "inactive": false,
+      "last_seen": null,
+      "metrics": [
+        {
+          "key": "check.hot_rows.metric.historical_waits",
+          "label": "Historical lock waits",
+          "text": null,
+          "unit": "count",
+          "value": 5.0
+        },
+        {
+          "key": "check.hot_rows.metric.historical_time",
+          "label": "Historical time waiting",
+          "text": null,
+          "unit": "ms",
+          "value": 186660.0
+        },
+        {
+          "key": "check.hot_rows.metric.historical_average",
+          "label": "Historical average wait",
+          "text": null,
+          "unit": "ms",
+          "value": 37332.0
+        }
+      ],
+      "queries": [
+        {
+          "id": "138",
+          "note": "Recorded 2 min of lock waiting and references orders; this capture does not identify the lock resource or its owner.",
+          "plan_node": null
+        },
+        {
+          "id": "143",
+          "note": "Recorded 1 min of lock waiting and references orders; this capture does not identify the lock resource or its owner.",
+          "plan_node": null
+        },
+        {
+          "id": "161",
+          "note": "Recorded 2.4 s of lock waiting and references orders; this capture does not identify the lock resource or its owner.",
+          "plan_node": null
+        }
+      ],
+      "severity": "low",
+      "subject": {
+        "kind": "index",
+        "name": "shop.orders.pk_orders"
+      },
+      "summary": "Since its index pk_orders was loaded into memory, sessions waited 5 times for locks on the rows and pages of orders, 3 min 7 s in all, 37.3 s each on average. These counters identify lock waiting on the table, but do not identify the blocked request, blocker or SQL responsible. No comparable earlier counters place these waits in the selected window or establish that contention continues.",
+      "title": "orders has 5 recorded historical lock waits",
+      "verification_basis": "counter-change",
+      "verify": [
+        "Compare new lock waits and their time between scans under comparable load on orders. An unchanged counter reports no new waits; an idle interval alone does not verify a fix."
+      ]
+    },
+    {
+      "actionability": "information",
+      "category": "indexes",
+      "caveats": [
         "These totals do not establish a new increase or continuing blocking in the selected window. Capture dated events or compare counters wholly within that period before treating this as current pressure.",
         "SQL Server counts escalations over each index metadata entry’s lifetime, which can end without a server restart. Individual escalations are not dated."
       ],
@@ -1725,7 +2003,6 @@
         "large_rows": null,
         "lock_wait": null,
         "log_write": null,
-        "network_wait_share": null,
         "plan_change": null,
         "recommended_plan": null,
         "usual_fast_plan": null
@@ -1850,7 +2127,6 @@
           "bytes": 242946788.0,
           "per_row": 8098.226266666667
         },
-        "network_wait_share": null,
         "nothing_to_check": "gone",
         "plan_change": null,
         "recommended_plan": null,
@@ -2019,7 +2295,6 @@
         "MySQL's possible keys named with their columns",
         "plan operators marked with their index's kind",
         "health counters graded only on the evidence",
-        "PostgreSQL's I/O time within its statement time",
         "MariaDB's lock time unknown where it counts the whole run",
         "a scan's filter judged by what its runs measured"
       ],
@@ -2038,12 +2313,9 @@
         "dead rows are the table's empty space",
         "updates that aren't HOT explain their WAL",
         "large values explain the log their writes make",
-        "one lock episode on a table",
-        "one blocking chain on a table",
         "the plan cache finding carries the compile load",
         "dead rows absorb the table's stale statistics",
         "a replication slot's finding carries the cleanup it holds back",
-        "waiting on the application explains a heavy query",
         "a heavy query another finding explains",
         "statements that stopped running",
         "nothing is created for statements that stopped",
@@ -2139,45 +2411,6 @@
       ]
     },
     {
-      "finding": "lock-time:143",
-      "outcome": {
-        "into": "lock-time:138",
-        "kind": "absorbed"
-      },
-      "queries": [
-        "143"
-      ],
-      "rule": "one-lock-episode",
-      "tables": []
-    },
-    {
-      "finding": "lock-time:138",
-      "outcome": {
-        "into": "hot-rows:shop.orders",
-        "kind": "absorbed"
-      },
-      "queries": [
-        "138",
-        "143"
-      ],
-      "rule": "one-blocking-chain",
-      "tables": []
-    },
-    {
-      "finding": "heavy-query:138",
-      "outcome": {
-        "by": [
-          "hot-rows:shop.orders"
-        ],
-        "kind": "covered"
-      },
-      "queries": [
-        "138"
-      ],
-      "rule": "cause-covers-heavy-query",
-      "tables": []
-    },
-    {
       "finding": "heavy-query:263",
       "outcome": {
         "by": [
@@ -2189,20 +2422,6 @@
       },
       "queries": [
         "263"
-      ],
-      "rule": "cause-covers-heavy-query",
-      "tables": []
-    },
-    {
-      "finding": "heavy-query:143",
-      "outcome": {
-        "by": [
-          "hot-rows:shop.orders"
-        ],
-        "kind": "covered"
-      },
-      "queries": [
-        "143"
       ],
       "rule": "cause-covers-heavy-query",
       "tables": []
@@ -2242,6 +2461,30 @@
       },
       "queries": [
         "8"
+      ],
+      "rule": "stopped-running",
+      "tables": []
+    },
+    {
+      "finding": "heavy-query:138",
+      "outcome": {
+        "kind": "last-execution",
+        "last_seen": "2026-10-11T14:19:10Z"
+      },
+      "queries": [
+        "138"
+      ],
+      "rule": "stopped-running",
+      "tables": []
+    },
+    {
+      "finding": "heavy-query:143",
+      "outcome": {
+        "kind": "last-execution",
+        "last_seen": "2026-10-11T14:19:10Z"
+      },
+      "queries": [
+        "143"
       ],
       "rule": "stopped-running",
       "tables": []
@@ -2343,6 +2586,30 @@
       "tables": []
     },
     {
+      "finding": "lock-time:138",
+      "outcome": {
+        "kind": "last-execution",
+        "last_seen": "2026-10-11T14:19:10Z"
+      },
+      "queries": [
+        "138"
+      ],
+      "rule": "stopped-running",
+      "tables": []
+    },
+    {
+      "finding": "lock-time:143",
+      "outcome": {
+        "kind": "last-execution",
+        "last_seen": "2026-10-11T14:19:10Z"
+      },
+      "queries": [
+        "143"
+      ],
+      "rule": "stopped-running",
+      "tables": []
+    },
+    {
       "finding": "big-result:264",
       "outcome": {
         "kind": "last-execution",
@@ -2405,6 +2672,30 @@
       },
       "queries": [
         "8"
+      ],
+      "rule": "absolute-query-cost",
+      "tables": []
+    },
+    {
+      "finding": "heavy-query:138",
+      "outcome": {
+        "aspect": "absolute-cost",
+        "kind": "presentation"
+      },
+      "queries": [
+        "138"
+      ],
+      "rule": "absolute-query-cost",
+      "tables": []
+    },
+    {
+      "finding": "heavy-query:143",
+      "outcome": {
+        "aspect": "absolute-cost",
+        "kind": "presentation"
+      },
+      "queries": [
+        "143"
       ],
       "rule": "absolute-query-cost",
       "tables": []
@@ -2513,20 +2804,6 @@
       },
       "queries": [
         "264"
-      ],
-      "rule": "absolute-query-cost",
-      "tables": []
-    },
-    {
-      "finding": "hot-rows:shop.orders",
-      "outcome": {
-        "aspect": "absolute-cost",
-        "kind": "presentation"
-      },
-      "queries": [
-        "138",
-        "143",
-        "161"
       ],
       "rule": "absolute-query-cost",
       "tables": []
@@ -12299,11 +12576,11 @@
     "by_category": [
       {
         "category": "indexes",
-        "count": 6
+        "count": 5
       },
       {
         "category": "queries",
-        "count": 9
+        "count": 13
       },
       {
         "category": "maintenance",
@@ -12316,11 +12593,11 @@
     ],
     "by_severity": [
       {
-        "count": 2,
+        "count": 3,
         "severity": "high"
       },
       {
-        "count": 7,
+        "count": 9,
         "severity": "medium"
       },
       {
@@ -12360,7 +12637,7 @@
         "table": "ticket_events"
       }
     ],
-    "headline": "20 opportunities. The top ones touch 5 min of database time over the last 5 hours (83%).",
+    "headline": "23 opportunities. The top ones touch 3 min of database time over the last 5 hours (61%).",
     "headline_message": {
       "kind": "sequence",
       "messages": [
@@ -12368,11 +12645,11 @@
           "arguments": {
             "count": {
               "kind": "digits",
-              "value": "20"
+              "value": "23"
             },
             "n": {
               "kind": "number",
-              "value": 20.0
+              "value": 23.0
             }
           },
           "key": "summary.headline.opportunities",
@@ -12390,7 +12667,7 @@
                   },
                   "share": {
                     "kind": "percent",
-                    "value": 0.8285132103468869
+                    "value": 0.6085946588813995
                   },
                   "span": {
                     "kind": "message",
@@ -12411,7 +12688,7 @@
                   },
                   "time": {
                     "kind": "duration",
-                    "value": 279176.847
+                    "value": 205072.81699999998
                   }
                 },
                 "key": "support.cost.time_over",
@@ -12477,7 +12754,7 @@
       }
     ],
     "no_workload": null,
-    "opportunities": 20,
+    "opportunities": 23,
     "over_scans": [],
     "runs_said": [
       {
@@ -12485,7 +12762,7 @@
         "runs": "2 runs on Oct 11, 11:54–12:13 UTC"
       }
     ],
-    "takeaway": "The top ones touch 5 min of database time over the last 5 hours (83%).",
+    "takeaway": "The top ones touch 3 min of database time over the last 5 hours (61%).",
     "takeaway_message": {
       "kind": "sequence",
       "messages": [
@@ -12501,7 +12778,7 @@
                   },
                   "share": {
                     "kind": "percent",
-                    "value": 0.8285132103468869
+                    "value": 0.6085946588813995
                   },
                   "span": {
                     "kind": "message",
@@ -12522,7 +12799,7 @@
                   },
                   "time": {
                     "kind": "duration",
-                    "value": 279176.847
+                    "value": 205072.81699999998
                   }
                 },
                 "key": "support.cost.time_over",
@@ -12536,6 +12813,6 @@
       ],
       "separator": " "
     },
-    "top_share": 0.8285132103468869
+    "top_share": 0.6085946588813995
   }
 }

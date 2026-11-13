@@ -47,7 +47,7 @@ untracked_time_ms: number | null,
  */
 hourly_time_ms: number | null, 
 /**
- * Only runs slower than this were recorded (the slow query log's `long_query_time`), so totals, shares and run
- * counts are of logged slow runs, not of everything the database ran. `None` when every run is counted.
+ * A lower duration bound established for the captured population. The current logging setting alone does not
+ * establish a historical bound. `None` means the floor is unknown, not that every database run was counted.
  */
 min_logged_ms: number | null, history_inputs?: Array<BaselineReference>, counter_set?: CounterSet, source_label?: string, source_message?: Message, };

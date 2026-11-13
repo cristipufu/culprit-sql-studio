@@ -24,42 +24,20 @@ pub fn statements_io_column(version_num: u32) -> &'static str {
     }
 }
 
-/// Database time by category from statement timing: disk I/O where it is timed, the rest as "Other". WAL write and
-/// sync time (pg_stat_wal, pg_stat_io) isn't in it: that is the whole server's, spent mostly by the WAL writer and by
-/// commits after a statement's timing ends, so it is no share of statement time. The scan shows it with the files'
-/// latency instead.
-pub async fn history_waits(
-    _client: &Client,
-    _probe: &Probe,
-    statements_ms: f64,
-    statements_io_ms: f64,
-) -> Vec<WaitStat> {
-    breakdown(statements_ms, statements_io_ms)
-}
-
-/// Statement time split into disk I/O and the rest. Nothing else PostgreSQL times is part of statement time per
-/// category: CPU, locks and untimed waits stay together, never guessed apart.
-fn breakdown(statements_ms: f64, statements_io_ms: f64) -> Vec<WaitStat> {
-    if statements_io_ms <= 0.0 || statements_io_ms > statements_ms {
+/// Native per-statement I/O totals. PostgreSQL accumulates parallel workers' BufferUsage timers in the leader:
+/// https://github.com/postgres/postgres/blob/REL_18_STABLE/src/backend/executor/instrument.c#L201-L227
+/// These timers can overlap elapsed execution, so subtraction cannot establish CPU, locks or an untimed residual.
+/// Shared WAL writer/commit timings have their own scope and are not included here.
+pub(crate) fn statement_io_waits(statements_io_ms: f64) -> Vec<WaitStat> {
+    if !statements_io_ms.is_finite() || statements_io_ms <= 0.0 {
         return Vec::new();
     }
-    let other = (statements_ms - statements_io_ms).max(0.0);
-    let mut out = vec![WaitStat {
+    vec![WaitStat {
         category: "IO".into(),
         wait_type: Some(t!("provider.postgres.wait.data_files")),
         wait_ms: statements_io_ms,
         tasks: None,
-    }];
-    if other > 0.0 {
-        out.push(WaitStat {
-            category: "Other".into(),
-            wait_type: Some(t!("provider.postgres.wait.other")),
-            wait_ms: other,
-            tasks: None,
-        });
-    }
-    out.sort_by(|a, b| b.wait_ms.total_cmp(&a.wait_ms));
-    out
+    }]
 }
 
 /// The pressure counters, each source read through `Coverage::read` (`crate::sources`).
@@ -484,28 +462,40 @@ mod tests {
         waits.iter().filter(|w| w.category == category).map(|w| w.wait_ms).sum()
     }
 
-    // The aptabase reading: pg_stat_wal's write and sync time (4,143 s) stood for 99.98% of statement time, because it
-    // was capped at the time statements didn't spend on I/O. It is the server's WAL writer and commits, outside
-    // statement time: never a share of it.
     #[test]
-    fn wal_time_is_no_share_of_statement_time() {
-        let waits = breakdown(4_143_706.0, 750.6);
+    fn native_io_totals_do_not_invent_wal_cpu_lock_or_untimed_residuals() {
+        let waits = statement_io_waits(750.6);
+        assert_eq!(waits.len(), 1);
         assert_eq!(category_ms(&waits, "Log"), 0.0);
         assert_eq!(category_ms(&waits, "IO"), 750.6);
-        assert!((category_ms(&waits, "Other") - 4_142_955.4).abs() < 0.01);
+        assert_eq!(category_ms(&waits, "Other"), 0.0);
+        assert_eq!(category_ms(&waits, "CPU"), 0.0);
+        assert_eq!(category_ms(&waits, "Lock"), 0.0);
         assert!(waits.iter().all(|w| !w.wait_type.as_deref().unwrap_or_default().contains("WAL")));
-        // Nothing timed per category: no breakdown, rather than all of it as "Other".
-        assert!(breakdown(100_000.0, 0.0).is_empty(), "nothing timed, nothing to break down");
-        assert!(breakdown(100.0, 150.0).is_empty(), "overlapping I/O time is not a partition of execution time");
     }
 
-    // What the statement-time breakdown calls its parts, word for word.
     #[test]
-    fn breakdown_in_english() {
-        let waits = breakdown(100.0, 40.0);
+    fn parallel_io_totals_above_query_elapsed_are_preserved_without_clamping() {
+        // A 100 ms query can accumulate 150 ms of worker I/O; execution time is deliberately not a function input.
+        let waits = statement_io_waits(150.0);
+        assert_eq!(waits.len(), 1);
+        assert_eq!(waits[0].wait_ms, 150.0);
+        assert!(waits[0].tasks.is_none());
+    }
+
+    #[test]
+    fn unavailable_io_timing_never_becomes_a_fabricated_zero_or_residual() {
+        for timing in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(statement_io_waits(timing).is_empty());
+        }
+    }
+
+    #[test]
+    fn native_statement_io_names_in_english() {
+        let waits = statement_io_waits(40.0);
         let named: Vec<(&str, &str)> =
             waits.iter().map(|w| (w.category.as_str(), w.wait_type.as_deref().unwrap())).collect();
-        assert_eq!(named, [("Other", "CPU, locks and untimed waits"), ("IO", "data file reads and writes")]);
+        assert_eq!(named, [("IO", "data file reads and writes")]);
     }
 
     #[test]

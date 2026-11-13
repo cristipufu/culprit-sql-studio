@@ -67,8 +67,8 @@ worker-pressure   Running out of workers or connections
                   SQL Server, PostgreSQL, MySQL/MariaDB · SQL Server sessions waiting for a worker thread (THREADPOOL), or PostgreSQL/MySQL connections close to max_connections.
 held-cleanup      A long open transaction holds cleanup back
                   SQL Server, PostgreSQL, MySQL/MariaDB · The transaction that holds this database's cleanup back: one with uncommitted changes or row versions here (SQL Server), the oldest snapshot, replication slot or prepared transaction behind VACUUM's horizon (PostgreSQL), or the oldest read view behind InnoDB's purge (MySQL).
-network-wait      Results the application reads slowly
-                  SQL Server · Queries that spend much of their time waiting for the application to take results (ASYNC_NETWORK_IO), usually because they return large result sets.
+network-wait      Queries with recorded network waits
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB, SQLite · Statements with material recorded network waits. These totals do not by themselves identify a slow client, transport problem or responsible component.
 tier-limit        Resource use near the cloud tier's limits
                   SQL Server · Azure SQL Database resources (CPU, data IO, log writes, workers) persistently near their limits in the available selected-period samples.
 checkpoint-pressure  Requested checkpoints
@@ -93,8 +93,8 @@ jit-overhead      JIT compilation that takes much of a statement's time
                   PostgreSQL · Statements where PostgreSQL's JIT compilation (pg_stat_statements jit_* columns, 15+) takes a large part of their run time.
 log-volume        Writes that produce most of the log
                   SQL Server, PostgreSQL · Statements that write a large share of the WAL (PostgreSQL 13+) or transaction log (SQL Server 2017+), or many kilobytes of it per row changed. Log volume drives replication lag, backup size and checkpoints. MySQL keeps no redo bytes per statement.
-lock-time         Queries that spend their time waiting for locks
-                  SQL Server, MySQL/MariaDB · Statements that spend a large part of their time waiting for locks other sessions hold: Query Store's lock waits per query, MySQL and MariaDB lock time per digest. PostgreSQL keeps no lock time per statement; Live shows blocking as it happens.
+lock-time         Queries with material recorded lock waits
+                  SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB, SQLite · Statements with material recorded lock waits. Totals can accumulate across workers and do not identify the lock resource or blocking request.
 big-result        Queries that return huge results
                   SQL Server, PostgreSQL, YugabyteDB, MySQL/MariaDB · Reads that send tens of thousands of rows to the application on every run, with an estimate in bytes from the plan's row width where the engine gives one.
 hot-rows          Rows that many sessions fight over

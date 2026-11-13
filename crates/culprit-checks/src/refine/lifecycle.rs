@@ -537,7 +537,7 @@ mod tests {
             trace[0].outcome,
             RefinementOutcome::Historical { basis: HistoryBasis::SingleLoggedExecution, .. }
         ));
-        assert!(findings[0].caveats[0].contains("may run more often, faster"));
+        assert!(findings[0].caveats[0].contains("Other executions may be faster, filtered out or no longer retained"));
     }
 
     #[test]

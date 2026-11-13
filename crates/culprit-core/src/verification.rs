@@ -318,7 +318,8 @@ mod counter_verification_tests {
         ));
         out.push(summary(&[said(VerifyStatus::Fixed), said(VerifyStatus::Unknown)], 0));
         let before: Report = serde_json::from_str(include_str!("../../../fixtures/mssql-demo.report.json")).unwrap();
-        let (was, mut now) = (before.findings[0].clone(), before.findings[0].clone());
+        let was = before.findings.iter().find(|finding| finding.id == "failing-query:263").unwrap().clone();
+        let mut now = was.clone();
         out.push(still_present_note(&was, &now, &before).unwrap_or_default());
         let mut totals = before.clone();
         let w = totals.snapshot.workload.as_mut().unwrap();

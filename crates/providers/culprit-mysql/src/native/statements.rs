@@ -5,6 +5,28 @@ use mysql_async::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) const SOURCE: &str = "performance_schema.events_statements_summary_by_digest";
+pub(crate) const LOCK_TIME_COLUMN: &str = "SUM_LOCK_TIME";
+pub(crate) const LOCK_TIME_METRIC: &str = "mysql.lock-time";
+
+/// Keep the native subtotal, not a complete lock-wait breakdown or a particular lock resource.
+/// MySQL 8.0.28 fixed TABLE/DATA lock accounting (Bug 33236909); that does not establish MariaDB's coverage.
+/// https://dev.mysql.com/doc/relnotes/mysql/8.0/en/news-8-0-28.html
+pub(crate) fn lock_time_ms(row: &Rec) -> Result<Option<f64>> {
+    row.unsigned(LOCK_TIME_COLUMN).map(|value| value.map(|ps| ps as f64 / 1_000_000_000.0))
+}
+
+pub(crate) fn lock_waits(milliseconds: Option<f64>) -> Vec<culprit_core::WaitStat> {
+    milliseconds
+        .filter(|ms| *ms > 0.0)
+        .map(|wait_ms| culprit_core::WaitStat {
+            category: "Lock".into(),
+            wait_type: Some(format!("{SOURCE}.{LOCK_TIME_COLUMN}")),
+            wait_ms,
+            tasks: None,
+        })
+        .into_iter()
+        .collect()
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Layout {
@@ -115,9 +137,9 @@ fn metrics() -> Vec<Metric> {
         Metric { column: "SUM_TIMER_WAIT", key: Key::Duration, unit: Unit::Picoseconds },
         Metric { column: "SUM_CPU_TIME", key: Key::CpuTime, unit: Unit::Picoseconds },
         Metric { column: "SUM_ROWS_SENT", key: Key::Rows, unit: Unit::Count },
+        Metric { column: LOCK_TIME_COLUMN, key: Key::Native(LOCK_TIME_METRIC.into()), unit: Unit::Picoseconds },
     ];
     for (column, name, unit) in [
-        ("SUM_LOCK_TIME", "lock-time", Unit::Picoseconds),
         ("SUM_ROWS_EXAMINED", "rows-examined", Unit::Count),
         ("SUM_ROWS_AFFECTED", "rows-affected", Unit::Count),
         ("SUM_ERRORS", "errors", Unit::Count),
